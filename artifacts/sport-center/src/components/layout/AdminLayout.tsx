@@ -12,7 +12,7 @@ import {
   Menu,
   X
 } from "lucide-react";
-import { useGetMe, useLogout } from "@workspace/api-client-react";
+import { useGetMe, useLogout, getGetMeQueryKey } from "@workspace/api-client-react";
 import { removeToken } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { useState } from "react";
@@ -24,6 +24,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
   const { data: user, isLoading, isError } = useGetMe({
     query: {
       retry: false,
+      queryKey: getGetMeQueryKey(),
     }
   });
 

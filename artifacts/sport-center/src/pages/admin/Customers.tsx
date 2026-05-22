@@ -49,7 +49,7 @@ function CustomerDetail({ customerId, onClose }: { customerId: number; onClose: 
             </Card>
             <Card>
               <CardContent className="p-4 text-center">
-                <div className="text-lg font-black">{formatCurrency(customer.totalSpent)}</div>
+                <div className="text-lg font-black">{formatCurrency(customer.totalSpent ?? 0)}</div>
                 <div className="text-xs text-muted-foreground">Total Spent</div>
               </CardContent>
             </Card>
@@ -132,7 +132,7 @@ export default function AdminCustomers() {
                       </td>
                       <td className="py-3 pr-4 text-muted-foreground">{c.phone ?? "–"}</td>
                       <td className="py-3 pr-4 font-semibold">{c.totalBookings}</td>
-                      <td className="py-3 pr-4 font-semibold">{formatCurrency(c.totalSpent)}</td>
+                      <td className="py-3 pr-4 font-semibold">{formatCurrency(c.totalSpent ?? 0)}</td>
                       <td className="py-3">
                         <Button size="sm" variant="ghost" onClick={() => setSelectedId(c.id)}>
                           <Eye size={14} className="mr-1" /> View

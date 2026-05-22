@@ -26,8 +26,8 @@ export default function AdminSchedule() {
   const facilityId = selectedFacility ? Number(selectedFacility) : undefined;
 
   const { data: slots, isLoading: slotsLoading } = useCheckAvailability(
-    { facilityId: facilityId!, date: selectedDate },
-    { query: { enabled: !!facilityId && !!selectedDate, queryKey: getCheckAvailabilityQueryKey({ facilityId, date: selectedDate }) } }
+    { facilityId: facilityId ?? 0, date: selectedDate },
+    { query: { enabled: !!facilityId && !!selectedDate, queryKey: getCheckAvailabilityQueryKey({ facilityId: facilityId ?? 0, date: selectedDate }) } }
   );
 
   const { data: blocked } = useListBlockedSchedules(

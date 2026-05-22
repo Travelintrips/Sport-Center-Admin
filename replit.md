@@ -1,45 +1,82 @@
-# [Project name]
+# Sport Center Jakarta
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+Web app untuk manajemen dan pemesanan fasilitas olahraga — customer-facing booking portal + full admin portal.
 
 ## Run & Operate
 
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
+- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000 / mapped to 8080)
+- `pnpm --filter @workspace/sport-center run dev` — run the frontend (Vite dev server)
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string
+- Required env: `DATABASE_URL` — Postgres connection string, `SESSION_SECRET` — used for HMAC password hashing
 
 ## Stack
 
 - pnpm workspaces, Node.js 24, TypeScript 5.9
+- Frontend: React + Vite, Wouter router, TanStack Query, shadcn/ui, Recharts, Tailwind CSS
 - API: Express 5
 - DB: PostgreSQL + Drizzle ORM
 - Validation: Zod (`zod/v4`), `drizzle-zod`
-- API codegen: Orval (from OpenAPI spec)
+- API codegen: Orval (from OpenAPI spec at `lib/api-spec/openapi.yaml`)
 - Build: esbuild (CJS bundle)
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `artifacts/sport-center/` — React+Vite customer + admin frontend
+- `artifacts/api-server/` — Express 5 REST API server
+- `lib/api-spec/openapi.yaml` — Source of truth for all API contracts
+- `lib/api-client-react/src/generated/` — Auto-generated hooks (DO NOT edit manually)
+- `lib/db/src/schema/` — Drizzle ORM schema files (users, facilities, bookings, payments, promos, schedules, settings)
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- Contract-first API: OpenAPI spec → Orval codegen → React Query hooks. All frontend data fetching uses generated hooks from `@workspace/api-client-react`.
+- Auth: JWT tokens stored in localStorage under key `sport_center_token`. HMAC-SHA256 password hashing using `SESSION_SECRET` env var.
+- No Stripe — payment flow is manual bank transfer with proof URL upload + admin confirmation.
+- Admin routes are all under `/admin/*` and protected by `adminMiddleware` on the API. Frontend routes are protected by `AdminLayout` which checks `useGetMe` and redirects on 401.
+- Availability endpoint generates hourly slots from facility open/close time and checks against existing bookings + blocked schedules.
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+**Customer Portal (/):**
+- Homepage with hero, facility highlights, promos, operating hours
+- `/facilities` — Browse all facilities with search + category filter
+- `/facilities/:id` — Facility detail with date picker, time slot selector, availability check
+- `/booking?facilityId=&date=&startTime=&duration=` — Checkout form with customer details
+- `/booking/:orderNumber` — Invoice/order detail with payment instructions + WhatsApp button
+- `/promos` — Active promos and events with registration form
+- `/contact`, `/terms`, `/privacy` — Static info pages
+
+**Admin Portal (/admin):**
+- `/admin/login` — Auth page (demo: admin@sportcenter.com / admin123)
+- `/admin/dashboard` — Stats cards, charts (booking status pie, revenue line, top facilities bar), recent bookings
+- `/admin/bookings` — Full booking list with search, status filter, CSV export, payment confirmation
+- `/admin/facilities` — CRUD facilities with image URLs, pricing, hours, active toggle
+- `/admin/schedule` — Per-facility daily availability grid, block/unblock time slots
+- `/admin/customers` — Customer list with booking history and spending detail
+- `/admin/promos` — CRUD promos and events with discount percentages and date ranges
+- `/admin/settings` — Edit center info, contact details, operating hours, bank account for transfers
 
 ## User preferences
 
-_Populate as you build — explicit user instructions worth remembering across sessions._
+- Indonesian language content for demo data and facility names
+- Sporty orange-red primary theme (hsl ~16° orange-red)
+- Bold font-black headings, shadcn Card/Button/Input/Badge components
+- Mobile-responsive layouts on all pages
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
+- Password hashing uses HMAC-SHA256 with `SESSION_SECRET`. Default secret for local dev: `sport-center-secret-key-2024`. Hash for `admin123` = `673cae722ece4bc8b7d66c76bee2f465e1e835452e7207c44cc6ea8a9db331e1`
+- Always run `pnpm --filter @workspace/api-spec run codegen` after changing `openapi.yaml`
+- Do NOT edit files in `lib/api-client-react/src/generated/` — they are overwritten by codegen
+- After updating `routes/index.ts`, the API server needs to rebuild (restart workflow)
+- The `Customers` page currently shows only registered users (role=customer), not anonymous bookings. Existing demo bookings are made without a user account, so the customers list may appear empty until actual user registrations occur.
 
 ## Pointers
 
 - See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details
+- OpenAPI spec: `lib/api-spec/openapi.yaml`
+- DB schema: `lib/db/src/schema/`
+- Generated API client: `lib/api-client-react/src/generated/api.ts`
