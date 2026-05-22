@@ -67,7 +67,7 @@ export default defineConfig({
       strict: true,
       allow: [
         path.resolve(import.meta.dirname),
-        path.resolve(import.meta.dirname, "../../node_modules"),
+        path.resolve(import.meta.dirname, "../.."),
       ],
     },
   },
