@@ -15,7 +15,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Pencil, Trash2, Upload, X, WrenchIcon, CheckCircle2, ImageIcon, Clock, DollarSign, Info } from "lucide-react";
+import { Plus, Pencil, Trash2, Upload, X, WrenchIcon, CheckCircle2, ImageIcon, Clock, DollarSign, Info, Star } from "lucide-react";
 import { getToken } from "@/lib/auth";
 
 const CATEGORIES = ["Futsal", "Basket", "Voli", "Tenis", "Badminton", "Gym", "Biliar", "Lainnya"];
@@ -114,10 +114,13 @@ export default function AdminFacilities() {
     setNewImagePreviews(prev => prev.filter((_, i) => i !== idx));
   };
 
+  const [uploadProgress, setUploadProgress] = useState<number>(0);
+
   const removeExistingImage = async (imgId: number) => {
     try {
       const token = getToken();
-      await fetch(`/api/facilities/${editFacility.id}/images/${imgId}`, {
+      const base = import.meta.env.BASE_URL?.replace(/\/$/, "") || "";
+      await fetch(`${base}/api/facilities/${editFacility.id}/images/${imgId}`, {
         method: "DELETE",
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
@@ -128,17 +131,39 @@ export default function AdminFacilities() {
     }
   };
 
+  const setPrimaryImage = async (facilityId: number, imgId: number) => {
+    try {
+      const token = getToken();
+      const base = import.meta.env.BASE_URL?.replace(/\/$/, "") || "";
+      await fetch(`${base}/api/facilities/${facilityId}/images/${imgId}/primary`, {
+        method: "PATCH",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      setImages(prev => prev.map(img => ({ ...img, isPrimary: img.id === imgId })));
+      queryClient.invalidateQueries({ queryKey: getListFacilitiesQueryKey() });
+      toast({ title: "Foto utama diperbarui" });
+    } catch {
+      toast({ title: "Gagal mengatur foto utama", variant: "destructive" });
+    }
+  };
+
   const uploadNewImages = async (facilityId: number): Promise<void> => {
-    for (const { file } of newImagePreviews) {
+    const total = newImagePreviews.length;
+    for (let i = 0; i < total; i++) {
+      const { file } = newImagePreviews[i];
       const formData = new FormData();
       formData.append("image", file);
       const token = getToken();
-      await fetch(`/api/facilities/${facilityId}/images`, {
+      const base = import.meta.env.BASE_URL?.replace(/\/$/, "") || "";
+      const resp = await fetch(`${base}/api/facilities/${facilityId}/images`, {
         method: "POST",
         headers: token ? { Authorization: `Bearer ${token}` } : {},
         body: formData,
       });
+      if (!resp.ok) throw new Error(`Upload failed for ${file.name}`);
+      setUploadProgress(Math.round(((i + 1) / total) * 100));
     }
+    setUploadProgress(0);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -392,16 +417,50 @@ export default function AdminFacilities() {
                     />
                   </div>
 
+                  {uploadProgress > 0 && (
+                    <div className="space-y-1.5">
+                      <div className="flex justify-between text-xs text-muted-foreground">
+                        <span>Mengupload ke Supabase Storage…</span>
+                        <span>{uploadProgress}%</span>
+                      </div>
+                      <div className="w-full bg-muted rounded-full h-2 overflow-hidden">
+                        <div
+                          className="bg-primary h-2 rounded-full transition-all duration-300"
+                          style={{ width: `${uploadProgress}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
+
                   {(images.length > 0 || newImagePreviews.length > 0) && (
                     <div>
-                      <Label className="mb-2 block">Foto Fasilitas</Label>
+                      <div className="flex items-center justify-between mb-2">
+                        <Label>Foto Fasilitas</Label>
+                        <span className="text-xs text-muted-foreground">Hover foto → ☆ untuk jadikan utama</span>
+                      </div>
                       <div className="grid grid-cols-3 gap-3">
                         {images.map((img, i) => (
                           <div key={img.id} className="relative group rounded-lg overflow-hidden aspect-square border">
                             <img src={img.url} alt={`foto-${i}`} className="w-full h-full object-cover" />
-                            {img.isPrimary && <Badge className="absolute top-1 left-1 text-xs bg-primary/80 py-0">Utama</Badge>}
+                            {img.isPrimary && (
+                              <Badge className="absolute top-1 left-1 text-xs bg-primary/90 py-0 gap-1">
+                                <Star size={9} fill="currentColor" /> Utama
+                              </Badge>
+                            )}
+                            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors rounded-lg" />
+                            {!img.isPrimary && editFacility && (
+                              <button
+                                type="button"
+                                title="Jadikan foto utama"
+                                onClick={() => setPrimaryImage(editFacility.id, img.id)}
+                                className="absolute top-1 left-1 bg-yellow-400 text-yellow-900 rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
+                              >
+                                <Star size={12} />
+                              </button>
+                            )}
                             <button
                               type="button"
+                              title="Hapus foto"
                               onClick={() => removeExistingImage(img.id)}
                               className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
                             >
@@ -423,6 +482,16 @@ export default function AdminFacilities() {
                           </div>
                         ))}
                       </div>
+                      <p className="text-xs text-muted-foreground mt-2">
+                        {images.length + newImagePreviews.length} foto • Foto pertama ditampilkan sebagai thumbnail
+                      </p>
+                    </div>
+                  )}
+
+                  {images.length === 0 && newImagePreviews.length === 0 && (
+                    <div className="text-center py-4 text-muted-foreground text-sm">
+                      <ImageIcon size={28} className="mx-auto mb-2 opacity-30" />
+                      <p>Belum ada foto. Upload foto di atas.</p>
                     </div>
                   )}
                 </div>
