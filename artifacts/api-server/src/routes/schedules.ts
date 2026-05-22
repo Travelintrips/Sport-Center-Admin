@@ -2,6 +2,7 @@ import { Router } from "express";
 import { db, blockedSchedulesTable, facilitiesTable } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
+import { broadcastAvailabilityChange } from "../lib/supabase";
 
 const router = Router();
 
@@ -34,6 +35,7 @@ router.post("/blocked-schedules", adminMiddleware, async (req, res) => {
     const [schedule] = await db.insert(blockedSchedulesTable).values({
       facilityId: Number(facilityId), date, startTime, endTime, reason,
     }).returning();
+    broadcastAvailabilityChange(Number(facilityId), date);
     res.status(201).json({ ...schedule, facilityName: null });
   } catch (err) {
     req.log.error({ err }, "Create blocked schedule error");
@@ -44,7 +46,10 @@ router.post("/blocked-schedules", adminMiddleware, async (req, res) => {
 router.delete("/blocked-schedules/:id", adminMiddleware, async (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    await db.delete(blockedSchedulesTable).where(eq(blockedSchedulesTable.id, id));
+    const [deleted] = await db.delete(blockedSchedulesTable)
+      .where(eq(blockedSchedulesTable.id, id))
+      .returning();
+    if (deleted) broadcastAvailabilityChange(deleted.facilityId, deleted.date);
     res.status(204).send();
   } catch (err) {
     req.log.error({ err }, "Delete blocked schedule error");
