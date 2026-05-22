@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { db, usersTable } from "@workspace/db";
+import { db, usersTable, bookingsTable, facilitiesTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { createToken, hashPassword, authMiddleware } from "../lib/auth";
 
@@ -29,6 +29,33 @@ router.post("/auth/login", async (req, res) => {
   }
 });
 
+router.post("/auth/register", async (req, res) => {
+  try {
+    const { name, email, password, phone } = req.body;
+    if (!name || !email || !password) {
+      res.status(400).json({ error: "Name, email and password required" });
+      return;
+    }
+    const [existing] = await db.select().from(usersTable).where(eq(usersTable.email, email)).limit(1);
+    if (existing) {
+      res.status(409).json({ error: "Email already registered" });
+      return;
+    }
+    const passwordHash = hashPassword(password);
+    const [user] = await db.insert(usersTable).values({
+      name, email, passwordHash, phone: phone || null, role: "customer",
+    }).returning();
+    const token = createToken(user.id, user.role);
+    res.status(201).json({
+      user: { id: user.id, name: user.name, email: user.email, role: user.role, phone: user.phone, createdAt: user.createdAt },
+      token,
+    });
+  } catch (err) {
+    req.log.error({ err }, "Register error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 router.post("/auth/logout", (_req, res) => {
   res.json({ message: "Logged out" });
 });
@@ -44,6 +71,33 @@ router.get("/auth/me", authMiddleware, async (req, res) => {
     res.json({ id: user.id, name: user.name, email: user.email, role: user.role, phone: user.phone, createdAt: user.createdAt });
   } catch (err) {
     req.log.error({ err }, "Get me error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.get("/my-bookings", authMiddleware, async (req, res) => {
+  try {
+    const userId = (req as any).user.userId;
+    const [user] = await db.select().from(usersTable).where(eq(usersTable.id, userId)).limit(1);
+    if (!user) { res.status(401).json({ error: "User not found" }); return; }
+
+    const bookings = await db.select().from(bookingsTable).where(eq(bookingsTable.customerEmail, user.email));
+    const facilities = await db.select().from(facilitiesTable);
+
+    const result = bookings.map((b) => {
+      const facility = facilities.find((f) => f.id === b.facilityId);
+      return {
+        ...b,
+        totalPrice: Number(b.totalPrice),
+        facilityName: facility?.name ?? "",
+        facilityCategory: facility?.category ?? "",
+        payment: null,
+      };
+    }).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+    res.json(result);
+  } catch (err) {
+    req.log.error({ err }, "My bookings error");
     res.status(500).json({ error: "Internal server error" });
   }
 });

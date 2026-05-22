@@ -38,6 +38,53 @@ export const LoginResponse = zod.object({
 
 
 /**
+ * @summary Customer registration
+ */
+export const RegisterBody = zod.object({
+  "name": zod.string(),
+  "email": zod.string(),
+  "password": zod.string(),
+  "phone": zod.string().optional()
+})
+
+
+/**
+ * @summary Get bookings for the currently logged-in customer
+ */
+export const GetMyBookingsResponseItem = zod.object({
+  "id": zod.number(),
+  "orderNumber": zod.string(),
+  "customerId": zod.number().nullish(),
+  "customerName": zod.string(),
+  "customerEmail": zod.string(),
+  "customerPhone": zod.string(),
+  "facilityId": zod.number(),
+  "facilityName": zod.string(),
+  "facilityCategory": zod.string().optional(),
+  "bookingDate": zod.string(),
+  "startTime": zod.string(),
+  "endTime": zod.string(),
+  "durationHours": zod.number(),
+  "totalPrice": zod.number(),
+  "status": zod.enum(['pending_payment', 'paid', 'confirmed', 'cancelled', 'completed']),
+  "notes": zod.string().nullish(),
+  "adminNotes": zod.string().nullish(),
+  "whatsappMessage": zod.string().nullish(),
+  "payment": zod.object({
+  "id": zod.number(),
+  "bookingId": zod.number(),
+  "amount": zod.number(),
+  "proofUrl": zod.string().nullish(),
+  "status": zod.enum(['pending', 'confirmed', 'rejected']),
+  "notes": zod.string().nullish(),
+  "createdAt": zod.string().optional()
+}).nullish(),
+  "createdAt": zod.string().optional()
+})
+export const GetMyBookingsResponse = zod.array(GetMyBookingsResponseItem)
+
+
+/**
  * @summary Get current user
  */
 export const GetMeResponse = zod.object({

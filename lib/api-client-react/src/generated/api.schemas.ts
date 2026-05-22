@@ -14,6 +14,13 @@ export interface LoginInput {
   password: string;
 }
 
+export interface RegisterInput {
+  name: string;
+  email: string;
+  password: string;
+  phone?: string;
+}
+
 export type UserRole = typeof UserRole[keyof typeof UserRole];
 
 

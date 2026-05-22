@@ -44,6 +44,7 @@ export * from './promoRegistration';
 export * from './promoRegistrationInput';
 export * from './promoType';
 export * from './promoUpdate';
+export * from './registerInput';
 export * from './settings';
 export * from './settingsUpdate';
 export * from './statusCount';

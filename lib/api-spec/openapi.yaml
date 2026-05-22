@@ -62,6 +62,27 @@ paths:
         "401":
           description: Invalid credentials
 
+  /auth/register:
+    post:
+      operationId: register
+      tags: [auth]
+      summary: Customer registration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterInput"
+      responses:
+        "201":
+          description: Registered successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "409":
+          description: Email already registered
+
   /auth/logout:
     post:
       operationId: logout
@@ -70,6 +91,23 @@ paths:
       responses:
         "200":
           description: Logged out
+
+  /my-bookings:
+    get:
+      operationId: getMyBookings
+      tags: [bookings]
+      summary: Get bookings for the currently logged-in customer
+      responses:
+        "200":
+          description: List of bookings
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Booking"
+        "401":
+          description: Not authenticated
 
   /auth/me:
     get:
@@ -657,6 +695,19 @@ components:
         email:
           type: string
         password:
+          type: string
+
+    RegisterInput:
+      type: object
+      required: [name, email, password]
+      properties:
+        name:
+          type: string
+        email:
+          type: string
+        password:
+          type: string
+        phone:
           type: string
 
     AuthResponse:

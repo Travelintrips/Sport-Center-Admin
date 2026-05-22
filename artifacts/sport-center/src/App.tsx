@@ -20,6 +20,9 @@ import Promos from "@/pages/Promos";
 import Terms from "@/pages/Terms";
 import Privacy from "@/pages/Privacy";
 import Contact from "@/pages/Contact";
+import Login from "@/pages/Login";
+import Register from "@/pages/Register";
+import MyBookings from "@/pages/MyBookings";
 
 // Admin Pages
 import AdminLogin from "@/pages/admin/Login";
@@ -65,6 +68,9 @@ function Router() {
             <Route path="/facilities/:id" component={FacilityDetail} />
             <Route path="/booking" component={Booking} />
             <Route path="/booking/:orderNumber" component={BookingDetail} />
+            <Route path="/login" component={Login} />
+            <Route path="/register" component={Register} />
+            <Route path="/my-bookings" component={MyBookings} />
             <Route path="/promos" component={Promos} />
             <Route path="/terms" component={Terms} />
             <Route path="/privacy" component={Privacy} />
