@@ -218,21 +218,63 @@ export default function AdminBookings() {
               )}
 
               {selectedBooking.payment && (
-                <div className="text-sm bg-blue-50 dark:bg-blue-950/20 rounded-md p-3 border border-blue-200 dark:border-blue-900">
-                  <div className="font-semibold mb-2">Payment</div>
-                  <div>Status: <Badge variant="secondary">{selectedBooking.payment.status}</Badge></div>
+                <div className="text-sm bg-blue-50 dark:bg-blue-950/20 rounded-md p-3 border border-blue-200 dark:border-blue-900 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="font-semibold">Pembayaran</div>
+                    <Badge
+                      variant="secondary"
+                      style={{
+                        background: selectedBooking.payment.status === "confirmed" ? "#d1fae5" : selectedBooking.payment.status === "rejected" ? "#fee2e2" : "#dbeafe",
+                        color: selectedBooking.payment.status === "confirmed" ? "#065f46" : selectedBooking.payment.status === "rejected" ? "#991b1b" : "#1e40af",
+                      }}
+                    >
+                      {selectedBooking.payment.status === "confirmed" ? "Dikonfirmasi" : selectedBooking.payment.status === "rejected" ? "Ditolak" : "Menunggu Verifikasi"}
+                    </Badge>
+                  </div>
+
                   {selectedBooking.payment.proofUrl && (
-                    <a href={selectedBooking.payment.proofUrl} target="_blank" rel="noreferrer" className="text-primary underline text-xs mt-1 block">
-                      View Proof
-                    </a>
+                    <div className="space-y-2">
+                      <div className="text-xs text-muted-foreground font-medium">Bukti Transfer</div>
+                      {/\.(jpe?g|png|webp|gif)(\?.*)?$/i.test(selectedBooking.payment.proofUrl) ? (
+                        <a href={selectedBooking.payment.proofUrl} target="_blank" rel="noreferrer" className="block">
+                          <img
+                            src={selectedBooking.payment.proofUrl}
+                            alt="Bukti transfer"
+                            className="w-full max-h-48 object-contain rounded-lg border bg-white cursor-zoom-in hover:opacity-90 transition-opacity"
+                          />
+                          <span className="text-xs text-primary mt-1 inline-block">Klik untuk lihat penuh ↗</span>
+                        </a>
+                      ) : (
+                        <a
+                          href={selectedBooking.payment.proofUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex items-center gap-2 text-primary underline text-xs"
+                        >
+                          📄 Lihat File Bukti
+                        </a>
+                      )}
+                    </div>
                   )}
+
                   {selectedBooking.payment.status === "pending" && (
-                    <div className="flex gap-2 mt-3">
-                      <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white" onClick={() => handlePaymentConfirm(selectedBooking.payment.id, "confirmed")}>
-                        Confirm Payment
+                    <div className="flex gap-2 pt-1">
+                      <Button
+                        size="sm"
+                        className="bg-green-600 hover:bg-green-700 text-white flex-1"
+                        onClick={() => handlePaymentConfirm(selectedBooking.payment.id, "confirmed")}
+                        disabled={updatePaymentMutation.isPending}
+                      >
+                        ✓ Konfirmasi
                       </Button>
-                      <Button size="sm" variant="destructive" onClick={() => handlePaymentConfirm(selectedBooking.payment.id, "rejected")}>
-                        Reject
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        className="flex-1"
+                        onClick={() => handlePaymentConfirm(selectedBooking.payment.id, "rejected")}
+                        disabled={updatePaymentMutation.isPending}
+                      >
+                        ✕ Tolak
                       </Button>
                     </div>
                   )}
