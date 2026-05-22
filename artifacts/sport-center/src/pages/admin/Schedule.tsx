@@ -3,7 +3,6 @@ import FullCalendar from "@fullcalendar/react";
 import timeGridPlugin from "@fullcalendar/timegrid";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import interactionPlugin from "@fullcalendar/interaction";
-import type { EventClickArg, DateSelectArg, EventInput } from "@fullcalendar/core";
 import {
   useListFacilities,
   useListBookings,

@@ -1,7 +1,33 @@
 import { Router } from "express";
 import { db, facilitiesTable, facilityImagesTable } from "@workspace/db";
-import { eq, and, inArray } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
+import multer from "multer";
+import path from "path";
+import fs from "fs";
+
+const uploadsDir = path.join(process.cwd(), "../sport-center/public/uploads");
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+const storage = multer.diskStorage({
+  destination: uploadsDir,
+  filename: (_req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    cb(null, `facility-${Date.now()}-${Math.random().toString(36).slice(2, 7)}${ext}`);
+  },
+});
+
+const upload = multer({
+  storage,
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const allowed = /jpeg|jpg|png|webp|gif/;
+    const valid = allowed.test(path.extname(file.originalname).toLowerCase()) && allowed.test(file.mimetype);
+    cb(null, valid);
+  },
+});
 
 const router = Router();
 
@@ -60,10 +86,7 @@ router.get("/facilities/:id", async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     const facility = await getFacilityWithImages(id);
-    if (!facility) {
-      res.status(404).json({ error: "Not found" });
-      return;
-    }
+    if (!facility) { res.status(404).json({ error: "Not found" }); return; }
     res.json(facility);
   } catch (err) {
     req.log.error({ err }, "Get facility error");
@@ -98,10 +121,56 @@ router.patch("/facilities/:id", adminMiddleware, async (req, res) => {
 router.delete("/facilities/:id", adminMiddleware, async (req, res) => {
   try {
     const id = parseInt(req.params.id);
+    const images = await db.select().from(facilityImagesTable).where(eq(facilityImagesTable.facilityId, id));
+    for (const img of images) {
+      if (img.url.startsWith("/uploads/")) {
+        const filePath = path.join(uploadsDir, path.basename(img.url));
+        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+      }
+    }
     await db.delete(facilitiesTable).where(eq(facilitiesTable.id, id));
     res.status(204).send();
   } catch (err) {
     req.log.error({ err }, "Delete facility error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.post("/facilities/:id/images", adminMiddleware, upload.single("image"), async (req, res) => {
+  try {
+    if (!req.file) { res.status(400).json({ error: "No image file provided" }); return; }
+    const id = parseInt(req.params.id);
+    const url = `/uploads/${req.file.filename}`;
+
+    const existingImages = await db.select().from(facilityImagesTable).where(eq(facilityImagesTable.facilityId, id));
+    const isPrimary = existingImages.length === 0;
+
+    const [image] = await db.insert(facilityImagesTable).values({ facilityId: id, url, isPrimary }).returning();
+    res.status(201).json(image);
+  } catch (err) {
+    req.log.error({ err }, "Upload facility image error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.delete("/facilities/:id/images/:imageId", adminMiddleware, async (req, res) => {
+  try {
+    const imageId = parseInt(req.params.imageId);
+    const [img] = await db.select().from(facilityImagesTable).where(eq(facilityImagesTable.id, imageId)).limit(1);
+    if (img) {
+      if (img.url.startsWith("/uploads/")) {
+        const filePath = path.join(uploadsDir, path.basename(img.url));
+        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+      }
+      await db.delete(facilityImagesTable).where(eq(facilityImagesTable.id, imageId));
+      if (img.isPrimary) {
+        const remaining = await db.select().from(facilityImagesTable).where(eq(facilityImagesTable.facilityId, img.facilityId)).limit(1);
+        if (remaining[0]) await db.update(facilityImagesTable).set({ isPrimary: true }).where(eq(facilityImagesTable.id, remaining[0].id));
+      }
+    }
+    res.status(204).send();
+  } catch (err) {
+    req.log.error({ err }, "Delete facility image error");
     res.status(500).json({ error: "Internal server error" });
   }
 });
