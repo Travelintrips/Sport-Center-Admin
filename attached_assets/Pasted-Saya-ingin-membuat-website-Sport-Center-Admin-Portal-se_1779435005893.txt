@@ -1,0 +1,52 @@
+Saya ingin membuat website Sport Center + Admin Portal seperti sportcenter.travelintrips.co.id, tetapi dengan desain lebih modern, responsive, dan profesional.
+
+Buat aplikasi fullstack dengan fitur berikut:
+
+1. FRONTEND CUSTOMER
+- Homepage sport center dengan hero banner, informasi fasilitas, galeri, alamat, kontak WhatsApp, dan CTA “Book Now”.
+- Halaman daftar fasilitas: Futsal, Basketball, Volley, Tennis, Badminton Lap 1, Badminton Lap 2, Gym/Fitness, Billiard.
+- Setiap fasilitas punya foto, deskripsi, harga, jam tersedia, durasi sewa, kapasitas, dan status available/unavailable.
+- Customer bisa pilih tanggal, jam, durasi, fasilitas, isi nama, email, nomor WhatsApp, catatan, lalu masuk ke cart/checkout.
+- Booking tidak boleh double pada fasilitas, tanggal, dan jam yang sama.
+- Setelah checkout, tampilkan invoice/order number dan status booking: Pending Payment, Paid, Confirmed, Cancelled, Completed.
+- Tambahkan halaman Terms, Privacy, Contact Us, dan Promo Event Form.
+- Buat tombol WhatsApp otomatis ke admin dengan format ringkasan booking.
+
+2. ADMIN PORTAL
+- Login admin.
+- Dashboard berisi total booking, total revenue, booking hari ini, booking pending, fasilitas paling banyak dipesan.
+- CRUD fasilitas/lapangan: nama, kategori, foto, harga per jam, jam operasional, status aktif/nonaktif.
+- Manajemen jadwal: lihat kalender harian/mingguan, blokir jam tertentu, set maintenance/closed.
+- Manajemen booking: lihat, ubah status, konfirmasi pembayaran, cancel booking, tambah catatan admin.
+- Manajemen customer.
+- Manajemen promo/event.
+- Upload bukti pembayaran/manual payment.
+- Export data booking ke CSV/Excel.
+
+3. DATABASE
+Buat tabel:
+- users
+- facilities
+- facility_images
+- bookings
+- booking_items
+- payments
+- promos
+- blocked_schedules
+- admin_notes
+- settings
+
+4. RULES PENTING
+- Jangan bentrok dengan route yang sudah ada.
+- Gunakan struktur folder yang rapi.
+- Buat UI clean, modern, mobile friendly.
+- Tambahkan validasi agar jadwal tidak double booking.
+- Buat seed data fasilitas awal.
+- Buat role admin dan customer.
+- Jika ada konflik file, jangan hapus otomatis. Jelaskan dulu file mana yang konflik dan berikan solusi aman.
+- Pastikan semua halaman tidak blank di dev preview dan deploy.
+
+Kerjakan bertahap:
+Step 1: Buat database schema, seed data, dan API booking.
+Step 2: Buat frontend customer untuk fasilitas, detail, cart, dan checkout.
+Step 3: Buat admin portal lengkap dengan dashboard, booking management, fasilitas, jadwal, promo, dan export.

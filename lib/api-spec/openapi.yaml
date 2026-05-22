@@ -1,22 +1,38 @@
 openapi: 3.1.0
 info:
-  # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: Sport Center API specification
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: auth
+    description: Authentication
+  - name: facilities
+    description: Facility management
+  - name: bookings
+    description: Booking management
+  - name: payments
+    description: Payment management
+  - name: promos
+    description: Promo and event management
+  - name: schedules
+    description: Blocked schedule management
+  - name: customers
+    description: Customer management
+  - name: dashboard
+    description: Admin dashboard
+  - name: settings
+    description: App settings
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,6 +40,606 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /auth/login:
+    post:
+      operationId: login
+      tags: [auth]
+      summary: Admin login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginInput"
+      responses:
+        "200":
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "401":
+          description: Invalid credentials
+
+  /auth/logout:
+    post:
+      operationId: logout
+      tags: [auth]
+      summary: Logout
+      responses:
+        "200":
+          description: Logged out
+
+  /auth/me:
+    get:
+      operationId: getMe
+      tags: [auth]
+      summary: Get current user
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          description: Not authenticated
+
+  /facilities:
+    get:
+      operationId: listFacilities
+      tags: [facilities]
+      summary: List all facilities
+      parameters:
+        - name: activeOnly
+          in: query
+          schema:
+            type: boolean
+        - name: category
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of facilities
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Facility"
+    post:
+      operationId: createFacility
+      tags: [facilities]
+      summary: Create a facility
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FacilityInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Facility"
+
+  /facilities/{id}:
+    get:
+      operationId: getFacility
+      tags: [facilities]
+      summary: Get a facility by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Facility detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Facility"
+        "404":
+          description: Not found
+    patch:
+      operationId: updateFacility
+      tags: [facilities]
+      summary: Update a facility
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FacilityUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Facility"
+    delete:
+      operationId: deleteFacility
+      tags: [facilities]
+      summary: Delete a facility
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /availability:
+    get:
+      operationId: checkAvailability
+      tags: [facilities]
+      summary: Get availability slots for a facility on a date
+      parameters:
+        - name: facilityId
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: date
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Available time slots
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TimeSlot"
+
+  /bookings:
+    get:
+      operationId: listBookings
+      tags: [bookings]
+      summary: List bookings
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: date
+          in: query
+          schema:
+            type: string
+        - name: facilityId
+          in: query
+          schema:
+            type: integer
+        - name: customerId
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of bookings
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Booking"
+    post:
+      operationId: createBooking
+      tags: [bookings]
+      summary: Create a new booking
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BookingInput"
+      responses:
+        "201":
+          description: Booking created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Booking"
+        "409":
+          description: Time slot conflict
+
+  /bookings/{id}:
+    get:
+      operationId: getBooking
+      tags: [bookings]
+      summary: Get booking by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Booking detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Booking"
+    patch:
+      operationId: updateBooking
+      tags: [bookings]
+      summary: Update booking status or notes
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BookingUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Booking"
+
+  /bookings/order/{orderNumber}:
+    get:
+      operationId: getBookingByOrder
+      tags: [bookings]
+      summary: Get booking by order number (for customers)
+      parameters:
+        - name: orderNumber
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Booking detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Booking"
+        "404":
+          description: Not found
+
+  /payments:
+    get:
+      operationId: listPayments
+      tags: [payments]
+      summary: List payments
+      parameters:
+        - name: bookingId
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of payments
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Payment"
+    post:
+      operationId: createPayment
+      tags: [payments]
+      summary: Upload payment proof
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PaymentInput"
+      responses:
+        "201":
+          description: Payment created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Payment"
+
+  /payments/{id}:
+    patch:
+      operationId: updatePayment
+      tags: [payments]
+      summary: Update payment status (admin confirm/reject)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PaymentUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Payment"
+
+  /promos:
+    get:
+      operationId: listPromos
+      tags: [promos]
+      summary: List promos/events
+      parameters:
+        - name: activeOnly
+          in: query
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: List of promos
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Promo"
+    post:
+      operationId: createPromo
+      tags: [promos]
+      summary: Create a promo/event
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PromoInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Promo"
+
+  /promos/{id}:
+    patch:
+      operationId: updatePromo
+      tags: [promos]
+      summary: Update a promo
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PromoUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Promo"
+    delete:
+      operationId: deletePromo
+      tags: [promos]
+      summary: Delete a promo
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /promos/register:
+    post:
+      operationId: registerPromo
+      tags: [promos]
+      summary: Customer registration for a promo/event
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PromoRegistrationInput"
+      responses:
+        "201":
+          description: Registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PromoRegistration"
+
+  /blocked-schedules:
+    get:
+      operationId: listBlockedSchedules
+      tags: [schedules]
+      summary: List blocked schedules
+      parameters:
+        - name: facilityId
+          in: query
+          schema:
+            type: integer
+        - name: date
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of blocked schedules
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/BlockedSchedule"
+    post:
+      operationId: createBlockedSchedule
+      tags: [schedules]
+      summary: Block a schedule slot
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BlockedScheduleInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BlockedSchedule"
+
+  /blocked-schedules/{id}:
+    delete:
+      operationId: deleteBlockedSchedule
+      tags: [schedules]
+      summary: Remove a blocked schedule
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /customers:
+    get:
+      operationId: listCustomers
+      tags: [customers]
+      summary: List customers
+      parameters:
+        - name: search
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of customers
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Customer"
+
+  /customers/{id}:
+    get:
+      operationId: getCustomer
+      tags: [customers]
+      summary: Get customer detail with booking history
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Customer detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Customer"
+
+  /admin/dashboard:
+    get:
+      operationId: getDashboard
+      tags: [dashboard]
+      summary: Get admin dashboard stats
+      responses:
+        "200":
+          description: Dashboard statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardStats"
+
+  /admin/bookings/export:
+    get:
+      operationId: exportBookings
+      tags: [dashboard]
+      summary: Export bookings as CSV
+      parameters:
+        - name: startDate
+          in: query
+          schema:
+            type: string
+        - name: endDate
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: CSV data
+          content:
+            text/csv:
+              schema:
+                type: string
+
+  /settings:
+    get:
+      operationId: getSettings
+      tags: [settings]
+      summary: Get app settings
+      responses:
+        "200":
+          description: App settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Settings"
+    patch:
+      operationId: updateSettings
+      tags: [settings]
+      summary: Update app settings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SettingsUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Settings"
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +650,541 @@ components:
       required:
         - status
 
+    LoginInput:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+        password:
+          type: string
+
+    AuthResponse:
+      type: object
+      required: [user, token]
+      properties:
+        user:
+          $ref: "#/components/schemas/User"
+        token:
+          type: string
+
+    User:
+      type: object
+      required: [id, name, email, role]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        email:
+          type: string
+        role:
+          type: string
+          enum: [admin, customer]
+        phone:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+
+    Facility:
+      type: object
+      required: [id, name, category, pricePerHour, openTime, closeTime, isActive]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        category:
+          type: string
+        description:
+          type: ["string", "null"]
+        pricePerHour:
+          type: number
+        openTime:
+          type: string
+        closeTime:
+          type: string
+        minDuration:
+          type: integer
+        maxDuration:
+          type: ["integer", "null"]
+        capacity:
+          type: ["integer", "null"]
+        isActive:
+          type: boolean
+        images:
+          type: array
+          items:
+            $ref: "#/components/schemas/FacilityImage"
+        createdAt:
+          type: string
+
+    FacilityImage:
+      type: object
+      required: [id, facilityId, url, isPrimary]
+      properties:
+        id:
+          type: integer
+        facilityId:
+          type: integer
+        url:
+          type: string
+        isPrimary:
+          type: boolean
+
+    FacilityInput:
+      type: object
+      required: [name, category, pricePerHour, openTime, closeTime]
+      properties:
+        name:
+          type: string
+        category:
+          type: string
+        description:
+          type: string
+        pricePerHour:
+          type: number
+        openTime:
+          type: string
+        closeTime:
+          type: string
+        minDuration:
+          type: integer
+        maxDuration:
+          type: integer
+        capacity:
+          type: integer
+        isActive:
+          type: boolean
+        imageUrls:
+          type: array
+          items:
+            type: string
+
+    FacilityUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+        category:
+          type: string
+        description:
+          type: string
+        pricePerHour:
+          type: number
+        openTime:
+          type: string
+        closeTime:
+          type: string
+        minDuration:
+          type: integer
+        maxDuration:
+          type: integer
+        capacity:
+          type: integer
+        isActive:
+          type: boolean
+        imageUrls:
+          type: array
+          items:
+            type: string
+
+    TimeSlot:
+      type: object
+      required: [time, available]
+      properties:
+        time:
+          type: string
+        available:
+          type: boolean
+        reason:
+          type: ["string", "null"]
+
+    Booking:
+      type: object
+      required: [id, orderNumber, customerName, customerEmail, customerPhone, facilityId, facilityName, bookingDate, startTime, endTime, durationHours, totalPrice, status]
+      properties:
+        id:
+          type: integer
+        orderNumber:
+          type: string
+        customerId:
+          type: ["integer", "null"]
+        customerName:
+          type: string
+        customerEmail:
+          type: string
+        customerPhone:
+          type: string
+        facilityId:
+          type: integer
+        facilityName:
+          type: string
+        facilityCategory:
+          type: string
+        bookingDate:
+          type: string
+        startTime:
+          type: string
+        endTime:
+          type: string
+        durationHours:
+          type: integer
+        totalPrice:
+          type: number
+        status:
+          type: string
+          enum: [pending_payment, paid, confirmed, cancelled, completed]
+        notes:
+          type: ["string", "null"]
+        adminNotes:
+          type: ["string", "null"]
+        whatsappMessage:
+          type: ["string", "null"]
+        payment:
+          $ref: "#/components/schemas/Payment"
+          nullable: true
+        createdAt:
+          type: string
+
+    BookingInput:
+      type: object
+      required: [customerName, customerEmail, customerPhone, facilityId, bookingDate, startTime, durationHours]
+      properties:
+        customerName:
+          type: string
+        customerEmail:
+          type: string
+        customerPhone:
+          type: string
+        facilityId:
+          type: integer
+        bookingDate:
+          type: string
+        startTime:
+          type: string
+        durationHours:
+          type: integer
+        notes:
+          type: string
+
+    BookingUpdate:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [pending_payment, paid, confirmed, cancelled, completed]
+        adminNotes:
+          type: string
+
+    Payment:
+      type: object
+      required: [id, bookingId, amount, status]
+      properties:
+        id:
+          type: integer
+        bookingId:
+          type: integer
+        amount:
+          type: number
+        proofUrl:
+          type: ["string", "null"]
+        status:
+          type: string
+          enum: [pending, confirmed, rejected]
+        notes:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+
+    PaymentInput:
+      type: object
+      required: [bookingId, amount]
+      properties:
+        bookingId:
+          type: integer
+        amount:
+          type: number
+        proofUrl:
+          type: string
+        notes:
+          type: string
+
+    PaymentUpdate:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [pending, confirmed, rejected]
+        notes:
+          type: string
+
+    Promo:
+      type: object
+      required: [id, title, type, isActive]
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        description:
+          type: ["string", "null"]
+        type:
+          type: string
+          enum: [promo, event]
+        discountPercent:
+          type: ["number", "null"]
+        startDate:
+          type: ["string", "null"]
+        endDate:
+          type: ["string", "null"]
+        imageUrl:
+          type: ["string", "null"]
+        isActive:
+          type: boolean
+        createdAt:
+          type: string
+
+    PromoInput:
+      type: object
+      required: [title, type]
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        type:
+          type: string
+          enum: [promo, event]
+        discountPercent:
+          type: number
+        startDate:
+          type: string
+        endDate:
+          type: string
+        imageUrl:
+          type: string
+        isActive:
+          type: boolean
+
+    PromoUpdate:
+      type: object
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        discountPercent:
+          type: number
+        startDate:
+          type: string
+        endDate:
+          type: string
+        imageUrl:
+          type: string
+        isActive:
+          type: boolean
+
+    PromoRegistrationInput:
+      type: object
+      required: [promoId, name, email, phone]
+      properties:
+        promoId:
+          type: integer
+        name:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+        message:
+          type: string
+
+    PromoRegistration:
+      type: object
+      required: [id, promoId, name, email, phone]
+      properties:
+        id:
+          type: integer
+        promoId:
+          type: integer
+        name:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+        message:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+
+    BlockedSchedule:
+      type: object
+      required: [id, facilityId, date, startTime, endTime, reason]
+      properties:
+        id:
+          type: integer
+        facilityId:
+          type: integer
+        facilityName:
+          type: ["string", "null"]
+        date:
+          type: string
+        startTime:
+          type: string
+        endTime:
+          type: string
+        reason:
+          type: string
+
+    BlockedScheduleInput:
+      type: object
+      required: [facilityId, date, startTime, endTime, reason]
+      properties:
+        facilityId:
+          type: integer
+        date:
+          type: string
+        startTime:
+          type: string
+        endTime:
+          type: string
+        reason:
+          type: string
+
+    Customer:
+      type: object
+      required: [id, name, email]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        email:
+          type: string
+        phone:
+          type: ["string", "null"]
+        totalBookings:
+          type: integer
+        totalSpent:
+          type: number
+        createdAt:
+          type: string
+
+    DashboardStats:
+      type: object
+      required: [totalBookings, totalRevenue, todayBookings, pendingBookings, topFacilities, recentBookings, bookingsByStatus, revenueByMonth]
+      properties:
+        totalBookings:
+          type: integer
+        totalRevenue:
+          type: number
+        todayBookings:
+          type: integer
+        pendingBookings:
+          type: integer
+        topFacilities:
+          type: array
+          items:
+            $ref: "#/components/schemas/FacilityStat"
+        recentBookings:
+          type: array
+          items:
+            $ref: "#/components/schemas/Booking"
+        bookingsByStatus:
+          type: array
+          items:
+            $ref: "#/components/schemas/StatusCount"
+        revenueByMonth:
+          type: array
+          items:
+            $ref: "#/components/schemas/MonthRevenue"
+
+    FacilityStat:
+      type: object
+      required: [facilityId, facilityName, bookingCount, revenue]
+      properties:
+        facilityId:
+          type: integer
+        facilityName:
+          type: string
+        bookingCount:
+          type: integer
+        revenue:
+          type: number
+
+    StatusCount:
+      type: object
+      required: [status, count]
+      properties:
+        status:
+          type: string
+        count:
+          type: integer
+
+    MonthRevenue:
+      type: object
+      required: [month, revenue, bookings]
+      properties:
+        month:
+          type: string
+        revenue:
+          type: number
+        bookings:
+          type: integer
+
+    Settings:
+      type: object
+      required: [id, centerName, address, phone, whatsapp, email]
+      properties:
+        id:
+          type: integer
+        centerName:
+          type: string
+        address:
+          type: string
+        phone:
+          type: string
+        whatsapp:
+          type: string
+        email:
+          type: string
+        openHour:
+          type: ["string", "null"]
+        closeHour:
+          type: ["string", "null"]
+        logoUrl:
+          type: ["string", "null"]
+        bankName:
+          type: ["string", "null"]
+        bankAccount:
+          type: ["string", "null"]
+        bankAccountName:
+          type: ["string", "null"]
+
+    SettingsUpdate:
+      type: object
+      properties:
+        centerName:
+          type: string
+        address:
+          type: string
+        phone:
+          type: string
+        whatsapp:
+          type: string
+        email:
+          type: string
+        openHour:
+          type: string
+        closeHour:
+          type: string
+        logoUrl:
+          type: string
+        bankName:
+          type: string
+        bankAccount:
+          type: string
+        bankAccountName:
+          type: string
