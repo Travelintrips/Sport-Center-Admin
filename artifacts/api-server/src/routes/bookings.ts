@@ -2,6 +2,7 @@ import { Router } from "express";
 import { db, bookingsTable, facilitiesTable, paymentsTable } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
+import { broadcastAvailabilityChange } from "../lib/supabase";
 
 const router = Router();
 
@@ -114,6 +115,8 @@ router.post("/bookings", async (req, res) => {
       totalPrice: String(totalPrice),
       notes,
     }).returning();
+
+    broadcastAvailabilityChange(Number(facilityId), bookingDate);
 
     res.status(201).json({
       ...booking,

@@ -25,6 +25,7 @@ import {
   CalendarDays
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
+import AvailabilityCalendar from "@/components/AvailabilityCalendar";
 
 export default function FacilityDetail() {
   const [, params] = useRoute("/facilities/:id");
@@ -207,45 +208,24 @@ export default function FacilityDetail() {
                 </div>
 
                 <div>
-                  <label className="text-sm font-semibold mb-2 flex items-center justify-between">
-                    <span>Select Time Slot</span>
-                    {isLoadingSlots && <span className="text-xs text-muted-foreground animate-pulse">Loading...</span>}
+                  <label className="text-sm font-semibold mb-2 block">
+                    Available Time Slots
                   </label>
-                  
-                  <div className="grid grid-cols-3 gap-2 max-h-60 overflow-y-auto pr-1">
-                    {!date ? (
-                      <div className="col-span-3 text-sm text-center text-muted-foreground py-4">
-                        Please select a date first
-                      </div>
-                    ) : isLoadingSlots ? (
-                      Array.from({ length: 12 }).map((_, i) => (
-                        <Skeleton key={i} className="h-10 w-full" />
-                      ))
-                    ) : slots && slots.length > 0 ? (
-                      slots.map((slot) => (
-                        <button
-                          key={slot.time}
-                          disabled={!slot.available}
-                          onClick={() => setSelectedTime(slot.time)}
-                          className={`
-                            py-2 px-1 text-sm rounded-md transition-all font-medium border
-                            ${!slot.available 
-                              ? 'bg-muted text-muted-foreground opacity-50 cursor-not-allowed border-transparent' 
-                              : selectedTime === slot.time
-                                ? 'bg-primary text-primary-foreground border-primary shadow-sm'
-                                : 'bg-background hover:border-primary/50 text-foreground hover:bg-primary/5'
-                            }
-                          `}
-                        >
-                          {slot.time.substring(0,5)}
-                        </button>
-                      ))
-                    ) : (
-                      <div className="col-span-3 text-sm text-center text-muted-foreground py-4 border rounded border-dashed">
-                        No slots available for this date
-                      </div>
-                    )}
-                  </div>
+                  {!date ? (
+                    <div className="text-sm text-center text-muted-foreground py-6 border border-dashed rounded-lg">
+                      Please select a date first
+                    </div>
+                  ) : (
+                    <AvailabilityCalendar
+                      facilityId={facilityId}
+                      date={formattedDate}
+                      slots={slots}
+                      isLoading={isLoadingSlots}
+                      selectedTime={selectedTime}
+                      duration={parseInt(duration)}
+                      onSelectTime={setSelectedTime}
+                    />
+                  )}
                 </div>
 
                 <div className="pt-4 border-t">

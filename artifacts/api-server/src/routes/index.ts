@@ -10,10 +10,12 @@ import schedulesRouter from "./schedules";
 import customersRouter from "./customers";
 import dashboardRouter from "./dashboard";
 import settingsRouter from "./settings";
+import configRouter from "./config";
 
 const router: IRouter = Router();
 
 router.use(healthRouter);
+router.use(configRouter);
 router.use(authRouter);
 router.use(facilitiesRouter);
 router.use(availabilityRouter);
