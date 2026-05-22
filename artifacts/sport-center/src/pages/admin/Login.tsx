@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useLocation } from "wouter";
-import { useLogin } from "@workspace/api-client-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { useLogin, getGetMeQueryKey } from "@workspace/api-client-react";
 import { setToken } from "@/lib/auth";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -13,12 +14,14 @@ export default function AdminLogin() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [, setLocation] = useLocation();
+  const queryClient = useQueryClient();
   const { toast } = useToast();
 
   const loginMutation = useLogin({
     mutation: {
       onSuccess: (data) => {
         setToken(data.token);
+        queryClient.invalidateQueries({ queryKey: getGetMeQueryKey() });
         toast({
           title: "Login successful",
           description: "Welcome back, Admin.",
