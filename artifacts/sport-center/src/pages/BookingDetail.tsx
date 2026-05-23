@@ -101,38 +101,22 @@ export default function BookingDetail() {
     try {
       setUploadProgress("uploading");
 
-      // Step 1: Request presigned upload URL
-      const urlResp = await fetch(`${BASE}/api/storage/uploads/request-url`, {
+      const formData = new FormData();
+      formData.append("proof", selectedFile);
+
+      const uploadResp = await fetch(`${BASE}/api/payments/proof-upload`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: selectedFile.name,
-          size: selectedFile.size,
-          contentType: selectedFile.type,
-        }),
-      });
-
-      if (!urlResp.ok) {
-        const err = await urlResp.json().catch(() => ({}));
-        throw new Error(err.error || "Gagal mendapatkan URL upload");
-      }
-
-      const { uploadURL, objectPath } = await urlResp.json();
-
-      // Step 2: Upload file directly to GCS
-      const uploadResp = await fetch(uploadURL, {
-        method: "PUT",
-        headers: { "Content-Type": selectedFile.type },
-        body: selectedFile,
+        body: formData,
       });
 
       if (!uploadResp.ok) {
-        throw new Error("Upload file gagal");
+        const err = await uploadResp.json().catch(() => ({}));
+        throw new Error(err.error || "Upload gagal");
       }
 
+      const { objectPath } = await uploadResp.json();
       setUploadProgress("done");
 
-      // Step 3: Submit payment with the object path as proof URL
       submitPayment.mutate({
         data: {
           bookingId: booking.id,

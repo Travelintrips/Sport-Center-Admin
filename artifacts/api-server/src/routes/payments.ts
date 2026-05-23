@@ -2,8 +2,51 @@ import { Router } from "express";
 import { db, paymentsTable, bookingsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
+import multer from "multer";
+import { randomUUID } from "crypto";
+import { objectStorageClient } from "../lib/objectStorage";
 
 const router = Router();
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const validMime = /image\/(jpeg|png|webp)|application\/pdf/.test(file.mimetype);
+    cb(null, validMime);
+  },
+});
+
+router.post("/payments/proof-upload", upload.single("proof"), async (req, res) => {
+  try {
+    if (!req.file) {
+      res.status(400).json({ error: "No file provided" });
+      return;
+    }
+
+    const privateDir = process.env.PRIVATE_OBJECT_DIR || "";
+    if (!privateDir) {
+      res.status(500).json({ error: "Storage not configured" });
+      return;
+    }
+
+    const uuid = randomUUID();
+    const fullPath = `${privateDir}/uploads/${uuid}`;
+    const parts = fullPath.replace(/^\//, "").split("/");
+    const bucketName = parts[0];
+    const objectName = parts.slice(1).join("/");
+
+    const bucket = objectStorageClient.bucket(bucketName);
+    const file = bucket.file(objectName);
+    await file.save(req.file.buffer, { contentType: req.file.mimetype, resumable: false });
+
+    const objectPath = `/objects/uploads/${uuid}`;
+    res.json({ objectPath });
+  } catch (err) {
+    req.log.error({ err }, "Upload proof error");
+    res.status(500).json({ error: "Upload failed" });
+  }
+});
 
 router.get("/payments", async (req, res) => {
   try {
