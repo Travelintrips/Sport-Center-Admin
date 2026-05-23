@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { Save, Upload, Trash2, QrCode, ImageIcon } from "lucide-react";
+import { getToken } from "@/lib/auth";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -68,13 +69,14 @@ export default function AdminSettings() {
     try {
       const fd = new FormData();
       fd.append("qris", file);
-      const token = localStorage.getItem("sport_center_token");
+      const token = getToken();
+      if (!token) throw new Error("Tidak terautentikasi");
       const res = await fetch(`${BASE}/api/settings/qris`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
         body: fd,
       });
-      if (!res.ok) throw new Error("Upload gagal");
+      if (!res.ok) throw new Error(`Upload gagal: ${res.status}`);
       const data = await res.json();
       setQrisPreview(data.qrisImageUrl);
       queryClient.invalidateQueries({ queryKey: getGetSettingsQueryKey() });
@@ -90,7 +92,8 @@ export default function AdminSettings() {
   const handleQrisDelete = async () => {
     setQrisDeleting(true);
     try {
-      const token = localStorage.getItem("sport_center_token");
+      const token = getToken();
+      if (!token) throw new Error("Tidak terautentikasi");
       const res = await fetch(`${BASE}/api/settings/qris`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` },
