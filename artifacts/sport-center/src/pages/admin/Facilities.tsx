@@ -51,14 +51,12 @@ export default function AdminFacilities() {
 
   const createMutation = useCreateFacility({
     mutation: {
-      onSuccess: () => { queryClient.invalidateQueries({ queryKey: getListFacilitiesQueryKey() }); toast({ title: "Fasilitas berhasil dibuat" }); setDialogOpen(false); },
       onError: (e: any) => toast({ title: "Gagal membuat fasilitas", description: e?.message, variant: "destructive" }),
     }
   });
 
   const updateMutation = useUpdateFacility({
     mutation: {
-      onSuccess: () => { queryClient.invalidateQueries({ queryKey: getListFacilitiesQueryKey() }); toast({ title: "Fasilitas berhasil diperbarui" }); setDialogOpen(false); },
       onError: (e: any) => toast({ title: "Gagal memperbarui fasilitas", description: e?.message, variant: "destructive" }),
     }
   });
@@ -147,24 +145,6 @@ export default function AdminFacilities() {
     }
   };
 
-  const uploadNewImages = async (facilityId: number): Promise<void> => {
-    const total = newImagePreviews.length;
-    for (let i = 0; i < total; i++) {
-      const { file } = newImagePreviews[i];
-      const formData = new FormData();
-      formData.append("image", file);
-      const token = getToken();
-      const base = import.meta.env.BASE_URL?.replace(/\/$/, "") || "";
-      const resp = await fetch(`${base}/api/facilities/${facilityId}/images`, {
-        method: "POST",
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-        body: formData,
-      });
-      if (!resp.ok) throw new Error(`Upload failed for ${file.name}`);
-      setUploadProgress(Math.round(((i + 1) / total) * 100));
-    }
-    setUploadProgress(0);
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -176,34 +156,72 @@ export default function AdminFacilities() {
     if (form.capacity) payload.capacity = Number(form.capacity);
     if (form.maxDuration) payload.maxDuration = Number(form.maxDuration);
 
+    const pendingImages = newImagePreviews.slice();
+
     try {
       setUploadingImages(true);
       if (editFacility) {
+        const facilityId = editFacility.id;
         await new Promise<void>((res, rej) => {
-          updateMutation.mutate({ id: editFacility.id, data: payload }, {
+          updateMutation.mutate({ id: facilityId, data: payload }, {
             onSuccess: () => res(), onError: rej,
           });
         });
-        if (newImagePreviews.length > 0) await uploadNewImages(editFacility.id);
+        if (pendingImages.length > 0) {
+          const total = pendingImages.length;
+          for (let i = 0; i < total; i++) {
+            const { file } = pendingImages[i];
+            const formData = new FormData();
+            formData.append("image", file);
+            const token = getToken();
+            const base = import.meta.env.BASE_URL?.replace(/\/$/, "") || "";
+            const resp = await fetch(`${base}/api/facilities/${facilityId}/images`, {
+              method: "POST",
+              headers: token ? { Authorization: `Bearer ${token}` } : {},
+              body: formData,
+            });
+            if (!resp.ok) throw new Error(`Gagal upload foto: ${resp.status}`);
+            setUploadProgress(Math.round(((i + 1) / total) * 100));
+          }
+          setUploadProgress(0);
+        }
         queryClient.invalidateQueries({ queryKey: getListFacilitiesQueryKey() });
+        toast({ title: "Fasilitas berhasil diperbarui" });
         setDialogOpen(false);
       } else {
-        await new Promise<void>((res, rej) => {
+        const facilityId = await new Promise<number>((res, rej) => {
           createMutation.mutate({ data: payload }, {
-            onSuccess: async (data: any) => {
-              if (newImagePreviews.length > 0) await uploadNewImages(data.id);
-              queryClient.invalidateQueries({ queryKey: getListFacilitiesQueryKey() });
-              res();
-            },
+            onSuccess: (data: any) => res(data.id),
             onError: rej,
           });
         });
-        setDialogOpen(false);
+        if (pendingImages.length > 0) {
+          const total = pendingImages.length;
+          for (let i = 0; i < total; i++) {
+            const { file } = pendingImages[i];
+            const formData = new FormData();
+            formData.append("image", file);
+            const token = getToken();
+            const base = import.meta.env.BASE_URL?.replace(/\/$/, "") || "";
+            const resp = await fetch(`${base}/api/facilities/${facilityId}/images`, {
+              method: "POST",
+              headers: token ? { Authorization: `Bearer ${token}` } : {},
+              body: formData,
+            });
+            if (!resp.ok) throw new Error(`Gagal upload foto: ${resp.status}`);
+            setUploadProgress(Math.round(((i + 1) / total) * 100));
+          }
+          setUploadProgress(0);
+        }
+        queryClient.invalidateQueries({ queryKey: getListFacilitiesQueryKey() });
         toast({ title: "Fasilitas berhasil dibuat" });
+        setDialogOpen(false);
       }
-    } catch {
+    } catch (err: any) {
+      toast({ title: err?.message ?? "Terjadi kesalahan", variant: "destructive" });
     } finally {
       setUploadingImages(false);
+      setUploadProgress(0);
     }
   };
 

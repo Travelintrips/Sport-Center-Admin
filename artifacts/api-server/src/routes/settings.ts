@@ -59,7 +59,19 @@ router.get("/settings", async (req, res) => {
 router.patch("/settings", adminMiddleware, async (req, res) => {
   try {
     const settings = await getOrCreateSettings();
-    await db.update(settingsTable).set(req.body).where(eq(settingsTable.id, settings.id));
+    const allowed = [
+      "centerName","address","phone","whatsapp","email",
+      "openHour","closeHour","logoUrl","bankName","bankAccount","bankAccountName",
+    ];
+    const patch: Record<string, unknown> = {};
+    for (const key of allowed) {
+      if (Object.prototype.hasOwnProperty.call(req.body, key)) {
+        patch[key] = req.body[key] ?? null;
+      }
+    }
+    if (Object.keys(patch).length > 0) {
+      await db.update(settingsTable).set(patch).where(eq(settingsTable.id, settings.id));
+    }
     const [updated] = await db.select().from(settingsTable).where(eq(settingsTable.id, settings.id)).limit(1);
     res.json(updated);
   } catch (err) {
