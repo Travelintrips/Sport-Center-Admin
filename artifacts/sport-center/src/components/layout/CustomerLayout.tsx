@@ -44,9 +44,9 @@ function UserMenu() {
         className="flex items-center gap-2 rounded-full px-3 py-1.5 hover:bg-accent transition-colors text-sm font-medium"
       >
         <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center text-primary font-black text-sm">
-          {user.name.charAt(0).toUpperCase()}
+          {user.name?.charAt(0).toUpperCase() ?? "?"}
         </div>
-        <span className="hidden sm:block max-w-[100px] truncate">{user.name.split(" ")[0]}</span>
+        <span className="hidden sm:block max-w-[100px] truncate">{user.name?.split(" ")[0] ?? ""}</span>
         <ChevronDown size={14} className="text-muted-foreground" />
       </button>
 
