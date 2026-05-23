@@ -885,7 +885,7 @@ components:
           type: number
         status:
           type: string
-          enum: [pending_payment, paid, confirmed, cancelled, completed]
+          enum: [pending_payment, paid, confirmed, cancelled, completed, refunded]
         notes:
           type: ["string", "null"]
         adminNotes:
@@ -924,7 +924,7 @@ components:
       properties:
         status:
           type: string
-          enum: [pending_payment, paid, confirmed, cancelled, completed]
+          enum: [pending_payment, paid, confirmed, cancelled, completed, refunded]
         adminNotes:
           type: string
 

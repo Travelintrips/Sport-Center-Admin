@@ -66,7 +66,7 @@ export const GetMyBookingsResponseItem = zod.object({
   "endTime": zod.string(),
   "durationHours": zod.number(),
   "totalPrice": zod.number(),
-  "status": zod.enum(['pending_payment', 'paid', 'confirmed', 'cancelled', 'completed']),
+  "status": zod.enum(['pending_payment', 'paid', 'confirmed', 'cancelled', 'completed', 'refunded']),
   "notes": zod.string().nullish(),
   "adminNotes": zod.string().nullish(),
   "whatsappMessage": zod.string().nullish(),
@@ -267,7 +267,7 @@ export const ListBookingsResponseItem = zod.object({
   "endTime": zod.string(),
   "durationHours": zod.number(),
   "totalPrice": zod.number(),
-  "status": zod.enum(['pending_payment', 'paid', 'confirmed', 'cancelled', 'completed']),
+  "status": zod.enum(['pending_payment', 'paid', 'confirmed', 'cancelled', 'completed', 'refunded']),
   "notes": zod.string().nullish(),
   "adminNotes": zod.string().nullish(),
   "whatsappMessage": zod.string().nullish(),
@@ -322,7 +322,7 @@ export const GetBookingResponse = zod.object({
   "endTime": zod.string(),
   "durationHours": zod.number(),
   "totalPrice": zod.number(),
-  "status": zod.enum(['pending_payment', 'paid', 'confirmed', 'cancelled', 'completed']),
+  "status": zod.enum(['pending_payment', 'paid', 'confirmed', 'cancelled', 'completed', 'refunded']),
   "notes": zod.string().nullish(),
   "adminNotes": zod.string().nullish(),
   "whatsappMessage": zod.string().nullish(),
@@ -347,7 +347,7 @@ export const UpdateBookingParams = zod.object({
 })
 
 export const UpdateBookingBody = zod.object({
-  "status": zod.enum(['pending_payment', 'paid', 'confirmed', 'cancelled', 'completed']).optional(),
+  "status": zod.enum(['pending_payment', 'paid', 'confirmed', 'cancelled', 'completed', 'refunded']).optional(),
   "adminNotes": zod.string().optional()
 })
 
@@ -366,7 +366,7 @@ export const UpdateBookingResponse = zod.object({
   "endTime": zod.string(),
   "durationHours": zod.number(),
   "totalPrice": zod.number(),
-  "status": zod.enum(['pending_payment', 'paid', 'confirmed', 'cancelled', 'completed']),
+  "status": zod.enum(['pending_payment', 'paid', 'confirmed', 'cancelled', 'completed', 'refunded']),
   "notes": zod.string().nullish(),
   "adminNotes": zod.string().nullish(),
   "whatsappMessage": zod.string().nullish(),
@@ -405,7 +405,7 @@ export const GetBookingByOrderResponse = zod.object({
   "endTime": zod.string(),
   "durationHours": zod.number(),
   "totalPrice": zod.number(),
-  "status": zod.enum(['pending_payment', 'paid', 'confirmed', 'cancelled', 'completed']),
+  "status": zod.enum(['pending_payment', 'paid', 'confirmed', 'cancelled', 'completed', 'refunded']),
   "notes": zod.string().nullish(),
   "adminNotes": zod.string().nullish(),
   "whatsappMessage": zod.string().nullish(),
@@ -669,7 +669,7 @@ export const GetDashboardResponse = zod.object({
   "endTime": zod.string(),
   "durationHours": zod.number(),
   "totalPrice": zod.number(),
-  "status": zod.enum(['pending_payment', 'paid', 'confirmed', 'cancelled', 'completed']),
+  "status": zod.enum(['pending_payment', 'paid', 'confirmed', 'cancelled', 'completed', 'refunded']),
   "notes": zod.string().nullish(),
   "adminNotes": zod.string().nullish(),
   "whatsappMessage": zod.string().nullish(),

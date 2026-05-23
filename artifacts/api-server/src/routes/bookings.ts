@@ -162,13 +162,23 @@ router.get("/bookings/:id", async (req, res) => {
   }
 });
 
+const ADMIN_ONLY_STATUSES = ["completed", "cancelled", "refunded"] as const;
+
 router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     const { status, adminNotes } = req.body;
+
+    const validStatuses = ["pending_payment", "paid", "confirmed", "completed", "cancelled", "refunded"];
+    if (status && !validStatuses.includes(status)) {
+      res.status(400).json({ error: `Invalid status: ${status}` });
+      return;
+    }
+
     const updateData: Record<string, unknown> = {};
     if (status) updateData.status = status;
     if (adminNotes !== undefined) updateData.adminNotes = adminNotes;
+
     await db.update(bookingsTable).set(updateData).where(eq(bookingsTable.id, id));
     const result = await getBookingWithPayment(id);
     if (!result) { res.status(404).json({ error: "Not found" }); return; }

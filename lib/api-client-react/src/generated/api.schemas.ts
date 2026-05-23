@@ -114,6 +114,7 @@ export const BookingStatus = {
   confirmed: 'confirmed',
   cancelled: 'cancelled',
   completed: 'completed',
+  refunded: 'refunded',
 } as const;
 
 export type PaymentStatus = typeof PaymentStatus[keyof typeof PaymentStatus];
@@ -184,6 +185,7 @@ export const BookingUpdateStatus = {
   confirmed: 'confirmed',
   cancelled: 'cancelled',
   completed: 'completed',
+  refunded: 'refunded',
 } as const;
 
 export interface BookingUpdate {

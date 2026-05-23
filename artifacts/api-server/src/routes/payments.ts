@@ -154,7 +154,7 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
     if (status === "confirmed") {
       await db
         .update(bookingsTable)
-        .set({ status: "confirmed" })
+        .set({ status: "completed" })
         .where(eq(bookingsTable.id, payment.bookingId));
     } else if (status === "rejected") {
       await db

@@ -15,4 +15,5 @@ export const BookingStatus = {
   confirmed: 'confirmed',
   cancelled: 'cancelled',
   completed: 'completed',
+  refunded: 'refunded',
 } as const;
