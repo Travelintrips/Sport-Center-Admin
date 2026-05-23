@@ -2,14 +2,25 @@ import { Router } from "express";
 import { db, facilitiesTable, facilityImagesTable } from "@workspace/db";
 import { eq, inArray } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
-import { getSupabaseAdmin } from "../lib/supabase";
 import multer from "multer";
 import path from "path";
+import fs from "fs";
+import { v4 as uuidv4 } from "uuid";
 
-const BUCKET = "facility-images";
+const UPLOADS_DIR = path.join(process.cwd(), "../sport-center/public/uploads");
+
+fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+
+const storage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, UPLOADS_DIR),
+  filename: (_req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase() || ".jpg";
+    cb(null, `facility-${uuidv4()}${ext}`);
+  },
+});
 
 const upload = multer({
-  storage: multer.memoryStorage(),
+  storage,
   limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     const allowed = /jpeg|jpg|png|webp|gif/;
@@ -20,49 +31,11 @@ const upload = multer({
   },
 });
 
-async function ensureBucket() {
-  const supabase = getSupabaseAdmin();
-  const { error } = await supabase.storage.getBucket(BUCKET);
-  if (error) {
-    await supabase.storage.createBucket(BUCKET, {
-      public: true,
-      fileSizeLimit: 5 * 1024 * 1024,
-      allowedMimeTypes: ["image/jpeg", "image/png", "image/webp", "image/gif"],
-    });
-  }
-}
-
-ensureBucket().catch(() => {});
-
-async function uploadToSupabase(
-  buffer: Buffer,
-  originalName: string,
-  mimetype: string
-): Promise<string> {
-  const supabase = getSupabaseAdmin();
-  const ext = path.extname(originalName).toLowerCase() || ".jpg";
-  const filename = `facility-${Date.now()}-${Math.random().toString(36).slice(2, 7)}${ext}`;
-
-  const { data, error } = await supabase.storage
-    .from(BUCKET)
-    .upload(filename, buffer, { contentType: mimetype, upsert: false });
-
-  if (error) throw new Error(`Supabase upload failed: ${error.message}`);
-
-  const {
-    data: { publicUrl },
-  } = supabase.storage.from(BUCKET).getPublicUrl(data.path);
-
-  return publicUrl;
-}
-
-async function deleteFromSupabase(url: string): Promise<void> {
+function deleteLocalFile(url: string): void {
   try {
-    const supabase = getSupabaseAdmin();
-    const match = url.match(/\/storage\/v1\/object\/public\/facility-images\/(.+?)(\?.*)?$/);
-    if (match?.[1]) {
-      await supabase.storage.from(BUCKET).remove([decodeURIComponent(match[1])]);
-    }
+    const filename = path.basename(url);
+    const filePath = path.join(UPLOADS_DIR, filename);
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
   } catch {
     // non-fatal
   }
@@ -195,7 +168,7 @@ router.delete("/facilities/:id", adminMiddleware, async (req, res) => {
       .select()
       .from(facilityImagesTable)
       .where(eq(facilityImagesTable.facilityId, id));
-    await Promise.all(images.map((img) => deleteFromSupabase(img.url)));
+    images.forEach((img) => deleteLocalFile(img.url));
     await db.delete(facilitiesTable).where(eq(facilitiesTable.id, id));
     res.status(204).send();
   } catch (err) {
@@ -215,12 +188,7 @@ router.post(
         return;
       }
       const id = parseInt(req.params.id);
-
-      const publicUrl = await uploadToSupabase(
-        req.file.buffer,
-        req.file.originalname,
-        req.file.mimetype
-      );
+      const publicUrl = `/uploads/${req.file.filename}`;
 
       const existingImages = await db
         .select()
@@ -254,7 +222,7 @@ router.delete(
         .limit(1);
 
       if (img) {
-        await deleteFromSupabase(img.url);
+        deleteLocalFile(img.url);
         await db
           .delete(facilityImagesTable)
           .where(eq(facilityImagesTable.id, imageId));
