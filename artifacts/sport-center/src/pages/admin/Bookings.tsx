@@ -618,6 +618,59 @@ function ActionButton({
   );
 }
 
+/* ─── Inline Status Select ──────────────────────────────────────── */
+
+const STATUS_OPTIONS = [
+  { value: "pending_payment", label: "⏳ Pending Payment" },
+  { value: "paid",            label: "💳 Menunggu Verifikasi" },
+  { value: "completed",       label: "✅ Completed" },
+  { value: "cancelled",       label: "❌ Cancelled" },
+  { value: "refunded",        label: "↩️ Refunded" },
+];
+
+function InlineStatusSelect({
+  bookingId,
+  status,
+  onUpdate,
+  isUpdating,
+}: {
+  bookingId: number;
+  status: string;
+  onUpdate: (id: number, status: string) => void;
+  isUpdating: boolean;
+}) {
+  const cfg = STATUS_CONFIG[status as BookingStatus] ?? STATUS_CONFIG.pending_payment;
+  const Icon = cfg.icon;
+
+  return (
+    <Select
+      value={status}
+      onValueChange={(val) => {
+        if (val !== status) onUpdate(bookingId, val);
+      }}
+      disabled={isUpdating}
+    >
+      <SelectTrigger
+        className={`h-7 w-auto min-w-0 gap-1.5 border rounded-full px-2.5 text-[11px] font-semibold shadow-none focus:ring-0 focus:ring-offset-0 ${cfg.bg} ${cfg.color} ${cfg.pill} disabled:opacity-70`}
+        style={{ outline: "none" }}
+      >
+        <Icon size={11} className="shrink-0" />
+        <SelectValue />
+        {isUpdating && (
+          <span className="ml-1 w-3 h-3 border border-current border-t-transparent rounded-full animate-spin shrink-0" />
+        )}
+      </SelectTrigger>
+      <SelectContent>
+        {STATUS_OPTIONS.map((o) => (
+          <SelectItem key={o.value} value={o.value} className="text-xs">
+            {o.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
 /* ─── Main Component ────────────────────────────────────────────── */
 
 export default function AdminBookings() {
@@ -846,7 +899,14 @@ export default function AdminBookings() {
                         </span>
                       </td>
                       <td className="px-4 py-3">
-                        <StatusBadge status={b.status} />
+                        <InlineStatusSelect
+                          bookingId={b.id}
+                          status={b.status}
+                          onUpdate={(id, status) =>
+                            updateBookingMutation.mutate({ id, data: { status: status as any } })
+                          }
+                          isUpdating={updateBookingMutation.isPending && updateBookingMutation.variables?.id === b.id}
+                        />
                         {b.status === "paid" && b.payment?.proofUrl && (
                           <div className="text-[10px] text-blue-500 mt-0.5 font-medium">
                             Bukti diterima ↗
