@@ -11,6 +11,7 @@ const app: Express = express();
 const uploadsDir = path.resolve(process.cwd(), "uploads");
 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
 app.use("/api/uploads", express.static(uploadsDir));
+app.use("/api/uploads/proofs", express.static(path.join(uploadsDir, "proofs")));
 
 app.use(
   pinoHttp({

@@ -3,13 +3,25 @@ import { db, paymentsTable, bookingsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
 import multer from "multer";
+import path from "path";
+import fs from "fs";
 import { randomUUID } from "crypto";
-import { objectStorageClient } from "../lib/objectStorage";
 
 const router = Router();
 
+const PROOFS_DIR = path.resolve(process.cwd(), "uploads", "proofs");
+if (!fs.existsSync(PROOFS_DIR)) fs.mkdirSync(PROOFS_DIR, { recursive: true });
+
+const storage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, PROOFS_DIR),
+  filename: (_req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase() || ".jpg";
+    cb(null, `proof-${randomUUID()}${ext}`);
+  },
+});
+
 const upload = multer({
-  storage: multer.memoryStorage(),
+  storage,
   limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     const validMime = /image\/(jpeg|png|webp)|application\/pdf/.test(file.mimetype);
@@ -23,24 +35,7 @@ router.post("/payments/proof-upload", upload.single("proof"), async (req, res) =
       res.status(400).json({ error: "No file provided" });
       return;
     }
-
-    const privateDir = process.env.PRIVATE_OBJECT_DIR || "";
-    if (!privateDir) {
-      res.status(500).json({ error: "Storage not configured" });
-      return;
-    }
-
-    const uuid = randomUUID();
-    const fullPath = `${privateDir}/uploads/${uuid}`;
-    const parts = fullPath.replace(/^\//, "").split("/");
-    const bucketName = parts[0];
-    const objectName = parts.slice(1).join("/");
-
-    const bucket = objectStorageClient.bucket(bucketName);
-    const file = bucket.file(objectName);
-    await file.save(req.file.buffer, { contentType: req.file.mimetype, resumable: false });
-
-    const objectPath = `/objects/uploads/${uuid}`;
+    const objectPath = `/api/uploads/proofs/${req.file.filename}`;
     res.json({ objectPath });
   } catch (err) {
     req.log.error({ err }, "Upload proof error");
@@ -89,12 +84,7 @@ router.post("/payments", async (req, res) => {
 
     const [payment] = await db
       .insert(paymentsTable)
-      .values({
-        bookingId: Number(bookingId),
-        amount: String(amount),
-        proofUrl,
-        notes,
-      })
+      .values({ bookingId: Number(bookingId), amount: String(amount), proofUrl, notes })
       .returning();
 
     await db
