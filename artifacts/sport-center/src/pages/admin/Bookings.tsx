@@ -431,52 +431,107 @@ function BookingDetailDrawer({
             <div className="px-4 py-2.5 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-700">
               <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Aksi Admin</span>
             </div>
-            <div className="p-4 space-y-2">
-              <p className="text-xs text-slate-400 mb-3">
-                Hanya admin yang dapat mengubah status berikut. Klik dua kali untuk konfirmasi.
-              </p>
+            <div className="p-4 space-y-4">
+              {/* Status Dropdown */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-slate-500">Ubah Status Langsung</label>
+                <Select
+                  value={booking.status}
+                  onValueChange={(val) => {
+                    setConfirmAction(val);
+                  }}
+                  disabled={isUpdating}
+                >
+                  <SelectTrigger className="h-9 text-xs rounded-xl border-slate-200 dark:border-slate-700">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {[
+                      { value: "pending_payment", label: "⏳ Pending Payment" },
+                      { value: "paid",            label: "💳 Menunggu Verifikasi" },
+                      { value: "completed",       label: "✅ Completed" },
+                      { value: "cancelled",       label: "❌ Cancelled" },
+                      { value: "refunded",        label: "↩️ Refunded" },
+                    ].map((o) => (
+                      <SelectItem key={o.value} value={o.value} className="text-xs">
+                        {o.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {confirmAction && confirmAction !== booking.status && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="flex items-center gap-2 mt-2"
+                  >
+                    <button
+                      onClick={() => {
+                        onUpdateStatus(confirmAction, adminNotes);
+                        setConfirmAction(null);
+                      }}
+                      disabled={isUpdating}
+                      className="flex-1 h-8 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50 transition-colors"
+                    >
+                      {isUpdating ? "Menyimpan..." : `Simpan → ${STATUS_CONFIG[confirmAction as BookingStatus]?.label ?? confirmAction}`}
+                    </button>
+                    <button
+                      onClick={() => setConfirmAction(null)}
+                      className="h-8 px-3 rounded-lg text-xs font-semibold border border-slate-200 dark:border-slate-700 text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+                    >
+                      Batal
+                    </button>
+                  </motion.div>
+                )}
+              </div>
 
-              {/* Cancel */}
-              {booking.status !== "cancelled" && booking.status !== "refunded" && (
-                <ActionButton
-                  action="cancelled"
-                  label="Batalkan Booking"
-                  description="Set status → Cancelled"
-                  icon={XCircle}
-                  confirmAction={confirmAction}
-                  onClick={() => handleAction("cancelled")}
-                  isUpdating={isUpdating}
-                  variant="danger"
-                />
-              )}
+              <div className="border-t border-slate-100 dark:border-slate-800 pt-3 space-y-2">
+                <p className="text-xs text-slate-400">
+                  Atau gunakan tombol cepat (klik dua kali untuk konfirmasi):
+                </p>
 
-              {/* Refund */}
-              {(booking.status === "completed" || booking.status === "confirmed" || booking.status === "cancelled") && (
-                <ActionButton
-                  action="refunded"
-                  label="Kembalikan Dana"
-                  description="Set status → Refunded"
-                  icon={RotateCcw}
-                  confirmAction={confirmAction}
-                  onClick={() => handleAction("refunded")}
-                  isUpdating={isUpdating}
-                  variant="purple"
-                />
-              )}
+                {/* Cancel */}
+                {booking.status !== "cancelled" && booking.status !== "refunded" && (
+                  <ActionButton
+                    action="cancelled"
+                    label="Batalkan Booking"
+                    description="Set status → Cancelled"
+                    icon={XCircle}
+                    confirmAction={confirmAction}
+                    onClick={() => handleAction("cancelled")}
+                    isUpdating={isUpdating}
+                    variant="danger"
+                  />
+                )}
 
-              {/* Manual complete (if somehow stuck) */}
-              {booking.status === "paid" && (
-                <ActionButton
-                  action="completed"
-                  label="Tandai Completed"
-                  description="Bypass verifikasi payment → Completed"
-                  icon={CheckCircle2}
-                  confirmAction={confirmAction}
-                  onClick={() => handleAction("completed")}
-                  isUpdating={isUpdating}
-                  variant="success"
-                />
-              )}
+                {/* Refund */}
+                {(booking.status === "completed" || booking.status === "confirmed" || booking.status === "cancelled") && (
+                  <ActionButton
+                    action="refunded"
+                    label="Kembalikan Dana"
+                    description="Set status → Refunded"
+                    icon={RotateCcw}
+                    confirmAction={confirmAction}
+                    onClick={() => handleAction("refunded")}
+                    isUpdating={isUpdating}
+                    variant="purple"
+                  />
+                )}
+
+                {/* Manual complete */}
+                {booking.status === "paid" && (
+                  <ActionButton
+                    action="completed"
+                    label="Tandai Completed"
+                    description="Bypass verifikasi payment → Completed"
+                    icon={CheckCircle2}
+                    confirmAction={confirmAction}
+                    onClick={() => handleAction("completed")}
+                    isUpdating={isUpdating}
+                    variant="success"
+                  />
+                )}
+              </div>
             </div>
           </div>
         </div>
