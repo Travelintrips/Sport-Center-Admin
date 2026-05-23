@@ -154,11 +154,12 @@ export default function BookingDetail() {
       case "paid":
         return { color: "bg-blue-100 text-blue-800 border-blue-300", icon: CheckCircle2, label: "Sedang Diverifikasi" };
       case "confirmed":
-        return { color: "bg-green-100 text-green-800 border-green-300", icon: CheckCircle2, label: "Dikonfirmasi" };
       case "completed":
-        return { color: "bg-slate-100 text-slate-800 border-slate-300", icon: CheckCircle2, label: "Selesai" };
+        return { color: "bg-green-100 text-green-800 border-green-300", icon: CheckCircle2, label: "Booking Dikonfirmasi" };
       case "cancelled":
         return { color: "bg-red-100 text-red-800 border-red-300", icon: AlertCircle, label: "Dibatalkan" };
+      case "refunded":
+        return { color: "bg-purple-100 text-purple-800 border-purple-300", icon: AlertCircle, label: "Dana Dikembalikan" };
       default:
         return { color: "bg-gray-100 text-gray-800 border-gray-300", icon: Clock, label: status };
     }
@@ -411,6 +412,36 @@ export default function BookingDetail() {
                 <h3 className="font-bold text-lg text-green-900 mb-1">Booking Dikonfirmasi!</h3>
                 <p className="text-sm text-green-700">
                   Pembayaran Anda sudah diverifikasi. Sampai jumpa di lapangan!
+                </p>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Refunded state */}
+          {booking.status === "refunded" && (
+            <Card className="border-purple-200 bg-purple-50/50">
+              <CardContent className="p-6 text-center">
+                <div className="w-14 h-14 rounded-full bg-purple-100 flex items-center justify-center mx-auto mb-3">
+                  <AlertCircle size={26} className="text-purple-600" />
+                </div>
+                <h3 className="font-bold text-lg text-purple-900 mb-1">Dana Telah Dikembalikan</h3>
+                <p className="text-sm text-purple-700">
+                  Pembayaran Anda telah dikembalikan oleh admin. Silakan hubungi kami jika ada pertanyaan.
+                </p>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Cancelled state */}
+          {booking.status === "cancelled" && (
+            <Card className="border-red-200 bg-red-50/50">
+              <CardContent className="p-6 text-center">
+                <div className="w-14 h-14 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-3">
+                  <AlertCircle size={26} className="text-red-600" />
+                </div>
+                <h3 className="font-bold text-lg text-red-900 mb-1">Booking Dibatalkan</h3>
+                <p className="text-sm text-red-700">
+                  Booking ini telah dibatalkan. Hubungi admin jika Anda memerlukan bantuan.
                 </p>
               </CardContent>
             </Card>
