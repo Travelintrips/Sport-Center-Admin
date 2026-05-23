@@ -5,17 +5,16 @@ import { adminMiddleware } from "../lib/auth";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
-import { v4 as uuidv4 } from "uuid";
 
-const UPLOADS_DIR = path.join(process.cwd(), "../sport-center/public/uploads");
-
-fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+const UPLOADS_DIR = path.resolve(process.cwd(), "uploads");
+if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, UPLOADS_DIR),
   filename: (_req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase() || ".jpg";
-    cb(null, `facility-${uuidv4()}${ext}`);
+    const name = `facility-${Date.now()}-${Math.random().toString(36).slice(2, 7)}${ext}`;
+    cb(null, name);
   },
 });
 
@@ -31,11 +30,17 @@ const upload = multer({
   },
 });
 
+function getPublicUrl(filename: string): string {
+  return `/api/uploads/${filename}`;
+}
+
 function deleteLocalFile(url: string): void {
   try {
-    const filename = path.basename(url);
-    const filePath = path.join(UPLOADS_DIR, filename);
-    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    const filename = url.split("/api/uploads/").pop();
+    if (filename) {
+      const filePath = path.join(UPLOADS_DIR, filename);
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    }
   } catch {
     // non-fatal
   }
@@ -136,6 +141,11 @@ router.patch("/facilities/:id", adminMiddleware, async (req, res) => {
       .set(updateData)
       .where(eq(facilitiesTable.id, id));
     if (imageUrls !== undefined) {
+      const oldImages = await db
+        .select()
+        .from(facilityImagesTable)
+        .where(eq(facilityImagesTable.facilityId, id));
+      oldImages.forEach((img) => deleteLocalFile(img.url));
       await db
         .delete(facilityImagesTable)
         .where(eq(facilityImagesTable.facilityId, id));
@@ -188,7 +198,7 @@ router.post(
         return;
       }
       const id = parseInt(req.params.id);
-      const publicUrl = `/uploads/${req.file.filename}`;
+      const publicUrl = getPublicUrl(req.file.filename);
 
       const existingImages = await db
         .select()
