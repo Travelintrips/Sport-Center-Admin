@@ -29,6 +29,8 @@ tags:
     description: App settings
   - name: Storage
     description: Object storage upload and serving endpoints.
+  - name: memberships
+    description: Gym monthly membership management
 paths:
   /healthz:
     get:
@@ -689,6 +691,99 @@ paths:
                 type: string
                 format: binary
 
+  /memberships:
+    get:
+      operationId: listMemberships
+      tags: [memberships]
+      summary: List all gym memberships (admin)
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [active, expired, cancelled]
+      responses:
+        "200":
+          description: List of memberships
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/GymMembership"
+    post:
+      operationId: createMembership
+      tags: [memberships]
+      summary: Register a new gym membership
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GymMembershipInput"
+      responses:
+        "201":
+          description: Membership created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GymMembership"
+
+  /memberships/{id}:
+    get:
+      operationId: getMembership
+      tags: [memberships]
+      summary: Get membership detail
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Membership detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GymMembership"
+    patch:
+      operationId: updateMembership
+      tags: [memberships]
+      summary: Update membership (admin)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GymMembershipUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GymMembership"
+    delete:
+      operationId: deleteMembership
+      tags: [memberships]
+      summary: Delete membership (admin)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
   /settings:
     get:
       operationId: getSettings
@@ -1283,6 +1378,61 @@ components:
         bankAccountName:
           type: string
         qrisImageUrl:
+          type: string
+
+    GymMembership:
+      type: object
+      required: [id, name, email, phone, startDate, endDate, months, totalPrice, status]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+        startDate:
+          type: string
+        endDate:
+          type: string
+        months:
+          type: integer
+        totalPrice:
+          type: number
+        status:
+          type: string
+          enum: [active, expired, cancelled]
+        notes:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+
+    GymMembershipInput:
+      type: object
+      required: [name, email, phone, startDate, months]
+      properties:
+        name:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+        startDate:
+          type: string
+        months:
+          type: integer
+          minimum: 1
+        notes:
+          type: string
+
+    GymMembershipUpdate:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [active, expired, cancelled]
+        notes:
           type: string
 
     UploadUrlRequest:

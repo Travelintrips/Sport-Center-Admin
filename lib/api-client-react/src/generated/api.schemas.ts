@@ -385,6 +385,54 @@ export interface SettingsUpdate {
   qrisImageUrl?: string;
 }
 
+export type GymMembershipStatus = typeof GymMembershipStatus[keyof typeof GymMembershipStatus];
+
+
+export const GymMembershipStatus = {
+  active: 'active',
+  expired: 'expired',
+  cancelled: 'cancelled',
+} as const;
+
+export interface GymMembership {
+  id: number;
+  name: string;
+  email: string;
+  phone: string;
+  startDate: string;
+  endDate: string;
+  months: number;
+  totalPrice: number;
+  status: GymMembershipStatus;
+  /** @nullable */
+  notes?: string | null;
+  createdAt?: string;
+}
+
+export interface GymMembershipInput {
+  name: string;
+  email: string;
+  phone: string;
+  startDate: string;
+  /** @minimum 1 */
+  months: number;
+  notes?: string;
+}
+
+export type GymMembershipUpdateStatus = typeof GymMembershipUpdateStatus[keyof typeof GymMembershipUpdateStatus];
+
+
+export const GymMembershipUpdateStatus = {
+  active: 'active',
+  expired: 'expired',
+  cancelled: 'cancelled',
+} as const;
+
+export interface GymMembershipUpdate {
+  status?: GymMembershipUpdateStatus;
+  notes?: string;
+}
+
 export interface UploadUrlRequest {
   /** @minLength 1 */
   name: string;
@@ -441,4 +489,17 @@ export type ExportBookingsParams = {
 startDate?: string;
 endDate?: string;
 };
+
+export type ListMembershipsParams = {
+status?: ListMembershipsStatus;
+};
+
+export type ListMembershipsStatus = typeof ListMembershipsStatus[keyof typeof ListMembershipsStatus];
+
+
+export const ListMembershipsStatus = {
+  active: 'active',
+  expired: 'expired',
+  cancelled: 'cancelled',
+} as const;
 

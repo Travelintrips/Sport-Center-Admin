@@ -33,11 +33,15 @@ import type {
   Facility,
   FacilityInput,
   FacilityUpdate,
+  GymMembership,
+  GymMembershipInput,
+  GymMembershipUpdate,
   HealthStatus,
   ListBlockedSchedulesParams,
   ListBookingsParams,
   ListCustomersParams,
   ListFacilitiesParams,
+  ListMembershipsParams,
   ListPaymentsParams,
   ListPromosParams,
   LoginInput,
@@ -2641,6 +2645,380 @@ export function useGetStorageObject<TData = Awaited<ReturnType<typeof getStorage
 
 
 
+
+export const getListMembershipsUrl = (params?: ListMembershipsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/memberships?${stringifiedParams}` : `/api/memberships`
+}
+
+/**
+ * @summary List all gym memberships (admin)
+ */
+export const listMemberships = async (params?: ListMembershipsParams, options?: RequestInit): Promise<GymMembership[]> => {
+
+  return customFetch<GymMembership[]>(getListMembershipsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListMembershipsQueryKey = (params?: ListMembershipsParams,) => {
+    return [
+    `/api/memberships`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListMembershipsQueryOptions = <TData = Awaited<ReturnType<typeof listMemberships>>, TError = ErrorType<unknown>>(params?: ListMembershipsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listMemberships>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListMembershipsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listMemberships>>> = ({ signal }) => listMemberships(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listMemberships>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListMembershipsQueryResult = NonNullable<Awaited<ReturnType<typeof listMemberships>>>
+export type ListMembershipsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List all gym memberships (admin)
+ */
+
+export function useListMemberships<TData = Awaited<ReturnType<typeof listMemberships>>, TError = ErrorType<unknown>>(
+ params?: ListMembershipsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listMemberships>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListMembershipsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getCreateMembershipUrl = () => {
+
+
+
+
+  return `/api/memberships`
+}
+
+/**
+ * @summary Register a new gym membership
+ */
+export const createMembership = async (gymMembershipInput: GymMembershipInput, options?: RequestInit): Promise<GymMembership> => {
+
+  return customFetch<GymMembership>(getCreateMembershipUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      gymMembershipInput,)
+  }
+);}
+
+
+
+
+export const getCreateMembershipMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createMembership>>, TError,{data: BodyType<GymMembershipInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createMembership>>, TError,{data: BodyType<GymMembershipInput>}, TContext> => {
+
+const mutationKey = ['createMembership'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createMembership>>, {data: BodyType<GymMembershipInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createMembership(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateMembershipMutationResult = NonNullable<Awaited<ReturnType<typeof createMembership>>>
+    export type CreateMembershipMutationBody = BodyType<GymMembershipInput>
+    export type CreateMembershipMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Register a new gym membership
+ */
+export const useCreateMembership = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createMembership>>, TError,{data: BodyType<GymMembershipInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createMembership>>,
+        TError,
+        {data: BodyType<GymMembershipInput>},
+        TContext
+      > => {
+      return useMutation(getCreateMembershipMutationOptions(options));
+    }
+
+export const getGetMembershipUrl = (id: number,) => {
+
+
+
+
+  return `/api/memberships/${id}`
+}
+
+/**
+ * @summary Get membership detail
+ */
+export const getMembership = async (id: number, options?: RequestInit): Promise<GymMembership> => {
+
+  return customFetch<GymMembership>(getGetMembershipUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetMembershipQueryKey = (id: number,) => {
+    return [
+    `/api/memberships/${id}`
+    ] as const;
+    }
+
+
+export const getGetMembershipQueryOptions = <TData = Awaited<ReturnType<typeof getMembership>>, TError = ErrorType<unknown>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMembership>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetMembershipQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getMembership>>> = ({ signal }) => getMembership(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getMembership>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetMembershipQueryResult = NonNullable<Awaited<ReturnType<typeof getMembership>>>
+export type GetMembershipQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get membership detail
+ */
+
+export function useGetMembership<TData = Awaited<ReturnType<typeof getMembership>>, TError = ErrorType<unknown>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMembership>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetMembershipQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getUpdateMembershipUrl = (id: number,) => {
+
+
+
+
+  return `/api/memberships/${id}`
+}
+
+/**
+ * @summary Update membership (admin)
+ */
+export const updateMembership = async (id: number,
+    gymMembershipUpdate: GymMembershipUpdate, options?: RequestInit): Promise<GymMembership> => {
+
+  return customFetch<GymMembership>(getUpdateMembershipUrl(id),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      gymMembershipUpdate,)
+  }
+);}
+
+
+
+
+export const getUpdateMembershipMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateMembership>>, TError,{id: number;data: BodyType<GymMembershipUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateMembership>>, TError,{id: number;data: BodyType<GymMembershipUpdate>}, TContext> => {
+
+const mutationKey = ['updateMembership'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateMembership>>, {id: number;data: BodyType<GymMembershipUpdate>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  updateMembership(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateMembershipMutationResult = NonNullable<Awaited<ReturnType<typeof updateMembership>>>
+    export type UpdateMembershipMutationBody = BodyType<GymMembershipUpdate>
+    export type UpdateMembershipMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Update membership (admin)
+ */
+export const useUpdateMembership = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateMembership>>, TError,{id: number;data: BodyType<GymMembershipUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateMembership>>,
+        TError,
+        {id: number;data: BodyType<GymMembershipUpdate>},
+        TContext
+      > => {
+      return useMutation(getUpdateMembershipMutationOptions(options));
+    }
+
+export const getDeleteMembershipUrl = (id: number,) => {
+
+
+
+
+  return `/api/memberships/${id}`
+}
+
+/**
+ * @summary Delete membership (admin)
+ */
+export const deleteMembership = async (id: number, options?: RequestInit): Promise<void> => {
+
+  return customFetch<void>(getDeleteMembershipUrl(id),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+export const getDeleteMembershipMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteMembership>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteMembership>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['deleteMembership'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteMembership>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  deleteMembership(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteMembershipMutationResult = NonNullable<Awaited<ReturnType<typeof deleteMembership>>>
+
+    export type DeleteMembershipMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Delete membership (admin)
+ */
+export const useDeleteMembership = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteMembership>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteMembership>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getDeleteMembershipMutationOptions(options));
+    }
 
 export const getGetSettingsUrl = () => {
 

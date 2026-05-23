@@ -12,6 +12,7 @@ import dashboardRouter from "./dashboard";
 import settingsRouter from "./settings";
 import configRouter from "./config";
 import storageRouter from "./storage";
+import membershipsRouter from "./memberships";
 
 const router: IRouter = Router();
 
@@ -28,5 +29,6 @@ router.use(schedulesRouter);
 router.use(customersRouter);
 router.use(dashboardRouter);
 router.use(settingsRouter);
+router.use(membershipsRouter);
 
 export default router;

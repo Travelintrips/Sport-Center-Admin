@@ -23,6 +23,7 @@ import Contact from "@/pages/Contact";
 import Login from "@/pages/Login";
 import Register from "@/pages/Register";
 import MyBookings from "@/pages/MyBookings";
+import Membership from "@/pages/Membership";
 
 // Admin Pages
 import AdminLogin from "@/pages/admin/Login";
@@ -33,6 +34,7 @@ import AdminSchedule from "@/pages/admin/Schedule";
 import AdminCustomers from "@/pages/admin/Customers";
 import AdminPromos from "@/pages/admin/Promos";
 import AdminSettings from "@/pages/admin/Settings";
+import AdminMemberships from "@/pages/admin/Memberships";
 
 const queryClient = new QueryClient();
 
@@ -46,6 +48,7 @@ function AdminRouter() {
     if (location === "/admin/schedule") return <AdminSchedule />;
     if (location === "/admin/customers") return <AdminCustomers />;
     if (location === "/admin/promos") return <AdminPromos />;
+    if (location === "/admin/memberships") return <AdminMemberships />;
     if (location === "/admin/settings") return <AdminSettings />;
     return <NotFound />;
   })();
@@ -66,6 +69,7 @@ function Router() {
       <Route path="/admin/schedule" component={AdminRouter} />
       <Route path="/admin/customers" component={AdminRouter} />
       <Route path="/admin/promos" component={AdminRouter} />
+      <Route path="/admin/memberships" component={AdminRouter} />
       <Route path="/admin/settings" component={AdminRouter} />
       <Route path="/admin" component={AdminRouter} />
 
@@ -81,6 +85,7 @@ function Router() {
             <Route path="/login" component={Login} />
             <Route path="/register" component={Register} />
             <Route path="/my-bookings" component={MyBookings} />
+            <Route path="/membership" component={Membership} />
             <Route path="/promos" component={Promos} />
             <Route path="/terms" component={Terms} />
             <Route path="/privacy" component={Privacy} />

@@ -734,6 +734,102 @@ export const GetStorageObjectParams = zod.object({
 
 
 /**
+ * @summary List all gym memberships (admin)
+ */
+export const ListMembershipsQueryParams = zod.object({
+  "status": zod.enum(['active', 'expired', 'cancelled']).optional()
+})
+
+export const ListMembershipsResponseItem = zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "email": zod.string(),
+  "phone": zod.string(),
+  "startDate": zod.string(),
+  "endDate": zod.string(),
+  "months": zod.number(),
+  "totalPrice": zod.number(),
+  "status": zod.enum(['active', 'expired', 'cancelled']),
+  "notes": zod.string().nullish(),
+  "createdAt": zod.string().optional()
+})
+export const ListMembershipsResponse = zod.array(ListMembershipsResponseItem)
+
+
+/**
+ * @summary Register a new gym membership
+ */
+
+
+
+export const CreateMembershipBody = zod.object({
+  "name": zod.string(),
+  "email": zod.string(),
+  "phone": zod.string(),
+  "startDate": zod.string(),
+  "months": zod.number().min(1),
+  "notes": zod.string().optional()
+})
+
+
+/**
+ * @summary Get membership detail
+ */
+export const GetMembershipParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetMembershipResponse = zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "email": zod.string(),
+  "phone": zod.string(),
+  "startDate": zod.string(),
+  "endDate": zod.string(),
+  "months": zod.number(),
+  "totalPrice": zod.number(),
+  "status": zod.enum(['active', 'expired', 'cancelled']),
+  "notes": zod.string().nullish(),
+  "createdAt": zod.string().optional()
+})
+
+
+/**
+ * @summary Update membership (admin)
+ */
+export const UpdateMembershipParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const UpdateMembershipBody = zod.object({
+  "status": zod.enum(['active', 'expired', 'cancelled']).optional(),
+  "notes": zod.string().optional()
+})
+
+export const UpdateMembershipResponse = zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "email": zod.string(),
+  "phone": zod.string(),
+  "startDate": zod.string(),
+  "endDate": zod.string(),
+  "months": zod.number(),
+  "totalPrice": zod.number(),
+  "status": zod.enum(['active', 'expired', 'cancelled']),
+  "notes": zod.string().nullish(),
+  "createdAt": zod.string().optional()
+})
+
+
+/**
+ * @summary Delete membership (admin)
+ */
+export const DeleteMembershipParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+
+/**
  * @summary Get app settings
  */
 export const GetSettingsResponse = zod.object({
