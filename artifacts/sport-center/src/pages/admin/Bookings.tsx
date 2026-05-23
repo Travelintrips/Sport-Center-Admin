@@ -995,6 +995,7 @@ export default function AdminBookings() {
   const [search, setSearch] = useState("");
   const [selectedBooking, setSelectedBooking] = useState<any>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
 
   const { data: rawBookings, isLoading } = useListBookings();
   const bookings = rawBookings ?? [];
@@ -1247,35 +1248,48 @@ export default function AdminBookings() {
                         )}
                       </td>
                       <td className="px-4 py-3">
-                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div className="flex items-center gap-1">
                           <motion.button
                             whileHover={{ scale: 1.04 }}
                             whileTap={{ scale: 0.96 }}
                             onClick={() => setSelectedBooking(b)}
-                            className="flex items-center gap-1 h-7 px-2.5 rounded-lg text-xs font-semibold text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                            className="flex items-center gap-1 h-7 px-2.5 rounded-lg text-xs font-semibold text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors opacity-0 group-hover:opacity-100"
                           >
                             <Eye size={12} />
                             Detail
                           </motion.button>
-                          <motion.button
-                            whileHover={{ scale: 1.04 }}
-                            whileTap={{ scale: 0.96 }}
-                            onClick={() => {
-                              setSelectedBooking(b);
-                              setTimeout(() => {
-                                document.querySelector<HTMLElement>('[data-delete-confirm]')?.click();
-                              }, 100);
-                            }}
-                            title="Hapus booking"
-                            disabled={deletingId === b.id}
-                            className="flex items-center justify-center h-7 w-7 rounded-lg border border-red-200 dark:border-red-900/50 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors disabled:opacity-50"
-                          >
-                            {deletingId === b.id ? (
-                              <span className="w-3 h-3 border border-red-400 border-t-transparent rounded-full animate-spin" />
-                            ) : (
-                              <Trash2 size={12} />
-                            )}
-                          </motion.button>
+                          {deleteConfirmId === b.id ? (
+                            <div className="flex items-center gap-1">
+                              <button
+                                onClick={() => { handleDelete(b.id); setDeleteConfirmId(null); }}
+                                disabled={deletingId === b.id}
+                                className="h-7 px-2 rounded-lg text-[11px] font-bold bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 transition-colors whitespace-nowrap"
+                              >
+                                Hapus?
+                              </button>
+                              <button
+                                onClick={() => setDeleteConfirmId(null)}
+                                className="h-7 px-1.5 rounded-lg text-[11px] border border-slate-200 dark:border-slate-700 text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+                              >
+                                <X size={10} />
+                              </button>
+                            </div>
+                          ) : (
+                            <motion.button
+                              whileHover={{ scale: 1.04 }}
+                              whileTap={{ scale: 0.96 }}
+                              onClick={() => setDeleteConfirmId(b.id)}
+                              title="Hapus booking"
+                              disabled={deletingId === b.id}
+                              className="flex items-center justify-center h-7 w-7 rounded-lg border border-red-200 dark:border-red-900/50 text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors disabled:opacity-50 opacity-0 group-hover:opacity-100"
+                            >
+                              {deletingId === b.id ? (
+                                <span className="w-3 h-3 border border-red-400 border-t-transparent rounded-full animate-spin" />
+                              ) : (
+                                <Trash2 size={12} />
+                              )}
+                            </motion.button>
+                          )}
                         </div>
                       </td>
                     </motion.tr>
