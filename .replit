@@ -11,6 +11,43 @@ env = { "CI" = "true" }
 [workflows]
 runButton = "Project"
 
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Start API Server"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Start Frontend"
+
+[[workflows.workflow]]
+name = "Start API Server"
+author = "agent"
+
+[workflows.workflow.metadata]
+outputType = "console"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "PORT=8080 pnpm --filter @workspace/api-server run dev"
+waitForPort = 8080
+
+[[workflows.workflow]]
+name = "Start Frontend"
+author = "agent"
+
+[workflows.workflow.metadata]
+outputType = "webview"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "PORT=21089 BASE_PATH=/ pnpm --filter @workspace/sport-center run dev"
+waitForPort = 21089
+
 [agent]
 stack = "PNPM_WORKSPACE"
 expertMode = true
@@ -18,3 +55,11 @@ expertMode = true
 [postMerge]
 path = "scripts/post-merge.sh"
 timeoutMs = 20000
+
+[[ports]]
+localPort = 8080
+externalPort = 80
+
+[[ports]]
+localPort = 21089
+externalPort = 3000
