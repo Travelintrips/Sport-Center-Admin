@@ -21,11 +21,11 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
   const [location, setLocation] = useLocation();
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   
-  const { data: user, isLoading, isFetching, isError } = useGetMe({
+  const { data: user, isLoading, isError } = useGetMe({
     query: {
       retry: false,
       queryKey: getGetMeQueryKey(),
-      staleTime: 0,
+      staleTime: 5 * 60 * 1000,
     }
   });
 
@@ -39,10 +39,10 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
   });
 
   useEffect(() => {
-    if (!isFetching && isError && location !== "/admin/login") {
+    if (isError && location !== "/admin/login") {
       setLocation("/admin/login");
     }
-  }, [isFetching, isError, location, setLocation]);
+  }, [isError, location, setLocation]);
 
   const navItems = [
     { href: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -58,7 +58,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
     logoutMutation.mutate();
   };
 
-  if (isLoading || (isFetching && !user)) {
+  if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="animate-pulse flex flex-col items-center">

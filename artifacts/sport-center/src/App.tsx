@@ -1,10 +1,10 @@
-import { Switch, Route, Router as WouterRouter } from "wouter";
+import { Switch, Route, Router as WouterRouter, useLocation } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/not-found";
 
-import "./lib/auth"; // Initialize auth token getter
+import "./lib/auth";
 
 // Layouts
 import CustomerLayout from "@/components/layout/CustomerLayout";
@@ -36,28 +36,38 @@ import AdminSettings from "@/pages/admin/Settings";
 
 const queryClient = new QueryClient();
 
+function AdminRouter() {
+  const [location] = useLocation();
+
+  const content = (() => {
+    if (location === "/admin" || location === "/admin/dashboard") return <AdminDashboard />;
+    if (location === "/admin/bookings") return <AdminBookings />;
+    if (location === "/admin/facilities") return <AdminFacilities />;
+    if (location === "/admin/schedule") return <AdminSchedule />;
+    if (location === "/admin/customers") return <AdminCustomers />;
+    if (location === "/admin/promos") return <AdminPromos />;
+    if (location === "/admin/settings") return <AdminSettings />;
+    return <NotFound />;
+  })();
+
+  return <AdminLayout>{content}</AdminLayout>;
+}
+
 function Router() {
   return (
     <Switch>
       {/* Admin Auth */}
       <Route path="/admin/login" component={AdminLogin} />
 
-      {/* Admin Routes */}
-      <Route path="/admin*">
-        <AdminLayout>
-          <Switch>
-            <Route path="/admin" component={AdminDashboard} />
-            <Route path="/admin/dashboard" component={AdminDashboard} />
-            <Route path="/admin/bookings" component={AdminBookings} />
-            <Route path="/admin/facilities" component={AdminFacilities} />
-            <Route path="/admin/schedule" component={AdminSchedule} />
-            <Route path="/admin/customers" component={AdminCustomers} />
-            <Route path="/admin/promos" component={AdminPromos} />
-            <Route path="/admin/settings" component={AdminSettings} />
-            <Route component={NotFound} />
-          </Switch>
-        </AdminLayout>
-      </Route>
+      {/* All admin sub-routes */}
+      <Route path="/admin/dashboard" component={AdminRouter} />
+      <Route path="/admin/bookings" component={AdminRouter} />
+      <Route path="/admin/facilities" component={AdminRouter} />
+      <Route path="/admin/schedule" component={AdminRouter} />
+      <Route path="/admin/customers" component={AdminRouter} />
+      <Route path="/admin/promos" component={AdminRouter} />
+      <Route path="/admin/settings" component={AdminRouter} />
+      <Route path="/admin" component={AdminRouter} />
 
       {/* Customer Routes */}
       <Route path="*">
