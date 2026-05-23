@@ -69,6 +69,7 @@ export default function Booking() {
     totalPrice: number;
   } | null>(null);
   const [isChecking, setIsChecking] = useState(false);
+  const [skippedDates, setSkippedDates] = useState<Set<string>>(new Set());
 
   // --- Submit success ---
   const [recurringResult, setRecurringResult] = useState<{
@@ -136,6 +137,7 @@ export default function Booking() {
         {
           onSuccess: (data) => {
             setCheckResult(data);
+            setSkippedDates(new Set());
             setIsChecking(false);
           },
           onError: () => {
@@ -165,8 +167,8 @@ export default function Booking() {
     }
 
     if (isRepeat) {
-      if (!checkResult || checkResult.validCount === 0) {
-        toast({ title: "Tidak ada slot tersedia", description: "Semua slot pada jadwal yang dipilih sudah terisi.", variant: "destructive" });
+      if (!checkResult || effectiveCount === 0) {
+        toast({ title: "Tidak ada slot dipilih", description: "Pilih setidaknya satu tanggal untuk booking.", variant: "destructive" });
         return;
       }
       createRecurring.mutate({
@@ -181,7 +183,8 @@ export default function Booking() {
           repeatType,
           repeatCount,
           notes,
-        },
+          specificDates: selectedDates,
+        } as any,
       });
     } else {
       createBooking.mutate({
@@ -198,6 +201,13 @@ export default function Booking() {
       });
     }
   };
+
+  // --- Derived selected dates (available and not manually skipped) ---
+  const selectedDates = checkResult
+    ? checkResult.dates.filter((d) => d.available && !skippedDates.has(d.date)).map((d) => d.date)
+    : [];
+  const effectiveCount = selectedDates.length;
+  const effectiveTotalPrice = checkResult ? checkResult.pricePerSession * effectiveCount : 0;
 
   // --- End time ---
   const [hours, minutes] = startTime ? startTime.split(":").map(Number) : [0, 0];
@@ -406,48 +416,80 @@ export default function Booking() {
 
                   {!isChecking && checkResult && (
                     <div className="space-y-2">
-                      {checkResult.dates.map((item, idx) => (
-                        <div
-                          key={item.date}
-                          className={`flex items-center justify-between px-4 py-3 rounded-lg border text-sm ${item.available
-                            ? "bg-green-50 border-green-200"
-                            : "bg-red-50 border-red-200 opacity-80"
-                          }`}
-                        >
-                          <div className="flex items-center gap-2.5">
-                            {item.available
-                              ? <CheckCircle2 size={16} className="text-green-600 shrink-0" />
-                              : <XCircle size={16} className="text-red-500 shrink-0" />
-                            }
-                            <div>
-                              <span className={`font-medium ${item.available ? "text-green-800" : "text-red-700"}`}>
-                                {formatDate(item.date)}
+                      {checkResult.dates.map((item) => {
+                        const isManuallySkipped = skippedDates.has(item.date);
+                        return (
+                          <div
+                            key={item.date}
+                            className={`flex items-center justify-between px-4 py-3 rounded-lg border text-sm transition-opacity ${
+                              !item.available
+                                ? "bg-red-50 border-red-200 opacity-70"
+                                : isManuallySkipped
+                                  ? "bg-muted border-border opacity-50"
+                                  : "bg-green-50 border-green-200"
+                            }`}
+                          >
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              {!item.available
+                                ? <XCircle size={16} className="text-red-500 shrink-0" />
+                                : isManuallySkipped
+                                  ? <XCircle size={16} className="text-muted-foreground shrink-0" />
+                                  : <CheckCircle2 size={16} className="text-green-600 shrink-0" />
+                              }
+                              <div className="min-w-0">
+                                <span className={`font-medium ${!item.available ? "text-red-700" : isManuallySkipped ? "text-muted-foreground line-through" : "text-green-800"}`}>
+                                  {formatDate(item.date)}
+                                </span>
+                                {!item.available && item.reason && (
+                                  <span className="ml-2 text-xs text-red-500">({item.reason})</span>
+                                )}
+                                {isManuallySkipped && (
+                                  <span className="ml-2 text-xs text-muted-foreground">(dilewati)</span>
+                                )}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-3 shrink-0 ml-2">
+                              <span className="text-xs font-medium text-muted-foreground">
+                                {startTime} – {endTime}
                               </span>
-                              {!item.available && item.reason && (
-                                <span className="ml-2 text-xs text-red-500">({item.reason})</span>
+                              {item.available && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSkippedDates((prev) => {
+                                      const next = new Set(prev);
+                                      if (next.has(item.date)) next.delete(item.date);
+                                      else next.add(item.date);
+                                      return next;
+                                    });
+                                  }}
+                                  className={`text-xs px-2 py-1 rounded border transition-colors ${
+                                    isManuallySkipped
+                                      ? "border-green-300 text-green-700 hover:bg-green-50"
+                                      : "border-red-200 text-red-500 hover:bg-red-50"
+                                  }`}
+                                >
+                                  {isManuallySkipped ? "Sertakan" : "Lewati"}
+                                </button>
                               )}
                             </div>
                           </div>
-                          <div className="text-xs font-medium text-muted-foreground">
-                            {startTime} – {endTime}
-                          </div>
-                        </div>
-                      ))}
+                        );
+                      })}
 
-                      {checkResult.validCount < checkResult.dates.length && (
+                      {effectiveCount < checkResult.dates.length && effectiveCount > 0 && (
                         <div className="flex items-start gap-2 p-3 bg-orange-50 border border-orange-200 rounded-lg text-sm text-orange-700">
                           <AlertTriangle size={15} className="mt-0.5 shrink-0" />
                           <span>
-                            <strong>{checkResult.dates.length - checkResult.validCount} slot</strong> tidak tersedia.
-                            Booking yang valid ({checkResult.validCount} slot) tetap akan diproses.
+                            Hanya <strong>{effectiveCount} dari {checkResult.dates.length} sesi</strong> yang akan dibooking.
                           </span>
                         </div>
                       )}
 
-                      {checkResult.validCount === 0 && (
+                      {effectiveCount === 0 && (
                         <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
                           <XCircle size={15} />
-                          <span>Semua slot sudah terbooked. Silakan pilih waktu lain.</span>
+                          <span>Tidak ada sesi yang dipilih. Aktifkan minimal satu tanggal.</span>
                         </div>
                       )}
                     </div>
@@ -470,7 +512,7 @@ export default function Booking() {
               {(createBooking.isPending || createRecurring.isPending)
                 ? "Memproses..."
                 : isRepeat
-                  ? `Konfirmasi ${checkResult?.validCount ?? repeatCount} Booking`
+                  ? `Konfirmasi ${isChecking ? "..." : effectiveCount || (checkResult?.validCount ?? repeatCount)} Booking`
                   : "Konfirmasi Booking"
               }
             </Button>
@@ -538,13 +580,11 @@ export default function Booking() {
                       <span>{formatCurrency(totalPrice)}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-muted-foreground">
-                        Sesi valid
-                      </span>
+                      <span className="text-muted-foreground">Sesi dipilih</span>
                       <span>
                         {isChecking
                           ? <span className="text-muted-foreground">...</span>
-                          : `× ${checkResult?.validCount ?? repeatCount}`
+                          : `× ${effectiveCount > 0 ? effectiveCount : (checkResult?.validCount ?? repeatCount)}`
                         }
                       </span>
                     </div>
@@ -554,14 +594,14 @@ export default function Booking() {
                   <span>Total</span>
                   <span className="text-primary">
                     {isRepeat
-                      ? (isChecking ? "..." : formatCurrency(checkResult?.totalPrice ?? totalPrice * repeatCount))
+                      ? (isChecking ? "..." : formatCurrency(checkResult ? effectiveTotalPrice : totalPrice * repeatCount))
                       : formatCurrency(totalPrice)
                     }
                   </span>
                 </div>
                 {isRepeat && !isChecking && checkResult && (
                   <div className="text-xs text-muted-foreground text-right">
-                    {checkResult.validCount} sesi × {duration} jam × {formatCurrency(facility.pricePerHour)}
+                    {effectiveCount} sesi × {duration} jam × {formatCurrency(facility.pricePerHour)}
                   </div>
                 )}
               </div>
@@ -579,7 +619,7 @@ export default function Booking() {
                 {(createBooking.isPending || createRecurring.isPending)
                   ? <><Loader2 size={16} className="mr-2 animate-spin" /> Memproses...</>
                   : isRepeat
-                    ? `Konfirmasi ${isChecking ? "..." : checkResult?.validCount ?? repeatCount} Booking`
+                    ? `Konfirmasi ${isChecking ? "..." : effectiveCount || (checkResult?.validCount ?? repeatCount)} Booking`
                     : "Konfirmasi Booking"
                 }
               </Button>

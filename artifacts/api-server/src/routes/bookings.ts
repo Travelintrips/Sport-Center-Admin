@@ -220,13 +220,15 @@ router.post("/bookings/recurring/check", async (req, res) => {
 // POST /bookings/recurring — create all valid (non-conflicting) bookings
 router.post("/bookings/recurring", async (req, res) => {
   try {
-    const { customerName, customerEmail, customerPhone, facilityId, startDate, startTime, durationHours, notes, repeatType, repeatCount } = req.body;
+    const { customerName, customerEmail, customerPhone, facilityId, startDate, startTime, durationHours, notes, repeatType, repeatCount, specificDates } = req.body;
 
     const [facility] = await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, Number(facilityId))).limit(1);
     if (!facility) { res.status(404).json({ error: "Facility not found" }); return; }
 
     const endTime = addHours(startTime, durationHours);
-    const dates = generateRecurringDates(startDate, repeatType, repeatCount);
+    const dates: string[] = Array.isArray(specificDates) && specificDates.length > 0
+      ? specificDates
+      : generateRecurringDates(startDate, repeatType, repeatCount);
     const totalPrice = Number(facility.pricePerHour) * durationHours;
 
     const created: any[] = [];
