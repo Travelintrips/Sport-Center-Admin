@@ -18,6 +18,7 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
+<<<<<<< HEAD
 args = "API Server"
 
 [[workflows.workflow.tasks]]
@@ -28,11 +29,27 @@ args = "Sport Center"
 name = "API Server"
 author = "agent"
 
+=======
+args = "Backend API"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Start application"
+
+[[workflows.workflow]]
+name = "Backend API"
+author = "agent"
+
+[workflows.workflow.metadata]
+outputType = "console"
+
+>>>>>>> 6a739232b98b3cf007676ab9580b8ca362be2c8f
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "PORT=8080 pnpm --filter @workspace/api-server run dev"
 waitForPort = 8080
 
+<<<<<<< HEAD
 [workflows.workflow.metadata]
 outputType = "console"
 
@@ -47,6 +64,19 @@ waitForPort = 8081
 
 [workflows.workflow.metadata]
 outputType = "webview"
+=======
+[[workflows.workflow]]
+name = "Start application"
+author = "agent"
+
+[workflows.workflow.metadata]
+outputType = "webview"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "PORT=21089 BASE_PATH=/ pnpm --filter @workspace/sport-center run dev"
+waitForPort = 21089
+>>>>>>> 6a739232b98b3cf007676ab9580b8ca362be2c8f
 
 [agent]
 stack = "PNPM_WORKSPACE"
@@ -55,6 +85,10 @@ expertMode = true
 [postMerge]
 path = "scripts/post-merge.sh"
 timeoutMs = 20000
+
+[[ports]]
+localPort = 5000
+externalPort = 5000
 
 [[ports]]
 localPort = 8080

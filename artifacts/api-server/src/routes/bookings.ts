@@ -6,10 +6,18 @@ import { broadcastAvailabilityChange } from "../lib/supabase";
 
 const router = Router();
 
-function generateOrderNumber(): string {
-  const ts = Date.now().toString(36).toUpperCase();
-  const rand = Math.random().toString(36).slice(2, 6).toUpperCase();
-  return `SC-${ts}-${rand}`;
+async function generateOrderNumber(): Promise<string> {
+  const rows = await db.select({ orderNumber: bookingsTable.orderNumber }).from(bookingsTable);
+  let maxNum = 0;
+  for (const row of rows) {
+    const match = row.orderNumber.match(/^SC-(\d+)$/);
+    if (match) {
+      const n = parseInt(match[1], 10);
+      if (n > maxNum) maxNum = n;
+    }
+  }
+  const next = maxNum + 1;
+  return `SC-${String(next).padStart(4, "0")}`;
 }
 
 function addHours(time: string, hours: number): string {
@@ -100,7 +108,7 @@ router.post("/bookings", async (req, res) => {
     }
 
     const totalPrice = Number(facility.pricePerHour) * durationHours;
-    const orderNumber = generateOrderNumber();
+    const orderNumber = await generateOrderNumber();
 
     const [booking] = await db.insert(bookingsTable).values({
       orderNumber,
@@ -158,6 +166,23 @@ router.get("/bookings/:id", async (req, res) => {
     res.json(result);
   } catch (err) {
     req.log.error({ err }, "Get booking error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.delete("/bookings/:id", adminMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, id)).limit(1);
+    if (!booking) {
+      res.status(404).json({ error: "Not found" });
+      return;
+    }
+    await db.delete(paymentsTable).where(eq(paymentsTable.bookingId, id));
+    await db.delete(bookingsTable).where(eq(bookingsTable.id, id));
+    res.json({ success: true });
+  } catch (err) {
+    req.log.error({ err }, "Delete booking error");
     res.status(500).json({ error: "Internal server error" });
   }
 });

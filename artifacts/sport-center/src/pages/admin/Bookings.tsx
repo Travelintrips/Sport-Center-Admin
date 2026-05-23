@@ -39,7 +39,32 @@ import {
   CalendarDays,
   AlertTriangle,
   FileImage,
+  Trash2,
+  FileText,
+  Receipt,
 } from "lucide-react";
+import { getToken } from "@/lib/auth";
+
+/* ─── Helpers ───────────────────────────────────────────────────── */
+
+function proofImageUrl(rawUrl: string): string {
+  if (!rawUrl) return rawUrl;
+  // /api/storage/objects/* → redirect to working /api/uploads/* path
+  if (rawUrl.startsWith("/api/storage/objects/")) {
+    const withoutPrefix = rawUrl.replace(/^\/api\/storage\/objects\//, "");
+    return `/api/uploads/${withoutPrefix}`;
+  }
+  // Already a working /api/uploads/ path — serve as-is
+  if (rawUrl.startsWith("/api/")) return rawUrl;
+  // Old Supabase-style /objects/... → /api/uploads/...
+  if (rawUrl.startsWith("/objects/")) {
+    return `/api/uploads/${rawUrl.replace(/^\/objects\//, "")}`;
+  }
+  // External URL — use as-is
+  if (rawUrl.startsWith("http")) return rawUrl;
+  // Bare filename or relative path — assume it lives in uploads
+  return `/api/uploads/${rawUrl.replace(/^\/+/, "")}`;
+}
 
 /* ─── Status Config ────────────────────────────────────────────── */
 
@@ -138,10 +163,195 @@ function formatDate(d: string) {
   });
 }
 
+/* ─── Invoice / Kwitansi Print ──────────────────────────────────── */
+
+function printInvoice(booking: any, settings?: any) {
+  const centerName = settings?.centerName ?? "Sport Center";
+  const address = settings?.address ?? "";
+  const phone = settings?.phone ?? "";
+  const html = `<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8"/>
+  <title>Invoice ${booking.orderNumber}</title>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; color: #1a1a1a; background: #fff; padding: 40px; max-width: 680px; margin: auto; }
+    .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid #f97316; padding-bottom: 20px; margin-bottom: 28px; }
+    .brand { font-size: 24px; font-weight: 900; color: #f97316; letter-spacing: -0.5px; }
+    .brand-sub { font-size: 12px; color: #777; margin-top: 2px; }
+    .invoice-meta { text-align: right; }
+    .invoice-title { font-size: 28px; font-weight: 900; color: #111; letter-spacing: -1px; }
+    .invoice-num { font-size: 13px; color: #555; margin-top: 4px; font-family: monospace; }
+    .invoice-date { font-size: 12px; color: #777; margin-top: 2px; }
+    .section { margin-bottom: 22px; }
+    .section-title { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #999; margin-bottom: 8px; }
+    .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 24px; }
+    .info-item label { font-size: 11px; color: #888; display: block; margin-bottom: 1px; }
+    .info-item value, .info-item span { font-size: 13px; font-weight: 600; color: #222; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
+    thead tr { background: #f8f8f8; }
+    th { padding: 10px 12px; text-align: left; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: #666; border-bottom: 2px solid #eee; }
+    td { padding: 12px; font-size: 13px; border-bottom: 1px solid #f0f0f0; }
+    .total-row { background: #fff8f4; }
+    .total-row td { font-weight: 900; font-size: 15px; color: #f97316; border-top: 2px solid #f97316; border-bottom: none; }
+    .status-badge { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 700; }
+    .status-completed { background: #d1fae5; color: #065f46; }
+    .status-pending { background: #fef3c7; color: #92400e; }
+    .status-cancelled { background: #fee2e2; color: #991b1b; }
+    .footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid #eee; font-size: 11px; color: #aaa; text-align: center; }
+    @media print { body { padding: 20px; } }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <div class="brand">${centerName}</div>
+      <div class="brand-sub">${address}</div>
+      <div class="brand-sub">${phone}</div>
+    </div>
+    <div class="invoice-meta">
+      <div class="invoice-title">INVOICE</div>
+      <div class="invoice-num">${booking.orderNumber}</div>
+      <div class="invoice-date">Tanggal: ${new Date().toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" })}</div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Informasi Customer</div>
+    <div class="info-grid">
+      <div class="info-item"><label>Nama</label><span>${booking.customerName}</span></div>
+      <div class="info-item"><label>No. HP</label><span>${booking.customerPhone || "-"}</span></div>
+      <div class="info-item"><label>Email</label><span>${booking.customerEmail || "-"}</span></div>
+      <div class="info-item"><label>Status</label><span class="status-badge ${
+        booking.status === "completed" || booking.status === "confirmed" ? "status-completed" :
+        booking.status === "cancelled" ? "status-cancelled" : "status-pending"
+      }">${STATUS_CONFIG[booking.status as BookingStatus]?.label ?? booking.status}</span></div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Detail Pemesanan</div>
+    <table>
+      <thead>
+        <tr>
+          <th>Fasilitas</th>
+          <th>Tanggal</th>
+          <th>Jam</th>
+          <th>Durasi</th>
+          <th style="text-align:right">Harga</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>${booking.facilityName}</td>
+          <td>${formatDate(booking.bookingDate)}</td>
+          <td>${booking.startTime?.slice(0,5)} – ${booking.endTime?.slice(0,5)}</td>
+          <td>${booking.durationHours} jam</td>
+          <td style="text-align:right;font-weight:600">${formatCurrency(booking.totalPrice)}</td>
+        </tr>
+        <tr class="total-row">
+          <td colspan="4" style="text-align:right;padding-right:16px">Total</td>
+          <td style="text-align:right">${formatCurrency(booking.totalPrice)}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  ${booking.notes ? `<div class="section"><div class="section-title">Catatan</div><p style="font-size:13px;color:#555">${booking.notes}</p></div>` : ""}
+
+  <div class="footer">
+    Dokumen ini dicetak secara otomatis oleh sistem ${centerName}. Terima kasih atas kepercayaan Anda.
+  </div>
+  <script>window.onload = function(){ window.print(); }<\/script>
+</body>
+</html>`;
+  const w = window.open("", "_blank");
+  if (w) { w.document.write(html); w.document.close(); }
+}
+
+function printKwitansi(booking: any, settings?: any) {
+  const centerName = settings?.centerName ?? "Sport Center";
+  const address = settings?.address ?? "";
+  const phone = settings?.phone ?? "";
+  const now = new Date().toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" });
+  const html = `<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8"/>
+  <title>Kwitansi ${booking.orderNumber}</title>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; color: #1a1a1a; background: #fff; padding: 40px; max-width: 600px; margin: auto; }
+    .outer { border: 2px solid #1a1a1a; border-radius: 8px; padding: 28px 32px; }
+    .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding-bottom: 16px; border-bottom: 2px solid #1a1a1a; }
+    .brand { font-size: 20px; font-weight: 900; color: #f97316; }
+    .brand-sub { font-size: 11px; color: #777; }
+    .kwitansi-title { font-size: 22px; font-weight: 900; letter-spacing: 4px; text-transform: uppercase; }
+    .num-row { display: flex; justify-content: space-between; font-size: 12px; color: #666; margin-bottom: 20px; }
+    .row { display: flex; margin-bottom: 12px; align-items: flex-start; }
+    .row label { width: 160px; font-size: 12px; color: #888; flex-shrink: 0; padding-top: 1px; }
+    .row span { font-size: 14px; font-weight: 600; flex: 1; }
+    .amount-box { background: #fff8f4; border: 2px solid #f97316; border-radius: 6px; padding: 14px 18px; margin: 20px 0; text-align: center; }
+    .amount-label { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #888; margin-bottom: 4px; }
+    .amount-value { font-size: 28px; font-weight: 900; color: #f97316; letter-spacing: -1px; }
+    .sig { display: flex; justify-content: flex-end; margin-top: 32px; }
+    .sig-box { text-align: center; }
+    .sig-box .line { border-bottom: 1px solid #aaa; width: 160px; margin: 48px auto 4px; }
+    .sig-box .name { font-size: 12px; font-weight: 700; }
+    .sig-box .title { font-size: 11px; color: #888; }
+    .stamp { display: inline-block; border: 3px solid #059669; border-radius: 50%; padding: 6px 12px; color: #059669; font-weight: 900; font-size: 13px; letter-spacing: 2px; transform: rotate(-15deg); margin-bottom: 8px; }
+    .footer { margin-top: 20px; font-size: 10px; color: #aaa; text-align: center; }
+    @media print { body { padding: 10px; } }
+  </style>
+</head>
+<body>
+  <div class="outer">
+    <div class="header">
+      <div>
+        <div class="brand">${centerName}</div>
+        <div class="brand-sub">${address}</div>
+        <div class="brand-sub">${phone}</div>
+      </div>
+      <div class="kwitansi-title">Kwitansi</div>
+    </div>
+
+    <div class="num-row">
+      <span>No: <strong>${booking.orderNumber}</strong></span>
+      <span>Tanggal: <strong>${now}</strong></span>
+    </div>
+
+    <div class="row"><label>Diterima dari</label><span>${booking.customerName}</span></div>
+    <div class="row"><label>No. HP</label><span>${booking.customerPhone || "-"}</span></div>
+    <div class="row"><label>Untuk pembayaran</label><span>Sewa ${booking.facilityName}</span></div>
+    <div class="row"><label>Tanggal booking</label><span>${formatDate(booking.bookingDate)}</span></div>
+    <div class="row"><label>Waktu</label><span>${booking.startTime?.slice(0,5)} – ${booking.endTime?.slice(0,5)} (${booking.durationHours} jam)</span></div>
+
+    <div class="amount-box">
+      <div class="amount-label">Jumlah Pembayaran</div>
+      <div class="amount-value">${formatCurrency(booking.totalPrice)}</div>
+    </div>
+
+    <div class="sig">
+      <div class="sig-box">
+        <div class="stamp">LUNAS</div>
+        <div class="line"></div>
+        <div class="name">Admin</div>
+        <div class="title">${centerName}</div>
+      </div>
+    </div>
+  </div>
+  <div class="footer">Kwitansi ini sah tanpa tanda tangan basah. Dicetak ${now}.</div>
+  <script>window.onload = function(){ window.print(); }<\/script>
+</body>
+</html>`;
+  const w = window.open("", "_blank");
+  if (w) { w.document.write(html); w.document.close(); }
+}
+
 /* ─── Summary Stats ─────────────────────────────────────────────── */
 
 function SummaryStats({ bookings }: { bookings: any[] }) {
-  const today = new Date().toISOString().split("T")[0];
   const stats = [
     {
       label: "Total Booking",
@@ -206,6 +416,49 @@ function SummaryStats({ bookings }: { bookings: any[] }) {
   );
 }
 
+/* ─── Proof Image Component ─────────────────────────────────────── */
+
+function ProofImage({ proofUrl }: { proofUrl: string }) {
+  const [imgError, setImgError] = useState(false);
+  const url = proofImageUrl(proofUrl);
+
+  return (
+    <div className="space-y-2">
+      <div className="text-xs font-medium text-slate-500">Bukti Transfer</div>
+      {imgError ? (
+        <a
+          href={url}
+          target="_blank"
+          rel="noreferrer"
+          className="flex items-center gap-2 px-3 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
+        >
+          <FileImage size={14} /> Buka File Bukti
+          <ExternalLink size={11} className="ml-auto" />
+        </a>
+      ) : (
+        <div className="relative rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 group">
+          <img
+            src={url}
+            alt="Bukti transfer"
+            className="w-full max-h-52 object-contain bg-slate-50 dark:bg-slate-800"
+            onError={() => setImgError(true)}
+          />
+          <a
+            href={url}
+            target="_blank"
+            rel="noreferrer"
+            className="absolute inset-0 bg-black/0 group-hover:bg-black/20 flex items-center justify-center transition-colors"
+          >
+            <span className="opacity-0 group-hover:opacity-100 bg-black/70 text-white text-xs px-3 py-1.5 rounded-full flex items-center gap-1.5 transition-opacity">
+              <ExternalLink size={11} /> Buka penuh
+            </span>
+          </a>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ─── Booking Detail Drawer ─────────────────────────────────────── */
 
 function BookingDetailDrawer({
@@ -214,17 +467,22 @@ function BookingDetailDrawer({
   onUpdateStatus,
   onConfirmPayment,
   onRejectPayment,
+  onDelete,
   isUpdating,
+  settings,
 }: {
   booking: any;
   onClose: () => void;
   onUpdateStatus: (status: string, notes?: string) => void;
   onConfirmPayment: (paymentId: number) => void;
   onRejectPayment: (paymentId: number) => void;
+  onDelete: (id: number) => void;
   isUpdating: boolean;
+  settings?: any;
 }) {
   const [adminNotes, setAdminNotes] = useState(booking.adminNotes ?? "");
   const [confirmAction, setConfirmAction] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const cfg = STATUS_CONFIG[booking.status as BookingStatus] ?? STATUS_CONFIG.pending_payment;
   const StatusIcon = cfg.icon;
@@ -242,6 +500,7 @@ function BookingDetailDrawer({
 
   const isPaymentPending = booking.payment?.status === "pending";
   const hasPaymentProof = !!booking.payment?.proofUrl;
+  const isCompleted = booking.status === "completed" || booking.status === "confirmed";
 
   return (
     <AnimatePresence>
@@ -274,12 +533,32 @@ function BookingDetailDrawer({
               <div className="text-xs text-slate-400 font-mono">{booking.orderNumber}</div>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800"
-          >
-            <X size={15} />
-          </button>
+          <div className="flex items-center gap-1">
+            {/* Invoice button */}
+            <button
+              onClick={() => printInvoice(booking, settings)}
+              title="Cetak Invoice"
+              className="w-7 h-7 rounded-lg flex items-center justify-center text-blue-500 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
+            >
+              <FileText size={14} />
+            </button>
+            {/* Kwitansi button — only for completed */}
+            {isCompleted && (
+              <button
+                onClick={() => printKwitansi(booking, settings)}
+                title="Cetak Kwitansi"
+                className="w-7 h-7 rounded-lg flex items-center justify-center text-emerald-500 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 transition-colors"
+              >
+                <Receipt size={14} />
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800"
+            >
+              <X size={15} />
+            </button>
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto p-5 space-y-5">
@@ -346,38 +625,7 @@ function BookingDetailDrawer({
                   <span className="font-bold">{formatCurrency(booking.payment.amount)}</span>
                 </div>
                 {booking.payment.proofUrl && (
-                  <div className="space-y-2">
-                    <div className="text-xs font-medium text-slate-500">Bukti Transfer</div>
-                    {/\.(jpe?g|png|webp|gif)(\?.*)?$/i.test(booking.payment.proofUrl) ? (
-                      <div className="relative rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 group">
-                        <img
-                          src={booking.payment.proofUrl}
-                          alt="Bukti transfer"
-                          className="w-full max-h-52 object-contain bg-slate-50 dark:bg-slate-800"
-                        />
-                        <a
-                          href={booking.payment.proofUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="absolute inset-0 bg-black/0 group-hover:bg-black/20 flex items-center justify-center transition-colors"
-                        >
-                          <span className="opacity-0 group-hover:opacity-100 bg-black/70 text-white text-xs px-3 py-1.5 rounded-full flex items-center gap-1.5 transition-opacity">
-                            <ExternalLink size={11} /> Buka penuh
-                          </span>
-                        </a>
-                      </div>
-                    ) : (
-                      <a
-                        href={booking.payment.proofUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="flex items-center gap-2 px-3 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
-                      >
-                        <FileImage size={14} /> Lihat File Bukti
-                        <ExternalLink size={11} className="ml-auto" />
-                      </a>
-                    )}
-                  </div>
+                  <ProofImage proofUrl={booking.payment.proofUrl} />
                 )}
 
                 {/* Payment Action Buttons */}
@@ -404,6 +652,45 @@ function BookingDetailDrawer({
               </div>
             </div>
           )}
+
+          {/* Quick Actions - Invoice / Kwitansi */}
+          <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+            <div className="px-4 py-2.5 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-700">
+              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Dokumen</span>
+            </div>
+            <div className="p-3 flex flex-col gap-2">
+              <button
+                onClick={() => printInvoice(booking, settings)}
+                className="flex items-center gap-3 px-3 py-2.5 rounded-xl border border-blue-200 dark:border-blue-800 text-left hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
+              >
+                <FileText size={15} className="text-blue-500 shrink-0" />
+                <div>
+                  <div className="text-xs font-semibold text-slate-700 dark:text-slate-300">Cetak Invoice</div>
+                  <div className="text-[11px] text-slate-400">Dokumen tagihan untuk semua status</div>
+                </div>
+              </button>
+              {isCompleted ? (
+                <button
+                  onClick={() => printKwitansi(booking, settings)}
+                  className="flex items-center gap-3 px-3 py-2.5 rounded-xl border border-emerald-200 dark:border-emerald-800 text-left hover:bg-emerald-50 dark:hover:bg-emerald-900/20 transition-colors"
+                >
+                  <Receipt size={15} className="text-emerald-500 shrink-0" />
+                  <div>
+                    <div className="text-xs font-semibold text-slate-700 dark:text-slate-300">Cetak Kwitansi</div>
+                    <div className="text-[11px] text-slate-400">Bukti pembayaran lunas (completed)</div>
+                  </div>
+                </button>
+              ) : (
+                <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl border border-dashed border-slate-200 dark:border-slate-700 opacity-50">
+                  <Receipt size={15} className="text-slate-400 shrink-0" />
+                  <div>
+                    <div className="text-xs font-semibold text-slate-500">Kwitansi (khusus Completed)</div>
+                    <div className="text-[11px] text-slate-400">Tersedia setelah pembayaran dikonfirmasi</div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
 
           {/* Admin Notes */}
           <div className="space-y-2">
@@ -490,7 +777,6 @@ function BookingDetailDrawer({
                   Atau gunakan tombol cepat (klik dua kali untuk konfirmasi):
                 </p>
 
-                {/* Cancel */}
                 {booking.status !== "cancelled" && booking.status !== "refunded" && (
                   <ActionButton
                     action="cancelled"
@@ -504,7 +790,6 @@ function BookingDetailDrawer({
                   />
                 )}
 
-                {/* Refund */}
                 {(booking.status === "completed" || booking.status === "confirmed" || booking.status === "cancelled") && (
                   <ActionButton
                     action="refunded"
@@ -518,7 +803,6 @@ function BookingDetailDrawer({
                   />
                 )}
 
-                {/* Manual complete */}
                 {booking.status === "paid" && (
                   <ActionButton
                     action="completed"
@@ -532,6 +816,46 @@ function BookingDetailDrawer({
                   />
                 )}
               </div>
+            </div>
+          </div>
+
+          {/* Delete Booking */}
+          <div className="rounded-xl border border-red-200 dark:border-red-900/40 overflow-hidden">
+            <div className="px-4 py-2.5 bg-red-50 dark:bg-red-900/10 border-b border-red-200 dark:border-red-900/40">
+              <span className="text-xs font-semibold text-red-500 uppercase tracking-wide">Zona Bahaya</span>
+            </div>
+            <div className="p-4">
+              {!confirmDelete ? (
+                <button
+                  onClick={() => setConfirmDelete(true)}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border border-red-200 dark:border-red-800 text-left hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                >
+                  <Trash2 size={14} className="text-red-500 shrink-0" />
+                  <div>
+                    <div className="text-xs font-semibold text-red-600">Hapus Booking</div>
+                    <div className="text-[11px] text-slate-400">Menghapus permanen booking ini beserta data pembayaran</div>
+                  </div>
+                </button>
+              ) : (
+                <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} className="space-y-2">
+                  <p className="text-xs text-red-600 font-semibold">Yakin ingin menghapus booking ini? Tindakan ini tidak dapat dibatalkan.</p>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => { onDelete(booking.id); setConfirmDelete(false); }}
+                      disabled={isUpdating}
+                      className="flex-1 h-8 rounded-lg text-xs font-semibold bg-red-600 hover:bg-red-700 text-white disabled:opacity-50 transition-colors"
+                    >
+                      Ya, Hapus
+                    </button>
+                    <button
+                      onClick={() => setConfirmDelete(false)}
+                      className="h-8 px-3 rounded-lg text-xs font-semibold border border-slate-200 dark:border-slate-700 text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+                    >
+                      Batal
+                    </button>
+                  </div>
+                </motion.div>
+              )}
             </div>
           </div>
         </div>
@@ -589,13 +913,13 @@ function ActionButton({
   const variantStyles = {
     danger: isPending
       ? "bg-red-600 text-white border-red-600"
-      : "border-red-200 text-red-600 hover:bg-red-50 dark:border-red-800 dark:hover:bg-red-900/20",
+      : "border-red-200 dark:border-red-900/40 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20",
     purple: isPending
       ? "bg-purple-600 text-white border-purple-600"
-      : "border-purple-200 text-purple-600 hover:bg-purple-50 dark:border-purple-800 dark:hover:bg-purple-900/20",
+      : "border-purple-200 dark:border-purple-900/40 text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-900/20",
     success: isPending
       ? "bg-emerald-600 text-white border-emerald-600"
-      : "border-emerald-200 text-emerald-600 hover:bg-emerald-50 dark:border-emerald-800 dark:hover:bg-emerald-900/20",
+      : "border-emerald-200 dark:border-emerald-900/40 text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/20",
   };
 
   return (
@@ -680,6 +1004,8 @@ export default function AdminBookings() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [selectedBooking, setSelectedBooking] = useState<any>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
 
   const { data: rawBookings, isLoading } = useListBookings();
   const bookings = rawBookings ?? [];
@@ -736,8 +1062,34 @@ export default function AdminBookings() {
     });
   };
 
+  const handleDelete = async (id: number) => {
+    setDeletingId(id);
+    try {
+      const token = getToken();
+      const res = await fetch(`/api/bookings/${id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token ?? ""}` },
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body?.error ?? `HTTP ${res.status}`);
+      }
+      queryClient.invalidateQueries({ queryKey: getListBookingsQueryKey() });
+      toast({ title: "Booking berhasil dihapus" });
+      setSelectedBooking(null);
+    } catch (err: any) {
+      toast({
+        title: "Gagal menghapus booking",
+        description: err?.message ?? "Terjadi kesalahan",
+        variant: "destructive",
+      });
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   const handleExport = () => {
-    const token = localStorage.getItem("sport_center_token");
+    const token = getToken();
     fetch("/api/admin/bookings/export", {
       headers: { Authorization: `Bearer ${token}` },
     })
@@ -750,8 +1102,7 @@ export default function AdminBookings() {
       });
   };
 
-  const isUpdating = updateBookingMutation.isPending || updatePaymentMutation.isPending;
-
+  const isUpdating = updateBookingMutation.isPending || updatePaymentMutation.isPending || deletingId !== null;
   const pendingVerification = bookings.filter((b: any) => b.status === "paid").length;
 
   return (
@@ -863,7 +1214,7 @@ export default function AdminBookings() {
                       className="border-b border-slate-50 dark:border-slate-800/50 hover:bg-slate-50/70 dark:hover:bg-slate-800/30 transition-colors group"
                     >
                       <td className="px-4 py-3">
-                        <span className="font-mono text-xs text-slate-500 dark:text-slate-400">
+                        <span className="font-mono text-xs font-bold text-slate-600 dark:text-slate-400">
                           {b.orderNumber}
                         </span>
                       </td>
@@ -914,15 +1265,49 @@ export default function AdminBookings() {
                         )}
                       </td>
                       <td className="px-4 py-3">
-                        <motion.button
-                          whileHover={{ scale: 1.04 }}
-                          whileTap={{ scale: 0.96 }}
-                          onClick={() => setSelectedBooking(b)}
-                          className="flex items-center gap-1 h-7 px-2.5 rounded-lg text-xs font-semibold text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors opacity-0 group-hover:opacity-100"
-                        >
-                          <Eye size={12} />
-                          Detail
-                        </motion.button>
+                        <div className="flex items-center gap-1">
+                          <motion.button
+                            whileHover={{ scale: 1.04 }}
+                            whileTap={{ scale: 0.96 }}
+                            onClick={() => setSelectedBooking(b)}
+                            className="flex items-center gap-1 h-7 px-2.5 rounded-lg text-xs font-semibold text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors opacity-0 group-hover:opacity-100"
+                          >
+                            <Eye size={12} />
+                            Detail
+                          </motion.button>
+                          {deleteConfirmId === b.id ? (
+                            <div className="flex items-center gap-1">
+                              <button
+                                onClick={() => { handleDelete(b.id); setDeleteConfirmId(null); }}
+                                disabled={deletingId === b.id}
+                                className="h-7 px-2 rounded-lg text-[11px] font-bold bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 transition-colors whitespace-nowrap"
+                              >
+                                Hapus?
+                              </button>
+                              <button
+                                onClick={() => setDeleteConfirmId(null)}
+                                className="h-7 px-1.5 rounded-lg text-[11px] border border-slate-200 dark:border-slate-700 text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+                              >
+                                <X size={10} />
+                              </button>
+                            </div>
+                          ) : (
+                            <motion.button
+                              whileHover={{ scale: 1.04 }}
+                              whileTap={{ scale: 0.96 }}
+                              onClick={() => setDeleteConfirmId(b.id)}
+                              title="Hapus booking"
+                              disabled={deletingId === b.id}
+                              className="flex items-center justify-center h-7 w-7 rounded-lg border border-red-200 dark:border-red-900/50 text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors disabled:opacity-50 opacity-0 group-hover:opacity-100"
+                            >
+                              {deletingId === b.id ? (
+                                <span className="w-3 h-3 border border-red-400 border-t-transparent rounded-full animate-spin" />
+                              ) : (
+                                <Trash2 size={12} />
+                              )}
+                            </motion.button>
+                          )}
+                        </div>
                       </td>
                     </motion.tr>
                   ))}
@@ -953,6 +1338,7 @@ export default function AdminBookings() {
           onRejectPayment={(paymentId) =>
             updatePaymentMutation.mutate({ id: paymentId, data: { status: "rejected" } })
           }
+          onDelete={handleDelete}
           isUpdating={isUpdating}
         />
       )}
