@@ -18,7 +18,7 @@ import { format, parseISO } from "date-fns";
 import { id as idLocale } from "date-fns/locale";
 import {
   MapPin, Calendar, Clock, Receipt, ChevronLeft,
-  RefreshCw, CheckCircle2, XCircle, AlertTriangle, Loader2
+  RefreshCw, CheckCircle2, XCircle, AlertTriangle, Loader2, Pencil, X as IconX
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
@@ -70,6 +70,10 @@ export default function Booking() {
   } | null>(null);
   const [isChecking, setIsChecking] = useState(false);
   const [skippedDates, setSkippedDates] = useState<Set<string>>(new Set());
+  // overriddenDates: index → { date, available, checking }
+  const [overriddenDates, setOverriddenDates] = useState<Record<number, { date: string; available: boolean | null; checking: boolean }>>({});
+  const [editingIdx, setEditingIdx] = useState<number | null>(null);
+  const [editingValue, setEditingValue] = useState("");
 
   // --- Submit success ---
   const [recurringResult, setRecurringResult] = useState<{
@@ -138,6 +142,8 @@ export default function Booking() {
           onSuccess: (data) => {
             setCheckResult(data);
             setSkippedDates(new Set());
+            setOverriddenDates({});
+            setEditingIdx(null);
             setIsChecking(false);
           },
           onError: () => {
@@ -202,9 +208,32 @@ export default function Booking() {
     }
   };
 
+  // --- Check availability for a specific overridden date ---
+  const checkOverrideDate = (idx: number, newDate: string) => {
+    if (!newDate || !facilityId || !startTime || !duration) return;
+    setOverriddenDates((prev) => ({ ...prev, [idx]: { date: newDate, available: null, checking: true } }));
+    setEditingIdx(null);
+    checkRecurringMutate(
+      { data: { facilityId, startDate: newDate, startTime, durationHours: duration, repeatType, repeatCount: 1 } },
+      {
+        onSuccess: (data) => {
+          const available = data.dates[0]?.available ?? false;
+          setOverriddenDates((prev) => ({ ...prev, [idx]: { date: newDate, available, checking: false } }));
+        },
+        onError: () => {
+          setOverriddenDates((prev) => ({ ...prev, [idx]: { date: newDate, available: null, checking: false } }));
+          toast({ title: "Gagal cek tanggal", variant: "destructive" });
+        },
+      }
+    );
+  };
+
   // --- Derived selected dates (available and not manually skipped) ---
   const selectedDates = checkResult
-    ? checkResult.dates.filter((d) => d.available && !skippedDates.has(d.date)).map((d) => d.date)
+    ? checkResult.dates
+        .map((d, idx) => overriddenDates[idx] ?? d)
+        .filter((d) => d.available && !skippedDates.has(d.date))
+        .map((d) => d.date)
     : [];
   const effectiveCount = selectedDates.length;
   const effectiveTotalPrice = checkResult ? checkResult.pricePerSession * effectiveCount : 0;
@@ -416,63 +445,112 @@ export default function Booking() {
 
                   {!isChecking && checkResult && (
                     <div className="space-y-2">
-                      {checkResult.dates.map((item) => {
+                      {checkResult.dates.map((original, idx) => {
+                        const override = overriddenDates[idx];
+                        const item = override ?? original;
                         const isManuallySkipped = skippedDates.has(item.date);
+                        const isEditing = editingIdx === idx;
+                        const isCheckingOverride = override?.checking === true;
+                        const wasOverridden = !!override && !override.checking;
+
+                        let rowBg = "bg-green-50 border-green-200";
+                        if (isCheckingOverride) rowBg = "bg-blue-50 border-blue-200";
+                        else if (item.available === null) rowBg = "bg-muted border-border";
+                        else if (!item.available) rowBg = "bg-red-50 border-red-200 opacity-70";
+                        else if (isManuallySkipped) rowBg = "bg-muted border-border opacity-50";
+
                         return (
-                          <div
-                            key={item.date}
-                            className={`flex items-center justify-between px-4 py-3 rounded-lg border text-sm transition-opacity ${
-                              !item.available
-                                ? "bg-red-50 border-red-200 opacity-70"
-                                : isManuallySkipped
-                                  ? "bg-muted border-border opacity-50"
-                                  : "bg-green-50 border-green-200"
-                            }`}
-                          >
-                            <div className="flex items-center gap-2.5 min-w-0">
-                              {!item.available
-                                ? <XCircle size={16} className="text-red-500 shrink-0" />
-                                : isManuallySkipped
-                                  ? <XCircle size={16} className="text-muted-foreground shrink-0" />
-                                  : <CheckCircle2 size={16} className="text-green-600 shrink-0" />
-                              }
-                              <div className="min-w-0">
-                                <span className={`font-medium ${!item.available ? "text-red-700" : isManuallySkipped ? "text-muted-foreground line-through" : "text-green-800"}`}>
-                                  {formatDate(item.date)}
-                                </span>
-                                {!item.available && item.reason && (
-                                  <span className="ml-2 text-xs text-red-500">({item.reason})</span>
+                          <div key={idx} className="space-y-1.5">
+                            <div className={`flex items-center justify-between px-4 py-3 rounded-lg border text-sm transition-all ${rowBg}`}>
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                {isCheckingOverride
+                                  ? <Loader2 size={16} className="text-blue-500 shrink-0 animate-spin" />
+                                  : item.available === null
+                                    ? <AlertTriangle size={16} className="text-muted-foreground shrink-0" />
+                                    : !item.available
+                                      ? <XCircle size={16} className="text-red-500 shrink-0" />
+                                      : isManuallySkipped
+                                        ? <XCircle size={16} className="text-muted-foreground shrink-0" />
+                                        : <CheckCircle2 size={16} className="text-green-600 shrink-0" />
+                                }
+                                <div className="min-w-0">
+                                  <span className={`font-medium ${
+                                    isCheckingOverride ? "text-blue-700" :
+                                    item.available === null ? "text-muted-foreground" :
+                                    !item.available ? "text-red-700" :
+                                    isManuallySkipped ? "text-muted-foreground line-through" :
+                                    "text-green-800"
+                                  }`}>
+                                    {formatDate(item.date)}
+                                  </span>
+                                  {wasOverridden && <span className="ml-2 text-xs text-blue-500">(diubah)</span>}
+                                  {isCheckingOverride && <span className="ml-2 text-xs text-blue-500">Mengecek...</span>}
+                                  {!item.available && (item as any).reason && !isCheckingOverride && (
+                                    <span className="ml-2 text-xs text-red-500">({(item as any).reason})</span>
+                                  )}
+                                  {isManuallySkipped && <span className="ml-2 text-xs text-muted-foreground">(dilewati)</span>}
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2 shrink-0 ml-2">
+                                <span className="text-xs font-medium text-muted-foreground">{startTime} – {endTime}</span>
+                                {!isCheckingOverride && (
+                                  <button
+                                    type="button"
+                                    title="Ubah tanggal"
+                                    onClick={() => { setEditingIdx(isEditing ? null : idx); setEditingValue(item.date); }}
+                                    className="p-1 rounded hover:bg-black/5 text-muted-foreground hover:text-foreground transition-colors"
+                                  >
+                                    {isEditing ? <IconX size={14} /> : <Pencil size={14} />}
+                                  </button>
                                 )}
-                                {isManuallySkipped && (
-                                  <span className="ml-2 text-xs text-muted-foreground">(dilewati)</span>
+                                {!isCheckingOverride && (
+                                  <button
+                                    type="button"
+                                    disabled={!item.available && !isManuallySkipped}
+                                    onClick={() => setSkippedDates((prev) => {
+                                      const next = new Set(prev);
+                                      if (next.has(item.date)) next.delete(item.date); else next.add(item.date);
+                                      return next;
+                                    })}
+                                    className={`text-xs px-2 py-1 rounded border transition-colors ${
+                                      isManuallySkipped ? "border-green-300 text-green-700 hover:bg-green-50" :
+                                      !item.available ? "border-gray-200 text-gray-400 cursor-not-allowed" :
+                                      "border-red-200 text-red-500 hover:bg-red-50"
+                                    }`}
+                                  >
+                                    {isManuallySkipped ? "Sertakan" : "Lewati"}
+                                  </button>
                                 )}
                               </div>
                             </div>
-                            <div className="flex items-center gap-3 shrink-0 ml-2">
-                              <span className="text-xs font-medium text-muted-foreground">
-                                {startTime} – {endTime}
-                              </span>
-                              {item.available && (
+
+                            {isEditing && (
+                              <div className="flex items-center gap-2 px-4 py-2.5 bg-blue-50 border border-blue-200 rounded-lg">
+                                <Calendar size={14} className="text-blue-500 shrink-0" />
+                                <input
+                                  type="date"
+                                  value={editingValue}
+                                  min={new Date().toISOString().split("T")[0]}
+                                  onChange={(e) => setEditingValue(e.target.value)}
+                                  className="flex-1 text-sm bg-transparent border-none outline-none text-blue-800"
+                                />
                                 <button
                                   type="button"
-                                  onClick={() => {
-                                    setSkippedDates((prev) => {
-                                      const next = new Set(prev);
-                                      if (next.has(item.date)) next.delete(item.date);
-                                      else next.add(item.date);
-                                      return next;
-                                    });
-                                  }}
-                                  className={`text-xs px-2 py-1 rounded border transition-colors ${
-                                    isManuallySkipped
-                                      ? "border-green-300 text-green-700 hover:bg-green-50"
-                                      : "border-red-200 text-red-500 hover:bg-red-50"
-                                  }`}
+                                  disabled={!editingValue || editingValue === item.date}
+                                  onClick={() => checkOverrideDate(idx, editingValue)}
+                                  className="text-xs px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                                 >
-                                  {isManuallySkipped ? "Sertakan" : "Lewati"}
+                                  Cek & Simpan
                                 </button>
-                              )}
-                            </div>
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingIdx(null)}
+                                  className="text-xs px-2 py-1 border border-blue-200 text-blue-600 rounded hover:bg-blue-100 transition-colors"
+                                >
+                                  Batal
+                                </button>
+                              </div>
+                            )}
                           </div>
                         );
                       })}
