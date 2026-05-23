@@ -301,6 +301,51 @@ export const CreateBookingBody = zod.object({
 
 
 /**
+ * @summary Check availability for recurring booking dates
+ */
+export const checkRecurringBookingBodyRepeatCountMax = 52;
+
+
+
+export const CheckRecurringBookingBody = zod.object({
+  "facilityId": zod.number(),
+  "startDate": zod.string(),
+  "startTime": zod.string(),
+  "durationHours": zod.number(),
+  "repeatType": zod.enum(['weekly', 'monthly']),
+  "repeatCount": zod.number().min(1).max(checkRecurringBookingBodyRepeatCountMax)
+})
+
+export const CheckRecurringBookingResponse = zod.object({
+  "dates": zod.array(zod.object({
+  "date": zod.string(),
+  "available": zod.boolean(),
+  "reason": zod.string().nullish()
+})),
+  "pricePerSession": zod.number(),
+  "validCount": zod.number(),
+  "totalPrice": zod.number()
+})
+
+
+/**
+ * @summary Create multiple bookings (recurring)
+ */
+export const CreateRecurringBookingBody = zod.object({
+  "customerName": zod.string(),
+  "customerEmail": zod.string(),
+  "customerPhone": zod.string(),
+  "facilityId": zod.number(),
+  "startDate": zod.string(),
+  "startTime": zod.string(),
+  "durationHours": zod.number(),
+  "repeatType": zod.enum(['weekly', 'monthly']),
+  "repeatCount": zod.number(),
+  "notes": zod.string().optional()
+})
+
+
+/**
  * @summary Get booking by ID
  */
 export const GetBookingParams = zod.object({

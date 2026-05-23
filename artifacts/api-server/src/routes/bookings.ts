@@ -139,6 +139,130 @@ router.post("/bookings", async (req, res) => {
   }
 });
 
+// --- RECURRING BOOKING HELPERS ---
+
+function timeToMinutes(t: string): number {
+  const [h, m] = t.split(":").map(Number);
+  return h * 60 + (m || 0);
+}
+
+function generateRecurringDates(
+  startDate: string,
+  repeatType: "weekly" | "monthly",
+  repeatCount: number
+): string[] {
+  const dates: string[] = [];
+  const base = new Date(startDate);
+  for (let i = 0; i < repeatCount; i++) {
+    const d = new Date(base);
+    if (repeatType === "weekly") {
+      d.setDate(d.getDate() + i * 7);
+    } else {
+      d.setMonth(d.getMonth() + i);
+    }
+    dates.push(d.toISOString().split("T")[0]);
+  }
+  return dates;
+}
+
+async function checkSlotConflict(
+  facilityId: number,
+  bookingDate: string,
+  startTime: string,
+  endTime: string
+): Promise<boolean> {
+  const existing = await db.select().from(bookingsTable).where(
+    and(eq(bookingsTable.facilityId, facilityId), eq(bookingsTable.bookingDate, bookingDate))
+  );
+  const active = existing.filter((b) => b.status !== "cancelled");
+  const sMin = timeToMinutes(startTime);
+  const eMin = timeToMinutes(endTime);
+  return active.some((b) => {
+    const bStart = timeToMinutes(b.startTime);
+    const bEnd = timeToMinutes(b.endTime);
+    return sMin < bEnd && eMin > bStart;
+  });
+}
+
+// POST /bookings/recurring/check
+router.post("/bookings/recurring/check", async (req, res) => {
+  try {
+    const { facilityId, startDate, startTime, durationHours, repeatType, repeatCount } = req.body;
+
+    const [facility] = await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, Number(facilityId))).limit(1);
+    if (!facility) { res.status(404).json({ error: "Facility not found" }); return; }
+
+    const endTime = addHours(startTime, durationHours);
+    const dates = generateRecurringDates(startDate, repeatType, repeatCount);
+
+    const results = await Promise.all(
+      dates.map(async (date) => {
+        const conflict = await checkSlotConflict(Number(facilityId), date, startTime, endTime);
+        return { date, available: !conflict, reason: conflict ? "Slot already booked" : null };
+      })
+    );
+
+    const pricePerSession = Number(facility.pricePerHour) * durationHours;
+    const validCount = results.filter((r) => r.available).length;
+
+    res.json({
+      dates: results,
+      pricePerSession,
+      validCount,
+      totalPrice: pricePerSession * validCount,
+    });
+  } catch (err) {
+    req.log.error({ err }, "Check recurring error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// POST /bookings/recurring — create all valid (non-conflicting) bookings
+router.post("/bookings/recurring", async (req, res) => {
+  try {
+    const { customerName, customerEmail, customerPhone, facilityId, startDate, startTime, durationHours, notes, repeatType, repeatCount } = req.body;
+
+    const [facility] = await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, Number(facilityId))).limit(1);
+    if (!facility) { res.status(404).json({ error: "Facility not found" }); return; }
+
+    const endTime = addHours(startTime, durationHours);
+    const dates = generateRecurringDates(startDate, repeatType, repeatCount);
+    const totalPrice = Number(facility.pricePerHour) * durationHours;
+
+    const created: any[] = [];
+    const skipped: string[] = [];
+
+    for (const bookingDate of dates) {
+      const conflict = await checkSlotConflict(Number(facilityId), bookingDate, startTime, endTime);
+      if (conflict) {
+        skipped.push(bookingDate);
+        continue;
+      }
+      const orderNumber = await generateOrderNumber();
+      const [booking] = await db.insert(bookingsTable).values({
+        orderNumber,
+        customerName,
+        customerEmail,
+        customerPhone,
+        facilityId: Number(facilityId),
+        bookingDate,
+        startTime,
+        endTime,
+        durationHours,
+        totalPrice: String(totalPrice),
+        notes,
+      }).returning();
+      broadcastAvailabilityChange(Number(facilityId), bookingDate);
+      created.push({ ...booking, totalPrice: Number(booking.totalPrice), facilityName: facility.name, facilityCategory: facility.category, payment: null });
+    }
+
+    res.status(201).json({ created, skipped, totalBookings: created.length, grandTotal: totalPrice * created.length });
+  } catch (err) {
+    req.log.error({ err }, "Create recurring booking error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 router.get("/bookings/order/:orderNumber", async (req, res) => {
   try {
     const [booking] = await db.select().from(bookingsTable)

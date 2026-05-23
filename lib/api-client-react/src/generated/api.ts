@@ -53,6 +53,10 @@ import type {
   PromoRegistration,
   PromoRegistrationInput,
   PromoUpdate,
+  RecurringBookingCheckInput,
+  RecurringBookingCheckResult,
+  RecurringBookingInput,
+  RecurringBookingResult,
   RegisterInput,
   Settings,
   SettingsUpdate,
@@ -1128,6 +1132,148 @@ export const useCreateBooking = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getCreateBookingMutationOptions(options));
+    }
+
+export const getCheckRecurringBookingUrl = () => {
+
+
+
+
+  return `/api/bookings/recurring/check`
+}
+
+/**
+ * @summary Check availability for recurring booking dates
+ */
+export const checkRecurringBooking = async (recurringBookingCheckInput: RecurringBookingCheckInput, options?: RequestInit): Promise<RecurringBookingCheckResult> => {
+
+  return customFetch<RecurringBookingCheckResult>(getCheckRecurringBookingUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      recurringBookingCheckInput,)
+  }
+);}
+
+
+
+
+export const getCheckRecurringBookingMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof checkRecurringBooking>>, TError,{data: BodyType<RecurringBookingCheckInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof checkRecurringBooking>>, TError,{data: BodyType<RecurringBookingCheckInput>}, TContext> => {
+
+const mutationKey = ['checkRecurringBooking'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof checkRecurringBooking>>, {data: BodyType<RecurringBookingCheckInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  checkRecurringBooking(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CheckRecurringBookingMutationResult = NonNullable<Awaited<ReturnType<typeof checkRecurringBooking>>>
+    export type CheckRecurringBookingMutationBody = BodyType<RecurringBookingCheckInput>
+    export type CheckRecurringBookingMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Check availability for recurring booking dates
+ */
+export const useCheckRecurringBooking = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof checkRecurringBooking>>, TError,{data: BodyType<RecurringBookingCheckInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof checkRecurringBooking>>,
+        TError,
+        {data: BodyType<RecurringBookingCheckInput>},
+        TContext
+      > => {
+      return useMutation(getCheckRecurringBookingMutationOptions(options));
+    }
+
+export const getCreateRecurringBookingUrl = () => {
+
+
+
+
+  return `/api/bookings/recurring`
+}
+
+/**
+ * @summary Create multiple bookings (recurring)
+ */
+export const createRecurringBooking = async (recurringBookingInput: RecurringBookingInput, options?: RequestInit): Promise<RecurringBookingResult> => {
+
+  return customFetch<RecurringBookingResult>(getCreateRecurringBookingUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      recurringBookingInput,)
+  }
+);}
+
+
+
+
+export const getCreateRecurringBookingMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createRecurringBooking>>, TError,{data: BodyType<RecurringBookingInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createRecurringBooking>>, TError,{data: BodyType<RecurringBookingInput>}, TContext> => {
+
+const mutationKey = ['createRecurringBooking'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createRecurringBooking>>, {data: BodyType<RecurringBookingInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createRecurringBooking(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateRecurringBookingMutationResult = NonNullable<Awaited<ReturnType<typeof createRecurringBooking>>>
+    export type CreateRecurringBookingMutationBody = BodyType<RecurringBookingInput>
+    export type CreateRecurringBookingMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Create multiple bookings (recurring)
+ */
+export const useCreateRecurringBooking = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createRecurringBooking>>, TError,{data: BodyType<RecurringBookingInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createRecurringBooking>>,
+        TError,
+        {data: BodyType<RecurringBookingInput>},
+        TContext
+      > => {
+      return useMutation(getCreateRecurringBookingMutationOptions(options));
     }
 
 export const getGetBookingUrl = (id: number,) => {

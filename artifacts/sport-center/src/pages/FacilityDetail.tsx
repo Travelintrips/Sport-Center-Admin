@@ -219,7 +219,7 @@ export default function FacilityDetail() {
                     <AvailabilityCalendar
                       facilityId={facilityId}
                       date={formattedDate}
-                      slots={slots}
+                      slots={slots as any}
                       isLoading={isLoadingSlots}
                       selectedTime={selectedTime}
                       duration={parseInt(duration)}

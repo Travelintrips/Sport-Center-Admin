@@ -6,7 +6,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 interface Slot {
   time: string;
   available: boolean;
-  reason: string | null;
+  reason: string | null | undefined;
 }
 
 interface Props {

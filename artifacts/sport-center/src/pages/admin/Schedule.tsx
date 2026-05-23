@@ -255,7 +255,7 @@ export default function AdminSchedule() {
   const todayBookings = bookings.filter(
     (b) => b.bookingDate === todayStr && b.status !== "cancelled"
   ).length;
-  const pendingCount = bookings.filter((b) => b.status === "pending").length;
+  const pendingCount = bookings.filter((b) => (b.status as string) === "pending").length;
 
   return (
     <div className="space-y-4 lg:space-y-5 pb-20">

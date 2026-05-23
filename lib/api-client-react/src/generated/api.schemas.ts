@@ -165,6 +165,69 @@ export interface Booking {
   createdAt?: string;
 }
 
+export type RecurringBookingCheckInputRepeatType = typeof RecurringBookingCheckInputRepeatType[keyof typeof RecurringBookingCheckInputRepeatType];
+
+
+export const RecurringBookingCheckInputRepeatType = {
+  weekly: 'weekly',
+  monthly: 'monthly',
+} as const;
+
+export interface RecurringBookingCheckInput {
+  facilityId: number;
+  startDate: string;
+  startTime: string;
+  durationHours: number;
+  repeatType: RecurringBookingCheckInputRepeatType;
+  /**
+     * @minimum 1
+     * @maximum 52
+     */
+  repeatCount: number;
+}
+
+export interface RecurringDateStatus {
+  date: string;
+  available: boolean;
+  /** @nullable */
+  reason?: string | null;
+}
+
+export interface RecurringBookingCheckResult {
+  dates: RecurringDateStatus[];
+  pricePerSession: number;
+  validCount: number;
+  totalPrice: number;
+}
+
+export type RecurringBookingInputRepeatType = typeof RecurringBookingInputRepeatType[keyof typeof RecurringBookingInputRepeatType];
+
+
+export const RecurringBookingInputRepeatType = {
+  weekly: 'weekly',
+  monthly: 'monthly',
+} as const;
+
+export interface RecurringBookingInput {
+  customerName: string;
+  customerEmail: string;
+  customerPhone: string;
+  facilityId: number;
+  startDate: string;
+  startTime: string;
+  durationHours: number;
+  repeatType: RecurringBookingInputRepeatType;
+  repeatCount: number;
+  notes?: string;
+}
+
+export interface RecurringBookingResult {
+  created: Booking[];
+  skipped: string[];
+  totalBookings: number;
+  grandTotal: number;
+}
+
 export interface BookingInput {
   customerName: string;
   customerEmail: string;

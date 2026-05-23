@@ -303,6 +303,44 @@ paths:
         "409":
           description: Time slot conflict
 
+  /bookings/recurring/check:
+    post:
+      operationId: checkRecurringBooking
+      tags: [bookings]
+      summary: Check availability for recurring booking dates
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RecurringBookingCheckInput"
+      responses:
+        "200":
+          description: Availability result for each date
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RecurringBookingCheckResult"
+
+  /bookings/recurring:
+    post:
+      operationId: createRecurringBooking
+      tags: [bookings]
+      summary: Create multiple bookings (recurring)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RecurringBookingInput"
+      responses:
+        "201":
+          description: Bookings created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RecurringBookingResult"
+
   /bookings/{id}:
     get:
       operationId: getBooking
@@ -1033,6 +1071,95 @@ components:
           nullable: true
         createdAt:
           type: string
+
+    RecurringBookingCheckInput:
+      type: object
+      required: [facilityId, startDate, startTime, durationHours, repeatType, repeatCount]
+      properties:
+        facilityId:
+          type: integer
+        startDate:
+          type: string
+        startTime:
+          type: string
+        durationHours:
+          type: integer
+        repeatType:
+          type: string
+          enum: [weekly, monthly]
+        repeatCount:
+          type: integer
+          minimum: 1
+          maximum: 52
+
+    RecurringDateStatus:
+      type: object
+      required: [date, available]
+      properties:
+        date:
+          type: string
+        available:
+          type: boolean
+        reason:
+          type: ["string", "null"]
+
+    RecurringBookingCheckResult:
+      type: object
+      required: [dates, pricePerSession, validCount, totalPrice]
+      properties:
+        dates:
+          type: array
+          items:
+            $ref: "#/components/schemas/RecurringDateStatus"
+        pricePerSession:
+          type: number
+        validCount:
+          type: integer
+        totalPrice:
+          type: number
+
+    RecurringBookingInput:
+      type: object
+      required: [customerName, customerEmail, customerPhone, facilityId, startDate, startTime, durationHours, repeatType, repeatCount]
+      properties:
+        customerName:
+          type: string
+        customerEmail:
+          type: string
+        customerPhone:
+          type: string
+        facilityId:
+          type: integer
+        startDate:
+          type: string
+        startTime:
+          type: string
+        durationHours:
+          type: integer
+        repeatType:
+          type: string
+          enum: [weekly, monthly]
+        repeatCount:
+          type: integer
+        notes:
+          type: string
+
+    RecurringBookingResult:
+      type: object
+      required: [created, skipped, totalBookings, grandTotal]
+      properties:
+        created:
+          type: array
+          items:
+            $ref: "#/components/schemas/Booking"
+        skipped:
+          type: array
+          items:
+            type: string
+        totalBookings:
+          type: integer
+        grandTotal:
+          type: number
 
     BookingInput:
       type: object
