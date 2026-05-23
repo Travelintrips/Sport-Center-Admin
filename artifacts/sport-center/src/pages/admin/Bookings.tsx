@@ -49,10 +49,21 @@ import { getToken } from "@/lib/auth";
 
 function proofImageUrl(rawUrl: string): string {
   if (!rawUrl) return rawUrl;
-  if (rawUrl.startsWith("/objects/")) {
-    return `/api/storage${rawUrl}`;
+  // /api/storage/objects/* → redirect to working /api/uploads/* path
+  if (rawUrl.startsWith("/api/storage/objects/")) {
+    const withoutPrefix = rawUrl.replace(/^\/api\/storage\/objects\//, "");
+    return `/api/uploads/${withoutPrefix}`;
   }
-  return rawUrl;
+  // Already a working /api/uploads/ path — serve as-is
+  if (rawUrl.startsWith("/api/")) return rawUrl;
+  // Old Supabase-style /objects/... → /api/uploads/...
+  if (rawUrl.startsWith("/objects/")) {
+    return `/api/uploads/${rawUrl.replace(/^\/objects\//, "")}`;
+  }
+  // External URL — use as-is
+  if (rawUrl.startsWith("http")) return rawUrl;
+  // Bare filename or relative path — assume it lives in uploads
+  return `/api/uploads/${rawUrl.replace(/^\/+/, "")}`;
 }
 
 /* ─── Status Config ────────────────────────────────────────────── */
@@ -405,6 +416,49 @@ function SummaryStats({ bookings }: { bookings: any[] }) {
   );
 }
 
+/* ─── Proof Image Component ─────────────────────────────────────── */
+
+function ProofImage({ proofUrl }: { proofUrl: string }) {
+  const [imgError, setImgError] = useState(false);
+  const url = proofImageUrl(proofUrl);
+
+  return (
+    <div className="space-y-2">
+      <div className="text-xs font-medium text-slate-500">Bukti Transfer</div>
+      {imgError ? (
+        <a
+          href={url}
+          target="_blank"
+          rel="noreferrer"
+          className="flex items-center gap-2 px-3 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
+        >
+          <FileImage size={14} /> Buka File Bukti
+          <ExternalLink size={11} className="ml-auto" />
+        </a>
+      ) : (
+        <div className="relative rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 group">
+          <img
+            src={url}
+            alt="Bukti transfer"
+            className="w-full max-h-52 object-contain bg-slate-50 dark:bg-slate-800"
+            onError={() => setImgError(true)}
+          />
+          <a
+            href={url}
+            target="_blank"
+            rel="noreferrer"
+            className="absolute inset-0 bg-black/0 group-hover:bg-black/20 flex items-center justify-center transition-colors"
+          >
+            <span className="opacity-0 group-hover:opacity-100 bg-black/70 text-white text-xs px-3 py-1.5 rounded-full flex items-center gap-1.5 transition-opacity">
+              <ExternalLink size={11} /> Buka penuh
+            </span>
+          </a>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ─── Booking Detail Drawer ─────────────────────────────────────── */
 
 function BookingDetailDrawer({
@@ -571,51 +625,7 @@ function BookingDetailDrawer({
                   <span className="font-bold">{formatCurrency(booking.payment.amount)}</span>
                 </div>
                 {booking.payment.proofUrl && (
-                  <div className="space-y-2">
-                    <div className="text-xs font-medium text-slate-500">Bukti Transfer</div>
-                    {(() => {
-                      const url = proofImageUrl(booking.payment.proofUrl);
-                      const isImage = /\.(jpe?g|png|webp|gif)(\?.*)?$/i.test(url) || url.includes("/objects/") || url.includes("/storage/");
-                      return isImage ? (
-                        <div className="relative rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 group">
-                          <img
-                            src={url}
-                            alt="Bukti transfer"
-                            className="w-full max-h-52 object-contain bg-slate-50 dark:bg-slate-800"
-                            onError={(e) => {
-                              const el = e.currentTarget;
-                              el.style.display = "none";
-                              el.nextElementSibling?.removeAttribute("style");
-                            }}
-                          />
-                          <div style={{display:"none"}} className="p-3 text-xs text-slate-500 text-center">
-                            Gambar tidak dapat dimuat.{" "}
-                            <a href={url} target="_blank" rel="noreferrer" className="text-blue-500 underline">Buka link</a>
-                          </div>
-                          <a
-                            href={url}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="absolute inset-0 bg-black/0 group-hover:bg-black/20 flex items-center justify-center transition-colors"
-                          >
-                            <span className="opacity-0 group-hover:opacity-100 bg-black/70 text-white text-xs px-3 py-1.5 rounded-full flex items-center gap-1.5 transition-opacity">
-                              <ExternalLink size={11} /> Buka penuh
-                            </span>
-                          </a>
-                        </div>
-                      ) : (
-                        <a
-                          href={url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="flex items-center gap-2 px-3 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
-                        >
-                          <FileImage size={14} /> Lihat File Bukti
-                          <ExternalLink size={11} className="ml-auto" />
-                        </a>
-                      );
-                    })()}
-                  </div>
+                  <ProofImage proofUrl={booking.payment.proofUrl} />
                 )}
 
                 {/* Payment Action Buttons */}
@@ -1058,14 +1068,21 @@ export default function AdminBookings() {
       const token = getToken();
       const res = await fetch(`/api/bookings/${id}`, {
         method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${token ?? ""}` },
       });
-      if (!res.ok) throw new Error("Failed");
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body?.error ?? `HTTP ${res.status}`);
+      }
       queryClient.invalidateQueries({ queryKey: getListBookingsQueryKey() });
       toast({ title: "Booking berhasil dihapus" });
       setSelectedBooking(null);
-    } catch {
-      toast({ title: "Gagal menghapus booking", variant: "destructive" });
+    } catch (err: any) {
+      toast({
+        title: "Gagal menghapus booking",
+        description: err?.message ?? "Terjadi kesalahan",
+        variant: "destructive",
+      });
     } finally {
       setDeletingId(null);
     }
