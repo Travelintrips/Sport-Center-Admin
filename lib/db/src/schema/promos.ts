@@ -14,6 +14,12 @@ export const promosTable = pgTable("promos", {
   endDate: text("end_date"),
   imageUrl: text("image_url"),
   isActive: boolean("is_active").notNull().default(true),
+  code: text("code").unique(),
+  discountType: text("discount_type").notNull().default("percent"),
+  discountAmount: numeric("discount_amount", { precision: 12, scale: 2 }),
+  minPurchase: numeric("min_purchase", { precision: 12, scale: 2 }),
+  maxUses: integer("max_uses"),
+  usedCount: integer("used_count").notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });

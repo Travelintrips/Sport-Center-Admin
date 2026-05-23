@@ -26,6 +26,8 @@ export const bookingsTable = pgTable("bookings", {
   endTime: text("end_time").notNull(),
   durationHours: integer("duration_hours").notNull(),
   totalPrice: numeric("total_price", { precision: 12, scale: 2 }).notNull(),
+  promoCode: text("promo_code"),
+  discountAmount: numeric("discount_amount", { precision: 12, scale: 2 }).notNull().default("0"),
   status: bookingStatusEnum("status").notNull().default("pending_payment"),
   notes: text("notes"),
   adminNotes: text("admin_notes"),

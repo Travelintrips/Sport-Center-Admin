@@ -75,6 +75,19 @@ export default function Booking() {
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const [editingValue, setEditingValue] = useState("");
 
+  // --- Coupon ---
+  const [couponInput, setCouponInput] = useState("");
+  const [isValidatingCoupon, setIsValidatingCoupon] = useState(false);
+  const [couponResult, setCouponResult] = useState<{
+    valid: boolean;
+    code: string;
+    title: string;
+    discountType: string;
+    discountPercent: number | null;
+    discountAmount: number;
+  } | null>(null);
+  const [couponError, setCouponError] = useState<string | null>(null);
+
   // --- Submit success ---
   const [recurringResult, setRecurringResult] = useState<{
     totalBookings: number;
@@ -164,6 +177,33 @@ export default function Booking() {
     }
   }, [search, facilityId, date, startTime, setLocation, toast]);
 
+  // --- Validate coupon ---
+  const validateCoupon = async () => {
+    if (!couponInput.trim()) return;
+    setIsValidatingCoupon(true);
+    setCouponError(null);
+    setCouponResult(null);
+    try {
+      const baseAmt = facility ? facility.pricePerHour * duration : 0;
+      const purchaseAmount = isRepeat ? baseAmt * effectiveCount : baseAmt;
+      const res = await fetch("/api/promos/validate-code", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: couponInput.trim().toUpperCase(), purchaseAmount }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setCouponError(data.error || "Kode tidak valid");
+      } else {
+        setCouponResult(data);
+      }
+    } catch {
+      setCouponError("Gagal menghubungi server");
+    } finally {
+      setIsValidatingCoupon(false);
+    }
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!facilityId || !date || !startTime || !duration) return;
@@ -171,6 +211,12 @@ export default function Booking() {
       toast({ title: "Form tidak lengkap", description: "Harap isi semua field yang wajib.", variant: "destructive" });
       return;
     }
+
+    const discountPerSession = couponResult?.discountAmount
+      ? isRepeat
+        ? Math.round(couponResult.discountAmount / (effectiveCount || 1))
+        : couponResult.discountAmount
+      : 0;
 
     if (isRepeat) {
       if (!checkResult || effectiveCount === 0) {
@@ -190,6 +236,8 @@ export default function Booking() {
           repeatCount,
           notes,
           specificDates: selectedDates,
+          promoCode: couponResult?.code || undefined,
+          discountAmountPerSession: discountPerSession || undefined,
         } as any,
       });
     } else {
@@ -203,7 +251,9 @@ export default function Booking() {
           startTime,
           durationHours: duration,
           notes,
-        },
+          promoCode: couponResult?.code || undefined,
+          discountAmount: discountPerSession || undefined,
+        } as any,
       });
     }
   };
@@ -349,6 +399,63 @@ export default function Booking() {
                 </div>
               </CardContent>
             </form>
+          </Card>
+
+          {/* Coupon Code */}
+          <Card className={couponResult ? "border-green-300 bg-green-50/50" : ""}>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Receipt size={16} className="text-primary" /> Kode Kupon
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {couponResult ? (
+                <div className="flex items-center justify-between bg-green-100 border border-green-300 rounded-lg px-4 py-3">
+                  <div className="flex items-center gap-2.5">
+                    <CheckCircle2 size={18} className="text-green-600 shrink-0" />
+                    <div>
+                      <div className="font-semibold text-green-800 text-sm">{couponResult.code}</div>
+                      <div className="text-xs text-green-700">{couponResult.title}</div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-sm font-bold text-green-700">−{formatCurrency(couponResult.discountAmount)}</span>
+                    <button
+                      type="button"
+                      onClick={() => { setCouponResult(null); setCouponInput(""); setCouponError(null); }}
+                      className="text-green-600 hover:text-green-800 p-1 rounded hover:bg-green-200 transition-colors"
+                    >
+                      <IconX size={14} />
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex gap-2">
+                  <Input
+                    value={couponInput}
+                    onChange={(e) => { setCouponInput(e.target.value.toUpperCase()); setCouponError(null); }}
+                    onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), validateCoupon())}
+                    placeholder="Masukkan kode kupon..."
+                    className={`font-mono tracking-wider ${couponError ? "border-red-400 focus-visible:ring-red-400" : ""}`}
+                    disabled={isValidatingCoupon}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={validateCoupon}
+                    disabled={!couponInput.trim() || isValidatingCoupon}
+                    className="shrink-0"
+                  >
+                    {isValidatingCoupon ? <Loader2 size={15} className="animate-spin" /> : "Terapkan"}
+                  </Button>
+                </div>
+              )}
+              {couponError && (
+                <div className="flex items-center gap-2 text-sm text-red-600">
+                  <XCircle size={14} /> {couponError}
+                </div>
+              )}
+            </CardContent>
           </Card>
 
           {/* Repeat Booking */}
@@ -668,18 +775,31 @@ export default function Booking() {
                     </div>
                   </>
                 )}
+                {couponResult && (
+                  <div className="flex justify-between text-green-700 font-medium">
+                    <span className="flex items-center gap-1">
+                      <Receipt size={12} /> Diskon ({couponResult.code})
+                    </span>
+                    <span>−{formatCurrency(couponResult.discountAmount)}</span>
+                  </div>
+                )}
                 <div className="flex justify-between font-bold text-lg pt-3 border-t">
                   <span>Total</span>
                   <span className="text-primary">
-                    {isRepeat
-                      ? (isChecking ? "..." : formatCurrency(checkResult ? effectiveTotalPrice : totalPrice * repeatCount))
-                      : formatCurrency(totalPrice)
-                    }
+                    {(() => {
+                      const disc = couponResult?.discountAmount ?? 0;
+                      if (isRepeat) {
+                        const base = isChecking ? null : (checkResult ? effectiveTotalPrice : totalPrice * repeatCount);
+                        return base === null ? "..." : formatCurrency(Math.max(0, base - disc));
+                      }
+                      return formatCurrency(Math.max(0, totalPrice - disc));
+                    })()}
                   </span>
                 </div>
                 {isRepeat && !isChecking && checkResult && (
                   <div className="text-xs text-muted-foreground text-right">
                     {effectiveCount} sesi × {duration} jam × {formatCurrency(facility.pricePerHour)}
+                    {couponResult ? ` − ${formatCurrency(couponResult.discountAmount)}` : ""}
                   </div>
                 )}
               </div>

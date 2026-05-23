@@ -1,6 +1,6 @@
 import { Router } from "express";
-import { db, bookingsTable, facilitiesTable, paymentsTable } from "@workspace/db";
-import { eq, and } from "drizzle-orm";
+import { db, bookingsTable, facilitiesTable, paymentsTable, promosTable } from "@workspace/db";
+import { eq, and, sql } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
 import { broadcastAvailabilityChange } from "../lib/supabase";
 
@@ -81,7 +81,7 @@ router.get("/bookings", async (req, res) => {
 
 router.post("/bookings", async (req, res) => {
   try {
-    const { customerName, customerEmail, customerPhone, facilityId, bookingDate, startTime, durationHours, notes } = req.body;
+    const { customerName, customerEmail, customerPhone, facilityId, bookingDate, startTime, durationHours, notes, promoCode, discountAmount } = req.body;
 
     const [facility] = await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, Number(facilityId))).limit(1);
     if (!facility) {
@@ -107,7 +107,9 @@ router.post("/bookings", async (req, res) => {
       return;
     }
 
-    const totalPrice = Number(facility.pricePerHour) * durationHours;
+    const basePrice = Number(facility.pricePerHour) * durationHours;
+    const discount = Math.min(Number(discountAmount) || 0, basePrice);
+    const totalPrice = basePrice - discount;
     const orderNumber = await generateOrderNumber();
 
     const [booking] = await db.insert(bookingsTable).values({
@@ -121,14 +123,23 @@ router.post("/bookings", async (req, res) => {
       endTime,
       durationHours,
       totalPrice: String(totalPrice),
+      promoCode: promoCode || null,
+      discountAmount: String(discount),
       notes,
     }).returning();
+
+    if (promoCode) {
+      await db.update(promosTable)
+        .set({ usedCount: sql`${promosTable.usedCount} + 1` })
+        .where(eq(promosTable.code, String(promoCode).toUpperCase()));
+    }
 
     broadcastAvailabilityChange(Number(facilityId), bookingDate);
 
     res.status(201).json({
       ...booking,
       totalPrice: Number(booking.totalPrice),
+      discountAmount: Number(booking.discountAmount),
       facilityName: facility.name,
       facilityCategory: facility.category,
       payment: null,
@@ -220,7 +231,7 @@ router.post("/bookings/recurring/check", async (req, res) => {
 // POST /bookings/recurring — create all valid (non-conflicting) bookings
 router.post("/bookings/recurring", async (req, res) => {
   try {
-    const { customerName, customerEmail, customerPhone, facilityId, startDate, startTime, durationHours, notes, repeatType, repeatCount, specificDates } = req.body;
+    const { customerName, customerEmail, customerPhone, facilityId, startDate, startTime, durationHours, notes, repeatType, repeatCount, specificDates, promoCode, discountAmountPerSession } = req.body;
 
     const [facility] = await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, Number(facilityId))).limit(1);
     if (!facility) { res.status(404).json({ error: "Facility not found" }); return; }
@@ -229,7 +240,9 @@ router.post("/bookings/recurring", async (req, res) => {
     const dates: string[] = Array.isArray(specificDates) && specificDates.length > 0
       ? specificDates
       : generateRecurringDates(startDate, repeatType, repeatCount);
-    const totalPrice = Number(facility.pricePerHour) * durationHours;
+    const basePrice = Number(facility.pricePerHour) * durationHours;
+    const discount = Math.min(Number(discountAmountPerSession) || 0, basePrice);
+    const totalPrice = basePrice - discount;
 
     const created: any[] = [];
     const skipped: string[] = [];
@@ -252,10 +265,18 @@ router.post("/bookings/recurring", async (req, res) => {
         endTime,
         durationHours,
         totalPrice: String(totalPrice),
+        promoCode: promoCode || null,
+        discountAmount: String(discount),
         notes,
       }).returning();
       broadcastAvailabilityChange(Number(facilityId), bookingDate);
-      created.push({ ...booking, totalPrice: Number(booking.totalPrice), facilityName: facility.name, facilityCategory: facility.category, payment: null });
+      created.push({ ...booking, totalPrice: Number(booking.totalPrice), discountAmount: Number(booking.discountAmount), facilityName: facility.name, facilityCategory: facility.category, payment: null });
+    }
+
+    if (promoCode && created.length > 0) {
+      await db.update(promosTable)
+        .set({ usedCount: sql`${promosTable.usedCount} + ${created.length}` })
+        .where(eq(promosTable.code, String(promoCode).toUpperCase()));
     }
 
     res.status(201).json({ created, skipped, totalBookings: created.length, grandTotal: totalPrice * created.length });
