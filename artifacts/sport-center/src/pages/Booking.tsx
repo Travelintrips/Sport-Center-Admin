@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
-import { useLocation } from "wouter";
+import { useState, useEffect } from "react";
+import { useLocation, useSearch } from "wouter";
 import {
   useGetFacility,
   getGetFacilityQueryKey,
@@ -37,19 +37,16 @@ function formatDate(dateStr: string) {
 type RepeatType = "weekly" | "monthly";
 
 export default function Booking() {
-  const [location, setLocation] = useLocation();
+  const [, setLocation] = useLocation();
+  const search = useSearch();
   const { toast } = useToast();
 
-  const [queryParams, setQueryParams] = useState<URLSearchParams | null>(null);
-  useEffect(() => {
-    setQueryParams(new URLSearchParams(window.location.search));
-  }, []);
-
-  const facilityId = queryParams?.get("facilityId") ? parseInt(queryParams.get("facilityId")!) : 0;
-  const date = queryParams?.get("date") || "";
-  const startTime = queryParams?.get("startTime") || "";
-  const durationStr = queryParams?.get("duration") || "1";
-  const duration = parseInt(durationStr);
+  const queryParams = new URLSearchParams(search);
+  const facilityId = queryParams.get("facilityId") ? parseInt(queryParams.get("facilityId")!) : 0;
+  const date = queryParams.get("date") || "";
+  const startTime = queryParams.get("startTime") || "";
+  const durationStr = queryParams.get("duration") || "1";
+  const duration = parseInt(durationStr) || 1;
 
   const { data: facility, isLoading: isLoadingFacility } = useGetFacility(facilityId, {
     query: { enabled: !!facilityId, queryKey: getGetFacilityQueryKey(facilityId) },
@@ -94,19 +91,9 @@ export default function Booking() {
     },
   });
 
-  // ---- Recurring check (manual trigger via fetch) ----
-  const checkRecurring = useCheckRecurringBooking({
-    mutation: {
-      onSuccess: (data) => {
-        setCheckResult(data);
-        setIsChecking(false);
-      },
-      onError: () => {
-        setIsChecking(false);
-        toast({ title: "Gagal cek jadwal", variant: "destructive" });
-      },
-    },
-  });
+  // ---- Recurring check ----
+  const checkRecurring = useCheckRecurringBooking();
+  const checkRecurringMutate = checkRecurring.mutate;
 
   // ---- Recurring create ----
   const createRecurring = useCreateRecurringBooking({
@@ -129,33 +116,45 @@ export default function Booking() {
   useEffect(() => {
     if (!isRepeat || !facilityId || !date || !startTime || !duration) {
       setCheckResult(null);
+      setIsChecking(false);
       return;
     }
     setIsChecking(true);
     setCheckResult(null);
     const timer = setTimeout(() => {
-      checkRecurring.mutate({
-        data: {
-          facilityId,
-          startDate: date,
-          startTime,
-          durationHours: duration,
-          repeatType,
-          repeatCount,
+      checkRecurringMutate(
+        {
+          data: {
+            facilityId,
+            startDate: date,
+            startTime,
+            durationHours: duration,
+            repeatType,
+            repeatCount,
+          },
         },
-      });
+        {
+          onSuccess: (data) => {
+            setCheckResult(data);
+            setIsChecking(false);
+          },
+          onError: () => {
+            setIsChecking(false);
+            toast({ title: "Gagal cek jadwal", variant: "destructive" });
+          },
+        }
+      );
     }, 400);
     return () => clearTimeout(timer);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isRepeat, repeatType, repeatCount, facilityId, date, startTime, duration]);
+  }, [isRepeat, repeatType, repeatCount, facilityId, date, startTime, duration, checkRecurringMutate, toast]);
 
   // Redirect if missing params
   useEffect(() => {
-    if (queryParams && (!facilityId || !date || !startTime)) {
+    if (search && (!facilityId || !date || !startTime)) {
       toast({ title: "Detail booking tidak lengkap", description: "Silakan pilih fasilitas dan waktu terlebih dahulu.", variant: "destructive" });
       setLocation("/facilities");
     }
-  }, [queryParams, facilityId, date, startTime, setLocation, toast]);
+  }, [search, facilityId, date, startTime, setLocation, toast]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -207,7 +206,7 @@ export default function Booking() {
 
   const totalPrice = facility ? facility.pricePerHour * duration : 0;
 
-  if (isLoadingFacility || !queryParams) {
+  if (isLoadingFacility) {
     return (
       <div className="container py-20 flex justify-center">
         <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
