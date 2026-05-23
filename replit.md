@@ -61,6 +61,7 @@ Web app untuk manajemen dan pemesanan fasilitas olahraga — customer-facing boo
 
 ## User preferences
 
+- STOP explaining. Just give me the code.
 - Indonesian language content for demo data and facility names
 - Sporty orange-red primary theme (hsl ~16° orange-red)
 - Bold font-black headings, shadcn Card/Button/Input/Badge components
