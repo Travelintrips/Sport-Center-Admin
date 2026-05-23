@@ -97,7 +97,6 @@ export default function CustomerLayout({ children }: { children: ReactNode }) {
   const navLinks = [
     { href: "/", label: "Home" },
     { href: "/facilities", label: "Fasilitas" },
-    { href: "/membership", label: "Member Gym" },
     { href: "/promos", label: "Promo" },
     { href: "/contact", label: "Kontak" },
   ];
@@ -239,7 +238,6 @@ export default function CustomerLayout({ children }: { children: ReactNode }) {
               <h3 className="font-semibold text-lg mb-4">Link Cepat</h3>
               <ul className="space-y-2">
                 <li><Link href="/facilities" className="text-muted-foreground hover:text-primary transition-colors">Fasilitas</Link></li>
-                <li><Link href="/membership" className="text-muted-foreground hover:text-primary transition-colors">Member Gym</Link></li>
                 <li><Link href="/promos" className="text-muted-foreground hover:text-primary transition-colors">Promo & Events</Link></li>
                 <li><Link href="/my-bookings" className="text-muted-foreground hover:text-primary transition-colors">Booking Saya</Link></li>
                 <li><Link href="/contact" className="text-muted-foreground hover:text-primary transition-colors">Kontak Kami</Link></li>
