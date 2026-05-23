@@ -2,8 +2,31 @@ import { Router } from "express";
 import { db, settingsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
+import multer from "multer";
+import path from "path";
+import fs from "fs";
+import { randomUUID } from "crypto";
 
 const router = Router();
+
+const uploadsDir = path.join(process.cwd(), "../sport-center/public/uploads");
+if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+
+const storage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, uploadsDir),
+  filename: (_req, file, cb) => {
+    const ext = path.extname(file.originalname);
+    cb(null, `qris-${randomUUID()}${ext}`);
+  },
+});
+const upload = multer({
+  storage,
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (file.mimetype.startsWith("image/")) cb(null, true);
+    else cb(new Error("Only image files allowed"));
+  },
+});
 
 async function getOrCreateSettings() {
   const [settings] = await db.select().from(settingsTable).limit(1);
@@ -41,6 +64,38 @@ router.patch("/settings", adminMiddleware, async (req, res) => {
     res.json(updated);
   } catch (err) {
     req.log.error({ err }, "Update settings error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.post("/settings/qris", adminMiddleware, upload.single("qris"), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+    const settings = await getOrCreateSettings();
+    if (settings.qrisImageUrl) {
+      const oldFile = path.join(uploadsDir, path.basename(settings.qrisImageUrl));
+      if (fs.existsSync(oldFile)) fs.unlinkSync(oldFile);
+    }
+    const qrisImageUrl = `/uploads/${req.file.filename}`;
+    await db.update(settingsTable).set({ qrisImageUrl }).where(eq(settingsTable.id, settings.id));
+    res.json({ qrisImageUrl });
+  } catch (err) {
+    req.log.error({ err }, "Upload QRIS error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.delete("/settings/qris", adminMiddleware, async (req, res) => {
+  try {
+    const settings = await getOrCreateSettings();
+    if (settings.qrisImageUrl) {
+      const oldFile = path.join(uploadsDir, path.basename(settings.qrisImageUrl));
+      if (fs.existsSync(oldFile)) fs.unlinkSync(oldFile);
+    }
+    await db.update(settingsTable).set({ qrisImageUrl: null }).where(eq(settingsTable.id, settings.id));
+    res.json({ success: true });
+  } catch (err) {
+    req.log.error({ err }, "Delete QRIS error");
     res.status(500).json({ error: "Internal server error" });
   }
 });

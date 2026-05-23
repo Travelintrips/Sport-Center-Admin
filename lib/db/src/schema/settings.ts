@@ -15,6 +15,7 @@ export const settingsTable = pgTable("settings", {
   bankName: text("bank_name"),
   bankAccount: text("bank_account"),
   bankAccountName: text("bank_account_name"),
+  qrisImageUrl: text("qris_image_url"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });
