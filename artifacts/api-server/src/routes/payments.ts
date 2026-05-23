@@ -2,81 +2,8 @@ import { Router } from "express";
 import { db, paymentsTable, bookingsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
-import { getSupabaseAdmin } from "../lib/supabase";
-import multer from "multer";
-import path from "path";
-
-const PROOF_BUCKET = "payment-proofs";
-
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 },
-  fileFilter: (_req, file, cb) => {
-    const allowed = /jpeg|jpg|png|webp|pdf/;
-    const validExt = allowed.test(path.extname(file.originalname).toLowerCase());
-    const validMime = /image\/(jpeg|png|webp)|application\/pdf/.test(file.mimetype);
-    cb(null, validExt || validMime);
-  },
-});
-
-async function ensureProofBucket() {
-  const supabase = getSupabaseAdmin();
-  const { error } = await supabase.storage.getBucket(PROOF_BUCKET);
-  if (error) {
-    await supabase.storage.createBucket(PROOF_BUCKET, {
-      public: true,
-      fileSizeLimit: 10 * 1024 * 1024,
-    });
-  }
-}
-
-ensureProofBucket().catch(() => {});
-
-async function uploadProofToSupabase(
-  buffer: Buffer,
-  originalName: string,
-  mimetype: string
-): Promise<string> {
-  const supabase = getSupabaseAdmin();
-  const ext = path.extname(originalName).toLowerCase() || ".jpg";
-  const filename = `proof-${Date.now()}-${Math.random().toString(36).slice(2, 7)}${ext}`;
-
-  const { data, error } = await supabase.storage
-    .from(PROOF_BUCKET)
-    .upload(filename, buffer, { contentType: mimetype, upsert: false });
-
-  if (error) throw new Error(`Supabase upload failed: ${error.message}`);
-
-  const {
-    data: { publicUrl },
-  } = supabase.storage.from(PROOF_BUCKET).getPublicUrl(data.path);
-
-  return publicUrl;
-}
 
 const router = Router();
-
-router.post(
-  "/payments/proof-upload",
-  upload.single("proof"),
-  async (req, res) => {
-    try {
-      if (!req.file) {
-        res.status(400).json({ error: "No file provided" });
-        return;
-      }
-      const publicUrl = await uploadProofToSupabase(
-        req.file.buffer,
-        req.file.originalname,
-        req.file.mimetype
-      );
-      res.json({ url: publicUrl });
-    } catch (err) {
-      req.log.error({ err }, "Upload proof error");
-      res.status(500).json({ error: "Upload failed" });
-    }
-  }
-);
 
 router.get("/payments", async (req, res) => {
   try {
@@ -104,6 +31,10 @@ router.post("/payments", async (req, res) => {
         .update(paymentsTable)
         .set({ proofUrl, notes, status: "pending" })
         .where(eq(paymentsTable.bookingId, Number(bookingId)));
+      await db
+        .update(bookingsTable)
+        .set({ status: "paid" })
+        .where(eq(bookingsTable.id, Number(bookingId)));
       const [updated] = await db
         .select()
         .from(paymentsTable)

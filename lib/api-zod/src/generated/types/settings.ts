@@ -25,4 +25,6 @@ export interface Settings {
   bankAccount?: string | null;
   /** @nullable */
   bankAccountName?: string | null;
+  /** @nullable */
+  qrisImageUrl?: string | null;
 }

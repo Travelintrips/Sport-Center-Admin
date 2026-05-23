@@ -18,4 +18,5 @@ export interface SettingsUpdate {
   bankName?: string;
   bankAccount?: string;
   bankAccountName?: string;
+  qrisImageUrl?: string;
 }

@@ -706,6 +706,34 @@ export const ExportBookingsQueryParams = zod.object({
 
 
 /**
+ * @summary Request a presigned URL for file upload
+ */
+
+
+
+
+
+export const RequestUploadUrlBody = zod.object({
+  "name": zod.string().min(1),
+  "size": zod.number().min(1),
+  "contentType": zod.string().min(1)
+})
+
+export const RequestUploadUrlResponse = zod.object({
+  "uploadURL": zod.string().url(),
+  "objectPath": zod.string()
+})
+
+
+/**
+ * @summary Serve an object entity
+ */
+export const GetStorageObjectParams = zod.object({
+  "objectPath": zod.coerce.string()
+})
+
+
+/**
  * @summary Get app settings
  */
 export const GetSettingsResponse = zod.object({
@@ -720,7 +748,8 @@ export const GetSettingsResponse = zod.object({
   "logoUrl": zod.string().nullish(),
   "bankName": zod.string().nullish(),
   "bankAccount": zod.string().nullish(),
-  "bankAccountName": zod.string().nullish()
+  "bankAccountName": zod.string().nullish(),
+  "qrisImageUrl": zod.string().nullish()
 })
 
 
@@ -738,7 +767,8 @@ export const UpdateSettingsBody = zod.object({
   "logoUrl": zod.string().optional(),
   "bankName": zod.string().optional(),
   "bankAccount": zod.string().optional(),
-  "bankAccountName": zod.string().optional()
+  "bankAccountName": zod.string().optional(),
+  "qrisImageUrl": zod.string().optional()
 })
 
 export const UpdateSettingsResponse = zod.object({
@@ -753,7 +783,8 @@ export const UpdateSettingsResponse = zod.object({
   "logoUrl": zod.string().nullish(),
   "bankName": zod.string().nullish(),
   "bankAccount": zod.string().nullish(),
-  "bankAccountName": zod.string().nullish()
+  "bankAccountName": zod.string().nullish(),
+  "qrisImageUrl": zod.string().nullish()
 })
 
 

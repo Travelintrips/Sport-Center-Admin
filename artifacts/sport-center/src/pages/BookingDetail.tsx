@@ -9,7 +9,6 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { format } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -23,9 +22,14 @@ import {
   AlertCircle,
   ImageIcon,
   FileCheck2,
+  Building2,
+  QrCode,
+  ChevronRight,
 } from "lucide-react";
 
 const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "") || "";
+
+type PaymentMethod = "transfer" | "qris";
 
 export default function BookingDetail() {
   const [, params] = useRoute("/booking/:orderNumber");
@@ -39,6 +43,7 @@ export default function BookingDetail() {
   });
   const { data: settings } = useGetSettings();
 
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -95,23 +100,46 @@ export default function BookingDetail() {
 
     try {
       setUploadProgress("uploading");
-      const formData = new FormData();
-      formData.append("proof", selectedFile);
-      const token = localStorage.getItem("sport_center_token");
-      const resp = await fetch(`${BASE}/api/payments/proof-upload`, {
+
+      // Step 1: Request presigned upload URL
+      const urlResp = await fetch(`${BASE}/api/storage/uploads/request-url`, {
         method: "POST",
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-        body: formData,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: selectedFile.name,
+          size: selectedFile.size,
+          contentType: selectedFile.type,
+        }),
       });
-      if (!resp.ok) {
-        const err = await resp.json().catch(() => ({}));
-        throw new Error(err.error || "Upload gagal");
+
+      if (!urlResp.ok) {
+        const err = await urlResp.json().catch(() => ({}));
+        throw new Error(err.error || "Gagal mendapatkan URL upload");
       }
-      const { url } = await resp.json();
+
+      const { uploadURL, objectPath } = await urlResp.json();
+
+      // Step 2: Upload file directly to GCS
+      const uploadResp = await fetch(uploadURL, {
+        method: "PUT",
+        headers: { "Content-Type": selectedFile.type },
+        body: selectedFile,
+      });
+
+      if (!uploadResp.ok) {
+        throw new Error("Upload file gagal");
+      }
+
       setUploadProgress("done");
 
+      // Step 3: Submit payment with the object path as proof URL
       submitPayment.mutate({
-        data: { bookingId: booking.id, amount: booking.totalPrice, proofUrl: url, notes: notes || undefined },
+        data: {
+          bookingId: booking.id,
+          amount: booking.totalPrice,
+          proofUrl: `${BASE}/api/storage/objects/${objectPath.replace(/^\/objects\//, "")}`,
+          notes: notes || undefined,
+        },
       });
     } catch (err: any) {
       toast({ title: "Upload gagal", description: err.message, variant: "destructive" });
@@ -168,6 +196,9 @@ export default function BookingDetail() {
   const statusConfig = getStatusConfig(booking.status);
   const StatusIcon = statusConfig.icon;
   const isPending = uploadProgress === "uploading" || submitPayment.isPending;
+
+  const hasBankInfo = settings?.bankAccount && settings?.bankName;
+  const hasQris = !!(settings as any)?.qrisImageUrl;
 
   return (
     <div className="container mx-auto px-4 py-8 md:py-12 max-w-4xl">
@@ -242,147 +273,152 @@ export default function BookingDetail() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="p-6 space-y-5">
-                <p className="text-sm text-muted-foreground">
-                  Transfer tepat{" "}
-                  <strong className="text-foreground text-base">
+                <div className="text-sm font-semibold text-foreground">
+                  Bayar{" "}
+                  <span className="text-primary text-base">
                     Rp {booking.totalPrice.toLocaleString("id-ID")}
-                  </strong>{" "}
-                  ke rekening berikut:
-                </p>
-
-                {/* Bank account */}
-                <div className="bg-muted rounded-lg p-4 relative group">
-                  <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">
-                    {settings?.bankName || "BCA"}
-                  </div>
-                  <div className="text-2xl font-mono tracking-wider mb-1">
-                    {settings?.bankAccount || "1234567890"}
-                  </div>
-                  <div className="text-sm font-medium">
-                    a.n {settings?.bankAccountName || "SportCenter Official"}
-                  </div>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="absolute top-2 right-2 opacity-50 group-hover:opacity-100 transition-opacity"
-                    onClick={() => copyToClipboard(settings?.bankAccount || "1234567890")}
-                  >
-                    <Copy size={16} />
-                  </Button>
+                  </span>{" "}
+                  via:
                 </div>
 
-                {/* Upload proof form */}
-                <form onSubmit={handleSubmit} className="space-y-4">
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">Upload Bukti Transfer *</label>
-
-                    {!selectedFile ? (
-                      <div
-                        onClick={() => fileInputRef.current?.click()}
-                        onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
-                        onDragLeave={() => setIsDragging(false)}
-                        onDrop={onDrop}
-                        className={`w-full border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-colors ${
-                          isDragging
-                            ? "border-primary bg-primary/5"
-                            : "border-muted-foreground/30 hover:border-primary/50 hover:bg-muted/30"
-                        }`}
+                {/* Payment Method Selector */}
+                {!paymentMethod && (
+                  <div className="grid grid-cols-2 gap-3">
+                    {hasBankInfo && (
+                      <button
+                        type="button"
+                        onClick={() => setPaymentMethod("transfer")}
+                        className="flex flex-col items-center gap-3 p-5 rounded-2xl border-2 border-border hover:border-primary hover:bg-primary/5 transition-all group"
                       >
-                        <Upload size={28} className="mx-auto mb-2 text-muted-foreground" />
-                        <p className="text-sm font-medium text-muted-foreground">
-                          Drag & drop atau klik untuk upload
-                        </p>
-                        <p className="text-xs text-muted-foreground/70 mt-1">
-                          JPG, PNG, WebP, PDF — maks 10 MB
-                        </p>
-                      </div>
-                    ) : (
-                      <div className="relative rounded-xl overflow-hidden border border-primary/30 bg-muted/20">
-                        {previewUrl && selectedFile.type.startsWith("image/") ? (
-                          <img
-                            src={previewUrl}
-                            alt="Bukti pembayaran"
-                            className="w-full max-h-56 object-contain bg-checkered"
-                          />
-                        ) : (
-                          <div className="flex items-center gap-3 p-4">
-                            <FileCheck2 size={32} className="text-primary shrink-0" />
-                            <div>
-                              <div className="font-medium text-sm">{selectedFile.name}</div>
-                              <div className="text-xs text-muted-foreground">
-                                {(selectedFile.size / 1024).toFixed(0)} KB
-                              </div>
-                            </div>
-                          </div>
-                        )}
-                        <button
-                          type="button"
-                          onClick={clearFile}
-                          className="absolute top-2 right-2 bg-black/60 text-white rounded-full p-1 hover:bg-black/80 transition-colors"
-                        >
-                          <X size={14} />
-                        </button>
-                        <div className="px-3 py-2 border-t border-primary/20 flex items-center gap-2 bg-primary/5">
-                          <ImageIcon size={13} className="text-primary" />
-                          <span className="text-xs text-primary font-medium truncate">
-                            {selectedFile.name}
-                          </span>
+                        <div className="w-12 h-12 rounded-xl bg-blue-100 flex items-center justify-center group-hover:bg-blue-200 transition-colors">
+                          <Building2 size={22} className="text-blue-600" />
                         </div>
+                        <div className="text-center">
+                          <div className="font-semibold text-sm">Transfer Bank</div>
+                          <div className="text-xs text-muted-foreground mt-0.5">
+                            {settings?.bankName}
+                          </div>
+                        </div>
+                        <ChevronRight size={14} className="text-muted-foreground group-hover:text-primary transition-colors" />
+                      </button>
+                    )}
+                    {hasQris && (
+                      <button
+                        type="button"
+                        onClick={() => setPaymentMethod("qris")}
+                        className="flex flex-col items-center gap-3 p-5 rounded-2xl border-2 border-border hover:border-primary hover:bg-primary/5 transition-all group"
+                      >
+                        <div className="w-12 h-12 rounded-xl bg-orange-100 flex items-center justify-center group-hover:bg-orange-200 transition-colors">
+                          <QrCode size={22} className="text-orange-600" />
+                        </div>
+                        <div className="text-center">
+                          <div className="font-semibold text-sm">QRIS</div>
+                          <div className="text-xs text-muted-foreground mt-0.5">Scan & Pay</div>
+                        </div>
+                        <ChevronRight size={14} className="text-muted-foreground group-hover:text-primary transition-colors" />
+                      </button>
+                    )}
+                    {!hasBankInfo && !hasQris && (
+                      <div className="col-span-2 text-center py-4 text-sm text-muted-foreground">
+                        Hubungi admin untuk info pembayaran.
                       </div>
                     )}
+                  </div>
+                )}
 
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      accept="image/jpeg,image/png,image/webp,application/pdf"
-                      className="hidden"
-                      onChange={onFileChange}
+                {/* Transfer Bank */}
+                {paymentMethod === "transfer" && (
+                  <div className="space-y-4">
+                    <button
+                      type="button"
+                      onClick={() => { setPaymentMethod(null); clearFile(); }}
+                      className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
+                    >
+                      ← Pilih metode lain
+                    </button>
+
+                    <div className="bg-muted rounded-xl p-4 relative group">
+                      <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">
+                        {settings?.bankName}
+                      </div>
+                      <div className="text-2xl font-mono tracking-wider mb-1">
+                        {settings?.bankAccount}
+                      </div>
+                      <div className="text-sm font-medium">
+                        a.n {settings?.bankAccountName}
+                      </div>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="absolute top-2 right-2 opacity-50 group-hover:opacity-100 transition-opacity"
+                        onClick={() => copyToClipboard(settings?.bankAccount ?? "")}
+                      >
+                        <Copy size={16} />
+                      </Button>
+                    </div>
+
+                    <UploadProofForm
+                      selectedFile={selectedFile}
+                      previewUrl={previewUrl}
+                      isDragging={isDragging}
+                      setIsDragging={setIsDragging}
+                      onDrop={onDrop}
+                      onFileChange={onFileChange}
+                      clearFile={clearFile}
+                      fileInputRef={fileInputRef}
+                      notes={notes}
+                      setNotes={setNotes}
+                      handleSubmit={handleSubmit}
+                      isPending={isPending}
+                      uploadProgress={uploadProgress}
                     />
                   </div>
+                )}
 
-                  {/* Progress bar */}
-                  {uploadProgress === "uploading" && (
-                    <div className="space-y-1">
-                      <div className="flex justify-between text-xs text-muted-foreground">
-                        <span>Mengupload ke Supabase Storage…</span>
+                {/* QRIS */}
+                {paymentMethod === "qris" && (
+                  <div className="space-y-4">
+                    <button
+                      type="button"
+                      onClick={() => { setPaymentMethod(null); clearFile(); }}
+                      className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
+                    >
+                      ← Pilih metode lain
+                    </button>
+
+                    <div className="rounded-xl border border-border overflow-hidden">
+                      <div className="bg-muted px-4 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                        Scan QR Code Berikut
                       </div>
-                      <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-                        <div className="h-full bg-primary rounded-full animate-[progress_1.5s_ease-in-out_infinite]" style={{ width: "60%" }} />
+                      <div className="p-4 flex justify-center">
+                        <img
+                          src={(settings as any)?.qrisImageUrl}
+                          alt="QRIS Payment Code"
+                          className="max-w-xs w-full rounded-lg border border-border"
+                        />
+                      </div>
+                      <div className="px-4 pb-3 text-center text-sm text-muted-foreground">
+                        Scan dengan aplikasi e-wallet / m-banking apapun
                       </div>
                     </div>
-                  )}
 
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-muted-foreground">
-                      Catatan (opsional)
-                    </label>
-                    <textarea
-                      value={notes}
-                      onChange={(e) => setNotes(e.target.value)}
-                      placeholder="Misal: Transfer dari BCA a.n Budi..."
-                      rows={2}
-                      className="w-full px-3 py-2 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-ring resize-none"
+                    <UploadProofForm
+                      selectedFile={selectedFile}
+                      previewUrl={previewUrl}
+                      isDragging={isDragging}
+                      setIsDragging={setIsDragging}
+                      onDrop={onDrop}
+                      onFileChange={onFileChange}
+                      clearFile={clearFile}
+                      fileInputRef={fileInputRef}
+                      notes={notes}
+                      setNotes={setNotes}
+                      handleSubmit={handleSubmit}
+                      isPending={isPending}
+                      uploadProgress={uploadProgress}
                     />
                   </div>
-
-                  <Button
-                    type="submit"
-                    className="w-full"
-                    disabled={isPending || !selectedFile}
-                    size="lg"
-                  >
-                    {isPending ? (
-                      <span className="flex items-center gap-2">
-                        <span className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
-                        {uploadProgress === "uploading" ? "Mengupload..." : "Mengirim..."}
-                      </span>
-                    ) : (
-                      <span className="flex items-center gap-2">
-                        <CheckCircle2 size={18} /> Saya Sudah Bayar
-                      </span>
-                    )}
-                  </Button>
-                </form>
+                )}
               </CardContent>
             </Card>
           )}
@@ -402,7 +438,7 @@ export default function BookingDetail() {
             </Card>
           )}
 
-          {/* Confirmed state */}
+          {/* Confirmed / completed state */}
           {(booking.status === "confirmed" || booking.status === "completed") && (
             <Card className="border-green-200 bg-green-50/50">
               <CardContent className="p-6 text-center">
@@ -468,5 +504,148 @@ export default function BookingDetail() {
         </div>
       </div>
     </div>
+  );
+}
+
+/* ─── Upload Proof Form sub-component ──────────────────────────── */
+
+function UploadProofForm({
+  selectedFile,
+  previewUrl,
+  isDragging,
+  setIsDragging,
+  onDrop,
+  onFileChange,
+  clearFile,
+  fileInputRef,
+  notes,
+  setNotes,
+  handleSubmit,
+  isPending,
+  uploadProgress,
+}: {
+  selectedFile: File | null;
+  previewUrl: string | null;
+  isDragging: boolean;
+  setIsDragging: (v: boolean) => void;
+  onDrop: (e: React.DragEvent) => void;
+  onFileChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  clearFile: () => void;
+  fileInputRef: React.RefObject<HTMLInputElement | null>;
+  notes: string;
+  setNotes: (v: string) => void;
+  handleSubmit: (e: React.FormEvent) => void;
+  isPending: boolean;
+  uploadProgress: "idle" | "uploading" | "done";
+}) {
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div className="space-y-2">
+        <label className="text-sm font-semibold">Upload Bukti Pembayaran *</label>
+
+        {!selectedFile ? (
+          <div
+            onClick={() => fileInputRef.current?.click()}
+            onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+            onDragLeave={() => setIsDragging(false)}
+            onDrop={onDrop}
+            className={`w-full border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-colors ${
+              isDragging
+                ? "border-primary bg-primary/5"
+                : "border-muted-foreground/30 hover:border-primary/50 hover:bg-muted/30"
+            }`}
+          >
+            <Upload size={28} className="mx-auto mb-2 text-muted-foreground" />
+            <p className="text-sm font-medium text-muted-foreground">
+              Drag & drop atau klik untuk upload
+            </p>
+            <p className="text-xs text-muted-foreground/70 mt-1">
+              JPG, PNG, WebP, PDF — maks 10 MB
+            </p>
+          </div>
+        ) : (
+          <div className="relative rounded-xl overflow-hidden border border-primary/30 bg-muted/20">
+            {previewUrl && selectedFile.type.startsWith("image/") ? (
+              <img
+                src={previewUrl}
+                alt="Bukti pembayaran"
+                className="w-full max-h-56 object-contain bg-checkered"
+              />
+            ) : (
+              <div className="flex items-center gap-3 p-4">
+                <FileCheck2 size={32} className="text-primary shrink-0" />
+                <div>
+                  <div className="font-medium text-sm">{selectedFile.name}</div>
+                  <div className="text-xs text-muted-foreground">
+                    {(selectedFile.size / 1024).toFixed(0)} KB
+                  </div>
+                </div>
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={clearFile}
+              className="absolute top-2 right-2 bg-black/60 text-white rounded-full p-1 hover:bg-black/80 transition-colors"
+            >
+              <X size={14} />
+            </button>
+            <div className="px-3 py-2 border-t border-primary/20 flex items-center gap-2 bg-primary/5">
+              <ImageIcon size={13} className="text-primary" />
+              <span className="text-xs text-primary font-medium truncate">
+                {selectedFile.name}
+              </span>
+            </div>
+          </div>
+        )}
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/jpeg,image/png,image/webp,application/pdf"
+          className="hidden"
+          onChange={onFileChange}
+        />
+      </div>
+
+      {uploadProgress === "uploading" && (
+        <div className="space-y-1">
+          <div className="text-xs text-muted-foreground">Mengupload file...</div>
+          <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+            <div className="h-full bg-primary rounded-full animate-pulse" style={{ width: "70%" }} />
+          </div>
+        </div>
+      )}
+
+      <div className="space-y-2">
+        <label className="text-sm font-medium text-muted-foreground">
+          Catatan (opsional)
+        </label>
+        <textarea
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          placeholder="Misal: Transfer dari BCA a.n Budi..."
+          rows={2}
+          className="w-full px-3 py-2 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-ring resize-none"
+        />
+      </div>
+
+      <Button
+        type="submit"
+        className="w-full"
+        disabled={isPending || !selectedFile}
+        size="lg"
+      >
+        {isPending ? (
+          <span className="flex items-center gap-2">
+            <span className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
+            {uploadProgress === "uploading" ? "Mengupload..." : "Mengirim..."}
+          </span>
+        ) : (
+          <span className="flex items-center gap-2">
+            <CheckCircle2 size={18} /> Saya Sudah Bayar
+          </span>
+        )}
+      </Button>
+    </form>
   );
 }

@@ -11,10 +11,12 @@ import customersRouter from "./customers";
 import dashboardRouter from "./dashboard";
 import settingsRouter from "./settings";
 import configRouter from "./config";
+import storageRouter from "./storage";
 
 const router: IRouter = Router();
 
 router.use(healthRouter);
+router.use(storageRouter);
 router.use(configRouter);
 router.use(authRouter);
 router.use(facilitiesRouter);
