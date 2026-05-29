@@ -101,7 +101,7 @@ router.post("/payments", async (req, res) => {
 
 router.patch("/payments/:id", adminMiddleware, async (req, res) => {
   try {
-    const id = parseInt(req.params.id);
+    const id = parseInt(String(req.params.id));
     const { status, notes } = req.body;
     const updateData: Record<string, unknown> = {};
     if (status) updateData.status = status;

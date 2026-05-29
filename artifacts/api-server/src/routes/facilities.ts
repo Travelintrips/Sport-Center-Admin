@@ -116,7 +116,7 @@ router.post("/facilities", adminMiddleware, async (req, res) => {
 
 router.get("/facilities/:id", async (req, res) => {
   try {
-    const id = parseInt(req.params.id);
+    const id = parseInt(String(req.params.id));
     const facility = await getFacilityWithImages(id);
     if (!facility) {
       res.status(404).json({ error: "Not found" });
@@ -131,7 +131,7 @@ router.get("/facilities/:id", async (req, res) => {
 
 router.patch("/facilities/:id", adminMiddleware, async (req, res) => {
   try {
-    const id = parseInt(req.params.id);
+    const id = parseInt(String(req.params.id));
     const { imageUrls, ...data } = req.body;
     const updateData: Record<string, unknown> = { ...data };
     if (data.pricePerHour !== undefined)
@@ -173,7 +173,7 @@ router.patch("/facilities/:id", adminMiddleware, async (req, res) => {
 
 router.delete("/facilities/:id", adminMiddleware, async (req, res) => {
   try {
-    const id = parseInt(req.params.id);
+    const id = parseInt(String(req.params.id));
     const images = await db
       .select()
       .from(facilityImagesTable)
@@ -197,7 +197,7 @@ router.post(
         res.status(400).json({ error: "No image file provided" });
         return;
       }
-      const id = parseInt(req.params.id);
+      const id = parseInt(String(req.params.id));
       const publicUrl = getPublicUrl(req.file.filename);
 
       const existingImages = await db
@@ -224,7 +224,7 @@ router.delete(
   adminMiddleware,
   async (req, res) => {
     try {
-      const imageId = parseInt(req.params.imageId);
+      const imageId = parseInt(String(req.params.imageId));
       const [img] = await db
         .select()
         .from(facilityImagesTable)
@@ -264,8 +264,8 @@ router.patch(
   adminMiddleware,
   async (req, res) => {
     try {
-      const facilityId = parseInt(req.params.id);
-      const imageId = parseInt(req.params.imageId);
+      const facilityId = parseInt(String(req.params.id));
+      const imageId = parseInt(String(req.params.imageId));
       await db
         .update(facilityImagesTable)
         .set({ isPrimary: false })

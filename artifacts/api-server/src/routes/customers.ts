@@ -36,7 +36,7 @@ router.get("/customers", adminMiddleware, async (req, res) => {
 
 router.get("/customers/:id", adminMiddleware, async (req, res) => {
   try {
-    const id = parseInt(req.params.id);
+    const id = parseInt(String(req.params.id));
     const [user] = await db.select().from(usersTable).where(eq(usersTable.id, id)).limit(1);
     if (!user) { res.status(404).json({ error: "Not found" }); return; }
     const userBookings = await db.select().from(bookingsTable).where(eq(bookingsTable.customerId, id));

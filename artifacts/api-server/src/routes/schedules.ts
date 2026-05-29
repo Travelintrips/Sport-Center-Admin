@@ -45,7 +45,7 @@ router.post("/blocked-schedules", adminMiddleware, async (req, res) => {
 
 router.delete("/blocked-schedules/:id", adminMiddleware, async (req, res) => {
   try {
-    const id = parseInt(req.params.id);
+    const id = parseInt(String(req.params.id));
     const [deleted] = await db.delete(blockedSchedulesTable)
       .where(eq(blockedSchedulesTable.id, id))
       .returning();

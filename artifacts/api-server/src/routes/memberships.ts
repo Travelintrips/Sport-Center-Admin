@@ -21,7 +21,7 @@ router.get("/memberships", adminMiddleware, async (req, res) => {
 
 router.get("/memberships/:id", adminMiddleware, async (req, res) => {
   try {
-    const id = parseInt(req.params.id);
+    const id = parseInt(String(req.params.id));
     const [membership] = await db.select().from(gymMembershipsTable).where(eq(gymMembershipsTable.id, id)).limit(1);
     if (!membership) { res.status(404).json({ error: "Not found" }); return; }
     res.json({ ...membership, totalPrice: Number(membership.totalPrice) });
@@ -66,7 +66,7 @@ router.post("/memberships", async (req, res) => {
 
 router.patch("/memberships/:id", adminMiddleware, async (req, res) => {
   try {
-    const id = parseInt(req.params.id);
+    const id = parseInt(String(req.params.id));
     const data = { ...req.body };
     if (data.totalPrice !== undefined) data.totalPrice = String(data.totalPrice);
     await db.update(gymMembershipsTable).set(data).where(eq(gymMembershipsTable.id, id));
@@ -81,7 +81,7 @@ router.patch("/memberships/:id", adminMiddleware, async (req, res) => {
 
 router.delete("/memberships/:id", adminMiddleware, async (req, res) => {
   try {
-    const id = parseInt(req.params.id);
+    const id = parseInt(String(req.params.id));
     await db.delete(gymMembershipsTable).where(eq(gymMembershipsTable.id, id));
     res.status(204).send();
   } catch (err) {

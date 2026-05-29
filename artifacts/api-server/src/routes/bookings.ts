@@ -304,7 +304,7 @@ router.get("/bookings/order/:orderNumber", async (req, res) => {
 
 router.get("/bookings/:id", async (req, res) => {
   try {
-    const id = parseInt(req.params.id);
+    const id = parseInt(String(req.params.id));
     const result = await getBookingWithPayment(id);
     if (!result) {
       res.status(404).json({ error: "Not found" });
@@ -319,7 +319,7 @@ router.get("/bookings/:id", async (req, res) => {
 
 router.delete("/bookings/:id", adminMiddleware, async (req, res) => {
   try {
-    const id = parseInt(req.params.id);
+    const id = parseInt(String(req.params.id));
     const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, id)).limit(1);
     if (!booking) {
       res.status(404).json({ error: "Not found" });
@@ -338,7 +338,7 @@ const ADMIN_ONLY_STATUSES = ["completed", "cancelled", "refunded"] as const;
 
 router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
   try {
-    const id = parseInt(req.params.id);
+    const id = parseInt(String(req.params.id));
     const { status, adminNotes } = req.body;
 
     const validStatuses = ["pending_payment", "paid", "confirmed", "completed", "cancelled", "refunded"];

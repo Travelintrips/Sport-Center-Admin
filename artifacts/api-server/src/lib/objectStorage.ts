@@ -56,4 +56,5 @@ export class ObjectStorageService {
   }
 }
 
-export { ObjectAclPolicy, ObjectPermission, canAccessObject, getObjectAclPolicy, setObjectAclPolicy };
+export type { ObjectAclPolicy, ObjectPermission };
+export { canAccessObject, getObjectAclPolicy, setObjectAclPolicy };

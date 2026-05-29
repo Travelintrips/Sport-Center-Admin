@@ -82,7 +82,7 @@ router.patch("/settings", adminMiddleware, async (req, res) => {
 
 router.post("/settings/qris", adminMiddleware, upload.single("qris"), async (req, res) => {
   try {
-    if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+    if (!req.file) { res.status(400).json({ error: "No file uploaded" }); return; }
     const settings = await getOrCreateSettings();
     if (settings.qrisImageUrl) {
       const oldFile = path.join(uploadsDir, path.basename(settings.qrisImageUrl));

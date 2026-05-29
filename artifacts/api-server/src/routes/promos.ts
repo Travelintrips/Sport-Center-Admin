@@ -99,7 +99,7 @@ router.post("/promos", adminMiddleware, async (req, res) => {
 
 router.patch("/promos/:id", adminMiddleware, async (req, res) => {
   try {
-    const id = parseInt(req.params.id);
+    const id = parseInt(String(req.params.id));
     const data = { ...req.body };
     if (data.discountPercent !== undefined) data.discountPercent = String(data.discountPercent);
     if (data.discountAmount !== undefined) data.discountAmount = String(data.discountAmount);
@@ -116,7 +116,7 @@ router.patch("/promos/:id", adminMiddleware, async (req, res) => {
 
 router.delete("/promos/:id", adminMiddleware, async (req, res) => {
   try {
-    const id = parseInt(req.params.id);
+    const id = parseInt(String(req.params.id));
     await db.delete(promosTable).where(eq(promosTable.id, id));
     res.status(204).send();
   } catch (err) {
