@@ -15,7 +15,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { format, parseISO } from "date-fns";
-import { id as idLocale } from "date-fns/locale";
+import { id as idLocale, enUS } from "date-fns/locale";
 import {
   MapPin, Calendar, Clock, Receipt, ChevronLeft,
   RefreshCw, CheckCircle2, XCircle, AlertTriangle, Loader2, Pencil, X as IconX
@@ -27,9 +27,9 @@ function formatCurrency(n: number) {
   return "Rp " + n.toLocaleString("id-ID");
 }
 
-function formatDate(dateStr: string) {
+function formatDate(dateStr: string, lang: string = "id") {
   try {
-    return format(parseISO(dateStr), "EEEE, d MMMM yyyy", { locale: idLocale });
+    return format(parseISO(dateStr), "EEEE, d MMMM yyyy", { locale: lang === "en" ? enUS : idLocale });
   } catch {
     return dateStr;
   }
@@ -41,7 +41,7 @@ export default function Booking() {
   const [, setLocation] = useLocation();
   const search = useSearch();
   const { toast } = useToast();
-  const { t } = useLang();
+  const { t, lang } = useLang();
 
   const queryParams = new URLSearchParams(search);
   const facilityId = queryParams.get("facilityId") ? parseInt(queryParams.get("facilityId")!) : 0;
@@ -342,7 +342,7 @@ export default function Booking() {
               <AlertTriangle size={15} /> {t("Slot yang dilewati karena konflik:", "Slots skipped due to conflict:")}
             </div>
             {recurringResult.skipped.map((d) => (
-              <div key={d} className="text-sm text-orange-600">{formatDate(d)}</div>
+              <div key={d} className="text-sm text-orange-600">{formatDate(d, lang)}</div>
             ))}
           </div>
         )}

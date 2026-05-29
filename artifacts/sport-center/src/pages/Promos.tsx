@@ -8,14 +8,15 @@ import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Calendar, Tag, Info, Gift, MapPin, ArrowRight, Zap } from "lucide-react";
 import { format } from "date-fns";
-import { id } from "date-fns/locale";
+import { id, enUS } from "date-fns/locale";
 import { getFacilityImage } from "@/lib/utils";
 import { useLang } from "@/lib/i18n";
 
 export default function Promos() {
   const { data: promos, isLoading } = useListPromos({ activeOnly: true });
   const { toast } = useToast();
-  const { t } = useLang();
+  const { t, lang } = useLang();
+  const dfLocale = lang === "en" ? enUS : id;
   
   const [selectedPromo, setSelectedPromo] = useState<number | null>(null);
   const [isRegisterOpen, setIsRegisterOpen] = useState(false);
@@ -146,9 +147,9 @@ export default function Promos() {
                       <div className="flex items-center gap-3 text-sm font-semibold text-muted-foreground bg-[#F8FAFC] dark:bg-slate-950 p-3 rounded-xl border border-border/50">
                         <Calendar size={18} className="text-primary shrink-0" />
                         <div>
-                          {promo.startDate && format(new Date(promo.startDate), 'dd MMMM yyyy', { locale: id })}
+                          {promo.startDate && format(new Date(promo.startDate), 'dd MMMM yyyy', { locale: dfLocale })}
                           {promo.startDate && promo.endDate && ' - '}
-                          {promo.endDate && format(new Date(promo.endDate), 'dd MMMM yyyy', { locale: id })}
+                          {promo.endDate && format(new Date(promo.endDate), 'dd MMMM yyyy', { locale: dfLocale })}
                         </div>
                       </div>
                     )}

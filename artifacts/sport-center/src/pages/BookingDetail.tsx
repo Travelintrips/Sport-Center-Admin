@@ -128,14 +128,14 @@ export default function BookingDetail() {
         },
       });
     } catch (err: any) {
-      toast({ title: "Upload gagal", description: err.message, variant: "destructive" });
+      toast({ title: t("Upload gagal", "Upload failed"), description: err.message, variant: "destructive" });
       setUploadProgress("idle");
     }
   };
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
-    toast({ title: "Disalin ke clipboard" });
+    toast({ title: t("Disalin ke clipboard", "Copied to clipboard") });
   };
 
   const getWhatsAppLink = () => {

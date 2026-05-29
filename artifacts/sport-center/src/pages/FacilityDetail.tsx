@@ -17,7 +17,7 @@ import {
   SelectValue 
 } from "@/components/ui/select";
 import { format } from "date-fns";
-import { id } from "date-fns/locale";
+import { id, enUS } from "date-fns/locale";
 import { 
   Clock, 
   Users, 
@@ -34,7 +34,7 @@ import { getFacilityImage } from "@/lib/utils";
 import { useLang } from "@/lib/i18n";
 
 export default function FacilityDetail() {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const [, params] = useRoute("/facilities/:id");
   const [, setLocation] = useLocation();
   const facilityId = params?.id ? parseInt(params.id) : 0;
@@ -223,7 +223,7 @@ export default function FacilityDetail() {
                         onSelect={setDate}
                         disabled={(d) => d < new Date(new Date().setHours(0,0,0,0))}
                         className="rounded-xl bg-transparent"
-                        locale={id}
+                        locale={lang === "en" ? enUS : id}
                       />
                     </div>
                   </div>
