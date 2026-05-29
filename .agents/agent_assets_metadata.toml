@@ -1,0 +1,50 @@
+uploads = []
+outputs = []
+
+[[generated]]
+id = "YDdMT_89l0u49cYH90Wua"
+uri = "file://artifacts/sport-center/public/hero.png"
+type = "image"
+title = "Sport Center Hero Image"
+
+[[generated]]
+id = "YpxOmDP2YLFGQ_SdbaT3s"
+uri = "file://artifacts/sport-center/public/futsal.png"
+type = "image"
+title = "Futsal Court"
+
+[[generated]]
+id = "2sGYSXohD2n59wyOLMyac"
+uri = "file://artifacts/sport-center/public/basket.png"
+type = "image"
+title = "Basketball Court"
+
+[[generated]]
+id = "1whWZ63fitIqyQV2Kq0xL"
+uri = "file://artifacts/sport-center/public/voli.png"
+type = "image"
+title = "Volleyball Court"
+
+[[generated]]
+id = "fucFsZ3eXhKCNLKhX4ROf"
+uri = "file://artifacts/sport-center/public/tennis.png"
+type = "image"
+title = "Tennis Court"
+
+[[generated]]
+id = "wS8I69eIOG5E8wU3dHQdy"
+uri = "file://artifacts/sport-center/public/badminton.png"
+type = "image"
+title = "Badminton Court"
+
+[[generated]]
+id = "ElxhfGL22YGvlg1YdY0Cc"
+uri = "file://artifacts/sport-center/public/gym.png"
+type = "image"
+title = "Gym and Fitness"
+
+[[generated]]
+id = "JTbyYx_9iRTy5pwr4cJiJ"
+uri = "file://artifacts/sport-center/public/billiard.png"
+type = "image"
+title = "Billiard Lounge"

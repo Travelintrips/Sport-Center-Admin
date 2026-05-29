@@ -76,48 +76,49 @@
   --elevate-1: rgba(0,0,0, .03);
   --elevate-2: rgba(0,0,0, .08);
 
-  --background: 0 0% 100%;
-  --foreground: 240 10% 3.9%;
-  --border: 240 5.9% 90%;
+  --background: 210 40% 98%; /* #F8FAFC */
+  --foreground: 222.2 47.4% 11.2%; /* #0F172A */
+  --border: 214.3 31.8% 91.4%;
   
-  --card: 0 0% 100%;
-  --card-foreground: 240 10% 3.9%;
-  --card-border: 240 5.9% 90%;
+  --card: 0 0% 100%; /* White */
+  --card-foreground: 222.2 47.4% 11.2%;
+  --card-border: 214.3 31.8% 91.4%;
 
-  --sidebar: 0 0% 98%;
-  --sidebar-foreground: 240 5.3% 26.1%;
-  --sidebar-border: 240 5.9% 90%;
-  --sidebar-primary: 240 5.9% 10%;
-  --sidebar-primary-foreground: 0 0% 98%;
-  --sidebar-accent: 240 4.8% 95.9%;
-  --sidebar-accent-foreground: 240 5.9% 10%;
-  --sidebar-ring: 240 5% 64.9%;
+  --sidebar: 0 0% 100%;
+  --sidebar-foreground: 222.2 47.4% 11.2%;
+  --sidebar-border: 214.3 31.8% 91.4%;
+  --sidebar-primary: 24.6 95% 53.1%;
+  --sidebar-primary-foreground: 0 0% 100%;
+  --sidebar-accent: 210 40% 96.1%;
+  --sidebar-accent-foreground: 222.2 47.4% 11.2%;
+  --sidebar-ring: 24.6 95% 53.1%;
 
   --popover: 0 0% 100%;
-  --popover-foreground: 240 10% 3.9%;
-  --popover-border: 240 5.9% 90%;
+  --popover-foreground: 222.2 47.4% 11.2%;
+  --popover-border: 214.3 31.8% 91.4%;
 
-  /* Sporty orange-red for vibrant CTA */
-  --primary: 15 90% 55%; 
+  /* Primary: Orange #F97316 */
+  --primary: 24.6 95% 53.1%; 
   --primary-foreground: 0 0% 100%;
 
-  --secondary: 240 4.8% 95.9%;
-  --secondary-foreground: 240 5.9% 10%;
+  /* Secondary: Navy #0F172A */
+  --secondary: 222.2 47.4% 11.2%;
+  --secondary-foreground: 0 0% 100%;
 
-  --muted: 240 4.8% 95.9%;
-  --muted-foreground: 240 3.8% 46.1%;
+  --muted: 210 40% 96.1%;
+  --muted-foreground: 215.4 16.3% 46.9%; /* #475569 */
 
-  --accent: 240 4.8% 95.9%;
-  --accent-foreground: 240 5.9% 10%;
+  --accent: 210 40% 96.1%;
+  --accent-foreground: 222.2 47.4% 11.2%;
 
   --destructive: 0 84.2% 60.2%;
   --destructive-foreground: 0 0% 98%;
 
-  --input: 240 5.9% 90%;
-  --ring: 15 90% 55%;
+  --input: 214.3 31.8% 91.4%;
+  --ring: 24.6 95% 53.1%;
 
-  --chart-1: 15 90% 55%;
-  --chart-2: 215 90% 50%;
+  --chart-1: 24.6 95% 53.1%;
+  --chart-2: 222.2 47.4% 11.2%;
   --chart-3: 140 70% 50%;
   --chart-4: 280 80% 60%;
   --chart-5: 45 90% 55%;
@@ -125,7 +126,7 @@
   --app-font-sans: 'Inter', sans-serif;
   --app-font-serif: Georgia, serif;
   --app-font-mono: Menlo, monospace;
-  --radius: .5rem; 
+  --radius: 0.75rem; 
 }
 
 .dark {

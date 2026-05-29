@@ -1,14 +1,15 @@
 import { useState } from "react";
-import { useListPromos, useRegisterPromo, getListPromosQueryKey } from "@workspace/api-client-react";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
+import { useListPromos, useRegisterPromo } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
-import { Calendar, Tag, Info } from "lucide-react";
+import { Calendar, Tag, Info, Gift, MapPin, ArrowRight, Zap } from "lucide-react";
 import { format } from "date-fns";
+import { id } from "date-fns/locale";
+import { getFacilityImage } from "@/lib/utils";
 
 export default function Promos() {
   const { data: promos, isLoading } = useListPromos({ activeOnly: true });
@@ -27,16 +28,16 @@ export default function Promos() {
     mutation: {
       onSuccess: () => {
         toast({
-          title: "Registration successful",
-          description: "We will contact you shortly with more details.",
+          title: "Pendaftaran Berhasil!",
+          description: "Tim kami akan segera menghubungi Anda melalui WhatsApp.",
         });
         setIsRegisterOpen(false);
         resetForm();
       },
       onError: (error: any) => {
         toast({
-          title: "Registration failed",
-          description: error?.message || "Something went wrong. Please try again.",
+          title: "Pendaftaran Gagal",
+          description: error?.message || "Terjadi kesalahan. Silakan coba lagi.",
           variant: "destructive",
         });
       }
@@ -74,115 +75,156 @@ export default function Promos() {
   const activePromo = promos?.find(p => p.id === selectedPromo);
 
   return (
-    <div className="container mx-auto px-4 py-8 md:py-12">
-      <div className="mb-10 text-center max-w-2xl mx-auto">
-        <h1 className="text-3xl md:text-5xl font-black tracking-tight mb-4">Promos & Events</h1>
-        <p className="text-muted-foreground text-lg">
-          Join our upcoming tournaments, classes, or grab a special discount for your next booking.
-        </p>
+    <div className="min-h-screen bg-[#F8FAFC] dark:bg-slate-950 pb-20">
+      <div className="bg-primary/10 dark:bg-primary/5 pt-16 pb-24 rounded-b-[40px] md:rounded-b-[80px] mb-12 relative overflow-hidden">
+        <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-primary/20 rounded-full blur-[80px] pointer-events-none" />
+        
+        <div className="container mx-auto px-4 md:px-8 relative z-10">
+          <div className="max-w-3xl mx-auto text-center">
+            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 text-primary font-bold text-sm mb-6 border border-primary/20 shadow-sm">
+              <Gift size={16} /> Penawaran Terbatas
+            </div>
+            <h1 className="text-4xl md:text-5xl lg:text-6xl font-black tracking-tight text-secondary dark:text-white mb-6 leading-tight">
+              Promo & <span className="text-primary">Acara Spesial</span>
+            </h1>
+            <p className="text-lg md:text-xl font-medium text-muted-foreground leading-relaxed max-w-2xl mx-auto">
+              Berolahraga lebih hemat! Temukan penawaran menarik bulan ini atau daftar untuk turnamen dan event seru kami.
+            </p>
+          </div>
+        </div>
       </div>
 
-      {isLoading ? (
-        <div className="flex justify-center py-20">
-          <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
-        </div>
-      ) : promos && promos.length > 0 ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-5xl mx-auto">
-          {promos.map((promo) => (
-            <Card key={promo.id} className="overflow-hidden flex flex-col border-border">
-              {promo.imageUrl && (
-                <div className="aspect-[2/1] relative overflow-hidden bg-muted">
-                  <img src={promo.imageUrl} alt={promo.title} className="w-full h-full object-cover" />
+      <div className="container mx-auto px-4 md:px-8">
+        {isLoading ? (
+          <div className="flex justify-center py-20">
+            <div className="animate-spin w-12 h-12 border-4 border-primary border-t-transparent rounded-full" />
+          </div>
+        ) : promos && promos.length > 0 ? (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 max-w-6xl mx-auto">
+            {promos.map((promo) => (
+              <div key={promo.id} className="bg-white dark:bg-slate-900 rounded-3xl overflow-hidden border border-border shadow-lg hover:shadow-xl transition-all duration-500 flex flex-col h-full group transform hover:-translate-y-1">
+                {/* Visual Header */}
+                <div className="aspect-[16/9] sm:aspect-[2/1] relative overflow-hidden bg-muted p-3 pb-0">
+                  <div className="w-full h-full rounded-t-2xl rounded-b-lg overflow-hidden relative">
+                    <img 
+                      src={promo.imageUrl || getFacilityImage(promo.title)} 
+                      alt={promo.title} 
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" 
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
+                    
+                    <div className="absolute top-4 left-4 flex gap-2">
+                      <span className={`px-3 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider shadow-lg flex items-center gap-1.5 ${
+                        promo.type === 'promo' 
+                          ? 'bg-orange-500 text-white' 
+                          : 'bg-blue-600 text-white'
+                      }`}>
+                        {promo.type === 'promo' ? <Tag size={14} /> : <Zap size={14} />}
+                        {promo.type === 'promo' ? 'Promo' : 'Event'}
+                      </span>
+                    </div>
+
+                    {promo.discountPercent && (
+                      <div className="absolute bottom-0 right-4 translate-y-1/2 z-10">
+                        <div className="w-20 h-20 bg-primary text-white rounded-full flex flex-col items-center justify-center font-black shadow-xl border-4 border-white dark:border-slate-900 transform rotate-12 group-hover:rotate-0 transition-transform">
+                          <span className="text-2xl leading-none">{promo.discountPercent}%</span>
+                          <span className="text-[10px] tracking-wider">DISKON</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
-              )}
-              
-              <CardHeader>
-                <div className="flex items-center gap-2 mb-2">
-                  <span className={`px-2 py-1 rounded text-xs font-bold uppercase tracking-wider ${promo.type === 'promo' ? 'bg-orange-100 text-orange-700' : 'bg-blue-100 text-blue-700'}`}>
-                    {promo.type}
-                  </span>
-                  {promo.discountPercent && (
-                    <span className="px-2 py-1 rounded text-xs font-bold bg-green-100 text-green-700 flex items-center gap-1">
-                      <Tag size={12} />
-                      {promo.discountPercent}% OFF
-                    </span>
-                  )}
+                
+                {/* Content */}
+                <div className="p-6 sm:p-8 flex-1 flex flex-col">
+                  <h3 className="text-2xl font-black text-secondary dark:text-white mb-4 pr-16">{promo.title}</h3>
+                  
+                  <div className="space-y-3 mb-6">
+                    {(promo.startDate || promo.endDate) && (
+                      <div className="flex items-center gap-3 text-sm font-semibold text-muted-foreground bg-[#F8FAFC] dark:bg-slate-950 p-3 rounded-xl border border-border/50">
+                        <Calendar size={18} className="text-primary shrink-0" />
+                        <div>
+                          {promo.startDate && format(new Date(promo.startDate), 'dd MMMM yyyy', { locale: id })}
+                          {promo.startDate && promo.endDate && ' - '}
+                          {promo.endDate && format(new Date(promo.endDate), 'dd MMMM yyyy', { locale: id })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <p className="text-muted-foreground font-medium whitespace-pre-line mb-8 flex-1 leading-relaxed">{promo.description}</p>
+                  
+                  <div className="mt-auto pt-6 border-t border-border flex justify-between items-center gap-4">
+                    <Button 
+                      className="w-full h-14 rounded-full font-bold text-base shadow-md shadow-primary/20 group-hover:bg-primary/90" 
+                      onClick={() => handleRegisterClick(promo.id)}
+                      variant={promo.type === 'event' ? 'default' : 'outline'}
+                    >
+                      {promo.type === 'event' ? (
+                        <>Daftar Event Ini <ArrowRight size={18} className="ml-2" /></>
+                      ) : (
+                        <>Ambil Diskon <Tag size={18} className="ml-2" /></>
+                      )}
+                    </Button>
+                  </div>
                 </div>
-                <CardTitle className="text-2xl">{promo.title}</CardTitle>
-                {(promo.startDate || promo.endDate) && (
-                  <CardDescription className="flex items-center gap-2 mt-2 text-foreground font-medium">
-                    <Calendar size={14} className="text-muted-foreground" />
-                    {promo.startDate && format(new Date(promo.startDate), 'MMM d, yyyy')}
-                    {promo.startDate && promo.endDate && ' - '}
-                    {promo.endDate && format(new Date(promo.endDate), 'MMM d, yyyy')}
-                  </CardDescription>
-                )}
-              </CardHeader>
-              <CardContent className="flex-1">
-                <p className="text-muted-foreground whitespace-pre-line">{promo.description}</p>
-              </CardContent>
-              <CardFooter className="pt-4 border-t bg-muted/10">
-                <Button 
-                  className="w-full" 
-                  onClick={() => handleRegisterClick(promo.id)}
-                  variant={promo.type === 'event' ? 'default' : 'secondary'}
-                >
-                  {promo.type === 'event' ? 'Register Now' : 'Claim Offer'}
-                </Button>
-              </CardFooter>
-            </Card>
-          ))}
-        </div>
-      ) : (
-        <div className="text-center py-20 bg-muted/30 rounded-xl max-w-2xl mx-auto border border-dashed">
-          <Info className="w-12 h-12 mx-auto text-muted-foreground mb-4 opacity-50" />
-          <h3 className="text-xl font-bold mb-2">No active promos</h3>
-          <p className="text-muted-foreground">Check back later for exciting events and special offers!</p>
-        </div>
-      )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="text-center py-24 bg-white dark:bg-slate-900 rounded-3xl max-w-2xl mx-auto border border-dashed shadow-sm">
+            <div className="w-20 h-20 bg-muted rounded-full flex items-center justify-center mx-auto mb-6">
+              <Info className="w-8 h-8 text-muted-foreground opacity-50" />
+            </div>
+            <h3 className="text-2xl font-black text-secondary dark:text-white mb-2">Belum Ada Promo</h3>
+            <p className="text-muted-foreground font-medium px-6">Maaf, saat ini belum ada promo atau event yang aktif. Silakan kembali lagi nanti untuk penawaran menarik lainnya!</p>
+          </div>
+        )}
+      </div>
 
       {/* Registration Dialog */}
       <Dialog open={isRegisterOpen} onOpenChange={setIsRegisterOpen}>
-        <DialogContent className="sm:max-w-[425px]">
-          <DialogHeader>
-            <DialogTitle>
-              {activePromo?.type === 'event' ? 'Register for Event' : 'Claim Offer'}
+        <DialogContent className="sm:max-w-[425px] p-0 border-0 rounded-3xl overflow-hidden">
+          <div className="bg-primary/5 p-6 border-b border-primary/10">
+            <DialogTitle className="text-2xl font-black text-secondary dark:text-white mb-2">
+              {activePromo?.type === 'event' ? 'Pendaftaran Event' : 'Klaim Penawaran'}
             </DialogTitle>
-            <DialogDescription>
+            <DialogDescription className="text-primary font-bold text-sm">
               {activePromo?.title}
             </DialogDescription>
-          </DialogHeader>
+          </div>
           
-          <form onSubmit={onSubmit} className="space-y-4 py-4">
+          <form onSubmit={onSubmit} className="p-6 space-y-5 bg-white dark:bg-slate-950">
             <div className="space-y-2">
-              <Label htmlFor="name">Full Name <span className="text-destructive">*</span></Label>
-              <Input id="name" required value={name} onChange={e => setName(e.target.value)} />
+              <Label htmlFor="name" className="font-bold">Nama Lengkap <span className="text-destructive">*</span></Label>
+              <Input id="name" required value={name} onChange={e => setName(e.target.value)} className="h-12 rounded-xl bg-[#F8FAFC] dark:bg-slate-900 border-border" placeholder="Ketik nama Anda" />
             </div>
             
             <div className="space-y-2">
-              <Label htmlFor="email">Email <span className="text-destructive">*</span></Label>
-              <Input id="email" type="email" required value={email} onChange={e => setEmail(e.target.value)} />
+              <Label htmlFor="email" className="font-bold">Email Aktif <span className="text-destructive">*</span></Label>
+              <Input id="email" type="email" required value={email} onChange={e => setEmail(e.target.value)} className="h-12 rounded-xl bg-[#F8FAFC] dark:bg-slate-900 border-border" placeholder="nama@email.com" />
             </div>
             
             <div className="space-y-2">
-              <Label htmlFor="phone">Phone Number <span className="text-destructive">*</span></Label>
-              <Input id="phone" required placeholder="08xxxxxxxxxx" value={phone} onChange={e => setPhone(e.target.value)} />
+              <Label htmlFor="phone" className="font-bold">No. WhatsApp <span className="text-destructive">*</span></Label>
+              <Input id="phone" required placeholder="08xxxxxxxxxx" value={phone} onChange={e => setPhone(e.target.value)} className="h-12 rounded-xl bg-[#F8FAFC] dark:bg-slate-900 border-border" />
             </div>
             
             <div className="space-y-2">
-              <Label htmlFor="message">Message (Optional)</Label>
+              <Label htmlFor="message" className="font-bold">Pesan (Opsional)</Label>
               <Textarea 
                 id="message" 
-                placeholder={activePromo?.type === 'event' ? 'Any questions or team details?' : 'Additional notes'} 
+                placeholder={activePromo?.type === 'event' ? 'Contoh: Nama tim, pertanyaan...' : 'Catatan tambahan'} 
                 value={message} 
                 onChange={e => setMessage(e.target.value)} 
+                className="rounded-xl bg-[#F8FAFC] dark:bg-slate-900 border-border min-h-[100px]"
               />
             </div>
             
-            <DialogFooter className="pt-4">
-              <Button type="button" variant="outline" onClick={() => setIsRegisterOpen(false)}>Cancel</Button>
-              <Button type="submit" disabled={registerMutation.isPending}>
-                {registerMutation.isPending ? 'Submitting...' : 'Submit'}
+            <DialogFooter className="pt-4 gap-3 sm:gap-0">
+              <Button type="button" variant="outline" onClick={() => setIsRegisterOpen(false)} className="rounded-full font-bold h-12">Batal</Button>
+              <Button type="submit" disabled={registerMutation.isPending} className="rounded-full font-bold h-12 shadow-md shadow-primary/20">
+                {registerMutation.isPending ? 'Memproses...' : 'Kirim Pendaftaran'}
               </Button>
             </DialogFooter>
           </form>
