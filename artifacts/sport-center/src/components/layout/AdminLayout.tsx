@@ -34,7 +34,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
     mutation: {
       onSuccess: () => {
         removeToken();
-        setLocation("/admin/login");
+        setLocation("/");
       }
     }
   });
