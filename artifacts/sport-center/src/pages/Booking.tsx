@@ -590,7 +590,7 @@ export default function Booking() {
                                     isManuallySkipped ? "text-muted-foreground line-through" :
                                     "text-green-800"
                                   }`}>
-                                    {formatDate(item.date)}
+                                    {formatDate(item.date, lang)}
                                   </span>
                                   {wasOverridden && <span className="ml-2 text-xs text-blue-500">{t("(diubah)", "(changed)")}</span>}
                                   {isCheckingOverride && <span className="ml-2 text-xs text-blue-500">{t("Mengecek...", "Checking...")}</span>}
@@ -724,7 +724,7 @@ export default function Booking() {
                     <Calendar className="w-4 h-4 text-muted-foreground shrink-0 mt-0.5" />
                     <div>
                       <div className="font-medium">{t("Tanggal", "Date")}</div>
-                      <div className="text-muted-foreground">{date ? formatDate(date) : ""}</div>
+                      <div className="text-muted-foreground">{date ? formatDate(date, lang) : ""}</div>
                       {isRepeat && (
                         <div className="text-xs text-primary mt-0.5">
                           +{repeatCount - 1} {repeatType === "weekly" ? t("sesi mingguan berikutnya", "more weekly sessions") : t("sesi bulanan berikutnya", "more monthly sessions")}

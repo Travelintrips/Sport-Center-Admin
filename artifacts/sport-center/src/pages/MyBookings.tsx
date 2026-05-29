@@ -13,8 +13,8 @@ function formatCurrency(n: number) {
   return new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(n);
 }
 
-function formatDate(dateStr: string) {
-  return new Date(dateStr).toLocaleDateString("id-ID", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
+function formatDate(dateStr: string, lang: string = "id") {
+  return new Date(dateStr).toLocaleDateString(lang === "en" ? "en-US" : "id-ID", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
 }
 
 const STATUS_CONFIG: Record<string, { label: string; labelEn: string; color: string; bg: string }> = {
@@ -165,7 +165,7 @@ export default function MyBookings() {
                       <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-2 text-sm">
                         <div className="flex items-center gap-1.5 text-muted-foreground">
                           <CalendarDays size={14} className="flex-shrink-0" />
-                          <span>{formatDate(booking.bookingDate)}</span>
+                          <span>{formatDate(booking.bookingDate, lang)}</span>
                         </div>
                         <div className="flex items-center gap-1.5 text-muted-foreground">
                           <Clock size={14} className="flex-shrink-0" />
