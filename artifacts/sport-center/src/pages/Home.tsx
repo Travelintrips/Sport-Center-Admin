@@ -17,11 +17,13 @@ import {
   CreditCard,
   Building,
   TrendingUp,
-  Activity
+  Activity,
+  Plane
 } from "lucide-react";
 import { useListFacilities, useGetSettings, useListPromos } from "@workspace/api-client-react";
 import { getFacilityImage } from "@/lib/utils";
 import { useLang } from "@/lib/i18n";
+import buildingImg from "@assets/1780087062_1780089778393.png";
 
 function AnimatedCounter({ end, label, suffix = "+" }: { end: number, label: string, suffix?: string }) {
   // A simple static representation that implies a counter
@@ -222,8 +224,78 @@ export default function Home() {
         </div>
       </section>
 
+      {/* Venue / About Section */}
+      <section className="py-20 md:py-28 bg-[#F8FAFC] dark:bg-slate-950 overflow-hidden">
+        <div className="container px-4 md:px-8">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-16 items-center">
+            
+            {/* Image */}
+            <div className="relative animate-in fade-in slide-in-from-left-8 duration-1000">
+              <div className="absolute -inset-3 bg-gradient-to-tr from-primary/20 via-primary/5 to-transparent rounded-[2rem] transform -rotate-2" />
+              <div className="relative rounded-[2rem] overflow-hidden shadow-2xl border-4 border-white dark:border-slate-900 aspect-[16/10]">
+                <img 
+                  src={buildingImg} 
+                  alt="Gedung Sport Center Bandara Soekarno-Hatta" 
+                  className="w-full h-full object-cover"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent" />
+              </div>
+              
+              {/* Floating badge */}
+              <div className="absolute -bottom-6 -right-2 md:right-6 p-4 rounded-2xl bg-white dark:bg-slate-900 shadow-xl border border-border/50 flex items-center gap-3 max-w-[260px]">
+                <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center text-primary shrink-0">
+                  <Plane className="w-6 h-6" />
+                </div>
+                <div>
+                  <div className="font-black text-secondary dark:text-white leading-tight">{t("Dekat Bandara", "Near The Airport")}</div>
+                  <div className="text-xs font-semibold text-muted-foreground">{t("Hanya menit dari Soekarno-Hatta", "Minutes from Soekarno-Hatta")}</div>
+                </div>
+              </div>
+            </div>
+            
+            {/* Content */}
+            <div className="max-w-xl animate-in fade-in slide-in-from-right-8 duration-1000 delay-150">
+              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-primary/10 text-primary font-bold text-sm mb-6 border border-primary/20">
+                <Building className="w-4 h-4" />
+                {t("Tentang Gedung Kami", "About Our Venue")}
+              </div>
+              
+              <h2 className="text-3xl md:text-5xl font-black tracking-tight text-secondary dark:text-white leading-[1.1] mb-6">
+                {t("Gedung Olahraga Modern di Jantung", "A Modern Sports Venue in the Heart of")} <span className="text-primary">{t("Kawasan Bandara", "the Airport Area")}</span>
+              </h2>
+              
+              <p className="text-lg text-muted-foreground font-medium leading-relaxed mb-8">
+                {t("Sport Center Bandara Soekarno-Hatta hadir sebagai pusat kebugaran terpadu dengan bangunan kokoh dan arsitektur modern. Lokasinya yang strategis menjadikannya pilihan utama bagi warga sekitar maupun para pelancong yang transit.", "Sport Center Bandara Soekarno-Hatta is an integrated fitness hub with a solid structure and modern architecture. Its strategic location makes it the top choice for locals and transit travelers alike.")}
+              </p>
+              
+              <div className="space-y-4 mb-10">
+                {[
+                  t("Bangunan luas dengan area parkir yang memadai", "Spacious building with ample parking area"),
+                  t("Akses mudah dari Terminal Bandara Soekarno-Hatta", "Easy access from Soekarno-Hatta Airport Terminals"),
+                  t("Fasilitas lengkap berstandar profesional", "Complete facilities with professional standards"),
+                ].map((item, i) => (
+                  <div key={i} className="flex items-center gap-3">
+                    <div className="w-7 h-7 rounded-full bg-green-500/10 flex items-center justify-center text-green-600 shrink-0">
+                      <CheckCircle2 className="w-5 h-5" />
+                    </div>
+                    <span className="font-semibold text-secondary dark:text-white">{item}</span>
+                  </div>
+                ))}
+              </div>
+              
+              <Button size="lg" className="h-14 px-8 text-base font-bold shadow-xl shadow-primary/25 rounded-full group" asChild>
+                <Link href="/contact">
+                  {t("Lihat Lokasi", "View Location")} <MapPin className="ml-2 w-5 h-5 group-hover:scale-110 transition-transform" />
+                </Link>
+              </Button>
+            </div>
+            
+          </div>
+        </div>
+      </section>
+
       {/* Trust Section / Why Choose Us */}
-      <section className="py-20 md:py-28 bg-[#F8FAFC] dark:bg-slate-950">
+      <section className="py-20 md:py-28 bg-white dark:bg-slate-950">
         <div className="container px-4 md:px-8">
           <div className="text-center max-w-2xl mx-auto mb-16">
             <h2 className="text-3xl md:text-5xl font-black tracking-tight text-secondary dark:text-white mb-4">
