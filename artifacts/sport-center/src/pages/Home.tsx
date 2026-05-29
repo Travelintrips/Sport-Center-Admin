@@ -95,11 +95,11 @@ export default function Home() {
         <div className="container px-4 md:px-8">
           <div className="flex justify-between items-end mb-10">
             <div>
-              <h2 className="text-3xl font-bold tracking-tight mb-2">Our Facilities</h2>
-              <p className="text-muted-foreground">Choose from a variety of premium sports courts.</p>
+              <h2 className="text-3xl font-bold tracking-tight mb-2">Fasilitas Kami</h2>
+              <p className="text-muted-foreground">Pilih dari beragam lapangan olahraga premium.</p>
             </div>
             <Button variant="ghost" asChild className="hidden md:flex">
-              <Link href="/facilities">See All <ArrowRight className="ml-2 w-4 h-4" /></Link>
+              <Link href="/facilities">Lihat Semua <ArrowRight className="ml-2 w-4 h-4" /></Link>
             </Button>
           </div>
 
@@ -132,7 +132,7 @@ export default function Home() {
             ))}
           </div>
           <Button variant="outline" asChild className="w-full mt-6 md:hidden">
-            <Link href="/facilities">See All Facilities</Link>
+            <Link href="/facilities">Lihat Semua Fasilitas</Link>
           </Button>
         </div>
       </section>
@@ -142,8 +142,8 @@ export default function Home() {
         <section className="py-20">
           <div className="container px-4 md:px-8">
             <div className="text-center mb-12">
-              <h2 className="text-3xl font-bold tracking-tight mb-2">Special Offers & Events</h2>
-              <p className="text-muted-foreground max-w-2xl mx-auto">Don't miss out on our latest promotions and upcoming tournaments.</p>
+              <h2 className="text-3xl font-bold tracking-tight mb-2">Promo & Paket Spesial</h2>
+              <p className="text-muted-foreground max-w-2xl mx-auto">Jangan lewatkan promo terbaru dan paket olahraga hemat dari kami.</p>
             </div>
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -173,7 +173,7 @@ export default function Home() {
                     <p className="text-muted-foreground text-sm mb-6 line-clamp-3">{promo.description}</p>
                     <div className="mt-auto">
                       <Button asChild>
-                        <Link href="/promos">Learn More</Link>
+                        <Link href="/promos">Selengkapnya</Link>
                       </Button>
                     </div>
                   </div>
@@ -263,14 +263,14 @@ export default function Home() {
         <div className="container px-4 md:px-8">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
             <div>
-              <h2 className="text-3xl font-bold tracking-tight mb-6">Visit Us</h2>
+              <h2 className="text-3xl font-bold tracking-tight mb-6">Kunjungi Kami</h2>
               <div className="space-y-6">
                 <div className="flex items-start gap-4">
                   <div className="w-10 h-10 rounded-full bg-primary/20 text-primary flex items-center justify-center shrink-0">
                     <MapPin size={20} />
                   </div>
                   <div>
-                    <h4 className="font-bold text-lg">Location</h4>
+                    <h4 className="font-bold text-lg">Lokasi</h4>
                     <p className="text-sidebar-foreground/80 leading-relaxed mt-1">
                       {settings?.address || 'Jakarta, Indonesia'}
                     </p>
@@ -282,7 +282,7 @@ export default function Home() {
                     <Phone size={20} />
                   </div>
                   <div>
-                    <h4 className="font-bold text-lg">Contact</h4>
+                    <h4 className="font-bold text-lg">Kontak</h4>
                     <p className="text-sidebar-foreground/80 mt-1">{settings?.phone || '-'}</p>
                     <p className="text-sidebar-foreground/80">{settings?.email || '-'}</p>
                   </div>
@@ -293,18 +293,18 @@ export default function Home() {
                     <Clock size={20} />
                   </div>
                   <div>
-                    <h4 className="font-bold text-lg">Operating Hours</h4>
-                    <p className="text-sidebar-foreground/80 mt-1">Everyday</p>
+                    <h4 className="font-bold text-lg">Jam Operasional</h4>
+                    <p className="text-sidebar-foreground/80 mt-1">Setiap Hari</p>
                     <p className="text-sidebar-foreground/80">{settings?.openHour || '06:00'} - {settings?.closeHour || '23:00'}</p>
                   </div>
                 </div>
               </div>
               
               <div className="mt-8 pt-8 border-t border-sidebar-border">
-                <p className="mb-4 text-sidebar-foreground/80">Have questions or want to book via WhatsApp?</p>
+                <p className="mb-4 text-sidebar-foreground/80">Ada pertanyaan atau ingin booking via WhatsApp?</p>
                 <Button size="lg" className="bg-[#25D366] hover:bg-[#20bd5a] text-white" asChild>
-                  <a href={`https://wa.me/62${settings?.whatsapp?.replace(/^0|^62|\+62/, '')}`} target="_blank" rel="noopener noreferrer">
-                    Chat on WhatsApp
+                  <a href={`https://wa.me/62${(settings?.whatsapp || '082299997227').replace(/^0|^62|\+62/, '')}`} target="_blank" rel="noopener noreferrer">
+                    Chat via WhatsApp
                   </a>
                 </Button>
               </div>
@@ -313,7 +313,7 @@ export default function Home() {
             <div className="aspect-[4/3] bg-muted rounded-xl overflow-hidden shadow-lg border border-border">
               <div className="w-full h-full bg-secondary flex items-center justify-center text-muted-foreground">
                 <MapPin size={48} className="mb-4 opacity-50" />
-                <span className="block mt-4 text-lg">Map View</span>
+                <span className="block mt-4 text-lg">Peta Lokasi</span>
               </div>
             </div>
           </div>
