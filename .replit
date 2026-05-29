@@ -1,4 +1,4 @@
-modules = ["nodejs-24"]
+modules = ["nodejs-24", "postgresql-16"]
 
 [deployment]
 router = "application"
@@ -99,3 +99,6 @@ VITE_SUPABASE_URL = "https://nzdweipzckfszczzqtuw.supabase.co"
 SESSION_SECRET = "OgZyysezieWkipmN0MD4Y37AR4QHIkMqWg4oQ4yN1CXE86wRI0bYI/cFBPS/K+4DffPWvNSIXCJIuR5wXYPebQ=="
 SUPABASE_DATABASE_URL = "postgresql://postgres.nzdweipzckfszczzqtuw:%24%23Admin12345%40%24@aws-1-ap-southeast-2.pooler.supabase.com:6543/postgres"
 SUPABASE_DATABASE_URL_DEV = "postgresql://postgres.xssrfshdrtdfupgqwfdw:admcst0012026@aws-1-ap-southeast-2.pooler.supabase.com:6543/postgres"
+
+[nix]
+channel = "stable-25_05"

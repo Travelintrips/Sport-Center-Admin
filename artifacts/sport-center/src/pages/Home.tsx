@@ -9,7 +9,9 @@ import {
   ArrowRight,
   ShieldCheck,
   Zap,
-  Target
+  Target,
+  Star,
+  Quote
 } from "lucide-react";
 import { useListFacilities, useGetSettings, useListPromos } from "@workspace/api-client-react";
 
@@ -36,20 +38,20 @@ export default function Home() {
         <div className="container relative z-10 px-4 md:px-8">
           <div className="max-w-3xl">
             <h1 className="text-4xl md:text-6xl font-black tracking-tight mb-6">
-              Elevate Your Game at <span className="text-primary">{settings?.centerName || 'SportCenter'}</span>
+              Olahraga Seru di <span className="text-primary">{settings?.centerName || 'Sport Center'}</span>
             </h1>
             <p className="text-xl text-muted-foreground mb-8 max-w-2xl leading-relaxed">
-              Premium courts. Professional equipment. A vibrant community. Book your next match today and experience the difference.
+              Lapangan premium, peralatan profesional, dan lokasi strategis dekat bandara. Booking gampang, langsung main, badan bugar!
             </p>
             <div className="flex flex-wrap gap-4">
               <Button size="lg" className="text-base h-14 px-8" asChild>
                 <Link href="/facilities">
-                  Book Now <ArrowRight className="ml-2" />
+                  Pesan Sekarang <ArrowRight className="ml-2" />
                 </Link>
               </Button>
               <Button size="lg" variant="outline" className="text-base h-14 px-8" asChild>
                 <Link href="/promos">
-                  View Promos
+                  Lihat Promo
                 </Link>
               </Button>
             </div>
@@ -60,29 +62,29 @@ export default function Home() {
               <div className="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center text-primary mb-2">
                 <Trophy size={24} />
               </div>
-              <h3 className="font-bold text-lg">Premium Quality</h3>
-              <p className="text-sm text-muted-foreground">International standard courts and equipment</p>
+              <h3 className="font-bold text-lg">Kualitas Premium</h3>
+              <p className="text-sm text-muted-foreground">Lapangan & peralatan berstandar internasional</p>
             </div>
             <div className="flex flex-col gap-2">
               <div className="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center text-primary mb-2">
                 <Clock size={24} />
               </div>
-              <h3 className="font-bold text-lg">Flexible Hours</h3>
-              <p className="text-sm text-muted-foreground">Open {settings?.openHour || '06:00'} to {settings?.closeHour || '23:00'} daily</p>
+              <h3 className="font-bold text-lg">Jam Fleksibel</h3>
+              <p className="text-sm text-muted-foreground">Buka {settings?.openHour || '06:00'} - {settings?.closeHour || '23:00'} setiap hari</p>
             </div>
             <div className="flex flex-col gap-2">
               <div className="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center text-primary mb-2">
                 <ShieldCheck size={24} />
               </div>
-              <h3 className="font-bold text-lg">Secure Booking</h3>
-              <p className="text-sm text-muted-foreground">Easy online reservation system</p>
+              <h3 className="font-bold text-lg">Booking Aman</h3>
+              <p className="text-sm text-muted-foreground">Sistem reservasi online yang mudah</p>
             </div>
             <div className="flex flex-col gap-2">
               <div className="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center text-primary mb-2">
                 <Target size={24} />
               </div>
-              <h3 className="font-bold text-lg">All Skill Levels</h3>
-              <p className="text-sm text-muted-foreground">From beginners to professionals</p>
+              <h3 className="font-bold text-lg">Semua Level</h3>
+              <p className="text-sm text-muted-foreground">Dari pemula hingga profesional</p>
             </div>
           </div>
         </div>
@@ -181,6 +183,80 @@ export default function Home() {
           </div>
         </section>
       )}
+
+      {/* Testimonials */}
+      <section className="py-20 bg-muted/30">
+        <div className="container px-4 md:px-8">
+          <div className="text-center mb-12">
+            <h2 className="text-3xl font-bold tracking-tight mb-2">Apa Kata Mereka</h2>
+            <p className="text-muted-foreground max-w-2xl mx-auto">
+              Ribuan pelanggan sudah merasakan serunya berolahraga bersama kami.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {[
+              {
+                quote: "Lapangan futsalnya empuk, bersih, dan nggak pernah bocor jadwal. Tiap minggu fix main di sini bareng tim!",
+                name: "A. Pratama",
+                role: "Komunitas Futsal Rutin",
+                date: "Mar 2026",
+              },
+              {
+                quote: "Corporate Sport Day kantor kami sukses besar. Panitianya sigap, fasilitas lengkap, peserta semua happy.",
+                name: "R. Wijaya",
+                role: "HR — Event Korporat",
+                date: "Feb 2026",
+              },
+              {
+                quote: "Transit 4 jam di Soetta, sempat nge-gym sebentar. Alatnya lengkap, shower bersih, badan langsung segar lagi.",
+                name: "D. Santoso",
+                role: "Traveler Transit",
+                date: "Apr 2026",
+              },
+              {
+                quote: "Lantai vinyl badmintonnya enak banget di lutut. Ibu-ibu PB kami betah main lama di sini, sejuk dan terang.",
+                name: "S. Lestari",
+                role: "Komunitas Badminton",
+                date: "Jan 2026",
+              },
+              {
+                quote: "Pertama kali coba tennis dan dipandu staf yang ramah. Raket disediain, jadi nggak minder. Pasti balik lagi!",
+                name: "M. Iqbal",
+                role: "Pemula Tennis",
+                date: "Mei 2026",
+              },
+              {
+                quote: "Booking lewat WhatsApp gampang banget, dibalas cepat. Tempatnya strategis dekat bandara, parkir luas.",
+                name: "N. Anggraini",
+                role: "Pelanggan Setia",
+                date: "Apr 2026",
+              },
+            ].map((t, i) => (
+              <Card key={i} className="border-border h-full">
+                <CardContent className="p-6 flex flex-col h-full">
+                  <Quote className="text-primary/30 mb-3" size={32} />
+                  <div className="flex gap-0.5 mb-3">
+                    {Array.from({ length: 5 }).map((_, s) => (
+                      <Star key={s} size={16} className="fill-primary text-primary" />
+                    ))}
+                  </div>
+                  <p className="text-foreground/90 leading-relaxed mb-6 flex-1">"{t.quote}"</p>
+                  <div className="flex items-center gap-3 mt-auto">
+                    <div className="w-10 h-10 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold">
+                      {t.name.charAt(0)}
+                    </div>
+                    <div>
+                      <div className="font-bold text-sm">{t.name}</div>
+                      <div className="text-xs text-muted-foreground">{t.role} · {t.date}</div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </div>
+      </section>
 
       {/* Location / Contact */}
       <section className="py-20 bg-sidebar text-sidebar-foreground">
