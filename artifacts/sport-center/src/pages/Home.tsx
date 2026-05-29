@@ -282,7 +282,7 @@ export default function Home() {
                     />
                     {promo.discountPercent && (
                       <div className="absolute top-4 left-4 bg-red-500 text-white px-3 py-1.5 rounded-xl text-sm font-black shadow-lg transform -rotate-2">
-                        DISUKON {promo.discountPercent}%
+                        {t("DISKON", "DISCOUNT")} {promo.discountPercent}%
                       </div>
                     )}
                   </div>
@@ -344,22 +344,22 @@ export default function Home() {
                 role: t("HRD Manager", "HR Manager"),
                 rating: 5
               },
-            ].map((t, i) => (
+            ].map((testimonial, i) => (
               <div key={i} className="bg-white/5 border border-white/10 p-8 rounded-3xl backdrop-blur-sm relative hover:bg-white/10 transition-colors">
                 <Quote className="absolute top-8 right-8 text-primary/30 w-12 h-12" />
                 <div className="flex gap-1 mb-6">
-                  {Array.from({ length: t.rating }).map((_, s) => (
+                  {Array.from({ length: testimonial.rating }).map((_, s) => (
                     <Star key={s} className="w-5 h-5 fill-primary text-primary" />
                   ))}
                 </div>
-                <p className="text-lg text-white/90 font-medium leading-relaxed mb-8 relative z-10">"{t.quote}"</p>
+                <p className="text-lg text-white/90 font-medium leading-relaxed mb-8 relative z-10">"{testimonial.quote}"</p>
                 <div className="flex items-center gap-4 mt-auto">
                   <div className="w-12 h-12 rounded-full bg-primary/20 border border-primary/30 text-primary flex items-center justify-center font-black text-lg">
-                    {t.name.charAt(0)}
+                    {testimonial.name.charAt(0)}
                   </div>
                   <div>
-                    <div className="font-bold text-white text-lg">{t.name}</div>
-                    <div className="text-sm text-white/60 font-medium">{t.role}</div>
+                    <div className="font-bold text-white text-lg">{testimonial.name}</div>
+                    <div className="text-sm text-white/60 font-medium">{testimonial.role}</div>
                   </div>
                 </div>
               </div>
