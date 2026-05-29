@@ -61,8 +61,8 @@ export default function Home() {
                 Fasilitas Olahraga Premium Tangerang
               </div>
               
-              <h1 className="text-5xl md:text-6xl lg:text-7xl font-black tracking-tight text-secondary dark:text-white leading-[1.1] mb-6">
-                Cara Baru Untuk <span className="text-primary relative inline-block">Mulai Aktif<svg className="absolute -bottom-2 left-0 w-full h-3 text-primary/30" viewBox="0 0 100 10" preserveAspectRatio="none"><path d="M0,5 Q50,10 100,5" stroke="currentColor" strokeWidth="8" fill="none" strokeLinecap="round"/></svg></span>
+              <h1 className="text-4xl md:text-5xl lg:text-6xl font-black tracking-tight text-secondary dark:text-white leading-[1.1] mb-6">
+                Sport Center <span className="text-primary relative inline-block">Bandara Soekarno-Hatta<svg className="absolute -bottom-2 left-0 w-full h-3 text-primary/30" viewBox="0 0 100 10" preserveAspectRatio="none"><path d="M0,5 Q50,10 100,5" stroke="currentColor" strokeWidth="8" fill="none" strokeLinecap="round"/></svg></span>
               </h1>
               
               <p className="text-lg md:text-xl text-muted-foreground mb-8 leading-relaxed font-medium max-w-xl">
@@ -102,8 +102,8 @@ export default function Home() {
               <div className="absolute inset-0 bg-gradient-to-tr from-primary/20 to-transparent rounded-3xl transform rotate-3 scale-105" />
               <div className="relative rounded-3xl overflow-hidden shadow-2xl border-4 border-white dark:border-slate-900 bg-muted aspect-[4/3] group">
                 <img 
-                  src="/hero.png" 
-                  alt="Premium Sport Center" 
+                  src="/api/uploads/facility-1780070935997-xzu8f.png" 
+                  alt="Sport Center Bandara Soekarno-Hatta" 
                   className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700 ease-out"
                 />
                 
