@@ -1,5 +1,6 @@
 import { ReactNode, useEffect } from "react";
 import { Link, useLocation } from "wouter";
+import logoUrl from "@assets/logosc_1780088803724.png";
 import { 
   LayoutDashboard, 
   CalendarDays, 
@@ -94,7 +95,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
       `}>
         <div className="h-16 hidden md:flex items-center px-6 border-b border-sidebar-border bg-sidebar-primary text-sidebar-primary-foreground">
           <Link href="/admin" className="font-bold text-lg flex items-center gap-2">
-            <div className="w-6 h-6 rounded bg-background text-primary flex items-center justify-center text-xs">S</div>
+            <img src={logoUrl} alt="Logo" className="w-7 h-7 rounded object-cover" />
             Admin Portal
           </Link>
         </div>

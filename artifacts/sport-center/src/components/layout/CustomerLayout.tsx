@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { useGetMe, useLogout, getGetMeQueryKey, useGetSettings } from "@workspace/api-client-react";
 import { removeToken } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
+import logoUrl from "@assets/logosc_1780088803724.png";
 
 function LangToggle({ className = "" }: { className?: string }) {
   const { lang, setLang } = useLang();
@@ -162,9 +163,7 @@ export default function CustomerLayout({ children }: { children: ReactNode }) {
       >
         <div className="container mx-auto px-4 md:px-8 flex items-center justify-between">
           <Link href="/" className="flex items-center gap-2.5 font-black text-2xl tracking-tight text-secondary dark:text-foreground group">
-            <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center text-primary-foreground shadow-lg shadow-primary/20 group-hover:scale-105 transition-transform">
-              <span className="font-bold text-xl leading-none">{settings?.centerName?.charAt(0) || "S"}</span>
-            </div>
+            <img src={logoUrl} alt={settings?.centerName || "Sport Center"} className="w-11 h-11 rounded-xl object-cover shadow-lg shadow-primary/20 group-hover:scale-105 transition-transform" />
             <span className="hidden sm:inline-block">{settings?.centerName?.split(' ')[0] || "SportCenter"}</span>
           </Link>
 
@@ -276,9 +275,7 @@ export default function CustomerLayout({ children }: { children: ReactNode }) {
           <div className="grid grid-cols-1 md:grid-cols-12 gap-12 lg:gap-16">
             <div className="col-span-1 md:col-span-5 lg:col-span-4">
               <Link href="/" className="flex items-center gap-3 font-black text-2xl mb-6 text-white group">
-                <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center text-primary-foreground shadow-lg shadow-primary/20">
-                  <span className="font-bold text-xl leading-none">{settings?.centerName?.charAt(0) || "S"}</span>
-                </div>
+                <img src={logoUrl} alt={settings?.centerName || "Sport Center"} className="w-11 h-11 rounded-xl object-cover shadow-lg shadow-primary/20" />
                 {settings?.centerName || "SportCenter"}
               </Link>
               <p className="text-secondary-foreground/70 mb-8 leading-relaxed max-w-sm">
