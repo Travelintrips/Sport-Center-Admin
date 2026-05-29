@@ -108,6 +108,10 @@ export default function CustomerLayout({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [location]);
+
   const waPhone = (() => {
     let p = settings?.whatsapp || "";
     if (p.startsWith("0")) p = "62" + p.slice(1);
