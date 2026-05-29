@@ -27,7 +27,7 @@ const STATUS_CONFIG: Record<string, { label: string; labelEn: string; color: str
 
 export default function MyBookings() {
   const [, setLocation] = useLocation();
-  const { t } = useLang();
+  const { t, lang } = useLang();
 
   const { data: user, isLoading: userLoading, isError } = useGetMe({
     query: { retry: false, queryKey: getGetMeQueryKey() },
