@@ -65,5 +65,16 @@ localPort = 8081
 externalPort = 8081
 
 [[ports]]
+localPort = 8082
+externalPort = 3002
+
+[[ports]]
 localPort = 21089
 externalPort = 3000
+
+[userenv]
+
+[userenv.shared]
+ADMIN_EMAIL = "admcst001@gmail.com"
+ADMIN_EMAIL_DOMAINS = "example.com"
+ADMIN_EMAILS = "divatranssoetta@gmail.com,admcst001@gmail.com,almanosetiawan@gmail.com,divarestorxr@gmail.com,wangsamasindo@gmail.com"
