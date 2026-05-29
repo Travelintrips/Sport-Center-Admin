@@ -1,6 +1,6 @@
 import { ReactNode, useState, useEffect } from "react";
 import { Link, useLocation } from "wouter";
-import { Menu, X, LogOut, CalendarDays, UserCircle, ChevronDown, MapPin, Phone, Instagram, Facebook } from "lucide-react";
+import { Menu, X, LogOut, CalendarDays, UserCircle, ChevronDown, MapPin, Phone, Instagram, Facebook, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useGetMe, useLogout, getGetMeQueryKey, useGetSettings } from "@workspace/api-client-react";
 import { removeToken } from "@/lib/auth";
@@ -27,6 +27,9 @@ function UserMenu() {
   if (!user || user.role === "admin") {
     return (
       <div className="flex items-center gap-3">
+        <Button asChild variant="ghost" size="sm" className="hidden md:inline-flex font-medium text-foreground/60 hover:text-primary gap-1.5">
+          <Link href="/admin/login"><ShieldCheck size={15} /> Admin</Link>
+        </Button>
         <Button asChild variant="ghost" className="hidden md:inline-flex font-medium text-foreground/80 hover:text-foreground">
           <Link href="/login">Masuk</Link>
         </Button>
@@ -212,6 +215,9 @@ export default function CustomerLayout({ children }: { children: ReactNode }) {
                   <Button asChild className="h-12 rounded-xl text-base font-bold shadow-lg shadow-primary/20" onClick={() => setIsMobileMenuOpen(false)}>
                     <Link href="/register">Daftar Sekarang</Link>
                   </Button>
+                  <Link href="/admin/login" onClick={() => setIsMobileMenuOpen(false)} className="flex items-center justify-center gap-2 text-sm font-medium text-muted-foreground hover:text-primary mt-2 py-2">
+                    <ShieldCheck size={15} /> Login Admin
+                  </Link>
                 </div>
               )}
             </nav>
