@@ -31,8 +31,10 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import AvailabilityCalendar from "@/components/AvailabilityCalendar";
 import { getFacilityImage } from "@/lib/utils";
+import { useLang } from "@/lib/i18n";
 
 export default function FacilityDetail() {
+  const { t } = useLang();
   const [, params] = useRoute("/facilities/:id");
   const [, setLocation] = useLocation();
   const facilityId = params?.id ? parseInt(params.id) : 0;
@@ -103,9 +105,9 @@ export default function FacilityDetail() {
         <div className="w-24 h-24 bg-muted rounded-full flex items-center justify-center mx-auto mb-6">
           <AlertCircle className="w-10 h-10 text-muted-foreground opacity-50" />
         </div>
-        <h2 className="text-3xl font-black mb-4">Fasilitas Tidak Ditemukan</h2>
-        <p className="text-muted-foreground mb-8">Maaf, data fasilitas yang Anda cari tidak dapat ditemukan atau telah dihapus.</p>
-        <Button size="lg" asChild className="rounded-full font-bold h-14 px-8 w-full"><Link href="/facilities">Kembali ke Daftar Fasilitas</Link></Button>
+        <h2 className="text-3xl font-black mb-4">{t("Fasilitas Tidak Ditemukan", "Facility Not Found")}</h2>
+        <p className="text-muted-foreground mb-8">{t("Maaf, data fasilitas yang Anda cari tidak dapat ditemukan atau telah dihapus.", "Sorry, the facility you are looking for could not be found or has been removed.")}</p>
+        <Button size="lg" asChild className="rounded-full font-bold h-14 px-8 w-full"><Link href="/facilities">{t("Kembali ke Daftar Fasilitas", "Back to Facilities List")}</Link></Button>
       </div>
     );
   }
@@ -116,7 +118,7 @@ export default function FacilityDetail() {
     <div className="bg-[#F8FAFC] dark:bg-slate-950 min-h-screen pb-24">
       <div className="container mx-auto px-4 py-8 max-w-7xl">
         <Link href="/facilities" className="inline-flex items-center gap-2 text-sm font-bold text-muted-foreground hover:text-foreground transition-colors mb-8 bg-white dark:bg-slate-900 px-4 py-2 rounded-full border shadow-sm">
-          <ChevronLeft className="w-4 h-4" /> Kembali ke Daftar
+          <ChevronLeft className="w-4 h-4" /> {t("Kembali ke Daftar", "Back to List")}
         </Link>
         
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12">
@@ -143,11 +145,11 @@ export default function FacilityDetail() {
                   
                   <div className="flex flex-wrap items-center gap-4 text-sm font-semibold text-muted-foreground">
                     <div className="flex items-center gap-2 bg-muted/50 px-3 py-1.5 rounded-lg text-foreground/80">
-                      <Clock className="w-4 h-4 text-primary" /> {facility.openTime.substring(0,5)} - {facility.closeTime.substring(0,5)} WIB
+                      <Clock className="w-4 h-4 text-primary" /> {facility.openTime.substring(0,5)} - {facility.closeTime.substring(0,5)} {t("WIB", "WIB")}
                     </div>
                     {facility.capacity && (
                       <div className="flex items-center gap-2 bg-muted/50 px-3 py-1.5 rounded-lg text-foreground/80">
-                        <Users className="w-4 h-4 text-primary" /> Kapasitas {facility.capacity} pax
+                        <Users className="w-4 h-4 text-primary" /> {t("Kapasitas", "Capacity")} {facility.capacity} {t("pax", "pax")}
                       </div>
                     )}
                     <div className="flex items-center gap-1 text-yellow-500 bg-yellow-50 dark:bg-yellow-950/20 px-3 py-1.5 rounded-lg">
@@ -163,18 +165,18 @@ export default function FacilityDetail() {
               <div>
                 <h2 className="text-xl font-black mb-4 text-secondary dark:text-white flex items-center gap-2">
                   <div className="w-1.5 h-6 bg-primary rounded-full"></div>
-                  Tentang Lapangan Ini
+                  {t("Tentang Lapangan Ini", "About This Court")}
                 </h2>
                 <div className="text-foreground/80 font-medium leading-relaxed prose dark:prose-invert max-w-none">
-                  <p className="whitespace-pre-line">{facility.description || "Fasilitas premium berstandar internasional yang dirawat dengan sangat baik. Cocok untuk semua kalangan dari pemula hingga profesional."}</p>
+                  <p className="whitespace-pre-line">{facility.description || t("Fasilitas premium berstandar internasional yang dirawat dengan sangat baik. Cocok untuk semua kalangan dari pemula hingga profesional.", "A premium international-standard facility that is exceptionally well maintained. Suitable for everyone from beginners to professionals.")}</p>
                 </div>
                 
                 <div className="mt-8 grid grid-cols-2 gap-4">
                   {[
-                    "Lantai berstandar internasional",
-                    "Penerangan LED maksimal",
-                    "Sirkulasi udara baik",
-                    "Loker & Shower room gratis"
+                    t("Lantai berstandar internasional", "International-standard flooring"),
+                    t("Penerangan LED maksimal", "Maximum LED lighting"),
+                    t("Sirkulasi udara baik", "Good air circulation"),
+                    t("Loker & Shower room gratis", "Free locker & shower room")
                   ].map((feat, i) => (
                     <div key={i} className="flex items-center gap-3 text-sm font-medium">
                       <div className="w-6 h-6 rounded-full bg-green-100 flex items-center justify-center text-green-600 shrink-0">
@@ -194,12 +196,12 @@ export default function FacilityDetail() {
               <div className="bg-secondary dark:bg-slate-900 p-6 text-white text-center relative overflow-hidden">
                 <div className="absolute top-0 right-0 w-32 h-32 bg-primary/20 rounded-full blur-[40px]" />
                 <div className="relative z-10">
-                  <div className="text-sm font-bold text-white/70 uppercase tracking-widest mb-1">Tarif Sewa</div>
+                  <div className="text-sm font-bold text-white/70 uppercase tracking-widest mb-1">{t("Tarif Sewa", "Rental Rate")}</div>
                   <div className="text-3xl md:text-4xl font-black text-white mb-1">
                     <span className="text-xl mr-1 text-primary">Rp</span>
                     {facility.pricePerHour.toLocaleString('id-ID')}
                   </div>
-                  <div className="text-sm font-medium text-white/70">per jam bermain</div>
+                  <div className="text-sm font-medium text-white/70">{t("per jam bermain", "per playing hour")}</div>
                 </div>
               </div>
               
@@ -208,12 +210,12 @@ export default function FacilityDetail() {
                   <div className="w-8 h-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center">
                     <CalendarDays className="w-4 h-4" />
                   </div>
-                  Atur Jadwal Bermain
+                  {t("Atur Jadwal Bermain", "Set Your Playing Schedule")}
                 </h3>
                 
                 <div className="space-y-6">
                   <div className="space-y-3">
-                    <label className="text-sm font-bold text-foreground/80 block">1. Pilih Tanggal</label>
+                    <label className="text-sm font-bold text-foreground/80 block">{t("1. Pilih Tanggal", "1. Choose Date")}</label>
                     <div className="border rounded-2xl p-3 flex justify-center bg-[#F8FAFC] dark:bg-slate-900 shadow-inner">
                       <Calendar
                         mode="single"
@@ -227,29 +229,29 @@ export default function FacilityDetail() {
                   </div>
 
                   <div className="space-y-3">
-                    <label className="text-sm font-bold text-foreground/80 block">2. Durasi Bermain</label>
+                    <label className="text-sm font-bold text-foreground/80 block">{t("2. Durasi Bermain", "2. Playing Duration")}</label>
                     <Select value={duration} onValueChange={setDuration}>
                       <SelectTrigger className="h-14 rounded-xl bg-[#F8FAFC] dark:bg-slate-900 border-border font-bold">
-                        <SelectValue placeholder="Pilih durasi" />
+                        <SelectValue placeholder={t("Pilih durasi", "Choose duration")} />
                       </SelectTrigger>
                       <SelectContent className="rounded-xl">
-                        <SelectItem value="1" className="font-medium py-3">1 Jam</SelectItem>
-                        <SelectItem value="2" className="font-medium py-3">2 Jam</SelectItem>
-                        <SelectItem value="3" className="font-medium py-3">3 Jam</SelectItem>
-                        <SelectItem value="4" className="font-medium py-3">4 Jam</SelectItem>
+                        <SelectItem value="1" className="font-medium py-3">{t("1 Jam", "1 Hour")}</SelectItem>
+                        <SelectItem value="2" className="font-medium py-3">{t("2 Jam", "2 Hours")}</SelectItem>
+                        <SelectItem value="3" className="font-medium py-3">{t("3 Jam", "3 Hours")}</SelectItem>
+                        <SelectItem value="4" className="font-medium py-3">{t("4 Jam", "4 Hours")}</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
 
                   <div className="space-y-3">
                     <label className="text-sm font-bold text-foreground/80 block flex justify-between items-end">
-                      <span>3. Jam Tersedia</span>
-                      {selectedTime && <span className="text-xs text-primary bg-primary/10 px-2 py-0.5 rounded-md">Terpilih: {selectedTime}</span>}
+                      <span>{t("3. Jam Tersedia", "3. Available Times")}</span>
+                      {selectedTime && <span className="text-xs text-primary bg-primary/10 px-2 py-0.5 rounded-md">{t("Terpilih", "Selected")}: {selectedTime}</span>}
                     </label>
                     
                     {!date ? (
                       <div className="text-sm text-center font-medium text-muted-foreground py-10 border-2 border-dashed rounded-2xl bg-muted/30">
-                        Pilih tanggal terlebih dahulu
+                        {t("Pilih tanggal terlebih dahulu", "Please choose a date first")}
                       </div>
                     ) : (
                       <div className="bg-[#F8FAFC] dark:bg-slate-900 rounded-2xl p-4 border shadow-inner max-h-[250px] overflow-y-auto">
@@ -268,7 +270,7 @@ export default function FacilityDetail() {
 
                   <div className="pt-6 mt-4 border-t border-dashed">
                     <div className="flex justify-between items-end mb-6 bg-primary/5 p-4 rounded-2xl border border-primary/10">
-                      <span className="font-bold text-foreground/80">Total Tagihan</span>
+                      <span className="font-bold text-foreground/80">{t("Total Tagihan", "Total Bill")}</span>
                       <span className="text-2xl font-black text-primary">
                         Rp {totalPrice.toLocaleString('id-ID')}
                       </span>
@@ -280,7 +282,7 @@ export default function FacilityDetail() {
                       onClick={handleBook}
                       disabled={!selectedTime || !date}
                     >
-                      {selectedTime ? "Lanjut ke Pembayaran" : "Lengkapi Jadwal Dulu"}
+                      {selectedTime ? t("Lanjut ke Pembayaran", "Continue to Payment") : t("Lengkapi Jadwal Dulu", "Complete the Schedule First")}
                     </Button>
                   </div>
                 </div>

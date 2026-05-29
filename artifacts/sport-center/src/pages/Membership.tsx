@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
+import { useLang } from "@/lib/i18n";
 import { CheckCircle2, Dumbbell, Calendar, Shield, Star, Users } from "lucide-react";
 
 const PRICE_PER_MONTH = 300000;
@@ -24,15 +25,16 @@ function addMonths(dateStr: string, months: number): string {
 const today = new Date().toISOString().split("T")[0];
 
 const BENEFITS = [
-  { icon: Dumbbell, label: "Akses Gym Penuh", desc: "Gunakan seluruh peralatan gym tanpa batasan waktu" },
-  { icon: Calendar, label: "Bebas Pilih Jadwal", desc: "Datang kapan saja selama jam operasional" },
-  { icon: Shield, label: "Locker Pribadi", desc: "Simpan barang Anda dengan aman di locker member" },
-  { icon: Star, label: "Diskon Fasilitas Lain", desc: "Dapatkan diskon khusus untuk booking lapangan" },
-  { icon: Users, label: "Komunitas Aktif", desc: "Bergabung dengan komunitas olahraga kami" },
+  { icon: Dumbbell, label: "Akses Gym Penuh", labelEn: "Full Gym Access", desc: "Gunakan seluruh peralatan gym tanpa batasan waktu", descEn: "Use all gym equipment with no time limits" },
+  { icon: Calendar, label: "Bebas Pilih Jadwal", labelEn: "Flexible Schedule", desc: "Datang kapan saja selama jam operasional", descEn: "Come anytime during operating hours" },
+  { icon: Shield, label: "Locker Pribadi", labelEn: "Private Locker", desc: "Simpan barang Anda dengan aman di locker member", descEn: "Store your belongings safely in a member locker" },
+  { icon: Star, label: "Diskon Fasilitas Lain", labelEn: "Discounts on Other Facilities", desc: "Dapatkan diskon khusus untuk booking lapangan", descEn: "Get special discounts for court bookings" },
+  { icon: Users, label: "Komunitas Aktif", labelEn: "Active Community", desc: "Bergabung dengan komunitas olahraga kami", descEn: "Join our sports community" },
 ];
 
 export default function Membership() {
   const { toast } = useToast();
+  const { t } = useLang();
   const [months, setMonths] = useState(1);
   const [form, setForm] = useState({ name: "", email: "", phone: "", startDate: today, notes: "" });
   const [success, setSuccess] = useState<{ name: string; endDate: string; totalPrice: number } | null>(null);
@@ -45,7 +47,7 @@ export default function Membership() {
         setMonths(1);
       },
       onError: () => {
-        toast({ title: "Gagal mendaftar", description: "Terjadi kesalahan. Silakan coba lagi.", variant: "destructive" });
+        toast({ title: t("Gagal mendaftar", "Registration failed"), description: t("Terjadi kesalahan. Silakan coba lagi.", "An error occurred. Please try again."), variant: "destructive" });
       },
     },
   });
@@ -53,7 +55,7 @@ export default function Membership() {
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!form.name || !form.email || !form.phone || !form.startDate) {
-      toast({ title: "Form tidak lengkap", description: "Harap isi semua field yang wajib.", variant: "destructive" });
+      toast({ title: t("Form tidak lengkap", "Incomplete form"), description: t("Harap isi semua field yang wajib.", "Please fill in all required fields."), variant: "destructive" });
       return;
     }
     createMutation.mutate({ data: { ...form, months } });
@@ -65,28 +67,28 @@ export default function Membership() {
         <div className="w-20 h-20 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-6">
           <CheckCircle2 className="text-green-600 w-10 h-10" />
         </div>
-        <h1 className="text-2xl font-bold mb-2">Pendaftaran Berhasil!</h1>
+        <h1 className="text-2xl font-bold mb-2">{t("Pendaftaran Berhasil!", "Registration Successful!")}</h1>
         <p className="text-muted-foreground mb-6">
-          Selamat datang, <span className="font-semibold text-foreground">{success.name}</span>!<br />
-          Member Gym Anda aktif hingga <span className="font-semibold text-foreground">{success.endDate}</span>.
+          {t("Selamat datang", "Welcome")}, <span className="font-semibold text-foreground">{success.name}</span>!<br />
+          {t("Member Gym Anda aktif hingga", "Your Gym membership is active until")} <span className="font-semibold text-foreground">{success.endDate}</span>.
         </p>
         <Card className="mb-6 text-left">
           <CardContent className="p-5 flex items-center justify-between">
             <div>
-              <div className="text-sm text-muted-foreground">Total Pembayaran</div>
+              <div className="text-sm text-muted-foreground">{t("Total Pembayaran", "Total Payment")}</div>
               <div className="text-2xl font-black text-primary">{formatCurrency(success.totalPrice)}</div>
             </div>
-            <Badge className="bg-green-100 text-green-700 border-green-200">Member Aktif</Badge>
+            <Badge className="bg-green-100 text-green-700 border-green-200">{t("Member Aktif", "Active Member")}</Badge>
           </CardContent>
         </Card>
         <p className="text-sm text-muted-foreground mb-6">
-          Silakan tunjukkan konfirmasi ini kepada petugas kami saat pertama kali datang.
+          {t("Silakan tunjukkan konfirmasi ini kepada petugas kami saat pertama kali datang.", "Please show this confirmation to our staff on your first visit.")}
         </p>
         <Button onClick={() => setSuccess(null)} variant="outline" className="mr-3">
-          Daftar Lagi
+          {t("Daftar Lagi", "Register Again")}
         </Button>
         <Button asChild>
-          <a href="/">Kembali ke Home</a>
+          <a href="/">{t("Kembali ke Home", "Back to Home")}</a>
         </Button>
       </div>
     );
@@ -96,20 +98,20 @@ export default function Membership() {
     <div className="flex flex-col min-h-screen">
       <section className="bg-gradient-to-br from-primary/20 via-background to-background py-16 md:py-24">
         <div className="container px-4 md:px-8 text-center max-w-2xl mx-auto">
-          <Badge className="mb-4 bg-primary/10 text-primary border-primary/20">Member Gym Bulanan</Badge>
+          <Badge className="mb-4 bg-primary/10 text-primary border-primary/20">{t("Member Gym Bulanan", "Monthly Gym Membership")}</Badge>
           <h1 className="text-4xl md:text-5xl font-black tracking-tight mb-4">
-            Jadilah <span className="text-primary">Member Gym</span> Kami
+            {t("Jadilah", "Become")} <span className="text-primary">{t("Member Gym", "Gym Member")}</span> {t("Kami", "of Ours")}
           </h1>
           <p className="text-xl text-muted-foreground mb-6">
-            Akses penuh ke fasilitas gym premium hanya dengan <span className="font-bold text-foreground">{formatCurrency(PRICE_PER_MONTH)}</span> per bulan.
+            {t("Akses penuh ke fasilitas gym premium hanya dengan", "Full access to premium gym facilities for only")} <span className="font-bold text-foreground">{formatCurrency(PRICE_PER_MONTH)}</span> {t("per bulan.", "per month.")}
           </p>
-          <div className="text-3xl font-black text-primary">{formatCurrency(PRICE_PER_MONTH)} <span className="text-lg font-normal text-muted-foreground">/ bulan</span></div>
+          <div className="text-3xl font-black text-primary">{formatCurrency(PRICE_PER_MONTH)} <span className="text-lg font-normal text-muted-foreground">{t("/ bulan", "/ month")}</span></div>
         </div>
       </section>
 
       <section className="py-16 bg-muted/30">
         <div className="container px-4 md:px-8">
-          <h2 className="text-2xl font-bold text-center mb-10">Keuntungan Menjadi Member</h2>
+          <h2 className="text-2xl font-bold text-center mb-10">{t("Keuntungan Menjadi Member", "Benefits of Becoming a Member")}</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 max-w-4xl mx-auto">
             {BENEFITS.map((b) => (
               <div key={b.label} className="flex gap-4 p-5 rounded-xl bg-background border border-border">
@@ -117,8 +119,8 @@ export default function Membership() {
                   <b.icon size={22} />
                 </div>
                 <div>
-                  <h3 className="font-semibold mb-1">{b.label}</h3>
-                  <p className="text-sm text-muted-foreground">{b.desc}</p>
+                  <h3 className="font-semibold mb-1">{t(b.label, b.labelEn)}</h3>
+                  <p className="text-sm text-muted-foreground">{t(b.desc, b.descEn)}</p>
                 </div>
               </div>
             ))}
@@ -131,23 +133,23 @@ export default function Membership() {
           <div className="max-w-xl mx-auto">
             <Card>
               <CardHeader>
-                <CardTitle className="text-xl">Formulir Pendaftaran Member</CardTitle>
+                <CardTitle className="text-xl">{t("Formulir Pendaftaran Member", "Member Registration Form")}</CardTitle>
               </CardHeader>
               <CardContent>
                 <form onSubmit={handleSubmit} className="space-y-5">
                   <div>
-                    <Label htmlFor="name">Nama Lengkap <span className="text-destructive">*</span></Label>
+                    <Label htmlFor="name">{t("Nama Lengkap", "Full Name")} <span className="text-destructive">*</span></Label>
                     <Input
                       id="name"
                       value={form.name}
                       onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                      placeholder="Nama lengkap Anda"
+                      placeholder={t("Nama lengkap Anda", "Your full name")}
                       required
                       className="mt-1.5"
                     />
                   </div>
                   <div>
-                    <Label htmlFor="email">Email <span className="text-destructive">*</span></Label>
+                    <Label htmlFor="email">{t("Email", "Email")} <span className="text-destructive">*</span></Label>
                     <Input
                       id="email"
                       type="email"
@@ -159,7 +161,7 @@ export default function Membership() {
                     />
                   </div>
                   <div>
-                    <Label htmlFor="phone">No. Telepon <span className="text-destructive">*</span></Label>
+                    <Label htmlFor="phone">{t("No. Telepon", "Phone No.")} <span className="text-destructive">*</span></Label>
                     <Input
                       id="phone"
                       type="tel"
@@ -171,7 +173,7 @@ export default function Membership() {
                     />
                   </div>
                   <div>
-                    <Label htmlFor="startDate">Tanggal Mulai <span className="text-destructive">*</span></Label>
+                    <Label htmlFor="startDate">{t("Tanggal Mulai", "Start Date")} <span className="text-destructive">*</span></Label>
                     <Input
                       id="startDate"
                       type="date"
@@ -183,7 +185,7 @@ export default function Membership() {
                     />
                   </div>
                   <div>
-                    <Label>Durasi Membership</Label>
+                    <Label>{t("Durasi Membership", "Membership Duration")}</Label>
                     <div className="flex gap-2 mt-1.5 flex-wrap">
                       {[1, 2, 3, 6, 12].map((m) => (
                         <button
@@ -196,18 +198,18 @@ export default function Membership() {
                               : "bg-background border-border text-foreground hover:border-primary/50"
                           }`}
                         >
-                          {m} Bulan
+                          {m} {t("Bulan", "Months")}
                         </button>
                       ))}
                     </div>
                   </div>
                   <div>
-                    <Label htmlFor="notes">Catatan (opsional)</Label>
+                    <Label htmlFor="notes">{t("Catatan (opsional)", "Notes (optional)")}</Label>
                     <Textarea
                       id="notes"
                       value={form.notes}
                       onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
-                      placeholder="Catatan atau pertanyaan tambahan..."
+                      placeholder={t("Catatan atau pertanyaan tambahan...", "Additional notes or questions...")}
                       className="mt-1.5"
                       rows={3}
                     />
@@ -215,27 +217,27 @@ export default function Membership() {
 
                   <div className="rounded-xl bg-primary/5 border border-primary/20 p-4 space-y-2">
                     <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">Harga per bulan</span>
+                      <span className="text-muted-foreground">{t("Harga per bulan", "Price per month")}</span>
                       <span>{formatCurrency(PRICE_PER_MONTH)}</span>
                     </div>
                     <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">Durasi</span>
-                      <span>{months} bulan</span>
+                      <span className="text-muted-foreground">{t("Durasi", "Duration")}</span>
+                      <span>{months} {t("bulan", "months")}</span>
                     </div>
                     {form.startDate && (
                       <div className="flex justify-between text-sm">
-                        <span className="text-muted-foreground">Berlaku hingga</span>
+                        <span className="text-muted-foreground">{t("Berlaku hingga", "Valid until")}</span>
                         <span>{addMonths(form.startDate, months)}</span>
                       </div>
                     )}
                     <div className="border-t border-primary/20 pt-2 flex justify-between font-bold">
-                      <span>Total</span>
+                      <span>{t("Total", "Total")}</span>
                       <span className="text-primary">{formatCurrency(PRICE_PER_MONTH * months)}</span>
                     </div>
                   </div>
 
                   <Button type="submit" className="w-full h-12 text-base" disabled={createMutation.isPending}>
-                    {createMutation.isPending ? "Mendaftarkan..." : "Daftar Sekarang"}
+                    {createMutation.isPending ? t("Mendaftarkan...", "Registering...") : t("Daftar Sekarang", "Register Now")}
                   </Button>
                 </form>
               </CardContent>

@@ -26,6 +26,7 @@ import {
   QrCode,
   ChevronRight,
 } from "lucide-react";
+import { useLang } from "@/lib/i18n";
 
 const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "") || "";
 
@@ -35,6 +36,7 @@ export default function BookingDetail() {
   const [, params] = useRoute("/booking/:orderNumber");
   const orderNumber = params?.orderNumber || "";
   const { toast } = useToast();
+  const { t } = useLang();
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -53,12 +55,12 @@ export default function BookingDetail() {
   const submitPayment = useCreatePayment({
     mutation: {
       onSuccess: () => {
-        toast({ title: "Bukti pembayaran dikirim!", description: "Admin akan memverifikasi pembayaran Anda segera." });
+        toast({ title: t("Bukti pembayaran dikirim!", "Payment proof submitted!"), description: t("Admin akan memverifikasi pembayaran Anda segera.", "Admin will verify your payment shortly.") });
         queryClient.invalidateQueries({ queryKey: getGetBookingByOrderQueryKey(orderNumber) });
         clearFile();
       },
       onError: (error: any) => {
-        toast({ title: "Gagal mengirim", description: error?.message || "Terjadi kesalahan", variant: "destructive" });
+        toast({ title: t("Gagal mengirim", "Failed to submit"), description: error?.message || t("Terjadi kesalahan", "An error occurred"), variant: "destructive" });
         setUploadProgress("idle");
       },
     },
@@ -90,7 +92,7 @@ export default function BookingDetail() {
     if (file && /image\/(jpeg|png|webp)|application\/pdf/.test(file.type)) {
       setFile(file);
     } else {
-      toast({ title: "Format tidak didukung", description: "Gunakan JPG, PNG, WebP, atau PDF", variant: "destructive" });
+      toast({ title: t("Format tidak didukung", "Unsupported format"), description: t("Gunakan JPG, PNG, WebP, atau PDF", "Use JPG, PNG, WebP, or PDF"), variant: "destructive" });
     }
   }, []);
 
@@ -154,24 +156,24 @@ export default function BookingDetail() {
   if (!booking)
     return (
       <div className="container py-20 text-center">
-        <h2 className="text-2xl font-bold mb-2">Booking Tidak Ditemukan</h2>
-        <p className="text-muted-foreground">Order {orderNumber} tidak ada.</p>
+        <h2 className="text-2xl font-bold mb-2">{t("Booking Tidak Ditemukan", "Booking Not Found")}</h2>
+        <p className="text-muted-foreground">{t("Order", "Order")} {orderNumber} {t("tidak ada.", "does not exist.")}</p>
       </div>
     );
 
   const getStatusConfig = (status: string) => {
     switch (status) {
       case "pending_payment":
-        return { color: "bg-yellow-100 text-yellow-800 border-yellow-300", icon: Clock, label: "Menunggu Pembayaran" };
+        return { color: "bg-yellow-100 text-yellow-800 border-yellow-300", icon: Clock, label: t("Menunggu Pembayaran", "Awaiting Payment") };
       case "paid":
-        return { color: "bg-blue-100 text-blue-800 border-blue-300", icon: CheckCircle2, label: "Sedang Diverifikasi" };
+        return { color: "bg-blue-100 text-blue-800 border-blue-300", icon: CheckCircle2, label: t("Sedang Diverifikasi", "Being Verified") };
       case "confirmed":
       case "completed":
-        return { color: "bg-green-100 text-green-800 border-green-300", icon: CheckCircle2, label: "Booking Dikonfirmasi" };
+        return { color: "bg-green-100 text-green-800 border-green-300", icon: CheckCircle2, label: t("Booking Dikonfirmasi", "Booking Confirmed") };
       case "cancelled":
-        return { color: "bg-red-100 text-red-800 border-red-300", icon: AlertCircle, label: "Dibatalkan" };
+        return { color: "bg-red-100 text-red-800 border-red-300", icon: AlertCircle, label: t("Dibatalkan", "Cancelled") };
       case "refunded":
-        return { color: "bg-purple-100 text-purple-800 border-purple-300", icon: AlertCircle, label: "Dana Dikembalikan" };
+        return { color: "bg-purple-100 text-purple-800 border-purple-300", icon: AlertCircle, label: t("Dana Dikembalikan", "Refunded") };
       default:
         return { color: "bg-gray-100 text-gray-800 border-gray-300", icon: Clock, label: status };
     }
@@ -193,12 +195,12 @@ export default function BookingDetail() {
           <span className="font-bold">{statusConfig.label}</span>
         </div>
         <h1 className="text-3xl md:text-5xl font-black tracking-tight mb-2">
-          Order {booking.orderNumber}
+          {t("Order", "Order")} {booking.orderNumber}
         </h1>
         <p className="text-muted-foreground text-lg">
           {booking.status === "pending_payment"
-            ? "Selesaikan pembayaran untuk mengamankan booking ini."
-            : "Terima kasih atas pemesanan Anda!"}
+            ? t("Selesaikan pembayaran untuk mengamankan booking ini.", "Complete payment to secure this booking.")
+            : t("Terima kasih atas pemesanan Anda!", "Thank you for your order!")}
         </p>
       </div>
 
@@ -206,11 +208,11 @@ export default function BookingDetail() {
         {/* Booking Details */}
         <Card className="border-border">
           <CardHeader className="bg-muted/30 pb-4 border-b">
-            <CardTitle>Detail Booking</CardTitle>
+            <CardTitle>{t("Detail Booking", "Booking Details")}</CardTitle>
           </CardHeader>
           <CardContent className="p-6 space-y-4">
             <div>
-              <div className="text-sm text-muted-foreground mb-1">Pelanggan</div>
+              <div className="text-sm text-muted-foreground mb-1">{t("Pelanggan", "Customer")}</div>
               <div className="font-semibold">{booking.customerName}</div>
               <div className="text-sm text-muted-foreground">
                 {booking.customerPhone} · {booking.customerEmail}
@@ -218,19 +220,19 @@ export default function BookingDetail() {
             </div>
             <div className="h-px bg-border" />
             <div>
-              <div className="text-sm text-muted-foreground mb-1">Fasilitas</div>
+              <div className="text-sm text-muted-foreground mb-1">{t("Fasilitas", "Facility")}</div>
               <div className="font-semibold text-lg">{booking.facilityName}</div>
               <div className="text-sm text-primary font-medium">{booking.facilityCategory}</div>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <div className="text-sm text-muted-foreground mb-1">Tanggal</div>
+                <div className="text-sm text-muted-foreground mb-1">{t("Tanggal", "Date")}</div>
                 <div className="font-semibold">
                   {format(new Date(booking.bookingDate), "d MMM yyyy")}
                 </div>
               </div>
               <div>
-                <div className="text-sm text-muted-foreground mb-1">Waktu</div>
+                <div className="text-sm text-muted-foreground mb-1">{t("Waktu", "Time")}</div>
                 <div className="font-semibold">
                   {booking.startTime.substring(0, 5)} – {booking.endTime.substring(0, 5)}
                 </div>
@@ -238,7 +240,7 @@ export default function BookingDetail() {
             </div>
             <div className="h-px bg-border" />
             <div className="flex justify-between items-center text-xl font-black">
-              <div>Total</div>
+              <div>{t("Total", "Total")}</div>
               <div className="text-primary">
                 Rp {booking.totalPrice.toLocaleString("id-ID")}
               </div>
@@ -253,16 +255,16 @@ export default function BookingDetail() {
               <CardHeader className="bg-primary/5 pb-4 border-b border-primary/10">
                 <CardTitle className="flex items-center gap-2 text-primary">
                   <CreditCard size={20} />
-                  Instruksi Pembayaran
+                  {t("Instruksi Pembayaran", "Payment Instructions")}
                 </CardTitle>
               </CardHeader>
               <CardContent className="p-6 space-y-5">
                 <div className="text-sm font-semibold text-foreground">
-                  Bayar{" "}
+                  {t("Bayar", "Pay")}{" "}
                   <span className="text-primary text-base">
                     Rp {booking.totalPrice.toLocaleString("id-ID")}
                   </span>{" "}
-                  via:
+                  {t("via:", "via:")}
                 </div>
 
                 {/* Payment Method Selector */}
@@ -278,7 +280,7 @@ export default function BookingDetail() {
                           <Building2 size={22} className="text-blue-600" />
                         </div>
                         <div className="text-center">
-                          <div className="font-semibold text-sm">Transfer Bank</div>
+                          <div className="font-semibold text-sm">{t("Transfer Bank", "Bank Transfer")}</div>
                           <div className="text-xs text-muted-foreground mt-0.5">
                             {settings?.bankName}
                           </div>
@@ -297,14 +299,14 @@ export default function BookingDetail() {
                         </div>
                         <div className="text-center">
                           <div className="font-semibold text-sm">QRIS</div>
-                          <div className="text-xs text-muted-foreground mt-0.5">Scan & Pay</div>
+                          <div className="text-xs text-muted-foreground mt-0.5">{t("Scan & Pay", "Scan & Pay")}</div>
                         </div>
                         <ChevronRight size={14} className="text-muted-foreground group-hover:text-primary transition-colors" />
                       </button>
                     )}
                     {!hasBankInfo && !hasQris && (
                       <div className="col-span-2 text-center py-4 text-sm text-muted-foreground">
-                        Hubungi admin untuk info pembayaran.
+                        {t("Hubungi admin untuk info pembayaran.", "Contact admin for payment information.")}
                       </div>
                     )}
                   </div>
@@ -318,7 +320,7 @@ export default function BookingDetail() {
                       onClick={() => { setPaymentMethod(null); clearFile(); }}
                       className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
                     >
-                      ← Pilih metode lain
+                      ← {t("Pilih metode lain", "Choose another method")}
                     </button>
 
                     <div className="bg-muted rounded-xl p-4 relative group">
@@ -329,7 +331,7 @@ export default function BookingDetail() {
                         {settings?.bankAccount}
                       </div>
                       <div className="text-sm font-medium">
-                        a.n {settings?.bankAccountName}
+                        {t("a.n", "a/n")} {settings?.bankAccountName}
                       </div>
                       <Button
                         size="icon"
@@ -367,12 +369,12 @@ export default function BookingDetail() {
                       onClick={() => { setPaymentMethod(null); clearFile(); }}
                       className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
                     >
-                      ← Pilih metode lain
+                      ← {t("Pilih metode lain", "Choose another method")}
                     </button>
 
                     <div className="rounded-xl border border-border overflow-hidden">
                       <div className="bg-muted px-4 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                        Scan QR Code Berikut
+                        {t("Scan QR Code Berikut", "Scan the QR Code Below")}
                       </div>
                       <div className="p-4 flex justify-center">
                         <img
@@ -382,7 +384,7 @@ export default function BookingDetail() {
                         />
                       </div>
                       <div className="px-4 pb-3 text-center text-sm text-muted-foreground">
-                        Scan dengan aplikasi e-wallet / m-banking apapun
+                        {t("Scan dengan aplikasi e-wallet / m-banking apapun", "Scan with any e-wallet / m-banking app")}
                       </div>
                     </div>
 
@@ -414,9 +416,9 @@ export default function BookingDetail() {
                 <div className="w-14 h-14 rounded-full bg-blue-100 flex items-center justify-center mx-auto mb-3">
                   <Clock size={26} className="text-blue-600" />
                 </div>
-                <h3 className="font-bold text-lg text-blue-900 mb-1">Pembayaran Sedang Diverifikasi</h3>
+                <h3 className="font-bold text-lg text-blue-900 mb-1">{t("Pembayaran Sedang Diverifikasi", "Payment Being Verified")}</h3>
                 <p className="text-sm text-blue-700">
-                  Bukti transfer Anda sudah diterima. Admin akan mengonfirmasi dalam 1×24 jam.
+                  {t("Bukti transfer Anda sudah diterima. Admin akan mengonfirmasi dalam 1×24 jam.", "Your transfer proof has been received. Admin will confirm within 1×24 hours.")}
                 </p>
               </CardContent>
             </Card>
@@ -429,9 +431,9 @@ export default function BookingDetail() {
                 <div className="w-14 h-14 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-3">
                   <CheckCircle2 size={26} className="text-green-600" />
                 </div>
-                <h3 className="font-bold text-lg text-green-900 mb-1">Booking Dikonfirmasi!</h3>
+                <h3 className="font-bold text-lg text-green-900 mb-1">{t("Booking Dikonfirmasi!", "Booking Confirmed!")}</h3>
                 <p className="text-sm text-green-700">
-                  Pembayaran Anda sudah diverifikasi. Sampai jumpa di lapangan!
+                  {t("Pembayaran Anda sudah diverifikasi. Sampai jumpa di lapangan!", "Your payment has been verified. See you on the court!")}
                 </p>
               </CardContent>
             </Card>
@@ -444,9 +446,9 @@ export default function BookingDetail() {
                 <div className="w-14 h-14 rounded-full bg-purple-100 flex items-center justify-center mx-auto mb-3">
                   <AlertCircle size={26} className="text-purple-600" />
                 </div>
-                <h3 className="font-bold text-lg text-purple-900 mb-1">Dana Telah Dikembalikan</h3>
+                <h3 className="font-bold text-lg text-purple-900 mb-1">{t("Dana Telah Dikembalikan", "Funds Have Been Refunded")}</h3>
                 <p className="text-sm text-purple-700">
-                  Pembayaran Anda telah dikembalikan oleh admin. Silakan hubungi kami jika ada pertanyaan.
+                  {t("Pembayaran Anda telah dikembalikan oleh admin. Silakan hubungi kami jika ada pertanyaan.", "Your payment has been refunded by admin. Please contact us if you have any questions.")}
                 </p>
               </CardContent>
             </Card>
@@ -459,9 +461,9 @@ export default function BookingDetail() {
                 <div className="w-14 h-14 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-3">
                   <AlertCircle size={26} className="text-red-600" />
                 </div>
-                <h3 className="font-bold text-lg text-red-900 mb-1">Booking Dibatalkan</h3>
+                <h3 className="font-bold text-lg text-red-900 mb-1">{t("Booking Dibatalkan", "Booking Cancelled")}</h3>
                 <p className="text-sm text-red-700">
-                  Booking ini telah dibatalkan. Hubungi admin jika Anda memerlukan bantuan.
+                  {t("Booking ini telah dibatalkan. Hubungi admin jika Anda memerlukan bantuan.", "This booking has been cancelled. Contact admin if you need assistance.")}
                 </p>
               </CardContent>
             </Card>
@@ -470,8 +472,8 @@ export default function BookingDetail() {
           {/* Contact */}
           <Card>
             <CardHeader>
-              <CardTitle className="text-lg">Butuh Bantuan?</CardTitle>
-              <CardDescription>Hubungi admin via WhatsApp untuk respons cepat</CardDescription>
+              <CardTitle className="text-lg">{t("Butuh Bantuan?", "Need Help?")}</CardTitle>
+              <CardDescription>{t("Hubungi admin via WhatsApp untuk respons cepat", "Contact admin via WhatsApp for a quick response")}</CardDescription>
             </CardHeader>
             <CardContent>
               <Button
@@ -480,7 +482,7 @@ export default function BookingDetail() {
                 className="w-full border-[#25D366] text-[#25D366] hover:bg-[#25D366] hover:text-white"
               >
                 <a href={getWhatsAppLink()} target="_blank" rel="noopener noreferrer">
-                  <MessageCircle className="mr-2" size={18} /> Chat dengan Admin
+                  <MessageCircle className="mr-2" size={18} /> {t("Chat dengan Admin", "Chat with Admin")}
                 </a>
               </Button>
             </CardContent>
@@ -522,10 +524,11 @@ function UploadProofForm({
   isPending: boolean;
   uploadProgress: "idle" | "uploading" | "done";
 }) {
+  const { t } = useLang();
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <div className="space-y-2">
-        <label className="text-sm font-semibold">Upload Bukti Pembayaran *</label>
+        <label className="text-sm font-semibold">{t("Upload Bukti Pembayaran *", "Upload Payment Proof *")}</label>
 
         {!selectedFile ? (
           <div
@@ -541,10 +544,10 @@ function UploadProofForm({
           >
             <Upload size={28} className="mx-auto mb-2 text-muted-foreground" />
             <p className="text-sm font-medium text-muted-foreground">
-              Drag & drop atau klik untuk upload
+              {t("Drag & drop atau klik untuk upload", "Drag & drop or click to upload")}
             </p>
             <p className="text-xs text-muted-foreground/70 mt-1">
-              JPG, PNG, WebP, PDF — maks 10 MB
+              {t("JPG, PNG, WebP, PDF — maks 10 MB", "JPG, PNG, WebP, PDF — max 10 MB")}
             </p>
           </div>
         ) : (
@@ -593,7 +596,7 @@ function UploadProofForm({
 
       {uploadProgress === "uploading" && (
         <div className="space-y-1">
-          <div className="text-xs text-muted-foreground">Mengupload file...</div>
+          <div className="text-xs text-muted-foreground">{t("Mengupload file...", "Uploading file...")}</div>
           <div className="h-1.5 bg-muted rounded-full overflow-hidden">
             <div className="h-full bg-primary rounded-full animate-pulse" style={{ width: "70%" }} />
           </div>
@@ -602,12 +605,12 @@ function UploadProofForm({
 
       <div className="space-y-2">
         <label className="text-sm font-medium text-muted-foreground">
-          Catatan (opsional)
+          {t("Catatan (opsional)", "Notes (optional)")}
         </label>
         <textarea
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
-          placeholder="Misal: Transfer dari BCA a.n Budi..."
+          placeholder={t("Misal: Transfer dari BCA a.n Budi...", "e.g. Transfer from BCA a/n Budi...")}
           rows={2}
           className="w-full px-3 py-2 text-sm rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-ring resize-none"
         />
@@ -622,11 +625,11 @@ function UploadProofForm({
         {isPending ? (
           <span className="flex items-center gap-2">
             <span className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
-            {uploadProgress === "uploading" ? "Mengupload..." : "Mengirim..."}
+            {uploadProgress === "uploading" ? t("Mengupload...", "Uploading...") : t("Mengirim...", "Submitting...")}
           </span>
         ) : (
           <span className="flex items-center gap-2">
-            <CheckCircle2 size={18} /> Saya Sudah Bayar
+            <CheckCircle2 size={18} /> {t("Saya Sudah Bayar", "I Have Paid")}
           </span>
         )}
       </Button>

@@ -10,10 +10,12 @@ import { Calendar, Tag, Info, Gift, MapPin, ArrowRight, Zap } from "lucide-react
 import { format } from "date-fns";
 import { id } from "date-fns/locale";
 import { getFacilityImage } from "@/lib/utils";
+import { useLang } from "@/lib/i18n";
 
 export default function Promos() {
   const { data: promos, isLoading } = useListPromos({ activeOnly: true });
   const { toast } = useToast();
+  const { t } = useLang();
   
   const [selectedPromo, setSelectedPromo] = useState<number | null>(null);
   const [isRegisterOpen, setIsRegisterOpen] = useState(false);
@@ -28,16 +30,16 @@ export default function Promos() {
     mutation: {
       onSuccess: () => {
         toast({
-          title: "Pendaftaran Berhasil!",
-          description: "Tim kami akan segera menghubungi Anda melalui WhatsApp.",
+          title: t("Pendaftaran Berhasil!", "Registration Successful!"),
+          description: t("Tim kami akan segera menghubungi Anda melalui WhatsApp.", "Our team will contact you shortly via WhatsApp."),
         });
         setIsRegisterOpen(false);
         resetForm();
       },
       onError: (error: any) => {
         toast({
-          title: "Pendaftaran Gagal",
-          description: error?.message || "Terjadi kesalahan. Silakan coba lagi.",
+          title: t("Pendaftaran Gagal", "Registration Failed"),
+          description: error?.message || t("Terjadi kesalahan. Silakan coba lagi.", "An error occurred. Please try again."),
           variant: "destructive",
         });
       }
@@ -82,13 +84,13 @@ export default function Promos() {
         <div className="container mx-auto px-4 md:px-8 relative z-10">
           <div className="max-w-3xl mx-auto text-center">
             <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 text-primary font-bold text-sm mb-6 border border-primary/20 shadow-sm">
-              <Gift size={16} /> Penawaran Terbatas
+              <Gift size={16} /> {t("Penawaran Terbatas", "Limited Offer")}
             </div>
             <h1 className="text-4xl md:text-5xl lg:text-6xl font-black tracking-tight text-secondary dark:text-white mb-6 leading-tight">
-              Promo & <span className="text-primary">Acara Spesial</span>
+              {t("Promo &", "Promos &")} <span className="text-primary">{t("Acara Spesial", "Special Events")}</span>
             </h1>
             <p className="text-lg md:text-xl font-medium text-muted-foreground leading-relaxed max-w-2xl mx-auto">
-              Berolahraga lebih hemat! Temukan penawaran menarik bulan ini atau daftar untuk turnamen dan event seru kami.
+              {t("Berolahraga lebih hemat! Temukan penawaran menarik bulan ini atau daftar untuk turnamen dan event seru kami.", "Work out for less! Discover this month's great offers or sign up for our exciting tournaments and events.")}
             </p>
           </div>
         </div>
@@ -120,7 +122,7 @@ export default function Promos() {
                           : 'bg-blue-600 text-white'
                       }`}>
                         {promo.type === 'promo' ? <Tag size={14} /> : <Zap size={14} />}
-                        {promo.type === 'promo' ? 'Promo' : 'Event'}
+                        {promo.type === 'promo' ? t('Promo', 'Promo') : t('Event', 'Event')}
                       </span>
                     </div>
 
@@ -128,7 +130,7 @@ export default function Promos() {
                       <div className="absolute bottom-0 right-4 translate-y-1/2 z-10">
                         <div className="w-20 h-20 bg-primary text-white rounded-full flex flex-col items-center justify-center font-black shadow-xl border-4 border-white dark:border-slate-900 transform rotate-12 group-hover:rotate-0 transition-transform">
                           <span className="text-2xl leading-none">{promo.discountPercent}%</span>
-                          <span className="text-[10px] tracking-wider">DISKON</span>
+                          <span className="text-[10px] tracking-wider">{t("DISKON", "DISCOUNT")}</span>
                         </div>
                       </div>
                     )}
@@ -161,9 +163,9 @@ export default function Promos() {
                       variant={promo.type === 'event' ? 'default' : 'outline'}
                     >
                       {promo.type === 'event' ? (
-                        <>Daftar Event Ini <ArrowRight size={18} className="ml-2" /></>
+                        <>{t("Daftar Event Ini", "Register for This Event")} <ArrowRight size={18} className="ml-2" /></>
                       ) : (
-                        <>Ambil Diskon <Tag size={18} className="ml-2" /></>
+                        <>{t("Ambil Diskon", "Claim Discount")} <Tag size={18} className="ml-2" /></>
                       )}
                     </Button>
                   </div>
@@ -176,8 +178,8 @@ export default function Promos() {
             <div className="w-20 h-20 bg-muted rounded-full flex items-center justify-center mx-auto mb-6">
               <Info className="w-8 h-8 text-muted-foreground opacity-50" />
             </div>
-            <h3 className="text-2xl font-black text-secondary dark:text-white mb-2">Belum Ada Promo</h3>
-            <p className="text-muted-foreground font-medium px-6">Maaf, saat ini belum ada promo atau event yang aktif. Silakan kembali lagi nanti untuk penawaran menarik lainnya!</p>
+            <h3 className="text-2xl font-black text-secondary dark:text-white mb-2">{t("Belum Ada Promo", "No Promos Yet")}</h3>
+            <p className="text-muted-foreground font-medium px-6">{t("Maaf, saat ini belum ada promo atau event yang aktif. Silakan kembali lagi nanti untuk penawaran menarik lainnya!", "Sorry, there are currently no active promos or events. Please check back later for other great offers!")}</p>
           </div>
         )}
       </div>
@@ -187,7 +189,7 @@ export default function Promos() {
         <DialogContent className="sm:max-w-[425px] p-0 border-0 rounded-3xl overflow-hidden">
           <div className="bg-primary/5 p-6 border-b border-primary/10">
             <DialogTitle className="text-2xl font-black text-secondary dark:text-white mb-2">
-              {activePromo?.type === 'event' ? 'Pendaftaran Event' : 'Klaim Penawaran'}
+              {activePromo?.type === 'event' ? t('Pendaftaran Event', 'Event Registration') : t('Klaim Penawaran', 'Claim Offer')}
             </DialogTitle>
             <DialogDescription className="text-primary font-bold text-sm">
               {activePromo?.title}
@@ -196,25 +198,25 @@ export default function Promos() {
           
           <form onSubmit={onSubmit} className="p-6 space-y-5 bg-white dark:bg-slate-950">
             <div className="space-y-2">
-              <Label htmlFor="name" className="font-bold">Nama Lengkap <span className="text-destructive">*</span></Label>
-              <Input id="name" required value={name} onChange={e => setName(e.target.value)} className="h-12 rounded-xl bg-[#F8FAFC] dark:bg-slate-900 border-border" placeholder="Ketik nama Anda" />
+              <Label htmlFor="name" className="font-bold">{t("Nama Lengkap", "Full Name")} <span className="text-destructive">*</span></Label>
+              <Input id="name" required value={name} onChange={e => setName(e.target.value)} className="h-12 rounded-xl bg-[#F8FAFC] dark:bg-slate-900 border-border" placeholder={t("Ketik nama Anda", "Type your name")} />
             </div>
             
             <div className="space-y-2">
-              <Label htmlFor="email" className="font-bold">Email Aktif <span className="text-destructive">*</span></Label>
+              <Label htmlFor="email" className="font-bold">{t("Email Aktif", "Active Email")} <span className="text-destructive">*</span></Label>
               <Input id="email" type="email" required value={email} onChange={e => setEmail(e.target.value)} className="h-12 rounded-xl bg-[#F8FAFC] dark:bg-slate-900 border-border" placeholder="nama@email.com" />
             </div>
             
             <div className="space-y-2">
-              <Label htmlFor="phone" className="font-bold">No. WhatsApp <span className="text-destructive">*</span></Label>
+              <Label htmlFor="phone" className="font-bold">{t("No. WhatsApp", "WhatsApp Number")} <span className="text-destructive">*</span></Label>
               <Input id="phone" required placeholder="08xxxxxxxxxx" value={phone} onChange={e => setPhone(e.target.value)} className="h-12 rounded-xl bg-[#F8FAFC] dark:bg-slate-900 border-border" />
             </div>
             
             <div className="space-y-2">
-              <Label htmlFor="message" className="font-bold">Pesan (Opsional)</Label>
+              <Label htmlFor="message" className="font-bold">{t("Pesan (Opsional)", "Message (Optional)")}</Label>
               <Textarea 
                 id="message" 
-                placeholder={activePromo?.type === 'event' ? 'Contoh: Nama tim, pertanyaan...' : 'Catatan tambahan'} 
+                placeholder={activePromo?.type === 'event' ? t('Contoh: Nama tim, pertanyaan...', 'Example: Team name, questions...') : t('Catatan tambahan', 'Additional notes')} 
                 value={message} 
                 onChange={e => setMessage(e.target.value)} 
                 className="rounded-xl bg-[#F8FAFC] dark:bg-slate-900 border-border min-h-[100px]"
@@ -222,9 +224,9 @@ export default function Promos() {
             </div>
             
             <DialogFooter className="pt-4 gap-3 sm:gap-0">
-              <Button type="button" variant="outline" onClick={() => setIsRegisterOpen(false)} className="rounded-full font-bold h-12">Batal</Button>
+              <Button type="button" variant="outline" onClick={() => setIsRegisterOpen(false)} className="rounded-full font-bold h-12">{t("Batal", "Cancel")}</Button>
               <Button type="submit" disabled={registerMutation.isPending} className="rounded-full font-bold h-12 shadow-md shadow-primary/20">
-                {registerMutation.isPending ? 'Memproses...' : 'Kirim Pendaftaran'}
+                {registerMutation.isPending ? t('Memproses...', 'Processing...') : t('Kirim Pendaftaran', 'Submit Registration')}
               </Button>
             </DialogFooter>
           </form>

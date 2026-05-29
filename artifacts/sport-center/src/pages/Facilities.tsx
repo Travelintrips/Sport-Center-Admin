@@ -12,6 +12,7 @@ import { Search, MapPin, Dumbbell, CheckCircle2, Star, Users, ArrowRight } from 
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { getFacilityImage } from "@/lib/utils";
+import { useLang } from "@/lib/i18n";
 
 const PRICE_PER_MONTH = 300000;
 const today = new Date().toISOString().split("T")[0];
@@ -28,6 +29,7 @@ function addMonths(dateStr: string, months: number): string {
 
 function MembershipDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { toast } = useToast();
+  const { t } = useLang();
   const [months, setMonths] = useState(1);
   const [form, setForm] = useState({ name: "", email: "", phone: "", startDate: today, notes: "" });
   const [success, setSuccess] = useState<{ name: string; endDate: string; totalPrice: number } | null>(null);
@@ -38,7 +40,7 @@ function MembershipDialog({ open, onClose }: { open: boolean; onClose: () => voi
         setSuccess({ name: data.name, endDate: data.endDate, totalPrice: data.totalPrice });
       },
       onError: () => {
-        toast({ title: "Gagal mendaftar", description: "Terjadi kesalahan. Silakan coba lagi.", variant: "destructive" });
+        toast({ title: t("Gagal mendaftar", "Registration failed"), description: t("Terjadi kesalahan. Silakan coba lagi.", "An error occurred. Please try again."), variant: "destructive" });
       },
     },
   });
@@ -46,7 +48,7 @@ function MembershipDialog({ open, onClose }: { open: boolean; onClose: () => voi
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!form.name || !form.email || !form.phone || !form.startDate) {
-      toast({ title: "Form tidak lengkap", description: "Harap isi semua field yang wajib.", variant: "destructive" });
+      toast({ title: t("Form tidak lengkap", "Incomplete form"), description: t("Harap isi semua field yang wajib.", "Please fill in all required fields."), variant: "destructive" });
       return;
     }
     createMutation.mutate({ data: { ...form, months } });
@@ -67,7 +69,7 @@ function MembershipDialog({ open, onClose }: { open: boolean; onClose: () => voi
             <div className="w-8 h-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center">
               <Dumbbell size={18} />
             </div>
-            Daftar Member Gym Bulanan
+            {t("Daftar Member Gym Bulanan", "Monthly Gym Membership Registration")}
           </DialogTitle>
         </DialogHeader>
 
@@ -77,30 +79,30 @@ function MembershipDialog({ open, onClose }: { open: boolean; onClose: () => voi
               <div className="w-20 h-20 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-6 shadow-inner">
                 <CheckCircle2 className="text-green-600 w-10 h-10" />
               </div>
-              <h3 className="text-2xl font-black mb-2 text-secondary dark:text-white">Pendaftaran Berhasil!</h3>
+              <h3 className="text-2xl font-black mb-2 text-secondary dark:text-white">{t("Pendaftaran Berhasil!", "Registration Successful!")}</h3>
               <p className="text-muted-foreground font-medium mb-6">
-                Selamat, <span className="font-bold text-foreground">{success.name}</span>!<br />
-                Membership gym Anda aktif hingga <span className="font-bold text-foreground">{success.endDate}</span>.
+                {t("Selamat", "Congratulations")}, <span className="font-bold text-foreground">{success.name}</span>!<br />
+                {t("Membership gym Anda aktif hingga", "Your gym membership is active until")} <span className="font-bold text-foreground">{success.endDate}</span>.
               </p>
               
               <div className="bg-[#F8FAFC] dark:bg-slate-900 border border-border rounded-2xl p-5 mb-8 flex flex-col items-center justify-center shadow-sm">
-                <span className="text-sm font-bold text-muted-foreground uppercase tracking-widest mb-1">Total Pembayaran</span>
+                <span className="text-sm font-bold text-muted-foreground uppercase tracking-widest mb-1">{t("Total Pembayaran", "Total Payment")}</span>
                 <span className="font-black text-primary text-3xl">{formatCurrency(success.totalPrice)}</span>
               </div>
               
               <p className="text-sm font-medium text-muted-foreground mb-6 bg-primary/5 p-4 rounded-xl text-left flex gap-3 items-start border border-primary/10">
                 <span className="w-5 h-5 rounded-full bg-primary/20 text-primary flex items-center justify-center text-xs font-bold shrink-0 mt-0.5">!</span>
-                Tunjukkan konfirmasi ini kepada resepsionis saat kunjungan pertama Anda untuk mengaktifkan kartu akses.
+                {t("Tunjukkan konfirmasi ini kepada resepsionis saat kunjungan pertama Anda untuk mengaktifkan kartu akses.", "Show this confirmation to the receptionist on your first visit to activate your access card.")}
               </p>
               <Button onClick={handleClose} size="lg" className="w-full rounded-full font-bold h-12 shadow-lg shadow-primary/20">
-                Tutup & Kembali
+                {t("Tutup & Kembali", "Close & Back")}
               </Button>
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-5">
               <div className="space-y-1.5">
-                <Label htmlFor="m-name" className="font-bold text-foreground/80">Nama Lengkap <span className="text-destructive">*</span></Label>
-                <Input id="m-name" value={form.name} onChange={(e) => setForm(f => ({ ...f, name: e.target.value }))} placeholder="Ketik nama lengkap Anda" required className="h-12 rounded-xl bg-[#F8FAFC] dark:bg-slate-900 border-border font-medium" />
+                <Label htmlFor="m-name" className="font-bold text-foreground/80">{t("Nama Lengkap", "Full Name")} <span className="text-destructive">*</span></Label>
+                <Input id="m-name" value={form.name} onChange={(e) => setForm(f => ({ ...f, name: e.target.value }))} placeholder={t("Ketik nama lengkap Anda", "Enter your full name")} required className="h-12 rounded-xl bg-[#F8FAFC] dark:bg-slate-900 border-border font-medium" />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="m-email" className="font-bold text-foreground/80">Email <span className="text-destructive">*</span></Label>
@@ -108,16 +110,16 @@ function MembershipDialog({ open, onClose }: { open: boolean; onClose: () => voi
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1.5">
-                  <Label htmlFor="m-phone" className="font-bold text-foreground/80">No. WhatsApp <span className="text-destructive">*</span></Label>
+                  <Label htmlFor="m-phone" className="font-bold text-foreground/80">{t("No. WhatsApp", "WhatsApp No.")} <span className="text-destructive">*</span></Label>
                   <Input id="m-phone" type="tel" value={form.phone} onChange={(e) => setForm(f => ({ ...f, phone: e.target.value }))} placeholder="08xxxxxxxxxx" required className="h-12 rounded-xl bg-[#F8FAFC] dark:bg-slate-900 border-border font-medium" />
                 </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="m-start" className="font-bold text-foreground/80">Mulai Tanggal <span className="text-destructive">*</span></Label>
+                  <Label htmlFor="m-start" className="font-bold text-foreground/80">{t("Mulai Tanggal", "Start Date")} <span className="text-destructive">*</span></Label>
                   <Input id="m-start" type="date" value={form.startDate} min={today} onChange={(e) => setForm(f => ({ ...f, startDate: e.target.value }))} required className="h-12 rounded-xl bg-[#F8FAFC] dark:bg-slate-900 border-border font-medium" />
                 </div>
               </div>
               <div className="space-y-2 pt-2">
-                <Label className="font-bold text-foreground/80">Pilih Durasi Membership</Label>
+                <Label className="font-bold text-foreground/80">{t("Pilih Durasi Membership", "Choose Membership Duration")}</Label>
                 <div className="grid grid-cols-5 gap-2">
                   {[1, 2, 3, 6, 12].map((m) => (
                     <button key={m} type="button" onClick={() => setMonths(m)}
@@ -126,7 +128,7 @@ function MembershipDialog({ open, onClose }: { open: boolean; onClose: () => voi
                           ? "bg-primary/10 text-primary border-primary shadow-sm" 
                           : "bg-[#F8FAFC] dark:bg-slate-900 border-border text-foreground/70 hover:border-primary/40 hover:bg-white"
                       }`}>
-                      {m}<span className="block text-[10px] uppercase font-semibold opacity-70">Bulan</span>
+                      {m}<span className="block text-[10px] uppercase font-semibold opacity-70">{t("Bulan", "Month")}</span>
                     </button>
                   ))}
                 </div>
@@ -134,22 +136,22 @@ function MembershipDialog({ open, onClose }: { open: boolean; onClose: () => voi
               
               <div className="rounded-2xl bg-[#F8FAFC] dark:bg-slate-900 border border-border p-5 space-y-3 mt-6">
                 <div className="flex justify-between items-center text-sm font-medium">
-                  <span className="text-muted-foreground">Harga Per Bulan</span>
+                  <span className="text-muted-foreground">{t("Harga Per Bulan", "Price Per Month")}</span>
                   <span className="text-foreground">{formatCurrency(PRICE_PER_MONTH)}</span>
                 </div>
                 <div className="flex justify-between items-center text-sm font-medium">
-                  <span className="text-muted-foreground">Durasi Pilihan</span>
-                  <span className="text-foreground">{months} Bulan</span>
+                  <span className="text-muted-foreground">{t("Durasi Pilihan", "Selected Duration")}</span>
+                  <span className="text-foreground">{months} {t("Bulan", "Months")}</span>
                 </div>
                 <div className="h-px bg-border my-1" />
                 <div className="flex justify-between items-end">
-                  <span className="font-bold text-foreground/80">Total Bayar</span>
+                  <span className="font-bold text-foreground/80">{t("Total Bayar", "Total Payment")}</span>
                   <span className="text-2xl font-black text-primary">{formatCurrency(PRICE_PER_MONTH * months)}</span>
                 </div>
               </div>
               
               <Button type="submit" size="lg" className="w-full h-14 rounded-full font-bold shadow-lg shadow-primary/20 text-base" disabled={createMutation.isPending}>
-                {createMutation.isPending ? "Memproses Data..." : "Konfirmasi & Lanjut Bayar"}
+                {createMutation.isPending ? t("Memproses Data...", "Processing Data...") : t("Konfirmasi & Lanjut Bayar", "Confirm & Continue to Payment")}
               </Button>
             </form>
           )}
@@ -160,6 +162,7 @@ function MembershipDialog({ open, onClose }: { open: boolean; onClose: () => voi
 }
 
 export default function Facilities() {
+  const { t } = useLang();
   const [search, setSearch] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [membershipOpen, setMembershipOpen] = useState(false);
@@ -191,10 +194,10 @@ export default function Facilities() {
         <div className="container mx-auto px-4 md:px-8">
           <div className="max-w-3xl">
             <h1 className="text-4xl md:text-5xl font-black tracking-tight text-secondary dark:text-white mb-4 leading-tight">
-              Pilih Fasilitas <span className="text-primary">Olahraga Anda</span>
+              {t("Pilih Fasilitas", "Choose Your")} <span className="text-primary">{t("Olahraga Anda", "Sports Facility")}</span>
             </h1>
             <p className="text-lg font-medium text-muted-foreground leading-relaxed">
-              Dari lapangan berstandar internasional hingga pusat kebugaran modern. Temukan ketersediaan dan pesan jadwal Anda hari ini.
+              {t("Dari lapangan berstandar internasional hingga pusat kebugaran modern. Temukan ketersediaan dan pesan jadwal Anda hari ini.", "From internationally-standard courts to modern fitness centers. Find availability and book your schedule today.")}
             </p>
           </div>
         </div>
@@ -206,7 +209,7 @@ export default function Facilities() {
           <div className="relative w-full md:w-96 shrink-0">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground w-5 h-5" />
             <Input
-              placeholder="Cari nama fasilitas..."
+              placeholder={t("Cari nama fasilitas...", "Search facility name...")}
               className="pl-12 h-14 rounded-2xl bg-[#F8FAFC] dark:bg-slate-950 border-transparent focus-visible:ring-primary focus-visible:bg-white focus-visible:border-primary/20 text-base font-medium shadow-inner transition-all"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -225,7 +228,7 @@ export default function Facilities() {
                       : "bg-[#F8FAFC] dark:bg-slate-950 text-foreground/70 hover:bg-accent hover:text-foreground"
                   }`}
                 >
-                  {cat === "all" ? "Semua Kategori" : cat}
+                  {cat === "all" ? t("Semua Kategori", "All Categories") : cat}
                 </button>
               ))}
             </div>
@@ -279,9 +282,9 @@ export default function Facilities() {
                 <CardContent className="p-6 md:p-8 flex-1 flex flex-col">
                   <h3 className="text-2xl font-black text-secondary dark:text-white mb-2 line-clamp-1 group-hover:text-primary transition-colors">{facility.name}</h3>
                   <div className="flex items-center gap-3 text-sm font-semibold text-muted-foreground mb-4">
-                    <span className="flex items-center gap-1.5"><Users className="w-4 h-4" /> Maks {facility.capacity || 10} Org</span>
+                    <span className="flex items-center gap-1.5"><Users className="w-4 h-4" /> {t("Maks", "Max")} {facility.capacity || 10} {t("Org", "People")}</span>
                     <span className="w-1 h-1 rounded-full bg-border" />
-                    <span className="flex items-center gap-1.5 text-green-600 dark:text-green-500"><CheckCircle2 className="w-4 h-4" /> Tersedia</span>
+                    <span className="flex items-center gap-1.5 text-green-600 dark:text-green-500"><CheckCircle2 className="w-4 h-4" /> {t("Tersedia", "Available")}</span>
                   </div>
                   
                   {facility.description && (
@@ -292,11 +295,11 @@ export default function Facilities() {
                   
                   <div className="mt-auto pt-6 border-t border-border/70 flex items-center justify-between">
                     <div>
-                      <div className="text-xs font-bold text-muted-foreground uppercase tracking-widest mb-0.5">Sewa Per Jam</div>
+                      <div className="text-xs font-bold text-muted-foreground uppercase tracking-widest mb-0.5">{t("Sewa Per Jam", "Rental Per Hour")}</div>
                       <div className="font-black text-xl text-primary">Rp {facility.pricePerHour.toLocaleString('id-ID')}</div>
                     </div>
                     <Button asChild className="rounded-full font-bold shadow-md shadow-primary/20 h-12 px-6">
-                      <Link href={`/facilities/${facility.id}`}>Cek Jadwal</Link>
+                      <Link href={`/facilities/${facility.id}`}>{t("Cek Jadwal", "Check Schedule")}</Link>
                     </Button>
                   </div>
                 </CardContent>
@@ -317,17 +320,17 @@ export default function Facilities() {
                       <Dumbbell size={32} />
                     </div>
                     <Badge className="bg-orange-100 text-orange-700 hover:bg-orange-100 border-none font-black tracking-wider px-3 py-1">
-                      PENAWARAN SPESIAL
+                      {t("PENAWARAN SPESIAL", "SPECIAL OFFER")}
                     </Badge>
                   </div>
                   
-                  <h3 className="text-2xl font-black text-secondary dark:text-white mb-3 group-hover:text-primary transition-colors">Membership Gym Eksklusif</h3>
+                  <h3 className="text-2xl font-black text-secondary dark:text-white mb-3 group-hover:text-primary transition-colors">{t("Membership Gym Eksklusif", "Exclusive Gym Membership")}</h3>
                   <p className="text-muted-foreground font-medium mb-6 leading-relaxed flex-1">
-                    Akses tak terbatas ke seluruh alat fitness premium kami. Berlaku untuk 1 bulan penuh tanpa batasan jam kunjungan.
+                    {t("Akses tak terbatas ke seluruh alat fitness premium kami. Berlaku untuk 1 bulan penuh tanpa batasan jam kunjungan.", "Unlimited access to all our premium fitness equipment. Valid for a full month with no visit-hour restrictions.")}
                   </p>
                   
                   <div className="space-y-3 mb-8">
-                    {['Akses gym sepuasnya', 'Gratis loker & shower', 'Konsultasi trainer (1x)'].map((b, i) => (
+                    {[t('Akses gym sepuasnya', 'Unlimited gym access'), t('Gratis loker & shower', 'Free locker & shower'), t('Konsultasi trainer (1x)', 'Trainer consultation (1x)')].map((b, i) => (
                       <div key={i} className="flex items-center gap-2.5 text-sm font-semibold text-secondary dark:text-gray-300">
                         <CheckCircle2 className="w-5 h-5 text-primary shrink-0" /> {b}
                       </div>
@@ -336,14 +339,14 @@ export default function Facilities() {
                   
                   <div className="mt-auto pt-6 border-t border-primary/20 flex items-center justify-between">
                     <div>
-                      <div className="text-xs font-bold text-muted-foreground uppercase tracking-widest mb-0.5">Biaya Langganan</div>
-                      <div className="font-black text-xl text-primary">Rp 300.000<span className="text-sm font-bold text-muted-foreground ml-1">/bln</span></div>
+                      <div className="text-xs font-bold text-muted-foreground uppercase tracking-widest mb-0.5">{t("Biaya Langganan", "Subscription Fee")}</div>
+                      <div className="font-black text-xl text-primary">Rp 300.000<span className="text-sm font-bold text-muted-foreground ml-1">{t("/bln", "/mo")}</span></div>
                     </div>
                     <Button 
                       className="rounded-full font-bold h-12 px-6 shadow-md"
                       onClick={(e) => { e.stopPropagation(); setMembershipOpen(true); }}
                     >
-                      Daftar
+                      {t("Daftar", "Register")}
                     </Button>
                   </div>
                 </div>
@@ -355,10 +358,10 @@ export default function Facilities() {
                 <div className="w-20 h-20 bg-muted rounded-full flex items-center justify-center mx-auto mb-6">
                   <MapPin className="w-8 h-8 text-muted-foreground opacity-50" />
                 </div>
-                <h3 className="text-2xl font-black text-secondary dark:text-white mb-2">Fasilitas Tidak Ditemukan</h3>
-                <p className="text-muted-foreground font-medium mb-8 max-w-sm mx-auto">Maaf, kami tidak menemukan fasilitas yang cocok dengan pencarian Anda.</p>
+                <h3 className="text-2xl font-black text-secondary dark:text-white mb-2">{t("Fasilitas Tidak Ditemukan", "No Facilities Found")}</h3>
+                <p className="text-muted-foreground font-medium mb-8 max-w-sm mx-auto">{t("Maaf, kami tidak menemukan fasilitas yang cocok dengan pencarian Anda.", "Sorry, we couldn't find any facilities matching your search.")}</p>
                 <Button onClick={() => { setSearch(""); setSelectedCategory("all"); }} variant="outline" className="rounded-full font-bold h-12 px-8">
-                  Hapus Filter Pencarian
+                  {t("Hapus Filter Pencarian", "Clear Search Filters")}
                 </Button>
               </div>
             )}

@@ -7,11 +7,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
+import { useLang } from "@/lib/i18n";
 import { UserPlus, Eye, EyeOff } from "lucide-react";
 
 export default function Register() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
+  const { t } = useLang();
   const [form, setForm] = useState({ name: "", email: "", phone: "", password: "", confirmPassword: "" });
   const [showPw, setShowPw] = useState(false);
 
@@ -19,12 +21,12 @@ export default function Register() {
     mutation: {
       onSuccess: (data) => {
         setToken(data.token);
-        toast({ title: "Akun berhasil dibuat!", description: `Selamat datang, ${data.user.name}!` });
+        toast({ title: t("Akun berhasil dibuat!", "Account created successfully!"), description: `${t("Selamat datang", "Welcome")}, ${data.user.name}!` });
         setLocation("/my-bookings");
       },
       onError: (err: any) => {
-        const msg = err?.response?.data?.error ?? "Gagal mendaftar. Coba lagi.";
-        toast({ title: "Registrasi gagal", description: msg, variant: "destructive" });
+        const msg = err?.response?.data?.error ?? t("Gagal mendaftar. Coba lagi.", "Registration failed. Please try again.");
+        toast({ title: t("Registrasi gagal", "Registration failed"), description: msg, variant: "destructive" });
       },
     },
   });
@@ -32,11 +34,11 @@ export default function Register() {
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (form.password !== form.confirmPassword) {
-      toast({ title: "Password tidak cocok", description: "Pastikan kedua password sama.", variant: "destructive" });
+      toast({ title: t("Password tidak cocok", "Passwords do not match"), description: t("Pastikan kedua password sama.", "Make sure both passwords are the same."), variant: "destructive" });
       return;
     }
     if (form.password.length < 6) {
-      toast({ title: "Password terlalu pendek", description: "Minimal 6 karakter.", variant: "destructive" });
+      toast({ title: t("Password terlalu pendek", "Password too short"), description: t("Minimal 6 karakter.", "Minimum 6 characters."), variant: "destructive" });
       return;
     }
     registerMutation.mutate({ data: { name: form.name, email: form.email, password: form.password, phone: form.phone || undefined } });
@@ -49,16 +51,16 @@ export default function Register() {
           <div className="mx-auto w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center mb-3">
             <UserPlus size={26} className="text-primary" />
           </div>
-          <CardTitle className="text-2xl font-black">Buat Akun Baru</CardTitle>
-          <CardDescription>Daftar untuk melacak riwayat booking Anda</CardDescription>
+          <CardTitle className="text-2xl font-black">{t("Buat Akun Baru", "Create New Account")}</CardTitle>
+          <CardDescription>{t("Daftar untuk melacak riwayat booking Anda", "Register to track your booking history")}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-5 pt-4">
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-1.5">
-              <Label htmlFor="name">Nama Lengkap</Label>
+              <Label htmlFor="name">{t("Nama Lengkap", "Full Name")}</Label>
               <Input
                 id="name"
-                placeholder="Nama lengkap Anda"
+                placeholder={t("Nama lengkap Anda", "Your full name")}
                 value={form.name}
                 onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
                 required
@@ -79,7 +81,7 @@ export default function Register() {
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="phone">
-                No. HP <span className="text-muted-foreground font-normal">(opsional)</span>
+                {t("No. HP", "Phone No.")} <span className="text-muted-foreground font-normal">{t("(opsional)", "(optional)")}</span>
               </Label>
               <Input
                 id="phone"
@@ -91,12 +93,12 @@ export default function Register() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="password">Password</Label>
+              <Label htmlFor="password">{t("Password", "Password")}</Label>
               <div className="relative">
                 <Input
                   id="password"
                   type={showPw ? "text" : "password"}
-                  placeholder="Min. 6 karakter"
+                  placeholder={t("Min. 6 karakter", "Min. 6 characters")}
                   value={form.password}
                   onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
                   required
@@ -113,11 +115,11 @@ export default function Register() {
               </div>
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="confirmPassword">Konfirmasi Password</Label>
+              <Label htmlFor="confirmPassword">{t("Konfirmasi Password", "Confirm Password")}</Label>
               <Input
                 id="confirmPassword"
                 type={showPw ? "text" : "password"}
-                placeholder="Ulangi password"
+                placeholder={t("Ulangi password", "Repeat password")}
                 value={form.confirmPassword}
                 onChange={(e) => setForm((f) => ({ ...f, confirmPassword: e.target.value }))}
                 required
@@ -126,14 +128,14 @@ export default function Register() {
             </div>
 
             <Button type="submit" className="w-full" disabled={registerMutation.isPending}>
-              {registerMutation.isPending ? "Mendaftarkan..." : "Daftar Sekarang"}
+              {registerMutation.isPending ? t("Mendaftarkan...", "Registering...") : t("Daftar Sekarang", "Register Now")}
             </Button>
           </form>
 
           <div className="text-center text-sm text-muted-foreground">
-            Sudah punya akun?{" "}
+            {t("Sudah punya akun?", "Already have an account?")}{" "}
             <Link href="/login" className="text-primary font-semibold hover:underline">
-              Masuk di sini
+              {t("Masuk di sini", "Sign in here")}
             </Link>
           </div>
         </CardContent>

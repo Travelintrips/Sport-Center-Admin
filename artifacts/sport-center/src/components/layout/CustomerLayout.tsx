@@ -4,8 +4,32 @@ import { Menu, X, LogOut, CalendarDays, UserCircle, ChevronDown, MapPin, Phone, 
 import { Button } from "@/components/ui/button";
 import { useGetMe, useLogout, getGetMeQueryKey, useGetSettings } from "@workspace/api-client-react";
 import { removeToken } from "@/lib/auth";
+import { useLang } from "@/lib/i18n";
+
+function LangToggle({ className = "" }: { className?: string }) {
+  const { lang, setLang } = useLang();
+  return (
+    <div className={`inline-flex items-center rounded-full border border-border/50 bg-background/50 backdrop-blur-sm p-0.5 text-xs font-bold shadow-sm ${className}`}>
+      <button
+        onClick={() => setLang("id")}
+        className={`px-2.5 py-1 rounded-full transition-colors ${lang === "id" ? "bg-primary text-primary-foreground shadow" : "text-foreground/60 hover:text-foreground"}`}
+        aria-label="Bahasa Indonesia"
+      >
+        ID
+      </button>
+      <button
+        onClick={() => setLang("en")}
+        className={`px-2.5 py-1 rounded-full transition-colors ${lang === "en" ? "bg-primary text-primary-foreground shadow" : "text-foreground/60 hover:text-foreground"}`}
+        aria-label="English"
+      >
+        EN
+      </button>
+    </div>
+  );
+}
 
 function UserMenu() {
+  const { t } = useLang();
   const [open, setOpen] = useState(false);
   const [, setLocation] = useLocation();
 
@@ -27,14 +51,15 @@ function UserMenu() {
   if (!user || user.role === "admin") {
     return (
       <div className="flex items-center gap-3">
+        <LangToggle className="hidden md:inline-flex" />
         <Button asChild variant="ghost" size="sm" className="hidden md:inline-flex font-medium text-foreground/60 hover:text-primary gap-1.5">
           <Link href="/admin/login"><ShieldCheck size={15} /> Admin</Link>
         </Button>
         <Button asChild variant="ghost" className="hidden md:inline-flex font-medium text-foreground/80 hover:text-foreground">
-          <Link href="/login">Masuk</Link>
+          <Link href="/login">{t("Masuk", "Sign In")}</Link>
         </Button>
         <Button asChild className="rounded-full shadow-lg shadow-primary/20 hover:shadow-primary/40 transition-all font-semibold">
-          <Link href="/register">Daftar</Link>
+          <Link href="/register">{t("Daftar", "Sign Up")}</Link>
         </Button>
       </div>
     );
@@ -67,14 +92,14 @@ function UserMenu() {
                 onClick={() => setOpen(false)}
                 className="flex items-center gap-2.5 px-3 py-2.5 text-sm font-medium rounded-xl hover:bg-accent transition-colors w-full text-foreground/80 hover:text-foreground"
               >
-                <CalendarDays size={16} className="text-primary" /> Booking Saya
+                <CalendarDays size={16} className="text-primary" /> {t("Booking Saya", "My Bookings")}
               </Link>
               <div className="h-px bg-border/50 my-1 mx-2" />
               <button
                 onClick={() => { setOpen(false); doLogoutMenu(); }}
                 className="flex items-center gap-2.5 px-3 py-2.5 text-sm font-medium rounded-xl hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors w-full text-left text-red-600"
               >
-                <LogOut size={16} /> Keluar
+                <LogOut size={16} /> {t("Keluar", "Logout")}
               </button>
             </div>
           </div>
@@ -95,6 +120,7 @@ export default function CustomerLayout({ children }: { children: ReactNode }) {
   });
   
   const { data: settings } = useGetSettings();
+  const { t } = useLang();
 
   const logoutMutation = useLogout({
     mutation: { onSuccess: () => { removeToken(); } },
@@ -119,10 +145,10 @@ export default function CustomerLayout({ children }: { children: ReactNode }) {
   })();
 
   const navLinks = [
-    { href: "/", label: "Beranda" },
-    { href: "/facilities", label: "Fasilitas" },
-    { href: "/promos", label: "Promo" },
-    { href: "/contact", label: "Hubungi Kami" },
+    { href: "/", label: t("Beranda", "Home") },
+    { href: "/facilities", label: t("Fasilitas", "Facilities") },
+    { href: "/promos", label: t("Promo", "Promos") },
+    { href: "/contact", label: t("Hubungi Kami", "Contact") },
   ];
 
   return (
@@ -208,29 +234,31 @@ export default function CustomerLayout({ children }: { children: ReactNode }) {
                     onClick={() => setIsMobileMenuOpen(false)}
                   >
                     <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary"><CalendarDays size={16} /></div> 
-                    Booking Saya
+                    {t("Booking Saya", "My Bookings")}
                   </Link>
                   <button
                     onClick={() => { setIsMobileMenuOpen(false); doLogout(); }}
                     className="flex items-center gap-3 text-base font-semibold p-4 rounded-2xl text-red-600 hover:bg-red-50 w-full text-left"
                   >
                     <div className="w-8 h-8 rounded-full bg-red-100 flex items-center justify-center text-red-600"><LogOut size={16} /></div>
-                    Keluar Akun
+                    {t("Keluar Akun", "Logout")}
                   </button>
                 </>
               ) : (
                 <div className="flex flex-col gap-3 p-2 mt-2">
                   <Button asChild variant="outline" className="h-12 rounded-xl text-base font-semibold" onClick={() => setIsMobileMenuOpen(false)}>
-                    <Link href="/login">Masuk Akun</Link>
+                    <Link href="/login">{t("Masuk Akun", "Sign In")}</Link>
                   </Button>
                   <Button asChild className="h-12 rounded-xl text-base font-bold shadow-lg shadow-primary/20" onClick={() => setIsMobileMenuOpen(false)}>
-                    <Link href="/register">Daftar Sekarang</Link>
+                    <Link href="/register">{t("Daftar Sekarang", "Sign Up")}</Link>
                   </Button>
                   <Link href="/admin/login" onClick={() => setIsMobileMenuOpen(false)} className="flex items-center justify-center gap-2 text-sm font-medium text-muted-foreground hover:text-primary mt-2 py-2">
-                    <ShieldCheck size={15} /> Login Admin
+                    <ShieldCheck size={15} /> {t("Login Admin", "Admin Login")}
                   </Link>
                 </div>
               )}
+              <div className="h-px bg-border/50 my-2 mx-4" />
+              <div className="flex justify-center py-2"><LangToggle /></div>
             </nav>
           </div>
         )}
@@ -254,7 +282,10 @@ export default function CustomerLayout({ children }: { children: ReactNode }) {
                 {settings?.centerName || "SportCenter"}
               </Link>
               <p className="text-secondary-foreground/70 mb-8 leading-relaxed max-w-sm">
-                Fasilitas olahraga premium di Tangerang. Berlokasi strategis dekat Bandara Soekarno-Hatta dengan lapangan berkualitas dan pemesanan yang mudah.
+                {t(
+                  "Fasilitas olahraga premium di Tangerang. Berlokasi strategis dekat Bandara Soekarno-Hatta dengan lapangan berkualitas dan pemesanan yang mudah.",
+                  "Premium sports facilities in Tangerang. Strategically located near Soekarno-Hatta Airport with quality courts and easy booking."
+                )}
               </p>
               <div className="space-y-4">
                 <div className="flex items-start gap-3 text-secondary-foreground/80">
@@ -269,26 +300,26 @@ export default function CustomerLayout({ children }: { children: ReactNode }) {
             </div>
 
             <div className="col-span-1 md:col-span-3 lg:col-span-2 lg:col-start-7">
-              <h3 className="font-bold text-lg mb-6 text-white">Eksplorasi</h3>
+              <h3 className="font-bold text-lg mb-6 text-white">{t("Eksplorasi", "Explore")}</h3>
               <ul className="space-y-4">
-                <li><Link href="/" className="text-secondary-foreground/70 hover:text-primary transition-colors text-sm font-medium inline-block">Beranda</Link></li>
-                <li><Link href="/facilities" className="text-secondary-foreground/70 hover:text-primary transition-colors text-sm font-medium inline-block">Daftar Fasilitas</Link></li>
-                <li><Link href="/promos" className="text-secondary-foreground/70 hover:text-primary transition-colors text-sm font-medium inline-block">Promo Spesial</Link></li>
-                <li><Link href="/contact" className="text-secondary-foreground/70 hover:text-primary transition-colors text-sm font-medium inline-block">Hubungi Kami</Link></li>
+                <li><Link href="/" className="text-secondary-foreground/70 hover:text-primary transition-colors text-sm font-medium inline-block">{t("Beranda", "Home")}</Link></li>
+                <li><Link href="/facilities" className="text-secondary-foreground/70 hover:text-primary transition-colors text-sm font-medium inline-block">{t("Daftar Fasilitas", "Facilities")}</Link></li>
+                <li><Link href="/promos" className="text-secondary-foreground/70 hover:text-primary transition-colors text-sm font-medium inline-block">{t("Promo Spesial", "Special Promos")}</Link></li>
+                <li><Link href="/contact" className="text-secondary-foreground/70 hover:text-primary transition-colors text-sm font-medium inline-block">{t("Hubungi Kami", "Contact Us")}</Link></li>
               </ul>
             </div>
 
             <div className="col-span-1 md:col-span-4 lg:col-span-3">
-              <h3 className="font-bold text-lg mb-6 text-white">Jam Operasional</h3>
+              <h3 className="font-bold text-lg mb-6 text-white">{t("Jam Operasional", "Operating Hours")}</h3>
               <div className="bg-white/5 rounded-2xl p-5 border border-white/10">
                 <div className="flex justify-between items-center mb-3">
-                  <span className="text-secondary-foreground/70 text-sm">Senin - Minggu</span>
-                  <span className="font-bold text-primary bg-primary/10 px-3 py-1 rounded-full text-xs">Buka</span>
+                  <span className="text-secondary-foreground/70 text-sm">{t("Senin - Minggu", "Monday - Sunday")}</span>
+                  <span className="font-bold text-primary bg-primary/10 px-3 py-1 rounded-full text-xs">{t("Buka", "Open")}</span>
                 </div>
                 <div className="text-2xl font-bold text-white mb-1">
                   {settings?.openHour || '06:00'} - {settings?.closeHour || '23:00'}
                 </div>
-                <p className="text-xs text-secondary-foreground/50">Waktu Indonesia Barat (WIB)</p>
+                <p className="text-xs text-secondary-foreground/50">{t("Waktu Indonesia Barat (WIB)", "Western Indonesia Time (WIB)")}</p>
               </div>
               
               <div className="mt-6 flex gap-3">
@@ -304,11 +335,11 @@ export default function CustomerLayout({ children }: { children: ReactNode }) {
 
           <div className="mt-16 pt-8 border-t border-white/10 flex flex-col md:flex-row items-center justify-between gap-4">
             <p className="text-sm font-medium text-secondary-foreground/50">
-              © {new Date().getFullYear()} {settings?.centerName || 'SportCenter'}. Hak cipta dilindungi.
+              © {new Date().getFullYear()} {settings?.centerName || 'SportCenter'}. {t("Hak cipta dilindungi.", "All rights reserved.")}
             </p>
             <div className="flex items-center gap-6">
-              <Link href="/terms" className="text-sm font-medium text-secondary-foreground/50 hover:text-white transition-colors">Syarat & Ketentuan</Link>
-              <Link href="/privacy" className="text-sm font-medium text-secondary-foreground/50 hover:text-white transition-colors">Kebijakan Privasi</Link>
+              <Link href="/terms" className="text-sm font-medium text-secondary-foreground/50 hover:text-white transition-colors">{t("Syarat & Ketentuan", "Terms & Conditions")}</Link>
+              <Link href="/privacy" className="text-sm font-medium text-secondary-foreground/50 hover:text-white transition-colors">{t("Kebijakan Privasi", "Privacy Policy")}</Link>
             </div>
           </div>
         </div>

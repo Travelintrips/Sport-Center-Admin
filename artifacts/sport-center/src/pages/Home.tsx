@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { useListFacilities, useGetSettings, useListPromos } from "@workspace/api-client-react";
 import { getFacilityImage } from "@/lib/utils";
+import { useLang } from "@/lib/i18n";
 
 function AnimatedCounter({ end, label, suffix = "+" }: { end: number, label: string, suffix?: string }) {
   // A simple static representation that implies a counter
@@ -35,6 +36,7 @@ function AnimatedCounter({ end, label, suffix = "+" }: { end: number, label: str
 }
 
 export default function Home() {
+  const { t } = useLang();
   const { data: facilities } = useListFacilities({ activeOnly: true });
   const { data: settings } = useGetSettings();
   const { data: promos } = useListPromos({ activeOnly: true });
@@ -58,7 +60,7 @@ export default function Home() {
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
                   <span className="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
                 </span>
-                Fasilitas Olahraga Premium Tangerang
+                {t("Fasilitas Olahraga Premium Tangerang", "Premium Sports Facilities in Tangerang")}
               </div>
               
               <h1 className="text-4xl md:text-5xl lg:text-6xl font-black tracking-tight text-secondary dark:text-white leading-[1.1] mb-6">
@@ -66,18 +68,18 @@ export default function Home() {
               </h1>
               
               <p className="text-lg md:text-xl text-muted-foreground mb-8 leading-relaxed font-medium max-w-xl">
-                Tingkatkan pengalaman berolahraga Anda. Booking lapangan futsal, basket, tenis, hingga gym premium dengan mudah dalam hitungan detik. 
+                {t("Tingkatkan pengalaman berolahraga Anda. Booking lapangan futsal, basket, tenis, hingga gym premium dengan mudah dalam hitungan detik.", "Elevate your sports experience. Easily book futsal, basketball, and tennis courts, even a premium gym, in a matter of seconds.")}
               </p>
               
               <div className="flex flex-col sm:flex-row items-center gap-4">
                 <Button size="lg" className="w-full sm:w-auto h-14 px-8 text-base font-bold shadow-xl shadow-primary/25 hover:shadow-primary/40 transition-all rounded-full group" asChild>
                   <Link href="/facilities">
-                    Booking Sekarang <ArrowRight className="ml-2 w-5 h-5 group-hover:translate-x-1 transition-transform" />
+                    {t("Booking Sekarang", "Book Now")} <ArrowRight className="ml-2 w-5 h-5 group-hover:translate-x-1 transition-transform" />
                   </Link>
                 </Button>
                 <Button size="lg" variant="outline" className="w-full sm:w-auto h-14 px-8 text-base font-bold rounded-full bg-white dark:bg-slate-900 border-border shadow-sm hover:bg-accent" asChild>
                   <Link href="/facilities">
-                    Lihat Fasilitas
+                    {t("Lihat Fasilitas", "View Facilities")}
                   </Link>
                 </Button>
               </div>
@@ -92,7 +94,7 @@ export default function Home() {
                 </div>
                 <div className="text-sm font-semibold">
                   <span className="text-primary block font-black">1,000+</span> 
-                  <span className="text-muted-foreground">Atlet lokal bergabung</span>
+                  <span className="text-muted-foreground">{t("Atlet lokal bergabung", "Local athletes joined")}</span>
                 </div>
               </div>
             </div>
@@ -113,7 +115,7 @@ export default function Home() {
                       <CheckCircle2 className="w-6 h-6" />
                     </div>
                     <div>
-                      <div className="font-bold text-secondary dark:text-white">Buka Hari Ini</div>
+                      <div className="font-bold text-secondary dark:text-white">{t("Buka Hari Ini", "Open Today")}</div>
                       <div className="text-xs font-semibold text-muted-foreground">{settings?.openHour || '06:00'} - {settings?.closeHour || '23:00'} WIB</div>
                     </div>
                   </div>
@@ -125,7 +127,7 @@ export default function Home() {
                       <Star className="w-4 h-4 fill-yellow-500" />
                       <Star className="w-4 h-4 fill-yellow-500" />
                     </div>
-                    <div className="text-xs font-bold text-secondary dark:text-white">4.9/5 Rating</div>
+                    <div className="text-xs font-bold text-secondary dark:text-white">4.9/5 {t("Rating", "Rating")}</div>
                   </div>
                 </div>
               </div>
@@ -138,14 +140,14 @@ export default function Home() {
       {/* Stats Section */}
       <section className="relative z-20 -mt-10 mb-16 px-4 md:px-8 max-w-7xl mx-auto">
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6">
-          <AnimatedCounter end={5000} label="Total Booking" />
-          <AnimatedCounter end={20} label="Fasilitas Premium" suffix="+" />
-          <AnimatedCounter end={1200} label="Member Aktif" suffix="+" />
+          <AnimatedCounter end={5000} label={t("Total Booking", "Total Bookings")} />
+          <AnimatedCounter end={20} label={t("Fasilitas Premium", "Premium Facilities")} suffix="+" />
+          <AnimatedCounter end={1200} label={t("Member Aktif", "Active Members")} suffix="+" />
           <div className="flex flex-col items-center justify-center p-6 bg-primary rounded-3xl shadow-lg shadow-primary/30 text-white">
             <div className="text-4xl md:text-5xl font-black mb-2 flex items-center">
               4.9<span className="text-2xl opacity-70">/5</span>
             </div>
-            <div className="text-sm font-bold uppercase tracking-widest opacity-90 text-center">Kepuasan Pelanggan</div>
+            <div className="text-sm font-bold uppercase tracking-widest opacity-90 text-center">{t("Kepuasan Pelanggan", "Customer Satisfaction")}</div>
           </div>
         </div>
       </section>
@@ -156,14 +158,14 @@ export default function Home() {
           <div className="flex flex-col md:flex-row justify-between items-end mb-12 gap-6">
             <div className="max-w-2xl">
               <h2 className="text-3xl md:text-5xl font-black tracking-tight text-secondary dark:text-white mb-4">
-                Fasilitas <span className="text-primary">Terbaik</span> Untuk Anda
+                {t("Fasilitas", "The Best")} <span className="text-primary">{t("Terbaik", "Facilities")}</span> {t("Untuk Anda", "For You")}
               </h2>
               <p className="text-lg text-muted-foreground font-medium">
-                Pilih dari beragam lapangan olahraga standar profesional yang dirawat dengan sempurna setiap harinya.
+                {t("Pilih dari beragam lapangan olahraga standar profesional yang dirawat dengan sempurna setiap harinya.", "Choose from a variety of professional-standard sports courts that are perfectly maintained every day.")}
               </p>
             </div>
             <Button size="lg" variant="outline" asChild className="rounded-full hidden md:flex items-center gap-2 border-border font-bold">
-              <Link href="/facilities">Lihat Semua Kategori <ArrowRight className="w-4 h-4" /></Link>
+              <Link href="/facilities">{t("Lihat Semua Kategori", "View All Categories")} <ArrowRight className="w-4 h-4" /></Link>
             </Button>
           </div>
 
@@ -181,7 +183,7 @@ export default function Home() {
                   {/* Tags */}
                   <div className="absolute top-4 left-4 flex gap-2">
                     <div className="bg-primary text-white px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider shadow-md">
-                      Populer
+                      {t("Populer", "Popular")}
                     </div>
                   </div>
                   
@@ -197,16 +199,16 @@ export default function Home() {
                   <h3 className="text-2xl font-black text-secondary dark:text-white mb-2 line-clamp-1 group-hover:text-primary transition-colors">{facility.name}</h3>
                   <div className="flex items-center gap-2 text-sm font-semibold text-muted-foreground mb-4">
                     <Users className="w-4 h-4" /> 
-                    <span>Kapasitas {facility.capacity || 10} Orang</span>
+                    <span>{t("Kapasitas", "Capacity")} {facility.capacity || 10} {t("Orang", "People")}</span>
                   </div>
                   
                   <div className="mt-auto pt-6 border-t border-border flex items-center justify-between">
                     <div>
-                      <div className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-1">Mulai Dari</div>
+                      <div className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-1">{t("Mulai Dari", "Starting From")}</div>
                       <div className="text-xl font-black text-primary">Rp {facility.pricePerHour.toLocaleString('id-ID')}</div>
                     </div>
                     <Button className="rounded-full shadow-md shadow-primary/20 font-bold" asChild>
-                      <Link href={`/facilities/${facility.id}`}>Booking</Link>
+                      <Link href={`/facilities/${facility.id}`}>{t("Booking", "Book")}</Link>
                     </Button>
                   </div>
                 </CardContent>
@@ -215,7 +217,7 @@ export default function Home() {
           </div>
           
           <Button size="lg" asChild className="w-full mt-8 rounded-xl h-14 font-bold md:hidden text-base">
-            <Link href="/facilities">Jelajahi Semua Fasilitas</Link>
+            <Link href="/facilities">{t("Jelajahi Semua Fasilitas", "Explore All Facilities")}</Link>
           </Button>
         </div>
       </section>
@@ -225,21 +227,21 @@ export default function Home() {
         <div className="container px-4 md:px-8">
           <div className="text-center max-w-2xl mx-auto mb-16">
             <h2 className="text-3xl md:text-5xl font-black tracking-tight text-secondary dark:text-white mb-4">
-              Mengapa Memilih Kami?
+              {t("Mengapa Memilih Kami?", "Why Choose Us?")}
             </h2>
             <p className="text-lg text-muted-foreground font-medium">
-              Kami berkomitmen memberikan pengalaman olahraga terbaik dari awal pemesanan hingga sesi Anda berakhir.
+              {t("Kami berkomitmen memberikan pengalaman olahraga terbaik dari awal pemesanan hingga sesi Anda berakhir.", "We are committed to providing the best sports experience from the start of your booking until the end of your session.")}
             </p>
           </div>
           
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 md:gap-8">
             {[
-              { Icon: Trophy, title: "Fasilitas Premium", desc: "Standar lapangan dan peralatan profesional yang dirawat ketat setiap hari." },
-              { Icon: Zap, title: "Booking Online Mudah", desc: "Cek jadwal real-time dan pesan lapangan langsung dari smartphone Anda." },
-              { Icon: CreditCard, title: "Harga Transparan", desc: "Tidak ada biaya tersembunyi. Bayar sesuai harga yang tertera di sistem." },
-              { Icon: MapPin, title: "Lokasi Strategis", desc: "Sangat mudah diakses, berdekatan dengan area Bandara Soekarno-Hatta." },
-              { Icon: Phone, title: "Customer Support 24/7", desc: "Tim kami siap membantu Anda kapan saja melalui WhatsApp." },
-              { Icon: ShieldCheck, title: "Pembayaran Aman", desc: "Transaksi terjamin dengan berbagai metode pembayaran digital yang aman." },
+              { Icon: Trophy, title: t("Fasilitas Premium", "Premium Facilities"), desc: t("Standar lapangan dan peralatan profesional yang dirawat ketat setiap hari.", "Professional-standard courts and equipment that are strictly maintained every day.") },
+              { Icon: Zap, title: t("Booking Online Mudah", "Easy Online Booking"), desc: t("Cek jadwal real-time dan pesan lapangan langsung dari smartphone Anda.", "Check real-time schedules and book courts directly from your smartphone.") },
+              { Icon: CreditCard, title: t("Harga Transparan", "Transparent Pricing"), desc: t("Tidak ada biaya tersembunyi. Bayar sesuai harga yang tertera di sistem.", "No hidden fees. Pay according to the price shown in the system.") },
+              { Icon: MapPin, title: t("Lokasi Strategis", "Strategic Location"), desc: t("Sangat mudah diakses, berdekatan dengan area Bandara Soekarno-Hatta.", "Very easy to access, close to the Soekarno-Hatta Airport area.") },
+              { Icon: Phone, title: t("Customer Support 24/7", "24/7 Customer Support"), desc: t("Tim kami siap membantu Anda kapan saja melalui WhatsApp.", "Our team is ready to help you anytime via WhatsApp.") },
+              { Icon: ShieldCheck, title: t("Pembayaran Aman", "Secure Payment"), desc: t("Transaksi terjamin dengan berbagai metode pembayaran digital yang aman.", "Transactions guaranteed with various secure digital payment methods.") },
             ].map((feature, i) => (
               <div key={i} className="bg-white dark:bg-slate-900 p-8 rounded-3xl border border-border/50 shadow-sm hover:shadow-md transition-shadow">
                 <div className="w-14 h-14 rounded-2xl bg-primary/10 text-primary flex items-center justify-center mb-6">
@@ -260,12 +262,12 @@ export default function Home() {
             <div className="flex flex-col md:flex-row justify-between items-end mb-12 gap-6">
               <div className="max-w-2xl">
                 <h2 className="text-3xl md:text-5xl font-black tracking-tight text-secondary dark:text-white mb-4">
-                  Promo & <span className="text-primary">Event</span>
+                  {t("Promo &", "Promos &")} <span className="text-primary">{t("Event", "Events")}</span>
                 </h2>
-                <p className="text-lg text-muted-foreground font-medium">Jangan lewatkan kesempatan hemat dan acara seru dari kami bulan ini.</p>
+                <p className="text-lg text-muted-foreground font-medium">{t("Jangan lewatkan kesempatan hemat dan acara seru dari kami bulan ini.", "Don't miss out on savings and exciting events from us this month.")}</p>
               </div>
               <Button size="lg" variant="ghost" asChild className="font-bold text-primary hover:text-primary hover:bg-primary/10 rounded-full hidden md:flex items-center gap-2">
-                <Link href="/promos">Lihat Semua Promo <ArrowRight className="w-4 h-4" /></Link>
+                <Link href="/promos">{t("Lihat Semua Promo", "View All Promos")} <ArrowRight className="w-4 h-4" /></Link>
               </Button>
             </div>
             
@@ -288,7 +290,7 @@ export default function Home() {
                   <div className="w-full sm:w-3/5 p-6 md:p-8 flex flex-col justify-center">
                     <div className="inline-block px-3 py-1 rounded-full text-xs font-bold uppercase tracking-widest mb-4 w-fit
                       bg-primary/10 text-primary">
-                      {promo.type === 'promo' ? 'Penawaran Spesial' : 'Acara Spesial'}
+                      {promo.type === 'promo' ? t('Penawaran Spesial', 'Special Offer') : t('Acara Spesial', 'Special Event')}
                     </div>
                     
                     <h3 className="font-black text-2xl text-secondary dark:text-white mb-3 line-clamp-2">{promo.title}</h3>
@@ -296,7 +298,7 @@ export default function Home() {
                     
                     <div className="mt-auto">
                       <Button asChild className="rounded-full font-bold shadow-md shadow-primary/20 w-full sm:w-auto">
-                        <Link href="/promos">Ambil Promo</Link>
+                        <Link href="/promos">{t("Ambil Promo", "Get Promo")}</Link>
                       </Button>
                     </div>
                   </div>
@@ -315,31 +317,31 @@ export default function Home() {
         <div className="container relative z-10 px-4 md:px-8">
           <div className="text-center mb-16">
             <h2 className="text-3xl md:text-5xl font-black tracking-tight mb-4">
-              Apa Kata <span className="text-primary">Atlet Kami</span>
+              {t("Apa Kata", "What")} <span className="text-primary">{t("Atlet Kami", "Our Athletes Say")}</span>
             </h2>
             <p className="text-lg text-secondary-foreground/70 font-medium max-w-2xl mx-auto">
-              Testimoni nyata dari pelanggan yang telah membuktikan kualitas fasilitas dan pelayanan kami.
+              {t("Testimoni nyata dari pelanggan yang telah membuktikan kualitas fasilitas dan pelayanan kami.", "Real testimonials from customers who have proven the quality of our facilities and service.")}
             </p>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 md:gap-8">
             {[
               {
-                quote: "Lantai lapangan futsalnya berstandar tinggi, empuk di lutut. Sistem bookingnya juga cepat tanpa antri. Fix jadi tempat rutin tim kami!",
+                quote: t("Lantai lapangan futsalnya berstandar tinggi, empuk di lutut. Sistem bookingnya juga cepat tanpa antri. Fix jadi tempat rutin tim kami!", "The futsal court flooring is high-standard, gentle on the knees. The booking system is also fast with no queues. Definitely our team's regular spot!"),
                 name: "Bima Arya",
-                role: "Kapten Tim Futsal",
+                role: t("Kapten Tim Futsal", "Futsal Team Captain"),
                 rating: 5
               },
               {
-                quote: "Transit 4 jam nunggu pesawat? Nge-gym di sini solusinya. Alatnya lengkap, shower room-nya sekelas hotel. Badan langsung segar!",
+                quote: t("Transit 4 jam nunggu pesawat? Nge-gym di sini solusinya. Alatnya lengkap, shower room-nya sekelas hotel. Badan langsung segar!", "A 4-hour transit waiting for a flight? Hitting the gym here is the solution. The equipment is complete, the shower room is hotel-class. Instantly refreshing!"),
                 name: "Dian Sastrowardoyo",
-                role: "Frequent Traveler",
+                role: t("Frequent Traveler", "Frequent Traveler"),
                 rating: 5
               },
               {
-                quote: "Sangat rekomended untuk event korporat. Panitia dibantu dari awal, fasilitas parkir luas, dan lapangannya terang benderang.",
+                quote: t("Sangat rekomended untuk event korporat. Panitia dibantu dari awal, fasilitas parkir luas, dan lapangannya terang benderang.", "Highly recommended for corporate events. The committee was helped from the start, ample parking facilities, and the courts are brightly lit."),
                 name: "Reza Rahadian",
-                role: "HRD Manager",
+                role: t("HRD Manager", "HR Manager"),
                 rating: 5
               },
             ].map((t, i) => (

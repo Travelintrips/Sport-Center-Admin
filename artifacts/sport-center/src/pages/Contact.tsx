@@ -2,9 +2,11 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { MapPin, Phone, Mail, Clock, MessageSquare } from "lucide-react";
 import { useGetSettings } from "@workspace/api-client-react";
+import { useLang } from "@/lib/i18n";
 
 export default function Contact() {
   const { data: settings, isLoading } = useGetSettings();
+  const { t } = useLang();
 
   const handleWhatsApp = () => {
     if (!settings?.whatsapp) return;
@@ -21,9 +23,9 @@ export default function Contact() {
   return (
     <div className="container mx-auto px-4 py-12 max-w-5xl">
       <div className="text-center mb-12">
-        <h1 className="text-3xl md:text-5xl font-black tracking-tight mb-4">Contact Us</h1>
+        <h1 className="text-3xl md:text-5xl font-black tracking-tight mb-4">{t("Hubungi Kami", "Contact Us")}</h1>
         <p className="text-muted-foreground text-lg max-w-2xl mx-auto">
-          Have a question about our facilities, booking process, or need help with an existing reservation? We're here to help.
+          {t("Punya pertanyaan tentang fasilitas kami, proses pemesanan, atau butuh bantuan dengan reservasi yang sudah ada? Kami siap membantu.", "Have a question about our facilities, booking process, or need help with an existing reservation? We're here to help.")}
         </p>
       </div>
 
@@ -31,7 +33,7 @@ export default function Contact() {
         <div className="space-y-6">
           <Card className="border-border">
             <CardContent className="p-6">
-              <h2 className="text-2xl font-bold mb-6">Get in Touch</h2>
+              <h2 className="text-2xl font-bold mb-6">{t("Hubungi Kami", "Get in Touch")}</h2>
               
               {isLoading ? (
                 <div className="space-y-4 animate-pulse">
@@ -52,7 +54,7 @@ export default function Contact() {
                       <MapPin size={20} />
                     </div>
                     <div>
-                      <h3 className="font-semibold text-sm text-muted-foreground uppercase tracking-wider mb-1">Address</h3>
+                      <h3 className="font-semibold text-sm text-muted-foreground uppercase tracking-wider mb-1">{t("Alamat", "Address")}</h3>
                       <p className="font-medium text-lg">{settings?.centerName}</p>
                       <p className="text-muted-foreground mt-1">{settings?.address}</p>
                     </div>
@@ -63,8 +65,8 @@ export default function Contact() {
                       <Phone size={20} />
                     </div>
                     <div>
-                      <h3 className="font-semibold text-sm text-muted-foreground uppercase tracking-wider mb-1">Phone</h3>
-                      <p className="font-medium text-lg">{settings?.phone || 'Not available'}</p>
+                      <h3 className="font-semibold text-sm text-muted-foreground uppercase tracking-wider mb-1">{t("Telepon", "Phone")}</h3>
+                      <p className="font-medium text-lg">{settings?.phone || t('Tidak tersedia', 'Not available')}</p>
                     </div>
                   </div>
                   
@@ -73,8 +75,8 @@ export default function Contact() {
                       <Mail size={20} />
                     </div>
                     <div>
-                      <h3 className="font-semibold text-sm text-muted-foreground uppercase tracking-wider mb-1">Email</h3>
-                      <p className="font-medium text-lg">{settings?.email || 'Not available'}</p>
+                      <h3 className="font-semibold text-sm text-muted-foreground uppercase tracking-wider mb-1">{t("Email", "Email")}</h3>
+                      <p className="font-medium text-lg">{settings?.email || t('Tidak tersedia', 'Not available')}</p>
                     </div>
                   </div>
                   
@@ -83,8 +85,8 @@ export default function Contact() {
                       <Clock size={20} />
                     </div>
                     <div>
-                      <h3 className="font-semibold text-sm text-muted-foreground uppercase tracking-wider mb-1">Operating Hours</h3>
-                      <p className="font-medium text-lg">Everyday: {settings?.openHour || '06:00'} - {settings?.closeHour || '23:00'}</p>
+                      <h3 className="font-semibold text-sm text-muted-foreground uppercase tracking-wider mb-1">{t("Jam Operasional", "Operating Hours")}</h3>
+                      <p className="font-medium text-lg">{t("Setiap hari", "Everyday")}: {settings?.openHour || '06:00'} - {settings?.closeHour || '23:00'}</p>
                     </div>
                   </div>
                 </div>
@@ -95,9 +97,9 @@ export default function Contact() {
           <Card className="bg-[#25D366]/10 border-[#25D366]/20">
             <CardContent className="p-6 text-center">
               <MessageSquare className="w-12 h-12 text-[#25D366] mx-auto mb-4" />
-              <h3 className="text-xl font-bold mb-2">Fastest Response</h3>
+              <h3 className="text-xl font-bold mb-2">{t("Respons Tercepat", "Fastest Response")}</h3>
               <p className="text-muted-foreground mb-6">
-                Need immediate assistance? Contact our customer service team directly via WhatsApp.
+                {t("Butuh bantuan segera? Hubungi tim layanan pelanggan kami langsung melalui WhatsApp.", "Need immediate assistance? Contact our customer service team directly via WhatsApp.")}
               </p>
               <Button 
                 onClick={handleWhatsApp} 
@@ -105,7 +107,7 @@ export default function Contact() {
                 className="w-full bg-[#25D366] hover:bg-[#20bd5a] text-white"
                 size="lg"
               >
-                Chat on WhatsApp
+                {t("Chat via WhatsApp", "Chat on WhatsApp")}
               </Button>
             </CardContent>
           </Card>
@@ -126,7 +128,7 @@ export default function Contact() {
             rel="noopener noreferrer"
             className="absolute bottom-4 left-4 right-4 bg-primary text-primary-foreground font-semibold text-sm py-3 rounded-xl shadow-lg flex items-center justify-center gap-2 hover:bg-primary/90 transition-colors"
           >
-            <MapPin size={16} /> Buka di Google Maps
+            <MapPin size={16} /> {t("Buka di Google Maps", "Open in Google Maps")}
           </a>
         </div>
       </div>

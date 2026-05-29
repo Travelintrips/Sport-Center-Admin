@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useLang } from "@/lib/i18n";
 import { CalendarDays, Clock, MapPin, ChevronRight, LogOut, ReceiptText, User } from "lucide-react";
 
 function formatCurrency(n: number) {
@@ -16,16 +17,17 @@ function formatDate(dateStr: string) {
   return new Date(dateStr).toLocaleDateString("id-ID", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
 }
 
-const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
-  pending_payment: { label: "Menunggu Pembayaran", color: "#d97706", bg: "#fef3c7" },
-  paid:            { label: "Sudah Dibayar",       color: "#2563eb", bg: "#dbeafe" },
-  confirmed:       { label: "Dikonfirmasi",         color: "#059669", bg: "#d1fae5" },
-  completed:       { label: "Selesai",              color: "#7c3aed", bg: "#ede9fe" },
-  cancelled:       { label: "Dibatalkan",           color: "#dc2626", bg: "#fee2e2" },
+const STATUS_CONFIG: Record<string, { label: string; labelEn: string; color: string; bg: string }> = {
+  pending_payment: { label: "Menunggu Pembayaran", labelEn: "Awaiting Payment", color: "#d97706", bg: "#fef3c7" },
+  paid:            { label: "Sudah Dibayar",       labelEn: "Paid",            color: "#2563eb", bg: "#dbeafe" },
+  confirmed:       { label: "Dikonfirmasi",         labelEn: "Confirmed",       color: "#059669", bg: "#d1fae5" },
+  completed:       { label: "Selesai",              labelEn: "Completed",       color: "#7c3aed", bg: "#ede9fe" },
+  cancelled:       { label: "Dibatalkan",           labelEn: "Cancelled",       color: "#dc2626", bg: "#fee2e2" },
 };
 
 export default function MyBookings() {
   const [, setLocation] = useLocation();
+  const { t } = useLang();
 
   const { data: user, isLoading: userLoading, isError } = useGetMe({
     query: { retry: false, queryKey: getGetMeQueryKey() },
@@ -73,8 +75,8 @@ export default function MyBookings() {
       {/* Header */}
       <div className="flex items-start justify-between mb-8 gap-4 flex-wrap">
         <div>
-          <h1 className="text-3xl font-black mb-1">Booking Saya</h1>
-          <p className="text-muted-foreground">Riwayat dan status pemesanan fasilitas Anda</p>
+          <h1 className="text-3xl font-black mb-1">{t("Booking Saya", "My Bookings")}</h1>
+          <p className="text-muted-foreground">{t("Riwayat dan status pemesanan fasilitas Anda", "History and status of your facility bookings")}</p>
         </div>
         <div className="flex items-center gap-3">
           <div className="text-right hidden sm:block">
@@ -85,7 +87,7 @@ export default function MyBookings() {
             {user.name.charAt(0).toUpperCase()}
           </div>
           <Button variant="ghost" size="sm" onClick={doLogout} className="text-muted-foreground hover:text-foreground gap-1">
-            <LogOut size={14} /> Keluar
+            <LogOut size={14} /> {t("Keluar", "Log out")}
           </Button>
         </div>
       </div>
@@ -95,7 +97,7 @@ export default function MyBookings() {
         <Card>
           <CardContent className="p-4 text-center">
             <div className="text-2xl font-black text-primary">{bookings?.length ?? 0}</div>
-            <div className="text-xs text-muted-foreground mt-0.5">Total Booking</div>
+            <div className="text-xs text-muted-foreground mt-0.5">{t("Total Booking", "Total Bookings")}</div>
           </CardContent>
         </Card>
         <Card>
@@ -103,7 +105,7 @@ export default function MyBookings() {
             <div className="text-2xl font-black text-green-600">
               {bookings?.filter((b) => b.status === "confirmed" || b.status === "completed").length ?? 0}
             </div>
-            <div className="text-xs text-muted-foreground mt-0.5">Terkonfirmasi</div>
+            <div className="text-xs text-muted-foreground mt-0.5">{t("Terkonfirmasi", "Confirmed")}</div>
           </CardContent>
         </Card>
         <Card>
@@ -111,7 +113,7 @@ export default function MyBookings() {
             <div className="text-2xl font-black text-amber-600">
               {bookings?.filter((b) => b.status === "pending_payment").length ?? 0}
             </div>
-            <div className="text-xs text-muted-foreground mt-0.5">Menunggu Bayar</div>
+            <div className="text-xs text-muted-foreground mt-0.5">{t("Menunggu Bayar", "Awaiting Payment")}</div>
           </CardContent>
         </Card>
       </div>
@@ -125,17 +127,17 @@ export default function MyBookings() {
         <Card>
           <CardContent className="py-16 text-center">
             <ReceiptText size={40} className="mx-auto text-muted-foreground/40 mb-4" />
-            <h3 className="font-bold text-lg mb-1">Belum ada booking</h3>
-            <p className="text-muted-foreground text-sm mb-6">Mulai pesan fasilitas favoritmu sekarang!</p>
+            <h3 className="font-bold text-lg mb-1">{t("Belum ada booking", "No bookings yet")}</h3>
+            <p className="text-muted-foreground text-sm mb-6">{t("Mulai pesan fasilitas favoritmu sekarang!", "Start booking your favorite facility now!")}</p>
             <Button asChild>
-              <Link href="/facilities">Lihat Fasilitas</Link>
+              <Link href="/facilities">{t("Lihat Fasilitas", "View Facilities")}</Link>
             </Button>
           </CardContent>
         </Card>
       ) : (
         <div className="space-y-4">
           {sorted.map((booking) => {
-            const cfg = STATUS_CONFIG[booking.status] ?? { label: booking.status, color: "#6b7280", bg: "#f3f4f6" };
+            const cfg = STATUS_CONFIG[booking.status] ?? { label: booking.status, labelEn: booking.status, color: "#6b7280", bg: "#f3f4f6" };
             return (
               <Card key={booking.id} className="overflow-hidden hover:shadow-md transition-shadow">
                 <CardContent className="p-0">
@@ -156,7 +158,7 @@ export default function MyBookings() {
                           className="text-xs font-semibold px-2.5 py-1"
                           style={{ background: cfg.bg, color: cfg.color }}
                         >
-                          {cfg.label}
+                          {t(cfg.label, cfg.labelEn)}
                         </Badge>
                       </div>
 
@@ -178,7 +180,7 @@ export default function MyBookings() {
                         <span className="text-xs text-muted-foreground font-mono">#{booking.orderNumber}</span>
                         <Button asChild variant="ghost" size="sm" className="gap-1 text-primary hover:text-primary">
                           <Link href={`/booking/${booking.orderNumber}`}>
-                            Lihat Detail <ChevronRight size={14} />
+                            {t("Lihat Detail", "View Details")} <ChevronRight size={14} />
                           </Link>
                         </Button>
                       </div>
@@ -194,7 +196,7 @@ export default function MyBookings() {
       {/* CTA */}
       <div className="mt-8 text-center">
         <Button asChild variant="outline" size="lg">
-          <Link href="/facilities">+ Pesan Fasilitas Baru</Link>
+          <Link href="/facilities">{t("+ Pesan Fasilitas Baru", "+ Book a New Facility")}</Link>
         </Button>
       </div>
     </div>

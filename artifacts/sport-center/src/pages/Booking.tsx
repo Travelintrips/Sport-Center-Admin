@@ -21,6 +21,7 @@ import {
   RefreshCw, CheckCircle2, XCircle, AlertTriangle, Loader2, Pencil, X as IconX
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useLang } from "@/lib/i18n";
 
 function formatCurrency(n: number) {
   return "Rp " + n.toLocaleString("id-ID");
@@ -40,6 +41,7 @@ export default function Booking() {
   const [, setLocation] = useLocation();
   const search = useSearch();
   const { toast } = useToast();
+  const { t } = useLang();
 
   const queryParams = new URLSearchParams(search);
   const facilityId = queryParams.get("facilityId") ? parseInt(queryParams.get("facilityId")!) : 0;
@@ -100,11 +102,11 @@ export default function Booking() {
   const createBooking = useCreateBooking({
     mutation: {
       onSuccess: (data) => {
-        toast({ title: "Booking Berhasil", description: "Silakan lanjutkan ke pembayaran." });
+        toast({ title: t("Booking Berhasil", "Booking Successful"), description: t("Silakan lanjutkan ke pembayaran.", "Please proceed to payment.") });
         setLocation(`/booking/${data.orderNumber}`);
       },
       onError: (error: any) => {
-        toast({ title: "Booking Gagal", description: error?.message || "Gagal membuat booking", variant: "destructive" });
+        toast({ title: t("Booking Gagal", "Booking Failed"), description: error?.message || t("Gagal membuat booking", "Failed to create booking"), variant: "destructive" });
       },
     },
   });
@@ -125,7 +127,7 @@ export default function Booking() {
         });
       },
       onError: (error: any) => {
-        toast({ title: "Gagal membuat booking berulang", description: error?.message || "Terjadi kesalahan", variant: "destructive" });
+        toast({ title: t("Gagal membuat booking berulang", "Failed to create recurring booking"), description: error?.message || t("Terjadi kesalahan", "An error occurred"), variant: "destructive" });
       },
     },
   });
@@ -161,7 +163,7 @@ export default function Booking() {
           },
           onError: () => {
             setIsChecking(false);
-            toast({ title: "Gagal cek jadwal", variant: "destructive" });
+            toast({ title: t("Gagal cek jadwal", "Failed to check schedule"), variant: "destructive" });
           },
         }
       );
@@ -172,7 +174,7 @@ export default function Booking() {
   // Redirect if missing params
   useEffect(() => {
     if (search && (!facilityId || !date || !startTime)) {
-      toast({ title: "Detail booking tidak lengkap", description: "Silakan pilih fasilitas dan waktu terlebih dahulu.", variant: "destructive" });
+      toast({ title: t("Detail booking tidak lengkap", "Incomplete booking details"), description: t("Silakan pilih fasilitas dan waktu terlebih dahulu.", "Please select a facility and time first."), variant: "destructive" });
       setLocation("/facilities");
     }
   }, [search, facilityId, date, startTime, setLocation, toast]);
@@ -193,12 +195,12 @@ export default function Booking() {
       });
       const data = await res.json();
       if (!res.ok) {
-        setCouponError(data.error || "Kode tidak valid");
+        setCouponError(data.error || t("Kode tidak valid", "Invalid code"));
       } else {
         setCouponResult(data);
       }
     } catch {
-      setCouponError("Gagal menghubungi server");
+      setCouponError(t("Gagal menghubungi server", "Failed to reach server"));
     } finally {
       setIsValidatingCoupon(false);
     }
@@ -208,7 +210,7 @@ export default function Booking() {
     e.preventDefault();
     if (!facilityId || !date || !startTime || !duration) return;
     if (!name || !email || !phone) {
-      toast({ title: "Form tidak lengkap", description: "Harap isi semua field yang wajib.", variant: "destructive" });
+      toast({ title: t("Form tidak lengkap", "Incomplete form"), description: t("Harap isi semua field yang wajib.", "Please fill in all required fields."), variant: "destructive" });
       return;
     }
 
@@ -220,7 +222,7 @@ export default function Booking() {
 
     if (isRepeat) {
       if (!checkResult || effectiveCount === 0) {
-        toast({ title: "Tidak ada slot dipilih", description: "Pilih setidaknya satu tanggal untuk booking.", variant: "destructive" });
+        toast({ title: t("Tidak ada slot dipilih", "No slot selected"), description: t("Pilih setidaknya satu tanggal untuk booking.", "Select at least one date for booking."), variant: "destructive" });
         return;
       }
       createRecurring.mutate({
@@ -272,7 +274,7 @@ export default function Booking() {
         },
         onError: () => {
           setOverriddenDates((prev) => ({ ...prev, [idx]: { date: newDate, available: null, checking: false } }));
-          toast({ title: "Gagal cek tanggal", variant: "destructive" });
+          toast({ title: t("Gagal cek tanggal", "Failed to check date"), variant: "destructive" });
         },
       }
     );
@@ -312,24 +314,24 @@ export default function Booking() {
         <div className="w-20 h-20 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-6">
           <CheckCircle2 className="text-green-600 w-10 h-10" />
         </div>
-        <h1 className="text-2xl font-bold mb-2">Booking Berhasil Dibuat!</h1>
+        <h1 className="text-2xl font-bold mb-2">{t("Booking Berhasil Dibuat!", "Booking Created Successfully!")}</h1>
         <p className="text-muted-foreground mb-6">
-          <span className="font-semibold text-foreground">{recurringResult.totalBookings}</span> booking berhasil dibuat untuk <span className="font-semibold text-foreground">{facility.name}</span>.
+          <span className="font-semibold text-foreground">{recurringResult.totalBookings}</span> {t("booking berhasil dibuat untuk", "bookings successfully created for")} <span className="font-semibold text-foreground">{facility.name}</span>.
         </p>
         <Card className="mb-6 text-left">
           <CardContent className="p-5 space-y-3">
             <div className="flex justify-between text-sm">
-              <span className="text-muted-foreground">Total Booking Dibuat</span>
-              <span className="font-semibold">{recurringResult.totalBookings} booking</span>
+              <span className="text-muted-foreground">{t("Total Booking Dibuat", "Total Bookings Created")}</span>
+              <span className="font-semibold">{recurringResult.totalBookings} {t("booking", "bookings")}</span>
             </div>
             {recurringResult.skipped.length > 0 && (
               <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Dilewati (konflik)</span>
-                <span className="text-orange-600 font-semibold">{recurringResult.skipped.length} booking</span>
+                <span className="text-muted-foreground">{t("Dilewati (konflik)", "Skipped (conflict)")}</span>
+                <span className="text-orange-600 font-semibold">{recurringResult.skipped.length} {t("booking", "bookings")}</span>
               </div>
             )}
             <div className="border-t pt-3 flex justify-between font-bold text-lg">
-              <span>Grand Total</span>
+              <span>{t("Grand Total", "Grand Total")}</span>
               <span className="text-primary">{formatCurrency(recurringResult.grandTotal)}</span>
             </div>
           </CardContent>
@@ -337,7 +339,7 @@ export default function Booking() {
         {recurringResult.skipped.length > 0 && (
           <div className="bg-orange-50 border border-orange-200 rounded-xl p-4 mb-6 text-left">
             <div className="flex items-center gap-2 text-orange-700 font-semibold text-sm mb-2">
-              <AlertTriangle size={15} /> Slot yang dilewati karena konflik:
+              <AlertTriangle size={15} /> {t("Slot yang dilewati karena konflik:", "Slots skipped due to conflict:")}
             </div>
             {recurringResult.skipped.map((d) => (
               <div key={d} className="text-sm text-orange-600">{formatDate(d)}</div>
@@ -347,11 +349,11 @@ export default function Booking() {
         <div className="flex gap-3">
           {recurringResult.firstOrder && (
             <Button className="flex-1" onClick={() => setLocation(`/booking/${recurringResult.firstOrder}`)}>
-              Lihat Detail Pembayaran
+              {t("Lihat Detail Pembayaran", "View Payment Details")}
             </Button>
           )}
           <Button variant="outline" className="flex-1" onClick={() => setLocation("/my-bookings")}>
-            Booking Saya
+            {t("Booking Saya", "My Bookings")}
           </Button>
         </div>
       </div>
@@ -361,12 +363,12 @@ export default function Booking() {
   return (
     <div className="container mx-auto px-4 py-8 max-w-5xl">
       <Button variant="ghost" onClick={() => window.history.back()} className="mb-6 -ml-4">
-        <ChevronLeft className="mr-2 h-4 w-4" /> Kembali
+        <ChevronLeft className="mr-2 h-4 w-4" /> {t("Kembali", "Back")}
       </Button>
 
       <div className="mb-8">
-        <h1 className="text-3xl md:text-4xl font-black tracking-tight">Checkout</h1>
-        <p className="text-muted-foreground">Lengkapi detail booking kamu di bawah ini.</p>
+        <h1 className="text-3xl md:text-4xl font-black tracking-tight">{t("Checkout", "Checkout")}</h1>
+        <p className="text-muted-foreground">{t("Lengkapi detail booking kamu di bawah ini.", "Complete your booking details below.")}</p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -375,27 +377,27 @@ export default function Booking() {
           {/* Customer Details */}
           <Card>
             <CardHeader>
-              <CardTitle>Data Pemesan</CardTitle>
+              <CardTitle>{t("Data Pemesan", "Customer Details")}</CardTitle>
             </CardHeader>
             <form onSubmit={handleSubmit} id="booking-form">
               <CardContent className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="name">Nama Lengkap <span className="text-destructive">*</span></Label>
+                  <Label htmlFor="name">{t("Nama Lengkap", "Full Name")} <span className="text-destructive">*</span></Label>
                   <Input id="name" required value={name} onChange={e => setName(e.target.value)} placeholder="John Doe" />
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor="email">Alamat Email <span className="text-destructive">*</span></Label>
+                    <Label htmlFor="email">{t("Alamat Email", "Email Address")} <span className="text-destructive">*</span></Label>
                     <Input id="email" type="email" required value={email} onChange={e => setEmail(e.target.value)} placeholder="john@example.com" />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="phone">No. WhatsApp <span className="text-destructive">*</span></Label>
+                    <Label htmlFor="phone">{t("No. WhatsApp", "WhatsApp No.")} <span className="text-destructive">*</span></Label>
                     <Input id="phone" required value={phone} onChange={e => setPhone(e.target.value)} placeholder="08123456789" />
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="notes">Catatan Tambahan (Opsional)</Label>
-                  <Textarea id="notes" value={notes} onChange={e => setNotes(e.target.value)} placeholder="Permintaan khusus..." />
+                  <Label htmlFor="notes">{t("Catatan Tambahan (Opsional)", "Additional Notes (Optional)")}</Label>
+                  <Textarea id="notes" value={notes} onChange={e => setNotes(e.target.value)} placeholder={t("Permintaan khusus...", "Special requests...")} />
                 </div>
               </CardContent>
             </form>
@@ -405,7 +407,7 @@ export default function Booking() {
           <Card className={couponResult ? "border-green-300 bg-green-50/50" : ""}>
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
-                <Receipt size={16} className="text-primary" /> Kode Kupon
+                <Receipt size={16} className="text-primary" /> {t("Kode Kupon", "Coupon Code")}
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
@@ -435,7 +437,7 @@ export default function Booking() {
                     value={couponInput}
                     onChange={(e) => { setCouponInput(e.target.value.toUpperCase()); setCouponError(null); }}
                     onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), validateCoupon())}
-                    placeholder="Masukkan kode kupon..."
+                    placeholder={t("Masukkan kode kupon...", "Enter coupon code...")}
                     className={`font-mono tracking-wider ${couponError ? "border-red-400 focus-visible:ring-red-400" : ""}`}
                     disabled={isValidatingCoupon}
                   />
@@ -446,7 +448,7 @@ export default function Booking() {
                     disabled={!couponInput.trim() || isValidatingCoupon}
                     className="shrink-0"
                   >
-                    {isValidatingCoupon ? <Loader2 size={15} className="animate-spin" /> : "Terapkan"}
+                    {isValidatingCoupon ? <Loader2 size={15} className="animate-spin" /> : t("Terapkan", "Apply")}
                   </Button>
                 </div>
               )}
@@ -469,13 +471,13 @@ export default function Booking() {
                 />
                 <Label htmlFor="repeat-check" className="text-base font-semibold cursor-pointer flex items-center gap-2">
                   <RefreshCw size={16} className={isRepeat ? "text-primary" : "text-muted-foreground"} />
-                  Repeat Booking
-                  {isRepeat && <Badge className="bg-primary/10 text-primary border-primary/20 text-xs">Aktif</Badge>}
+                  {t("Repeat Booking", "Repeat Booking")}
+                  {isRepeat && <Badge className="bg-primary/10 text-primary border-primary/20 text-xs">{t("Aktif", "Active")}</Badge>}
                 </Label>
               </div>
               {!isRepeat && (
                 <p className="text-xs text-muted-foreground ml-7">
-                  Aktifkan untuk membuat booking berulang secara otomatis (mingguan / bulanan).
+                  {t("Aktifkan untuk membuat booking berulang secara otomatis (mingguan / bulanan).", "Enable to automatically create recurring bookings (weekly / monthly).")}
                 </p>
               )}
             </CardHeader>
@@ -484,16 +486,16 @@ export default function Booking() {
               <CardContent className="space-y-5 pt-0">
                 {/* Repeat Type */}
                 <div>
-                  <Label className="text-sm font-semibold mb-2 block">Tipe Pengulangan</Label>
+                  <Label className="text-sm font-semibold mb-2 block">{t("Tipe Pengulangan", "Repeat Type")}</Label>
                   <div className="flex gap-2">
-                    {(["weekly", "monthly"] as RepeatType[]).map((t) => (
+                    {(["weekly", "monthly"] as RepeatType[]).map((rt) => (
                       <button
-                        key={t}
+                        key={rt}
                         type="button"
-                        onClick={() => setRepeatType(t)}
-                        className={`flex-1 py-2.5 rounded-lg text-sm font-medium border transition-colors ${repeatType === t ? "bg-primary text-primary-foreground border-primary" : "bg-background border-border hover:border-primary/50"}`}
+                        onClick={() => setRepeatType(rt)}
+                        className={`flex-1 py-2.5 rounded-lg text-sm font-medium border transition-colors ${repeatType === rt ? "bg-primary text-primary-foreground border-primary" : "bg-background border-border hover:border-primary/50"}`}
                       >
-                        {t === "weekly" ? "🗓 Weekly (Mingguan)" : "📅 Monthly (Bulanan)"}
+                        {rt === "weekly" ? t("🗓 Weekly (Mingguan)", "🗓 Weekly") : t("📅 Monthly (Bulanan)", "📅 Monthly")}
                       </button>
                     ))}
                   </div>
@@ -502,8 +504,8 @@ export default function Booking() {
                 {/* Repeat Count */}
                 <div>
                   <Label htmlFor="repeat-count" className="text-sm font-semibold mb-2 block">
-                    Jumlah Pengulangan
-                    <span className="text-muted-foreground font-normal ml-1">(maks. 52)</span>
+                    {t("Jumlah Pengulangan", "Number of Repeats")}
+                    <span className="text-muted-foreground font-normal ml-1">{t("(maks. 52)", "(max. 52)")}</span>
                   </Label>
                   <div className="flex items-center gap-3">
                     <button
@@ -526,7 +528,7 @@ export default function Booking() {
                       className="w-10 h-10 rounded-lg border border-border hover:bg-accent flex items-center justify-center text-lg font-bold"
                     >+</button>
                     <span className="text-sm text-muted-foreground">
-                      {repeatType === "weekly" ? "minggu" : "bulan"}
+                      {repeatType === "weekly" ? t("minggu", "weeks") : t("bulan", "months")}
                     </span>
                   </div>
                 </div>
@@ -534,10 +536,10 @@ export default function Booking() {
                 {/* Preview */}
                 <div>
                   <div className="flex items-center justify-between mb-3">
-                    <Label className="text-sm font-semibold">Preview Jadwal Booking</Label>
+                    <Label className="text-sm font-semibold">{t("Preview Jadwal Booking", "Booking Schedule Preview")}</Label>
                     {isChecking && (
                       <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                        <Loader2 size={13} className="animate-spin" /> Mengecek ketersediaan...
+                        <Loader2 size={13} className="animate-spin" /> {t("Mengecek ketersediaan...", "Checking availability...")}
                       </div>
                     )}
                   </div>
@@ -590,12 +592,12 @@ export default function Booking() {
                                   }`}>
                                     {formatDate(item.date)}
                                   </span>
-                                  {wasOverridden && <span className="ml-2 text-xs text-blue-500">(diubah)</span>}
-                                  {isCheckingOverride && <span className="ml-2 text-xs text-blue-500">Mengecek...</span>}
+                                  {wasOverridden && <span className="ml-2 text-xs text-blue-500">{t("(diubah)", "(changed)")}</span>}
+                                  {isCheckingOverride && <span className="ml-2 text-xs text-blue-500">{t("Mengecek...", "Checking...")}</span>}
                                   {!item.available && (item as any).reason && !isCheckingOverride && (
                                     <span className="ml-2 text-xs text-red-500">({(item as any).reason})</span>
                                   )}
-                                  {isManuallySkipped && <span className="ml-2 text-xs text-muted-foreground">(dilewati)</span>}
+                                  {isManuallySkipped && <span className="ml-2 text-xs text-muted-foreground">{t("(dilewati)", "(skipped)")}</span>}
                                 </div>
                               </div>
                               <div className="flex items-center gap-2 shrink-0 ml-2">
@@ -603,7 +605,7 @@ export default function Booking() {
                                 {!isCheckingOverride && (
                                   <button
                                     type="button"
-                                    title="Ubah tanggal"
+                                    title={t("Ubah tanggal", "Change date")}
                                     onClick={() => { setEditingIdx(isEditing ? null : idx); setEditingValue(item.date); }}
                                     className="p-1 rounded hover:bg-black/5 text-muted-foreground hover:text-foreground transition-colors"
                                   >
@@ -625,7 +627,7 @@ export default function Booking() {
                                       "border-red-200 text-red-500 hover:bg-red-50"
                                     }`}
                                   >
-                                    {isManuallySkipped ? "Sertakan" : "Lewati"}
+                                    {isManuallySkipped ? t("Sertakan", "Include") : t("Lewati", "Skip")}
                                   </button>
                                 )}
                               </div>
@@ -647,14 +649,14 @@ export default function Booking() {
                                   onClick={() => checkOverrideDate(idx, editingValue)}
                                   className="text-xs px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                                 >
-                                  Cek & Simpan
+                                  {t("Cek & Simpan", "Check & Save")}
                                 </button>
                                 <button
                                   type="button"
                                   onClick={() => setEditingIdx(null)}
                                   className="text-xs px-2 py-1 border border-blue-200 text-blue-600 rounded hover:bg-blue-100 transition-colors"
                                 >
-                                  Batal
+                                  {t("Batal", "Cancel")}
                                 </button>
                               </div>
                             )}
@@ -666,7 +668,7 @@ export default function Booking() {
                         <div className="flex items-start gap-2 p-3 bg-orange-50 border border-orange-200 rounded-lg text-sm text-orange-700">
                           <AlertTriangle size={15} className="mt-0.5 shrink-0" />
                           <span>
-                            Hanya <strong>{effectiveCount} dari {checkResult.dates.length} sesi</strong> yang akan dibooking.
+                            {t("Hanya", "Only")} <strong>{effectiveCount} {t("dari", "of")} {checkResult.dates.length} {t("sesi", "sessions")}</strong> {t("yang akan dibooking.", "will be booked.")}
                           </span>
                         </div>
                       )}
@@ -674,7 +676,7 @@ export default function Booking() {
                       {effectiveCount === 0 && (
                         <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
                           <XCircle size={15} />
-                          <span>Tidak ada sesi yang dipilih. Aktifkan minimal satu tanggal.</span>
+                          <span>{t("Tidak ada sesi yang dipilih. Aktifkan minimal satu tanggal.", "No sessions selected. Enable at least one date.")}</span>
                         </div>
                       )}
                     </div>
@@ -695,10 +697,10 @@ export default function Booking() {
               onClick={handleSubmit}
             >
               {(createBooking.isPending || createRecurring.isPending)
-                ? "Memproses..."
+                ? t("Memproses...", "Processing...")
                 : isRepeat
-                  ? `Konfirmasi ${isChecking ? "..." : effectiveCount || (checkResult?.validCount ?? repeatCount)} Booking`
-                  : "Konfirmasi Booking"
+                  ? `${t("Konfirmasi", "Confirm")} ${isChecking ? "..." : effectiveCount || (checkResult?.validCount ?? repeatCount)} ${t("Booking", "Bookings")}`
+                  : t("Konfirmasi Booking", "Confirm Booking")
               }
             </Button>
           </div>
@@ -710,7 +712,7 @@ export default function Booking() {
             <CardHeader className="bg-muted/30 pb-4 border-b">
               <CardTitle className="text-lg flex items-center gap-2">
                 <Receipt className="text-primary w-5 h-5" />
-                Ringkasan Booking
+                {t("Ringkasan Booking", "Booking Summary")}
               </CardTitle>
             </CardHeader>
             <CardContent className="p-6 space-y-5">
@@ -721,11 +723,11 @@ export default function Booking() {
                   <div className="flex items-start gap-3">
                     <Calendar className="w-4 h-4 text-muted-foreground shrink-0 mt-0.5" />
                     <div>
-                      <div className="font-medium">Tanggal</div>
+                      <div className="font-medium">{t("Tanggal", "Date")}</div>
                       <div className="text-muted-foreground">{date ? formatDate(date) : ""}</div>
                       {isRepeat && (
                         <div className="text-xs text-primary mt-0.5">
-                          +{repeatCount - 1} sesi {repeatType === "weekly" ? "mingguan" : "bulanan"} berikutnya
+                          +{repeatCount - 1} {repeatType === "weekly" ? t("sesi mingguan berikutnya", "more weekly sessions") : t("sesi bulanan berikutnya", "more monthly sessions")}
                         </div>
                       )}
                     </div>
@@ -733,16 +735,16 @@ export default function Booking() {
                   <div className="flex items-start gap-3">
                     <Clock className="w-4 h-4 text-muted-foreground shrink-0 mt-0.5" />
                     <div>
-                      <div className="font-medium">Waktu & Durasi</div>
+                      <div className="font-medium">{t("Waktu & Durasi", "Time & Duration")}</div>
                       <div className="text-muted-foreground">
-                        {startTime.substring(0, 5)} – {endTime} ({duration} {duration === 1 ? "jam" : "jam"})
+                        {startTime.substring(0, 5)} – {endTime} ({duration} {t("jam", "hours")})
                       </div>
                     </div>
                   </div>
                   <div className="flex items-start gap-3">
                     <MapPin className="w-4 h-4 text-muted-foreground shrink-0 mt-0.5" />
                     <div>
-                      <div className="font-medium">Lokasi</div>
+                      <div className="font-medium">{t("Lokasi", "Location")}</div>
                       <div className="text-muted-foreground">SportCenter Main</div>
                     </div>
                   </div>
@@ -751,21 +753,21 @@ export default function Booking() {
 
               <div className="border-t pt-4 space-y-2 text-sm">
                 <div className="flex justify-between">
-                  <span className="text-muted-foreground">Harga/jam</span>
+                  <span className="text-muted-foreground">{t("Harga/jam", "Price/hour")}</span>
                   <span>{formatCurrency(facility.pricePerHour)}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-muted-foreground">Durasi</span>
-                  <span>× {duration} jam</span>
+                  <span className="text-muted-foreground">{t("Durasi", "Duration")}</span>
+                  <span>× {duration} {t("jam", "hours")}</span>
                 </div>
                 {isRepeat && (
                   <>
                     <div className="flex justify-between">
-                      <span className="text-muted-foreground">Harga/sesi</span>
+                      <span className="text-muted-foreground">{t("Harga/sesi", "Price/session")}</span>
                       <span>{formatCurrency(totalPrice)}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-muted-foreground">Sesi dipilih</span>
+                      <span className="text-muted-foreground">{t("Sesi dipilih", "Sessions selected")}</span>
                       <span>
                         {isChecking
                           ? <span className="text-muted-foreground">...</span>
@@ -778,13 +780,13 @@ export default function Booking() {
                 {couponResult && (
                   <div className="flex justify-between text-green-700 font-medium">
                     <span className="flex items-center gap-1">
-                      <Receipt size={12} /> Diskon ({couponResult.code})
+                      <Receipt size={12} /> {t("Diskon", "Discount")} ({couponResult.code})
                     </span>
                     <span>−{formatCurrency(couponResult.discountAmount)}</span>
                   </div>
                 )}
                 <div className="flex justify-between font-bold text-lg pt-3 border-t">
-                  <span>Total</span>
+                  <span>{t("Total", "Total")}</span>
                   <span className="text-primary">
                     {(() => {
                       const disc = couponResult?.discountAmount ?? 0;
@@ -798,7 +800,7 @@ export default function Booking() {
                 </div>
                 {isRepeat && !isChecking && checkResult && (
                   <div className="text-xs text-muted-foreground text-right">
-                    {effectiveCount} sesi × {duration} jam × {formatCurrency(facility.pricePerHour)}
+                    {effectiveCount} {t("sesi", "sessions")} × {duration} {t("jam", "hours")} × {formatCurrency(facility.pricePerHour)}
                     {couponResult ? ` − ${formatCurrency(couponResult.discountAmount)}` : ""}
                   </div>
                 )}
@@ -815,10 +817,10 @@ export default function Booking() {
                 onClick={handleSubmit}
               >
                 {(createBooking.isPending || createRecurring.isPending)
-                  ? <><Loader2 size={16} className="mr-2 animate-spin" /> Memproses...</>
+                  ? <><Loader2 size={16} className="mr-2 animate-spin" /> {t("Memproses...", "Processing...")}</>
                   : isRepeat
-                    ? `Konfirmasi ${isChecking ? "..." : effectiveCount || (checkResult?.validCount ?? repeatCount)} Booking`
-                    : "Konfirmasi Booking"
+                    ? `${t("Konfirmasi", "Confirm")} ${isChecking ? "..." : effectiveCount || (checkResult?.validCount ?? repeatCount)} ${t("Booking", "Bookings")}`
+                    : t("Konfirmasi Booking", "Confirm Booking")
                 }
               </Button>
             </CardFooter>

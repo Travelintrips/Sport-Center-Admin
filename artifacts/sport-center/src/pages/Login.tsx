@@ -7,11 +7,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
+import { useLang } from "@/lib/i18n";
 import { LogIn, Eye, EyeOff } from "lucide-react";
 
 export default function Login() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
+  const { t } = useLang();
   const [form, setForm] = useState({ email: "", password: "" });
   const [showPw, setShowPw] = useState(false);
 
@@ -19,11 +21,11 @@ export default function Login() {
     mutation: {
       onSuccess: (data) => {
         setToken(data.token);
-        toast({ title: "Selamat datang kembali!", description: `Halo, ${data.user.name}` });
+        toast({ title: t("Selamat datang kembali!", "Welcome back!"), description: `${t("Halo", "Hello")}, ${data.user.name}` });
         setLocation("/my-bookings");
       },
       onError: () => {
-        toast({ title: "Login gagal", description: "Email atau password salah.", variant: "destructive" });
+        toast({ title: t("Login gagal", "Login failed"), description: t("Email atau password salah.", "Incorrect email or password."), variant: "destructive" });
       },
     },
   });
@@ -40,8 +42,8 @@ export default function Login() {
           <div className="mx-auto w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center mb-3">
             <LogIn size={26} className="text-primary" />
           </div>
-          <CardTitle className="text-2xl font-black">Masuk ke Akun</CardTitle>
-          <CardDescription>Login untuk melihat riwayat booking Anda</CardDescription>
+          <CardTitle className="text-2xl font-black">{t("Masuk ke Akun", "Sign in to Account")}</CardTitle>
+          <CardDescription>{t("Login untuk melihat riwayat booking Anda", "Log in to view your booking history")}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-5 pt-4">
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -81,14 +83,14 @@ export default function Login() {
             </div>
 
             <Button type="submit" className="w-full" disabled={loginMutation.isPending}>
-              {loginMutation.isPending ? "Memproses..." : "Masuk"}
+              {loginMutation.isPending ? t("Memproses...", "Processing...") : t("Masuk", "Sign in")}
             </Button>
           </form>
 
           <div className="text-center text-sm text-muted-foreground">
-            Belum punya akun?{" "}
+            {t("Belum punya akun?", "Don't have an account?")}{" "}
             <Link href="/register" className="text-primary font-semibold hover:underline">
-              Daftar sekarang
+              {t("Daftar sekarang", "Register now")}
             </Link>
           </div>
         </CardContent>
