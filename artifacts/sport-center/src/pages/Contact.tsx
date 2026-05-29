@@ -111,13 +111,23 @@ export default function Contact() {
           </Card>
         </div>
 
-        <div className="bg-muted rounded-xl overflow-hidden border border-border h-full min-h-[400px] flex items-center justify-center relative">
-          {/* Map placeholder */}
-          <div className="absolute inset-0 bg-secondary/50 flex flex-col items-center justify-center text-muted-foreground p-6 text-center">
-            <MapPin size={48} className="mb-4 opacity-50 text-primary" />
-            <h3 className="text-xl font-bold mb-2">Interactive Map</h3>
-            <p>Google Maps integration goes here</p>
-          </div>
+        <div className="rounded-xl overflow-hidden border border-border h-full min-h-[400px] relative">
+          <iframe
+            title="Lokasi Sport Center Bandara Soekarno-Hatta"
+            src="https://www.google.com/maps?q=Jl.%20C3%20No.%20831%2C%20Pajang%2C%20Benda%2C%20Kota%20Tangerang%2C%20Banten%2015126&output=embed"
+            className="w-full h-full min-h-[400px] border-0"
+            loading="lazy"
+            referrerPolicy="no-referrer-when-downgrade"
+            allowFullScreen
+          />
+          <a
+            href="https://maps.app.goo.gl/iiXurNzUPFZpEA5s6"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="absolute bottom-4 left-4 right-4 bg-primary text-primary-foreground font-semibold text-sm py-3 rounded-xl shadow-lg flex items-center justify-center gap-2 hover:bg-primary/90 transition-colors"
+          >
+            <MapPin size={16} /> Buka di Google Maps
+          </a>
         </div>
       </div>
     </div>
