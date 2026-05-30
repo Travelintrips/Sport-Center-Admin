@@ -50,6 +50,9 @@ export default function Booking() {
   const startTime = queryParams.get("startTime") || "";
   const durationStr = queryParams.get("duration") || "1";
   const duration = parseInt(durationStr) || 1;
+  const mode = queryParams.get("mode") || "time_slot";
+  const isWalkIn = mode === "walk_in";
+  const urlActivityType = queryParams.get("activityType") || "";
 
   const { data: facility, isLoading: isLoadingFacility } = useGetFacility(facilityId, {
     query: { enabled: !!facilityId, queryKey: getGetFacilityQueryKey(facilityId) },
@@ -60,6 +63,7 @@ export default function Booking() {
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [notes, setNotes] = useState("");
+  const [numberOfPeople, setNumberOfPeople] = useState<string>("1");
 
   // --- Customer type (Angkasa Pura) ---
   const [customerType, setCustomerType] = useState<"umum" | "angkasa_pura">("umum");
@@ -179,11 +183,16 @@ export default function Booking() {
 
   // Redirect if missing params
   useEffect(() => {
-    if (search && (!facilityId || !date || !startTime)) {
+    if (search && (!facilityId || !date)) {
       toast({ title: t("Detail booking tidak lengkap", "Incomplete booking details"), description: t("Silakan pilih fasilitas dan waktu terlebih dahulu.", "Please select a facility and time first."), variant: "destructive" });
       setLocation("/facilities");
+      return;
     }
-  }, [search, facilityId, date, startTime, setLocation, toast]);
+    if (search && !isWalkIn && !startTime) {
+      toast({ title: t("Detail booking tidak lengkap", "Incomplete booking details"), description: t("Silakan pilih jam terlebih dahulu.", "Please select a time slot first."), variant: "destructive" });
+      setLocation("/facilities");
+    }
+  }, [search, facilityId, date, startTime, isWalkIn, setLocation, toast]);
 
   // --- Validate coupon ---
   const validateCoupon = async () => {

@@ -237,8 +237,11 @@ export default function FacilityDetail() {
                 </h3>
                 
                 <div className="space-y-6">
+                  {/* Step 1 - Date Picker (always shown) */}
                   <div className="space-y-3">
-                    <label className="text-sm font-bold text-foreground/80 block">{t("1. Pilih Tanggal", "1. Choose Date")}</label>
+                    <label className="text-sm font-bold text-foreground/80 block">
+                      {t("1. Pilih Tanggal", "1. Choose Date")}
+                    </label>
                     <div className="border rounded-2xl p-3 flex justify-center bg-[#F8FAFC] dark:bg-slate-900 shadow-inner">
                       <Calendar
                         mode="single"
@@ -251,45 +254,99 @@ export default function FacilityDetail() {
                     </div>
                   </div>
 
-                  <div className="space-y-3">
-                    <label className="text-sm font-bold text-foreground/80 block">{t("2. Durasi Bermain", "2. Playing Duration")}</label>
-                    <Select value={duration} onValueChange={setDuration}>
-                      <SelectTrigger className="h-14 rounded-xl bg-[#F8FAFC] dark:bg-slate-900 border-border font-bold">
-                        <SelectValue placeholder={t("Pilih durasi", "Choose duration")} />
-                      </SelectTrigger>
-                      <SelectContent className="rounded-xl">
-                        <SelectItem value="1" className="font-medium py-3">{t("1 Jam", "1 Hour")}</SelectItem>
-                        <SelectItem value="2" className="font-medium py-3">{t("2 Jam", "2 Hours")}</SelectItem>
-                        <SelectItem value="3" className="font-medium py-3">{t("3 Jam", "3 Hours")}</SelectItem>
-                        <SelectItem value="4" className="font-medium py-3">{t("4 Jam", "4 Hours")}</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
+                  {/* Walk-in (Gym) info block */}
+                  {isWalkIn && (
+                    <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-2xl p-4 text-sm text-blue-800 dark:text-blue-200">
+                      <div className="font-bold mb-1">🏋️ {t("Akses Bebas Jam Operasional", "Open Access During Operating Hours")}</div>
+                      <p className="text-blue-700/80 dark:text-blue-300/80">
+                        {t(
+                          "Gym bisa diakses kapan saja antara 06:00–22:00 WIB. Tidak ada slot jam — datang dan nikmati fasilitas.",
+                          "Gym is accessible anytime between 06:00–22:00 WIB. No time slot needed — just come and enjoy."
+                        )}
+                      </p>
+                    </div>
+                  )}
 
-                  <div className="space-y-3">
-                    <label className="text-sm font-bold text-foreground/80 block flex justify-between items-end">
-                      <span>{t("3. Jam Tersedia", "3. Available Times")}</span>
-                      {selectedTime && <span className="text-xs text-primary bg-primary/10 px-2 py-0.5 rounded-md">{t("Terpilih", "Selected")}: {selectedTime}</span>}
-                    </label>
-                    
-                    {!date ? (
-                      <div className="text-sm text-center font-medium text-muted-foreground py-10 border-2 border-dashed rounded-2xl bg-muted/30">
-                        {t("Pilih tanggal terlebih dahulu", "Please choose a date first")}
+                  {/* Multiguna: activity type selector */}
+                  {!isWalkIn && isMultiguna && (
+                    <div className="space-y-3">
+                      <label className="text-sm font-bold text-foreground/80 block">
+                        {t("2. Pilih Jenis Olahraga", "2. Choose Sport Type")}
+                      </label>
+                      <div className="grid grid-cols-3 gap-2">
+                        {MULTIGUNA_ACTIVITIES.map((act) => (
+                          <button
+                            key={act.value}
+                            type="button"
+                            onClick={() => setActivityType(act.value)}
+                            className={`flex flex-col items-center gap-1 p-3 rounded-xl border font-bold text-sm transition-all ${
+                              activityType === act.value
+                                ? "bg-primary text-primary-foreground border-primary shadow-lg scale-105"
+                                : "bg-[#F8FAFC] dark:bg-slate-900 border-border hover:border-primary/50 text-foreground/80"
+                            }`}
+                          >
+                            <span className="text-xl">{act.icon}</span>
+                            <span>{act.label}</span>
+                          </button>
+                        ))}
                       </div>
-                    ) : (
-                      <div className="bg-[#F8FAFC] dark:bg-slate-900 rounded-2xl p-4 border shadow-inner max-h-[250px] overflow-y-auto">
-                        <AvailabilityCalendar
-                          facilityId={facilityId}
-                          date={formattedDate}
-                          slots={slots as any}
-                          isLoading={isLoadingSlots}
-                          selectedTime={selectedTime}
-                          duration={parseInt(duration)}
-                          onSelectTime={setSelectedTime}
-                        />
-                      </div>
-                    )}
-                  </div>
+                      {activityType && (
+                        <div className="text-xs text-primary bg-primary/10 px-3 py-1.5 rounded-lg font-medium">
+                          ⚠️ {t("Lapangan yang sama digunakan semua olahraga. Slot yang terisi oleh olahraga lain tidak bisa dipesan.", "Same court for all sports. Slots booked by other sports are unavailable.")}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Duration (non-gym only) */}
+                  {!isWalkIn && (
+                    <div className="space-y-3">
+                      <label className="text-sm font-bold text-foreground/80 block">
+                        {isMultiguna ? t("3. Durasi Bermain", "3. Playing Duration") : t("2. Durasi Bermain", "2. Playing Duration")}
+                      </label>
+                      <Select value={duration} onValueChange={(v) => { setDuration(v); setSelectedTime(""); }}>
+                        <SelectTrigger className="h-14 rounded-xl bg-[#F8FAFC] dark:bg-slate-900 border-border font-bold">
+                          <SelectValue placeholder={t("Pilih durasi", "Choose duration")} />
+                        </SelectTrigger>
+                        <SelectContent className="rounded-xl">
+                          <SelectItem value="1" className="font-medium py-3">{t("1 Jam", "1 Hour")}</SelectItem>
+                          <SelectItem value="2" className="font-medium py-3">{t("2 Jam", "2 Hours")}</SelectItem>
+                          <SelectItem value="3" className="font-medium py-3">{t("3 Jam", "3 Hours")}</SelectItem>
+                          <SelectItem value="4" className="font-medium py-3">{t("4 Jam", "4 Hours")}</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+
+                  {/* Time slot picker (non-gym only) */}
+                  {!isWalkIn && (
+                    <div className="space-y-3">
+                      <label className="text-sm font-bold text-foreground/80 block flex justify-between items-end">
+                        <span>
+                          {isMultiguna ? t("4. Jam Tersedia", "4. Available Times") : t("3. Jam Tersedia", "3. Available Times")}
+                        </span>
+                        {selectedTime && <span className="text-xs text-primary bg-primary/10 px-2 py-0.5 rounded-md">{t("Terpilih", "Selected")}: {selectedTime}</span>}
+                      </label>
+                      
+                      {!date ? (
+                        <div className="text-sm text-center font-medium text-muted-foreground py-10 border-2 border-dashed rounded-2xl bg-muted/30">
+                          {t("Pilih tanggal terlebih dahulu", "Please choose a date first")}
+                        </div>
+                      ) : (
+                        <div className="bg-[#F8FAFC] dark:bg-slate-900 rounded-2xl p-4 border shadow-inner max-h-[250px] overflow-y-auto">
+                          <AvailabilityCalendar
+                            facilityId={facilityId}
+                            date={formattedDate}
+                            slots={slots as any}
+                            isLoading={isLoadingSlots}
+                            selectedTime={selectedTime}
+                            duration={parseInt(duration)}
+                            onSelectTime={setSelectedTime}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   <div className="pt-6 mt-4 border-t border-dashed">
                     <div className="flex justify-between items-end mb-6 bg-primary/5 p-4 rounded-2xl border border-primary/10">
@@ -303,9 +360,20 @@ export default function FacilityDetail() {
                       size="lg" 
                       className="w-full text-base font-bold h-14 rounded-full shadow-lg shadow-primary/20 transition-all hover:-translate-y-1" 
                       onClick={handleBook}
-                      disabled={!selectedTime || !date}
+                      disabled={
+                        !date || 
+                        (!isWalkIn && !selectedTime) ||
+                        (isMultiguna && !activityType)
+                      }
                     >
-                      {selectedTime ? t("Lanjut ke Pembayaran", "Continue to Payment") : t("Lengkapi Jadwal Dulu", "Complete the Schedule First")}
+                      {isWalkIn
+                        ? (date ? t("Booking Masuk Gym", "Book Gym Entry") : t("Pilih Tanggal Dulu", "Choose Date First"))
+                        : (!selectedTime
+                          ? t("Lengkapi Jadwal Dulu", "Complete the Schedule First")
+                          : (isMultiguna && !activityType)
+                            ? t("Pilih Jenis Olahraga", "Choose Sport Type")
+                            : t("Lanjut ke Pembayaran", "Continue to Payment"))
+                      }
                     </Button>
                   </div>
                 </div>
