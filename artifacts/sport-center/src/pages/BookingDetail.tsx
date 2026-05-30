@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback } from "react";
+import QRCode from "react-qr-code";
 import { useRoute } from "wouter";
 import {
   useGetBookingByOrder,
@@ -170,8 +171,14 @@ export default function BookingDetail() {
       case "confirmed":
       case "completed":
         return { color: "bg-green-100 text-green-800 border-green-300", icon: CheckCircle2, label: t("Booking Dikonfirmasi", "Booking Confirmed") };
+      case "waiting_confirmation":
+        return { color: "bg-orange-100 text-orange-800 border-orange-300", icon: Clock, label: t("Menunggu Konfirmasi Admin", "Awaiting Admin Confirmation") };
       case "cancelled":
         return { color: "bg-red-100 text-red-800 border-red-300", icon: AlertCircle, label: t("Dibatalkan", "Cancelled") };
+      case "rejected":
+        return { color: "bg-red-100 text-red-800 border-red-300", icon: AlertCircle, label: t("Pembayaran Ditolak", "Payment Rejected") };
+      case "expired":
+        return { color: "bg-gray-100 text-gray-700 border-gray-300", icon: AlertCircle, label: t("Booking Expired", "Booking Expired") };
       case "refunded":
         return { color: "bg-purple-100 text-purple-800 border-purple-300", icon: AlertCircle, label: t("Dana Dikembalikan", "Refunded") };
       default:
@@ -424,6 +431,51 @@ export default function BookingDetail() {
             </Card>
           )}
 
+          {/* Waiting confirmation state */}
+          {booking.status === "waiting_confirmation" && (
+            <Card className="border-orange-200 bg-orange-50/50">
+              <CardContent className="p-6 text-center">
+                <div className="w-14 h-14 rounded-full bg-orange-100 flex items-center justify-center mx-auto mb-3">
+                  <Clock size={26} className="text-orange-600" />
+                </div>
+                <h3 className="font-bold text-lg text-orange-900 mb-1">{t("Bukti Pembayaran Diterima", "Payment Proof Received")}</h3>
+                <p className="text-sm text-orange-700">
+                  {t("Admin sedang memverifikasi pembayaran Anda. Biasanya memakan waktu 1–2 jam kerja.", "Admin is verifying your payment. Usually takes 1–2 business hours.")}
+                </p>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Expired state */}
+          {booking.status === "expired" && (
+            <Card className="border-gray-200 bg-gray-50/50">
+              <CardContent className="p-6 text-center">
+                <div className="w-14 h-14 rounded-full bg-gray-100 flex items-center justify-center mx-auto mb-3">
+                  <AlertCircle size={26} className="text-gray-500" />
+                </div>
+                <h3 className="font-bold text-lg text-gray-800 mb-1">{t("Booking Expired", "Booking Expired")}</h3>
+                <p className="text-sm text-gray-600">
+                  {t("Batas waktu pembayaran terlewat. Silakan buat booking baru.", "Payment deadline has passed. Please create a new booking.")}
+                </p>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Rejected state */}
+          {booking.status === "rejected" && (
+            <Card className="border-red-200 bg-red-50/50">
+              <CardContent className="p-6 text-center">
+                <div className="w-14 h-14 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-3">
+                  <AlertCircle size={26} className="text-red-600" />
+                </div>
+                <h3 className="font-bold text-lg text-red-900 mb-1">{t("Pembayaran Ditolak", "Payment Rejected")}</h3>
+                <p className="text-sm text-red-700">
+                  {t("Bukti pembayaran tidak valid. Silakan upload ulang atau hubungi admin.", "Payment proof is invalid. Please re-upload or contact admin.")}
+                </p>
+              </CardContent>
+            </Card>
+          )}
+
           {/* Confirmed / completed state */}
           {(booking.status === "confirmed" || booking.status === "completed") && (
             <Card className="border-green-200 bg-green-50/50">
@@ -432,9 +484,19 @@ export default function BookingDetail() {
                   <CheckCircle2 size={26} className="text-green-600" />
                 </div>
                 <h3 className="font-bold text-lg text-green-900 mb-1">{t("Booking Dikonfirmasi!", "Booking Confirmed!")}</h3>
-                <p className="text-sm text-green-700">
+                <p className="text-sm text-green-700 mb-4">
                   {t("Pembayaran Anda sudah diverifikasi. Sampai jumpa di lapangan!", "Your payment has been verified. See you on the court!")}
                 </p>
+                {/* QR Code for check-in */}
+                <div className="border-t border-green-200 pt-4">
+                  <p className="text-xs font-semibold text-green-700 uppercase tracking-wide mb-3">{t("QR Code Check-In", "Check-In QR Code")}</p>
+                  <div className="flex justify-center">
+                    <div className="bg-white p-3 rounded-xl border border-green-200 inline-block">
+                      <QRCode value={booking.orderNumber} size={140} />
+                    </div>
+                  </div>
+                  <p className="text-xs text-green-600 mt-2">{t("Tunjukkan kode ini kepada petugas saat tiba", "Show this code to staff upon arrival")}</p>
+                </div>
               </CardContent>
             </Card>
           )}
