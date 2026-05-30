@@ -15,6 +15,17 @@ import storageRouter from "./storage";
 import membershipsRouter from "./memberships";
 import discountSettingsRouter from "./discountSettings";
 import apMembersRouter from "./apMembers";
+import cancellationsRouter from "./cancellations";
+import rescheduleRouter from "./reschedule";
+import auditLogsRouter from "./auditLogs";
+import pricingRulesRouter from "./pricingRules";
+import maintenanceRouter from "./maintenance";
+import reviewsRouter from "./reviews";
+import calendarRouter from "./calendar";
+import reportsRouter from "./reports";
+import notificationTemplatesRouter from "./notificationTemplates";
+import bookingHistoryRouter from "./bookingHistory";
+import qrCheckinRouter from "./qrCheckin";
 
 const router: IRouter = Router();
 
@@ -34,5 +45,16 @@ router.use(settingsRouter);
 router.use(membershipsRouter);
 router.use(discountSettingsRouter);
 router.use(apMembersRouter);
+router.use(cancellationsRouter);
+router.use(rescheduleRouter);
+router.use(auditLogsRouter);
+router.use(pricingRulesRouter);
+router.use(maintenanceRouter);
+router.use(reviewsRouter);
+router.use(calendarRouter);
+router.use(reportsRouter);
+router.use(notificationTemplatesRouter);
+router.use(bookingHistoryRouter);
+router.use(qrCheckinRouter);
 
 export default router;

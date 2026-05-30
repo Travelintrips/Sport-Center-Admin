@@ -7,14 +7,17 @@
     "hello": "tsx ./src/hello.ts",
     "seed-all": "tsx ./src/seed-all.ts",
     "seed-admin": "tsx ./src/seed-admin.ts",
+    "migrate": "tsx ../migrate.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@workspace/db": "workspace:*",
-    "drizzle-orm": "catalog:"
+    "drizzle-orm": "catalog:",
+    "pg": "^8.20.0"
   },
   "devDependencies": {
     "@types/node": "catalog:",
+    "@types/pg": "^8.11.11",
     "tsx": "catalog:"
   }
 }

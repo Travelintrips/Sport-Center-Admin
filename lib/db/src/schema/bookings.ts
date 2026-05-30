@@ -7,10 +7,13 @@ import { scSchema } from "./_schema";
 
 export const bookingStatusEnum = scSchema.enum("booking_status", [
   "pending_payment",
+  "waiting_confirmation",
   "paid",
   "confirmed",
-  "cancelled",
   "completed",
+  "cancelled",
+  "rejected",
+  "expired",
   "refunded",
 ]);
 
@@ -49,8 +52,12 @@ export const bookingsTable = scSchema.table("bookings", {
   status: bookingStatusEnum("status").notNull().default("pending_payment"),
   activityType: text("activity_type"),
   numberOfPeople: integer("number_of_people"),
+  resourceName: text("resource_name"),
   notes: text("notes"),
   adminNotes: text("admin_notes"),
+  paymentDeadline: timestamp("payment_deadline", { withTimezone: true }),
+  checkedInAt: timestamp("checked_in_at", { withTimezone: true }),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });

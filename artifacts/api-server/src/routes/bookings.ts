@@ -1,8 +1,12 @@
 import { Router } from "express";
-import { db, bookingsTable, facilitiesTable, paymentsTable, promosTable, discountSettingsTable, apMembersTable } from "@workspace/db";
+import { db, bookingsTable, facilitiesTable, paymentsTable, promosTable, discountSettingsTable, apMembersTable, bookingHistoryTable } from "@workspace/db";
 import { eq, and, sql } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
 import { broadcastAvailabilityChange } from "../lib/supabase";
+import { notifyBookingCreated, notifyPaymentConfirmed, notifyBookingCancelled } from "../lib/notifications";
+import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
+
+const INACTIVE_STATUSES = ["cancelled", "expired", "rejected", "refunded"];
 
 const router = Router();
 
@@ -164,7 +168,7 @@ router.post("/bookings", async (req, res) => {
       const conflicting = await db.select().from(bookingsTable).where(
         and(eq(bookingsTable.facilityId, Number(facilityId)), eq(bookingsTable.bookingDate, bookingDate))
       );
-      const active = conflicting.filter((b) => b.status !== "cancelled");
+      const active = conflicting.filter((b) => !INACTIVE_STATUSES.includes(b.status));
       const conflict = active.some((b) => {
         const bStart = timeToMinutesLocal(b.startTime);
         const bEnd = timeToMinutesLocal(b.endTime);
@@ -204,6 +208,7 @@ router.post("/bookings", async (req, res) => {
       activityType,
       numberOfPeople,
       notes,
+      paymentDeadline: new Date(Date.now() + 30 * 60 * 1000),
     }).returning();
 
     if (promoCode && !isAp) {
@@ -212,7 +217,31 @@ router.post("/bookings", async (req, res) => {
         .where(eq(promosTable.code, String(promoCode).toUpperCase()));
     }
 
+    // Record history
+    await db.insert(bookingHistoryTable).values({
+      bookingId: booking.id,
+      fromStatus: null,
+      toStatus: "pending_payment",
+      changedByName: customerName,
+      note: "Booking dibuat",
+    });
+
     broadcastAvailabilityChange(Number(facilityId), bookingDate);
+
+    // Send WA notification (non-blocking)
+    const deadline = new Date(Date.now() + 30 * 60 * 1000);
+    const deadlineStr = deadline.toLocaleString("id-ID", { timeZone: "Asia/Jakarta", hour12: false });
+    notifyBookingCreated({
+      customerName,
+      customerPhone,
+      orderNumber: booking.orderNumber,
+      facilityName: facility.name,
+      bookingDate,
+      startTime: booking.startTime,
+      endTime: booking.endTime,
+      totalPrice: totalPrice.toLocaleString("id-ID"),
+      paymentDeadline: deadlineStr,
+    });
 
     res.status(201).json({
       ...booking,
@@ -265,7 +294,7 @@ async function checkSlotConflict(
   const existing = await db.select().from(bookingsTable).where(
     and(eq(bookingsTable.facilityId, facilityId), eq(bookingsTable.bookingDate, bookingDate))
   );
-  const active = existing.filter((b) => b.status !== "cancelled");
+  const active = existing.filter((b) => !["cancelled", "expired", "rejected", "refunded"].includes(b.status));
   const sMin = timeToMinutes(startTime);
   const eMin = timeToMinutes(endTime);
   return active.some((b) => {
