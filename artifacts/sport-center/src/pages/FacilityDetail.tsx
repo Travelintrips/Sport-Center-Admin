@@ -135,7 +135,7 @@ export default function FacilityDetail() {
     );
   }
 
-  const totalPrice = facility.pricePerHour * parseInt(duration);
+  const totalPrice = isWalkIn ? facility.pricePerHour : facility.pricePerHour * parseInt(duration);
 
   return (
     <div className="bg-[#F8FAFC] dark:bg-slate-950 min-h-screen pb-24">

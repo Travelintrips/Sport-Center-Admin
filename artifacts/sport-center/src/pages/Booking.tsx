@@ -223,7 +223,8 @@ export default function Booking() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!facilityId || !date || !startTime || !duration) return;
+    if (!facilityId || !date) return;
+    if (!isWalkIn && (!startTime || !duration)) return;
     if (!name || !email || !phone) {
       toast({ title: t("Form tidak lengkap", "Incomplete form"), description: t("Harap isi semua field yang wajib.", "Please fill in all required fields."), variant: "destructive" });
       return;
@@ -269,8 +270,9 @@ export default function Booking() {
           customerPhone: phone,
           facilityId,
           bookingDate: date,
-          startTime,
-          durationHours: duration,
+          ...(isWalkIn ? {} : { startTime, durationHours: duration }),
+          activityType: urlActivityType || undefined,
+          numberOfPeople: isWalkIn ? parseInt(numberOfPeople) || 1 : undefined,
           notes,
           customerType,
           idCardNumber: isAP ? idCardNumber.trim() : undefined,
@@ -809,15 +811,39 @@ export default function Booking() {
                       )}
                     </div>
                   </div>
-                  <div className="flex items-start gap-3">
-                    <Clock className="w-4 h-4 text-muted-foreground shrink-0 mt-0.5" />
-                    <div>
-                      <div className="font-medium">{t("Waktu & Durasi", "Time & Duration")}</div>
-                      <div className="text-muted-foreground">
-                        {startTime.substring(0, 5)} – {endTime} ({duration} {t("jam", "hours")})
+                  {isWalkIn ? (
+                    <div className="flex items-start gap-3">
+                      <Clock className="w-4 h-4 text-muted-foreground shrink-0 mt-0.5" />
+                      <div>
+                        <div className="font-medium">{t("Akses", "Access")}</div>
+                        <div className="text-muted-foreground">06:00 – 22:00 {t("(bebas masuk)", "(open access)")}</div>
+                        <div className="mt-1">
+                          <label className="text-xs font-medium text-muted-foreground block mb-1">{t("Jumlah orang", "Number of people")}</label>
+                          <div className="flex items-center gap-2">
+                            <button type="button" onClick={() => setNumberOfPeople(String(Math.max(1, parseInt(numberOfPeople) - 1)))} className="w-7 h-7 rounded border border-border flex items-center justify-center text-sm font-bold hover:bg-accent">−</button>
+                            <span className="font-bold w-8 text-center">{numberOfPeople}</span>
+                            <button type="button" onClick={() => setNumberOfPeople(String(Math.min(20, parseInt(numberOfPeople) + 1)))} className="w-7 h-7 rounded border border-border flex items-center justify-center text-sm font-bold hover:bg-accent">+</button>
+                            <span className="text-xs text-muted-foreground">{t("orang", "people")}</span>
+                          </div>
+                        </div>
                       </div>
                     </div>
-                  </div>
+                  ) : (
+                    <div className="flex items-start gap-3">
+                      <Clock className="w-4 h-4 text-muted-foreground shrink-0 mt-0.5" />
+                      <div>
+                        <div className="font-medium">{t("Waktu & Durasi", "Time & Duration")}</div>
+                        <div className="text-muted-foreground">
+                          {startTime.substring(0, 5)} – {endTime} ({duration} {t("jam", "hours")})
+                        </div>
+                        {urlActivityType && (
+                          <div className="text-xs text-primary font-medium mt-0.5 capitalize">
+                            🏅 {urlActivityType}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
                   <div className="flex items-start gap-3">
                     <MapPin className="w-4 h-4 text-muted-foreground shrink-0 mt-0.5" />
                     <div>
