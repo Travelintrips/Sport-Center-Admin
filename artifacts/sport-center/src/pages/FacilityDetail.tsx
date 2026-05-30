@@ -33,6 +33,12 @@ import AvailabilityCalendar from "@/components/AvailabilityCalendar";
 import { getFacilityImage } from "@/lib/utils";
 import { useLang } from "@/lib/i18n";
 
+const MULTIGUNA_ACTIVITIES = [
+  { value: "futsal", label: "Futsal", icon: "⚽" },
+  { value: "basket", label: "Basket", icon: "🏀" },
+  { value: "voli", label: "Voli", icon: "🏐" },
+];
+
 export default function FacilityDetail() {
   const { t, lang } = useLang();
   const [, params] = useRoute("/facilities/:id");
@@ -42,6 +48,7 @@ export default function FacilityDetail() {
   const [date, setDate] = useState<Date | undefined>(new Date());
   const [selectedTime, setSelectedTime] = useState<string>("");
   const [duration, setDuration] = useState<string>("1");
+  const [activityType, setActivityType] = useState<string>("");
   
   const { data: facility, isLoading: isLoadingFacility } = useGetFacility(facilityId, {
     query: {
@@ -62,15 +69,31 @@ export default function FacilityDetail() {
     }
   );
 
+  const isWalkIn = facility?.bookingMode === "walk_in";
+  const isMultiguna = facility?.category === "Multiguna";
+
   const handleBook = () => {
-    if (!facility || !date || !selectedTime) return;
+    if (!facility || !date) return;
     
-    // Create checkout url with params
+    if (isWalkIn) {
+      const searchParams = new URLSearchParams({
+        facilityId: facility.id.toString(),
+        date: formattedDate,
+        mode: "walk_in",
+      });
+      setLocation(`/booking?${searchParams.toString()}`);
+      return;
+    }
+
+    if (!selectedTime) return;
+    if (isMultiguna && !activityType) return;
+
     const searchParams = new URLSearchParams({
       facilityId: facility.id.toString(),
       date: formattedDate,
       startTime: selectedTime,
-      duration: duration
+      duration: duration,
+      ...(isMultiguna && activityType ? { activityType } : {}),
     });
     
     setLocation(`/booking?${searchParams.toString()}`);
