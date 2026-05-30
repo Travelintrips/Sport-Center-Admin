@@ -6,21 +6,126 @@
   <title>Verifikasi ID Card — Admin</title>
   <link rel="stylesheet" href="/css/style.css">
   <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <style>
+    /* ── Scanner ── */
     #qr-reader { width: 100%; }
     #qr-reader video { border-radius: 8px !important; }
     #qr-reader__scan_region { border-radius: 8px; overflow: hidden; }
-    .scan-frame { position: relative; background: #000; border-radius: var(--radius); overflow: hidden; }
+    .scan-frame { position: relative; background: #0d0d1a; border-radius: var(--radius); overflow: hidden; min-height: 60px; }
     .scan-status { font-size: .88rem; text-align: center; padding: .7rem; }
-    .result-box { border-radius: var(--radius); padding: 1.5rem; text-align: center; animation: fadeIn .4s; }
-    .result-box.success { background: #f0fdf4; border: 2px solid var(--success); }
-    .result-box.error   { background: #fef2f2; border: 2px solid var(--danger); }
-    .result-icon { font-size: 3rem; margin-bottom: .5rem; }
-    @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
-    .manual-row { display: flex; gap: .7rem; }
     .step-chip { display: inline-flex; align-items: center; gap: .4rem; background: var(--border); border-radius: 100px; padding: .3rem .8rem; font-size: .82rem; font-weight: 600; }
     .step-chip.active { background: var(--primary); color: #fff; }
     .booking-strip { background: #f8fafc; border: 1px solid var(--border); border-radius: 8px; padding: 1rem; }
+    .manual-row { display: flex; gap: .7rem; }
+
+    /* ── Loading overlay ── */
+    .verify-loading {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 1.2rem; padding: 2.5rem 1rem;
+    }
+    .verify-loading .ring {
+      width: 64px; height: 64px; position: relative;
+    }
+    .verify-loading .ring::before,
+    .verify-loading .ring::after {
+      content: ''; position: absolute; inset: 0; border-radius: 50%; border: 4px solid transparent;
+    }
+    .verify-loading .ring::before {
+      border-top-color: var(--primary);
+      animation: spin 1s linear infinite;
+    }
+    .verify-loading .ring::after {
+      border-bottom-color: #f97316;
+      animation: spin 1.5s linear infinite reverse;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .verify-loading .steps-list { list-style: none; padding: 0; margin: 0; text-align: left; }
+    .verify-loading .steps-list li {
+      font-size: .85rem; padding: .3rem 0; color: var(--text-muted);
+      display: flex; align-items: center; gap: .6rem; transition: all .4s;
+    }
+    .verify-loading .steps-list li.done  { color: var(--success); }
+    .verify-loading .steps-list li.active { color: var(--text); font-weight: 700; }
+    .verify-loading .steps-list li .dot {
+      width: 8px; height: 8px; border-radius: 50%; background: var(--border); flex-shrink: 0; transition: background .3s;
+    }
+    .verify-loading .steps-list li.done  .dot { background: var(--success); }
+    .verify-loading .steps-list li.active .dot { background: var(--primary); animation: pulse-dot .8s ease-in-out infinite; }
+    @keyframes pulse-dot { 0%,100%{transform:scale(1);} 50%{transform:scale(1.6);} }
+
+    /* ── Success result ── */
+    .verify-success {
+      animation: slideUp .45s cubic-bezier(.16,1,.3,1);
+    }
+    @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: none; } }
+
+    .success-header {
+      background: linear-gradient(135deg, #064e3b, #065f46);
+      color: #fff; border-radius: var(--radius) var(--radius) 0 0;
+      padding: 1.8rem 1.5rem; text-align: center;
+    }
+    .success-header .icon-wrap {
+      width: 68px; height: 68px; background: rgba(255,255,255,.12);
+      border-radius: 50%; display: flex; align-items: center; justify-content: center;
+      font-size: 2.2rem; margin: 0 auto .9rem; animation: popIn .5s .1s both;
+    }
+    @keyframes popIn { 0%{transform:scale(0);} 70%{transform:scale(1.15);} 100%{transform:scale(1);} }
+
+    .price-reveal {
+      background: #f0fdf4; border: 2px solid #86efac;
+      border-radius: var(--radius); padding: 1.2rem 1.4rem;
+    }
+    .price-reveal .pr-row {
+      display: flex; justify-content: space-between; padding: .4rem 0;
+      font-size: .9rem; border-bottom: 1px solid #dcfce7;
+    }
+    .price-reveal .pr-row:last-child { border-bottom: none; }
+    .price-reveal .pr-row.discount { color: var(--success); font-weight: 700; }
+    .price-reveal .pr-row.total {
+      font-size: 1.15rem; font-weight: 900; color: var(--success);
+      border-top: 2px solid #86efac; margin-top: .4rem; padding-top: .8rem; border-bottom: none;
+    }
+    .price-reveal .pr-row.total span:last-child {
+      animation: countUp .6s .3s both;
+    }
+    @keyframes countUp { from { opacity: 0; transform: scale(.8); } to { opacity: 1; transform: scale(1); } }
+
+    .receipt-detail { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem .8rem; font-size: .85rem; }
+    .receipt-detail dt { color: var(--text-muted); }
+    .receipt-detail dd { font-weight: 700; margin: 0; word-break: break-all; }
+
+    .savings-badge {
+      display: inline-flex; align-items: center; gap: .4rem;
+      background: #fef9c3; color: #854d0e; border: 1px solid #fde047;
+      border-radius: 100px; padding: .4rem 1rem; font-size: .88rem; font-weight: 700;
+      animation: fadeIn .5s .6s both;
+    }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+    /* ── Error result ── */
+    .verify-error {
+      background: #fef2f2; border: 2px solid #fca5a5;
+      border-radius: var(--radius); padding: 1.6rem; text-align: center;
+      animation: shake .4s;
+    }
+    @keyframes shake {
+      0%,100%{transform:translateX(0);}
+      20%,60%{transform:translateX(-6px);}
+      40%,80%{transform:translateX(6px);}
+    }
+
+    /* ── Print / PDF ── */
+    #receipt-print {
+      display: none;
+      font-family: 'Courier New', monospace;
+      width: 280px; margin: 0 auto; padding: 1rem;
+      border: 2px dashed #333; background: #fff; color: #000;
+    }
+    @media print {
+      body > * { display: none !important; }
+      #receipt-print { display: block !important; }
+    }
   </style>
 </head>
 <body>
@@ -38,7 +143,7 @@
         <div style="max-width:600px;margin:0 auto;display:flex;flex-direction:column;gap:1rem;">
 
           <!-- Info Booking -->
-          <div id="booking-card" class="card">
+          <div class="card">
             <div class="card-body">
               <div id="booking-info">
                 <div class="spinner" style="width:28px;height:28px;border-width:3px;margin:.5rem auto;"></div>
@@ -52,22 +157,17 @@
               <h3>📷 Scan QR / Barcode</h3>
               <div style="display:flex;gap:.4rem;">
                 <span class="step-chip active" id="chip-scan">1 Scan</span>
-                <span class="step-chip" id="chip-result">2 Hasil</span>
+                <span class="step-chip" id="chip-result">2 Verifikasi</span>
+                <span class="step-chip" id="chip-done">3 Selesai</span>
               </div>
             </div>
             <div class="card-body" style="padding:1rem;">
               <p class="text-muted mb-2" style="font-size:.85rem;">
                 Arahkan kamera ke QR Code atau barcode pada ID Card Angkasa Pura milik customer.
               </p>
-
-              <!-- Area kamera -->
-              <div class="scan-frame" id="scan-frame">
-                <div id="qr-reader"></div>
-              </div>
+              <div class="scan-frame"><div id="qr-reader"></div></div>
               <div id="scan-status" class="scan-status text-muted">Kamera belum aktif</div>
-
-              <!-- Tombol kamera -->
-              <div style="display:flex;gap:.7rem;flex-wrap:wrap;margin-top:.8rem;">
+              <div style="display:flex;gap:.7rem;flex-wrap:wrap;margin-top:.6rem;">
                 <button id="btn-start" class="btn btn-primary" onclick="startScan()">📷 Mulai Kamera</button>
                 <button id="btn-stop" class="btn btn-ghost hidden" onclick="stopScan()">⏹ Stop</button>
                 <button id="btn-retry" class="btn btn-outline hidden" onclick="resetScan()">🔄 Scan Ulang</button>
@@ -75,14 +175,18 @@
             </div>
           </div>
 
-          <!-- Input manual (fallback) -->
-          <div class="card">
+          <!-- Input manual -->
+          <div class="card" id="manual-section">
             <div class="card-header">
-              <h3>⌨️ Input Manual <span style="font-size:.78rem;font-weight:400;color:var(--text-muted);">(fallback jika kamera tidak bisa)</span></h3>
+              <h3>⌨️ Input Manual</h3>
+              <span style="font-size:.78rem;color:var(--text-muted);">fallback jika kamera tidak tersedia</span>
             </div>
             <div class="card-body">
               <div class="manual-row">
-                <input type="text" id="manual-id" class="form-control" placeholder="Ketik nomor ID Card — cth: AP-2024-001">
+                <input type="text" id="manual-id" class="form-control"
+                       placeholder="Cth: AP-2024-001"
+                       oninput="this.value=this.value.toUpperCase()"
+                       onkeydown="if(event.key==='Enter')verifyWithId(this.value.trim())">
                 <button class="btn btn-primary" onclick="verifyWithId(document.getElementById('manual-id').value.trim())">
                   ✅ Verifikasi
                 </button>
@@ -92,67 +196,74 @@
           </div>
 
           <!-- Hasil verifikasi -->
-          <div id="result-section" class="hidden"></div>
+          <div id="result-section"></div>
 
-        </div>
+        </div><!-- /max-width -->
       </div>
     </div>
   </div>
+
+  <!-- Hidden receipt for PDF / print -->
+  <div id="receipt-print"></div>
 
   <div id="toast-container"></div>
   <script src="/js/api.js"></script>
   <script src="/js/admin-layout.js"></script>
   <script>
-    let scanner = null;
-    let isVerifying = false;
+    let scanner  = null;
+    let isVerify = false;
+    let lastResult = null;
     const bookingId = getParam('bookingId');
 
-    // ── Load info booking ─────────────────────────────────────────────────────
+    // ── Load booking info ─────────────────────────────────────────────────────
     async function loadBooking() {
       if (!bookingId) {
         document.getElementById('booking-info').innerHTML =
-          `<div class="alert alert-warning">⚠️ Tidak ada booking_id. Pilih booking dari <a href="/admin/bookings.html">halaman Booking</a>.</div>`;
+          `<div class="alert alert-warning">⚠️ Tidak ada booking_id. Pilih booking dari
+           <a href="/admin/bookings.html">halaman Booking</a>.</div>`;
         return;
       }
       try {
         const b = await API.get(`/bookings/${bookingId}`);
         if (b.verification_status !== 'pending_verification') {
+          const done = b.verification_status === 'verified';
           document.getElementById('booking-info').innerHTML = `
-            <div class="alert alert-${b.verification_status === 'verified' ? 'success' : 'danger'}">
-              Booking ini sudah berstatus <strong>${b.verification_status}</strong>. Verifikasi selesai.
+            <div class="alert alert-${done ? 'success' : 'danger'}">
+              Booking ini sudah berstatus <strong>${b.verification_status}</strong>
+              ${done ? ' — verifikasi selesai ✅' : ''}.
             </div>
             <a href="/admin/bookings.html" class="btn btn-primary btn-sm mt-1">← Kembali ke Booking</a>`;
           document.getElementById('scanner-section').classList.add('hidden');
+          document.getElementById('manual-section').classList.add('hidden');
           return;
         }
         document.getElementById('booking-info').innerHTML = `
           <div class="booking-strip">
-            <div style="display:flex;flex-wrap:wrap;gap:1rem;justify-content:space-between;align-items:start;">
+            <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5rem;">
               <div>
-                <div class="text-muted" style="font-size:.75rem;margin-bottom:.1rem;">KODE BOOKING</div>
-                <div style="font-size:1.1rem;font-weight:900;letter-spacing:.05em;">${b.booking_code}</div>
+                <div class="text-muted" style="font-size:.73rem;letter-spacing:.08em;">KODE BOOKING</div>
+                <div style="font-size:1.15rem;font-weight:900;letter-spacing:.06em;">${b.booking_code}</div>
               </div>
-              <div>${statusBadge(b.verification_status)}</div>
+              ${statusBadge(b.verification_status)}
             </div>
-            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:.6rem;margin-top:.8rem;">
-              <div><div class="text-muted" style="font-size:.74rem;">Customer</div><div class="fw-bold">${b.customer_name}</div></div>
-              <div><div class="text-muted" style="font-size:.74rem;">Fasilitas</div><div>${b.facility_name}</div></div>
-              <div><div class="text-muted" style="font-size:.74rem;">Jadwal</div><div>${b.booking_date} ${b.start_time}–${b.end_time}</div></div>
-              <div><div class="text-muted" style="font-size:.74rem;">Harga Dasar</div><div class="fw-bold text-primary">${formatRp(b.base_price)}</div></div>
-              ${b.id_card_number ? `<div><div class="text-muted" style="font-size:.74rem;">ID Card di Booking</div><div><code>${b.id_card_number}</code></div></div>` : ''}
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:.6rem;margin-top:.9rem;">
+              <div><div class="text-muted" style="font-size:.73rem;">Customer</div><div class="fw-bold">${b.customer_name}</div></div>
+              <div><div class="text-muted" style="font-size:.73rem;">Fasilitas</div><div>${b.facility_name}</div></div>
+              <div><div class="text-muted" style="font-size:.73rem;">Jadwal</div><div style="font-size:.88rem;">${b.booking_date} ${b.start_time}–${b.end_time}</div></div>
+              <div><div class="text-muted" style="font-size:.73rem;">Harga Dasar</div><div class="fw-bold" style="color:var(--primary);">${formatRp(b.base_price)}</div></div>
+              ${b.id_card_number ? `<div><div class="text-muted" style="font-size:.73rem;">ID Card</div><div><code>${b.id_card_number}</code></div></div>` : ''}
             </div>
           </div>`;
-        if (b.id_card_number) {
-          document.getElementById('manual-id').value = b.id_card_number;
-        }
+        if (b.id_card_number) document.getElementById('manual-id').value = b.id_card_number;
       } catch (e) {
-        document.getElementById('booking-info').innerHTML = `<div class="alert alert-danger">Gagal memuat booking: ${e.message}</div>`;
+        document.getElementById('booking-info').innerHTML =
+          `<div class="alert alert-danger">Gagal memuat: ${e.message}</div>`;
       }
     }
 
     // ── QR Scanner ────────────────────────────────────────────────────────────
     function startScan() {
-      setStatus('🔄 Mengaktifkan kamera...', 'info');
+      setStatus('🔄 Mengaktifkan kamera...', 'muted');
       document.getElementById('btn-start').classList.add('hidden');
       document.getElementById('btn-stop').classList.remove('hidden');
 
@@ -160,16 +271,17 @@
       scanner.start(
         { facingMode: 'environment' },
         { fps: 10, qrbox: { width: 240, height: 180 } },
-        (text) => {
+        text => {
           setStatus(`✅ Terbaca: ${text}`, 'success');
           document.getElementById('manual-id').value = text;
           stopScan();
           verifyWithId(text);
         },
         () => {}
-      ).then(() => setStatus('📷 Kamera aktif — arahkan ke ID Card', 'info'))
-       .catch(err => {
-        setStatus('❌ Kamera tidak bisa diakses: ' + err, 'danger');
+      )
+      .then(() => setStatus('📷 Kamera aktif — arahkan ke ID Card', 'muted'))
+      .catch(err => {
+        setStatus('❌ Kamera tidak bisa diakses. Gunakan input manual.', 'danger');
         document.getElementById('btn-start').classList.remove('hidden');
         document.getElementById('btn-stop').classList.add('hidden');
       });
@@ -182,74 +294,303 @@
     }
 
     function resetScan() {
-      document.getElementById('result-section').classList.add('hidden');
       document.getElementById('result-section').innerHTML = '';
       document.getElementById('btn-retry').classList.add('hidden');
-      document.getElementById('chip-scan').classList.add('active');
-      document.getElementById('chip-result').classList.remove('active');
-      isVerifying = false;
-      setStatus('Siap scan ulang', 'info');
+      setChip(1);
+      isVerify = false;
+      lastResult = null;
+      setStatus('Siap scan ulang', 'muted');
     }
 
-    function setStatus(msg, type = 'info') {
+    function setStatus(msg, cls) {
       const el = document.getElementById('scan-status');
       el.textContent = msg;
-      el.className = `scan-status text-${type === 'info' ? 'muted' : type}`;
+      el.className = `scan-status text-${cls}`;
     }
 
-    // ── Verifikasi ke backend ─────────────────────────────────────────────────
+    function setChip(step) {
+      ['chip-scan','chip-result','chip-done'].forEach((id, i) => {
+        document.getElementById(id).classList.toggle('active', i + 1 === step);
+      });
+    }
+
+    // ── Animasi loading bertahap ──────────────────────────────────────────────
+    const LOADING_STEPS = [
+      'Mengirim data ke server...',
+      'Memvalidasi ID Card di database...',
+      'Memeriksa status karyawan Angkasa Pura...',
+      'Menghitung diskon yang berlaku...',
+      'Memperbarui data booking...',
+    ];
+
+    function showLoadingSteps() {
+      const el = document.getElementById('result-section');
+      el.innerHTML = `
+        <div class="card">
+          <div class="card-body verify-loading">
+            <div class="ring"></div>
+            <div>
+              <div style="font-weight:800;font-size:1rem;text-align:center;margin-bottom:.8rem;">
+                Memverifikasi ID Card...
+              </div>
+              <ul class="steps-list" id="vloading-steps">
+                ${LOADING_STEPS.map((s,i) => `
+                  <li id="vstep-${i}">
+                    <div class="dot"></div><span>${s}</span>
+                  </li>`).join('')}
+              </ul>
+            </div>
+          </div>
+        </div>`;
+
+      let i = 0;
+      const tick = () => {
+        if (i > 0) document.getElementById(`vstep-${i-1}`)?.classList.replace('active','done');
+        const cur = document.getElementById(`vstep-${i}`);
+        if (cur) cur.classList.add('active');
+        i++;
+        if (i < LOADING_STEPS.length) setTimeout(tick, 320 + Math.random() * 200);
+      };
+      tick();
+    }
+
+    // ── Verifikasi ────────────────────────────────────────────────────────────
     async function verifyWithId(scanned_id) {
-      if (!scanned_id) { toast('Masukkan nomor ID Card', 'danger'); return; }
-      if (!bookingId)  { toast('Tidak ada booking yang dipilih', 'danger'); return; }
-      if (isVerifying) return;
-      isVerifying = true;
+      if (!scanned_id)  { toast('Masukkan nomor ID Card', 'danger'); return; }
+      if (!bookingId)   { toast('Tidak ada booking yang dipilih', 'danger'); return; }
+      if (isVerify) return;
+      isVerify = true;
 
       stopScan();
-      document.getElementById('chip-scan').classList.remove('active');
-      document.getElementById('chip-result').classList.add('active');
+      setChip(2);
+      showLoadingSteps();
 
-      const resultEl = document.getElementById('result-section');
-      resultEl.classList.remove('hidden');
-      resultEl.innerHTML = '<div class="card"><div class="card-body text-center"><div class="spinner" style="width:36px;height:36px;border-width:3px;margin:1rem auto;"></div><p>Memverifikasi ID Card...</p></div></div>';
+      // Pastikan animasi loading terlihat minimal 1.8 detik
+      const [res] = await Promise.allSettled([
+        API.post('/verify-angkasa-pura', { scanned_id, booking_id: Number(bookingId) }),
+        new Promise(r => setTimeout(r, 1800))
+      ]);
 
-      try {
-        const res = await API.post('/verify-angkasa-pura', { scanned_id, booking_id: Number(bookingId) });
-        const b = res.booking;
-        resultEl.innerHTML = `
-          <div class="result-box success">
-            <div class="result-icon">✅</div>
-            <h3 style="color:var(--success);margin-bottom:.5rem;">Verifikasi Berhasil!</h3>
-            <p>${res.message}</p>
-            <div class="price-summary mt-2" style="text-align:left;max-width:340px;margin:.8rem auto 0;">
-              <div class="price-row"><span>Nama Customer</span><span class="fw-bold">${res.customer_name}</span></div>
-              <div class="price-row"><span>ID Card</span><span><code>${scanned_id}</code></span></div>
-              <div class="price-row"><span>Harga Dasar</span><span>${formatRp(b.base_price)}</span></div>
-              ${res.discount_applied ? `<div class="price-row text-success"><span>Diskon ${res.discount_percentage}%</span><span>-${formatRp(res.discount_amount)}</span></div>` : ''}
-              <div class="price-row total"><span>Harga Akhir</span><span>${formatRp(res.final_price)}</span></div>
-            </div>
-            <div class="mt-2 alert alert-info" style="font-size:.85rem;text-align:left;">
-              📱 <strong>Notifikasi:</strong> Sampaikan kepada customer bahwa booking <strong>${b.booking_code}</strong>
-              sudah dikonfirmasi${res.discount_applied ? ` dengan diskon ${res.discount_percentage}%` : ''}.
-              Harga akhir: <strong>${formatRp(res.final_price)}</strong>.
-            </div>
-            <a href="/admin/bookings.html" class="btn btn-success mt-2">← Kembali ke Booking</a>
-          </div>`;
-      } catch (e) {
-        const isRateLimit = e.message.includes('banyak percobaan');
-        resultEl.innerHTML = `
-          <div class="result-box error">
-            <div class="result-icon">${isRateLimit ? '🚫' : '❌'}</div>
-            <h3 style="color:var(--danger);margin-bottom:.5rem;">${isRateLimit ? 'Rate Limit Tercapai' : 'Verifikasi Gagal'}</h3>
-            <p>${e.message}</p>
-            ${isRateLimit ? '<p class="text-muted" style="font-size:.85rem;">Tunggu 1 menit sebelum mencoba lagi.</p>' : ''}
-            <div style="display:flex;gap:.7rem;justify-content:center;margin-top:1rem;flex-wrap:wrap;">
-              ${!isRateLimit ? `<button class="btn btn-outline" onclick="resetScan()">🔄 Coba Lagi</button>` : ''}
-              <a href="/admin/bookings.html" class="btn btn-ghost">← Kembali</a>
-            </div>
-          </div>`;
-        isVerifying = false;
-        document.getElementById('btn-retry').classList.remove('hidden');
+      // Mark all steps done
+      LOADING_STEPS.forEach((_, i) => {
+        document.getElementById(`vstep-${i}`)?.classList.add('done');
+        document.getElementById(`vstep-${i}`)?.classList.remove('active');
+      });
+      await new Promise(r => setTimeout(r, 350));
+
+      if (res.status === 'fulfilled') {
+        lastResult = res.value;
+        setChip(3);
+        showSuccess(res.value, scanned_id);
+      } else {
+        setChip(1);
+        showError(res.reason.message);
+        isVerify = false;
       }
+    }
+
+    // ── Tampilan sukses ───────────────────────────────────────────────────────
+    function showSuccess(res, scanned_id) {
+      const b = res.booking;
+      const savedAmount = res.discount_amount || 0;
+
+      document.getElementById('result-section').innerHTML = `
+        <div class="verify-success">
+          <!-- Header hijau -->
+          <div class="success-header">
+            <div class="icon-wrap">✅</div>
+            <h2 style="margin:0 0 .3rem;font-size:1.4rem;">Verifikasi Berhasil!</h2>
+            <p style="margin:0;opacity:.8;font-size:.9rem;">ID Card valid — booking telah dikonfirmasi</p>
+            ${res.discount_applied && savedAmount > 0
+              ? `<div class="savings-badge" style="margin-top:.9rem;">
+                  🎉 Hemat ${formatRp(savedAmount)} (Diskon ${res.discount_percentage}%)
+                 </div>`
+              : ''}
+          </div>
+
+          <!-- Body -->
+          <div class="card" style="border-radius:0 0 var(--radius) var(--radius);border-top:none;">
+            <div class="card-body" style="display:flex;flex-direction:column;gap:1.2rem;">
+
+              <!-- Rincian harga -->
+              <div class="price-reveal">
+                <div style="font-weight:800;font-size:.88rem;margin-bottom:.7rem;color:var(--success);">
+                  💰 Rincian Harga Setelah Verifikasi
+                </div>
+                <div class="pr-row"><span>Harga Dasar (${b.duration_hours} jam)</span><span>${formatRp(b.base_price)}</span></div>
+                ${res.discount_applied
+                  ? `<div class="pr-row discount">
+                       <span>Diskon Angkasa Pura ${res.discount_percentage}%</span>
+                       <span>− ${formatRp(res.discount_amount)}</span>
+                     </div>`
+                  : `<div class="pr-row" style="color:var(--text-muted);"><span>Diskon</span><span>Tidak berlaku untuk fasilitas ini</span></div>`}
+                <div class="pr-row total">
+                  <span>Total Harga Akhir</span>
+                  <span>${formatRp(res.final_price)}</span>
+                </div>
+              </div>
+
+              <!-- Detail booking -->
+              <div>
+                <div style="font-weight:800;font-size:.88rem;margin-bottom:.7rem;">📋 Detail Booking</div>
+                <dl class="receipt-detail">
+                  <dt>Kode Booking</dt><dd style="letter-spacing:.05em;">${b.booking_code}</dd>
+                  <dt>Nama Customer</dt><dd>${b.customer_name}</dd>
+                  <dt>Nomor Telepon</dt><dd>${b.customer_phone || '—'}</dd>
+                  <dt>ID Card</dt><dd><code>${scanned_id}</code></dd>
+                  <dt>Fasilitas</dt><dd>${b.facility_name}</dd>
+                  <dt>Tanggal</dt><dd>${b.booking_date}</dd>
+                  <dt>Waktu</dt><dd>${b.start_time} – ${b.end_time}</dd>
+                  <dt>Durasi</dt><dd>${b.duration_hours} jam</dd>
+                  <dt>Status</dt><dd>${statusBadge(b.verification_status)}</dd>
+                  <dt>Diverifikasi oleh</dt><dd>${localStorage.getItem('admin_username') || 'Admin'}</dd>
+                </dl>
+              </div>
+
+              <!-- Notifikasi petugas -->
+              <div class="alert alert-info" style="font-size:.85rem;">
+                📢 <strong>Sampaikan ke customer:</strong> Booking <code>${b.booking_code}</code>
+                sudah <strong>dikonfirmasi</strong>
+                ${res.discount_applied ? ` dengan diskon <strong>${res.discount_percentage}%</strong>` : ''}.
+                Harga akhir: <strong>${formatRp(res.final_price)}</strong>.
+                Silakan hadir sesuai jadwal.
+              </div>
+
+              <!-- Tombol aksi -->
+              <div style="display:flex;gap:.7rem;flex-wrap:wrap;">
+                <button class="btn btn-primary" onclick="printPDF()">
+                  🖨️ Cetak Bukti Booking
+                </button>
+                <a href="/admin/bookings.html" class="btn btn-success">← Kembali ke Booking</a>
+                <button class="btn btn-ghost" onclick="resetScan()">🔄 Verifikasi Lain</button>
+              </div>
+
+            </div>
+          </div>
+        </div>`;
+    }
+
+    // ── Tampilan error ────────────────────────────────────────────────────────
+    function showError(msg) {
+      const isRate = msg.includes('banyak percobaan');
+      document.getElementById('result-section').innerHTML = `
+        <div class="verify-error">
+          <div style="font-size:2.5rem;margin-bottom:.5rem;">${isRate ? '🚫' : '❌'}</div>
+          <h3 style="color:var(--danger);margin:.4rem 0;">${isRate ? 'Rate Limit' : 'Verifikasi Gagal'}</h3>
+          <p style="margin:.3rem 0;">${msg}</p>
+          ${isRate ? `<p style="font-size:.82rem;color:var(--text-muted);">Tunggu 1 menit sebelum mencoba lagi.</p>` : ''}
+          <div style="display:flex;gap:.7rem;justify-content:center;margin-top:1.2rem;flex-wrap:wrap;">
+            ${!isRate ? `<button class="btn btn-outline" onclick="resetScan()">🔄 Coba Lagi</button>` : ''}
+            <a href="/admin/bookings.html" class="btn btn-ghost">← Kembali</a>
+          </div>
+        </div>`;
+      document.getElementById('btn-retry').classList.remove('hidden');
+    }
+
+    // ── Generate PDF (jsPDF) ──────────────────────────────────────────────────
+    function printPDF() {
+      if (!lastResult) { toast('Tidak ada data untuk dicetak', 'danger'); return; }
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF({ unit: 'mm', format: [80, 140], orientation: 'portrait' });
+      const b = lastResult.booking;
+      const res = lastResult;
+
+      const W  = 80;
+      const cx = W / 2;
+      let y = 8;
+
+      const line  = (text, size = 8, align = 'center', style = 'normal', color = [30,30,30]) => {
+        doc.setFontSize(size); doc.setFont('helvetica', style);
+        doc.setTextColor(...color);
+        doc.text(text, align === 'center' ? cx : (align === 'right' ? W - 5 : 5), y, { align });
+        y += size * 0.45;
+      };
+
+      const rule = (dashed = false) => {
+        doc.setDrawColor(180, 180, 180);
+        if (dashed) {
+          doc.setLineDashPattern([1.5, 1.5], 0);
+        } else {
+          doc.setLineDashPattern([], 0);
+        }
+        doc.line(5, y, W - 5, y);
+        y += 3;
+      };
+
+      const kv = (k, v, bold = false) => {
+        doc.setFontSize(7); doc.setFont('helvetica', 'normal');
+        doc.setTextColor(80, 80, 80); doc.text(k, 5, y);
+        doc.setFont('helvetica', bold ? 'bold' : 'normal');
+        doc.setTextColor(30, 30, 30);
+        // wrap long values
+        const maxW = 38;
+        const lines = doc.splitTextToSize(String(v), maxW);
+        lines.forEach((l, i) => { doc.text(l, W - 5, y + i * 3.5, { align: 'right' }); });
+        y += Math.max(lines.length * 3.5, 4.5);
+      };
+
+      // Header
+      doc.setFillColor(20, 20, 40); doc.roundedRect(0, 0, W, 22, 0, 0, 'F');
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(11); doc.setFont('helvetica', 'bold');
+      doc.text('SPORT CENTER', cx, 8, { align: 'center' });
+      doc.setFontSize(7); doc.setFont('helvetica', 'normal');
+      doc.text('Bandara Soekarno-Hatta', cx, 13, { align: 'center' });
+      doc.text('BUKTI BOOKING TERVERIFIKASI', cx, 18, { align: 'center' });
+      y = 26;
+
+      line('✅ VERIFIKASI BERHASIL', 9, 'center', 'bold', [5,150,105]);
+      y += 1;
+      rule();
+
+      // Booking info
+      kv('Kode Booking', b.booking_code, true);
+      kv('Customer', b.customer_name);
+      kv('Telepon', b.customer_phone || '—');
+      kv('ID Card AP', b.id_card_number || '—');
+      rule(true);
+
+      kv('Fasilitas', b.facility_name);
+      kv('Tanggal', b.booking_date);
+      kv('Waktu', `${b.start_time} – ${b.end_time}`);
+      kv('Durasi', `${b.duration_hours} jam`);
+      rule(true);
+
+      // Harga
+      kv('Harga Dasar', formatRp(b.base_price));
+      if (res.discount_applied) {
+        doc.setTextColor(5, 150, 105);
+        kv(`Diskon AP (${res.discount_percentage}%)`, `- ${formatRp(res.discount_amount)}`, true);
+        doc.setTextColor(30, 30, 30);
+      }
+      rule();
+
+      // Total
+      doc.setFillColor(5, 150, 105); doc.roundedRect(4, y - 1, W - 8, 9, 1, 1, 'F');
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.setTextColor(255, 255, 255);
+      doc.text('TOTAL HARGA AKHIR', 7, y + 4.5);
+      doc.setFontSize(9);
+      doc.text(formatRp(res.final_price), W - 7, y + 4.5, { align: 'right' });
+      y += 13;
+
+      // Savings badge
+      if (res.discount_applied && res.discount_amount > 0) {
+        doc.setFillColor(254, 249, 195); doc.roundedRect(4, y - 1, W - 8, 7, 1, 1, 'F');
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(7); doc.setTextColor(133, 77, 14);
+        doc.text(`🎉 Hemat ${formatRp(res.discount_amount)} (Diskon ${res.discount_percentage}%)`, cx, y + 3, { align: 'center' });
+        y += 10;
+      }
+
+      // Footer
+      rule(true);
+      doc.setFontSize(6.5); doc.setFont('helvetica', 'normal'); doc.setTextColor(120,120,120);
+      const ts = new Date().toLocaleString('id-ID', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' });
+      doc.text(`Dicetak: ${ts}`, cx, y, { align: 'center' }); y += 4;
+      doc.text('Tunjukkan bukti ini kepada petugas lapangan', cx, y, { align: 'center' }); y += 4;
+      doc.text('Terima kasih telah menggunakan layanan kami', cx, y, { align: 'center' });
+
+      doc.save(`bukti-booking-${b.booking_code}.pdf`);
+      toast('PDF berhasil diunduh ✅');
     }
 
     window.addEventListener('beforeunload', stopScan);
