@@ -22,19 +22,36 @@
         <div class="stats-grid" id="stats-grid">
           <div class="stat-card"><div class="stat-label">Total Booking</div><div class="stat-value">—</div></div>
           <div class="stat-card green"><div class="stat-label">Terverifikasi</div><div class="stat-value">—</div></div>
-          <div class="stat-card yellow"><div class="stat-label">Pending</div><div class="stat-value">—</div></div>
+          <div class="stat-card yellow"><div class="stat-label">Pending Verifikasi</div><div class="stat-value">—</div></div>
           <div class="stat-card blue"><div class="stat-label">Booking Hari Ini</div><div class="stat-value">—</div></div>
-          <div class="stat-card"><div class="stat-label">Pendapatan</div><div class="stat-value">—</div></div>
+          <div class="stat-card"><div class="stat-label">Total Pendapatan</div><div class="stat-value">—</div></div>
         </div>
 
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.2rem;margin-bottom:1.2rem;" id="quick-actions">
-          <a href="/admin/bookings.html?status=pending" class="card" style="padding:1.3rem;text-decoration:none;display:flex;align-items:center;gap:1rem;border:2px solid var(--warning);">
+        <!-- Quick actions -->
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:1rem;margin-bottom:1.2rem;">
+          <a href="/admin/bookings.html?status=pending_verification" class="card"
+             style="padding:1.2rem;text-decoration:none;display:flex;align-items:center;gap:.8rem;border:2px solid var(--warning);">
             <div style="font-size:2rem;">⏳</div>
-            <div><div class="fw-bold">Verifikasi Pending</div><div class="text-muted" style="font-size:.82rem;">Booking menunggu verifikasi ID Card</div></div>
+            <div><div class="fw-bold" style="font-size:.92rem;">Pending Verifikasi</div>
+                 <div class="text-muted" style="font-size:.78rem;">Booking menunggu scan ID Card</div></div>
           </a>
-          <a href="/booking.html" target="_blank" class="card" style="padding:1.3rem;text-decoration:none;display:flex;align-items:center;gap:1rem;border:2px solid var(--primary);">
+          <a href="/admin/bookings.html" class="card"
+             style="padding:1.2rem;text-decoration:none;display:flex;align-items:center;gap:.8rem;border:2px solid var(--info);">
+            <div style="font-size:2rem;">📋</div>
+            <div><div class="fw-bold" style="font-size:.92rem;">Semua Booking</div>
+                 <div class="text-muted" style="font-size:.78rem;">Kelola semua booking</div></div>
+          </a>
+          <a href="/admin/settings.html" class="card"
+             style="padding:1.2rem;text-decoration:none;display:flex;align-items:center;gap:.8rem;border:2px solid var(--success);">
+            <div style="font-size:2rem;">⚙️</div>
+            <div><div class="fw-bold" style="font-size:.92rem;">Pengaturan Diskon</div>
+                 <div class="text-muted" style="font-size:.78rem;">Atur diskon Angkasa Pura</div></div>
+          </a>
+          <a href="/booking.html" target="_blank" class="card"
+             style="padding:1.2rem;text-decoration:none;display:flex;align-items:center;gap:.8rem;border:2px solid var(--primary);">
             <div style="font-size:2rem;">➕</div>
-            <div><div class="fw-bold">Booking Baru</div><div class="text-muted" style="font-size:.82rem;">Buka portal customer</div></div>
+            <div><div class="fw-bold" style="font-size:.92rem;">Booking Baru</div>
+                 <div class="text-muted" style="font-size:.78rem;">Buka portal customer</div></div>
           </a>
         </div>
 
@@ -47,7 +64,9 @@
           <div class="table-wrap">
             <table>
               <thead><tr><th>Kode</th><th>Customer</th><th>Fasilitas</th><th>Tanggal</th><th>Harga</th><th>Status</th><th></th></tr></thead>
-              <tbody id="recent-table"><tr><td colspan="7" class="text-center"><div class="spinner" style="margin:.5rem auto;width:24px;height:24px;border-width:3px;"></div></td></tr></tbody>
+              <tbody id="recent-table">
+                <tr><td colspan="7" class="text-center"><div class="spinner" style="margin:.5rem auto;width:24px;height:24px;border-width:3px;"></div></td></tr>
+              </tbody>
             </table>
           </div>
         </div>
@@ -64,28 +83,25 @@
           API.get('/bookings/stats'),
           API.get('/bookings?')
         ]);
-        const cards = document.getElementById('stats-grid').children;
-        cards[0].innerHTML = `<div class="stat-label">Total Booking</div><div class="stat-value">${stats.total}</div>`;
-        cards[1].innerHTML = `<div class="stat-label">Terverifikasi</div><div class="stat-value">${stats.verified}</div>`;
-        cards[2].innerHTML = `<div class="stat-label">Pending Verifikasi</div><div class="stat-value" style="color:var(--warning)">${stats.pending}</div>`;
-        cards[3].innerHTML = `<div class="stat-label">Booking Hari Ini</div><div class="stat-value">${stats.today_count}</div>`;
-        cards[4].innerHTML = `<div class="stat-label">Total Pendapatan</div><div class="stat-value" style="font-size:1.2rem;">${formatRp(stats.revenue)}</div>`;
+        const c = document.getElementById('stats-grid').children;
+        c[0].innerHTML = `<div class="stat-label">Total Booking</div><div class="stat-value">${stats.total}</div>`;
+        c[1].innerHTML = `<div class="stat-label">Terverifikasi</div><div class="stat-value">${stats.verified}</div>`;
+        c[2].innerHTML = `<div class="stat-label">Pending Verifikasi</div><div class="stat-value" style="color:var(--warning)">${stats.pending}</div><div class="stat-sub"><a href="/admin/bookings.html?status=pending_verification" style="font-size:.78rem;">Proses sekarang →</a></div>`;
+        c[3].innerHTML = `<div class="stat-label">Booking Hari Ini</div><div class="stat-value">${stats.today_count}</div>`;
+        c[4].innerHTML = `<div class="stat-label">Total Pendapatan</div><div class="stat-value" style="font-size:1.1rem;">${formatRp(stats.revenue)}</div>`;
 
-        const recent = bookings.slice(0, 8);
-        document.getElementById('recent-table').innerHTML = recent.length
-          ? recent.map(b => `<tr>
-              <td><code style="font-size:.82rem;">${b.booking_code}</code></td>
-              <td><div class="fw-bold">${b.customer_name}</div><div class="text-muted" style="font-size:.78rem;">${b.customer_type === 'angkasa_pura' ? '✈️ AP' : '👤 Umum'}</div></td>
-              <td>${b.facility_name}</td>
-              <td>${b.booking_date}<br><span class="text-muted" style="font-size:.78rem;">${b.start_time}–${b.end_time}</span></td>
-              <td>${formatRp(b.final_price)}</td>
-              <td>${statusBadge(b.verification_status)}</td>
-              <td>${b.verification_status === 'pending' ? `<a href="/admin/verify.html?bookingId=${b.id}" class="btn btn-warning btn-sm">🔍 Verifikasi</a>` : ''}</td>
-            </tr>`).join('')
-          : '<tr><td colspan="7" class="text-center text-muted" style="padding:2rem;">Belum ada booking</td></tr>';
-      } catch (e) {
-        toast(e.message, 'danger');
-      }
+        document.getElementById('recent-table').innerHTML = bookings.slice(0,8).map(b => `
+          <tr style="${b.verification_status==='pending_verification'?'background:#fffbeb;':''}">
+            <td><code style="font-size:.82rem;">${b.booking_code}</code></td>
+            <td><div class="fw-bold">${b.customer_name}</div><div style="font-size:.75rem;">${typeBadge(b.customer_type)}</div></td>
+            <td style="font-size:.88rem;">${b.facility_name}</td>
+            <td style="font-size:.82rem;">${b.booking_date}<br>${b.start_time}–${b.end_time}</td>
+            <td>${formatRp(b.final_price)}</td>
+            <td>${statusBadge(b.verification_status)}</td>
+            <td>${b.verification_status==='pending_verification'?`<a href="/admin/verify.html?bookingId=${b.id}" class="btn btn-warning btn-sm">📸 Verifikasi</a>`:''}</td>
+          </tr>`).join('') ||
+          '<tr><td colspan="7" class="text-center text-muted" style="padding:2rem;">Belum ada booking</td></tr>';
+      } catch (e) { toast(e.message, 'danger'); }
     }
     loadDashboard();
   </script>

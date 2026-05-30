@@ -3,8 +3,37 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Pengaturan — Sport Center Admin</title>
+  <title>Pengaturan Diskon — Admin</title>
   <link rel="stylesheet" href="/css/style.css">
+  <style>
+    .facility-check-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: .6rem; }
+    .facility-check-item {
+      display: flex; align-items: center; gap: .7rem; padding: .75rem 1rem;
+      border: 2px solid var(--border); border-radius: 8px; cursor: pointer;
+      transition: all .2s; user-select: none;
+    }
+    .facility-check-item:hover { border-color: var(--primary); }
+    .facility-check-item.checked { border-color: var(--primary); background: #fff5f0; }
+    .facility-check-item input { display: none; }
+    .facility-check-item .chk-icon { width: 20px; height: 20px; border: 2px solid var(--border); border-radius: 4px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: .8rem; transition: all .2s; }
+    .facility-check-item.checked .chk-icon { background: var(--primary); border-color: var(--primary); color: #fff; }
+    .slider-row { display: flex; align-items: center; gap: .8rem; }
+    .slider-row input[type=range] { flex: 1; accent-color: var(--primary); }
+    .pct-input { width: 70px; text-align: center; font-weight: 700; font-size: 1.1rem; }
+    .toggle-wrap { display: flex; align-items: center; gap: .8rem; }
+    .toggle { position: relative; width: 52px; height: 28px; }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .slider-toggle { position: absolute; inset: 0; background: #cbd5e1; border-radius: 28px; cursor: pointer; transition: .3s; }
+    .slider-toggle::before { content: ''; position: absolute; width: 20px; height: 20px; left: 4px; top: 4px; background: #fff; border-radius: 50%; transition: .3s; }
+    input:checked + .slider-toggle { background: var(--success); }
+    input:checked + .slider-toggle::before { transform: translateX(24px); }
+    .preview-box { background: linear-gradient(135deg, #1a1a2e, #2d1b4e); color: #fff; border-radius: var(--radius); padding: 1.5rem; }
+    .preview-row { display: flex; justify-content: space-between; padding: .4rem 0; font-size: .92rem; }
+    .preview-row.total { border-top: 1px solid rgba(255,255,255,.2); margin-top: .5rem; padding-top: .8rem; font-size: 1.1rem; font-weight: 900; }
+    .log-row { font-size: .82rem; padding: .5rem .8rem; border-bottom: 1px solid var(--border); display: grid; grid-template-columns: 160px 120px 1fr 100px; gap: .5rem; align-items: center; }
+    .log-row:last-child { border-bottom: none; }
+    .log-header { background: var(--secondary); color: #fff; border-radius: 6px 6px 0 0; }
+  </style>
 </head>
 <body>
   <div class="admin-layout">
@@ -13,78 +42,117 @@
       <div class="admin-topbar">
         <div style="display:flex;align-items:center;gap:.8rem;">
           <button class="hamburger" onclick="toggleSidebar()">☰</button>
-          <h1>Pengaturan Sistem</h1>
+          <h1>⚙️ Pengaturan Diskon</h1>
         </div>
+        <button class="btn btn-primary" onclick="saveAll()" id="save-btn">💾 Simpan Semua</button>
       </div>
-      <div class="admin-main" style="max-width:640px;">
+      <div class="admin-main">
+        <div style="display:grid;grid-template-columns:1fr 380px;gap:1.2rem;align-items:start;">
 
-        <!-- Diskon Angkasa Pura -->
-        <div class="card mb-2">
-          <div class="card-header"><h3>✈️ Pengaturan Diskon Angkasa Pura</h3></div>
-          <div class="card-body">
-            <div id="current-discount" class="alert alert-info mb-2">Memuat...</div>
-            <div id="discount-form">
-              <div class="form-group">
-                <label class="form-label">Persentase Diskon (%) <span class="req">*</span></label>
-                <div style="display:flex;align-items:center;gap:.8rem;">
-                  <input type="range" id="discount-slider" min="0" max="50" step="1" value="20"
-                    oninput="document.getElementById('discount-val').value=this.value"
-                    style="flex:1;">
-                  <input type="number" id="discount-val" class="form-control" min="0" max="100" value="20"
-                    oninput="document.getElementById('discount-slider').value=this.value"
-                    style="width:80px;">
-                  <span>%</span>
+          <!-- Kiri: Form pengaturan -->
+          <div style="display:flex;flex-direction:column;gap:1rem;">
+
+            <!-- Card: Status & Persentase -->
+            <div class="card">
+              <div class="card-header"><h3>✈️ Diskon Angkasa Pura</h3></div>
+              <div class="card-body" style="display:flex;flex-direction:column;gap:1.2rem;">
+
+                <!-- Toggle aktif/nonaktif -->
+                <div>
+                  <div class="form-label">Status Diskon</div>
+                  <div class="toggle-wrap">
+                    <label class="toggle">
+                      <input type="checkbox" id="toggle-active" onchange="updatePreview()">
+                      <span class="slider-toggle"></span>
+                    </label>
+                    <span id="toggle-label" style="font-weight:700;">Memuat...</span>
+                  </div>
+                  <div class="form-hint">Nonaktifkan untuk menonaktifkan diskon sementara tanpa mengubah persentase</div>
                 </div>
-                <div class="form-hint">Diskon berlaku untuk semua customer Angkasa Pura yang terverifikasi</div>
+
+                <!-- Persentase diskon -->
+                <div>
+                  <div class="form-label">Persentase Diskon</div>
+                  <div class="slider-row">
+                    <span style="font-size:.85rem;color:var(--text-muted);">0%</span>
+                    <input type="range" id="discount-slider" min="0" max="50" step="1" value="20"
+                           oninput="syncSlider(this.value)">
+                    <span style="font-size:.85rem;color:var(--text-muted);">50%</span>
+                    <input type="number" id="discount-val" class="form-control pct-input"
+                           min="0" max="100" value="20" oninput="syncInput(this.value)">
+                    <span style="font-weight:700;font-size:1.1rem;">%</span>
+                  </div>
+                </div>
+
+                <!-- Deskripsi -->
+                <div class="form-group" style="margin:0;">
+                  <label class="form-label">Keterangan</label>
+                  <input type="text" id="discount-desc" class="form-control"
+                         placeholder="Contoh: Diskon khusus karyawan Angkasa Pura">
+                </div>
               </div>
-              <div class="form-group">
-                <label class="form-label">Keterangan</label>
-                <input type="text" id="discount-desc" class="form-control" placeholder="Contoh: Diskon khusus karyawan Angkasa Pura">
+            </div>
+
+            <!-- Card: Fasilitas yang mendapat diskon -->
+            <div class="card">
+              <div class="card-header">
+                <h3>🏟️ Fasilitas yang Mendapat Diskon</h3>
+                <div style="display:flex;gap:.5rem;">
+                  <button class="btn btn-ghost btn-sm" onclick="selectAll(true)">Semua</button>
+                  <button class="btn btn-ghost btn-sm" onclick="selectAll(false)">Hapus Semua</button>
+                </div>
               </div>
-              <div class="form-group">
-                <label class="form-label">Status</label>
-                <select id="discount-active" class="form-select">
-                  <option value="1">✅ Aktif</option>
-                  <option value="0">❌ Nonaktif (semua bayar harga normal)</option>
-                </select>
+              <div class="card-body">
+                <div class="form-hint mb-2">Centang fasilitas yang termasuk program diskon Angkasa Pura</div>
+                <div id="facility-checklist" class="facility-check-list">
+                  <div class="text-muted" style="font-size:.85rem;">Memuat fasilitas...</div>
+                </div>
               </div>
-              <button class="btn btn-primary" onclick="saveDiscount()">💾 Simpan Pengaturan Diskon</button>
+            </div>
+          </div>
+
+          <!-- Kanan: Preview + Log -->
+          <div style="display:flex;flex-direction:column;gap:1rem;position:sticky;top:80px;">
+
+            <!-- Preview harga -->
+            <div class="card">
+              <div class="card-header"><h3>🧮 Preview Harga</h3></div>
+              <div class="card-body" style="padding:.8rem;">
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:.6rem;margin-bottom:.8rem;">
+                  <div class="form-group" style="margin:0;">
+                    <label class="form-label" style="font-size:.78rem;">Harga Dasar/Jam</label>
+                    <input type="number" id="sim-price" class="form-control" value="150000" oninput="updatePreview()">
+                  </div>
+                  <div class="form-group" style="margin:0;">
+                    <label class="form-label" style="font-size:.78rem;">Durasi (Jam)</label>
+                    <input type="number" id="sim-dur" class="form-control" value="2" min="1" oninput="updatePreview()">
+                  </div>
+                </div>
+                <div class="preview-box" id="preview-box">
+                  <div class="preview-row"><span>Harga Dasar</span><span id="prev-base">—</span></div>
+                  <div class="preview-row" style="color:rgba(255,255,255,.65)"><span>Durasi</span><span id="prev-dur">—</span></div>
+                  <div class="preview-row" style="color:#fca5a5"><span id="prev-disc-label">Diskon</span><span id="prev-disc">—</span></div>
+                  <div class="preview-row total"><span>💰 Harga Akhir</span><span id="prev-final" style="color:#86efac;">—</span></div>
+                </div>
+                <div id="preview-note" class="mt-1" style="font-size:.78rem;color:var(--text-muted);text-align:center;"></div>
+              </div>
+            </div>
+
+            <!-- Log verifikasi terbaru -->
+            <div class="card">
+              <div class="card-header">
+                <h3>📋 Log Verifikasi</h3>
+                <button class="btn btn-ghost btn-sm" onclick="loadLogs()">↻</button>
+              </div>
+              <div id="log-wrap" style="max-height:340px;overflow-y:auto;">
+                <div class="log-row log-header">
+                  <span>Waktu</span><span>Admin</span><span>Detail</span><span>Hasil</span>
+                </div>
+                <div id="log-body" class="text-muted" style="padding:.8rem;font-size:.82rem;text-align:center;">Memuat...</div>
+              </div>
             </div>
           </div>
         </div>
-
-        <!-- Simulasi harga -->
-        <div class="card mb-2">
-          <div class="card-header"><h3>🧮 Simulasi Harga</h3></div>
-          <div class="card-body">
-            <p class="text-muted mb-2" style="font-size:.88rem;">Hitung estimasi harga dengan dan tanpa diskon</p>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
-              <div class="form-group">
-                <label class="form-label">Harga Dasar (Rp)</label>
-                <input type="number" id="sim-price" class="form-control" value="150000" oninput="simulate()">
-              </div>
-              <div class="form-group">
-                <label class="form-label">Durasi (jam)</label>
-                <input type="number" id="sim-dur" class="form-control" value="2" min="1" oninput="simulate()">
-              </div>
-            </div>
-            <div id="sim-result" class="price-summary"></div>
-          </div>
-        </div>
-
-        <!-- Info admin -->
-        <div class="card">
-          <div class="card-header"><h3>ℹ️ Informasi Sistem</h3></div>
-          <div class="card-body">
-            <div class="price-summary">
-              <div class="price-row"><span>Login Admin</span><span>admin / admin123</span></div>
-              <div class="price-row"><span>Database</span><span>SQLite (lokal)</span></div>
-              <div class="price-row"><span>Versi</span><span>1.0.0</span></div>
-              <div class="price-row"><span>QR Scanner</span><span>html5-qrcode v2.3.8</span></div>
-            </div>
-          </div>
-        </div>
-
       </div>
     </div>
   </div>
@@ -93,53 +161,163 @@
   <script src="/js/api.js"></script>
   <script src="/js/admin-layout.js"></script>
   <script>
-    async function loadSettings() {
-      try {
-        const s = await API.get('/settings/discount/angkasa_pura');
-        document.getElementById('current-discount').innerHTML =
-          `Diskon saat ini: <strong>${s.discount_percentage}%</strong> — ${s.description || '-'} — ${s.is_active ? '✅ Aktif' : '❌ Nonaktif'}`;
-        document.getElementById('discount-val').value = s.discount_percentage;
-        document.getElementById('discount-slider').value = s.discount_percentage;
-        document.getElementById('discount-desc').value = s.description || '';
-        document.getElementById('discount-active').value = s.is_active ? '1' : '0';
-        simulate();
-      } catch (e) { toast(e.message, 'danger'); }
-    }
+    let facilities = [];
+    let selectedFacilityIds = new Set();
 
-    async function saveDiscount() {
-      const data = {
-        discount_percentage: Number(document.getElementById('discount-val').value),
-        description: document.getElementById('discount-desc').value.trim(),
-        is_active: document.getElementById('discount-active').value === '1',
-      };
-      if (isNaN(data.discount_percentage) || data.discount_percentage < 0 || data.discount_percentage > 100) {
-        toast('Persentase harus antara 0–100', 'danger'); return;
+    // ── Init ─────────────────────────────────────────────────────────────────
+    async function init() {
+      try {
+        const [setting, facRes, allFacilities] = await Promise.all([
+          API.get('/settings/discount/angkasa_pura').catch(() => ({ discount_percentage: 20, is_active: 1, description: '' })),
+          API.get('/settings/discount/angkasa_pura/facilities'),
+          API.get('/facilities')
+        ]);
+
+        // Toggle
+        document.getElementById('toggle-active').checked = !!setting.is_active;
+        updateToggleLabel(!!setting.is_active);
+
+        // Slider
+        document.getElementById('discount-val').value = setting.discount_percentage;
+        document.getElementById('discount-slider').value = setting.discount_percentage;
+        document.getElementById('discount-desc').value = setting.description || '';
+
+        // Fasilitas
+        facilities = allFacilities;
+        selectedFacilityIds = new Set(facRes.facility_ids || []);
+        renderFacilityChecklist();
+        updatePreview();
+      } catch (e) {
+        toast('Gagal memuat pengaturan: ' + e.message, 'danger');
       }
+      loadLogs();
+    }
+
+    // ── Slider sync ───────────────────────────────────────────────────────────
+    function syncSlider(v) {
+      document.getElementById('discount-val').value = v;
+      updatePreview();
+    }
+    function syncInput(v) {
+      const clamped = Math.max(0, Math.min(100, Number(v)));
+      document.getElementById('discount-slider').value = clamped;
+      updatePreview();
+    }
+
+    // ── Toggle label ──────────────────────────────────────────────────────────
+    document.getElementById('toggle-active').addEventListener('change', function() {
+      updateToggleLabel(this.checked);
+      updatePreview();
+    });
+    function updateToggleLabel(active) {
+      const el = document.getElementById('toggle-label');
+      el.textContent = active ? '✅ Diskon Aktif' : '❌ Diskon Nonaktif';
+      el.style.color = active ? 'var(--success)' : 'var(--danger)';
+    }
+
+    // ── Facility checklist ────────────────────────────────────────────────────
+    function renderFacilityChecklist() {
+      const el = document.getElementById('facility-checklist');
+      el.innerHTML = facilities.map(f => {
+        const checked = selectedFacilityIds.has(f.id);
+        return `<label class="facility-check-item ${checked ? 'checked' : ''}" data-id="${f.id}" onclick="toggleFacility(${f.id}, this)">
+          <input type="checkbox" ${checked ? 'checked' : ''}>
+          <div class="chk-icon">${checked ? '✓' : ''}</div>
+          <div>
+            <div style="font-weight:700;font-size:.88rem;">${f.name}</div>
+            <div style="font-size:.75rem;color:var(--text-muted);">${formatRp(f.base_price)}/jam</div>
+          </div>
+        </label>`;
+      }).join('');
+    }
+
+    function toggleFacility(id, el) {
+      if (selectedFacilityIds.has(id)) {
+        selectedFacilityIds.delete(id);
+        el.classList.remove('checked');
+        el.querySelector('.chk-icon').textContent = '';
+      } else {
+        selectedFacilityIds.add(id);
+        el.classList.add('checked');
+        el.querySelector('.chk-icon').textContent = '✓';
+      }
+    }
+
+    function selectAll(on) {
+      if (on) facilities.forEach(f => selectedFacilityIds.add(f.id));
+      else selectedFacilityIds.clear();
+      renderFacilityChecklist();
+    }
+
+    // ── Preview kalkulasi ────────────────────────────────────────────────────
+    function updatePreview() {
+      const price  = Number(document.getElementById('sim-price').value) || 0;
+      const dur    = Number(document.getElementById('sim-dur').value) || 1;
+      const pct    = Number(document.getElementById('discount-val').value) || 0;
+      const active = document.getElementById('toggle-active').checked;
+      const base   = price * dur;
+      const applied = active ? pct : 0;
+      const disc   = Math.round(base * applied / 100);
+      const final  = base - disc;
+
+      document.getElementById('prev-base').textContent = formatRp(price) + '/jam';
+      document.getElementById('prev-dur').textContent = dur + ' jam';
+      document.getElementById('prev-disc-label').textContent = active ? `Diskon ${pct}%` : `Diskon (nonaktif)`;
+      document.getElementById('prev-disc').textContent = applied > 0 ? '-' + formatRp(disc) : '-';
+      document.getElementById('prev-final').textContent = formatRp(final);
+      document.getElementById('preview-note').textContent = active
+        ? `Hemat ${formatRp(disc)} (${pct}%) untuk karyawan Angkasa Pura`
+        : 'Diskon nonaktif — semua customer bayar harga penuh';
+    }
+
+    // ── Simpan semua ─────────────────────────────────────────────────────────
+    async function saveAll() {
+      const btn = document.getElementById('save-btn');
+      btn.disabled = true; btn.textContent = '⏳ Menyimpan...';
       try {
-        await API.put('/settings/discount/angkasa_pura', data);
-        toast('Pengaturan diskon berhasil disimpan');
-        loadSettings();
-      } catch (e) { toast(e.message, 'danger'); }
+        await Promise.all([
+          API.put('/settings/discount/angkasa_pura', {
+            discount_percentage: Number(document.getElementById('discount-val').value),
+            description: document.getElementById('discount-desc').value.trim(),
+            is_active: document.getElementById('toggle-active').checked,
+          }),
+          API.put('/settings/discount/angkasa_pura/facilities', {
+            facility_ids: [...selectedFacilityIds]
+          })
+        ]);
+        toast('Pengaturan berhasil disimpan ✅');
+      } catch (e) {
+        toast('Gagal menyimpan: ' + e.message, 'danger');
+      } finally {
+        btn.disabled = false; btn.textContent = '💾 Simpan Semua';
+      }
     }
 
-    function simulate() {
-      const price = Number(document.getElementById('sim-price').value) || 0;
-      const dur = Number(document.getElementById('sim-dur').value) || 1;
-      const pct = Number(document.getElementById('discount-val').value) || 0;
-      const base = price * dur;
-      const disc = Math.round(base * pct / 100);
-      const final = base - disc;
-      document.getElementById('sim-result').innerHTML = `
-        <div class="price-row"><span>Harga Dasar</span><span>${formatRp(price)}/jam</span></div>
-        <div class="price-row"><span>Durasi</span><span>${dur} jam</span></div>
-        <div class="price-row"><span>Total Dasar</span><span>${formatRp(base)}</span></div>
-        <div class="price-row text-muted"><span>Harga Customer Umum</span><span class="fw-bold">${formatRp(base)}</span></div>
-        <div class="price-row text-success"><span>Diskon AP ${pct}%</span><span>-${formatRp(disc)}</span></div>
-        <div class="price-row total"><span>Harga Angkasa Pura</span><span>${formatRp(final)}</span></div>
-      `;
+    // ── Log verifikasi ────────────────────────────────────────────────────────
+    async function loadLogs() {
+      try {
+        const logs = await API.get('/verify-angkasa-pura/logs?limit=30');
+        const resultMap = {
+          success:      '<span class="badge badge-success">✅ Sukses</span>',
+          invalid_card: '<span class="badge badge-danger">❌ ID Invalid</span>',
+          mismatch:     '<span class="badge badge-warning">⚠️ Mismatch</span>',
+          not_pending:  '<span class="badge badge-secondary">— Sudah diproses</span>',
+          rate_limited: '<span class="badge badge-danger">🚫 Rate limit</span>',
+        };
+        document.getElementById('log-body').innerHTML = logs.length
+          ? logs.map(l => `<div class="log-row">
+              <span style="font-size:.76rem;">${l.created_at?.replace('T',' ').slice(0,16) || '-'}</span>
+              <span>${l.admin_username || '-'}</span>
+              <span style="font-size:.76rem;word-break:break-all;">${l.detail || l.scanned_id || '-'}</span>
+              <span>${resultMap[l.result] || `<span class="badge badge-secondary">${l.result}</span>`}</span>
+            </div>`).join('')
+          : '<div style="padding:.8rem;text-align:center;color:var(--text-muted);">Belum ada log verifikasi</div>';
+      } catch (e) {
+        document.getElementById('log-body').innerHTML = `<div style="padding:.8rem;color:var(--danger);">${e.message}</div>`;
+      }
     }
 
-    loadSettings();
+    init();
   </script>
 </body>
 </html>

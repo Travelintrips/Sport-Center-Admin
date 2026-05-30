@@ -1,17 +1,13 @@
 // api.js — helper HTTP request ke backend
 const API = (() => {
   const BASE = '/api';
-
   function getToken() { return localStorage.getItem('admin_token'); }
 
   async function request(method, path, data) {
-    const opts = {
-      method,
-      headers: { 'Content-Type': 'application/json' }
-    };
+    const opts = { method, headers: { 'Content-Type': 'application/json' } };
     const token = getToken();
     if (token) opts.headers['Authorization'] = `Bearer ${token}`;
-    if (data) opts.body = JSON.stringify(data);
+    if (data !== undefined) opts.body = JSON.stringify(data);
     const res = await fetch(BASE + path, opts);
     const json = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
@@ -19,39 +15,36 @@ const API = (() => {
   }
 
   return {
-    get:    (path)        => request('GET',    path),
-    post:   (path, data)  => request('POST',   path, data),
-    put:    (path, data)  => request('PUT',    path, data),
-    delete: (path)        => request('DELETE', path),
-    // Auth
-    login:  (u, p) => request('POST', '/auth/login', { username: u, password: p }),
-    me:     ()     => request('GET',  '/auth/me'),
+    get:    (path)       => request('GET',    path),
+    post:   (path, data) => request('POST',   path, data),
+    put:    (path, data) => request('PUT',    path, data),
+    delete: (path)       => request('DELETE', path),
+    login:  (u, p)       => request('POST', '/auth/login', { username: u, password: p }),
+    me:     ()           => request('GET',  '/auth/me'),
   };
 })();
 
-// ─── Utilities ────────────────────────────────────────────────────────────────
+// ─── Format helpers ───────────────────────────────────────────────────────────
 function formatRp(n) {
-  return 'Rp ' + Number(n).toLocaleString('id-ID');
+  return 'Rp ' + Number(n || 0).toLocaleString('id-ID');
 }
-
 function formatDate(str) {
   if (!str) return '-';
-  const d = new Date(str);
-  return d.toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' });
+  return new Date(str).toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' });
 }
-
 function formatDateTime(str) {
   if (!str) return '-';
-  const d = new Date(str);
-  return d.toLocaleString('id-ID', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  return new Date(str).toLocaleString('id-ID', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
+// ─── Status badge ─────────────────────────────────────────────────────────────
 function statusBadge(status) {
   const map = {
-    verified:   '<span class="badge badge-success">✅ Terverifikasi</span>',
-    pending:    '<span class="badge badge-warning">⏳ Pending Verifikasi</span>',
-    cancelled:  '<span class="badge badge-danger">❌ Dibatalkan</span>',
-    rejected:   '<span class="badge badge-danger">🚫 Ditolak</span>',
+    verified:             '<span class="badge badge-success">✅ Terverifikasi</span>',
+    pending_verification: '<span class="badge badge-warning">⏳ Pending Verifikasi</span>',
+    pending:              '<span class="badge badge-warning">⏳ Pending</span>',
+    cancelled:            '<span class="badge badge-danger">❌ Dibatalkan</span>',
+    rejected:             '<span class="badge badge-danger">🚫 Ditolak</span>',
   };
   return map[status] || `<span class="badge badge-secondary">${status}</span>`;
 }
@@ -62,26 +55,20 @@ function typeBadge(type) {
     : '<span class="badge badge-secondary">👤 Umum</span>';
 }
 
-// Toast notification
+// ─── Toast notification ───────────────────────────────────────────────────────
 function toast(msg, type = 'success') {
-  let container = document.getElementById('toast-container');
-  if (!container) {
-    container = document.createElement('div');
-    container.id = 'toast-container';
-    document.body.appendChild(container);
-  }
+  let c = document.getElementById('toast-container');
+  if (!c) { c = document.createElement('div'); c.id = 'toast-container'; document.body.appendChild(c); }
   const el = document.createElement('div');
   el.className = `toast ${type}`;
   el.textContent = msg;
-  container.appendChild(el);
-  setTimeout(() => el.remove(), 3500);
+  c.appendChild(el);
+  setTimeout(() => el.remove(), 4000);
 }
 
-// Show/hide loading overlay
 function showLoading() { document.getElementById('loading')?.classList.remove('hidden'); }
 function hideLoading() { document.getElementById('loading')?.classList.add('hidden'); }
 
-// Get query param
 function getParam(name) {
   return new URLSearchParams(window.location.search).get(name);
 }
