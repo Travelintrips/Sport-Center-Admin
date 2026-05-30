@@ -12,7 +12,8 @@ import {
   LogOut,
   Menu,
   X,
-  Dumbbell
+  Dumbbell,
+  Plane
 } from "lucide-react";
 import { useGetMe, useLogout, getGetMeQueryKey } from "@workspace/api-client-react";
 import { removeToken } from "@/lib/auth";
@@ -54,6 +55,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
     { href: "/admin/customers", label: "Customers", icon: Users },
     { href: "/admin/promos", label: "Promos", icon: Tag },
     { href: "/admin/memberships", label: "Member Gym", icon: Dumbbell },
+    { href: "/admin/ap-members", label: "Member AP", icon: Plane },
     { href: "/admin/settings", label: "Settings", icon: SettingsIcon },
   ];
 

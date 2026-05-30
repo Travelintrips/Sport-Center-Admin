@@ -1,14 +1,92 @@
 import { useState, useEffect, useRef } from "react";
-import { useGetSettings, useUpdateSettings, getGetSettingsQueryKey } from "@workspace/api-client-react";
+import { useGetSettings, useUpdateSettings, getGetSettingsQueryKey, useListDiscountSettings, useUpdateDiscountSetting, getListDiscountSettingsQueryKey } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { Save, Upload, Trash2, QrCode, ImageIcon } from "lucide-react";
+import { Save, Upload, Trash2, QrCode, ImageIcon, Plane } from "lucide-react";
 import { getToken } from "@/lib/auth";
+
+function ApDiscountCard() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const { data: discountSettings, isLoading } = useListDiscountSettings();
+  const [percentage, setPercentage] = useState("");
+  const [isActive, setIsActive] = useState(true);
+
+  const ap = (discountSettings || []).find((d) => d.customerType === "angkasa_pura");
+
+  useEffect(() => {
+    if (ap) {
+      setPercentage(String(ap.discountPercentage));
+      setIsActive(ap.isActive);
+    }
+  }, [ap]);
+
+  const updateMutation = useUpdateDiscountSetting({
+    mutation: {
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: getListDiscountSettingsQueryKey() });
+        toast({ title: "Diskon Angkasa Pura disimpan" });
+      },
+      onError: () => toast({ title: "Gagal menyimpan diskon", variant: "destructive" }),
+    },
+  });
+
+  const handleSave = () => {
+    const pct = Number(percentage);
+    if (Number.isNaN(pct) || pct < 0 || pct > 100) {
+      toast({ title: "Persentase harus 0–100", variant: "destructive" });
+      return;
+    }
+    updateMutation.mutate({ customerType: "angkasa_pura", data: { discountPercentage: pct, isActive } });
+  };
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base font-bold flex items-center gap-2">
+          <Plane size={18} />
+          Diskon Karyawan Angkasa Pura
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <p className="text-sm text-muted-foreground">
+          Persentase diskon yang diterapkan setelah ID Card karyawan Angkasa Pura terverifikasi oleh admin.
+        </p>
+        {isLoading ? (
+          <Skeleton className="h-10 w-full" />
+        ) : (
+          <div className="flex flex-col sm:flex-row gap-4 sm:items-end">
+            <div className="space-y-2 flex-1">
+              <Label>Persentase Diskon (%)</Label>
+              <Input
+                type="number"
+                min={0}
+                max={100}
+                value={percentage}
+                onChange={(e) => setPercentage(e.target.value)}
+                placeholder="20"
+              />
+            </div>
+            <div className="flex items-center justify-between gap-3 rounded-lg border p-3 sm:w-48">
+              <Label htmlFor="ap-discount-active" className="cursor-pointer">Aktif</Label>
+              <Switch id="ap-discount-active" checked={isActive} onCheckedChange={setIsActive} />
+            </div>
+            <Button type="button" onClick={handleSave} disabled={updateMutation.isPending}>
+              <Save size={16} className="mr-2" />
+              {updateMutation.isPending ? "Menyimpan..." : "Simpan"}
+            </Button>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -190,6 +268,8 @@ export default function AdminSettings() {
           </Button>
         </div>
       </form>
+
+      <ApDiscountCard />
 
       <Card>
         <CardHeader className="pb-3">

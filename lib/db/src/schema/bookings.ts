@@ -14,6 +14,18 @@ export const bookingStatusEnum = scSchema.enum("booking_status", [
   "refunded",
 ]);
 
+export const customerTypeEnum = scSchema.enum("customer_type", [
+  "umum",
+  "angkasa_pura",
+]);
+
+export const verificationStatusEnum = scSchema.enum("verification_status", [
+  "not_required",
+  "pending",
+  "verified",
+  "rejected",
+]);
+
 export const bookingsTable = scSchema.table("bookings", {
   id: serial("id").primaryKey(),
   orderNumber: text("order_number").notNull().unique(),
@@ -29,6 +41,11 @@ export const bookingsTable = scSchema.table("bookings", {
   totalPrice: numeric("total_price", { precision: 12, scale: 2 }).notNull(),
   promoCode: text("promo_code"),
   discountAmount: numeric("discount_amount", { precision: 12, scale: 2 }).notNull().default("0"),
+  customerType: customerTypeEnum("customer_type").notNull().default("umum"),
+  idCardNumber: text("id_card_number"),
+  verificationStatus: verificationStatusEnum("verification_status").notNull().default("not_required"),
+  basePrice: numeric("base_price", { precision: 12, scale: 2 }),
+  apDiscountAmount: numeric("ap_discount_amount", { precision: 12, scale: 2 }).notNull().default("0"),
   status: bookingStatusEnum("status").notNull().default("pending_payment"),
   notes: text("notes"),
   adminNotes: text("admin_notes"),

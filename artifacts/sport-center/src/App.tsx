@@ -36,6 +36,7 @@ import AdminCustomers from "@/pages/admin/Customers";
 import AdminPromos from "@/pages/admin/Promos";
 import AdminSettings from "@/pages/admin/Settings";
 import AdminMemberships from "@/pages/admin/Memberships";
+import AdminApMembers from "@/pages/admin/ApMembers";
 
 const queryClient = new QueryClient();
 
@@ -50,6 +51,7 @@ function AdminRouter() {
     if (location === "/admin/customers") return <AdminCustomers />;
     if (location === "/admin/promos") return <AdminPromos />;
     if (location === "/admin/memberships") return <AdminMemberships />;
+    if (location === "/admin/ap-members") return <AdminApMembers />;
     if (location === "/admin/settings") return <AdminSettings />;
     return <NotFound />;
   })();
@@ -71,6 +73,7 @@ function Router() {
       <Route path="/admin/customers" component={AdminRouter} />
       <Route path="/admin/promos" component={AdminRouter} />
       <Route path="/admin/memberships" component={AdminRouter} />
+      <Route path="/admin/ap-members" component={AdminRouter} />
       <Route path="/admin/settings" component={AdminRouter} />
       <Route path="/admin" component={AdminRouter} />
 

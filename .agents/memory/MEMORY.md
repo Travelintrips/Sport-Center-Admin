@@ -1,1 +1,2 @@
 - [Supabase shared instance & schema isolation](supabase-shared-instance.md) — DB is shared; our tables live in dedicated `sport_center` schema; `drizzle-kit push` hangs, generate+apply via pg on port 5432.
+- [Booking PII & access control](booking-pii-access.md) — GET /bookings list is admin-only; public booking reads must redact idCardNumber; normalize ID cards to uppercase/trim.

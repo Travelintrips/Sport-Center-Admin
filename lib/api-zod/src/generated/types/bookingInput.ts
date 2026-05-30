@@ -5,6 +5,7 @@
  * Sport Center API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { BookingInputCustomerType } from './bookingInputCustomerType';
 
 export interface BookingInput {
   customerName: string;
@@ -14,5 +15,7 @@ export interface BookingInput {
   bookingDate: string;
   startTime: string;
   durationHours: number;
+  customerType?: BookingInputCustomerType;
+  idCardNumber?: string;
   notes?: string;
 }

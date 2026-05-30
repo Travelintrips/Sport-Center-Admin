@@ -20,6 +20,9 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
+  ApMember,
+  ApMemberInput,
+  ApMemberUpdate,
   AuthResponse,
   BlockedSchedule,
   BlockedScheduleInput,
@@ -29,6 +32,8 @@ import type {
   CheckAvailabilityParams,
   Customer,
   DashboardStats,
+  DiscountSetting,
+  DiscountSettingUpdate,
   ExportBookingsParams,
   Facility,
   FacilityInput,
@@ -37,6 +42,7 @@ import type {
   GymMembershipInput,
   GymMembershipUpdate,
   HealthStatus,
+  ListApMembersParams,
   ListBlockedSchedulesParams,
   ListBookingsParams,
   ListCustomersParams,
@@ -63,7 +69,9 @@ import type {
   TimeSlot,
   UploadUrlRequest,
   UploadUrlResponse,
-  User
+  User,
+  VerifyInput,
+  VerifyResult
 } from './api.schemas';
 
 import { customFetch } from '../custom-fetch';
@@ -3312,5 +3320,600 @@ export const useUpdateSettings = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getUpdateSettingsMutationOptions(options));
+    }
+
+export const getListDiscountSettingsUrl = () => {
+
+
+
+
+  return `/api/discount-settings`
+}
+
+/**
+ * @summary List discount settings per customer type
+ */
+export const listDiscountSettings = async ( options?: RequestInit): Promise<DiscountSetting[]> => {
+
+  return customFetch<DiscountSetting[]>(getListDiscountSettingsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListDiscountSettingsQueryKey = () => {
+    return [
+    `/api/discount-settings`
+    ] as const;
+    }
+
+
+export const getListDiscountSettingsQueryOptions = <TData = Awaited<ReturnType<typeof listDiscountSettings>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listDiscountSettings>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListDiscountSettingsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listDiscountSettings>>> = ({ signal }) => listDiscountSettings({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listDiscountSettings>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListDiscountSettingsQueryResult = NonNullable<Awaited<ReturnType<typeof listDiscountSettings>>>
+export type ListDiscountSettingsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List discount settings per customer type
+ */
+
+export function useListDiscountSettings<TData = Awaited<ReturnType<typeof listDiscountSettings>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listDiscountSettings>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListDiscountSettingsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getGetDiscountSettingUrl = (customerType: string,) => {
+
+
+
+
+  return `/api/discount-settings/${customerType}`
+}
+
+/**
+ * @summary Get discount setting for a customer type
+ */
+export const getDiscountSetting = async (customerType: string, options?: RequestInit): Promise<DiscountSetting> => {
+
+  return customFetch<DiscountSetting>(getGetDiscountSettingUrl(customerType),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetDiscountSettingQueryKey = (customerType: string,) => {
+    return [
+    `/api/discount-settings/${customerType}`
+    ] as const;
+    }
+
+
+export const getGetDiscountSettingQueryOptions = <TData = Awaited<ReturnType<typeof getDiscountSetting>>, TError = ErrorType<void>>(customerType: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getDiscountSetting>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetDiscountSettingQueryKey(customerType);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getDiscountSetting>>> = ({ signal }) => getDiscountSetting(customerType, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(customerType), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getDiscountSetting>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetDiscountSettingQueryResult = NonNullable<Awaited<ReturnType<typeof getDiscountSetting>>>
+export type GetDiscountSettingQueryError = ErrorType<void>
+
+
+/**
+ * @summary Get discount setting for a customer type
+ */
+
+export function useGetDiscountSetting<TData = Awaited<ReturnType<typeof getDiscountSetting>>, TError = ErrorType<void>>(
+ customerType: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getDiscountSetting>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetDiscountSettingQueryOptions(customerType,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getUpdateDiscountSettingUrl = (customerType: string,) => {
+
+
+
+
+  return `/api/discount-settings/${customerType}`
+}
+
+/**
+ * @summary Update discount percentage and active state (admin)
+ */
+export const updateDiscountSetting = async (customerType: string,
+    discountSettingUpdate: DiscountSettingUpdate, options?: RequestInit): Promise<DiscountSetting> => {
+
+  return customFetch<DiscountSetting>(getUpdateDiscountSettingUrl(customerType),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      discountSettingUpdate,)
+  }
+);}
+
+
+
+
+export const getUpdateDiscountSettingMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateDiscountSetting>>, TError,{customerType: string;data: BodyType<DiscountSettingUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateDiscountSetting>>, TError,{customerType: string;data: BodyType<DiscountSettingUpdate>}, TContext> => {
+
+const mutationKey = ['updateDiscountSetting'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateDiscountSetting>>, {customerType: string;data: BodyType<DiscountSettingUpdate>}> = (props) => {
+          const {customerType,data} = props ?? {};
+
+          return  updateDiscountSetting(customerType,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateDiscountSettingMutationResult = NonNullable<Awaited<ReturnType<typeof updateDiscountSetting>>>
+    export type UpdateDiscountSettingMutationBody = BodyType<DiscountSettingUpdate>
+    export type UpdateDiscountSettingMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Update discount percentage and active state (admin)
+ */
+export const useUpdateDiscountSetting = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateDiscountSetting>>, TError,{customerType: string;data: BodyType<DiscountSettingUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateDiscountSetting>>,
+        TError,
+        {customerType: string;data: BodyType<DiscountSettingUpdate>},
+        TContext
+      > => {
+      return useMutation(getUpdateDiscountSettingMutationOptions(options));
+    }
+
+export const getListApMembersUrl = (params?: ListApMembersParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/ap-members?${stringifiedParams}` : `/api/ap-members`
+}
+
+/**
+ * @summary List Angkasa Pura members (admin)
+ */
+export const listApMembers = async (params?: ListApMembersParams, options?: RequestInit): Promise<ApMember[]> => {
+
+  return customFetch<ApMember[]>(getListApMembersUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListApMembersQueryKey = (params?: ListApMembersParams,) => {
+    return [
+    `/api/ap-members`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListApMembersQueryOptions = <TData = Awaited<ReturnType<typeof listApMembers>>, TError = ErrorType<unknown>>(params?: ListApMembersParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listApMembers>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListApMembersQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listApMembers>>> = ({ signal }) => listApMembers(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listApMembers>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListApMembersQueryResult = NonNullable<Awaited<ReturnType<typeof listApMembers>>>
+export type ListApMembersQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List Angkasa Pura members (admin)
+ */
+
+export function useListApMembers<TData = Awaited<ReturnType<typeof listApMembers>>, TError = ErrorType<unknown>>(
+ params?: ListApMembersParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listApMembers>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListApMembersQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getCreateApMemberUrl = () => {
+
+
+
+
+  return `/api/ap-members`
+}
+
+/**
+ * @summary Add an Angkasa Pura member (admin)
+ */
+export const createApMember = async (apMemberInput: ApMemberInput, options?: RequestInit): Promise<ApMember> => {
+
+  return customFetch<ApMember>(getCreateApMemberUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      apMemberInput,)
+  }
+);}
+
+
+
+
+export const getCreateApMemberMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createApMember>>, TError,{data: BodyType<ApMemberInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createApMember>>, TError,{data: BodyType<ApMemberInput>}, TContext> => {
+
+const mutationKey = ['createApMember'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createApMember>>, {data: BodyType<ApMemberInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createApMember(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateApMemberMutationResult = NonNullable<Awaited<ReturnType<typeof createApMember>>>
+    export type CreateApMemberMutationBody = BodyType<ApMemberInput>
+    export type CreateApMemberMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Add an Angkasa Pura member (admin)
+ */
+export const useCreateApMember = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createApMember>>, TError,{data: BodyType<ApMemberInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createApMember>>,
+        TError,
+        {data: BodyType<ApMemberInput>},
+        TContext
+      > => {
+      return useMutation(getCreateApMemberMutationOptions(options));
+    }
+
+export const getUpdateApMemberUrl = (id: number,) => {
+
+
+
+
+  return `/api/ap-members/${id}`
+}
+
+/**
+ * @summary Update an Angkasa Pura member (admin)
+ */
+export const updateApMember = async (id: number,
+    apMemberUpdate: ApMemberUpdate, options?: RequestInit): Promise<ApMember> => {
+
+  return customFetch<ApMember>(getUpdateApMemberUrl(id),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      apMemberUpdate,)
+  }
+);}
+
+
+
+
+export const getUpdateApMemberMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateApMember>>, TError,{id: number;data: BodyType<ApMemberUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateApMember>>, TError,{id: number;data: BodyType<ApMemberUpdate>}, TContext> => {
+
+const mutationKey = ['updateApMember'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateApMember>>, {id: number;data: BodyType<ApMemberUpdate>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  updateApMember(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateApMemberMutationResult = NonNullable<Awaited<ReturnType<typeof updateApMember>>>
+    export type UpdateApMemberMutationBody = BodyType<ApMemberUpdate>
+    export type UpdateApMemberMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Update an Angkasa Pura member (admin)
+ */
+export const useUpdateApMember = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateApMember>>, TError,{id: number;data: BodyType<ApMemberUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateApMember>>,
+        TError,
+        {id: number;data: BodyType<ApMemberUpdate>},
+        TContext
+      > => {
+      return useMutation(getUpdateApMemberMutationOptions(options));
+    }
+
+export const getDeleteApMemberUrl = (id: number,) => {
+
+
+
+
+  return `/api/ap-members/${id}`
+}
+
+/**
+ * @summary Delete an Angkasa Pura member (admin)
+ */
+export const deleteApMember = async (id: number, options?: RequestInit): Promise<void> => {
+
+  return customFetch<void>(getDeleteApMemberUrl(id),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+export const getDeleteApMemberMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteApMember>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteApMember>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['deleteApMember'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteApMember>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  deleteApMember(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteApMemberMutationResult = NonNullable<Awaited<ReturnType<typeof deleteApMember>>>
+
+    export type DeleteApMemberMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Delete an Angkasa Pura member (admin)
+ */
+export const useDeleteApMember = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteApMember>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteApMember>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getDeleteApMemberMutationOptions(options));
+    }
+
+export const getVerifyBookingUrl = (id: number,) => {
+
+
+
+
+  return `/api/bookings/${id}/verify`
+}
+
+/**
+ * @summary Verify Angkasa Pura ID card and apply discount (admin)
+ */
+export const verifyBooking = async (id: number,
+    verifyInput: VerifyInput, options?: RequestInit): Promise<VerifyResult> => {
+
+  return customFetch<VerifyResult>(getVerifyBookingUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      verifyInput,)
+  }
+);}
+
+
+
+
+export const getVerifyBookingMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof verifyBooking>>, TError,{id: number;data: BodyType<VerifyInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof verifyBooking>>, TError,{id: number;data: BodyType<VerifyInput>}, TContext> => {
+
+const mutationKey = ['verifyBooking'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof verifyBooking>>, {id: number;data: BodyType<VerifyInput>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  verifyBooking(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type VerifyBookingMutationResult = NonNullable<Awaited<ReturnType<typeof verifyBooking>>>
+    export type VerifyBookingMutationBody = BodyType<VerifyInput>
+    export type VerifyBookingMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Verify Angkasa Pura ID card and apply discount (admin)
+ */
+export const useVerifyBooking = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof verifyBooking>>, TError,{id: number;data: BodyType<VerifyInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof verifyBooking>>,
+        TError,
+        {id: number;data: BodyType<VerifyInput>},
+        TContext
+      > => {
+      return useMutation(getVerifyBookingMutationOptions(options));
     }
 

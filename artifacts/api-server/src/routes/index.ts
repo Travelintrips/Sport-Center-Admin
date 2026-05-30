@@ -13,6 +13,8 @@ import settingsRouter from "./settings";
 import configRouter from "./config";
 import storageRouter from "./storage";
 import membershipsRouter from "./memberships";
+import discountSettingsRouter from "./discountSettings";
+import apMembersRouter from "./apMembers";
 
 const router: IRouter = Router();
 
@@ -30,5 +32,7 @@ router.use(customersRouter);
 router.use(dashboardRouter);
 router.use(settingsRouter);
 router.use(membershipsRouter);
+router.use(discountSettingsRouter);
+router.use(apMembersRouter);
 
 export default router;

@@ -6,17 +6,25 @@
  * OpenAPI spec version: 0.1.0
  */
 
+export * from './apMember';
+export * from './apMemberInput';
+export * from './apMemberUpdate';
 export * from './authResponse';
 export * from './blockedSchedule';
 export * from './blockedScheduleInput';
 export * from './booking';
+export * from './bookingCustomerType';
 export * from './bookingInput';
+export * from './bookingInputCustomerType';
 export * from './bookingStatus';
 export * from './bookingUpdate';
 export * from './bookingUpdateStatus';
+export * from './bookingVerificationStatus';
 export * from './checkAvailabilityParams';
 export * from './customer';
 export * from './dashboardStats';
+export * from './discountSetting';
+export * from './discountSettingUpdate';
 export * from './errorEnvelope';
 export * from './exportBookingsParams';
 export * from './facility';
@@ -30,6 +38,7 @@ export * from './gymMembershipStatus';
 export * from './gymMembershipUpdate';
 export * from './gymMembershipUpdateStatus';
 export * from './healthStatus';
+export * from './listApMembersParams';
 export * from './listBlockedSchedulesParams';
 export * from './listBookingsParams';
 export * from './listCustomersParams';
@@ -68,3 +77,6 @@ export * from './uploadUrlRequest';
 export * from './uploadUrlResponse';
 export * from './user';
 export * from './userRole';
+export * from './verifyInput';
+export * from './verifyResult';
+export * from './verifyResultResult';
