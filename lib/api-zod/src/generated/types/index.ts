@@ -28,6 +28,7 @@ export * from './discountSettingUpdate';
 export * from './errorEnvelope';
 export * from './exportBookingsParams';
 export * from './facility';
+export * from './facilityBookingMode';
 export * from './facilityImage';
 export * from './facilityInput';
 export * from './facilityStat';

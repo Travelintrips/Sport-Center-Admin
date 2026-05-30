@@ -5,6 +5,7 @@
  * Sport Center API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { FacilityBookingMode } from './facilityBookingMode';
 import type { FacilityImage } from './facilityImage';
 
 export interface Facility {
@@ -16,6 +17,7 @@ export interface Facility {
   pricePerHour: number;
   openTime: string;
   closeTime: string;
+  bookingMode: FacilityBookingMode;
   minDuration?: number;
   /** @nullable */
   maxDuration?: number | null;

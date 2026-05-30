@@ -1072,7 +1072,7 @@ components:
 
     Facility:
       type: object
-      required: [id, name, category, pricePerHour, openTime, closeTime, isActive]
+      required: [id, name, category, pricePerHour, openTime, closeTime, isActive, bookingMode]
       properties:
         id:
           type: integer
@@ -1088,6 +1088,9 @@ components:
           type: string
         closeTime:
           type: string
+        bookingMode:
+          type: string
+          enum: [time_slot, walk_in]
         minDuration:
           type: integer
         maxDuration:
@@ -1231,6 +1234,10 @@ components:
           type: ["number", "null"]
         apDiscountAmount:
           type: number
+        activityType:
+          type: ["string", "null"]
+        numberOfPeople:
+          type: ["integer", "null"]
         notes:
           type: ["string", "null"]
         adminNotes:
@@ -1334,7 +1341,7 @@ components:
 
     BookingInput:
       type: object
-      required: [customerName, customerEmail, customerPhone, facilityId, bookingDate, startTime, durationHours]
+      required: [customerName, customerEmail, customerPhone, facilityId, bookingDate]
       properties:
         customerName:
           type: string
@@ -1349,6 +1356,10 @@ components:
         startTime:
           type: string
         durationHours:
+          type: integer
+        activityType:
+          type: string
+        numberOfPeople:
           type: integer
         customerType:
           type: string

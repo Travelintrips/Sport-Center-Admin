@@ -88,9 +88,29 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
   }
 });
 
+function timeToMinutesLocal(t: string): number {
+  const [h, m] = t.split(":").map(Number);
+  return h * 60 + (m || 0);
+}
+
+function getTodayWIB(): string {
+  const now = new Date();
+  const wib = new Date(now.getTime() + 7 * 60 * 60 * 1000);
+  return wib.toISOString().split("T")[0];
+}
+
+function getNowMinutesWIB(): number {
+  const now = new Date();
+  const wib = new Date(now.getTime() + 7 * 60 * 60 * 1000);
+  return wib.getUTCHours() * 60 + wib.getUTCMinutes();
+}
+
 router.post("/bookings", async (req, res) => {
   try {
-    const { customerName, customerEmail, customerPhone, facilityId, bookingDate, startTime, durationHours, notes, promoCode, discountAmount, customerType } = req.body;
+    const { customerName, customerEmail, customerPhone, facilityId, bookingDate, notes, promoCode, discountAmount, customerType } = req.body;
+    let { startTime, durationHours } = req.body;
+    const activityType = req.body.activityType || null;
+    const numberOfPeople = req.body.numberOfPeople ? Number(req.body.numberOfPeople) : null;
     const idCardNumber = String(req.body?.idCardNumber || "").trim().toUpperCase() || null;
 
     const isAp = customerType === "angkasa_pura";
@@ -105,27 +125,61 @@ router.post("/bookings", async (req, res) => {
       return;
     }
 
-    const endTime = addHours(startTime, durationHours);
-    const conflicting = await db.select().from(bookingsTable).where(
-      and(eq(bookingsTable.facilityId, Number(facilityId)), eq(bookingsTable.bookingDate, bookingDate))
-    );
-    const active = conflicting.filter((b) => b.status !== "cancelled");
-    const conflict = active.some((b) => {
-      const bStartMin = b.startTime.split(":").reduce((h, m, i) => i === 0 ? parseInt(h as unknown as string) * 60 : parseInt(h as unknown as string) + parseInt(m), 0 as unknown as number) as unknown as number;
-      const bEndMin = b.endTime.split(":").reduce((h, m, i) => i === 0 ? parseInt(h as unknown as string) * 60 : parseInt(h as unknown as string) + parseInt(m), 0 as unknown as number) as unknown as number;
-      const sMin = startTime.split(":").map(Number).reduce((a: number, v: number, i: number) => i === 0 ? v * 60 : a + v, 0);
-      const eMin = endTime.split(":").map(Number).reduce((a: number, v: number, i: number) => i === 0 ? v * 60 : a + v, 0);
-      return sMin < bEndMin && eMin > bStartMin;
-    });
+    const isWalkIn = facility.bookingMode === "walk_in";
 
-    if (conflict) {
-      res.status(409).json({ error: "This time slot is already booked" });
-      return;
+    if (isWalkIn) {
+      // Gym walk-in: no time slot required, flat rate per visit
+      startTime = facility.openTime;
+      durationHours = 1;
+    } else {
+      // Time slot booking validations
+      if (!startTime || !durationHours) {
+        res.status(400).json({ error: "startTime and durationHours required" });
+        return;
+      }
+
+      // Validate slot is not in the past
+      const todayWIB = getTodayWIB();
+      if (bookingDate === todayWIB) {
+        const slotMinutes = timeToMinutesLocal(startTime);
+        const nowMinutes = getNowMinutesWIB();
+        if (slotMinutes <= nowMinutes) {
+          res.status(400).json({ error: "Tidak dapat booking slot yang sudah lewat" });
+          return;
+        }
+      }
+
+      // Validate within operating hours
+      const openMin = timeToMinutesLocal(facility.openTime);
+      const closeMin = timeToMinutesLocal(facility.closeTime);
+      const startMin = timeToMinutesLocal(startTime);
+      const endMin = startMin + durationHours * 60;
+      if (startMin < openMin || endMin > closeMin) {
+        res.status(400).json({ error: `Booking harus dalam jam operasional ${facility.openTime}–${facility.closeTime}` });
+        return;
+      }
+
+      // Conflict check
+      const endTime = addHours(startTime, durationHours);
+      const conflicting = await db.select().from(bookingsTable).where(
+        and(eq(bookingsTable.facilityId, Number(facilityId)), eq(bookingsTable.bookingDate, bookingDate))
+      );
+      const active = conflicting.filter((b) => b.status !== "cancelled");
+      const conflict = active.some((b) => {
+        const bStart = timeToMinutesLocal(b.startTime);
+        const bEnd = timeToMinutesLocal(b.endTime);
+        const sMin = timeToMinutesLocal(startTime);
+        const eMin = timeToMinutesLocal(endTime);
+        return sMin < bEnd && eMin > bStart;
+      });
+      if (conflict) {
+        res.status(409).json({ error: "Slot waktu ini sudah dipesan. Pilih jam lain." });
+        return;
+      }
     }
 
-    const basePrice = Number(facility.pricePerHour) * durationHours;
-    // Customer Angkasa Pura: harga belum didiskon sampai ID Card diverifikasi (tanpa promo).
-    // Customer umum: promo (jika ada) langsung diterapkan.
+    const endTime = addHours(startTime, durationHours);
+    const basePrice = Number(facility.pricePerHour) * (isWalkIn ? 1 : durationHours);
     const discount = isAp ? 0 : Math.min(Number(discountAmount) || 0, basePrice);
     const totalPrice = basePrice - discount;
     const orderNumber = await generateOrderNumber();
@@ -139,7 +193,7 @@ router.post("/bookings", async (req, res) => {
       bookingDate,
       startTime,
       endTime,
-      durationHours,
+      durationHours: isWalkIn ? 1 : durationHours,
       totalPrice: String(totalPrice),
       promoCode: isAp ? null : (promoCode || null),
       discountAmount: String(discount),
@@ -147,6 +201,8 @@ router.post("/bookings", async (req, res) => {
       idCardNumber: idCardNumber || null,
       verificationStatus: isAp ? "pending" : "not_required",
       basePrice: String(basePrice),
+      activityType,
+      numberOfPeople,
       notes,
     }).returning();
 

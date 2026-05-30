@@ -44,6 +44,14 @@ export interface AuthResponse {
   token: string;
 }
 
+export type FacilityBookingMode = typeof FacilityBookingMode[keyof typeof FacilityBookingMode];
+
+
+export const FacilityBookingMode = {
+  time_slot: 'time_slot',
+  walk_in: 'walk_in',
+} as const;
+
 export interface FacilityImage {
   id: number;
   facilityId: number;
@@ -60,6 +68,7 @@ export interface Facility {
   pricePerHour: number;
   openTime: string;
   closeTime: string;
+  bookingMode: FacilityBookingMode;
   minDuration?: number;
   /** @nullable */
   maxDuration?: number | null;
@@ -181,6 +190,10 @@ export interface Booking {
   basePrice?: number | null;
   apDiscountAmount?: number;
   /** @nullable */
+  activityType?: string | null;
+  /** @nullable */
+  numberOfPeople?: number | null;
+  /** @nullable */
   notes?: string | null;
   /** @nullable */
   adminNotes?: string | null;
@@ -267,8 +280,10 @@ export interface BookingInput {
   customerPhone: string;
   facilityId: number;
   bookingDate: string;
-  startTime: string;
-  durationHours: number;
+  startTime?: string;
+  durationHours?: number;
+  activityType?: string;
+  numberOfPeople?: number;
   customerType?: BookingInputCustomerType;
   idCardNumber?: string;
   notes?: string;

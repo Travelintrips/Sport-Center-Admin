@@ -35,6 +35,10 @@ export interface Booking {
   basePrice?: number | null;
   apDiscountAmount?: number;
   /** @nullable */
+  activityType?: string | null;
+  /** @nullable */
+  numberOfPeople?: number | null;
+  /** @nullable */
   notes?: string | null;
   /** @nullable */
   adminNotes?: string | null;

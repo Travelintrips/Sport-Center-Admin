@@ -47,6 +47,8 @@ export const bookingsTable = scSchema.table("bookings", {
   basePrice: numeric("base_price", { precision: 12, scale: 2 }),
   apDiscountAmount: numeric("ap_discount_amount", { precision: 12, scale: 2 }).notNull().default("0"),
   status: bookingStatusEnum("status").notNull().default("pending_payment"),
+  activityType: text("activity_type"),
+  numberOfPeople: integer("number_of_people"),
   notes: text("notes"),
   adminNotes: text("admin_notes"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
