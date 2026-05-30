@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sport Center — Booking Fasilitas</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <nav class="navbar">
+    <div class="navbar-inner">
+      <div class="navbar-brand"><div class="logo">⚽</div> Sport Center</div>
+      <div class="navbar-links">
+        <a href="/" class="active">Beranda</a>
+        <a href="/booking.html">Booking</a>
+        <a href="/admin/login.html">Admin</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Hero -->
+  <section class="hero">
+    <div class="container">
+      <h1>Booking <span>Fasilitas Olahraga</span><br>Bandara Soekarno-Hatta</h1>
+      <p>Tersedia lapangan futsal, basket, tenis, badminton, dan gymnasium. Booking mudah & cepat!</p>
+      <div style="display:flex;gap:1rem;justify-content:center;flex-wrap:wrap;">
+        <a href="/booking.html" class="btn btn-primary btn-lg">🏟️ Booking Sekarang</a>
+        <a href="#facilities" class="btn btn-outline btn-lg" style="color:#fff;border-color:rgba(255,255,255,.5)">Lihat Fasilitas</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- Info strip -->
+  <div style="background:var(--primary);color:#fff;padding:.7rem 1rem;">
+    <div class="container" style="display:flex;gap:2rem;flex-wrap:wrap;font-size:.85rem;font-weight:600;">
+      <span>✅ Karyawan Angkasa Pura diskon <strong id="ap-discount">20%</strong></span>
+      <span>🕐 Buka 05:00 – 22:00</span>
+      <span>📱 Booking online 24 jam</span>
+    </div>
+  </div>
+
+  <!-- Facilities -->
+  <section class="page" id="facilities">
+    <div class="container">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.5rem;flex-wrap:wrap;gap:1rem;">
+        <div>
+          <h2>Fasilitas Tersedia</h2>
+          <p class="text-muted" style="font-size:.9rem;">Pilih fasilitas untuk mulai booking</p>
+        </div>
+        <input type="text" id="search-facility" class="form-control" placeholder="🔍 Cari fasilitas..." style="max-width:240px;">
+      </div>
+      <div id="facilities-grid" class="facility-grid">
+        <div class="spinner"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- How to book -->
+  <section style="background:var(--surface);padding:3rem 1rem;">
+    <div class="container">
+      <h2 class="text-center mb-3">Cara Booking</h2>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1.5rem;text-align:center;">
+        <div class="card" style="padding:1.5rem;">
+          <div style="font-size:2.5rem;margin-bottom:.7rem;">🏟️</div>
+          <h4>1. Pilih Fasilitas</h4>
+          <p class="text-muted" style="font-size:.85rem;margin-top:.3rem;">Pilih lapangan atau gym yang ingin Anda gunakan</p>
+        </div>
+        <div class="card" style="padding:1.5rem;">
+          <div style="font-size:2.5rem;margin-bottom:.7rem;">📅</div>
+          <h4>2. Pilih Jadwal</h4>
+          <p class="text-muted" style="font-size:.85rem;margin-top:.3rem;">Tentukan tanggal, jam mulai, dan durasi sewa</p>
+        </div>
+        <div class="card" style="padding:1.5rem;">
+          <div style="font-size:2.5rem;margin-bottom:.7rem;">👤</div>
+          <h4>3. Isi Data</h4>
+          <p class="text-muted" style="font-size:.85rem;margin-top:.3rem;">Masukkan nama, nomor telepon, dan tipe customer</p>
+        </div>
+        <div class="card" style="padding:1.5rem;">
+          <div style="font-size:2.5rem;margin-bottom:.7rem;">✅</div>
+          <h4>4. Konfirmasi</h4>
+          <p class="text-muted" style="font-size:.85rem;margin-top:.3rem;">Booking berhasil! Tunjukkan kode booking ke petugas</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer style="background:var(--secondary);color:rgba(255,255,255,.7);padding:1.5rem;text-align:center;font-size:.85rem;">
+    <p>© 2024 Sport Center Bandara Soekarno-Hatta. Semua hak dilindungi.</p>
+  </footer>
+
+  <div id="toast-container"></div>
+
+  <script src="/js/api.js"></script>
+  <script>
+    async function loadFacilities() {
+      try {
+        const facilities = await API.get('/facilities?active=1');
+        const setting = await API.get('/settings/discount/angkasa_pura').catch(() => ({ discount_percentage: 20 }));
+        document.getElementById('ap-discount').textContent = setting.discount_percentage + '%';
+
+        const grid = document.getElementById('facilities-grid');
+        if (!facilities.length) {
+          grid.innerHTML = '<div class="empty-state"><div class="icon">🏟️</div><h3>Belum ada fasilitas</h3></div>';
+          return;
+        }
+        grid.innerHTML = facilities.map(f => `
+          <div class="facility-card" onclick="window.location='/booking.html?facilityId=${f.id}'">
+            <img src="${f.image_url || 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=600'}"
+                 alt="${f.name}" loading="lazy" onerror="this.src='https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=600'">
+            <div class="info">
+              <h3>${f.name}</h3>
+              <p class="text-muted" style="font-size:.82rem;">${f.description || ''}</p>
+              <div class="price">${formatRp(f.base_price)}<span style="font-weight:400;font-size:.82rem;color:var(--text-muted)"> / jam</span></div>
+              <div class="meta">🕐 ${f.open_time} – ${f.close_time}</div>
+              <button class="btn btn-primary btn-sm mt-2 w-100">Booking Sekarang →</button>
+            </div>
+          </div>
+        `).join('');
+      } catch (e) {
+        document.getElementById('facilities-grid').innerHTML = `<div class="alert alert-danger">Gagal memuat fasilitas: ${e.message}</div>`;
+      }
+    }
+
+    document.getElementById('search-facility').addEventListener('input', function() {
+      const q = this.value.toLowerCase();
+      document.querySelectorAll('.facility-card').forEach(card => {
+        card.style.display = card.innerText.toLowerCase().includes(q) ? '' : 'none';
+      });
+    });
+
+    loadFacilities();
+  </script>
+</body>
+</html>

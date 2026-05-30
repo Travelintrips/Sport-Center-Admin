@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pengaturan — Sport Center Admin</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="admin-layout">
+    <div id="sidebar-root"></div>
+    <div class="admin-content">
+      <div class="admin-topbar">
+        <div style="display:flex;align-items:center;gap:.8rem;">
+          <button class="hamburger" onclick="toggleSidebar()">☰</button>
+          <h1>Pengaturan Sistem</h1>
+        </div>
+      </div>
+      <div class="admin-main" style="max-width:640px;">
+
+        <!-- Diskon Angkasa Pura -->
+        <div class="card mb-2">
+          <div class="card-header"><h3>✈️ Pengaturan Diskon Angkasa Pura</h3></div>
+          <div class="card-body">
+            <div id="current-discount" class="alert alert-info mb-2">Memuat...</div>
+            <div id="discount-form">
+              <div class="form-group">
+                <label class="form-label">Persentase Diskon (%) <span class="req">*</span></label>
+                <div style="display:flex;align-items:center;gap:.8rem;">
+                  <input type="range" id="discount-slider" min="0" max="50" step="1" value="20"
+                    oninput="document.getElementById('discount-val').value=this.value"
+                    style="flex:1;">
+                  <input type="number" id="discount-val" class="form-control" min="0" max="100" value="20"
+                    oninput="document.getElementById('discount-slider').value=this.value"
+                    style="width:80px;">
+                  <span>%</span>
+                </div>
+                <div class="form-hint">Diskon berlaku untuk semua customer Angkasa Pura yang terverifikasi</div>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Keterangan</label>
+                <input type="text" id="discount-desc" class="form-control" placeholder="Contoh: Diskon khusus karyawan Angkasa Pura">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Status</label>
+                <select id="discount-active" class="form-select">
+                  <option value="1">✅ Aktif</option>
+                  <option value="0">❌ Nonaktif (semua bayar harga normal)</option>
+                </select>
+              </div>
+              <button class="btn btn-primary" onclick="saveDiscount()">💾 Simpan Pengaturan Diskon</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Simulasi harga -->
+        <div class="card mb-2">
+          <div class="card-header"><h3>🧮 Simulasi Harga</h3></div>
+          <div class="card-body">
+            <p class="text-muted mb-2" style="font-size:.88rem;">Hitung estimasi harga dengan dan tanpa diskon</p>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+              <div class="form-group">
+                <label class="form-label">Harga Dasar (Rp)</label>
+                <input type="number" id="sim-price" class="form-control" value="150000" oninput="simulate()">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Durasi (jam)</label>
+                <input type="number" id="sim-dur" class="form-control" value="2" min="1" oninput="simulate()">
+              </div>
+            </div>
+            <div id="sim-result" class="price-summary"></div>
+          </div>
+        </div>
+
+        <!-- Info admin -->
+        <div class="card">
+          <div class="card-header"><h3>ℹ️ Informasi Sistem</h3></div>
+          <div class="card-body">
+            <div class="price-summary">
+              <div class="price-row"><span>Login Admin</span><span>admin / admin123</span></div>
+              <div class="price-row"><span>Database</span><span>SQLite (lokal)</span></div>
+              <div class="price-row"><span>Versi</span><span>1.0.0</span></div>
+              <div class="price-row"><span>QR Scanner</span><span>html5-qrcode v2.3.8</span></div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <div id="toast-container"></div>
+  <script src="/js/api.js"></script>
+  <script src="/js/admin-layout.js"></script>
+  <script>
+    async function loadSettings() {
+      try {
+        const s = await API.get('/settings/discount/angkasa_pura');
+        document.getElementById('current-discount').innerHTML =
+          `Diskon saat ini: <strong>${s.discount_percentage}%</strong> — ${s.description || '-'} — ${s.is_active ? '✅ Aktif' : '❌ Nonaktif'}`;
+        document.getElementById('discount-val').value = s.discount_percentage;
+        document.getElementById('discount-slider').value = s.discount_percentage;
+        document.getElementById('discount-desc').value = s.description || '';
+        document.getElementById('discount-active').value = s.is_active ? '1' : '0';
+        simulate();
+      } catch (e) { toast(e.message, 'danger'); }
+    }
+
+    async function saveDiscount() {
+      const data = {
+        discount_percentage: Number(document.getElementById('discount-val').value),
+        description: document.getElementById('discount-desc').value.trim(),
+        is_active: document.getElementById('discount-active').value === '1',
+      };
+      if (isNaN(data.discount_percentage) || data.discount_percentage < 0 || data.discount_percentage > 100) {
+        toast('Persentase harus antara 0–100', 'danger'); return;
+      }
+      try {
+        await API.put('/settings/discount/angkasa_pura', data);
+        toast('Pengaturan diskon berhasil disimpan');
+        loadSettings();
+      } catch (e) { toast(e.message, 'danger'); }
+    }
+
+    function simulate() {
+      const price = Number(document.getElementById('sim-price').value) || 0;
+      const dur = Number(document.getElementById('sim-dur').value) || 1;
+      const pct = Number(document.getElementById('discount-val').value) || 0;
+      const base = price * dur;
+      const disc = Math.round(base * pct / 100);
+      const final = base - disc;
+      document.getElementById('sim-result').innerHTML = `
+        <div class="price-row"><span>Harga Dasar</span><span>${formatRp(price)}/jam</span></div>
+        <div class="price-row"><span>Durasi</span><span>${dur} jam</span></div>
+        <div class="price-row"><span>Total Dasar</span><span>${formatRp(base)}</span></div>
+        <div class="price-row text-muted"><span>Harga Customer Umum</span><span class="fw-bold">${formatRp(base)}</span></div>
+        <div class="price-row text-success"><span>Diskon AP ${pct}%</span><span>-${formatRp(disc)}</span></div>
+        <div class="price-row total"><span>Harga Angkasa Pura</span><span>${formatRp(final)}</span></div>
+      `;
+    }
+
+    loadSettings();
+  </script>
+</body>
+</html>

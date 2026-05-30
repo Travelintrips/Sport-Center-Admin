@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Verifikasi ID Card — Sport Center Admin</title>
+  <link rel="stylesheet" href="/css/style.css">
+  <!-- html5-qrcode via CDN -->
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <style>
+    #qr-reader { width: 100%; max-width: 400px; margin: 0 auto; }
+    #qr-reader video { border-radius: 8px !important; }
+    #qr-reader__scan_region { border-radius: 8px; overflow: hidden; }
+    .verify-result { border-radius: var(--radius); padding: 1.5rem; text-align: center; margin-top: 1rem; }
+    .verify-result.success { background: #dcfce7; border: 2px solid var(--success); }
+    .verify-result.error   { background: #fee2e2; border: 2px solid var(--danger); }
+    .verify-icon { font-size: 3rem; margin-bottom: .5rem; }
+  </style>
+</head>
+<body>
+  <div class="admin-layout">
+    <div id="sidebar-root"></div>
+    <div class="admin-content">
+      <div class="admin-topbar">
+        <div style="display:flex;align-items:center;gap:.8rem;">
+          <button class="hamburger" onclick="toggleSidebar()">☰</button>
+          <h1>Verifikasi ID Card</h1>
+        </div>
+        <a href="/admin/bookings.html" class="btn btn-ghost btn-sm">← Kembali ke Booking</a>
+      </div>
+      <div class="admin-main">
+        <div style="max-width:560px;margin:0 auto;">
+          <!-- Booking info -->
+          <div id="booking-info" class="card mb-2 hidden">
+            <div class="card-body" id="booking-info-body"></div>
+          </div>
+
+          <!-- Scanner card -->
+          <div class="card" id="scanner-card">
+            <div class="card-header"><h3>📷 Scan QR / Barcode ID Card</h3></div>
+            <div class="card-body">
+              <p class="text-muted mb-2" style="font-size:.88rem;">Arahkan kamera ke QR Code atau barcode pada ID Card Angkasa Pura</p>
+              <div id="qr-reader"></div>
+              <div id="qr-status" class="alert alert-info mt-2" style="display:none;"></div>
+            </div>
+            <div class="card-footer" style="display:flex;gap:.7rem;flex-wrap:wrap;">
+              <button id="start-btn" class="btn btn-primary" onclick="startScanner()">📷 Mulai Kamera</button>
+              <button id="stop-btn" class="btn btn-ghost hidden" onclick="stopScanner()">⏹ Stop Kamera</button>
+            </div>
+          </div>
+
+          <!-- Manual input -->
+          <div class="card mt-2">
+            <div class="card-header"><h3>⌨️ Input Manual</h3></div>
+            <div class="card-body">
+              <p class="text-muted mb-2" style="font-size:.88rem;">Masukkan nomor ID Card secara manual jika QR scan tidak berhasil</p>
+              <div style="display:flex;gap:.7rem;">
+                <input type="text" id="manual-input" class="form-control" placeholder="Contoh: AP-2024-001" style="flex:1;">
+                <button class="btn btn-primary" onclick="verifyManual()">✅ Verifikasi</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Result -->
+          <div id="verify-result" class="hidden"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast-container"></div>
+  <script src="/js/api.js"></script>
+  <script src="/js/admin-layout.js"></script>
+  <script>
+    let scanner = null;
+    let bookingId = getParam('bookingId');
+    let isVerifying = false;
+
+    async function init() {
+      if (!bookingId) return;
+      try {
+        const b = await API.get(`/bookings/${bookingId}`);
+        document.getElementById('booking-info').classList.remove('hidden');
+        if (b.verification_status !== 'pending') {
+          document.getElementById('booking-info-body').innerHTML = `
+            <div class="alert alert-${b.verification_status === 'verified' ? 'success' : 'danger'}">
+              Booking ini sudah berstatus <strong>${b.verification_status}</strong>. Tidak perlu verifikasi ulang.
+            </div>
+            <a href="/admin/bookings.html" class="btn btn-primary btn-sm">← Kembali ke Booking</a>
+          `;
+          document.getElementById('scanner-card').classList.add('hidden');
+          return;
+        }
+        document.getElementById('booking-info-body').innerHTML = `
+          <div style="display:flex;gap:1.2rem;flex-wrap:wrap;">
+            <div><div class="text-muted" style="font-size:.78rem;">Booking</div><div class="fw-bold">${b.booking_code}</div></div>
+            <div><div class="text-muted" style="font-size:.78rem;">Customer</div><div class="fw-bold">${b.customer_name}</div></div>
+            <div><div class="text-muted" style="font-size:.78rem;">Fasilitas</div><div>${b.facility_name}</div></div>
+            <div><div class="text-muted" style="font-size:.78rem;">Jadwal</div><div>${b.booking_date} ${b.start_time}–${b.end_time}</div></div>
+            <div><div class="text-muted" style="font-size:.78rem;">ID Card di Booking</div><div>${b.id_card_number || '<em>Belum diisi</em>'}</div></div>
+          </div>
+          <div class="mt-1">${statusBadge(b.verification_status)}</div>
+        `;
+        if (b.id_card_number) {
+          document.getElementById('manual-input').value = b.id_card_number;
+        }
+      } catch (e) {
+        toast('Gagal memuat data booking: ' + e.message, 'danger');
+      }
+    }
+
+    function startScanner() {
+      document.getElementById('start-btn').classList.add('hidden');
+      document.getElementById('stop-btn').classList.remove('hidden');
+      const status = document.getElementById('qr-status');
+      status.style.display = 'flex';
+      status.textContent = '🔄 Mengaktifkan kamera...';
+
+      scanner = new Html5Qrcode('qr-reader');
+      scanner.start(
+        { facingMode: 'environment' },
+        { fps: 10, qrbox: { width: 220, height: 220 } },
+        (decodedText) => {
+          status.textContent = `✅ Terdeteksi: ${decodedText}`;
+          document.getElementById('manual-input').value = decodedText;
+          stopScanner();
+          verifyIdCard(decodedText);
+        },
+        () => {}
+      ).then(() => {
+        status.textContent = '📷 Kamera aktif. Arahkan ke ID Card...';
+        status.className = 'alert alert-info mt-2';
+      }).catch(err => {
+        status.textContent = '❌ Kamera tidak bisa diakses: ' + err;
+        status.className = 'alert alert-danger mt-2';
+        document.getElementById('start-btn').classList.remove('hidden');
+        document.getElementById('stop-btn').classList.add('hidden');
+      });
+    }
+
+    function stopScanner() {
+      if (scanner) {
+        scanner.stop().catch(() => {});
+        scanner = null;
+      }
+      document.getElementById('start-btn').classList.remove('hidden');
+      document.getElementById('stop-btn').classList.add('hidden');
+    }
+
+    function verifyManual() {
+      const val = document.getElementById('manual-input').value.trim();
+      if (!val) { toast('Masukkan nomor ID Card', 'danger'); return; }
+      verifyIdCard(val);
+    }
+
+    async function verifyIdCard(idCard) {
+      if (isVerifying) return;
+      if (!bookingId) { toast('Tidak ada booking yang dipilih', 'danger'); return; }
+      isVerifying = true;
+      const resultEl = document.getElementById('verify-result');
+      resultEl.classList.remove('hidden');
+      resultEl.innerHTML = '<div class="spinner"></div>';
+      try {
+        const res = await API.post(`/bookings/${bookingId}/verify`, { id_card_number: idCard });
+        const b = res.booking;
+        resultEl.innerHTML = `
+          <div class="verify-result success">
+            <div class="verify-icon">✅</div>
+            <h3>${res.message}</h3>
+            <div class="mt-2">
+              <div class="price-summary" style="text-align:left;">
+                <div class="price-row"><span>Nama Customer</span><span>${b.customer_name}</span></div>
+                <div class="price-row"><span>ID Card</span><span>${idCard}</span></div>
+                <div class="price-row"><span>Harga Dasar</span><span>${formatRp(b.base_price)}</span></div>
+                <div class="price-row text-success"><span>Diskon ${b.discount_percentage}%</span><span>-${formatRp(b.discount_amount)}</span></div>
+                <div class="price-row total"><span>Harga Final</span><span>${formatRp(b.final_price)}</span></div>
+              </div>
+              <a href="/admin/bookings.html" class="btn btn-success mt-2 btn-block">← Kembali ke Booking</a>
+            </div>
+          </div>`;
+        stopScanner();
+      } catch (e) {
+        resultEl.innerHTML = `
+          <div class="verify-result error">
+            <div class="verify-icon">❌</div>
+            <h3>${e.message}</h3>
+            <button class="btn btn-outline mt-2" onclick="document.getElementById('verify-result').classList.add('hidden'); isVerifying=false;">Coba Lagi</button>
+            <a href="/admin/bookings.html" class="btn btn-ghost mt-2">← Kembali</a>
+          </div>`;
+        isVerifying = false;
+      }
+    }
+
+    window.addEventListener('beforeunload', stopScanner);
+    init();
+  </script>
+</body>
+</html>

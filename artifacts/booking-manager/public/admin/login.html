@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Login Admin — Sport Center</title>
+  <link rel="stylesheet" href="/css/style.css">
+  <style>
+    body { background: linear-gradient(135deg, var(--secondary) 0%, #2d1b4e 100%); display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+    .login-box { background: var(--surface); border-radius: var(--radius); padding: 2.5rem; width: 100%; max-width: 400px; box-shadow: var(--shadow-lg); }
+    .login-logo { text-align: center; margin-bottom: 1.8rem; }
+    .login-logo .icon { width: 64px; height: 64px; background: var(--primary); border-radius: 16px; display: flex; align-items: center; justify-content: center; font-size: 2rem; margin: 0 auto .7rem; }
+    .login-logo h1 { font-size: 1.4rem; }
+    .login-logo p { color: var(--text-muted); font-size: .85rem; }
+  </style>
+</head>
+<body>
+  <div class="login-box">
+    <div class="login-logo">
+      <div class="icon">⚽</div>
+      <h1>Sport Center Admin</h1>
+      <p>Masuk ke panel manajemen</p>
+    </div>
+    <div id="error-msg" class="alert alert-danger hidden"></div>
+    <form id="login-form" onsubmit="doLogin(event)">
+      <div class="form-group">
+        <label class="form-label">Username</label>
+        <input type="text" id="username" class="form-control" placeholder="admin" value="admin" required>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Password</label>
+        <input type="password" id="password" class="form-control" placeholder="••••••••" value="admin123" required>
+      </div>
+      <button type="submit" id="login-btn" class="btn btn-primary btn-block btn-lg">Masuk →</button>
+    </form>
+    <p class="text-center mt-2" style="font-size:.8rem;color:var(--text-muted);">Demo: admin / admin123</p>
+    <div class="mt-2 text-center"><a href="/" style="font-size:.85rem;">← Kembali ke halaman utama</a></div>
+  </div>
+  <div id="toast-container"></div>
+  <script src="/js/api.js"></script>
+  <script>
+    if (localStorage.getItem('admin_token')) window.location.href = '/admin/index.html';
+
+    async function doLogin(e) {
+      e.preventDefault();
+      const btn = document.getElementById('login-btn');
+      btn.disabled = true; btn.textContent = '⏳ Memproses...';
+      const err = document.getElementById('error-msg');
+      err.classList.add('hidden');
+      try {
+        const res = await API.login(
+          document.getElementById('username').value,
+          document.getElementById('password').value
+        );
+        localStorage.setItem('admin_token', res.token);
+        localStorage.setItem('admin_name', res.name);
+        window.location.href = '/admin/index.html';
+      } catch (ex) {
+        err.textContent = ex.message;
+        err.classList.remove('hidden');
+        btn.disabled = false; btn.textContent = 'Masuk →';
+      }
+    }
+  </script>
+</body>
+</html>

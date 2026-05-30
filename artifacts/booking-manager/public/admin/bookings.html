@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Booking — Sport Center Admin</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="admin-layout">
+    <div id="sidebar-root"></div>
+    <div class="admin-content">
+      <div class="admin-topbar">
+        <div style="display:flex;align-items:center;gap:.8rem;">
+          <button class="hamburger" onclick="toggleSidebar()">☰</button>
+          <h1>Manajemen Booking</h1>
+        </div>
+      </div>
+      <div class="admin-main">
+        <!-- Filter bar -->
+        <div class="card mb-2">
+          <div class="card-body" style="padding:1rem 1.2rem;">
+            <div style="display:flex;gap:.7rem;flex-wrap:wrap;align-items:flex-end;">
+              <div>
+                <label class="form-label" style="font-size:.8rem;">Cari</label>
+                <input type="text" id="search" class="form-control" placeholder="Nama / kode booking..." style="width:220px;" oninput="loadBookings()">
+              </div>
+              <div>
+                <label class="form-label" style="font-size:.8rem;">Status</label>
+                <select id="filter-status" class="form-select" style="width:180px;" onchange="loadBookings()">
+                  <option value="">Semua Status</option>
+                  <option value="pending">Pending Verifikasi</option>
+                  <option value="verified">Terverifikasi</option>
+                  <option value="cancelled">Dibatalkan</option>
+                  <option value="rejected">Ditolak</option>
+                </select>
+              </div>
+              <div>
+                <label class="form-label" style="font-size:.8rem;">Tanggal</label>
+                <input type="date" id="filter-date" class="form-control" onchange="loadBookings()">
+              </div>
+              <button class="btn btn-ghost btn-sm" onclick="clearFilters()">✕ Reset</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div id="booking-count" class="text-muted" style="font-size:.87rem;"></div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Kode Booking</th>
+                  <th>Customer</th>
+                  <th>Fasilitas</th>
+                  <th>Jadwal</th>
+                  <th>Harga</th>
+                  <th>Status</th>
+                  <th>Aksi</th>
+                </tr>
+              </thead>
+              <tbody id="booking-table">
+                <tr><td colspan="7" class="text-center"><div class="spinner" style="margin:.7rem auto;width:28px;height:28px;border-width:3px;"></div></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal detail booking -->
+  <div id="detail-modal" class="modal-backdrop hidden" onclick="closeDetail(event)">
+    <div class="modal" onclick="event.stopPropagation()">
+      <div class="modal-header"><h3>Detail Booking</h3><button class="btn-close" onclick="closeDetailModal()">×</button></div>
+      <div class="modal-body" id="detail-body"></div>
+      <div class="modal-footer" id="detail-footer"></div>
+    </div>
+  </div>
+
+  <div id="toast-container"></div>
+  <script src="/js/api.js"></script>
+  <script src="/js/admin-layout.js"></script>
+  <script>
+    // Pre-fill filter from URL
+    const preStatus = getParam('status');
+    if (preStatus) { setTimeout(() => { document.getElementById('filter-status').value = preStatus; loadBookings(); }, 300); }
+
+    async function loadBookings() {
+      const search = document.getElementById('search').value;
+      const status = document.getElementById('filter-status').value;
+      const date   = document.getElementById('filter-date').value;
+      const params = new URLSearchParams();
+      if (search) params.set('search', search);
+      if (status) params.set('status', status);
+      if (date)   params.set('date', date);
+      try {
+        const bookings = await API.get('/bookings?' + params);
+        document.getElementById('booking-count').textContent = `${bookings.length} booking ditemukan`;
+        document.getElementById('booking-table').innerHTML = bookings.length
+          ? bookings.map(b => `<tr>
+              <td><code style="font-size:.82rem;font-weight:700;">${b.booking_code}</code><br><span class="text-muted" style="font-size:.75rem;">${formatDateTime(b.created_at)}</span></td>
+              <td>
+                <div class="fw-bold">${b.customer_name}</div>
+                <div style="font-size:.78rem;">${b.customer_phone || ''}</div>
+                <div>${typeBadge(b.customer_type)}</div>
+              </td>
+              <td>${b.facility_name}</td>
+              <td>${b.booking_date}<br><span style="font-size:.82rem;">${b.start_time}–${b.end_time}</span><br><span class="badge badge-secondary">${b.duration_hours} jam</span></td>
+              <td>
+                <div class="fw-bold">${formatRp(b.final_price)}</div>
+                ${b.discount_amount > 0 ? `<div class="text-success" style="font-size:.78rem;">-${formatRp(b.discount_amount)} (${b.discount_percentage}%)</div>` : ''}
+                ${b.verification_status === 'pending' ? `<div class="text-muted" style="font-size:.75rem;">Belum diskon</div>` : ''}
+              </td>
+              <td>${statusBadge(b.verification_status)}</td>
+              <td style="display:flex;flex-direction:column;gap:.3rem;min-width:110px;">
+                <button class="btn btn-ghost btn-sm" onclick="showDetail(${b.id})">🔎 Detail</button>
+                ${b.verification_status === 'pending' ? `<a href="/admin/verify.html?bookingId=${b.id}" class="btn btn-warning btn-sm">🔍 Verifikasi ID</a>` : ''}
+                ${b.verification_status !== 'cancelled' && b.verification_status !== 'rejected' ? `<button class="btn btn-danger btn-sm" onclick="cancelBooking(${b.id})">❌ Batalkan</button>` : ''}
+              </td>
+            </tr>`).join('')
+          : '<tr><td colspan="7"><div class="empty-state"><div class="icon">📋</div><h3>Tidak ada booking</h3></div></td></tr>';
+      } catch (e) { toast(e.message, 'danger'); }
+    }
+
+    function clearFilters() {
+      document.getElementById('search').value = '';
+      document.getElementById('filter-status').value = '';
+      document.getElementById('filter-date').value = '';
+      loadBookings();
+    }
+
+    async function showDetail(id) {
+      document.getElementById('detail-modal').classList.remove('hidden');
+      document.getElementById('detail-body').innerHTML = '<div class="spinner" style="width:28px;height:28px;border-width:3px;margin:.5rem auto;"></div>';
+      try {
+        const b = await API.get(`/bookings/${id}`);
+        document.getElementById('detail-body').innerHTML = `
+          <div class="price-summary">
+            <div class="price-row"><span>Kode</span><span><strong>${b.booking_code}</strong></span></div>
+            <div class="price-row"><span>Customer</span><span>${b.customer_name}</span></div>
+            <div class="price-row"><span>Telepon</span><span>${b.customer_phone || '-'}</span></div>
+            <div class="price-row"><span>Tipe</span><span>${typeBadge(b.customer_type)}</span></div>
+            ${b.id_card_number ? `<div class="price-row"><span>ID Card</span><span>${b.id_card_number}</span></div>` : ''}
+            <div class="price-row"><span>Fasilitas</span><span>${b.facility_name}</span></div>
+            <div class="price-row"><span>Tanggal</span><span>${b.booking_date}</span></div>
+            <div class="price-row"><span>Waktu</span><span>${b.start_time} – ${b.end_time}</span></div>
+            <div class="price-row"><span>Durasi</span><span>${b.duration_hours} jam</span></div>
+            <div class="price-row"><span>Harga Dasar</span><span>${formatRp(b.base_price)}</span></div>
+            ${b.discount_amount > 0 ? `<div class="price-row text-success"><span>Diskon ${b.discount_percentage}%</span><span>-${formatRp(b.discount_amount)}</span></div>` : ''}
+            <div class="price-row total"><span>Total</span><span>${formatRp(b.final_price)}</span></div>
+            <div class="price-row"><span>Status</span><span>${statusBadge(b.verification_status)}</span></div>
+            ${b.notes ? `<div class="price-row"><span>Catatan</span><span>${b.notes}</span></div>` : ''}
+          </div>`;
+        document.getElementById('detail-footer').innerHTML = `
+          ${b.verification_status === 'pending' ? `<a href="/admin/verify.html?bookingId=${b.id}" class="btn btn-warning">🔍 Verifikasi ID Card</a>` : ''}
+          <button onclick="closeDetailModal()" class="btn btn-ghost">Tutup</button>
+        `;
+      } catch (e) { toast(e.message, 'danger'); }
+    }
+
+    function closeDetailModal() { document.getElementById('detail-modal').classList.add('hidden'); }
+    function closeDetail(e) { if (e.target === document.getElementById('detail-modal')) closeDetailModal(); }
+
+    async function cancelBooking(id) {
+      if (!confirm('Yakin ingin membatalkan booking ini?')) return;
+      try {
+        await API.put(`/bookings/${id}/cancel`);
+        toast('Booking berhasil dibatalkan');
+        loadBookings();
+      } catch (e) { toast(e.message, 'danger'); }
+    }
+
+    loadBookings();
+  </script>
+</body>
+</html>
