@@ -1,9 +1,10 @@
-import { pgTable, text, serial, timestamp, integer } from "drizzle-orm/pg-core";
+import { text, serial, timestamp, integer } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { facilitiesTable } from "./facilities";
+import { scSchema } from "./_schema";
 
-export const blockedSchedulesTable = pgTable("blocked_schedules", {
+export const blockedSchedulesTable = scSchema.table("blocked_schedules", {
   id: serial("id").primaryKey(),
   facilityId: integer("facility_id").notNull().references(() => facilitiesTable.id, { onDelete: "cascade" }),
   date: text("date").notNull(),

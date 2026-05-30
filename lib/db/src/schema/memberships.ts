@@ -1,10 +1,11 @@
-import { pgTable, text, serial, timestamp, numeric, integer, pgEnum } from "drizzle-orm/pg-core";
+import { text, serial, timestamp, numeric, integer } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
+import { scSchema } from "./_schema";
 
-export const membershipStatusEnum = pgEnum("membership_status", ["active", "expired", "cancelled"]);
+export const membershipStatusEnum = scSchema.enum("membership_status", ["active", "expired", "cancelled"]);
 
-export const gymMembershipsTable = pgTable("gym_memberships", {
+export const gymMembershipsTable = scSchema.table("gym_memberships", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
   email: text("email").notNull(),

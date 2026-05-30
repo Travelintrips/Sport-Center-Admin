@@ -1,10 +1,11 @@
-import { pgTable, text, serial, timestamp, pgEnum } from "drizzle-orm/pg-core";
+import { text, serial, timestamp } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
+import { scSchema } from "./_schema";
 
-export const userRoleEnum = pgEnum("user_role", ["admin", "customer"]);
+export const userRoleEnum = scSchema.enum("user_role", ["admin", "customer"]);
 
-export const usersTable = pgTable("users", {
+export const usersTable = scSchema.table("users", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
   email: text("email").notNull().unique(),

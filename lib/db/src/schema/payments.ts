@@ -1,11 +1,12 @@
-import { pgTable, text, serial, timestamp, numeric, integer, pgEnum } from "drizzle-orm/pg-core";
+import { text, serial, timestamp, numeric, integer } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { bookingsTable } from "./bookings";
+import { scSchema } from "./_schema";
 
-export const paymentStatusEnum = pgEnum("payment_status", ["pending", "confirmed", "rejected"]);
+export const paymentStatusEnum = scSchema.enum("payment_status", ["pending", "confirmed", "rejected"]);
 
-export const paymentsTable = pgTable("payments", {
+export const paymentsTable = scSchema.table("payments", {
   id: serial("id").primaryKey(),
   bookingId: integer("booking_id").notNull().references(() => bookingsTable.id, { onDelete: "cascade" }).unique(),
   amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),

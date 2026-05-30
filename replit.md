@@ -9,8 +9,8 @@ Web app untuk manajemen dan pemesanan fasilitas olahraga — customer-facing boo
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
-- `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string, `SESSION_SECRET` — used for HMAC password hashing
+- DB schema push: `drizzle-kit push` does NOT work against the Supabase instance (it hangs on introspection of the shared `public` schema). Instead run `drizzle-kit generate` then apply the SQL with a `pg` client over the session pooler (port 5432). See Gotchas + memory.
+- Required env: `SUPABASE_DATABASE_URL` (prod) / `SUPABASE_DATABASE_URL_DEV` (dev) — Supabase Postgres pooler connection, `SESSION_SECRET` — used for HMAC password hashing
 
 ## Stack
 
@@ -73,6 +73,7 @@ Web app untuk manajemen dan pemesanan fasilitas olahraga — customer-facing boo
 - Always run `pnpm --filter @workspace/api-spec run codegen` after changing `openapi.yaml`
 - Do NOT edit files in `lib/api-client-react/src/generated/` — they are overwritten by codegen
 - After updating `routes/index.ts`, the API server needs to rebuild (restart workflow)
+- DB is a **shared Supabase** instance — our tables live in a dedicated `sport_center` Postgres schema (via `pgSchema` in `lib/db/src/schema/_schema.ts`), NOT `public` (which holds ~150 tables from other apps). Always define new tables on `scSchema`. Runtime uses transaction pooler (6543); DDL/migrations need session pooler (5432).
 - The `Customers` page currently shows only registered users (role=customer), not anonymous bookings. Existing demo bookings are made without a user account, so the customers list may appear empty until actual user registrations occur.
 
 ## Pointers

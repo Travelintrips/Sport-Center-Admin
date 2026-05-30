@@ -1,10 +1,11 @@
-import { pgTable, text, serial, timestamp, numeric, boolean, integer, pgEnum } from "drizzle-orm/pg-core";
+import { text, serial, timestamp, numeric, boolean, integer } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
+import { scSchema } from "./_schema";
 
-export const promoTypeEnum = pgEnum("promo_type", ["promo", "event"]);
+export const promoTypeEnum = scSchema.enum("promo_type", ["promo", "event"]);
 
-export const promosTable = pgTable("promos", {
+export const promosTable = scSchema.table("promos", {
   id: serial("id").primaryKey(),
   title: text("title").notNull(),
   description: text("description"),
@@ -24,7 +25,7 @@ export const promosTable = pgTable("promos", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });
 
-export const promoRegistrationsTable = pgTable("promo_registrations", {
+export const promoRegistrationsTable = scSchema.table("promo_registrations", {
   id: serial("id").primaryKey(),
   promoId: integer("promo_id").notNull().references(() => promosTable.id, { onDelete: "cascade" }),
   name: text("name").notNull(),

@@ -1,10 +1,11 @@
-import { pgTable, text, serial, timestamp, numeric, integer, pgEnum } from "drizzle-orm/pg-core";
+import { text, serial, timestamp, numeric, integer } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { facilitiesTable } from "./facilities";
 import { usersTable } from "./users";
+import { scSchema } from "./_schema";
 
-export const bookingStatusEnum = pgEnum("booking_status", [
+export const bookingStatusEnum = scSchema.enum("booking_status", [
   "pending_payment",
   "paid",
   "confirmed",
@@ -13,7 +14,7 @@ export const bookingStatusEnum = pgEnum("booking_status", [
   "refunded",
 ]);
 
-export const bookingsTable = pgTable("bookings", {
+export const bookingsTable = scSchema.table("bookings", {
   id: serial("id").primaryKey(),
   orderNumber: text("order_number").notNull().unique(),
   customerId: integer("customer_id").references(() => usersTable.id, { onDelete: "set null" }),
@@ -35,7 +36,7 @@ export const bookingsTable = pgTable("bookings", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });
 
-export const adminNotesTable = pgTable("admin_notes", {
+export const adminNotesTable = scSchema.table("admin_notes", {
   id: serial("id").primaryKey(),
   bookingId: integer("booking_id").notNull().references(() => bookingsTable.id, { onDelete: "cascade" }),
   note: text("note").notNull(),

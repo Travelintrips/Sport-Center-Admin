@@ -1,8 +1,9 @@
-import { pgTable, text, serial, timestamp, numeric, integer, boolean } from "drizzle-orm/pg-core";
+import { text, serial, timestamp, numeric, integer, boolean } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
+import { scSchema } from "./_schema";
 
-export const facilitiesTable = pgTable("facilities", {
+export const facilitiesTable = scSchema.table("facilities", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
   category: text("category").notNull(),
@@ -18,7 +19,7 @@ export const facilitiesTable = pgTable("facilities", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });
 
-export const facilityImagesTable = pgTable("facility_images", {
+export const facilityImagesTable = scSchema.table("facility_images", {
   id: serial("id").primaryKey(),
   facilityId: integer("facility_id").notNull().references(() => facilitiesTable.id, { onDelete: "cascade" }),
   url: text("url").notNull(),

@@ -6,8 +6,10 @@ const { Pool } = pg;
 
 const isProduction = process.env.NODE_ENV === "production";
 const connectionString = isProduction
-  ? (process.env.PROD_DATABASE_URL || process.env.DATABASE_URL)
-  : process.env.DATABASE_URL;
+  ? (process.env.SUPABASE_DATABASE_URL ||
+     process.env.PROD_DATABASE_URL ||
+     process.env.DATABASE_URL)
+  : (process.env.SUPABASE_DATABASE_URL_DEV || process.env.DATABASE_URL);
 
 if (!connectionString) {
   throw new Error(
@@ -15,7 +17,12 @@ if (!connectionString) {
   );
 }
 
-export const pool = new Pool({ connectionString });
+const useSsl = /supabase\.(co|com|in)/.test(connectionString);
+
+export const pool = new Pool({
+  connectionString,
+  ...(useSsl ? { ssl: { rejectUnauthorized: false } } : {}),
+});
 export const db = drizzle(pool, { schema });
 
 export * from "./schema";
