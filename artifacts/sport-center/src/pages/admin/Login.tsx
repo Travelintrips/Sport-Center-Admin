@@ -27,7 +27,8 @@ export default function AdminLogin() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
       });
-      const data = await res.json();
+      let data: any = {};
+      try { data = await res.json(); } catch { /* non-JSON body */ }
       if (!res.ok) {
         toast({
           title: "Login Gagal",
@@ -36,12 +37,17 @@ export default function AdminLogin() {
         });
         return;
       }
+      if (!data.token) {
+        toast({ title: "Login Gagal", description: "Respons tidak valid dari server", variant: "destructive" });
+        return;
+      }
       setToken(data.token);
-      queryClient.invalidateQueries({ queryKey: getGetMeQueryKey() });
+      await queryClient.invalidateQueries({ queryKey: getGetMeQueryKey() });
       toast({ title: "Login berhasil", description: "Selamat datang, Admin." });
-      setLocation("/admin");
-    } catch {
-      toast({ title: "Login Gagal", description: "Terjadi kesalahan. Coba lagi.", variant: "destructive" });
+      setLocation("/admin/dashboard");
+    } catch (err: any) {
+      console.error("Admin login error:", err);
+      toast({ title: "Login Gagal", description: err?.message ?? "Terjadi kesalahan jaringan. Coba lagi.", variant: "destructive" });
     } finally {
       setIsPending(false);
     }
