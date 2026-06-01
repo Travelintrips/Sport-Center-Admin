@@ -49,37 +49,23 @@ export const RegisterBody = zod.object({
 
 
 /**
- * @summary Get bookings for the currently logged-in customer
+ * @summary Get bookings for the authenticated customer
  */
 export const GetMyBookingsResponseItem = zod.object({
   "id": zod.number(),
   "orderNumber": zod.string(),
-  "customerId": zod.number().nullish(),
-  "customerName": zod.string(),
-  "customerEmail": zod.string(),
-  "customerPhone": zod.string(),
   "facilityId": zod.number(),
   "facilityName": zod.string(),
-  "facilityCategory": zod.string().optional(),
+  "facilityCategory": zod.string(),
   "bookingDate": zod.string(),
   "startTime": zod.string(),
   "endTime": zod.string(),
-  "durationHours": zod.number(),
   "totalPrice": zod.number(),
-  "status": zod.enum(['pending_payment', 'paid', 'confirmed', 'cancelled', 'completed', 'refunded']),
+  "status": zod.string(),
+  "paymentStatus": zod.string().nullish(),
+  "paymentProofUrl": zod.string().nullish(),
   "notes": zod.string().nullish(),
-  "adminNotes": zod.string().nullish(),
-  "whatsappMessage": zod.string().nullish(),
-  "payment": zod.object({
-  "id": zod.number(),
-  "bookingId": zod.number(),
-  "amount": zod.number(),
-  "proofUrl": zod.string().nullish(),
-  "status": zod.enum(['pending', 'confirmed', 'rejected']),
-  "notes": zod.string().nullish(),
-  "createdAt": zod.string().optional()
-}).nullish(),
-  "createdAt": zod.string().optional()
+  "createdAt": zod.string().nullable()
 })
 export const GetMyBookingsResponse = zod.array(GetMyBookingsResponseItem)
 
@@ -113,6 +99,7 @@ export const ListFacilitiesResponseItem = zod.object({
   "pricePerHour": zod.number(),
   "openTime": zod.string(),
   "closeTime": zod.string(),
+  "bookingMode": zod.enum(['time_slot', 'walk_in']),
   "minDuration": zod.number().optional(),
   "maxDuration": zod.number().nullish(),
   "capacity": zod.number().nullish(),
@@ -161,6 +148,7 @@ export const GetFacilityResponse = zod.object({
   "pricePerHour": zod.number(),
   "openTime": zod.string(),
   "closeTime": zod.string(),
+  "bookingMode": zod.enum(['time_slot', 'walk_in']),
   "minDuration": zod.number().optional(),
   "maxDuration": zod.number().nullish(),
   "capacity": zod.number().nullish(),
@@ -204,6 +192,7 @@ export const UpdateFacilityResponse = zod.object({
   "pricePerHour": zod.number(),
   "openTime": zod.string(),
   "closeTime": zod.string(),
+  "bookingMode": zod.enum(['time_slot', 'walk_in']),
   "minDuration": zod.number().optional(),
   "maxDuration": zod.number().nullish(),
   "capacity": zod.number().nullish(),
@@ -268,6 +257,13 @@ export const ListBookingsResponseItem = zod.object({
   "durationHours": zod.number(),
   "totalPrice": zod.number(),
   "status": zod.enum(['pending_payment', 'paid', 'confirmed', 'cancelled', 'completed', 'refunded']),
+  "customerType": zod.enum(['umum', 'angkasa_pura']).optional(),
+  "idCardNumber": zod.string().nullish(),
+  "verificationStatus": zod.enum(['not_required', 'pending', 'verified', 'rejected']).optional(),
+  "basePrice": zod.number().nullish(),
+  "apDiscountAmount": zod.number().optional(),
+  "activityType": zod.string().nullish(),
+  "numberOfPeople": zod.number().nullish(),
   "notes": zod.string().nullish(),
   "adminNotes": zod.string().nullish(),
   "whatsappMessage": zod.string().nullish(),
@@ -294,8 +290,12 @@ export const CreateBookingBody = zod.object({
   "customerPhone": zod.string(),
   "facilityId": zod.number(),
   "bookingDate": zod.string(),
-  "startTime": zod.string(),
-  "durationHours": zod.number(),
+  "startTime": zod.string().optional(),
+  "durationHours": zod.number().optional(),
+  "activityType": zod.string().optional(),
+  "numberOfPeople": zod.number().optional(),
+  "customerType": zod.enum(['umum', 'angkasa_pura']).optional(),
+  "idCardNumber": zod.string().optional(),
   "notes": zod.string().optional()
 })
 
@@ -368,6 +368,13 @@ export const GetBookingResponse = zod.object({
   "durationHours": zod.number(),
   "totalPrice": zod.number(),
   "status": zod.enum(['pending_payment', 'paid', 'confirmed', 'cancelled', 'completed', 'refunded']),
+  "customerType": zod.enum(['umum', 'angkasa_pura']).optional(),
+  "idCardNumber": zod.string().nullish(),
+  "verificationStatus": zod.enum(['not_required', 'pending', 'verified', 'rejected']).optional(),
+  "basePrice": zod.number().nullish(),
+  "apDiscountAmount": zod.number().optional(),
+  "activityType": zod.string().nullish(),
+  "numberOfPeople": zod.number().nullish(),
   "notes": zod.string().nullish(),
   "adminNotes": zod.string().nullish(),
   "whatsappMessage": zod.string().nullish(),
@@ -412,6 +419,13 @@ export const UpdateBookingResponse = zod.object({
   "durationHours": zod.number(),
   "totalPrice": zod.number(),
   "status": zod.enum(['pending_payment', 'paid', 'confirmed', 'cancelled', 'completed', 'refunded']),
+  "customerType": zod.enum(['umum', 'angkasa_pura']).optional(),
+  "idCardNumber": zod.string().nullish(),
+  "verificationStatus": zod.enum(['not_required', 'pending', 'verified', 'rejected']).optional(),
+  "basePrice": zod.number().nullish(),
+  "apDiscountAmount": zod.number().optional(),
+  "activityType": zod.string().nullish(),
+  "numberOfPeople": zod.number().nullish(),
   "notes": zod.string().nullish(),
   "adminNotes": zod.string().nullish(),
   "whatsappMessage": zod.string().nullish(),
@@ -451,6 +465,13 @@ export const GetBookingByOrderResponse = zod.object({
   "durationHours": zod.number(),
   "totalPrice": zod.number(),
   "status": zod.enum(['pending_payment', 'paid', 'confirmed', 'cancelled', 'completed', 'refunded']),
+  "customerType": zod.enum(['umum', 'angkasa_pura']).optional(),
+  "idCardNumber": zod.string().nullish(),
+  "verificationStatus": zod.enum(['not_required', 'pending', 'verified', 'rejected']).optional(),
+  "basePrice": zod.number().nullish(),
+  "apDiscountAmount": zod.number().optional(),
+  "activityType": zod.string().nullish(),
+  "numberOfPeople": zod.number().nullish(),
   "notes": zod.string().nullish(),
   "adminNotes": zod.string().nullish(),
   "whatsappMessage": zod.string().nullish(),
@@ -715,6 +736,13 @@ export const GetDashboardResponse = zod.object({
   "durationHours": zod.number(),
   "totalPrice": zod.number(),
   "status": zod.enum(['pending_payment', 'paid', 'confirmed', 'cancelled', 'completed', 'refunded']),
+  "customerType": zod.enum(['umum', 'angkasa_pura']).optional(),
+  "idCardNumber": zod.string().nullish(),
+  "verificationStatus": zod.enum(['not_required', 'pending', 'verified', 'rejected']).optional(),
+  "basePrice": zod.number().nullish(),
+  "apDiscountAmount": zod.number().optional(),
+  "activityType": zod.string().nullish(),
+  "numberOfPeople": zod.number().nullish(),
   "notes": zod.string().nullish(),
   "adminNotes": zod.string().nullish(),
   "whatsappMessage": zod.string().nullish(),
@@ -926,6 +954,240 @@ export const UpdateSettingsResponse = zod.object({
   "bankAccount": zod.string().nullish(),
   "bankAccountName": zod.string().nullish(),
   "qrisImageUrl": zod.string().nullish()
+})
+
+
+/**
+ * @summary List discount settings per customer type
+ */
+export const ListDiscountSettingsResponseItem = zod.object({
+  "id": zod.number(),
+  "customerType": zod.string(),
+  "discountPercentage": zod.number(),
+  "description": zod.string().nullish(),
+  "isActive": zod.boolean()
+})
+export const ListDiscountSettingsResponse = zod.array(ListDiscountSettingsResponseItem)
+
+
+/**
+ * @summary Get discount setting for a customer type
+ */
+export const GetDiscountSettingParams = zod.object({
+  "customerType": zod.coerce.string()
+})
+
+export const GetDiscountSettingResponse = zod.object({
+  "id": zod.number(),
+  "customerType": zod.string(),
+  "discountPercentage": zod.number(),
+  "description": zod.string().nullish(),
+  "isActive": zod.boolean()
+})
+
+
+/**
+ * @summary Update discount percentage and active state (admin)
+ */
+export const UpdateDiscountSettingParams = zod.object({
+  "customerType": zod.coerce.string()
+})
+
+export const updateDiscountSettingBodyDiscountPercentageMin = 0;
+export const updateDiscountSettingBodyDiscountPercentageMax = 100;
+
+
+
+export const UpdateDiscountSettingBody = zod.object({
+  "discountPercentage": zod.number().min(updateDiscountSettingBodyDiscountPercentageMin).max(updateDiscountSettingBodyDiscountPercentageMax),
+  "description": zod.string().optional(),
+  "isActive": zod.boolean().optional()
+})
+
+export const UpdateDiscountSettingResponse = zod.object({
+  "id": zod.number(),
+  "customerType": zod.string(),
+  "discountPercentage": zod.number(),
+  "description": zod.string().nullish(),
+  "isActive": zod.boolean()
+})
+
+
+/**
+ * @summary List Angkasa Pura members (admin)
+ */
+export const ListApMembersQueryParams = zod.object({
+  "search": zod.coerce.string().optional()
+})
+
+export const ListApMembersResponseItem = zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "phone": zod.string().nullish(),
+  "email": zod.string().nullish(),
+  "idCardNumber": zod.string(),
+  "isActive": zod.boolean(),
+  "createdAt": zod.string().optional()
+})
+export const ListApMembersResponse = zod.array(ListApMembersResponseItem)
+
+
+/**
+ * @summary Add an Angkasa Pura member (admin)
+ */
+export const CreateApMemberBody = zod.object({
+  "name": zod.string(),
+  "phone": zod.string().optional(),
+  "email": zod.string().optional(),
+  "idCardNumber": zod.string(),
+  "isActive": zod.boolean().optional()
+})
+
+
+/**
+ * @summary Update an Angkasa Pura member (admin)
+ */
+export const UpdateApMemberParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const UpdateApMemberBody = zod.object({
+  "name": zod.string().optional(),
+  "phone": zod.string().optional(),
+  "email": zod.string().optional(),
+  "idCardNumber": zod.string().optional(),
+  "isActive": zod.boolean().optional()
+})
+
+export const UpdateApMemberResponse = zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "phone": zod.string().nullish(),
+  "email": zod.string().nullish(),
+  "idCardNumber": zod.string(),
+  "isActive": zod.boolean(),
+  "createdAt": zod.string().optional()
+})
+
+
+/**
+ * @summary Delete an Angkasa Pura member (admin)
+ */
+export const DeleteApMemberParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+
+/**
+ * @summary List reviews (optionally filtered by facilityId)
+ */
+export const GetReviewsQueryParams = zod.object({
+  "facilityId": zod.coerce.number().optional()
+})
+
+export const getReviewsResponseRatingMax = 5;
+
+
+
+export const GetReviewsResponseItem = zod.object({
+  "id": zod.number(),
+  "bookingId": zod.number(),
+  "facilityId": zod.number(),
+  "rating": zod.number().min(1).max(getReviewsResponseRatingMax),
+  "comment": zod.string().nullish(),
+  "reviewerName": zod.string(),
+  "facilityName": zod.string().optional(),
+  "bookingDate": zod.string().optional(),
+  "orderNumber": zod.string().optional(),
+  "createdAt": zod.string()
+})
+export const GetReviewsResponse = zod.array(GetReviewsResponseItem)
+
+
+/**
+ * @summary Submit a review for a completed booking
+ */
+export const createReviewBodyRatingMax = 5;
+
+
+
+export const CreateReviewBody = zod.object({
+  "bookingId": zod.number(),
+  "rating": zod.number().min(1).max(createReviewBodyRatingMax),
+  "comment": zod.string().optional(),
+  "reviewerName": zod.string().optional()
+})
+
+
+/**
+ * @summary Average ratings per facility
+ */
+export const GetReviewsSummaryResponseItem = zod.object({
+  "facilityId": zod.number(),
+  "facilityName": zod.string(),
+  "avgRating": zod.number(),
+  "count": zod.number()
+})
+export const GetReviewsSummaryResponse = zod.array(GetReviewsSummaryResponseItem)
+
+
+/**
+ * @summary Verify Angkasa Pura ID card and apply discount (admin)
+ */
+export const VerifyBookingParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const VerifyBookingBody = zod.object({
+  "idCardNumber": zod.string()
+})
+
+export const VerifyBookingResponse = zod.object({
+  "success": zod.boolean(),
+  "result": zod.enum(['verified', 'invalid_card', 'mismatch', 'not_pending']),
+  "message": zod.string().optional(),
+  "discountApplied": zod.boolean().optional(),
+  "discountPercentage": zod.number().optional(),
+  "discountAmount": zod.number().optional(),
+  "finalPrice": zod.number().optional(),
+  "memberName": zod.string().nullish(),
+  "booking": zod.object({
+  "id": zod.number(),
+  "orderNumber": zod.string(),
+  "customerId": zod.number().nullish(),
+  "customerName": zod.string(),
+  "customerEmail": zod.string(),
+  "customerPhone": zod.string(),
+  "facilityId": zod.number(),
+  "facilityName": zod.string(),
+  "facilityCategory": zod.string().optional(),
+  "bookingDate": zod.string(),
+  "startTime": zod.string(),
+  "endTime": zod.string(),
+  "durationHours": zod.number(),
+  "totalPrice": zod.number(),
+  "status": zod.enum(['pending_payment', 'paid', 'confirmed', 'cancelled', 'completed', 'refunded']),
+  "customerType": zod.enum(['umum', 'angkasa_pura']).optional(),
+  "idCardNumber": zod.string().nullish(),
+  "verificationStatus": zod.enum(['not_required', 'pending', 'verified', 'rejected']).optional(),
+  "basePrice": zod.number().nullish(),
+  "apDiscountAmount": zod.number().optional(),
+  "activityType": zod.string().nullish(),
+  "numberOfPeople": zod.number().nullish(),
+  "notes": zod.string().nullish(),
+  "adminNotes": zod.string().nullish(),
+  "whatsappMessage": zod.string().nullish(),
+  "payment": zod.object({
+  "id": zod.number(),
+  "bookingId": zod.number(),
+  "amount": zod.number(),
+  "proofUrl": zod.string().nullish(),
+  "status": zod.enum(['pending', 'confirmed', 'rejected']),
+  "notes": zod.string().nullish(),
+  "createdAt": zod.string().optional()
+}).nullish(),
+  "createdAt": zod.string().optional()
+}).nullish()
 })
 
 

@@ -303,6 +303,25 @@ paths:
         "409":
           description: Time slot conflict
 
+  /bookings/my:
+    get:
+      operationId: getMyBookings
+      tags: [bookings]
+      summary: Get bookings for the authenticated customer
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: List of customer bookings
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MyBookingItem"
+        "401":
+          description: Unauthorized
+
   /bookings/recurring/check:
     post:
       operationId: checkRecurringBooking
@@ -852,6 +871,217 @@ paths:
               schema:
                 $ref: "#/components/schemas/Settings"
 
+  /discount-settings:
+    get:
+      operationId: listDiscountSettings
+      tags: [discounts]
+      summary: List discount settings per customer type
+      responses:
+        "200":
+          description: List of discount settings
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DiscountSetting"
+
+  /discount-settings/{customerType}:
+    get:
+      operationId: getDiscountSetting
+      tags: [discounts]
+      summary: Get discount setting for a customer type
+      parameters:
+        - name: customerType
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Discount setting
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DiscountSetting"
+        "404":
+          description: Not found
+    patch:
+      operationId: updateDiscountSetting
+      tags: [discounts]
+      summary: Update discount percentage and active state (admin)
+      parameters:
+        - name: customerType
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DiscountSettingUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DiscountSetting"
+
+  /ap-members:
+    get:
+      operationId: listApMembers
+      tags: [ap-members]
+      summary: List Angkasa Pura members (admin)
+      parameters:
+        - name: search
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of members
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ApMember"
+    post:
+      operationId: createApMember
+      tags: [ap-members]
+      summary: Add an Angkasa Pura member (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApMemberInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApMember"
+
+  /ap-members/{id}:
+    patch:
+      operationId: updateApMember
+      tags: [ap-members]
+      summary: Update an Angkasa Pura member (admin)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApMemberUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApMember"
+    delete:
+      operationId: deleteApMember
+      tags: [ap-members]
+      summary: Delete an Angkasa Pura member (admin)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /reviews:
+    get:
+      operationId: getReviews
+      tags: [reviews]
+      summary: List reviews (optionally filtered by facilityId)
+      parameters:
+        - name: facilityId
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of reviews
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Review"
+    post:
+      operationId: createReview
+      tags: [reviews]
+      summary: Submit a review for a completed booking
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateReviewInput"
+      responses:
+        "201":
+          description: Review created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Review"
+
+  /reviews/summary:
+    get:
+      operationId: getReviewsSummary
+      tags: [reviews]
+      summary: Average ratings per facility
+      responses:
+        "200":
+          description: Rating summary per facility
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ReviewSummary"
+
+  /bookings/{id}/verify:
+    post:
+      operationId: verifyBooking
+      tags: [bookings]
+      summary: Verify Angkasa Pura ID card and apply discount (admin)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VerifyInput"
+      responses:
+        "200":
+          description: Verification result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerifyResult"
+
 components:
   schemas:
     HealthStatus:
@@ -913,7 +1143,7 @@ components:
 
     Facility:
       type: object
-      required: [id, name, category, pricePerHour, openTime, closeTime, isActive]
+      required: [id, name, category, pricePerHour, openTime, closeTime, isActive, bookingMode]
       properties:
         id:
           type: integer
@@ -929,6 +1159,9 @@ components:
           type: string
         closeTime:
           type: string
+        bookingMode:
+          type: string
+          enum: [time_slot, walk_in]
         minDuration:
           type: integer
         maxDuration:
@@ -1060,6 +1293,22 @@ components:
         status:
           type: string
           enum: [pending_payment, paid, confirmed, cancelled, completed, refunded]
+        customerType:
+          type: string
+          enum: [umum, angkasa_pura]
+        idCardNumber:
+          type: ["string", "null"]
+        verificationStatus:
+          type: string
+          enum: [not_required, pending, verified, rejected]
+        basePrice:
+          type: ["number", "null"]
+        apDiscountAmount:
+          type: number
+        activityType:
+          type: ["string", "null"]
+        numberOfPeople:
+          type: ["integer", "null"]
         notes:
           type: ["string", "null"]
         adminNotes:
@@ -1163,7 +1412,7 @@ components:
 
     BookingInput:
       type: object
-      required: [customerName, customerEmail, customerPhone, facilityId, bookingDate, startTime, durationHours]
+      required: [customerName, customerEmail, customerPhone, facilityId, bookingDate]
       properties:
         customerName:
           type: string
@@ -1179,6 +1428,15 @@ components:
           type: string
         durationHours:
           type: integer
+        activityType:
+          type: string
+        numberOfPeople:
+          type: integer
+        customerType:
+          type: string
+          enum: [umum, angkasa_pura]
+        idCardNumber:
+          type: string
         notes:
           type: string
 
@@ -1506,6 +1764,207 @@ components:
           type: string
         qrisImageUrl:
           type: string
+
+    DiscountSetting:
+      type: object
+      required: [id, customerType, discountPercentage, isActive]
+      properties:
+        id:
+          type: integer
+        customerType:
+          type: string
+        discountPercentage:
+          type: integer
+        description:
+          type: ["string", "null"]
+        isActive:
+          type: boolean
+
+    DiscountSettingUpdate:
+      type: object
+      required: [discountPercentage]
+      properties:
+        discountPercentage:
+          type: integer
+          minimum: 0
+          maximum: 100
+        description:
+          type: string
+        isActive:
+          type: boolean
+
+    ApMember:
+      type: object
+      required: [id, name, idCardNumber, isActive]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        phone:
+          type: ["string", "null"]
+        email:
+          type: ["string", "null"]
+        idCardNumber:
+          type: string
+        isActive:
+          type: boolean
+        createdAt:
+          type: string
+
+    ApMemberInput:
+      type: object
+      required: [name, idCardNumber]
+      properties:
+        name:
+          type: string
+        phone:
+          type: string
+        email:
+          type: string
+        idCardNumber:
+          type: string
+        isActive:
+          type: boolean
+
+    ApMemberUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+        phone:
+          type: string
+        email:
+          type: string
+        idCardNumber:
+          type: string
+        isActive:
+          type: boolean
+
+    MyBookingItem:
+      type: object
+      required: [id, orderNumber, facilityId, facilityName, facilityCategory, bookingDate, startTime, endTime, totalPrice, status, createdAt]
+      properties:
+        id:
+          type: integer
+        orderNumber:
+          type: string
+        facilityId:
+          type: integer
+        facilityName:
+          type: string
+        facilityCategory:
+          type: string
+        bookingDate:
+          type: string
+        startTime:
+          type: string
+        endTime:
+          type: string
+        totalPrice:
+          type: number
+        status:
+          type: string
+        paymentStatus:
+          type: string
+          nullable: true
+        paymentProofUrl:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          nullable: true
+
+    Review:
+      type: object
+      required: [id, bookingId, facilityId, rating, reviewerName, createdAt]
+      properties:
+        id:
+          type: integer
+        bookingId:
+          type: integer
+        facilityId:
+          type: integer
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+        comment:
+          type: string
+          nullable: true
+        reviewerName:
+          type: string
+        facilityName:
+          type: string
+        bookingDate:
+          type: string
+        orderNumber:
+          type: string
+        createdAt:
+          type: string
+
+    CreateReviewInput:
+      type: object
+      required: [bookingId, rating]
+      properties:
+        bookingId:
+          type: integer
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+        comment:
+          type: string
+        reviewerName:
+          type: string
+
+    ReviewSummary:
+      type: object
+      required: [facilityId, facilityName, avgRating, count]
+      properties:
+        facilityId:
+          type: integer
+        facilityName:
+          type: string
+        avgRating:
+          type: number
+        count:
+          type: integer
+
+    VerifyInput:
+      type: object
+      required: [idCardNumber]
+      properties:
+        idCardNumber:
+          type: string
+
+    VerifyResult:
+      type: object
+      required: [success, result]
+      properties:
+        success:
+          type: boolean
+        result:
+          type: string
+          enum: [verified, invalid_card, mismatch, not_pending]
+        message:
+          type: string
+        discountApplied:
+          type: boolean
+        discountPercentage:
+          type: integer
+        discountAmount:
+          type: number
+        finalPrice:
+          type: number
+        memberName:
+          type: ["string", "null"]
+        booking:
+          $ref: "#/components/schemas/Booking"
+          nullable: true
 
     GymMembership:
       type: object

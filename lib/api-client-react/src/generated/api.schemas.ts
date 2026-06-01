@@ -44,6 +44,14 @@ export interface AuthResponse {
   token: string;
 }
 
+export type FacilityBookingMode = typeof FacilityBookingMode[keyof typeof FacilityBookingMode];
+
+
+export const FacilityBookingMode = {
+  time_slot: 'time_slot',
+  walk_in: 'walk_in',
+} as const;
+
 export interface FacilityImage {
   id: number;
   facilityId: number;
@@ -60,6 +68,7 @@ export interface Facility {
   pricePerHour: number;
   openTime: string;
   closeTime: string;
+  bookingMode: FacilityBookingMode;
   minDuration?: number;
   /** @nullable */
   maxDuration?: number | null;
@@ -117,6 +126,24 @@ export const BookingStatus = {
   refunded: 'refunded',
 } as const;
 
+export type BookingCustomerType = typeof BookingCustomerType[keyof typeof BookingCustomerType];
+
+
+export const BookingCustomerType = {
+  umum: 'umum',
+  angkasa_pura: 'angkasa_pura',
+} as const;
+
+export type BookingVerificationStatus = typeof BookingVerificationStatus[keyof typeof BookingVerificationStatus];
+
+
+export const BookingVerificationStatus = {
+  not_required: 'not_required',
+  pending: 'pending',
+  verified: 'verified',
+  rejected: 'rejected',
+} as const;
+
 export type PaymentStatus = typeof PaymentStatus[keyof typeof PaymentStatus];
 
 
@@ -155,6 +182,17 @@ export interface Booking {
   durationHours: number;
   totalPrice: number;
   status: BookingStatus;
+  customerType?: BookingCustomerType;
+  /** @nullable */
+  idCardNumber?: string | null;
+  verificationStatus?: BookingVerificationStatus;
+  /** @nullable */
+  basePrice?: number | null;
+  apDiscountAmount?: number;
+  /** @nullable */
+  activityType?: string | null;
+  /** @nullable */
+  numberOfPeople?: number | null;
   /** @nullable */
   notes?: string | null;
   /** @nullable */
@@ -228,14 +266,26 @@ export interface RecurringBookingResult {
   grandTotal: number;
 }
 
+export type BookingInputCustomerType = typeof BookingInputCustomerType[keyof typeof BookingInputCustomerType];
+
+
+export const BookingInputCustomerType = {
+  umum: 'umum',
+  angkasa_pura: 'angkasa_pura',
+} as const;
+
 export interface BookingInput {
   customerName: string;
   customerEmail: string;
   customerPhone: string;
   facilityId: number;
   bookingDate: string;
-  startTime: string;
-  durationHours: number;
+  startTime?: string;
+  durationHours?: number;
+  activityType?: string;
+  numberOfPeople?: number;
+  customerType?: BookingInputCustomerType;
+  idCardNumber?: string;
   notes?: string;
 }
 
@@ -448,6 +498,132 @@ export interface SettingsUpdate {
   qrisImageUrl?: string;
 }
 
+export interface DiscountSetting {
+  id: number;
+  customerType: string;
+  discountPercentage: number;
+  /** @nullable */
+  description?: string | null;
+  isActive: boolean;
+}
+
+export interface DiscountSettingUpdate {
+  /**
+     * @minimum 0
+     * @maximum 100
+     */
+  discountPercentage: number;
+  description?: string;
+  isActive?: boolean;
+}
+
+export interface ApMember {
+  id: number;
+  name: string;
+  /** @nullable */
+  phone?: string | null;
+  /** @nullable */
+  email?: string | null;
+  idCardNumber: string;
+  isActive: boolean;
+  createdAt?: string;
+}
+
+export interface ApMemberInput {
+  name: string;
+  phone?: string;
+  email?: string;
+  idCardNumber: string;
+  isActive?: boolean;
+}
+
+export interface ApMemberUpdate {
+  name?: string;
+  phone?: string;
+  email?: string;
+  idCardNumber?: string;
+  isActive?: boolean;
+}
+
+export interface MyBookingItem {
+  id: number;
+  orderNumber: string;
+  facilityId: number;
+  facilityName: string;
+  facilityCategory: string;
+  bookingDate: string;
+  startTime: string;
+  endTime: string;
+  totalPrice: number;
+  status: string;
+  paymentStatus?: string | null;
+  paymentProofUrl?: string | null;
+  notes?: string | null;
+  createdAt: string | null;
+}
+
+export interface Review {
+  id: number;
+  bookingId: number;
+  facilityId: number;
+  /**
+     * @minimum 1
+     * @maximum 5
+     */
+  rating: number;
+  comment?: string | null;
+  reviewerName: string;
+  facilityName?: string;
+  bookingDate?: string;
+  orderNumber?: string;
+  createdAt: string;
+}
+
+export interface CreateReviewInput {
+  bookingId: number;
+  /**
+     * @minimum 1
+     * @maximum 5
+     */
+  rating: number;
+  comment?: string;
+  reviewerName?: string;
+}
+
+export interface ReviewSummary {
+  facilityId: number;
+  facilityName: string;
+  avgRating: number;
+  count: number;
+}
+
+export interface VerifyInput {
+  idCardNumber: string;
+}
+
+export type VerifyResultResult = typeof VerifyResultResult[keyof typeof VerifyResultResult];
+
+
+export const VerifyResultResult = {
+  verified: 'verified',
+  invalid_card: 'invalid_card',
+  mismatch: 'mismatch',
+  not_pending: 'not_pending',
+} as const;
+
+export interface VerifyResult {
+  success: boolean;
+  result: VerifyResultResult;
+  message?: string;
+  discountApplied?: boolean;
+  discountPercentage?: number;
+  discountAmount?: number;
+  finalPrice?: number;
+  /** @nullable */
+  memberName?: string | null;
+  booking?: Booking | null;
+}
+
 export type GymMembershipStatus = typeof GymMembershipStatus[keyof typeof GymMembershipStatus];
 
 
@@ -565,4 +741,12 @@ export const ListMembershipsStatus = {
   expired: 'expired',
   cancelled: 'cancelled',
 } as const;
+
+export type ListApMembersParams = {
+search?: string;
+};
+
+export type GetReviewsParams = {
+facilityId?: number;
+};
 

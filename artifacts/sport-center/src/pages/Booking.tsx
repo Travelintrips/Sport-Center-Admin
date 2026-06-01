@@ -18,7 +18,8 @@ import { format, parseISO } from "date-fns";
 import { id as idLocale, enUS } from "date-fns/locale";
 import {
   MapPin, Calendar, Clock, Receipt, ChevronLeft,
-  RefreshCw, CheckCircle2, XCircle, AlertTriangle, Loader2, Pencil, X as IconX
+  RefreshCw, CheckCircle2, XCircle, AlertTriangle, Loader2, Pencil, X as IconX,
+  Plane, ShieldCheck, User
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useLang } from "@/lib/i18n";
@@ -49,6 +50,9 @@ export default function Booking() {
   const startTime = queryParams.get("startTime") || "";
   const durationStr = queryParams.get("duration") || "1";
   const duration = parseInt(durationStr) || 1;
+  const mode = queryParams.get("mode") || "time_slot";
+  const isWalkIn = mode === "walk_in";
+  const urlActivityType = queryParams.get("activityType") || "";
 
   const { data: facility, isLoading: isLoadingFacility } = useGetFacility(facilityId, {
     query: { enabled: !!facilityId, queryKey: getGetFacilityQueryKey(facilityId) },
@@ -59,6 +63,12 @@ export default function Booking() {
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [notes, setNotes] = useState("");
+  const [numberOfPeople, setNumberOfPeople] = useState<string>("1");
+
+  // --- Customer type (Angkasa Pura) ---
+  const [customerType, setCustomerType] = useState<"umum" | "angkasa_pura">("umum");
+  const [idCardNumber, setIdCardNumber] = useState("");
+  const isAP = customerType === "angkasa_pura";
 
   // --- Repeat Booking state ---
   const [isRepeat, setIsRepeat] = useState(false);
@@ -173,11 +183,16 @@ export default function Booking() {
 
   // Redirect if missing params
   useEffect(() => {
-    if (search && (!facilityId || !date || !startTime)) {
+    if (search && (!facilityId || !date)) {
       toast({ title: t("Detail booking tidak lengkap", "Incomplete booking details"), description: t("Silakan pilih fasilitas dan waktu terlebih dahulu.", "Please select a facility and time first."), variant: "destructive" });
       setLocation("/facilities");
+      return;
     }
-  }, [search, facilityId, date, startTime, setLocation, toast]);
+    if (search && !isWalkIn && !startTime) {
+      toast({ title: t("Detail booking tidak lengkap", "Incomplete booking details"), description: t("Silakan pilih jam terlebih dahulu.", "Please select a time slot first."), variant: "destructive" });
+      setLocation("/facilities");
+    }
+  }, [search, facilityId, date, startTime, isWalkIn, setLocation, toast]);
 
   // --- Validate coupon ---
   const validateCoupon = async () => {
@@ -208,9 +223,14 @@ export default function Booking() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!facilityId || !date || !startTime || !duration) return;
+    if (!facilityId || !date) return;
+    if (!isWalkIn && (!startTime || !duration)) return;
     if (!name || !email || !phone) {
       toast({ title: t("Form tidak lengkap", "Incomplete form"), description: t("Harap isi semua field yang wajib.", "Please fill in all required fields."), variant: "destructive" });
+      return;
+    }
+    if (isAP && !idCardNumber.trim()) {
+      toast({ title: t("Nomor ID Card wajib", "ID Card number required"), description: t("Masukkan nomor ID Card Angkasa Pura kamu.", "Enter your Angkasa Pura ID Card number."), variant: "destructive" });
       return;
     }
 
@@ -250,11 +270,14 @@ export default function Booking() {
           customerPhone: phone,
           facilityId,
           bookingDate: date,
-          startTime,
-          durationHours: duration,
+          ...(isWalkIn ? {} : { startTime, durationHours: duration }),
+          activityType: urlActivityType || undefined,
+          numberOfPeople: isWalkIn ? parseInt(numberOfPeople) || 1 : undefined,
           notes,
-          promoCode: couponResult?.code || undefined,
-          discountAmount: discountPerSession || undefined,
+          customerType,
+          idCardNumber: isAP ? idCardNumber.trim() : undefined,
+          promoCode: isAP ? undefined : couponResult?.code || undefined,
+          discountAmount: isAP ? undefined : discountPerSession || undefined,
         } as any,
       });
     }
@@ -403,7 +426,60 @@ export default function Booking() {
             </form>
           </Card>
 
+          {/* Customer Type */}
+          <Card className={isAP ? "border-primary/40 bg-primary/5" : ""}>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <ShieldCheck size={16} className="text-primary" /> {t("Tipe Pemesan", "Customer Type")}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => setCustomerType("umum")}
+                  className={`flex items-center gap-3 p-4 rounded-lg border text-left transition-colors ${!isAP ? "bg-primary text-primary-foreground border-primary" : "bg-background border-border hover:border-primary/50"}`}
+                >
+                  <User size={20} className="shrink-0" />
+                  <div>
+                    <div className="font-semibold text-sm">{t("Umum", "General")}</div>
+                    <div className={`text-xs ${!isAP ? "text-primary-foreground/80" : "text-muted-foreground"}`}>{t("Harga normal", "Standard price")}</div>
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCustomerType("angkasa_pura")}
+                  className={`flex items-center gap-3 p-4 rounded-lg border text-left transition-colors ${isAP ? "bg-primary text-primary-foreground border-primary" : "bg-background border-border hover:border-primary/50"}`}
+                >
+                  <Plane size={20} className="shrink-0" />
+                  <div>
+                    <div className="font-semibold text-sm">{t("Karyawan Angkasa Pura", "Angkasa Pura Staff")}</div>
+                    <div className={`text-xs ${isAP ? "text-primary-foreground/80" : "text-muted-foreground"}`}>{t("Diskon khusus", "Special discount")}</div>
+                  </div>
+                </button>
+              </div>
+
+              {isAP && (
+                <div className="space-y-2">
+                  <Label htmlFor="idCard">{t("Nomor ID Card Angkasa Pura", "Angkasa Pura ID Card Number")} <span className="text-destructive">*</span></Label>
+                  <Input
+                    id="idCard"
+                    value={idCardNumber}
+                    onChange={(e) => setIdCardNumber(e.target.value.toUpperCase())}
+                    placeholder="AP-2024-001"
+                    className="font-mono tracking-wider"
+                  />
+                  <div className="flex items-start gap-2 text-xs text-muted-foreground">
+                    <AlertTriangle size={13} className="mt-0.5 shrink-0 text-orange-500" />
+                    <span>{t("Booking akan menunggu verifikasi ID Card oleh admin. Diskon diterapkan setelah ID Card terverifikasi.", "Booking will await ID Card verification by admin. Discount is applied once the ID Card is verified.")}</span>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
           {/* Coupon Code */}
+          {!isAP && (
           <Card className={couponResult ? "border-green-300 bg-green-50/50" : ""}>
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
@@ -459,8 +535,10 @@ export default function Booking() {
               )}
             </CardContent>
           </Card>
+          )}
 
           {/* Repeat Booking */}
+          {!isAP && (
           <Card className={isRepeat ? "border-primary/40 bg-primary/5" : ""}>
             <CardHeader className="pb-4">
               <div className="flex items-center gap-3">
@@ -685,6 +763,7 @@ export default function Booking() {
               </CardContent>
             )}
           </Card>
+          )}
 
           {/* Submit Button (mobile) */}
           <div className="lg:hidden">
@@ -732,15 +811,39 @@ export default function Booking() {
                       )}
                     </div>
                   </div>
-                  <div className="flex items-start gap-3">
-                    <Clock className="w-4 h-4 text-muted-foreground shrink-0 mt-0.5" />
-                    <div>
-                      <div className="font-medium">{t("Waktu & Durasi", "Time & Duration")}</div>
-                      <div className="text-muted-foreground">
-                        {startTime.substring(0, 5)} – {endTime} ({duration} {t("jam", "hours")})
+                  {isWalkIn ? (
+                    <div className="flex items-start gap-3">
+                      <Clock className="w-4 h-4 text-muted-foreground shrink-0 mt-0.5" />
+                      <div>
+                        <div className="font-medium">{t("Akses", "Access")}</div>
+                        <div className="text-muted-foreground">06:00 – 22:00 {t("(bebas masuk)", "(open access)")}</div>
+                        <div className="mt-1">
+                          <label className="text-xs font-medium text-muted-foreground block mb-1">{t("Jumlah orang", "Number of people")}</label>
+                          <div className="flex items-center gap-2">
+                            <button type="button" onClick={() => setNumberOfPeople(String(Math.max(1, parseInt(numberOfPeople) - 1)))} className="w-7 h-7 rounded border border-border flex items-center justify-center text-sm font-bold hover:bg-accent">−</button>
+                            <span className="font-bold w-8 text-center">{numberOfPeople}</span>
+                            <button type="button" onClick={() => setNumberOfPeople(String(Math.min(20, parseInt(numberOfPeople) + 1)))} className="w-7 h-7 rounded border border-border flex items-center justify-center text-sm font-bold hover:bg-accent">+</button>
+                            <span className="text-xs text-muted-foreground">{t("orang", "people")}</span>
+                          </div>
+                        </div>
                       </div>
                     </div>
-                  </div>
+                  ) : (
+                    <div className="flex items-start gap-3">
+                      <Clock className="w-4 h-4 text-muted-foreground shrink-0 mt-0.5" />
+                      <div>
+                        <div className="font-medium">{t("Waktu & Durasi", "Time & Duration")}</div>
+                        <div className="text-muted-foreground">
+                          {startTime.substring(0, 5)} – {endTime} ({duration} {t("jam", "hours")})
+                        </div>
+                        {urlActivityType && (
+                          <div className="text-xs text-primary font-medium mt-0.5 capitalize">
+                            🏅 {urlActivityType}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
                   <div className="flex items-start gap-3">
                     <MapPin className="w-4 h-4 text-muted-foreground shrink-0 mt-0.5" />
                     <div>

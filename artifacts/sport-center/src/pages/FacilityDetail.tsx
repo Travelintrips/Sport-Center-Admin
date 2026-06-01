@@ -4,7 +4,9 @@ import {
   useGetFacility, 
   getGetFacilityQueryKey,
   useCheckAvailability,
-  getCheckAvailabilityQueryKey 
+  getCheckAvailabilityQueryKey,
+  useGetReviews,
+  useGetReviewsSummary,
 } from "@workspace/api-client-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -33,6 +35,12 @@ import AvailabilityCalendar from "@/components/AvailabilityCalendar";
 import { getFacilityImage } from "@/lib/utils";
 import { useLang } from "@/lib/i18n";
 
+const MULTIGUNA_ACTIVITIES = [
+  { value: "futsal", label: "Futsal", icon: "⚽" },
+  { value: "basket", label: "Basket", icon: "🏀" },
+  { value: "voli", label: "Voli", icon: "🏐" },
+];
+
 export default function FacilityDetail() {
   const { t, lang } = useLang();
   const [, params] = useRoute("/facilities/:id");
@@ -42,6 +50,7 @@ export default function FacilityDetail() {
   const [date, setDate] = useState<Date | undefined>(new Date());
   const [selectedTime, setSelectedTime] = useState<string>("");
   const [duration, setDuration] = useState<string>("1");
+  const [activityType, setActivityType] = useState<string>("");
   
   const { data: facility, isLoading: isLoadingFacility } = useGetFacility(facilityId, {
     query: {
@@ -49,6 +58,12 @@ export default function FacilityDetail() {
       queryKey: getGetFacilityQueryKey(facilityId)
     }
   });
+
+  const { data: reviews } = useGetReviews({ facilityId }, { query: { enabled: !!facilityId } });
+  const { data: reviewsSummary } = useGetReviewsSummary();
+  const facilitySummary = reviewsSummary?.find((s) => s.facilityId === facilityId);
+  const avgRating = facilitySummary?.avgRating ?? 0;
+  const reviewCount = facilitySummary?.count ?? 0;
 
   const formattedDate = date ? format(date, "yyyy-MM-dd") : "";
 
@@ -62,15 +77,31 @@ export default function FacilityDetail() {
     }
   );
 
+  const isWalkIn = facility?.bookingMode === "walk_in";
+  const isMultiguna = facility?.category === "Multiguna";
+
   const handleBook = () => {
-    if (!facility || !date || !selectedTime) return;
+    if (!facility || !date) return;
     
-    // Create checkout url with params
+    if (isWalkIn) {
+      const searchParams = new URLSearchParams({
+        facilityId: facility.id.toString(),
+        date: formattedDate,
+        mode: "walk_in",
+      });
+      setLocation(`/booking?${searchParams.toString()}`);
+      return;
+    }
+
+    if (!selectedTime) return;
+    if (isMultiguna && !activityType) return;
+
     const searchParams = new URLSearchParams({
       facilityId: facility.id.toString(),
       date: formattedDate,
       startTime: selectedTime,
-      duration: duration
+      duration: duration,
+      ...(isMultiguna && activityType ? { activityType } : {}),
     });
     
     setLocation(`/booking?${searchParams.toString()}`);
@@ -112,7 +143,7 @@ export default function FacilityDetail() {
     );
   }
 
-  const totalPrice = facility.pricePerHour * parseInt(duration);
+  const totalPrice = isWalkIn ? facility.pricePerHour : facility.pricePerHour * parseInt(duration);
 
   return (
     <div className="bg-[#F8FAFC] dark:bg-slate-950 min-h-screen pb-24">
@@ -152,10 +183,13 @@ export default function FacilityDetail() {
                         <Users className="w-4 h-4 text-primary" /> {t("Kapasitas", "Capacity")} {facility.capacity} {t("pax", "pax")}
                       </div>
                     )}
-                    <div className="flex items-center gap-1 text-yellow-500 bg-yellow-50 dark:bg-yellow-950/20 px-3 py-1.5 rounded-lg">
-                      <Star className="w-4 h-4 fill-yellow-500" />
-                      <span className="font-bold">4.9/5</span>
-                    </div>
+                    {reviewCount > 0 && (
+                      <div className="flex items-center gap-1 text-yellow-500 bg-yellow-50 dark:bg-yellow-950/20 px-3 py-1.5 rounded-lg">
+                        <Star className="w-4 h-4 fill-yellow-500" />
+                        <span className="font-bold">{avgRating.toFixed(1)}/5</span>
+                        <span className="text-xs text-muted-foreground font-normal ml-1">({reviewCount} {t("ulasan", "reviews")})</span>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -186,6 +220,44 @@ export default function FacilityDetail() {
                     </div>
                   ))}
                 </div>
+
+                {/* Reviews Section */}
+                {reviews && reviews.length > 0 && (
+                  <div className="mt-10">
+                    <h2 className="text-xl font-black mb-5 text-secondary dark:text-white flex items-center gap-2">
+                      <div className="w-1.5 h-6 bg-primary rounded-full"></div>
+                      {t("Ulasan Pelanggan", "Customer Reviews")}
+                      <span className="text-sm font-normal text-muted-foreground ml-1">({reviewCount})</span>
+                    </h2>
+                    <div className="flex items-center gap-3 mb-6">
+                      <div className="flex gap-0.5">
+                        {[1,2,3,4,5].map((s) => (
+                          <Star key={s} className={`w-5 h-5 ${s <= Math.round(avgRating) ? "fill-yellow-400 text-yellow-400" : "text-gray-200"}`} />
+                        ))}
+                      </div>
+                      <span className="text-2xl font-black">{avgRating.toFixed(1)}</span>
+                      <span className="text-muted-foreground text-sm">{t("dari 5", "out of 5")}</span>
+                    </div>
+                    <div className="space-y-4">
+                      {reviews.slice(0, 5).map((review) => (
+                        <div key={review.id} className="border border-border/60 rounded-2xl p-4 bg-muted/20">
+                          <div className="flex items-center justify-between mb-2">
+                            <div className="font-bold text-sm">{review.reviewerName}</div>
+                            <div className="flex gap-0.5">
+                              {[1,2,3,4,5].map((s) => (
+                                <Star key={s} className={`w-3.5 h-3.5 ${s <= review.rating ? "fill-yellow-400 text-yellow-400" : "text-gray-200"}`} />
+                              ))}
+                            </div>
+                          </div>
+                          {review.comment && <p className="text-sm text-foreground/70 leading-relaxed">"{review.comment}"</p>}
+                          <p className="text-xs text-muted-foreground mt-2">
+                            {review.bookingDate ? new Date(review.bookingDate).toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" }) : ""}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -214,8 +286,11 @@ export default function FacilityDetail() {
                 </h3>
                 
                 <div className="space-y-6">
+                  {/* Step 1 - Date Picker (always shown) */}
                   <div className="space-y-3">
-                    <label className="text-sm font-bold text-foreground/80 block">{t("1. Pilih Tanggal", "1. Choose Date")}</label>
+                    <label className="text-sm font-bold text-foreground/80 block">
+                      {t("1. Pilih Tanggal", "1. Choose Date")}
+                    </label>
                     <div className="border rounded-2xl p-3 flex justify-center bg-[#F8FAFC] dark:bg-slate-900 shadow-inner">
                       <Calendar
                         mode="single"
@@ -228,45 +303,99 @@ export default function FacilityDetail() {
                     </div>
                   </div>
 
-                  <div className="space-y-3">
-                    <label className="text-sm font-bold text-foreground/80 block">{t("2. Durasi Bermain", "2. Playing Duration")}</label>
-                    <Select value={duration} onValueChange={setDuration}>
-                      <SelectTrigger className="h-14 rounded-xl bg-[#F8FAFC] dark:bg-slate-900 border-border font-bold">
-                        <SelectValue placeholder={t("Pilih durasi", "Choose duration")} />
-                      </SelectTrigger>
-                      <SelectContent className="rounded-xl">
-                        <SelectItem value="1" className="font-medium py-3">{t("1 Jam", "1 Hour")}</SelectItem>
-                        <SelectItem value="2" className="font-medium py-3">{t("2 Jam", "2 Hours")}</SelectItem>
-                        <SelectItem value="3" className="font-medium py-3">{t("3 Jam", "3 Hours")}</SelectItem>
-                        <SelectItem value="4" className="font-medium py-3">{t("4 Jam", "4 Hours")}</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
+                  {/* Walk-in (Gym) info block */}
+                  {isWalkIn && (
+                    <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-2xl p-4 text-sm text-blue-800 dark:text-blue-200">
+                      <div className="font-bold mb-1">🏋️ {t("Akses Bebas Jam Operasional", "Open Access During Operating Hours")}</div>
+                      <p className="text-blue-700/80 dark:text-blue-300/80">
+                        {t(
+                          "Gym bisa diakses kapan saja antara 06:00–22:00 WIB. Tidak ada slot jam — datang dan nikmati fasilitas.",
+                          "Gym is accessible anytime between 06:00–22:00 WIB. No time slot needed — just come and enjoy."
+                        )}
+                      </p>
+                    </div>
+                  )}
 
-                  <div className="space-y-3">
-                    <label className="text-sm font-bold text-foreground/80 block flex justify-between items-end">
-                      <span>{t("3. Jam Tersedia", "3. Available Times")}</span>
-                      {selectedTime && <span className="text-xs text-primary bg-primary/10 px-2 py-0.5 rounded-md">{t("Terpilih", "Selected")}: {selectedTime}</span>}
-                    </label>
-                    
-                    {!date ? (
-                      <div className="text-sm text-center font-medium text-muted-foreground py-10 border-2 border-dashed rounded-2xl bg-muted/30">
-                        {t("Pilih tanggal terlebih dahulu", "Please choose a date first")}
+                  {/* Multiguna: activity type selector */}
+                  {!isWalkIn && isMultiguna && (
+                    <div className="space-y-3">
+                      <label className="text-sm font-bold text-foreground/80 block">
+                        {t("2. Pilih Jenis Olahraga", "2. Choose Sport Type")}
+                      </label>
+                      <div className="grid grid-cols-3 gap-2">
+                        {MULTIGUNA_ACTIVITIES.map((act) => (
+                          <button
+                            key={act.value}
+                            type="button"
+                            onClick={() => setActivityType(act.value)}
+                            className={`flex flex-col items-center gap-1 p-3 rounded-xl border font-bold text-sm transition-all ${
+                              activityType === act.value
+                                ? "bg-primary text-primary-foreground border-primary shadow-lg scale-105"
+                                : "bg-[#F8FAFC] dark:bg-slate-900 border-border hover:border-primary/50 text-foreground/80"
+                            }`}
+                          >
+                            <span className="text-xl">{act.icon}</span>
+                            <span>{act.label}</span>
+                          </button>
+                        ))}
                       </div>
-                    ) : (
-                      <div className="bg-[#F8FAFC] dark:bg-slate-900 rounded-2xl p-4 border shadow-inner max-h-[250px] overflow-y-auto">
-                        <AvailabilityCalendar
-                          facilityId={facilityId}
-                          date={formattedDate}
-                          slots={slots as any}
-                          isLoading={isLoadingSlots}
-                          selectedTime={selectedTime}
-                          duration={parseInt(duration)}
-                          onSelectTime={setSelectedTime}
-                        />
-                      </div>
-                    )}
-                  </div>
+                      {activityType && (
+                        <div className="text-xs text-primary bg-primary/10 px-3 py-1.5 rounded-lg font-medium">
+                          ⚠️ {t("Lapangan yang sama digunakan semua olahraga. Slot yang terisi oleh olahraga lain tidak bisa dipesan.", "Same court for all sports. Slots booked by other sports are unavailable.")}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Duration (non-gym only) */}
+                  {!isWalkIn && (
+                    <div className="space-y-3">
+                      <label className="text-sm font-bold text-foreground/80 block">
+                        {isMultiguna ? t("3. Durasi Bermain", "3. Playing Duration") : t("2. Durasi Bermain", "2. Playing Duration")}
+                      </label>
+                      <Select value={duration} onValueChange={(v) => { setDuration(v); setSelectedTime(""); }}>
+                        <SelectTrigger className="h-14 rounded-xl bg-[#F8FAFC] dark:bg-slate-900 border-border font-bold">
+                          <SelectValue placeholder={t("Pilih durasi", "Choose duration")} />
+                        </SelectTrigger>
+                        <SelectContent className="rounded-xl">
+                          <SelectItem value="1" className="font-medium py-3">{t("1 Jam", "1 Hour")}</SelectItem>
+                          <SelectItem value="2" className="font-medium py-3">{t("2 Jam", "2 Hours")}</SelectItem>
+                          <SelectItem value="3" className="font-medium py-3">{t("3 Jam", "3 Hours")}</SelectItem>
+                          <SelectItem value="4" className="font-medium py-3">{t("4 Jam", "4 Hours")}</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+
+                  {/* Time slot picker (non-gym only) */}
+                  {!isWalkIn && (
+                    <div className="space-y-3">
+                      <label className="text-sm font-bold text-foreground/80 block flex justify-between items-end">
+                        <span>
+                          {isMultiguna ? t("4. Jam Tersedia", "4. Available Times") : t("3. Jam Tersedia", "3. Available Times")}
+                        </span>
+                        {selectedTime && <span className="text-xs text-primary bg-primary/10 px-2 py-0.5 rounded-md">{t("Terpilih", "Selected")}: {selectedTime}</span>}
+                      </label>
+                      
+                      {!date ? (
+                        <div className="text-sm text-center font-medium text-muted-foreground py-10 border-2 border-dashed rounded-2xl bg-muted/30">
+                          {t("Pilih tanggal terlebih dahulu", "Please choose a date first")}
+                        </div>
+                      ) : (
+                        <div className="bg-[#F8FAFC] dark:bg-slate-900 rounded-2xl p-4 border shadow-inner max-h-[250px] overflow-y-auto">
+                          <AvailabilityCalendar
+                            facilityId={facilityId}
+                            date={formattedDate}
+                            slots={slots as any}
+                            isLoading={isLoadingSlots}
+                            selectedTime={selectedTime}
+                            duration={parseInt(duration)}
+                            onSelectTime={setSelectedTime}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   <div className="pt-6 mt-4 border-t border-dashed">
                     <div className="flex justify-between items-end mb-6 bg-primary/5 p-4 rounded-2xl border border-primary/10">
@@ -280,9 +409,20 @@ export default function FacilityDetail() {
                       size="lg" 
                       className="w-full text-base font-bold h-14 rounded-full shadow-lg shadow-primary/20 transition-all hover:-translate-y-1" 
                       onClick={handleBook}
-                      disabled={!selectedTime || !date}
+                      disabled={
+                        !date || 
+                        (!isWalkIn && !selectedTime) ||
+                        (isMultiguna && !activityType)
+                      }
                     >
-                      {selectedTime ? t("Lanjut ke Pembayaran", "Continue to Payment") : t("Lengkapi Jadwal Dulu", "Complete the Schedule First")}
+                      {isWalkIn
+                        ? (date ? t("Booking Masuk Gym", "Book Gym Entry") : t("Pilih Tanggal Dulu", "Choose Date First"))
+                        : (!selectedTime
+                          ? t("Lengkapi Jadwal Dulu", "Complete the Schedule First")
+                          : (isMultiguna && !activityType)
+                            ? t("Pilih Jenis Olahraga", "Choose Sport Type")
+                            : t("Lanjut ke Pembayaran", "Continue to Payment"))
+                      }
                     </Button>
                   </div>
                 </div>

@@ -15,6 +15,18 @@ function minutesToTime(m: number): string {
   return `${h}:${min}`;
 }
 
+function getTodayWIB(): string {
+  const now = new Date();
+  const wib = new Date(now.getTime() + 7 * 60 * 60 * 1000);
+  return wib.toISOString().split("T")[0];
+}
+
+function getCurrentMinutesWIB(): number {
+  const now = new Date();
+  const wib = new Date(now.getTime() + 7 * 60 * 60 * 1000);
+  return wib.getUTCHours() * 60 + wib.getUTCMinutes();
+}
+
 router.get("/availability", async (req, res) => {
   try {
     const facilityId = parseInt(req.query.facilityId as string);
@@ -31,6 +43,12 @@ router.get("/availability", async (req, res) => {
       return;
     }
 
+    // Gym (walk_in) has no hourly slots
+    if (facility.bookingMode === "walk_in") {
+      res.json([]);
+      return;
+    }
+
     const bookings = await db.select().from(bookingsTable).where(
       and(eq(bookingsTable.facilityId, facilityId), eq(bookingsTable.bookingDate, date))
     );
@@ -44,9 +62,18 @@ router.get("/availability", async (req, res) => {
     const closeMinutes = timeToMinutes(facility.closeTime);
     const slots: { time: string; available: boolean; reason: string | null }[] = [];
 
+    const isToday = date === getTodayWIB();
+    const nowMinutes = isToday ? getCurrentMinutesWIB() : -1;
+
     for (let t = openMinutes; t < closeMinutes; t += 60) {
       const timeStr = minutesToTime(t);
       const slotEnd = t + 60;
+
+      // Hide/disable slots that have already passed today
+      if (isToday && t <= nowMinutes) {
+        slots.push({ time: timeStr, available: false, reason: "Slot sudah lewat" });
+        continue;
+      }
 
       const bookedSlot = activeBookings.find((b) => {
         const bStart = timeToMinutes(b.startTime);

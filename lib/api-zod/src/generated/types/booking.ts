@@ -5,7 +5,9 @@
  * Sport Center API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { BookingCustomerType } from './bookingCustomerType';
 import type { BookingStatus } from './bookingStatus';
+import type { BookingVerificationStatus } from './bookingVerificationStatus';
 import type { Payment } from './payment';
 
 export interface Booking {
@@ -25,6 +27,17 @@ export interface Booking {
   durationHours: number;
   totalPrice: number;
   status: BookingStatus;
+  customerType?: BookingCustomerType;
+  /** @nullable */
+  idCardNumber?: string | null;
+  verificationStatus?: BookingVerificationStatus;
+  /** @nullable */
+  basePrice?: number | null;
+  apDiscountAmount?: number;
+  /** @nullable */
+  activityType?: string | null;
+  /** @nullable */
+  numberOfPeople?: number | null;
   /** @nullable */
   notes?: string | null;
   /** @nullable */

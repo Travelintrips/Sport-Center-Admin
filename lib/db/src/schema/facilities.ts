@@ -14,6 +14,7 @@ export const facilitiesTable = scSchema.table("facilities", {
   minDuration: integer("min_duration").notNull().default(1),
   maxDuration: integer("max_duration"),
   capacity: integer("capacity"),
+  bookingMode: text("booking_mode").notNull().default("time_slot"),
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),

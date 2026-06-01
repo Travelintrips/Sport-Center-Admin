@@ -12,12 +12,61 @@ import {
   LogOut,
   Menu,
   X,
-  Dumbbell
+  Dumbbell,
+  Plane,
+  Calendar,
+  Shield,
+  DollarSign,
+  Wrench,
+  TrendingUp,
+  QrCode,
+  Bell,
+  RefreshCw,
 } from "lucide-react";
 import { useGetMe, useLogout, getGetMeQueryKey } from "@workspace/api-client-react";
 import { removeToken } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { useState } from "react";
+
+const NAV_GROUPS = [
+  {
+    label: "Utama",
+    items: [
+      { href: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard },
+      { href: "/admin/bookings", label: "Bookings", icon: CalendarDays },
+      { href: "/admin/calendar", label: "Kalender", icon: Calendar },
+      { href: "/admin/qr-checkin", label: "QR Check-In", icon: QrCode },
+      { href: "/admin/reschedule", label: "Reschedule", icon: RefreshCw },
+    ],
+  },
+  {
+    label: "Fasilitas",
+    items: [
+      { href: "/admin/facilities", label: "Fasilitas", icon: MapPin },
+      { href: "/admin/schedule", label: "Jadwal Blokir", icon: Clock },
+      { href: "/admin/maintenance", label: "Maintenance", icon: Wrench },
+      { href: "/admin/pricing-rules", label: "Pricing Rules", icon: DollarSign },
+    ],
+  },
+  {
+    label: "Pelanggan",
+    items: [
+      { href: "/admin/customers", label: "Customers", icon: Users },
+      { href: "/admin/memberships", label: "Member Gym", icon: Dumbbell },
+      { href: "/admin/ap-members", label: "Member AP", icon: Plane },
+      { href: "/admin/promos", label: "Promos", icon: Tag },
+    ],
+  },
+  {
+    label: "Laporan & Sistem",
+    items: [
+      { href: "/admin/reports", label: "Laporan Keuangan", icon: TrendingUp },
+      { href: "/admin/notification-templates", label: "Notifikasi WA", icon: Bell },
+      { href: "/admin/audit-log", label: "Audit Log", icon: Shield },
+      { href: "/admin/settings", label: "Settings", icon: SettingsIcon },
+    ],
+  },
+];
 
 export default function AdminLayout({ children }: { children: ReactNode }) {
   const [location, setLocation] = useLocation();
@@ -46,20 +95,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
     }
   }, [isError, location, setLocation]);
 
-  const navItems = [
-    { href: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard },
-    { href: "/admin/bookings", label: "Bookings", icon: CalendarDays },
-    { href: "/admin/facilities", label: "Facilities", icon: MapPin },
-    { href: "/admin/schedule", label: "Schedule", icon: Clock },
-    { href: "/admin/customers", label: "Customers", icon: Users },
-    { href: "/admin/promos", label: "Promos", icon: Tag },
-    { href: "/admin/memberships", label: "Member Gym", icon: Dumbbell },
-    { href: "/admin/settings", label: "Settings", icon: SettingsIcon },
-  ];
-
-  const handleLogout = () => {
-    logoutMutation.mutate();
-  };
+  const handleLogout = () => { logoutMutation.mutate(); };
 
   if (isLoading) {
     return (
@@ -87,62 +123,71 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
 
       {/* Sidebar */}
       <aside className={`
-        fixed inset-y-0 left-0 z-10 w-64 bg-sidebar text-sidebar-foreground border-r border-sidebar-border
+        fixed inset-y-0 left-0 z-10 w-60 bg-sidebar text-sidebar-foreground border-r border-sidebar-border
         transform transition-transform duration-200 ease-in-out
         md:translate-x-0 md:static md:flex-shrink-0
         flex flex-col
         ${isMobileOpen ? 'translate-x-0' : '-translate-x-full'}
       `}>
-        <div className="h-16 hidden md:flex items-center px-6 border-b border-sidebar-border bg-sidebar-primary text-sidebar-primary-foreground">
-          <Link href="/admin" className="font-bold text-lg flex items-center gap-2">
+        <div className="h-14 hidden md:flex items-center px-4 border-b border-sidebar-border bg-sidebar-primary text-sidebar-primary-foreground">
+          <Link href="/admin" className="font-bold text-base flex items-center gap-2">
             <img src={logoUrl} alt="Logo" className="w-7 h-7 rounded object-cover" />
             Admin Portal
           </Link>
         </div>
 
-        <div className="flex-1 overflow-y-auto py-4">
-          <nav className="space-y-1 px-3">
-            {navItems.map((item) => {
-              const isActive = location === item.href || (location === "/admin" && item.href === "/admin/dashboard");
-              const Icon = item.icon;
-              
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={`
-                    flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-colors
-                    ${isActive 
-                      ? 'bg-sidebar-accent text-sidebar-accent-foreground' 
-                      : 'text-sidebar-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground'}
-                  `}
-                  onClick={() => setIsMobileOpen(false)}
-                >
-                  <Icon size={18} className={isActive ? 'text-primary' : 'text-muted-foreground'} />
-                  {item.label}
-                </Link>
-              );
-            })}
+        <div className="flex-1 overflow-y-auto py-3">
+          <nav className="px-2 space-y-4">
+            {NAV_GROUPS.map((group) => (
+              <div key={group.label}>
+                <div className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  {group.label}
+                </div>
+                <div className="space-y-0.5">
+                  {group.items.map((item) => {
+                    const isActive = location === item.href || (location === "/admin" && item.href === "/admin/dashboard");
+                    const Icon = item.icon;
+                    return (
+                      <Link
+                        key={item.href}
+                        href={item.href}
+                        className={`
+                          flex items-center gap-2.5 px-3 py-2 rounded-md text-sm font-medium transition-colors
+                          ${isActive 
+                            ? 'bg-sidebar-accent text-sidebar-accent-foreground' 
+                            : 'text-sidebar-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground'}
+                        `}
+                        onClick={() => setIsMobileOpen(false)}
+                      >
+                        <Icon size={16} className={isActive ? 'text-primary' : 'text-muted-foreground'} />
+                        {item.label}
+                      </Link>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
           </nav>
         </div>
 
-        <div className="p-4 border-t border-sidebar-border">
-          <div className="flex items-center gap-3 px-3 py-2 mb-2">
-            <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center text-primary font-bold text-sm">
+        <div className="p-3 border-t border-sidebar-border">
+          <div className="flex items-center gap-2.5 px-3 py-2 mb-1">
+            <div className="w-7 h-7 rounded-full bg-primary/20 flex items-center justify-center text-primary font-bold text-xs flex-shrink-0">
               {user?.name?.charAt(0) || 'A'}
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium truncate">{user?.name || 'Admin'}</p>
-              <p className="text-xs text-muted-foreground truncate">{user?.email}</p>
+              <p className="text-xs font-semibold truncate">{user?.name || 'Admin'}</p>
+              <p className="text-[10px] text-muted-foreground truncate">{user?.role ?? user?.email}</p>
             </div>
           </div>
           <Button 
             variant="ghost" 
+            size="sm"
             className="w-full justify-start text-muted-foreground hover:text-destructive hover:bg-destructive/10"
             onClick={handleLogout}
             disabled={logoutMutation.isPending}
           >
-            <LogOut size={18} className="mr-2" />
+            <LogOut size={16} className="mr-2" />
             Sign Out
           </Button>
         </div>

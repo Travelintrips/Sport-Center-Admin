@@ -7,11 +7,26 @@ import { scSchema } from "./_schema";
 
 export const bookingStatusEnum = scSchema.enum("booking_status", [
   "pending_payment",
+  "waiting_confirmation",
   "paid",
   "confirmed",
-  "cancelled",
   "completed",
+  "cancelled",
+  "rejected",
+  "expired",
   "refunded",
+]);
+
+export const customerTypeEnum = scSchema.enum("customer_type", [
+  "umum",
+  "angkasa_pura",
+]);
+
+export const verificationStatusEnum = scSchema.enum("verification_status", [
+  "not_required",
+  "pending",
+  "verified",
+  "rejected",
 ]);
 
 export const bookingsTable = scSchema.table("bookings", {
@@ -29,9 +44,20 @@ export const bookingsTable = scSchema.table("bookings", {
   totalPrice: numeric("total_price", { precision: 12, scale: 2 }).notNull(),
   promoCode: text("promo_code"),
   discountAmount: numeric("discount_amount", { precision: 12, scale: 2 }).notNull().default("0"),
+  customerType: customerTypeEnum("customer_type").notNull().default("umum"),
+  idCardNumber: text("id_card_number"),
+  verificationStatus: verificationStatusEnum("verification_status").notNull().default("not_required"),
+  basePrice: numeric("base_price", { precision: 12, scale: 2 }),
+  apDiscountAmount: numeric("ap_discount_amount", { precision: 12, scale: 2 }).notNull().default("0"),
   status: bookingStatusEnum("status").notNull().default("pending_payment"),
+  activityType: text("activity_type"),
+  numberOfPeople: integer("number_of_people"),
+  resourceName: text("resource_name"),
   notes: text("notes"),
   adminNotes: text("admin_notes"),
+  paymentDeadline: timestamp("payment_deadline", { withTimezone: true }),
+  checkedInAt: timestamp("checked_in_at", { withTimezone: true }),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });

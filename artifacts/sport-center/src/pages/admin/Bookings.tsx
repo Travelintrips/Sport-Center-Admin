@@ -42,8 +42,11 @@ import {
   Trash2,
   FileText,
   Receipt,
+  Plane,
+  ShieldCheck,
 } from "lucide-react";
 import { getToken } from "@/lib/auth";
+import VerifyIdDialog from "@/components/admin/VerifyIdDialog";
 
 /* ─── Helpers ───────────────────────────────────────────────────── */
 
@@ -1004,6 +1007,7 @@ export default function AdminBookings() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [selectedBooking, setSelectedBooking] = useState<any>(null);
+  const [verifyBooking, setVerifyBooking] = useState<any>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
 
@@ -1228,6 +1232,16 @@ export default function AdminBookings() {
                               {b.customerName}
                             </div>
                             <div className="text-[11px] text-slate-400">{b.customerPhone}</div>
+                            {b.customerType === "angkasa_pura" && (
+                              <div className="mt-0.5 flex items-center gap-1">
+                                <Badge className="bg-primary/10 text-primary border-primary/20 text-[9px] px-1 py-0 gap-0.5 font-semibold">
+                                  <Plane size={9} /> AP
+                                </Badge>
+                                {b.verificationStatus === "verified" && <span className="text-[9px] text-green-600 font-semibold">✓ Terverifikasi</span>}
+                                {b.verificationStatus === "pending" && <span className="text-[9px] text-amber-600 font-semibold">Menunggu</span>}
+                                {b.verificationStatus === "rejected" && <span className="text-[9px] text-red-500 font-semibold">Ditolak</span>}
+                              </div>
+                            )}
                           </div>
                         </div>
                       </td>
@@ -1275,6 +1289,17 @@ export default function AdminBookings() {
                             <Eye size={12} />
                             Detail
                           </motion.button>
+                          {b.customerType === "angkasa_pura" && b.verificationStatus !== "verified" && (
+                            <motion.button
+                              whileHover={{ scale: 1.04 }}
+                              whileTap={{ scale: 0.96 }}
+                              onClick={() => setVerifyBooking(b)}
+                              className="flex items-center gap-1 h-7 px-2.5 rounded-lg text-xs font-semibold text-primary border border-primary/30 hover:bg-primary/10 transition-colors whitespace-nowrap"
+                            >
+                              <ShieldCheck size={12} />
+                              Verifikasi ID
+                            </motion.button>
+                          )}
                           {deleteConfirmId === b.id ? (
                             <div className="flex items-center gap-1">
                               <button
@@ -1342,6 +1367,8 @@ export default function AdminBookings() {
           isUpdating={isUpdating}
         />
       )}
+
+      <VerifyIdDialog booking={verifyBooking} onClose={() => setVerifyBooking(null)} />
     </div>
   );
 }

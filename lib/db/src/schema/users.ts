@@ -3,7 +3,7 @@ import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { scSchema } from "./_schema";
 
-export const userRoleEnum = scSchema.enum("user_role", ["admin", "customer"]);
+export const userRoleEnum = scSchema.enum("user_role", ["admin", "super_admin", "admin_booking", "finance", "staff", "customer"]);
 
 export const usersTable = scSchema.table("users", {
   id: serial("id").primaryKey(),

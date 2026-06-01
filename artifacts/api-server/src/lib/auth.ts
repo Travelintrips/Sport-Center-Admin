@@ -46,12 +46,61 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction):
   next();
 }
 
+const ADMIN_ROLES = ["admin", "super_admin", "admin_booking", "finance", "staff"];
+
 export function adminMiddleware(req: Request, res: Response, next: NextFunction): void {
   authMiddleware(req, res, () => {
-    if ((req as any).user?.role !== "admin") {
+    const role = (req as any).user?.role;
+    if (!ADMIN_ROLES.includes(role)) {
       res.status(403).json({ error: "Forbidden" });
       return;
     }
     next();
   });
+}
+
+export function superAdminMiddleware(req: Request, res: Response, next: NextFunction): void {
+  authMiddleware(req, res, () => {
+    const role = (req as any).user?.role;
+    if (role !== "admin" && role !== "super_admin") {
+      res.status(403).json({ error: "Forbidden: Super Admin only" });
+      return;
+    }
+    next();
+  });
+}
+
+export function financeMiddleware(req: Request, res: Response, next: NextFunction): void {
+  authMiddleware(req, res, () => {
+    const role = (req as any).user?.role;
+    if (!["admin", "super_admin", "finance"].includes(role)) {
+      res.status(403).json({ error: "Forbidden: Finance access required" });
+      return;
+    }
+    next();
+  });
+}
+
+export function bookingAdminMiddleware(req: Request, res: Response, next: NextFunction): void {
+  authMiddleware(req, res, () => {
+    const role = (req as any).user?.role;
+    if (!["admin", "super_admin", "admin_booking"].includes(role)) {
+      res.status(403).json({ error: "Forbidden: Booking Admin access required" });
+      return;
+    }
+    next();
+  });
+}
+
+export function roleMiddleware(...roles: string[]) {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    authMiddleware(req, res, () => {
+      const role = (req as any).user?.role;
+      if (!roles.includes(role)) {
+        res.status(403).json({ error: `Forbidden: requires one of [${roles.join(", ")}]` });
+        return;
+      }
+      next();
+    });
+  };
 }
