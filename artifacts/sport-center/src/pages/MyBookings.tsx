@@ -40,7 +40,15 @@ export default function MyBookings() {
 
   const [reviewState, setReviewState] = useState<Record<number, { rating: number; comment: string; hover: number }>>({});
 
-  const logoutMutation = useLogout({ mutation: { onSuccess: () => { removeToken(); setLocation("/login"); } } });
+  const logoutMutation = useLogout({
+    mutation: {
+      onSuccess: () => {
+        removeToken();
+        queryClient.clear();
+        setLocation("/");
+      },
+    },
+  });
 
   const submitReview = useCreateReview({
     mutation: {
