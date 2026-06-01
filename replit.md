@@ -66,6 +66,7 @@ Web app untuk manajemen dan pemesanan fasilitas olahraga — customer-facing boo
 - Sporty orange-red primary theme (hsl ~16° orange-red)
 - Bold font-black headings, shadcn Card/Button/Input/Badge components
 - Mobile-responsive layouts on all pages
+- Agent berkomunikasi dalam Bahasa Indonesia
 
 ## Gotchas
 

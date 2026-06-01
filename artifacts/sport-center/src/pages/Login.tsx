@@ -22,7 +22,11 @@ export default function Login() {
       onSuccess: (data) => {
         setToken(data.token);
         toast({ title: t("Selamat datang kembali!", "Welcome back!"), description: `${t("Halo", "Hello")}, ${data.user.name}` });
-        setLocation("/my-bookings");
+        if (data.user.role === "tenant") {
+          setLocation("/tenant/dashboard");
+        } else {
+          setLocation("/my-bookings");
+        }
       },
       onError: () => {
         toast({ title: t("Login gagal", "Login failed"), description: t("Email atau password salah.", "Incorrect email or password."), variant: "destructive" });

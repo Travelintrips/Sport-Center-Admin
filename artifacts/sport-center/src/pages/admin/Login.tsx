@@ -48,6 +48,13 @@ export default function AdminLogin() {
     } catch (err: any) {
       console.error("Admin login error:", err);
       toast({ title: "Login Gagal", description: err?.message ?? "Terjadi kesalahan jaringan. Coba lagi.", variant: "destructive" });
+      await queryClient.resetQueries({ queryKey: getGetMeQueryKey() });
+      toast({ title: "Login berhasil", description: "Selamat datang, Admin." });
+      setLocation("/admin");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("[AdminLogin] error:", err);
+      toast({ title: "Login Gagal", description: msg || "Terjadi kesalahan. Coba lagi.", variant: "destructive" });
     } finally {
       setIsPending(false);
     }
