@@ -63,6 +63,34 @@ router.post("/auth/register", async (req, res) => {
   }
 });
 
+router.post("/auth/admin-login", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) {
+      res.status(400).json({ error: "Email dan password wajib diisi" });
+      return;
+    }
+    const passwordHash = hashPassword(password);
+    const [user] = await db.select().from(usersTable).where(eq(usersTable.email, email)).limit(1);
+    if (!user || user.passwordHash !== passwordHash) {
+      res.status(401).json({ error: "Email atau password salah" });
+      return;
+    }
+    if (user.role !== "admin") {
+      res.status(403).json({ error: "Akses ditolak. Halaman ini hanya untuk admin." });
+      return;
+    }
+    const token = createToken(user.id, user.role, null);
+    res.json({
+      user: { id: user.id, name: user.name, email: user.email, role: user.role, phone: user.phone, tenantId: null, createdAt: user.createdAt },
+      token,
+    });
+  } catch (err) {
+    req.log.error({ err }, "Admin login error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 router.post("/auth/logout", (_req, res) => {
   res.json({ message: "Logged out" });
 });
