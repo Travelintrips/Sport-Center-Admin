@@ -42,7 +42,7 @@ export default function AdminLogin() {
         return;
       }
       setToken(data.token);
-      await queryClient.invalidateQueries({ queryKey: getGetMeQueryKey() });
+      queryClient.setQueryData(getGetMeQueryKey(), data.user);
       toast({ title: "Login berhasil", description: "Selamat datang, Admin." });
       setLocation("/admin/dashboard");
     } catch (err: any) {
