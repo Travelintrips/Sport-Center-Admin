@@ -72,7 +72,7 @@ function UserMenu() {
               <div className="text-xs text-muted-foreground truncate">{user.email}</div>
             </div>
             <div className="p-2 space-y-0.5">
-              <Link href="/my-bookings" onClick={() => setOpen(false)}
+              <Link href={user.role === "tenant" ? "/tenant/bookings" : "/my-bookings"} onClick={() => setOpen(false)}
                 className="flex items-center gap-2.5 px-3 py-2.5 text-sm font-medium rounded-xl hover:bg-accent transition-colors w-full">
                 <CalendarDays size={15} className="text-primary" /> {t("Booking Saya", "My Bookings")}
               </Link>
@@ -221,7 +221,7 @@ export default function CustomerLayout({ children }: { children: ReactNode }) {
                       <div className="text-xs text-muted-foreground">{user.email}</div>
                     </div>
                   </div>
-                  <Link href="/my-bookings" onClick={() => setIsMobileMenuOpen(false)}
+                  <Link href={user.role === "tenant" ? "/tenant/bookings" : "/my-bookings"} onClick={() => setIsMobileMenuOpen(false)}
                     className="flex items-center gap-3 px-4 py-3.5 rounded-2xl font-semibold text-[15px] text-foreground/80 hover:bg-muted/60">
                     <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center text-primary"><CalendarDays size={14} /></div>
                     {t("Booking Saya", "My Bookings")}
