@@ -511,20 +511,20 @@ export default function Home() {
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 md:gap-8">
             {[
-              { Icon: Trophy, title: t("Fasilitas Premium", "Premium Facilities"), desc: t("Standar lapangan dan peralatan profesional yang dirawat ketat setiap hari.", "Professional-standard courts maintained strictly every day.") },
-              { Icon: Zap, title: t("Booking Online Mudah", "Easy Online Booking"), desc: t("Cek jadwal real-time dan pesan lapangan langsung dari smartphone Anda.", "Check real-time schedules and book courts from your smartphone.") },
-              { Icon: CreditCard, title: t("Harga Transparan", "Transparent Pricing"), desc: t("Tidak ada biaya tersembunyi. Bayar sesuai harga yang tertera di sistem.", "No hidden fees. Pay exactly the price shown in the system.") },
-              { Icon: MapPin, title: t("Lokasi Strategis", "Strategic Location"), desc: t("Sangat mudah diakses, berdekatan dengan area Bandara Soekarno-Hatta.", "Very accessible, adjacent to the Soekarno-Hatta Airport area.") },
-              { Icon: Phone, title: t("Customer Support 24/7", "24/7 Customer Support"), desc: t("Tim kami siap membantu Anda kapan saja melalui WhatsApp.", "Our team is ready to help you anytime via WhatsApp.") },
-              { Icon: ShieldCheck, title: t("Pembayaran Aman", "Secure Payment"), desc: t("Transaksi terjamin dengan berbagai metode pembayaran digital yang aman.", "Secure transactions with various digital payment methods.") },
+              { Icon: Trophy, title: t("Fasilitas Premium", "Premium Facilities"), desc: t("Standar lapangan dan peralatan profesional yang dirawat ketat setiap hari.", "Professional-standard courts maintained strictly every day."), href: "/facilities" },
+              { Icon: Zap, title: t("Booking Online Mudah", "Easy Online Booking"), desc: t("Cek jadwal real-time dan pesan lapangan langsung dari smartphone Anda.", "Check real-time schedules and book courts from your smartphone."), href: "/facilities" },
+              { Icon: CreditCard, title: t("Harga Transparan", "Transparent Pricing"), desc: t("Tidak ada biaya tersembunyi. Bayar sesuai harga yang tertera di sistem.", "No hidden fees. Pay exactly the price shown in the system."), href: "/facilities" },
+              { Icon: MapPin, title: t("Lokasi Strategis", "Strategic Location"), desc: t("Sangat mudah diakses, berdekatan dengan area Bandara Soekarno-Hatta.", "Very accessible, adjacent to the Soekarno-Hatta Airport area."), href: "/contact" },
+              { Icon: Phone, title: t("Customer Support 24/7", "24/7 Customer Support"), desc: t("Tim kami siap membantu Anda kapan saja melalui WhatsApp.", "Our team is ready to help you anytime via WhatsApp."), href: "/contact" },
+              { Icon: ShieldCheck, title: t("Pembayaran Aman", "Secure Payment"), desc: t("Transaksi terjamin dengan berbagai metode pembayaran digital yang aman.", "Secure transactions with various digital payment methods."), href: "/terms" },
             ].map((feature, i) => (
-              <div key={i} className="bg-white dark:bg-slate-900 p-8 rounded-3xl border border-border/50 shadow-sm hover:shadow-md hover:-translate-y-1 transition-all duration-300">
-                <div className="w-14 h-14 rounded-2xl bg-primary/10 text-primary flex items-center justify-center mb-6">
+              <Link key={i} href={feature.href} className="block group bg-white dark:bg-slate-900 p-8 rounded-3xl border border-border/50 shadow-sm hover:shadow-md hover:-translate-y-1 hover:border-primary/30 transition-all duration-300 cursor-pointer">
+                <div className="w-14 h-14 rounded-2xl bg-primary/10 text-primary flex items-center justify-center mb-6 group-hover:bg-primary group-hover:text-white transition-colors duration-300">
                   <feature.Icon className="w-7 h-7" />
                 </div>
-                <h3 className="text-xl font-bold text-secondary dark:text-white mb-3">{feature.title}</h3>
+                <h3 className="text-xl font-bold text-secondary dark:text-white mb-3 group-hover:text-primary transition-colors duration-300">{feature.title}</h3>
                 <p className="text-muted-foreground font-medium leading-relaxed">{feature.desc}</p>
-              </div>
+              </Link>
             ))}
           </div>
         </div>
