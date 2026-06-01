@@ -545,6 +545,23 @@ export interface ApMemberUpdate {
   isActive?: boolean;
 }
 
+export interface MyBookingItem {
+  id: number;
+  orderNumber: string;
+  facilityId: number;
+  facilityName: string;
+  facilityCategory: string;
+  bookingDate: string;
+  startTime: string;
+  endTime: string;
+  totalPrice: number;
+  status: string;
+  paymentStatus?: string | null;
+  paymentProofUrl?: string | null;
+  notes?: string | null;
+  createdAt: string | null;
+}
+
 export interface Review {
   id: number;
   bookingId: number;

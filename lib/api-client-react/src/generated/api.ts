@@ -53,6 +53,7 @@ import type {
   ListPaymentsParams,
   ListPromosParams,
   LoginInput,
+  MyBookingItem,
   Payment,
   PaymentInput,
   PaymentUpdate,
@@ -384,15 +385,15 @@ export const getGetMyBookingsUrl = () => {
 
 
 
-  return `/api/my-bookings`
+  return `/api/bookings/my`
 }
 
 /**
- * @summary Get bookings for the currently logged-in customer
+ * @summary Get bookings for the authenticated customer
  */
-export const getMyBookings = async ( options?: RequestInit): Promise<Booking[]> => {
+export const getMyBookings = async ( options?: RequestInit): Promise<MyBookingItem[]> => {
 
-  return customFetch<Booking[]>(getGetMyBookingsUrl(),
+  return customFetch<MyBookingItem[]>(getGetMyBookingsUrl(),
   {
     ...options,
     method: 'GET'
@@ -407,7 +408,7 @@ export const getMyBookings = async ( options?: RequestInit): Promise<Booking[]> 
 
 export const getGetMyBookingsQueryKey = () => {
     return [
-    `/api/my-bookings`
+    `/api/bookings/my`
     ] as const;
     }
 
@@ -435,7 +436,7 @@ export type GetMyBookingsQueryError = ErrorType<void>
 
 
 /**
- * @summary Get bookings for the currently logged-in customer
+ * @summary Get bookings for the authenticated customer
  */
 
 export function useGetMyBookings<TData = Awaited<ReturnType<typeof getMyBookings>>, TError = ErrorType<void>>(

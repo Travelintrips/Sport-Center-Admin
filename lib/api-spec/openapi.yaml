@@ -303,6 +303,25 @@ paths:
         "409":
           description: Time slot conflict
 
+  /bookings/my:
+    get:
+      operationId: getMyBookings
+      tags: [bookings]
+      summary: Get bookings for the authenticated customer
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: List of customer bookings
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MyBookingItem"
+        "401":
+          description: Unauthorized
+
   /bookings/recurring/check:
     post:
       operationId: checkRecurringBooking
@@ -1821,6 +1840,43 @@ components:
           type: string
         isActive:
           type: boolean
+
+    MyBookingItem:
+      type: object
+      required: [id, orderNumber, facilityId, facilityName, facilityCategory, bookingDate, startTime, endTime, totalPrice, status, createdAt]
+      properties:
+        id:
+          type: integer
+        orderNumber:
+          type: string
+        facilityId:
+          type: integer
+        facilityName:
+          type: string
+        facilityCategory:
+          type: string
+        bookingDate:
+          type: string
+        startTime:
+          type: string
+        endTime:
+          type: string
+        totalPrice:
+          type: number
+        status:
+          type: string
+        paymentStatus:
+          type: string
+          nullable: true
+        paymentProofUrl:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          nullable: true
 
     Review:
       type: object

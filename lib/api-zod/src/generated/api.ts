@@ -49,44 +49,23 @@ export const RegisterBody = zod.object({
 
 
 /**
- * @summary Get bookings for the currently logged-in customer
+ * @summary Get bookings for the authenticated customer
  */
 export const GetMyBookingsResponseItem = zod.object({
   "id": zod.number(),
   "orderNumber": zod.string(),
-  "customerId": zod.number().nullish(),
-  "customerName": zod.string(),
-  "customerEmail": zod.string(),
-  "customerPhone": zod.string(),
   "facilityId": zod.number(),
   "facilityName": zod.string(),
-  "facilityCategory": zod.string().optional(),
+  "facilityCategory": zod.string(),
   "bookingDate": zod.string(),
   "startTime": zod.string(),
   "endTime": zod.string(),
-  "durationHours": zod.number(),
   "totalPrice": zod.number(),
-  "status": zod.enum(['pending_payment', 'paid', 'confirmed', 'cancelled', 'completed', 'refunded']),
-  "customerType": zod.enum(['umum', 'angkasa_pura']).optional(),
-  "idCardNumber": zod.string().nullish(),
-  "verificationStatus": zod.enum(['not_required', 'pending', 'verified', 'rejected']).optional(),
-  "basePrice": zod.number().nullish(),
-  "apDiscountAmount": zod.number().optional(),
-  "activityType": zod.string().nullish(),
-  "numberOfPeople": zod.number().nullish(),
+  "status": zod.string(),
+  "paymentStatus": zod.string().nullish(),
+  "paymentProofUrl": zod.string().nullish(),
   "notes": zod.string().nullish(),
-  "adminNotes": zod.string().nullish(),
-  "whatsappMessage": zod.string().nullish(),
-  "payment": zod.object({
-  "id": zod.number(),
-  "bookingId": zod.number(),
-  "amount": zod.number(),
-  "proofUrl": zod.string().nullish(),
-  "status": zod.enum(['pending', 'confirmed', 'rejected']),
-  "notes": zod.string().nullish(),
-  "createdAt": zod.string().optional()
-}).nullish(),
-  "createdAt": zod.string().optional()
+  "createdAt": zod.string().nullable()
 })
 export const GetMyBookingsResponse = zod.array(GetMyBookingsResponseItem)
 

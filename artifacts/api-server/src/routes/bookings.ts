@@ -1,7 +1,7 @@
 import { Router } from "express";
-import { db, bookingsTable, facilitiesTable, paymentsTable, promosTable, discountSettingsTable, apMembersTable, bookingHistoryTable } from "@workspace/db";
+import { db, bookingsTable, facilitiesTable, paymentsTable, promosTable, discountSettingsTable, apMembersTable, bookingHistoryTable, usersTable } from "@workspace/db";
 import { eq, and, sql } from "drizzle-orm";
-import { adminMiddleware } from "../lib/auth";
+import { adminMiddleware, authMiddleware } from "../lib/auth";
 import { broadcastAvailabilityChange } from "../lib/supabase";
 import { notifyBookingCreated, notifyPaymentConfirmed, notifyBookingCancelled } from "../lib/notifications";
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
@@ -391,6 +391,37 @@ router.post("/bookings/recurring", async (req, res) => {
     res.status(201).json({ created, skipped, totalBookings: created.length, grandTotal: totalPrice * created.length });
   } catch (err) {
     req.log.error({ err }, "Create recurring booking error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.get("/bookings/my", authMiddleware, async (req, res) => {
+  try {
+    const userId = (req as any).userId as number;
+    const [user] = await db.select().from(usersTable).where(eq(usersTable.id, userId)).limit(1);
+    if (!user) { res.status(404).json({ error: "User not found" }); return; }
+
+    const bookings = await db.select().from(bookingsTable)
+      .where(eq(bookingsTable.customerEmail, user.email));
+
+    const facilities = await db.select({ id: facilitiesTable.id, name: facilitiesTable.name, category: facilitiesTable.category }).from(facilitiesTable);
+    const payments = await db.select().from(paymentsTable);
+
+    const result = bookings.map((b) => {
+      const facility = facilities.find((f) => f.id === b.facilityId);
+      const payment = payments.filter((p) => p.bookingId === b.id).at(-1);
+      return {
+        ...b,
+        facilityName: facility?.name ?? "",
+        facilityCategory: facility?.category ?? "",
+        paymentStatus: payment?.status ?? null,
+        paymentProofUrl: payment?.proofUrl ?? null,
+      };
+    }).sort((a, b) => new Date(b.createdAt!).getTime() - new Date(a.createdAt!).getTime());
+
+    res.json(result);
+  } catch (err) {
+    req.log.error({ err }, "Get my bookings error");
     res.status(500).json({ error: "Internal server error" });
   }
 });

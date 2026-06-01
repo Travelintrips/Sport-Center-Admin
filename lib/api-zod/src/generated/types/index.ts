@@ -52,6 +52,7 @@ export * from './listPaymentsParams';
 export * from './listPromosParams';
 export * from './loginInput';
 export * from './monthRevenue';
+export * from './myBookingItem';
 export * from './payment';
 export * from './paymentInput';
 export * from './paymentStatus';

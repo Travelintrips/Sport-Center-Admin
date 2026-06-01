@@ -164,7 +164,7 @@ export default function CustomerLayout({ children }: { children: ReactNode }) {
         <div className="container mx-auto px-4 md:px-8 flex items-center justify-between">
           <Link href="/" className="flex items-center gap-2.5 font-black text-2xl tracking-tight text-secondary dark:text-foreground group">
             <img src={logoUrl} alt={settings?.centerName || "Sport Center"} className="w-11 h-11 rounded-xl object-cover shadow-lg shadow-primary/20 group-hover:scale-105 transition-transform" />
-            <span className="hidden sm:inline-block">{settings?.centerName?.split(' ')[0] || "SportCenter"}</span>
+            <span className="hidden sm:inline-block">{settings?.centerName || "Sport Center"}</span>
           </Link>
 
           <nav className="hidden md:flex items-center gap-1 bg-background/50 backdrop-blur-md border rounded-full px-2 py-1.5 shadow-sm">
