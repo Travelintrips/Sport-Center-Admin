@@ -1191,3 +1191,264 @@ export const VerifyBookingResponse = zod.object({
 })
 
 
+/**
+ * @summary Get own tenant profile
+ */
+export const GetTenantMeResponse = zod.object({
+  "id": zod.number(),
+  "userId": zod.number(),
+  "businessName": zod.string(),
+  "ownerName": zod.string(),
+  "phone": zod.string().nullish(),
+  "email": zod.string().nullish(),
+  "businessCategory": zod.string().nullish(),
+  "logoUrl": zod.string().nullish(),
+  "address": zod.string().nullish(),
+  "status": zod.enum(['pending', 'active', 'inactive']),
+  "bookingCount": zod.number().optional(),
+  "createdAt": zod.string()
+})
+
+
+/**
+ * @summary List own tenant bookings
+ */
+export const ListTenantBookingsResponseItem = zod.object({
+  "id": zod.number(),
+  "orderNumber": zod.string(),
+  "tenantId": zod.number(),
+  "userId": zod.number().nullish(),
+  "bookingType": zod.enum(['booth', 'event_space', 'advertising_space', 'renewal']),
+  "startDate": zod.string(),
+  "endDate": zod.string(),
+  "durationMonths": zod.number().nullish(),
+  "requestedArea": zod.string().nullish(),
+  "description": zod.string().nullish(),
+  "price": zod.number(),
+  "paymentStatus": zod.enum(['pending', 'uploaded', 'verified', 'rejected']),
+  "status": zod.enum(['pending', 'approved', 'rejected', 'active', 'expired']),
+  "adminNotes": zod.string().nullish(),
+  "businessName": zod.string().optional(),
+  "ownerName": zod.string().optional(),
+  "payments": zod.array(zod.object({
+  "id": zod.number(),
+  "tenantBookingId": zod.number(),
+  "proofImageUrl": zod.string().nullish(),
+  "amount": zod.number(),
+  "notes": zod.string().nullish(),
+  "status": zod.enum(['pending', 'verified', 'rejected']),
+  "createdAt": zod.string()
+})).optional(),
+  "createdAt": zod.string()
+})
+export const ListTenantBookingsResponse = zod.array(ListTenantBookingsResponseItem)
+
+
+/**
+ * @summary Submit new tenant booking
+ */
+export const CreateTenantBookingBody = zod.object({
+  "bookingType": zod.enum(['booth', 'event_space', 'advertising_space', 'renewal']),
+  "startDate": zod.string(),
+  "endDate": zod.string(),
+  "durationMonths": zod.number().optional(),
+  "requestedArea": zod.string().optional(),
+  "description": zod.string().optional()
+})
+
+
+/**
+ * @summary Get tenant booking detail
+ */
+export const GetTenantBookingParams = zod.object({
+  "orderNumber": zod.coerce.string()
+})
+
+export const GetTenantBookingResponse = zod.object({
+  "id": zod.number(),
+  "orderNumber": zod.string(),
+  "tenantId": zod.number(),
+  "userId": zod.number().nullish(),
+  "bookingType": zod.enum(['booth', 'event_space', 'advertising_space', 'renewal']),
+  "startDate": zod.string(),
+  "endDate": zod.string(),
+  "durationMonths": zod.number().nullish(),
+  "requestedArea": zod.string().nullish(),
+  "description": zod.string().nullish(),
+  "price": zod.number(),
+  "paymentStatus": zod.enum(['pending', 'uploaded', 'verified', 'rejected']),
+  "status": zod.enum(['pending', 'approved', 'rejected', 'active', 'expired']),
+  "adminNotes": zod.string().nullish(),
+  "businessName": zod.string().optional(),
+  "ownerName": zod.string().optional(),
+  "payments": zod.array(zod.object({
+  "id": zod.number(),
+  "tenantBookingId": zod.number(),
+  "proofImageUrl": zod.string().nullish(),
+  "amount": zod.number(),
+  "notes": zod.string().nullish(),
+  "status": zod.enum(['pending', 'verified', 'rejected']),
+  "createdAt": zod.string()
+})).optional(),
+  "createdAt": zod.string()
+})
+
+
+/**
+ * @summary Upload tenant payment proof
+ */
+export const CreateTenantPaymentBody = zod.object({
+  "tenantBookingId": zod.number(),
+  "proofImageUrl": zod.string().optional(),
+  "amount": zod.number(),
+  "notes": zod.string().optional()
+})
+
+
+/**
+ * @summary Admin list all tenants
+ */
+export const ListAdminTenantsResponseItem = zod.object({
+  "id": zod.number(),
+  "userId": zod.number(),
+  "businessName": zod.string(),
+  "ownerName": zod.string(),
+  "phone": zod.string().nullish(),
+  "email": zod.string().nullish(),
+  "businessCategory": zod.string().nullish(),
+  "logoUrl": zod.string().nullish(),
+  "address": zod.string().nullish(),
+  "status": zod.enum(['pending', 'active', 'inactive']),
+  "bookingCount": zod.number().optional(),
+  "createdAt": zod.string()
+})
+export const ListAdminTenantsResponse = zod.array(ListAdminTenantsResponseItem)
+
+
+/**
+ * @summary Admin create tenant account
+ */
+export const CreateAdminTenantBody = zod.object({
+  "name": zod.string(),
+  "email": zod.string(),
+  "password": zod.string(),
+  "phone": zod.string().optional(),
+  "businessName": zod.string(),
+  "ownerName": zod.string(),
+  "businessCategory": zod.string().optional(),
+  "address": zod.string().optional()
+})
+
+
+/**
+ * @summary Admin get tenant detail
+ */
+export const GetAdminTenantParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetAdminTenantResponse = zod.object({
+  "id": zod.number(),
+  "userId": zod.number(),
+  "businessName": zod.string(),
+  "ownerName": zod.string(),
+  "phone": zod.string().nullish(),
+  "email": zod.string().nullish(),
+  "businessCategory": zod.string().nullish(),
+  "logoUrl": zod.string().nullish(),
+  "address": zod.string().nullish(),
+  "status": zod.enum(['pending', 'active', 'inactive']),
+  "bookingCount": zod.number().optional(),
+  "createdAt": zod.string()
+})
+
+
+/**
+ * @summary Admin update tenant status
+ */
+export const UpdateAdminTenantStatusParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const UpdateAdminTenantStatusBody = zod.object({
+  "status": zod.enum(['pending', 'active', 'inactive'])
+})
+
+
+/**
+ * @summary Admin list all tenant bookings
+ */
+export const ListAdminTenantBookingsQueryParams = zod.object({
+  "status": zod.coerce.string().optional(),
+  "tenantId": zod.coerce.number().optional()
+})
+
+export const ListAdminTenantBookingsResponseItem = zod.object({
+  "id": zod.number(),
+  "orderNumber": zod.string(),
+  "tenantId": zod.number(),
+  "userId": zod.number().nullish(),
+  "bookingType": zod.enum(['booth', 'event_space', 'advertising_space', 'renewal']),
+  "startDate": zod.string(),
+  "endDate": zod.string(),
+  "durationMonths": zod.number().nullish(),
+  "requestedArea": zod.string().nullish(),
+  "description": zod.string().nullish(),
+  "price": zod.number(),
+  "paymentStatus": zod.enum(['pending', 'uploaded', 'verified', 'rejected']),
+  "status": zod.enum(['pending', 'approved', 'rejected', 'active', 'expired']),
+  "adminNotes": zod.string().nullish(),
+  "businessName": zod.string().optional(),
+  "ownerName": zod.string().optional(),
+  "payments": zod.array(zod.object({
+  "id": zod.number(),
+  "tenantBookingId": zod.number(),
+  "proofImageUrl": zod.string().nullish(),
+  "amount": zod.number(),
+  "notes": zod.string().nullish(),
+  "status": zod.enum(['pending', 'verified', 'rejected']),
+  "createdAt": zod.string()
+})).optional(),
+  "createdAt": zod.string()
+})
+export const ListAdminTenantBookingsResponse = zod.array(ListAdminTenantBookingsResponseItem)
+
+
+/**
+ * @summary Admin update tenant booking
+ */
+export const UpdateAdminTenantBookingParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const UpdateAdminTenantBookingBody = zod.object({
+  "status": zod.enum(['pending', 'approved', 'rejected', 'active', 'expired']).optional(),
+  "price": zod.number().optional(),
+  "adminNotes": zod.string().optional()
+})
+
+
+/**
+ * @summary Admin verify tenant payment
+ */
+export const VerifyAdminTenantPaymentParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const VerifyAdminTenantPaymentBody = zod.object({
+  "notes": zod.string().optional()
+})
+
+
+/**
+ * @summary Admin reject tenant payment
+ */
+export const RejectAdminTenantPaymentParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const RejectAdminTenantPaymentBody = zod.object({
+  "notes": zod.string().optional()
+})
+
+

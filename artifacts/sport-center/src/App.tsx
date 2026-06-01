@@ -25,6 +25,11 @@ import Login from "@/pages/Login";
 import Register from "@/pages/Register";
 import MyBookings from "@/pages/MyBookings";
 import Membership from "@/pages/Membership";
+import TenantLanding from "@/pages/TenantLanding";
+import TenantDashboard from "@/pages/TenantDashboard";
+import TenantBookings from "@/pages/TenantBookings";
+import TenantBookingDetail from "@/pages/TenantBookingDetail";
+import TenantBookingForm from "@/pages/TenantBookingForm";
 
 // Admin Pages
 import AdminLogin from "@/pages/admin/Login";
@@ -45,6 +50,8 @@ import AdminReports from "@/pages/admin/Reports";
 import AdminQrCheckin from "@/pages/admin/QrCheckin";
 import AdminNotificationTemplates from "@/pages/admin/NotificationTemplates";
 import AdminRescheduleRequests from "@/pages/admin/RescheduleRequests";
+import AdminTenants from "@/pages/admin/Tenants";
+import AdminTenantBookings from "@/pages/admin/TenantBookings";
 
 const queryClient = new QueryClient();
 
@@ -69,6 +76,8 @@ function AdminRouter() {
     if (location === "/admin/qr-checkin") return <AdminQrCheckin />;
     if (location === "/admin/notification-templates") return <AdminNotificationTemplates />;
     if (location === "/admin/reschedule") return <AdminRescheduleRequests />;
+    if (location === "/admin/tenants") return <AdminTenants />;
+    if (location === "/admin/tenant-bookings") return <AdminTenantBookings />;
     return <NotFound />;
   })();
 
@@ -99,6 +108,8 @@ function Router() {
       <Route path="/admin/qr-checkin" component={AdminRouter} />
       <Route path="/admin/notification-templates" component={AdminRouter} />
       <Route path="/admin/reschedule" component={AdminRouter} />
+      <Route path="/admin/tenants" component={AdminRouter} />
+      <Route path="/admin/tenant-bookings" component={AdminRouter} />
       <Route path="/admin" component={AdminRouter} />
 
       {/* Customer Routes */}
@@ -118,6 +129,11 @@ function Router() {
             <Route path="/terms" component={Terms} />
             <Route path="/privacy" component={Privacy} />
             <Route path="/contact" component={Contact} />
+            <Route path="/tenant" component={TenantLanding} />
+            <Route path="/tenant/dashboard" component={TenantDashboard} />
+            <Route path="/tenant/bookings" component={TenantBookings} />
+            <Route path="/tenant/bookings/:orderNumber" component={TenantBookingDetail} />
+            <Route path="/tenant/booking" component={TenantBookingForm} />
             <Route component={NotFound} />
           </Switch>
         </CustomerLayout>

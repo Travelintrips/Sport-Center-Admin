@@ -1,9 +1,9 @@
-import { text, serial, timestamp } from "drizzle-orm/pg-core";
+import { text, serial, timestamp, integer } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { scSchema } from "./_schema";
 
-export const userRoleEnum = scSchema.enum("user_role", ["admin", "super_admin", "admin_booking", "finance", "staff", "customer"]);
+export const userRoleEnum = scSchema.enum("user_role", ["admin", "super_admin", "admin_booking", "finance", "staff", "customer", "tenant"]);
 
 export const usersTable = scSchema.table("users", {
   id: serial("id").primaryKey(),
@@ -12,6 +12,7 @@ export const usersTable = scSchema.table("users", {
   passwordHash: text("password_hash").notNull(),
   role: userRoleEnum("role").notNull().default("customer"),
   phone: text("phone"),
+  tenantId: integer("tenant_id"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });

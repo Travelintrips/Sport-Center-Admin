@@ -4,14 +4,14 @@ import crypto from "crypto";
 const SECRET = process.env.SESSION_SECRET || "sport-center-secret-key-2024";
 const TOKEN_EXPIRY = 7 * 24 * 60 * 60 * 1000;
 
-export function createToken(userId: number, role: string): string {
-  const payload = { userId, role, exp: Date.now() + TOKEN_EXPIRY };
+export function createToken(userId: number, role: string, tenantId?: number | null): string {
+  const payload = { userId, role, tenantId: tenantId ?? null, exp: Date.now() + TOKEN_EXPIRY };
   const data = JSON.stringify(payload);
   const hmac = crypto.createHmac("sha256", SECRET).update(data).digest("hex");
   return Buffer.from(data).toString("base64") + "." + hmac;
 }
 
-export function verifyToken(token: string): { userId: number; role: string } | null {
+export function verifyToken(token: string): { userId: number; role: string; tenantId: number | null } | null {
   try {
     const [dataB64, hmac] = token.split(".");
     if (!dataB64 || !hmac) return null;
@@ -20,7 +20,7 @@ export function verifyToken(token: string): { userId: number; role: string } | n
     if (hmac !== expectedHmac) return null;
     const payload = JSON.parse(data);
     if (payload.exp < Date.now()) return null;
-    return { userId: payload.userId, role: payload.role };
+    return { userId: payload.userId, role: payload.role, tenantId: payload.tenantId ?? null };
   } catch {
     return null;
   }
@@ -86,6 +86,17 @@ export function bookingAdminMiddleware(req: Request, res: Response, next: NextFu
     const role = (req as any).user?.role;
     if (!["admin", "super_admin", "admin_booking"].includes(role)) {
       res.status(403).json({ error: "Forbidden: Booking Admin access required" });
+      return;
+    }
+    next();
+  });
+}
+
+export function tenantMiddleware(req: Request, res: Response, next: NextFunction): void {
+  authMiddleware(req, res, () => {
+    const role = (req as any).user?.role;
+    if (role !== "tenant") {
+      res.status(403).json({ error: "Forbidden: Tenant access required" });
       return;
     }
     next();

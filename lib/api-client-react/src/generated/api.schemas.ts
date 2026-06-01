@@ -686,6 +686,167 @@ export interface UploadUrlResponse {
   objectPath: string;
 }
 
+export type TenantStatus = typeof TenantStatus[keyof typeof TenantStatus];
+
+
+export const TenantStatus = {
+  pending: 'pending',
+  active: 'active',
+  inactive: 'inactive',
+} as const;
+
+export interface Tenant {
+  id: number;
+  userId: number;
+  businessName: string;
+  ownerName: string;
+  /** @nullable */
+  phone?: string | null;
+  /** @nullable */
+  email?: string | null;
+  /** @nullable */
+  businessCategory?: string | null;
+  /** @nullable */
+  logoUrl?: string | null;
+  /** @nullable */
+  address?: string | null;
+  status: TenantStatus;
+  bookingCount?: number;
+  createdAt: string;
+}
+
+export type TenantBookingBookingType = typeof TenantBookingBookingType[keyof typeof TenantBookingBookingType];
+
+
+export const TenantBookingBookingType = {
+  booth: 'booth',
+  event_space: 'event_space',
+  advertising_space: 'advertising_space',
+  renewal: 'renewal',
+} as const;
+
+export type TenantBookingPaymentStatus = typeof TenantBookingPaymentStatus[keyof typeof TenantBookingPaymentStatus];
+
+
+export const TenantBookingPaymentStatus = {
+  pending: 'pending',
+  uploaded: 'uploaded',
+  verified: 'verified',
+  rejected: 'rejected',
+} as const;
+
+export type TenantBookingStatus = typeof TenantBookingStatus[keyof typeof TenantBookingStatus];
+
+
+export const TenantBookingStatus = {
+  pending: 'pending',
+  approved: 'approved',
+  rejected: 'rejected',
+  active: 'active',
+  expired: 'expired',
+} as const;
+
+export type TenantPaymentStatus = typeof TenantPaymentStatus[keyof typeof TenantPaymentStatus];
+
+
+export const TenantPaymentStatus = {
+  pending: 'pending',
+  verified: 'verified',
+  rejected: 'rejected',
+} as const;
+
+export interface TenantPayment {
+  id: number;
+  tenantBookingId: number;
+  /** @nullable */
+  proofImageUrl?: string | null;
+  amount: number;
+  /** @nullable */
+  notes?: string | null;
+  status: TenantPaymentStatus;
+  createdAt: string;
+}
+
+export interface TenantBooking {
+  id: number;
+  orderNumber: string;
+  tenantId: number;
+  /** @nullable */
+  userId?: number | null;
+  bookingType: TenantBookingBookingType;
+  startDate: string;
+  endDate: string;
+  /** @nullable */
+  durationMonths?: number | null;
+  /** @nullable */
+  requestedArea?: string | null;
+  /** @nullable */
+  description?: string | null;
+  price: number;
+  paymentStatus: TenantBookingPaymentStatus;
+  status: TenantBookingStatus;
+  /** @nullable */
+  adminNotes?: string | null;
+  businessName?: string;
+  ownerName?: string;
+  payments?: TenantPayment[];
+  createdAt: string;
+}
+
+export type TenantBookingInputBookingType = typeof TenantBookingInputBookingType[keyof typeof TenantBookingInputBookingType];
+
+
+export const TenantBookingInputBookingType = {
+  booth: 'booth',
+  event_space: 'event_space',
+  advertising_space: 'advertising_space',
+  renewal: 'renewal',
+} as const;
+
+export interface TenantBookingInput {
+  bookingType: TenantBookingInputBookingType;
+  startDate: string;
+  endDate: string;
+  durationMonths?: number;
+  requestedArea?: string;
+  description?: string;
+}
+
+export type TenantBookingUpdateStatus = typeof TenantBookingUpdateStatus[keyof typeof TenantBookingUpdateStatus];
+
+
+export const TenantBookingUpdateStatus = {
+  pending: 'pending',
+  approved: 'approved',
+  rejected: 'rejected',
+  active: 'active',
+  expired: 'expired',
+} as const;
+
+export interface TenantBookingUpdate {
+  status?: TenantBookingUpdateStatus;
+  price?: number;
+  adminNotes?: string;
+}
+
+export interface TenantPaymentInput {
+  tenantBookingId: number;
+  proofImageUrl?: string;
+  amount: number;
+  notes?: string;
+}
+
+export interface CreateTenantInput {
+  name: string;
+  email: string;
+  password: string;
+  phone?: string;
+  businessName: string;
+  ownerName: string;
+  businessCategory?: string;
+  address?: string;
+}
+
 export interface ErrorEnvelope {
   error: string;
 }
@@ -748,5 +909,31 @@ search?: string;
 
 export type GetReviewsParams = {
 facilityId?: number;
+};
+
+export type UpdateAdminTenantStatusBodyStatus = typeof UpdateAdminTenantStatusBodyStatus[keyof typeof UpdateAdminTenantStatusBodyStatus];
+
+
+export const UpdateAdminTenantStatusBodyStatus = {
+  pending: 'pending',
+  active: 'active',
+  inactive: 'inactive',
+} as const;
+
+export type UpdateAdminTenantStatusBody = {
+  status: UpdateAdminTenantStatusBodyStatus;
+};
+
+export type ListAdminTenantBookingsParams = {
+status?: string;
+tenantId?: number;
+};
+
+export type VerifyAdminTenantPaymentBody = {
+  notes?: string;
+};
+
+export type RejectAdminTenantPaymentBody = {
+  notes?: string;
 };
 

@@ -31,6 +31,8 @@ tags:
     description: Object storage upload and serving endpoints.
   - name: memberships
     description: Gym monthly membership management
+  - name: tenants
+    description: Tenant (Penyewa Tenan) management
 paths:
   /healthz:
     get:
@@ -1082,6 +1084,281 @@ paths:
               schema:
                 $ref: "#/components/schemas/VerifyResult"
 
+  /tenant/me:
+    get:
+      operationId: getTenantMe
+      tags: [tenants]
+      summary: Get own tenant profile
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Tenant profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Tenant"
+        "404":
+          description: Not found
+
+  /tenant/bookings:
+    get:
+      operationId: listTenantBookings
+      tags: [tenants]
+      summary: List own tenant bookings
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: List of tenant bookings
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TenantBooking"
+    post:
+      operationId: createTenantBooking
+      tags: [tenants]
+      summary: Submit new tenant booking
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TenantBookingInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantBooking"
+
+  /tenant/bookings/{orderNumber}:
+    get:
+      operationId: getTenantBooking
+      tags: [tenants]
+      summary: Get tenant booking detail
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: orderNumber
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Booking detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantBooking"
+
+  /tenant/payments:
+    post:
+      operationId: createTenantPayment
+      tags: [tenants]
+      summary: Upload tenant payment proof
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TenantPaymentInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantPayment"
+
+  /admin/tenants:
+    get:
+      operationId: listAdminTenants
+      tags: [tenants]
+      summary: Admin list all tenants
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: List of tenants
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Tenant"
+    post:
+      operationId: createAdminTenant
+      tags: [tenants]
+      summary: Admin create tenant account
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTenantInput"
+      responses:
+        "201":
+          description: Created
+
+  /admin/tenants/{id}:
+    get:
+      operationId: getAdminTenant
+      tags: [tenants]
+      summary: Admin get tenant detail
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Tenant detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Tenant"
+
+  /admin/tenants/{id}/status:
+    put:
+      operationId: updateAdminTenantStatus
+      tags: [tenants]
+      summary: Admin update tenant status
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [pending, active, inactive]
+      responses:
+        "200":
+          description: Updated
+
+  /admin/tenant-bookings:
+    get:
+      operationId: listAdminTenantBookings
+      tags: [tenants]
+      summary: Admin list all tenant bookings
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: tenantId
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of tenant bookings
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TenantBooking"
+
+  /admin/tenant-bookings/{id}:
+    put:
+      operationId: updateAdminTenantBooking
+      tags: [tenants]
+      summary: Admin update tenant booking
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TenantBookingUpdate"
+      responses:
+        "200":
+          description: Updated
+
+  /admin/tenant-payments/{id}/verify:
+    put:
+      operationId: verifyAdminTenantPayment
+      tags: [tenants]
+      summary: Admin verify tenant payment
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                notes:
+                  type: string
+      responses:
+        "200":
+          description: Verified
+
+  /admin/tenant-payments/{id}/reject:
+    put:
+      operationId: rejectAdminTenantPayment
+      tags: [tenants]
+      summary: Admin reject tenant payment
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                notes:
+                  type: string
+      responses:
+        "200":
+          description: Rejected
+
 components:
   schemas:
     HealthStatus:
@@ -2043,6 +2320,165 @@ components:
           format: uri
         objectPath:
           type: string
+    Tenant:
+      type: object
+      required: [id, userId, businessName, ownerName, status, createdAt]
+      properties:
+        id:
+          type: integer
+        userId:
+          type: integer
+        businessName:
+          type: string
+        ownerName:
+          type: string
+        phone:
+          type: ["string", "null"]
+        email:
+          type: ["string", "null"]
+        businessCategory:
+          type: ["string", "null"]
+        logoUrl:
+          type: ["string", "null"]
+        address:
+          type: ["string", "null"]
+        status:
+          type: string
+          enum: [pending, active, inactive]
+        bookingCount:
+          type: integer
+        createdAt:
+          type: string
+
+    TenantBooking:
+      type: object
+      required: [id, orderNumber, tenantId, bookingType, startDate, endDate, price, paymentStatus, status, createdAt]
+      properties:
+        id:
+          type: integer
+        orderNumber:
+          type: string
+        tenantId:
+          type: integer
+        userId:
+          type: ["integer", "null"]
+        bookingType:
+          type: string
+          enum: [booth, event_space, advertising_space, renewal]
+        startDate:
+          type: string
+        endDate:
+          type: string
+        durationMonths:
+          type: ["integer", "null"]
+        requestedArea:
+          type: ["string", "null"]
+        description:
+          type: ["string", "null"]
+        price:
+          type: number
+        paymentStatus:
+          type: string
+          enum: [pending, uploaded, verified, rejected]
+        status:
+          type: string
+          enum: [pending, approved, rejected, active, expired]
+        adminNotes:
+          type: ["string", "null"]
+        businessName:
+          type: string
+        ownerName:
+          type: string
+        payments:
+          type: array
+          items:
+            $ref: "#/components/schemas/TenantPayment"
+        createdAt:
+          type: string
+
+    TenantPayment:
+      type: object
+      required: [id, tenantBookingId, amount, status, createdAt]
+      properties:
+        id:
+          type: integer
+        tenantBookingId:
+          type: integer
+        proofImageUrl:
+          type: ["string", "null"]
+        amount:
+          type: number
+        notes:
+          type: ["string", "null"]
+        status:
+          type: string
+          enum: [pending, verified, rejected]
+        createdAt:
+          type: string
+
+    TenantBookingInput:
+      type: object
+      required: [bookingType, startDate, endDate]
+      properties:
+        bookingType:
+          type: string
+          enum: [booth, event_space, advertising_space, renewal]
+        startDate:
+          type: string
+        endDate:
+          type: string
+        durationMonths:
+          type: integer
+        requestedArea:
+          type: string
+        description:
+          type: string
+
+    TenantBookingUpdate:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [pending, approved, rejected, active, expired]
+        price:
+          type: number
+        adminNotes:
+          type: string
+
+    TenantPaymentInput:
+      type: object
+      required: [tenantBookingId, amount]
+      properties:
+        tenantBookingId:
+          type: integer
+        proofImageUrl:
+          type: string
+        amount:
+          type: number
+        notes:
+          type: string
+
+    CreateTenantInput:
+      type: object
+      required: [name, email, password, businessName, ownerName]
+      properties:
+        name:
+          type: string
+        email:
+          type: string
+        password:
+          type: string
+        phone:
+          type: string
+        businessName:
+          type: string
+        ownerName:
+          type: string
+        businessCategory:
+          type: string
+        address:
+          type: string
+
     ErrorEnvelope:
       type: object
       required: [error]

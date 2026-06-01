@@ -26,6 +26,7 @@ import reportsRouter from "./reports";
 import notificationTemplatesRouter from "./notificationTemplates";
 import bookingHistoryRouter from "./bookingHistory";
 import qrCheckinRouter from "./qrCheckin";
+import tenantsRouter from "./tenants";
 
 const router: IRouter = Router();
 
@@ -56,5 +57,6 @@ router.use(reportsRouter);
 router.use(notificationTemplatesRouter);
 router.use(bookingHistoryRouter);
 router.use(qrCheckinRouter);
+router.use(tenantsRouter);
 
 export default router;

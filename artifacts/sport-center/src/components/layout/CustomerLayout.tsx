@@ -1,6 +1,6 @@
 import { ReactNode, useState, useEffect } from "react";
 import { Link, useLocation } from "wouter";
-import { Menu, X, LogOut, CalendarDays, ChevronDown, MapPin, Phone, Instagram, Facebook, ShieldCheck, ArrowUp, Dumbbell } from "lucide-react";
+import { Menu, X, LogOut, CalendarDays, ChevronDown, MapPin, Phone, Instagram, Facebook, ShieldCheck, ArrowUp, Dumbbell, Building2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useGetMe, useLogout, getGetMeQueryKey, useGetSettings } from "@workspace/api-client-react";
 import { removeToken } from "@/lib/auth";
@@ -75,6 +75,12 @@ function UserMenu() {
                 className="flex items-center gap-2.5 px-3 py-2.5 text-sm font-medium rounded-xl hover:bg-accent transition-colors w-full">
                 <CalendarDays size={15} className="text-primary" /> {t("Booking Saya", "My Bookings")}
               </Link>
+              {user.role === "tenant" && (
+                <Link href="/tenant/dashboard" onClick={() => setOpen(false)}
+                  className="flex items-center gap-2.5 px-3 py-2.5 text-sm font-medium rounded-xl hover:bg-accent transition-colors w-full">
+                  <Building2 size={15} className="text-primary" /> {t("Dashboard Tenant", "Tenant Dashboard")}
+                </Link>
+              )}
               <div className="h-px bg-border/40 my-1 mx-2" />
               <button onClick={() => { setOpen(false); logoutMutation.mutate(undefined as void); }}
                 className="flex items-center gap-2.5 px-3 py-2.5 text-sm font-medium rounded-xl hover:bg-red-50 dark:hover:bg-red-950/30 w-full text-left text-red-500">
@@ -117,6 +123,7 @@ export default function CustomerLayout({ children }: { children: ReactNode }) {
     { href: "/",            label: t("Beranda",      "Home")     },
     { href: "/facilities",  label: t("Fasilitas",    "Venues")   },
     { href: "/promos",      label: t("Promo",        "Promos")   },
+    { href: "/tenant",      label: t("Tenan",        "Tenant")   },
     { href: "/contact",     label: t("Hubungi Kami", "Contact")  },
   ];
 

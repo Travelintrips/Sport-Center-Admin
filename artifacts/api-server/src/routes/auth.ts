@@ -18,9 +18,16 @@ router.post("/auth/login", async (req, res) => {
       res.status(401).json({ error: "Invalid credentials" });
       return;
     }
-    const token = createToken(user.id, user.role);
+    let tenantId: number | null = null;
+    if (user.role === "tenant") {
+      const { tenantsTable } = await import("@workspace/db");
+      const { eq } = await import("drizzle-orm");
+      const [tenant] = await db.select().from(tenantsTable).where(eq(tenantsTable.userId, user.id)).limit(1);
+      tenantId = tenant?.id ?? null;
+    }
+    const token = createToken(user.id, user.role, tenantId);
     res.json({
-      user: { id: user.id, name: user.name, email: user.email, role: user.role, phone: user.phone, createdAt: user.createdAt },
+      user: { id: user.id, name: user.name, email: user.email, role: user.role, phone: user.phone, tenantId, createdAt: user.createdAt },
       token,
     });
   } catch (err) {
@@ -68,7 +75,7 @@ router.get("/auth/me", authMiddleware, async (req, res) => {
       res.status(401).json({ error: "User not found" });
       return;
     }
-    res.json({ id: user.id, name: user.name, email: user.email, role: user.role, phone: user.phone, createdAt: user.createdAt });
+    res.json({ id: user.id, name: user.name, email: user.email, role: user.role, phone: user.phone, tenantId: user.tenantId ?? null, createdAt: user.createdAt });
   } catch (err) {
     req.log.error({ err }, "Get me error");
     res.status(500).json({ error: "Internal server error" });

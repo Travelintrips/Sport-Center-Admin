@@ -22,6 +22,8 @@ import {
   QrCode,
   Bell,
   RefreshCw,
+  Building2,
+  Store,
 } from "lucide-react";
 import { useGetMe, useLogout, getGetMeQueryKey } from "@workspace/api-client-react";
 import { removeToken } from "@/lib/auth";
@@ -55,6 +57,13 @@ const NAV_GROUPS = [
       { href: "/admin/memberships", label: "Member Gym", icon: Dumbbell },
       { href: "/admin/ap-members", label: "Member AP", icon: Plane },
       { href: "/admin/promos", label: "Promos", icon: Tag },
+    ],
+  },
+  {
+    label: "Penyewa Tenan",
+    items: [
+      { href: "/admin/tenants", label: "Data Tenant", icon: Building2 },
+      { href: "/admin/tenant-bookings", label: "Booking Tenant", icon: Store },
     ],
   },
   {
