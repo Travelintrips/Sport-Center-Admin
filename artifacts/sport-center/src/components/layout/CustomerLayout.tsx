@@ -28,9 +28,18 @@ function UserMenu() {
   const { t } = useLang();
   const [open, setOpen] = useState(false);
   const [, setLocation] = useLocation();
+  const queryClient = useQueryClient();
 
   const { data: user } = useGetMe({ query: { retry: false, queryKey: getGetMeQueryKey(), staleTime: 60_000 } });
-  const logoutMutation = useLogout({ mutation: { onSuccess: () => { removeToken(); setLocation("/"); } } });
+  const logoutMutation = useLogout({
+    mutation: {
+      onSuccess: () => {
+        removeToken();
+        queryClient.clear();
+        setLocation("/");
+      },
+    },
+  });
 
   if (!user || user.role === "admin") {
     return (

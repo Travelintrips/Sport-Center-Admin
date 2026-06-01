@@ -26,6 +26,7 @@ import {
   Store,
 } from "lucide-react";
 import { useGetMe, useLogout, getGetMeQueryKey } from "@workspace/api-client-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { removeToken } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { useState } from "react";
@@ -80,7 +81,8 @@ const NAV_GROUPS = [
 export default function AdminLayout({ children }: { children: ReactNode }) {
   const [location, setLocation] = useLocation();
   const [isMobileOpen, setIsMobileOpen] = useState(false);
-  
+  const queryClient = useQueryClient();
+
   const { data: user, isLoading, isError } = useGetMe({
     query: {
       retry: false,
@@ -93,6 +95,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
     mutation: {
       onSuccess: () => {
         removeToken();
+        queryClient.clear();
         setLocation("/");
       }
     }
