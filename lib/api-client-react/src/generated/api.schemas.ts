@@ -847,6 +847,23 @@ export interface CreateTenantInput {
   address?: string;
 }
 
+export type TenantStatusUpdateBodyStatus = typeof TenantStatusUpdateBodyStatus[keyof typeof TenantStatusUpdateBodyStatus];
+
+
+export const TenantStatusUpdateBodyStatus = {
+  pending: 'pending',
+  active: 'active',
+  inactive: 'inactive',
+} as const;
+
+export interface TenantStatusUpdateBody {
+  status: TenantStatusUpdateBodyStatus;
+}
+
+export interface TenantPaymentActionBody {
+  notes?: string;
+}
+
 export interface ErrorEnvelope {
   error: string;
 }
@@ -911,29 +928,8 @@ export type GetReviewsParams = {
 facilityId?: number;
 };
 
-export type UpdateAdminTenantStatusBodyStatus = typeof UpdateAdminTenantStatusBodyStatus[keyof typeof UpdateAdminTenantStatusBodyStatus];
-
-
-export const UpdateAdminTenantStatusBodyStatus = {
-  pending: 'pending',
-  active: 'active',
-  inactive: 'inactive',
-} as const;
-
-export type UpdateAdminTenantStatusBody = {
-  status: UpdateAdminTenantStatusBodyStatus;
-};
-
 export type ListAdminTenantBookingsParams = {
 status?: string;
 tenantId?: number;
-};
-
-export type VerifyAdminTenantPaymentBody = {
-  notes?: string;
-};
-
-export type RejectAdminTenantPaymentBody = {
-  notes?: string;
 };
 

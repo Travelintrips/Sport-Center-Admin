@@ -6,10 +6,10 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type UpdateAdminTenantStatusBodyStatus = typeof UpdateAdminTenantStatusBodyStatus[keyof typeof UpdateAdminTenantStatusBodyStatus];
+export type TenantStatusUpdateBodyStatus = typeof TenantStatusUpdateBodyStatus[keyof typeof TenantStatusUpdateBodyStatus];
 
 
-export const UpdateAdminTenantStatusBodyStatus = {
+export const TenantStatusUpdateBodyStatus = {
   pending: 'pending',
   active: 'active',
   inactive: 'inactive',

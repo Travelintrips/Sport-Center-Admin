@@ -1250,12 +1250,7 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              required: [status]
-              properties:
-                status:
-                  type: string
-                  enum: [pending, active, inactive]
+              $ref: "#/components/schemas/TenantStatusUpdateBody"
       responses:
         "200":
           description: Updated
@@ -1326,10 +1321,7 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              properties:
-                notes:
-                  type: string
+              $ref: "#/components/schemas/TenantPaymentActionBody"
       responses:
         "200":
           description: Verified
@@ -1351,10 +1343,7 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              properties:
-                notes:
-                  type: string
+              $ref: "#/components/schemas/TenantPaymentActionBody"
       responses:
         "200":
           description: Rejected
@@ -2477,6 +2466,20 @@ components:
         businessCategory:
           type: string
         address:
+          type: string
+
+    TenantStatusUpdateBody:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [pending, active, inactive]
+
+    TenantPaymentActionBody:
+      type: object
+      properties:
+        notes:
           type: string
 
     ErrorEnvelope:

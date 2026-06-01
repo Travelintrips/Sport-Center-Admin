@@ -69,7 +69,6 @@ import type {
   RecurringBookingInput,
   RecurringBookingResult,
   RegisterInput,
-  RejectAdminTenantPaymentBody,
   Review,
   ReviewSummary,
   Settings,
@@ -79,13 +78,13 @@ import type {
   TenantBookingInput,
   TenantBookingUpdate,
   TenantPayment,
+  TenantPaymentActionBody,
   TenantPaymentInput,
+  TenantStatusUpdateBody,
   TimeSlot,
-  UpdateAdminTenantStatusBody,
   UploadUrlRequest,
   UploadUrlResponse,
   User,
-  VerifyAdminTenantPaymentBody,
   VerifyInput,
   VerifyResult
 } from './api.schemas';
@@ -4775,7 +4774,7 @@ export const getUpdateAdminTenantStatusUrl = (id: number,) => {
  * @summary Admin update tenant status
  */
 export const updateAdminTenantStatus = async (id: number,
-    updateAdminTenantStatusBody: UpdateAdminTenantStatusBody, options?: RequestInit): Promise<void> => {
+    tenantStatusUpdateBody: TenantStatusUpdateBody, options?: RequestInit): Promise<void> => {
 
   return customFetch<void>(getUpdateAdminTenantStatusUrl(id),
   {
@@ -4783,7 +4782,7 @@ export const updateAdminTenantStatus = async (id: number,
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
     body: JSON.stringify(
-      updateAdminTenantStatusBody,)
+      tenantStatusUpdateBody,)
   }
 );}
 
@@ -4791,8 +4790,8 @@ export const updateAdminTenantStatus = async (id: number,
 
 
 export const getUpdateAdminTenantStatusMutationOptions = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateAdminTenantStatus>>, TError,{id: number;data: BodyType<UpdateAdminTenantStatusBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof updateAdminTenantStatus>>, TError,{id: number;data: BodyType<UpdateAdminTenantStatusBody>}, TContext> => {
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateAdminTenantStatus>>, TError,{id: number;data: BodyType<TenantStatusUpdateBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateAdminTenantStatus>>, TError,{id: number;data: BodyType<TenantStatusUpdateBody>}, TContext> => {
 
 const mutationKey = ['updateAdminTenantStatus'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
@@ -4804,7 +4803,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateAdminTenantStatus>>, {id: number;data: BodyType<UpdateAdminTenantStatusBody>}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateAdminTenantStatus>>, {id: number;data: BodyType<TenantStatusUpdateBody>}> = (props) => {
           const {id,data} = props ?? {};
 
           return  updateAdminTenantStatus(id,data,requestOptions)
@@ -4818,18 +4817,18 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
   return  { mutationFn, ...mutationOptions }}
 
     export type UpdateAdminTenantStatusMutationResult = NonNullable<Awaited<ReturnType<typeof updateAdminTenantStatus>>>
-    export type UpdateAdminTenantStatusMutationBody = BodyType<UpdateAdminTenantStatusBody>
+    export type UpdateAdminTenantStatusMutationBody = BodyType<TenantStatusUpdateBody>
     export type UpdateAdminTenantStatusMutationError = ErrorType<unknown>
 
     /**
  * @summary Admin update tenant status
  */
 export const useUpdateAdminTenantStatus = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateAdminTenantStatus>>, TError,{id: number;data: BodyType<UpdateAdminTenantStatusBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateAdminTenantStatus>>, TError,{id: number;data: BodyType<TenantStatusUpdateBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof updateAdminTenantStatus>>,
         TError,
-        {id: number;data: BodyType<UpdateAdminTenantStatusBody>},
+        {id: number;data: BodyType<TenantStatusUpdateBody>},
         TContext
       > => {
       return useMutation(getUpdateAdminTenantStatusMutationOptions(options));
@@ -5003,7 +5002,7 @@ export const getVerifyAdminTenantPaymentUrl = (id: number,) => {
  * @summary Admin verify tenant payment
  */
 export const verifyAdminTenantPayment = async (id: number,
-    verifyAdminTenantPaymentBody?: VerifyAdminTenantPaymentBody, options?: RequestInit): Promise<void> => {
+    tenantPaymentActionBody?: TenantPaymentActionBody, options?: RequestInit): Promise<void> => {
 
   return customFetch<void>(getVerifyAdminTenantPaymentUrl(id),
   {
@@ -5011,7 +5010,7 @@ export const verifyAdminTenantPayment = async (id: number,
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
     body: JSON.stringify(
-      verifyAdminTenantPaymentBody,)
+      tenantPaymentActionBody,)
   }
 );}
 
@@ -5019,8 +5018,8 @@ export const verifyAdminTenantPayment = async (id: number,
 
 
 export const getVerifyAdminTenantPaymentMutationOptions = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof verifyAdminTenantPayment>>, TError,{id: number;data?: BodyType<VerifyAdminTenantPaymentBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof verifyAdminTenantPayment>>, TError,{id: number;data?: BodyType<VerifyAdminTenantPaymentBody>}, TContext> => {
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof verifyAdminTenantPayment>>, TError,{id: number;data?: BodyType<TenantPaymentActionBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof verifyAdminTenantPayment>>, TError,{id: number;data?: BodyType<TenantPaymentActionBody>}, TContext> => {
 
 const mutationKey = ['verifyAdminTenantPayment'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
@@ -5032,7 +5031,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof verifyAdminTenantPayment>>, {id: number;data?: BodyType<VerifyAdminTenantPaymentBody>}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof verifyAdminTenantPayment>>, {id: number;data?: BodyType<TenantPaymentActionBody>}> = (props) => {
           const {id,data} = props ?? {};
 
           return  verifyAdminTenantPayment(id,data,requestOptions)
@@ -5046,18 +5045,18 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
   return  { mutationFn, ...mutationOptions }}
 
     export type VerifyAdminTenantPaymentMutationResult = NonNullable<Awaited<ReturnType<typeof verifyAdminTenantPayment>>>
-    export type VerifyAdminTenantPaymentMutationBody = BodyType<VerifyAdminTenantPaymentBody> | undefined
+    export type VerifyAdminTenantPaymentMutationBody = BodyType<TenantPaymentActionBody> | undefined
     export type VerifyAdminTenantPaymentMutationError = ErrorType<unknown>
 
     /**
  * @summary Admin verify tenant payment
  */
 export const useVerifyAdminTenantPayment = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof verifyAdminTenantPayment>>, TError,{id: number;data?: BodyType<VerifyAdminTenantPaymentBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof verifyAdminTenantPayment>>, TError,{id: number;data?: BodyType<TenantPaymentActionBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof verifyAdminTenantPayment>>,
         TError,
-        {id: number;data?: BodyType<VerifyAdminTenantPaymentBody>},
+        {id: number;data?: BodyType<TenantPaymentActionBody>},
         TContext
       > => {
       return useMutation(getVerifyAdminTenantPaymentMutationOptions(options));
@@ -5075,7 +5074,7 @@ export const getRejectAdminTenantPaymentUrl = (id: number,) => {
  * @summary Admin reject tenant payment
  */
 export const rejectAdminTenantPayment = async (id: number,
-    rejectAdminTenantPaymentBody?: RejectAdminTenantPaymentBody, options?: RequestInit): Promise<void> => {
+    tenantPaymentActionBody?: TenantPaymentActionBody, options?: RequestInit): Promise<void> => {
 
   return customFetch<void>(getRejectAdminTenantPaymentUrl(id),
   {
@@ -5083,7 +5082,7 @@ export const rejectAdminTenantPayment = async (id: number,
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
     body: JSON.stringify(
-      rejectAdminTenantPaymentBody,)
+      tenantPaymentActionBody,)
   }
 );}
 
@@ -5091,8 +5090,8 @@ export const rejectAdminTenantPayment = async (id: number,
 
 
 export const getRejectAdminTenantPaymentMutationOptions = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rejectAdminTenantPayment>>, TError,{id: number;data?: BodyType<RejectAdminTenantPaymentBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof rejectAdminTenantPayment>>, TError,{id: number;data?: BodyType<RejectAdminTenantPaymentBody>}, TContext> => {
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rejectAdminTenantPayment>>, TError,{id: number;data?: BodyType<TenantPaymentActionBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof rejectAdminTenantPayment>>, TError,{id: number;data?: BodyType<TenantPaymentActionBody>}, TContext> => {
 
 const mutationKey = ['rejectAdminTenantPayment'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
@@ -5104,7 +5103,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof rejectAdminTenantPayment>>, {id: number;data?: BodyType<RejectAdminTenantPaymentBody>}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof rejectAdminTenantPayment>>, {id: number;data?: BodyType<TenantPaymentActionBody>}> = (props) => {
           const {id,data} = props ?? {};
 
           return  rejectAdminTenantPayment(id,data,requestOptions)
@@ -5118,18 +5117,18 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
   return  { mutationFn, ...mutationOptions }}
 
     export type RejectAdminTenantPaymentMutationResult = NonNullable<Awaited<ReturnType<typeof rejectAdminTenantPayment>>>
-    export type RejectAdminTenantPaymentMutationBody = BodyType<RejectAdminTenantPaymentBody> | undefined
+    export type RejectAdminTenantPaymentMutationBody = BodyType<TenantPaymentActionBody> | undefined
     export type RejectAdminTenantPaymentMutationError = ErrorType<unknown>
 
     /**
  * @summary Admin reject tenant payment
  */
 export const useRejectAdminTenantPayment = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rejectAdminTenantPayment>>, TError,{id: number;data?: BodyType<RejectAdminTenantPaymentBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rejectAdminTenantPayment>>, TError,{id: number;data?: BodyType<TenantPaymentActionBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof rejectAdminTenantPayment>>,
         TError,
-        {id: number;data?: BodyType<RejectAdminTenantPaymentBody>},
+        {id: number;data?: BodyType<TenantPaymentActionBody>},
         TContext
       > => {
       return useMutation(getRejectAdminTenantPaymentMutationOptions(options));
