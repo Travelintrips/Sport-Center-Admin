@@ -123,7 +123,6 @@ export default function CustomerLayout({ children }: { children: ReactNode }) {
     { href: "/",            label: t("Beranda",      "Home")     },
     { href: "/facilities",  label: t("Fasilitas",    "Venues")   },
     { href: "/promos",      label: t("Promo",        "Promos")   },
-    { href: "/tenant",      label: t("Tenan",        "Tenant")   },
     { href: "/contact",     label: t("Hubungi Kami", "Contact")  },
   ];
 
