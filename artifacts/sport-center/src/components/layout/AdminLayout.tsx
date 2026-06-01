@@ -82,10 +82,9 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
   const [location, setLocation] = useLocation();
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   
-  const { data: user, isLoading, isError, isFetching } = useGetMe({
   const queryClient = useQueryClient();
 
-  const { data: user, isLoading, isError } = useGetMe({
+  const { data: user, isLoading, isError, isFetching } = useGetMe({
     query: {
       retry: false,
       queryKey: getGetMeQueryKey(),
