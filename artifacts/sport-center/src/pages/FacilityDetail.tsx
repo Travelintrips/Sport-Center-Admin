@@ -220,6 +220,44 @@ export default function FacilityDetail() {
                     </div>
                   ))}
                 </div>
+
+                {/* Reviews Section */}
+                {reviews && reviews.length > 0 && (
+                  <div className="mt-10">
+                    <h2 className="text-xl font-black mb-5 text-secondary dark:text-white flex items-center gap-2">
+                      <div className="w-1.5 h-6 bg-primary rounded-full"></div>
+                      {t("Ulasan Pelanggan", "Customer Reviews")}
+                      <span className="text-sm font-normal text-muted-foreground ml-1">({reviewCount})</span>
+                    </h2>
+                    <div className="flex items-center gap-3 mb-6">
+                      <div className="flex gap-0.5">
+                        {[1,2,3,4,5].map((s) => (
+                          <Star key={s} className={`w-5 h-5 ${s <= Math.round(avgRating) ? "fill-yellow-400 text-yellow-400" : "text-gray-200"}`} />
+                        ))}
+                      </div>
+                      <span className="text-2xl font-black">{avgRating.toFixed(1)}</span>
+                      <span className="text-muted-foreground text-sm">{t("dari 5", "out of 5")}</span>
+                    </div>
+                    <div className="space-y-4">
+                      {reviews.slice(0, 5).map((review) => (
+                        <div key={review.id} className="border border-border/60 rounded-2xl p-4 bg-muted/20">
+                          <div className="flex items-center justify-between mb-2">
+                            <div className="font-bold text-sm">{review.reviewerName}</div>
+                            <div className="flex gap-0.5">
+                              {[1,2,3,4,5].map((s) => (
+                                <Star key={s} className={`w-3.5 h-3.5 ${s <= review.rating ? "fill-yellow-400 text-yellow-400" : "text-gray-200"}`} />
+                              ))}
+                            </div>
+                          </div>
+                          {review.comment && <p className="text-sm text-foreground/70 leading-relaxed">"{review.comment}"</p>}
+                          <p className="text-xs text-muted-foreground mt-2">
+                            {review.bookingDate ? new Date(review.bookingDate).toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" }) : ""}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
