@@ -37,11 +37,13 @@ export default function AdminLogin() {
         return;
       }
       setToken(data.token);
-      queryClient.invalidateQueries({ queryKey: getGetMeQueryKey() });
+      await queryClient.resetQueries({ queryKey: getGetMeQueryKey() });
       toast({ title: "Login berhasil", description: "Selamat datang, Admin." });
       setLocation("/admin");
-    } catch {
-      toast({ title: "Login Gagal", description: "Terjadi kesalahan. Coba lagi.", variant: "destructive" });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("[AdminLogin] error:", err);
+      toast({ title: "Login Gagal", description: msg || "Terjadi kesalahan. Coba lagi.", variant: "destructive" });
     } finally {
       setIsPending(false);
     }
