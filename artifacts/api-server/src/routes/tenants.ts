@@ -57,9 +57,73 @@ router.post("/tenant/bookings", tenantMiddleware, async (req, res) => {
     const tenantId = (req as any).user.tenantId;
     const userId = (req as any).user.userId;
     if (!tenantId) { res.status(404).json({ error: "Tenant profile not found" }); return; }
-    const { bookingType, startDate, endDate, durationMonths, requestedArea, description } = req.body;
-    if (!bookingType || !startDate || !endDate) {
-      res.status(400).json({ error: "bookingType, startDate, endDate required" });
+
+    const {
+      bookingType,
+      paymentPeriodType,
+      periodStartMonth, periodStartYear,
+      periodEndMonth, periodEndYear,
+      requestedArea, description,
+      // legacy fields
+      startDate, endDate, durationMonths,
+    } = req.body;
+
+    if (!bookingType) {
+      res.status(400).json({ error: "bookingType required" });
+      return;
+    }
+
+    // Period-based validation
+    if (periodStartMonth !== undefined) {
+      if (!periodStartMonth || !periodStartYear || !periodEndMonth || !periodEndYear) {
+        res.status(400).json({ error: "periodStartMonth, periodStartYear, periodEndMonth, periodEndYear required" });
+        return;
+      }
+      const endAfterStart =
+        periodEndYear > periodStartYear ||
+        (periodEndYear === periodStartYear && periodEndMonth >= periodStartMonth);
+      if (!endAfterStart) {
+        res.status(400).json({ error: "Period end must not be before period start" });
+        return;
+      }
+      const totalMonths = (periodEndYear - periodStartYear) * 12 + (periodEndMonth - periodStartMonth + 1);
+      if (paymentPeriodType === "yearly" && totalMonths < 12) {
+        res.status(400).json({ error: "Yearly payment requires minimum 12 months" });
+        return;
+      }
+      const orderNumber = await generateTenantOrderNumber();
+      // Compute start/end date from period for legacy compat
+      const computedStartDate = `${periodStartYear}-${String(periodStartMonth).padStart(2, "0")}-01`;
+      const lastDayOfEndMonth = new Date(periodEndYear, periodEndMonth, 0).getDate();
+      const computedEndDate = `${periodEndYear}-${String(periodEndMonth).padStart(2, "0")}-${lastDayOfEndMonth}`;
+
+      const [booking] = await db.insert(tenantBookingsTable).values({
+        orderNumber,
+        tenantId,
+        userId,
+        bookingType,
+        paymentPeriodType: paymentPeriodType ?? "monthly",
+        periodStartMonth: Number(periodStartMonth),
+        periodStartYear: Number(periodStartYear),
+        periodEndMonth: Number(periodEndMonth),
+        periodEndYear: Number(periodEndYear),
+        totalMonths,
+        startDate: computedStartDate,
+        endDate: computedEndDate,
+        durationMonths: totalMonths,
+        requestedArea: requestedArea ?? null,
+        description: description ?? null,
+        price: "0",
+        paymentStatus: "pending",
+        status: "pending",
+      }).returning();
+      res.status(201).json({ ...booking, price: Number(booking.price) });
+      return;
+    }
+
+    // Legacy date-based booking
+    if (!startDate || !endDate) {
+      res.status(400).json({ error: "bookingType and either period fields or startDate/endDate required" });
       return;
     }
     const orderNumber = await generateTenantOrderNumber();
@@ -68,6 +132,7 @@ router.post("/tenant/bookings", tenantMiddleware, async (req, res) => {
       tenantId,
       userId,
       bookingType,
+      paymentPeriodType: paymentPeriodType ?? "monthly",
       startDate,
       endDate,
       durationMonths: durationMonths ?? null,

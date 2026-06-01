@@ -37,7 +37,7 @@ const BOOKING_TYPES = [
 
 const STEPS = [
   { num: "01", label: "Daftar Akun", labelEn: "Create Account", desc: "Hubungi admin untuk membuat akun Penyewa Tenan Anda.", descEn: "Contact admin to create your Tenant account." },
-  { num: "02", label: "Ajukan Booking", labelEn: "Submit Booking", desc: "Isi form pengajuan sewa dengan detail kebutuhan Anda.", descEn: "Fill in the rental request form with your requirements." },
+  { num: "02", label: "Ajukan Pemesanan", labelEn: "Submit Booking", desc: "Isi form pengajuan sewa dengan detail kebutuhan Anda.", descEn: "Fill in the rental request form with your requirements." },
   { num: "03", label: "Tunggu Persetujuan", labelEn: "Await Approval", desc: "Admin meninjau dan menetapkan harga sesuai kesepakatan.", descEn: "Admin reviews and sets the price per agreement." },
   { num: "04", label: "Bayar & Aktif", labelEn: "Pay & Activate", desc: "Upload bukti pembayaran dan tenan Anda siap beroperasi.", descEn: "Upload proof of payment and your tenant is ready to operate." },
 ];
@@ -46,7 +46,7 @@ const BENEFITS = [
   { icon: Users, label: "Ribuan Pengunjung", labelEn: "Thousands of Visitors", desc: "Akses ke 1,200+ member aktif dan pengunjung harian Sport Center.", descEn: "Access to 1,200+ active members and daily Sport Center visitors." },
   { icon: ShieldCheck, label: "Lokasi Strategis", labelEn: "Strategic Location", desc: "Berada di kawasan Bandara Soekarno-Hatta, mudah dijangkau dari seluruh penjuru.", descEn: "Located in the Soekarno-Hatta Airport area, easily accessible from everywhere." },
   { icon: TrendingUp, label: "Potensi Tinggi", labelEn: "High Potential", desc: "Komunitas olahraga yang aktif dan memiliki daya beli tinggi.", descEn: "An active sports community with high purchasing power." },
-  { icon: Clock, label: "Fleksibel", labelEn: "Flexible", desc: "Pilihan durasi sewa mulai dari event satu hari hingga tahunan.", descEn: "Rental duration options from a single-day event to annual contracts." },
+  { icon: Clock, label: "Fleksibel", labelEn: "Flexible", desc: "Pilihan pembayaran bulanan atau tahunan sesuai kebutuhan bisnis Anda.", descEn: "Monthly or yearly payment options to suit your business needs." },
 ];
 
 export default function TenantLanding() {
@@ -80,7 +80,7 @@ export default function TenantLanding() {
                 <Button asChild size="lg" className="rounded-full px-8 font-bold shadow-lg shadow-primary/30">
                   <Link href="/tenant/dashboard">
                     <Building2 size={16} className="mr-2" />
-                    {t("Dashboard Saya", "My Dashboard")}
+                    {t("Dashboard Tenan", "Tenant Dashboard")}
                   </Link>
                 </Button>
               ) : (
@@ -92,7 +92,7 @@ export default function TenantLanding() {
                   </Button>
                   <Button asChild size="lg" variant="outline" className="rounded-full px-8 font-bold border-white/30 bg-white/10 text-white hover:bg-white/20">
                     <Link href="/login">
-                      {t("Login Tenant", "Tenant Login")}
+                      {t("Login Tenan", "Tenant Login")}
                     </Link>
                   </Button>
                 </>
@@ -106,7 +106,7 @@ export default function TenantLanding() {
             {[
               { n: "1,200+", l: t("Member Aktif", "Active Members") },
               { n: "10+", l: t("Jenis Fasilitas", "Facility Types") },
-              { n: "100+", l: t("Tenant Bergabung", "Tenants Joined") },
+              { n: "100+", l: t("Tenan Bergabung", "Tenants Joined") },
               { n: "24/7", l: t("Keamanan", "Security") },
             ].map((s) => (
               <div key={s.l} className="text-center">
@@ -171,7 +171,7 @@ export default function TenantLanding() {
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 relative">
             <div className="hidden lg:block absolute top-8 left-[12%] right-[12%] h-px bg-gradient-to-r from-transparent via-primary/30 to-transparent" />
-            {STEPS.map((step, i) => (
+            {STEPS.map((step) => (
               <div key={step.num} className="relative text-center group">
                 <div className="w-16 h-16 rounded-2xl bg-primary text-white flex items-center justify-center mx-auto mb-4 text-xl font-black shadow-lg shadow-primary/30 group-hover:scale-105 transition-transform">
                   {step.num}
@@ -203,7 +203,7 @@ export default function TenantLanding() {
             </Button>
             {isTenant && (
               <Button asChild size="lg" className="rounded-full px-8 font-bold bg-white text-primary hover:bg-white/90">
-                <Link href="/tenant/dashboard">{t("Dashboard Tenant", "Tenant Dashboard")}</Link>
+                <Link href="/tenant/dashboard">{t("Dashboard Tenan", "Tenant Dashboard")}</Link>
               </Button>
             )}
           </div>

@@ -8,7 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getToken } from "@/lib/auth";
-import { Search, Plus, Building2, User, Eye, ChevronDown, CheckCircle2, XCircle, Clock, X } from "lucide-react";
+import { Search, Plus, Building2, Eye } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
@@ -47,7 +47,6 @@ export default function AdminTenants() {
   const [showCreate, setShowCreate] = useState(false);
   const [viewTenant, setViewTenant] = useState<any>(null);
 
-  // Create form state
   const [form, setForm] = useState({ name: "", email: "", password: "", phone: "", businessName: "", ownerName: "", businessCategory: "", address: "" });
 
   const { data: tenants = [], isLoading } = useQuery({ queryKey: ["admin-tenants"], queryFn: fetchTenants });
@@ -55,7 +54,7 @@ export default function AdminTenants() {
   const createMutation = useMutation({
     mutationFn: createTenant,
     onSuccess: () => {
-      toast({ title: "Berhasil!", description: "Akun tenant berhasil dibuat." });
+      toast({ title: "Berhasil!", description: "Akun tenan berhasil dibuat." });
       qc.invalidateQueries({ queryKey: ["admin-tenants"] });
       setShowCreate(false);
       setForm({ name: "", email: "", password: "", phone: "", businessName: "", ownerName: "", businessCategory: "", address: "" });
@@ -88,10 +87,10 @@ export default function AdminTenants() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-black">Penyewa Tenan</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">Kelola akun dan status tenant</p>
+          <p className="text-sm text-muted-foreground mt-0.5">Kelola akun dan status tenan</p>
         </div>
         <Button onClick={() => setShowCreate(true)} className="rounded-full px-5 font-bold shadow-md shadow-primary/20">
-          <Plus size={15} className="mr-2" /> Tambah Tenant
+          <Plus size={15} className="mr-2" /> Tambah Tenan
         </Button>
       </div>
 
@@ -109,7 +108,7 @@ export default function AdminTenants() {
           ) : filtered.length === 0 ? (
             <div className="py-16 text-center text-muted-foreground">
               <Building2 size={36} className="mx-auto mb-3 opacity-30" />
-              <p className="text-sm">{search ? "Tidak ada hasil pencarian." : "Belum ada tenant terdaftar."}</p>
+              <p className="text-sm">{search ? "Tidak ada hasil pencarian." : "Belum ada tenan terdaftar."}</p>
             </div>
           ) : (
             <div className="divide-y divide-border/40">
@@ -129,7 +128,7 @@ export default function AdminTenants() {
                     <Badge variant="outline" className={`text-xs font-bold ${STATUS_BADGE[tenant.status] || ""}`}>
                       {STATUS_LABEL[tenant.status] || tenant.status}
                     </Badge>
-                    <span className="text-xs text-muted-foreground">{tenant.bookingCount} booking</span>
+                    <span className="text-xs text-muted-foreground">{tenant.bookingCount} pemesanan</span>
                     <Select
                       value={tenant.status}
                       onValueChange={(val) => statusMutation.mutate({ id: tenant.id, status: val })}
@@ -158,7 +157,7 @@ export default function AdminTenants() {
       <Dialog open={showCreate} onOpenChange={setShowCreate}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="font-black">Tambah Tenant Baru</DialogTitle>
+            <DialogTitle className="font-black">Tambah Tenan Baru</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 mt-2">
             <div className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Akun Login</div>
@@ -201,7 +200,7 @@ export default function AdminTenants() {
             </div>
             <div className="flex gap-2 pt-2">
               <Button onClick={handleCreate} disabled={createMutation.isPending} className="rounded-full px-6 font-bold">
-                {createMutation.isPending ? "Menyimpan..." : "Buat Akun Tenant"}
+                {createMutation.isPending ? "Menyimpan..." : "Buat Akun Tenan"}
               </Button>
               <Button variant="outline" onClick={() => setShowCreate(false)} className="rounded-full px-6">Batal</Button>
             </div>
@@ -218,12 +217,14 @@ export default function AdminTenants() {
           {viewTenant && (
             <div className="space-y-3 text-sm mt-2">
               {[
-                ["Pemilik", viewTenant.ownerName],
+                ["Nama Tenan", viewTenant.businessName],
+                ["Pengguna Tenan", viewTenant.ownerName],
                 ["Email", viewTenant.email || "-"],
+                ["Nama Usaha", viewTenant.businessName],
                 ["No. HP", viewTenant.phone || "-"],
                 ["Kategori", viewTenant.businessCategory || "-"],
                 ["Alamat", viewTenant.address || "-"],
-                ["Status", STATUS_LABEL[viewTenant.status] || viewTenant.status],
+                ["Status Tenan", STATUS_LABEL[viewTenant.status] || viewTenant.status],
                 ["Terdaftar", new Date(viewTenant.createdAt).toLocaleDateString("id-ID")],
               ].map(([k, v]) => (
                 <div key={k} className="flex justify-between gap-4">

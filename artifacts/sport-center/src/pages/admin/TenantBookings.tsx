@@ -9,12 +9,23 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getToken } from "@/lib/auth";
-import { Search, Building2, CheckCircle2, XCircle, Clock, Eye, DollarSign, ExternalLink, AlertCircle } from "lucide-react";
+import { Search, Building2, CheckCircle2, XCircle, Clock, Eye, ExternalLink, AlertCircle } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 const API = "/api";
 const headers = () => ({ "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` });
+
+const MONTHS_ID = ["","Januari","Februari","Maret","April","Mei","Juni","Juli","Agustus","September","Oktober","November","Desember"];
+
+function formatPeriod(b: any) {
+  if (b.periodStartMonth && b.periodStartYear && b.periodEndMonth && b.periodEndYear) {
+    const sm = MONTHS_ID[b.periodStartMonth] ?? b.periodStartMonth;
+    const em = MONTHS_ID[b.periodEndMonth] ?? b.periodEndMonth;
+    return `${sm} ${b.periodStartYear} – ${em} ${b.periodEndYear}`;
+  }
+  return b.startDate ? `${b.startDate} – ${b.endDate}` : "-";
+}
 
 async function fetchTenantBookings(status?: string) {
   const url = status && status !== "all" ? `${API}/admin/tenant-bookings?status=${status}` : `${API}/admin/tenant-bookings`;
@@ -120,14 +131,14 @@ export default function AdminTenantBookings() {
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-6">
       <div>
-        <h1 className="text-2xl font-black">Booking Tenant</h1>
-        <p className="text-sm text-muted-foreground mt-0.5">Kelola semua pengajuan sewa area tenant</p>
+        <h1 className="text-2xl font-black">Pemesanan Tenan</h1>
+        <p className="text-sm text-muted-foreground mt-0.5">Kelola semua pengajuan sewa area tenan</p>
       </div>
 
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1 max-w-sm">
           <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Cari no. booking, bisnis..." className="pl-9" />
+          <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Cari no. pemesanan, bisnis..." className="pl-9" />
         </div>
         <Select value={statusFilter} onValueChange={setStatusFilter}>
           <SelectTrigger className="w-44">
@@ -151,13 +162,14 @@ export default function AdminTenantBookings() {
           ) : filtered.length === 0 ? (
             <div className="py-16 text-center text-muted-foreground">
               <Building2 size={36} className="mx-auto mb-3 opacity-30" />
-              <p className="text-sm">{search ? "Tidak ada hasil." : "Belum ada booking tenant."}</p>
+              <p className="text-sm">{search ? "Tidak ada hasil." : "Belum ada pemesanan tenan."}</p>
             </div>
           ) : (
             <div className="divide-y divide-border/40">
               {filtered.map((b: any) => {
                 const cfg = STATUS_CFG[b.status] ?? STATUS_CFG.pending;
                 const pcfg = PAY_CFG[b.paymentStatus] ?? PAY_CFG.pending;
+                const periodType = b.paymentPeriodType === "yearly" ? "Tahunan" : "Bulanan";
                 return (
                   <div key={b.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-4 gap-3 hover:bg-muted/30 transition-colors">
                     <div className="flex items-center gap-3">
@@ -166,8 +178,12 @@ export default function AdminTenantBookings() {
                       </div>
                       <div>
                         <div className="font-black text-sm">{b.orderNumber}</div>
-                        <div className="text-xs text-muted-foreground">{b.businessName} · {b.startDate} – {b.endDate}</div>
-                        <div className="text-xs text-muted-foreground capitalize mt-0.5">{b.bookingType.replace("_", " ")} {b.requestedArea ? `· ${b.requestedArea}` : ""}</div>
+                        <div className="text-xs text-muted-foreground">{b.businessName} · {periodType}</div>
+                        <div className="text-xs text-muted-foreground mt-0.5">
+                          {formatPeriod(b)}
+                          {b.totalMonths ? ` · ${b.totalMonths} bulan` : ""}
+                          {b.requestedArea ? ` · ${b.requestedArea}` : ""}
+                        </div>
                       </div>
                     </div>
                     <div className="flex items-center gap-2 flex-wrap">
@@ -199,15 +215,15 @@ export default function AdminTenantBookings() {
               {/* Info */}
               <div className="grid grid-cols-2 gap-3 text-sm">
                 {[
-                  ["Tenant", selected.businessName],
+                  ["Tenan", selected.businessName],
                   ["Pemilik", selected.ownerName],
-                  ["Tipe", selected.bookingType.replace("_", " ")],
+                  ["Tipe Area", selected.bookingType.replace("_", " ")],
+                  ["Tipe Pembayaran", selected.paymentPeriodType === "yearly" ? "Tahunan" : "Bulanan"],
+                  ["Periode", formatPeriod(selected)],
+                  ["Total Bulan", selected.totalMonths ? `${selected.totalMonths} bulan` : "-"],
                   ["Area", selected.requestedArea || "-"],
-                  ["Mulai", selected.startDate],
-                  ["Selesai", selected.endDate],
-                  ["Durasi", selected.durationMonths ? `${selected.durationMonths} bulan` : "-"],
                 ].map(([k, v]) => (
-                  <div key={k}>
+                  <div key={k} className={k === "Periode" ? "col-span-2" : ""}>
                     <div className="text-xs text-muted-foreground">{k}</div>
                     <div className="font-semibold capitalize">{v}</div>
                   </div>
@@ -251,7 +267,7 @@ export default function AdminTenantBookings() {
               {/* Payment history */}
               {selected.payments?.length > 0 && (
                 <div className="border-t pt-4 space-y-3">
-                  <div className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Pembayaran</div>
+                  <div className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Pembayaran Tenan</div>
                   {selected.payments.map((p: any) => {
                     const ps = PAY_CFG[p.status] ?? PAY_CFG.pending;
                     return (

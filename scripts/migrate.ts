@@ -177,6 +177,7 @@ CREATE TABLE IF NOT EXISTS sport_center.booking_reviews (
 -- ============================================================
 -- 10. booking_cancellations
 -- ============================================================
+
 CREATE TABLE IF NOT EXISTS sport_center.booking_cancellations (
   id serial PRIMARY KEY,
   booking_id integer NOT NULL REFERENCES sport_center.bookings(id) ON DELETE CASCADE UNIQUE,
@@ -213,6 +214,25 @@ INSERT INTO sport_center.notification_templates (key, name, channel, body) VALUE
   ('admin_booking_expired', 'Booking Expired (Admin)', 'whatsapp',
    '⏰ *Booking Expired*\n\nNomor Order: {{orderNumber}}\nCustomer: {{customerName}}\nFasilitas: {{facilityName}}\nTanggal: {{bookingDate}}\n\nSlot sudah kembali tersedia.')
 ON CONFLICT (key) DO NOTHING;
+
+-- ============================================================
+-- 12. tenant_bookings period-based payment fields
+-- ============================================================
+ALTER TABLE sport_center.tenant_bookings
+  ADD COLUMN IF NOT EXISTS payment_period_type text NOT NULL DEFAULT 'monthly',
+  ADD COLUMN IF NOT EXISTS period_start_month integer,
+  ADD COLUMN IF NOT EXISTS period_start_year integer,
+  ADD COLUMN IF NOT EXISTS period_end_month integer,
+  ADD COLUMN IF NOT EXISTS period_end_year integer,
+  ADD COLUMN IF NOT EXISTS total_months integer,
+  ADD COLUMN IF NOT EXISTS monthly_price numeric(12,2),
+  ADD COLUMN IF NOT EXISTS yearly_price numeric(12,2),
+  ADD COLUMN IF NOT EXISTS total_price numeric(12,2);
+
+-- Make start_date and end_date nullable (they were NOT NULL before)
+ALTER TABLE sport_center.tenant_bookings
+  ALTER COLUMN start_date DROP NOT NULL,
+  ALTER COLUMN end_date DROP NOT NULL;
 `;
 
 async function main() {
