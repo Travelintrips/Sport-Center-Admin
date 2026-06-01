@@ -3,6 +3,7 @@ import { Link, useLocation } from "wouter";
 import { Menu, X, LogOut, CalendarDays, ChevronDown, MapPin, Phone, Instagram, Facebook, ShieldCheck, ArrowUp, Dumbbell, Building2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useGetMe, useLogout, getGetMeQueryKey, useGetSettings } from "@workspace/api-client-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { removeToken } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import logoUrl from "@assets/logosc_1780088803724.png";
@@ -98,12 +99,21 @@ export default function CustomerLayout({ children }: { children: ReactNode }) {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
   const [showTop, setShowTop] = useState(false);
-  const [location] = useLocation();
+  const [location, setLocation] = useLocation();
 
+  const queryClient = useQueryClient();
   const { data: user } = useGetMe({ query: { retry: false, queryKey: getGetMeQueryKey(), staleTime: 60_000 } });
   const { data: settings } = useGetSettings();
   const { t } = useLang();
-  const logoutMutation = useLogout({ mutation: { onSuccess: () => { removeToken(); } } });
+  const logoutMutation = useLogout({
+    mutation: {
+      onSuccess: () => {
+        removeToken();
+        queryClient.clear();
+        setLocation("/");
+      },
+    },
+  });
 
   useEffect(() => {
     const onScroll = () => { setIsScrolled(window.scrollY > 20); setShowTop(window.scrollY > 400); };
