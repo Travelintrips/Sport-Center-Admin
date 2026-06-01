@@ -545,6 +545,41 @@ export interface ApMemberUpdate {
   isActive?: boolean;
 }
 
+export interface Review {
+  id: number;
+  bookingId: number;
+  facilityId: number;
+  /**
+     * @minimum 1
+     * @maximum 5
+     */
+  rating: number;
+  comment?: string | null;
+  reviewerName: string;
+  facilityName?: string;
+  bookingDate?: string;
+  orderNumber?: string;
+  createdAt: string;
+}
+
+export interface CreateReviewInput {
+  bookingId: number;
+  /**
+     * @minimum 1
+     * @maximum 5
+     */
+  rating: number;
+  comment?: string;
+  reviewerName?: string;
+}
+
+export interface ReviewSummary {
+  facilityId: number;
+  facilityName: string;
+  avgRating: number;
+  count: number;
+}
+
 export interface VerifyInput {
   idCardNumber: string;
 }
@@ -692,5 +727,9 @@ export const ListMembershipsStatus = {
 
 export type ListApMembersParams = {
 search?: string;
+};
+
+export type GetReviewsParams = {
+facilityId?: number;
 };
 

@@ -1100,6 +1100,59 @@ export const DeleteApMemberParams = zod.object({
 
 
 /**
+ * @summary List reviews (optionally filtered by facilityId)
+ */
+export const GetReviewsQueryParams = zod.object({
+  "facilityId": zod.coerce.number().optional()
+})
+
+export const getReviewsResponseRatingMax = 5;
+
+
+
+export const GetReviewsResponseItem = zod.object({
+  "id": zod.number(),
+  "bookingId": zod.number(),
+  "facilityId": zod.number(),
+  "rating": zod.number().min(1).max(getReviewsResponseRatingMax),
+  "comment": zod.string().nullish(),
+  "reviewerName": zod.string(),
+  "facilityName": zod.string().optional(),
+  "bookingDate": zod.string().optional(),
+  "orderNumber": zod.string().optional(),
+  "createdAt": zod.string()
+})
+export const GetReviewsResponse = zod.array(GetReviewsResponseItem)
+
+
+/**
+ * @summary Submit a review for a completed booking
+ */
+export const createReviewBodyRatingMax = 5;
+
+
+
+export const CreateReviewBody = zod.object({
+  "bookingId": zod.number(),
+  "rating": zod.number().min(1).max(createReviewBodyRatingMax),
+  "comment": zod.string().optional(),
+  "reviewerName": zod.string().optional()
+})
+
+
+/**
+ * @summary Average ratings per facility
+ */
+export const GetReviewsSummaryResponseItem = zod.object({
+  "facilityId": zod.number(),
+  "facilityName": zod.string(),
+  "avgRating": zod.number(),
+  "count": zod.number()
+})
+export const GetReviewsSummaryResponse = zod.array(GetReviewsSummaryResponseItem)
+
+
+/**
  * @summary Verify Angkasa Pura ID card and apply discount (admin)
  */
 export const VerifyBookingParams = zod.object({

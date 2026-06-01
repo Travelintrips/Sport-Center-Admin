@@ -986,6 +986,58 @@ paths:
         "204":
           description: Deleted
 
+  /reviews:
+    get:
+      operationId: getReviews
+      tags: [reviews]
+      summary: List reviews (optionally filtered by facilityId)
+      parameters:
+        - name: facilityId
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of reviews
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Review"
+    post:
+      operationId: createReview
+      tags: [reviews]
+      summary: Submit a review for a completed booking
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateReviewInput"
+      responses:
+        "201":
+          description: Review created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Review"
+
+  /reviews/summary:
+    get:
+      operationId: getReviewsSummary
+      tags: [reviews]
+      summary: Average ratings per facility
+      responses:
+        "200":
+          description: Rating summary per facility
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ReviewSummary"
+
   /bookings/{id}/verify:
     post:
       operationId: verifyBooking
@@ -1769,6 +1821,62 @@ components:
           type: string
         isActive:
           type: boolean
+
+    Review:
+      type: object
+      required: [id, bookingId, facilityId, rating, reviewerName, createdAt]
+      properties:
+        id:
+          type: integer
+        bookingId:
+          type: integer
+        facilityId:
+          type: integer
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+        comment:
+          type: string
+          nullable: true
+        reviewerName:
+          type: string
+        facilityName:
+          type: string
+        bookingDate:
+          type: string
+        orderNumber:
+          type: string
+        createdAt:
+          type: string
+
+    CreateReviewInput:
+      type: object
+      required: [bookingId, rating]
+      properties:
+        bookingId:
+          type: integer
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+        comment:
+          type: string
+        reviewerName:
+          type: string
+
+    ReviewSummary:
+      type: object
+      required: [facilityId, facilityName, avgRating, count]
+      properties:
+        facilityId:
+          type: integer
+        facilityName:
+          type: string
+        avgRating:
+          type: number
+        count:
+          type: integer
 
     VerifyInput:
       type: object

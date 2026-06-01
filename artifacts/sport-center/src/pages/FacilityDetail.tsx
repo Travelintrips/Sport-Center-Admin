@@ -4,7 +4,9 @@ import {
   useGetFacility, 
   getGetFacilityQueryKey,
   useCheckAvailability,
-  getCheckAvailabilityQueryKey 
+  getCheckAvailabilityQueryKey,
+  useGetReviews,
+  useGetReviewsSummary,
 } from "@workspace/api-client-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -56,6 +58,12 @@ export default function FacilityDetail() {
       queryKey: getGetFacilityQueryKey(facilityId)
     }
   });
+
+  const { data: reviews } = useGetReviews({ facilityId }, { query: { enabled: !!facilityId } });
+  const { data: reviewsSummary } = useGetReviewsSummary();
+  const facilitySummary = reviewsSummary?.find((s) => s.facilityId === facilityId);
+  const avgRating = facilitySummary?.avgRating ?? 0;
+  const reviewCount = facilitySummary?.count ?? 0;
 
   const formattedDate = date ? format(date, "yyyy-MM-dd") : "";
 
@@ -175,10 +183,13 @@ export default function FacilityDetail() {
                         <Users className="w-4 h-4 text-primary" /> {t("Kapasitas", "Capacity")} {facility.capacity} {t("pax", "pax")}
                       </div>
                     )}
-                    <div className="flex items-center gap-1 text-yellow-500 bg-yellow-50 dark:bg-yellow-950/20 px-3 py-1.5 rounded-lg">
-                      <Star className="w-4 h-4 fill-yellow-500" />
-                      <span className="font-bold">4.9/5</span>
-                    </div>
+                    {reviewCount > 0 && (
+                      <div className="flex items-center gap-1 text-yellow-500 bg-yellow-50 dark:bg-yellow-950/20 px-3 py-1.5 rounded-lg">
+                        <Star className="w-4 h-4 fill-yellow-500" />
+                        <span className="font-bold">{avgRating.toFixed(1)}/5</span>
+                        <span className="text-xs text-muted-foreground font-normal ml-1">({reviewCount} {t("ulasan", "reviews")})</span>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

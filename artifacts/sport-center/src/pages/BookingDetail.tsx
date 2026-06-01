@@ -6,6 +6,8 @@ import {
   getGetBookingByOrderQueryKey,
   useGetSettings,
   useCreatePayment,
+  useGetReviews,
+  useCreateReview,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -26,6 +28,7 @@ import {
   Building2,
   QrCode,
   ChevronRight,
+  Star,
 } from "lucide-react";
 import { useLang } from "@/lib/i18n";
 
@@ -45,6 +48,10 @@ export default function BookingDetail() {
     query: { enabled: !!orderNumber, queryKey: getGetBookingByOrderQueryKey(orderNumber) },
   });
   const { data: settings } = useGetSettings();
+  const { data: existingReviews } = useGetReviews(undefined, {
+    query: { enabled: !!booking?.id },
+  });
+  const existingReview = existingReviews?.find((r) => r.bookingId === booking?.id);
 
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -52,6 +59,9 @@ export default function BookingDetail() {
   const [isDragging, setIsDragging] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<"idle" | "uploading" | "done">("idle");
   const [notes, setNotes] = useState("");
+  const [reviewRating, setReviewRating] = useState(0);
+  const [reviewComment, setReviewComment] = useState("");
+  const [hoverRating, setHoverRating] = useState(0);
 
   const submitPayment = useCreatePayment({
     mutation: {
@@ -66,6 +76,23 @@ export default function BookingDetail() {
       },
     },
   });
+
+  const submitReview = useCreateReview({
+    mutation: {
+      onSuccess: () => {
+        toast({ title: t("Terima kasih atas ulasan Anda!", "Thank you for your review!"), description: t("Ulasan Anda telah berhasil dikirim.", "Your review has been submitted.") });
+        queryClient.invalidateQueries({ queryKey: ["getReviews"] });
+      },
+      onError: (error: any) => {
+        toast({ title: t("Gagal mengirim ulasan", "Failed to submit review"), description: error?.message || t("Terjadi kesalahan", "An error occurred"), variant: "destructive" });
+      },
+    },
+  });
+
+  const handleReviewSubmit = () => {
+    if (!booking || reviewRating === 0) return;
+    submitReview.mutate({ data: { bookingId: booking.id, rating: reviewRating, comment: reviewComment || undefined, reviewerName: booking.customerName } });
+  };
 
   const setFile = (file: File) => {
     setSelectedFile(file);
@@ -497,6 +524,56 @@ export default function BookingDetail() {
                   </div>
                   <p className="text-xs text-green-600 mt-2">{t("Tunjukkan kode ini kepada petugas saat tiba", "Show this code to staff upon arrival")}</p>
                 </div>
+
+                {/* Review Section — only for completed bookings */}
+                {booking.status === "completed" && (
+                  <div className="border-t border-green-200 pt-4 mt-2">
+                    <p className="text-xs font-semibold text-green-700 uppercase tracking-wide mb-3">{t("Ulasan Anda", "Your Review")}</p>
+                    {existingReview ? (
+                      <div className="bg-white rounded-xl border border-green-200 p-4 text-left">
+                        <div className="flex gap-0.5 mb-2">
+                          {[1,2,3,4,5].map((s) => (
+                            <Star key={s} className={`w-5 h-5 ${s <= existingReview.rating ? "fill-yellow-400 text-yellow-400" : "text-gray-300"}`} />
+                          ))}
+                        </div>
+                        {existingReview.comment && <p className="text-sm text-gray-700 italic">"{existingReview.comment}"</p>}
+                        <p className="text-xs text-green-600 mt-1">{t("Sudah diulas", "Already reviewed")} ✓</p>
+                      </div>
+                    ) : (
+                      <div className="bg-white rounded-xl border border-green-200 p-4 text-left space-y-3">
+                        <div className="flex gap-1 justify-center">
+                          {[1,2,3,4,5].map((s) => (
+                            <button
+                              key={s}
+                              type="button"
+                              onClick={() => setReviewRating(s)}
+                              onMouseEnter={() => setHoverRating(s)}
+                              onMouseLeave={() => setHoverRating(0)}
+                              className="focus:outline-none"
+                            >
+                              <Star className={`w-8 h-8 transition-colors ${s <= (hoverRating || reviewRating) ? "fill-yellow-400 text-yellow-400" : "text-gray-300"}`} />
+                            </button>
+                          ))}
+                        </div>
+                        <textarea
+                          className="w-full text-sm border border-gray-200 rounded-lg p-2 resize-none focus:outline-none focus:ring-1 focus:ring-green-400"
+                          rows={2}
+                          placeholder={t("Ceritakan pengalaman Anda... (opsional)", "Share your experience... (optional)")}
+                          value={reviewComment}
+                          onChange={(e) => setReviewComment(e.target.value)}
+                        />
+                        <Button
+                          size="sm"
+                          className="w-full bg-green-600 hover:bg-green-700 text-white"
+                          disabled={reviewRating === 0 || submitReview.isPending}
+                          onClick={handleReviewSubmit}
+                        >
+                          {submitReview.isPending ? t("Mengirim...", "Submitting...") : t("Kirim Ulasan", "Submit Review")}
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                )}
               </CardContent>
             </Card>
           )}
