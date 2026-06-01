@@ -272,106 +272,106 @@ export default function Home() {
   return (
     <div className="flex flex-col min-h-screen">
 
-      {/* ── Hero ─────────────────────────────────────────────────── */}
-      <section className="relative bg-[#F8FAFC] dark:bg-slate-950 overflow-hidden pt-12 pb-24 md:pt-24 md:pb-32 lg:pt-32 lg:pb-40">
-        <div className="absolute top-0 right-0 w-[60%] h-full bg-gradient-to-l from-primary/5 to-transparent hidden lg:block" />
+      {/* ── Hero (full-bleed building photo) ─────────────────────── */}
+      <section className="relative min-h-[92vh] flex flex-col justify-end overflow-hidden">
 
-        <div className="container relative z-10 px-4 md:px-8">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-8 items-center">
+        {/* Background image */}
+        <img
+          src={buildingImg}
+          alt="Sport Center Bandara Soekarno-Hatta"
+          className="absolute inset-0 w-full h-full object-cover object-center scale-105 transition-transform duration-[8s] ease-out"
+          style={{ animation: "heroZoom 12s ease-out forwards" }}
+        />
 
-            <div className="max-w-2xl animate-in fade-in slide-in-from-bottom-8 duration-700">
-              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-primary/10 text-primary font-bold text-sm mb-6 border border-primary/20">
-                <span className="relative flex h-2 w-2">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
-                </span>
-                {t("Fasilitas Olahraga Premium Tangerang", "Premium Sports Facilities in Tangerang")}
-              </div>
+        {/* Multi-stop overlay: subtle top → rich dark bottom */}
+        <div className="absolute inset-0 bg-gradient-to-b from-black/30 via-black/50 to-black/85" />
+        {/* Warm color accent sweep from right */}
+        <div className="absolute inset-0 bg-gradient-to-tl from-primary/30 via-transparent to-transparent" />
 
-              <h1 className="text-4xl md:text-5xl lg:text-6xl font-black tracking-tight text-secondary dark:text-white leading-[1.1] mb-6">
-                Sport Center{" "}
-                <span className="text-primary relative inline-block">
-                  Bandara Soekarno-Hatta
-                  <svg className="absolute -bottom-2 left-0 w-full h-3 text-primary/30" viewBox="0 0 100 10" preserveAspectRatio="none">
-                    <path d="M0,5 Q50,10 100,5" stroke="currentColor" strokeWidth="8" fill="none" strokeLinecap="round" />
-                  </svg>
-                </span>
-              </h1>
+        {/* Content */}
+        <div className="relative z-10 container px-4 md:px-8 pb-36 md:pb-44 pt-24 md:pt-32">
+          <div className="max-w-3xl">
 
-              <p className="text-lg md:text-xl text-muted-foreground mb-8 leading-relaxed font-medium max-w-xl">
-                {t(
-                  "Tingkatkan pengalaman berolahraga Anda. Booking lapangan futsal, basket, tenis, hingga gym premium dengan mudah dalam hitungan detik.",
-                  "Elevate your sports experience. Easily book futsal, basketball, and tennis courts, even a premium gym, in seconds."
-                )}
-              </p>
-
-              <div className="flex flex-col sm:flex-row items-center gap-4">
-                <Button size="lg" className="w-full sm:w-auto h-14 px-8 text-base font-bold shadow-xl shadow-primary/25 hover:shadow-primary/40 transition-all rounded-full group" asChild>
-                  <Link href="/facilities">
-                    {t("Booking Sekarang", "Book Now")} <ArrowRight className="ml-2 w-5 h-5 group-hover:translate-x-1 transition-transform" />
-                  </Link>
-                </Button>
-                <Button size="lg" variant="outline" className="w-full sm:w-auto h-14 px-8 text-base font-bold rounded-full bg-white dark:bg-slate-900 border-border shadow-sm hover:bg-accent" asChild>
-                  <Link href="/facilities">{t("Lihat Fasilitas", "View Facilities")}</Link>
-                </Button>
-              </div>
-
-              <div className="mt-10 flex items-center gap-6">
-                <div className="flex -space-x-4">
-                  {[1, 2, 3, 4].map((i) => (
-                    <div key={i} className="w-10 h-10 rounded-full border-2 border-white dark:border-slate-950 bg-muted flex items-center justify-center overflow-hidden">
-                      <img src={`https://api.dicebear.com/7.x/notionists/svg?seed=${i}&backgroundColor=f97316,f8fafc`} alt="User" />
-                    </div>
-                  ))}
-                </div>
-                <div className="text-sm font-semibold">
-                  <span className="text-primary block font-black">1,000+</span>
-                  <span className="text-muted-foreground">{t("Atlet lokal bergabung", "Local athletes joined")}</span>
-                </div>
-              </div>
+            {/* Live badge */}
+            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/10 backdrop-blur-md text-white font-bold text-sm mb-8 border border-white/20 shadow-lg">
+              <span className="relative flex h-2.5 w-2.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-80" />
+                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-primary" />
+              </span>
+              {t("Buka Sekarang · 06:00 – 22:00 WIB", "Open Now · 06:00 – 22:00 WIB")}
             </div>
 
-            <div className="relative animate-in fade-in slide-in-from-right-12 duration-1000 delay-150">
-              <div className="absolute inset-0 bg-gradient-to-tr from-primary/20 to-transparent rounded-3xl transform rotate-3 scale-105" />
-              <div className="relative rounded-3xl overflow-hidden shadow-2xl border-4 border-white dark:border-slate-900 bg-muted aspect-[4/3] group">
-                <img
-                  src="/api/uploads/facility-1780070935997-xzu8f.png"
-                  alt="Sport Center Bandara Soekarno-Hatta"
-                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700 ease-out"
-                />
-                <div className="absolute bottom-6 left-6 right-6 p-4 rounded-2xl bg-white/90 dark:bg-slate-950/90 backdrop-blur-md shadow-lg border border-white/20 flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 rounded-xl bg-green-500/10 flex items-center justify-center text-green-600">
-                      <CheckCircle2 className="w-6 h-6" />
-                    </div>
-                    <div>
-                      <div className="font-bold text-secondary dark:text-white">{t("Buka Hari Ini", "Open Today")}</div>
-                      <div className="text-xs font-semibold text-muted-foreground">{settings?.openHour || "06:00"} - {settings?.closeHour || "22:00"} WIB</div>
-                    </div>
+            <h1 className="text-5xl md:text-6xl lg:text-7xl font-black tracking-tight text-white leading-[1.05] mb-6">
+              {t("Sport Center", "Sport Center")}<br />
+              <span className="text-primary drop-shadow-[0_2px_16px_rgba(249,115,22,0.6)]">
+                {t("Soekarno-Hatta", "Soekarno-Hatta")}
+              </span>
+            </h1>
+
+            <p className="text-lg md:text-xl text-white/75 mb-10 leading-relaxed font-medium max-w-xl">
+              {t(
+                "Pusat olahraga premium di kawasan Bandara. Booking lapangan futsal, basket, badminton, hingga gym langsung dari smartphone.",
+                "Premium sports hub near the Airport. Book futsal, basketball, badminton, and gym courts straight from your phone."
+              )}
+            </p>
+
+            <div className="flex flex-col sm:flex-row gap-4 mb-12">
+              <Button size="lg" className="h-14 px-8 text-base font-black shadow-2xl shadow-primary/40 hover:shadow-primary/60 hover:scale-105 transition-all rounded-full group bg-primary hover:bg-primary/90" asChild>
+                <Link href="/facilities">
+                  {t("Booking Sekarang", "Book Now")}
+                  <ArrowRight className="ml-2 w-5 h-5 group-hover:translate-x-1 transition-transform" />
+                </Link>
+              </Button>
+              <Button size="lg" variant="outline" className="h-14 px-8 text-base font-bold rounded-full border-white/30 bg-white/10 backdrop-blur-md text-white hover:bg-white/20 hover:border-white/50 transition-all" asChild>
+                <Link href="/facilities">{t("Lihat Fasilitas", "View Facilities")}</Link>
+              </Button>
+            </div>
+
+            {/* Social proof */}
+            <div className="flex items-center gap-5">
+              <div className="flex -space-x-3">
+                {[1, 2, 3, 4, 5].map((i) => (
+                  <div key={i} className="w-10 h-10 rounded-full border-2 border-white/40 bg-slate-700 overflow-hidden shadow-md">
+                    <img src={`https://api.dicebear.com/7.x/notionists/svg?seed=${i+10}&backgroundColor=374151`} alt="User" />
                   </div>
-                  <div className="text-right">
-                    <div className="flex items-center justify-end gap-0.5 text-yellow-500 mb-1">
-                      {[...Array(5)].map((_, i) => <Star key={i} className="w-4 h-4 fill-yellow-500" />)}
-                    </div>
-                    <div className="text-xs font-bold text-secondary dark:text-white">4.9/5 Rating</div>
-                  </div>
+                ))}
+              </div>
+              <div>
+                <div className="flex gap-0.5 mb-0.5">
+                  {[...Array(5)].map((_, i) => <Star key={i} className="w-3.5 h-3.5 fill-yellow-400 text-yellow-400" />)}
+                </div>
+                <div className="text-sm font-semibold text-white/80">
+                  <span className="text-white font-black">1,200+</span> {t("member aktif · rated 4.9/5", "active members · rated 4.9/5")}
                 </div>
               </div>
             </div>
 
           </div>
         </div>
+
+        {/* Scroll cue */}
+        <div className="absolute bottom-36 md:bottom-44 right-8 hidden md:flex flex-col items-center gap-2 text-white/40">
+          <div className="w-px h-12 bg-gradient-to-b from-transparent to-white/40" />
+          <span className="text-[10px] font-bold uppercase tracking-[0.2em] rotate-90 origin-center mt-2">scroll</span>
+        </div>
       </section>
 
-      {/* ── Stats / Counters ──────────────────────────────────────── */}
-      <section className="relative z-20 -mt-10 mb-16 px-4 md:px-8 max-w-7xl mx-auto w-full">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6">
+      {/* ── Stats strip — floats above next section ───────────────── */}
+      <section className="relative z-20 -mt-20 mb-16 px-4 md:px-8 max-w-6xl mx-auto w-full">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-5">
           <AnimatedCounter end={5800} label={t("Total Booking", "Total Bookings")} />
           <AnimatedCounter end={7} label={t("Lapangan Aktif", "Active Courts")} suffix="+" />
           <AnimatedCounter end={1200} label={t("Member Aktif", "Active Members")} suffix="+" />
-          <AnimatedCounter end={49} prefix="" suffix="/5" label={t("Kepuasan Pelanggan", "Customer Satisfaction")} highlight />
+          <AnimatedCounter end={49} suffix="/5" label={t("Kepuasan Pelanggan", "Customer Satisfaction")} highlight />
         </div>
       </section>
+
+      <style>{`
+        @keyframes heroZoom {
+          from { transform: scale(1.08); }
+          to   { transform: scale(1); }
+        }
+      `}</style>
 
       {/* ── Facilities Highlight ──────────────────────────────────── */}
       <section className="py-20 md:py-28 bg-white dark:bg-slate-950">
