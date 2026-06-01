@@ -14,11 +14,11 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 const STATUS_LABELS: Record<string, string> = {
-  pending_payment: "Pending Payment",
-  paid: "Paid",
-  confirmed: "Confirmed",
-  cancelled: "Cancelled",
-  completed: "Completed",
+  pending_payment: "Menunggu Pembayaran",
+  paid: "Menunggu Verifikasi",
+  confirmed: "Dikonfirmasi",
+  cancelled: "Dibatalkan",
+  completed: "Selesai",
 };
 
 function formatCurrency(n: number) {
@@ -33,7 +33,7 @@ export default function AdminDashboard() {
       <div className="space-y-6">
         <div>
           <h1 className="text-2xl font-black">Dashboard</h1>
-          <p className="text-muted-foreground">Overview of your sport center</p>
+          <p className="text-muted-foreground">Ringkasan operasional sport center Anda</p>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-28" />)}
@@ -46,17 +46,17 @@ export default function AdminDashboard() {
   }
 
   const stats = [
-    { label: "Total Bookings", value: data?.totalBookings ?? 0, icon: CalendarDays, format: (v: number) => v.toString() },
-    { label: "Total Revenue", value: data?.totalRevenue ?? 0, icon: DollarSign, format: formatCurrency },
-    { label: "Today's Bookings", value: data?.todayBookings ?? 0, icon: TrendingUp, format: (v: number) => v.toString() },
-    { label: "Pending Payment", value: data?.pendingBookings ?? 0, icon: Clock, format: (v: number) => v.toString() },
+    { label: "Total Pemesanan", value: data?.totalBookings ?? 0, icon: CalendarDays, format: (v: number) => v.toString() },
+    { label: "Total Pendapatan", value: data?.totalRevenue ?? 0, icon: DollarSign, format: formatCurrency },
+    { label: "Pemesanan Hari Ini", value: data?.todayBookings ?? 0, icon: TrendingUp, format: (v: number) => v.toString() },
+    { label: "Menunggu Pembayaran", value: data?.pendingBookings ?? 0, icon: Clock, format: (v: number) => v.toString() },
   ];
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-black">Dashboard</h1>
-        <p className="text-muted-foreground">Overview of your sport center operations</p>
+        <p className="text-muted-foreground">Ringkasan operasional sport center Anda</p>
       </div>
 
       {/* Stat cards */}
@@ -83,7 +83,7 @@ export default function AdminDashboard() {
         {/* Booking by status pie */}
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-base font-bold">Bookings by Status</CardTitle>
+            <CardTitle className="text-base font-bold">Pemesanan per Status</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="h-56">
@@ -103,7 +103,7 @@ export default function AdminDashboard() {
                       <Cell key={entry.status} fill={STATUS_COLORS[entry.status] ?? "#94a3b8"} />
                     ))}
                   </Pie>
-                  <Tooltip formatter={(v, name) => [v, STATUS_LABELS[name as string] ?? name]} />
+                  <Tooltip formatter={(v: any, name: any) => [v, STATUS_LABELS[name as string] ?? name]} />
                 </PieChart>
               </ResponsiveContainer>
             </div>
@@ -113,7 +113,7 @@ export default function AdminDashboard() {
         {/* Revenue by month */}
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-base font-bold">Monthly Revenue</CardTitle>
+            <CardTitle className="text-base font-bold">Pendapatan per Bulan</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="h-56">
@@ -122,7 +122,7 @@ export default function AdminDashboard() {
                   <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
                   <XAxis dataKey="month" tick={{ fontSize: 11 }} />
                   <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
-                  <Tooltip formatter={(v) => [formatCurrency(Number(v)), "Revenue"]} />
+                  <Tooltip formatter={(v: any) => [formatCurrency(Number(v)), "Pendapatan"]} />
                   <Line type="monotone" dataKey="revenue" stroke="hsl(var(--primary))" strokeWidth={2} dot={{ r: 4 }} />
                 </LineChart>
               </ResponsiveContainer>
@@ -133,7 +133,7 @@ export default function AdminDashboard() {
         {/* Top facilities */}
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-base font-bold">Top Facilities</CardTitle>
+            <CardTitle className="text-base font-bold">Fasilitas Terpopuler</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="h-56">
@@ -142,7 +142,7 @@ export default function AdminDashboard() {
                   <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
                   <XAxis type="number" tick={{ fontSize: 11 }} />
                   <YAxis dataKey="facilityName" type="category" tick={{ fontSize: 11 }} width={100} />
-                  <Tooltip formatter={(v) => [v, "Bookings"]} />
+                  <Tooltip formatter={(v: any) => [v, "Pemesanan"]} />
                   <Bar dataKey="bookingCount" fill="hsl(var(--primary))" radius={[0, 4, 4, 0]} />
                 </BarChart>
               </ResponsiveContainer>
@@ -153,7 +153,7 @@ export default function AdminDashboard() {
         {/* Recent bookings */}
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-base font-bold">Recent Bookings</CardTitle>
+            <CardTitle className="text-base font-bold">Pemesanan Terbaru</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="space-y-3">
@@ -173,7 +173,7 @@ export default function AdminDashboard() {
                 </div>
               ))}
               {!data?.recentBookings?.length && (
-                <p className="text-sm text-muted-foreground text-center py-4">No bookings yet</p>
+                <p className="text-sm text-muted-foreground text-center py-4">Belum ada pemesanan</p>
               )}
             </div>
           </CardContent>

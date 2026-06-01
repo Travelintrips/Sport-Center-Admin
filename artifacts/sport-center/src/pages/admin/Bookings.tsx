@@ -84,7 +84,7 @@ const STATUS_CONFIG: Record<
   { label: string; color: string; bg: string; icon: React.ElementType; pill: string }
 > = {
   pending_payment: {
-    label: "Pending Payment",
+    label: "Menunggu Pembayaran",
     color: "text-amber-700 dark:text-amber-300",
     bg: "bg-amber-100 dark:bg-amber-900/30",
     icon: Clock,
@@ -98,28 +98,28 @@ const STATUS_CONFIG: Record<
     pill: "border-blue-200 dark:border-blue-800",
   },
   confirmed: {
-    label: "Completed",
+    label: "Dikonfirmasi",
     color: "text-emerald-700 dark:text-emerald-300",
     bg: "bg-emerald-100 dark:bg-emerald-900/30",
     icon: CheckCircle2,
     pill: "border-emerald-200 dark:border-emerald-800",
   },
   completed: {
-    label: "Completed",
+    label: "Selesai",
     color: "text-emerald-700 dark:text-emerald-300",
     bg: "bg-emerald-100 dark:bg-emerald-900/30",
     icon: CheckCircle2,
     pill: "border-emerald-200 dark:border-emerald-800",
   },
   cancelled: {
-    label: "Cancelled",
+    label: "Dibatalkan",
     color: "text-red-700 dark:text-red-300",
     bg: "bg-red-100 dark:bg-red-900/30",
     icon: XCircle,
     pill: "border-red-200 dark:border-red-800",
   },
   refunded: {
-    label: "Refunded",
+    label: "Dikembalikan",
     color: "text-purple-700 dark:text-purple-300",
     bg: "bg-purple-100 dark:bg-purple-900/30",
     icon: RotateCcw,
@@ -129,11 +129,11 @@ const STATUS_CONFIG: Record<
 
 const FILTER_OPTIONS = [
   { value: "all", label: "Semua Status" },
-  { value: "pending_payment", label: "Pending Payment" },
+  { value: "pending_payment", label: "Menunggu Pembayaran" },
   { value: "paid", label: "Menunggu Verifikasi" },
-  { value: "completed", label: "Completed" },
-  { value: "cancelled", label: "Cancelled" },
-  { value: "refunded", label: "Refunded" },
+  { value: "completed", label: "Selesai" },
+  { value: "cancelled", label: "Dibatalkan" },
+  { value: "refunded", label: "Dikembalikan" },
 ];
 
 function StatusBadge({ status }: { status: string }) {
@@ -373,7 +373,7 @@ function SummaryStats({ bookings }: { bookings: any[] }) {
       border: "border-amber-200/60 dark:border-amber-800/40",
     },
     {
-      label: "Completed",
+      label: "Selesai",
       value: bookings.filter((b) => b.status === "completed" || b.status === "confirmed").length,
       icon: CheckCircle2,
       color: "text-emerald-600 dark:text-emerald-400",
@@ -381,7 +381,7 @@ function SummaryStats({ bookings }: { bookings: any[] }) {
       border: "border-emerald-200/60 dark:border-emerald-800/40",
     },
     {
-      label: "Cancelled / Refunded",
+      label: "Dibatalkan / Dikembalikan",
       value: bookings.filter((b) => b.status === "cancelled" || b.status === "refunded").length,
       icon: Ban,
       color: "text-red-600 dark:text-red-400",
@@ -698,7 +698,7 @@ function BookingDetailDrawer({
           {/* Admin Notes */}
           <div className="space-y-2">
             <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
-              Admin Notes (internal)
+              Catatan Admin (internal)
             </label>
             <Textarea
               value={adminNotes}
@@ -737,12 +737,12 @@ function BookingDetailDrawer({
                   </SelectTrigger>
                   <SelectContent>
                     {[
-                      { value: "pending_payment", label: "⏳ Pending Payment" },
+                      { value: "pending_payment", label: "⏳ Menunggu Pembayaran" },
                       { value: "paid",            label: "💳 Menunggu Verifikasi" },
-                      { value: "completed",       label: "✅ Completed" },
-                      { value: "cancelled",       label: "❌ Cancelled" },
-                      { value: "refunded",        label: "↩️ Refunded" },
-                    ].map((o) => (
+                      { value: "completed",       label: "✅ Selesai" },
+                      { value: "cancelled",       label: "❌ Dibatalkan" },
+                      { value: "refunded",        label: "↩️ Dikembalikan" },
+                    ].map((o: {value:string;label:string}) => (
                       <SelectItem key={o.value} value={o.value} className="text-xs">
                         {o.label}
                       </SelectItem>
@@ -784,7 +784,7 @@ function BookingDetailDrawer({
                   <ActionButton
                     action="cancelled"
                     label="Batalkan Booking"
-                    description="Set status → Cancelled"
+                    description="Ubah status → Dibatalkan"
                     icon={XCircle}
                     confirmAction={confirmAction}
                     onClick={() => handleAction("cancelled")}
@@ -797,7 +797,7 @@ function BookingDetailDrawer({
                   <ActionButton
                     action="refunded"
                     label="Kembalikan Dana"
-                    description="Set status → Refunded"
+                    description="Ubah status → Dikembalikan"
                     icon={RotateCcw}
                     confirmAction={confirmAction}
                     onClick={() => handleAction("refunded")}
@@ -809,8 +809,8 @@ function BookingDetailDrawer({
                 {booking.status === "paid" && (
                   <ActionButton
                     action="completed"
-                    label="Tandai Completed"
-                    description="Bypass verifikasi payment → Completed"
+                    label="Tandai Selesai"
+                    description="Lewati verifikasi pembayaran → Selesai"
                     icon={CheckCircle2}
                     confirmAction={confirmAction}
                     onClick={() => handleAction("completed")}
@@ -948,11 +948,11 @@ function ActionButton({
 /* ─── Inline Status Select ──────────────────────────────────────── */
 
 const STATUS_OPTIONS = [
-  { value: "pending_payment", label: "⏳ Pending Payment" },
+  { value: "pending_payment", label: "⏳ Menunggu Pembayaran" },
   { value: "paid",            label: "💳 Menunggu Verifikasi" },
-  { value: "completed",       label: "✅ Completed" },
-  { value: "cancelled",       label: "❌ Cancelled" },
-  { value: "refunded",        label: "↩️ Refunded" },
+  { value: "completed",       label: "✅ Selesai" },
+  { value: "cancelled",       label: "❌ Dibatalkan" },
+  { value: "refunded",        label: "↩️ Dikembalikan" },
 ];
 
 function InlineStatusSelect({
@@ -1119,7 +1119,7 @@ export default function AdminBookings() {
       >
         <div>
           <h1 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white">
-            Bookings
+            Pemesanan
           </h1>
           <p className="text-sm text-slate-400 mt-0.5">
             Kelola semua booking dan verifikasi pembayaran
@@ -1141,7 +1141,7 @@ export default function AdminBookings() {
             className="flex items-center gap-1.5 h-9 px-3 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
           >
             <Download size={13} />
-            Export CSV
+            Ekspor CSV
           </button>
         </div>
       </motion.div>

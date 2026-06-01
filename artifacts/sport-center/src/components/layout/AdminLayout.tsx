@@ -36,7 +36,7 @@ const NAV_GROUPS = [
     label: "Utama",
     items: [
       { href: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard },
-      { href: "/admin/bookings", label: "Bookings", icon: CalendarDays },
+      { href: "/admin/bookings", label: "Pemesanan", icon: CalendarDays },
       { href: "/admin/calendar", label: "Kalender", icon: Calendar },
       { href: "/admin/qr-checkin", label: "QR Check-In", icon: QrCode },
       { href: "/admin/reschedule", label: "Reschedule", icon: RefreshCw },
@@ -47,17 +47,17 @@ const NAV_GROUPS = [
     items: [
       { href: "/admin/facilities", label: "Fasilitas", icon: MapPin },
       { href: "/admin/schedule", label: "Jadwal Blokir", icon: Clock },
-      { href: "/admin/maintenance", label: "Maintenance", icon: Wrench },
-      { href: "/admin/pricing-rules", label: "Pricing Rules", icon: DollarSign },
+      { href: "/admin/maintenance", label: "Pemeliharaan", icon: Wrench },
+      { href: "/admin/pricing-rules", label: "Aturan Harga", icon: DollarSign },
     ],
   },
   {
     label: "Pelanggan",
     items: [
-      { href: "/admin/customers", label: "Customers", icon: Users },
+      { href: "/admin/customers", label: "Pelanggan", icon: Users },
       { href: "/admin/memberships", label: "Member Gym", icon: Dumbbell },
       { href: "/admin/ap-members", label: "Member AP", icon: Plane },
-      { href: "/admin/promos", label: "Promos", icon: Tag },
+      { href: "/admin/promos", label: "Promo", icon: Tag },
     ],
   },
   {
@@ -73,7 +73,7 @@ const NAV_GROUPS = [
       { href: "/admin/reports", label: "Laporan Keuangan", icon: TrendingUp },
       { href: "/admin/notification-templates", label: "Notifikasi WA", icon: Bell },
       { href: "/admin/audit-log", label: "Audit Log", icon: Shield },
-      { href: "/admin/settings", label: "Settings", icon: SettingsIcon },
+      { href: "/admin/settings", label: "Pengaturan", icon: SettingsIcon },
     ],
   },
 ];
@@ -114,7 +114,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="animate-pulse flex flex-col items-center">
           <div className="w-12 h-12 bg-primary/20 rounded-full mb-4"></div>
-          <div className="text-muted-foreground font-medium">Loading admin portal...</div>
+          <div className="text-muted-foreground font-medium">Memuat portal admin...</div>
         </div>
       </div>
     );
@@ -200,7 +200,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
             disabled={logoutMutation.isPending}
           >
             <LogOut size={16} className="mr-2" />
-            Sign Out
+            Keluar
           </Button>
         </div>
       </aside>

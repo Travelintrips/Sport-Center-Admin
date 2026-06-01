@@ -160,7 +160,7 @@ export default function AdminPricingRules() {
       <Dialog open={isOpen} onOpenChange={setIsOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>{editId ? "Edit Pricing Rule" : "Tambah Pricing Rule"}</DialogTitle>
+            <DialogTitle>{editId ? "Edit Aturan Harga" : "Tambah Aturan Harga"}</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-1">

@@ -16,7 +16,7 @@ const STATUS_COLORS: Record<string, string> = {
   pending_payment: "#f59e0b", paid: "#3b82f6", confirmed: "#10b981", cancelled: "#ef4444", completed: "#6366f1",
 };
 const STATUS_LABELS: Record<string, string> = {
-  pending_payment: "Pending", paid: "Paid", confirmed: "Confirmed", cancelled: "Cancelled", completed: "Completed",
+  pending_payment: "Menunggu Bayar", paid: "Menunggu Verifikasi", confirmed: "Dikonfirmasi", cancelled: "Dibatalkan", completed: "Selesai",
 };
 
 function CustomerDetail({ customerId, onClose }: { customerId: number; onClose: () => void }) {
