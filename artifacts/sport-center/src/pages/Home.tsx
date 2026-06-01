@@ -272,106 +272,177 @@ export default function Home() {
   return (
     <div className="flex flex-col min-h-screen">
 
-      {/* ── Hero (full-bleed building photo) ─────────────────────── */}
-      <section className="relative min-h-[92vh] flex flex-col justify-end overflow-hidden">
-
-        {/* Background image */}
-        <img
-          src={buildingImg}
-          alt="Sport Center Bandara Soekarno-Hatta"
-          className="absolute inset-0 w-full h-full object-cover object-center scale-105 transition-transform duration-[8s] ease-out"
-          style={{ animation: "heroZoom 12s ease-out forwards" }}
+      {/* ── Hero ─────────────────────────────────────────────────── */}
+      <section className="relative bg-white dark:bg-slate-950 overflow-hidden">
+        {/* Subtle dot-grid background pattern */}
+        <div
+          className="absolute inset-0 opacity-[0.035] dark:opacity-[0.06]"
+          style={{ backgroundImage: "radial-gradient(circle, #1e293b 1px, transparent 1px)", backgroundSize: "28px 28px" }}
         />
+        {/* Warm gradient sweep top-right */}
+        <div className="absolute top-0 right-0 w-[55%] h-full bg-gradient-to-l from-primary/8 via-primary/4 to-transparent pointer-events-none" />
+        {/* Decorative blobs */}
+        <div className="absolute -top-40 -right-40 w-[600px] h-[600px] bg-primary/6 rounded-full blur-[100px] pointer-events-none hidden lg:block" />
+        <div className="absolute top-1/2 -left-32 w-[400px] h-[400px] bg-primary/4 rounded-full blur-[80px] pointer-events-none hidden lg:block" />
 
-        {/* Multi-stop overlay: subtle top → rich dark bottom */}
-        <div className="absolute inset-0 bg-gradient-to-b from-black/30 via-black/50 to-black/85" />
-        {/* Warm color accent sweep from right */}
-        <div className="absolute inset-0 bg-gradient-to-tl from-primary/30 via-transparent to-transparent" />
+        <div className="container relative z-10 px-4 md:px-8 pt-16 pb-8 md:pt-24 md:pb-12 lg:pt-28 lg:pb-16">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 lg:gap-16 items-center min-h-[calc(100vh-80px)]">
 
-        {/* Content */}
-        <div className="relative z-10 container px-4 md:px-8 pb-36 md:pb-44 pt-24 md:pt-32">
-          <div className="max-w-3xl">
+            {/* ── Left: Content ── */}
+            <div className="max-w-xl lg:max-w-none animate-in fade-in slide-in-from-bottom-6 duration-700">
 
-            {/* Live badge */}
-            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/10 backdrop-blur-md text-white font-bold text-sm mb-8 border border-white/20 shadow-lg">
-              <span className="relative flex h-2.5 w-2.5">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-80" />
-                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-primary" />
-              </span>
-              {t("Buka Sekarang · 06:00 – 22:00 WIB", "Open Now · 06:00 – 22:00 WIB")}
-            </div>
+              {/* Live pill */}
+              <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 border border-primary/20 text-primary font-bold text-sm mb-8 shadow-sm">
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
+                </span>
+                {t("Buka Sekarang · 06:00 – 22:00 WIB", "Open Now · 06:00 – 22:00 WIB")}
+              </div>
 
-            <h1 className="text-5xl md:text-6xl lg:text-7xl font-black tracking-tight text-white leading-[1.05] mb-6">
-              {t("Sport Center", "Sport Center")}<br />
-              <span className="text-primary drop-shadow-[0_2px_16px_rgba(249,115,22,0.6)]">
-                {t("Soekarno-Hatta", "Soekarno-Hatta")}
-              </span>
-            </h1>
+              <h1 className="text-4xl sm:text-5xl lg:text-6xl xl:text-7xl font-black tracking-tight text-slate-900 dark:text-white leading-[1.05] mb-6">
+                {t("Sport Center", "Sport Center")}<br />
+                <span className="relative inline-block text-primary">
+                  {t("Soekarno-Hatta", "Soekarno-Hatta")}
+                  <svg className="absolute -bottom-1 left-0 w-full" height="6" viewBox="0 0 300 6" preserveAspectRatio="none">
+                    <path d="M0,3 Q75,6 150,3 Q225,0 300,3" stroke="currentColor" strokeWidth="3" fill="none" strokeLinecap="round" opacity="0.4"/>
+                  </svg>
+                </span>
+              </h1>
 
-            <p className="text-lg md:text-xl text-white/75 mb-10 leading-relaxed font-medium max-w-xl">
-              {t(
-                "Pusat olahraga premium di kawasan Bandara. Booking lapangan futsal, basket, badminton, hingga gym langsung dari smartphone.",
-                "Premium sports hub near the Airport. Book futsal, basketball, badminton, and gym courts straight from your phone."
-              )}
-            </p>
+              <p className="text-lg md:text-xl text-slate-500 dark:text-slate-400 mb-8 leading-relaxed font-medium max-w-lg">
+                {t(
+                  "Pusat olahraga premium di kawasan Bandara Soekarno-Hatta. Booking lapangan futsal, basket, badminton, hingga gym dalam hitungan detik.",
+                  "Premium sports hub near Soekarno-Hatta Airport. Book futsal, basketball, badminton, and gym courts in seconds."
+                )}
+              </p>
 
-            <div className="flex flex-col sm:flex-row gap-4 mb-12">
-              <Button size="lg" className="h-14 px-8 text-base font-black shadow-2xl shadow-primary/40 hover:shadow-primary/60 hover:scale-105 transition-all rounded-full group bg-primary hover:bg-primary/90" asChild>
-                <Link href="/facilities">
-                  {t("Booking Sekarang", "Book Now")}
-                  <ArrowRight className="ml-2 w-5 h-5 group-hover:translate-x-1 transition-transform" />
-                </Link>
-              </Button>
-              <Button size="lg" variant="outline" className="h-14 px-8 text-base font-bold rounded-full border-white/30 bg-white/10 backdrop-blur-md text-white hover:bg-white/20 hover:border-white/50 transition-all" asChild>
-                <Link href="/facilities">{t("Lihat Fasilitas", "View Facilities")}</Link>
-              </Button>
-            </div>
-
-            {/* Social proof */}
-            <div className="flex items-center gap-5">
-              <div className="flex -space-x-3">
-                {[1, 2, 3, 4, 5].map((i) => (
-                  <div key={i} className="w-10 h-10 rounded-full border-2 border-white/40 bg-slate-700 overflow-hidden shadow-md">
-                    <img src={`https://api.dicebear.com/7.x/notionists/svg?seed=${i+10}&backgroundColor=374151`} alt="User" />
-                  </div>
+              {/* Feature chips */}
+              <div className="flex flex-wrap gap-2 mb-8">
+                {[
+                  t("✓ Booking 24/7", "✓ 24/7 Booking"),
+                  t("✓ Bayar Fleksibel", "✓ Flexible Payment"),
+                  t("✓ Lokasi Strategis", "✓ Strategic Location"),
+                ].map((chip, i) => (
+                  <span key={i} className="px-3 py-1.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-sm font-semibold border border-slate-200 dark:border-slate-700">
+                    {chip}
+                  </span>
                 ))}
               </div>
-              <div>
-                <div className="flex gap-0.5 mb-0.5">
-                  {[...Array(5)].map((_, i) => <Star key={i} className="w-3.5 h-3.5 fill-yellow-400 text-yellow-400" />)}
+
+              {/* CTAs */}
+              <div className="flex flex-col sm:flex-row gap-3 mb-10">
+                <Button size="lg" className="h-13 px-8 text-base font-black shadow-xl shadow-primary/30 hover:shadow-primary/45 hover:-translate-y-0.5 transition-all rounded-full group" asChild>
+                  <Link href="/facilities">
+                    {t("Booking Sekarang", "Book Now")}
+                    <ArrowRight className="ml-2 w-5 h-5 group-hover:translate-x-1 transition-transform" />
+                  </Link>
+                </Button>
+                <Button size="lg" variant="outline" className="h-13 px-8 text-base font-bold rounded-full border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all" asChild>
+                  <Link href="/facilities">{t("Lihat Fasilitas", "View Facilities")}</Link>
+                </Button>
+              </div>
+
+              {/* Social proof */}
+              <div className="flex items-center gap-5 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <div className="flex -space-x-3">
+                  {[1, 2, 3, 4, 5].map((i) => (
+                    <div key={i} className="w-9 h-9 rounded-full border-2 border-white dark:border-slate-950 bg-slate-100 overflow-hidden shadow-sm">
+                      <img src={`https://api.dicebear.com/7.x/notionists/svg?seed=${i}&backgroundColor=f1f5f9,fed7aa`} alt="User" />
+                    </div>
+                  ))}
                 </div>
-                <div className="text-sm font-semibold text-white/80">
-                  <span className="text-white font-black">1,200+</span> {t("member aktif · rated 4.9/5", "active members · rated 4.9/5")}
+                <div>
+                  <div className="flex items-center gap-1 mb-0.5">
+                    {[...Array(5)].map((_, i) => <Star key={i} className="w-3.5 h-3.5 fill-yellow-400 text-yellow-400" />)}
+                    <span className="text-sm font-bold text-slate-900 dark:text-white ml-1">4.9</span>
+                  </div>
+                  <div className="text-sm font-medium text-slate-500 dark:text-slate-400">
+                    {t("dari 1.200+ member aktif", "from 1,200+ active members")}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* ── Right: Building Image ── */}
+            <div className="relative animate-in fade-in slide-in-from-right-8 duration-900 delay-150 lg:py-8">
+              {/* Accent ring */}
+              <div className="absolute -inset-4 bg-gradient-to-tr from-primary/15 via-primary/5 to-transparent rounded-[2.5rem] transform rotate-2 scale-[1.02]" />
+
+              {/* Main image card */}
+              <div className="relative rounded-[2rem] overflow-hidden shadow-2xl border border-white/60 dark:border-slate-800 bg-slate-100 dark:bg-slate-900 aspect-[4/3] group">
+                <img
+                  src={buildingImg}
+                  alt="Gedung Sport Center Bandara Soekarno-Hatta"
+                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700 ease-out"
+                />
+                {/* Inner vignette */}
+                <div className="absolute inset-0 bg-gradient-to-t from-slate-900/30 via-transparent to-transparent" />
+
+                {/* "Open" floating card */}
+                <div className="absolute bottom-5 left-5 right-5 p-3.5 rounded-2xl bg-white/90 dark:bg-slate-900/90 backdrop-blur-md shadow-xl border border-white/30 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-emerald-500/10 flex items-center justify-center text-emerald-600 shrink-0">
+                      <CheckCircle2 className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="font-black text-sm text-slate-900 dark:text-white">{t("Buka Hari Ini", "Open Today")}</div>
+                      <div className="text-xs font-semibold text-slate-500">
+                        {settings?.openHour || "06:00"} – {settings?.closeHour || "22:00"} WIB
+                      </div>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="flex justify-end gap-0.5 mb-0.5">
+                      {[...Array(5)].map((_, i) => <Star key={i} className="w-3 h-3 fill-yellow-400 text-yellow-400" />)}
+                    </div>
+                    <div className="text-xs font-black text-slate-900 dark:text-white">4.9/5</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Floating stat badge top-right */}
+              <div className="absolute -top-4 -right-2 md:right-4 flex items-center gap-2.5 bg-white dark:bg-slate-900 rounded-2xl shadow-xl border border-slate-100 dark:border-slate-800 px-4 py-3">
+                <div className="w-9 h-9 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                  <Users className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="font-black text-slate-900 dark:text-white text-sm leading-tight">1,200+</div>
+                  <div className="text-xs text-slate-500 font-medium">{t("Member Aktif", "Active Members")}</div>
+                </div>
+              </div>
+
+              {/* Floating badge bottom-left */}
+              <div className="absolute -bottom-4 -left-2 md:left-4 flex items-center gap-2.5 bg-primary rounded-2xl shadow-xl shadow-primary/25 px-4 py-3">
+                <Trophy className="w-4 h-4 text-white shrink-0" />
+                <div className="text-white">
+                  <div className="font-black text-sm leading-tight">{t("Fasilitas #1", "#1 Facility")}</div>
+                  <div className="text-xs opacity-80 font-medium">{t("Kawasan Bandara", "Airport Area")}</div>
                 </div>
               </div>
             </div>
 
           </div>
         </div>
-
-        {/* Scroll cue */}
-        <div className="absolute bottom-36 md:bottom-44 right-8 hidden md:flex flex-col items-center gap-2 text-white/40">
-          <div className="w-px h-12 bg-gradient-to-b from-transparent to-white/40" />
-          <span className="text-[10px] font-bold uppercase tracking-[0.2em] rotate-90 origin-center mt-2">scroll</span>
-        </div>
       </section>
 
-      {/* ── Stats strip — floats above next section ───────────────── */}
-      <section className="relative z-20 -mt-20 mb-16 px-4 md:px-8 max-w-6xl mx-auto w-full">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-5">
-          <AnimatedCounter end={5800} label={t("Total Booking", "Total Bookings")} />
-          <AnimatedCounter end={7} label={t("Lapangan Aktif", "Active Courts")} suffix="+" />
-          <AnimatedCounter end={1200} label={t("Member Aktif", "Active Members")} suffix="+" />
-          <AnimatedCounter end={49} suffix="/5" label={t("Kepuasan Pelanggan", "Customer Satisfaction")} highlight />
+      {/* ── Stats strip ───────────────────────────────────────────── */}
+      <section className="py-12 md:py-16 bg-slate-50 dark:bg-slate-900/50 border-y border-slate-100 dark:border-slate-800">
+        <div className="container px-4 md:px-8">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-6 md:gap-8 max-w-4xl mx-auto">
+            {[
+              { end: 5800, label: t("Total Booking", "Total Bookings"), suffix: "+" },
+              { end: 7, label: t("Lapangan Aktif", "Active Courts"), suffix: "+" },
+              { end: 1200, label: t("Member Aktif", "Active Members"), suffix: "+" },
+              { end: 49, label: t("Rating Pelanggan", "Customer Rating"), suffix: "/5" },
+            ].map((stat, i) => (
+              <div key={i} className={`text-center ${i === 3 ? "" : "border-r border-slate-200 dark:border-slate-700 last:border-0"}`}>
+                <AnimatedCounter end={stat.end} label={stat.label} suffix={stat.suffix} highlight={i === 3} />
+              </div>
+            ))}
+          </div>
         </div>
       </section>
-
-      <style>{`
-        @keyframes heroZoom {
-          from { transform: scale(1.08); }
-          to   { transform: scale(1); }
-        }
-      `}</style>
 
       {/* ── Facilities Highlight ──────────────────────────────────── */}
       <section className="py-20 md:py-28 bg-white dark:bg-slate-950">
