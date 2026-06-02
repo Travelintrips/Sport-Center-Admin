@@ -142,6 +142,7 @@ export default function CustomerLayout({ children }: { children: ReactNode }) {
     { href: "/",            label: t("Beranda",      "Home")     },
     { href: "/facilities",  label: t("Fasilitas",    "Venues")   },
     { href: "/promos",      label: t("Promo",        "Promos")   },
+    { href: "/tenant",      label: t("Sewa Tenan",   "Tenant")   },
     { href: "/contact",     label: t("Hubungi Kami", "Contact")  },
   ];
 
@@ -306,6 +307,7 @@ export default function CustomerLayout({ children }: { children: ReactNode }) {
                   { href: "/",           label: t("Beranda",          "Home")         },
                   { href: "/facilities", label: t("Daftar Fasilitas", "All Venues")   },
                   { href: "/promos",     label: t("Promo Spesial",    "Special Promos") },
+                  { href: "/tenant",     label: t("Sewa Tenan",       "Tenant Program") },
                   { href: "/contact",    label: t("Hubungi Kami",     "Contact Us")   },
                 ].map((l) => (
                   <li key={l.href}>
