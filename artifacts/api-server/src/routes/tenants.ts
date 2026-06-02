@@ -1,9 +1,52 @@
 import { Router } from "express";
 import { db, tenantsTable, tenantBookingsTable, tenantPaymentsTable, usersTable } from "@workspace/db";
 import { eq, desc } from "drizzle-orm";
-import { adminMiddleware, tenantMiddleware, authMiddleware } from "../lib/auth";
+import { adminMiddleware, tenantMiddleware, authMiddleware, hashPassword, createToken } from "../lib/auth";
 
 const router = Router();
+
+// ─── Public: Self-register as tenant ────────────────────────────────────────
+router.post("/tenant/register", async (req, res) => {
+  try {
+    const { name, email, password, phone, businessName, ownerName, businessCategory, address } = req.body;
+    if (!name || !email || !password || !businessName || !ownerName) {
+      res.status(400).json({ error: "name, email, password, businessName, dan ownerName wajib diisi" });
+      return;
+    }
+    const [existing] = await db.select().from(usersTable).where(eq(usersTable.email, email)).limit(1);
+    if (existing) {
+      res.status(409).json({ error: "Email sudah terdaftar" });
+      return;
+    }
+    const passwordHash = hashPassword(password);
+    const [user] = await db.insert(usersTable).values({
+      name, email, passwordHash, phone: phone || null, role: "tenant",
+    }).returning();
+
+    const [tenant] = await db.insert(tenantsTable).values({
+      userId: user.id,
+      businessName,
+      ownerName,
+      phone: phone || null,
+      email,
+      businessCategory: businessCategory || null,
+      address: address || null,
+      status: "pending",
+    }).returning();
+
+    await db.update(usersTable).set({ tenantId: tenant.id }).where(eq(usersTable.id, user.id));
+
+    const token = createToken(user.id, "tenant", tenant.id);
+    res.status(201).json({
+      user: { id: user.id, name: user.name, email: user.email, role: "tenant", phone: user.phone, tenantId: tenant.id },
+      tenant,
+      token,
+    });
+  } catch (err) {
+    req.log.error({ err }, "Tenant self-register error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
 
 async function generateTenantOrderNumber(): Promise<string> {
   const rows = await db.select({ orderNumber: tenantBookingsTable.orderNumber }).from(tenantBookingsTable);

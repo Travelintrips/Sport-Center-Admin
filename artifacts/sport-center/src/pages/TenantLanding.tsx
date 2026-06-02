@@ -1,214 +1,224 @@
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Building2, FileText, CheckCircle2, TrendingUp, Store, Megaphone, Calendar, ChevronRight, ArrowRight, ShieldCheck, Clock, Users, Star } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { useLang } from "@/lib/i18n";
 import { useGetMe, getGetMeQueryKey } from "@workspace/api-client-react";
+import {
+  Building2, CheckCircle2, ShoppingBag, Megaphone, Users,
+  Star, ArrowRight, Zap, Shield, Clock, ChevronRight,
+} from "lucide-react";
 
-const BOOKING_TYPES = [
+const BENEFITS = [
   {
-    icon: Store,
-    label: "Booth / Kios",
-    labelEn: "Booth / Kiosk",
-    desc: "Sewa area booth atau kios untuk berjualan produk/layanan Anda di kawasan Sport Center.",
-    descEn: "Rent a booth or kiosk area to sell your products/services at Sport Center.",
-    color: "text-orange-500",
-    bg: "bg-orange-50 dark:bg-orange-950/20",
+    icon: Users,
+    title: "Ribuan Pengunjung / Bulan",
+    desc: "Sport Center dikunjungi ribuan member aktif setiap bulan — calon pelanggan siap untuk bisnis Anda.",
   },
   {
-    icon: Calendar,
+    icon: Zap,
+    title: "Setup Cepat & Mudah",
+    desc: "Proses pendaftaran online, tanpa birokrasi. Daftar hari ini, langsung ajukan booking space.",
+  },
+  {
+    icon: Shield,
+    title: "Harga Transparan",
+    desc: "Satu harga flat Rp 3.000.000 / bulan, sudah termasuk PPN. Tidak ada biaya tersembunyi.",
+  },
+  {
+    icon: Clock,
+    title: "Kontrak Fleksibel",
+    desc: "Pilih durasi sewa mulai dari 1 bulan. Perpanjang kapan saja sesuai kebutuhan bisnis.",
+  },
+];
+
+const SPACE_TYPES = [
+  {
+    icon: ShoppingBag,
+    label: "Booth / Kios",
+    desc: "Area penjualan produk, minuman, atau makanan di dalam kawasan Sport Center.",
+    colorClass: "bg-orange-50 text-orange-600 border-orange-200",
+  },
+  {
+    icon: Star,
     label: "Ruang Event",
-    labelEn: "Event Space",
-    desc: "Sewa ruang khusus untuk menyelenggarakan event, seminar, atau turnamen olahraga.",
-    descEn: "Rent a dedicated space for events, seminars, or sports tournaments.",
-    color: "text-blue-500",
-    bg: "bg-blue-50 dark:bg-blue-950/20",
+    desc: "Ruang serbaguna untuk workshop, seminar, peluncuran produk, atau acara komunitas.",
+    colorClass: "bg-blue-50 text-blue-600 border-blue-200",
   },
   {
     icon: Megaphone,
     label: "Ruang Iklan",
-    labelEn: "Advertising Space",
-    desc: "Pasang banner, spanduk, atau media iklan di lokasi strategis dalam kawasan Sport Center.",
-    descEn: "Place banners, billboards, or advertising media at strategic locations in the Sport Center.",
-    color: "text-purple-500",
-    bg: "bg-purple-50 dark:bg-purple-950/20",
+    desc: "Banner, signage, dan media promosi di lokasi strategis dengan lalu lintas tinggi.",
+    colorClass: "bg-purple-50 text-purple-600 border-purple-200",
   },
-];
-
-const STEPS = [
-  { num: "01", label: "Daftar Akun", labelEn: "Create Account", desc: "Hubungi admin untuk membuat akun Penyewa Tenan Anda.", descEn: "Contact admin to create your Tenant account." },
-  { num: "02", label: "Ajukan Pemesanan", labelEn: "Submit Booking", desc: "Isi form pengajuan sewa dengan detail kebutuhan Anda.", descEn: "Fill in the rental request form with your requirements." },
-  { num: "03", label: "Tunggu Persetujuan", labelEn: "Await Approval", desc: "Admin meninjau dan menetapkan harga sesuai kesepakatan.", descEn: "Admin reviews and sets the price per agreement." },
-  { num: "04", label: "Bayar & Aktif", labelEn: "Pay & Activate", desc: "Upload bukti pembayaran dan tenan Anda siap beroperasi.", descEn: "Upload proof of payment and your tenant is ready to operate." },
-];
-
-const BENEFITS = [
-  { icon: Users, label: "Ribuan Pengunjung", labelEn: "Thousands of Visitors", desc: "Akses ke 1,200+ member aktif dan pengunjung harian Sport Center.", descEn: "Access to 1,200+ active members and daily Sport Center visitors." },
-  { icon: ShieldCheck, label: "Lokasi Strategis", labelEn: "Strategic Location", desc: "Berada di kawasan Bandara Soekarno-Hatta, mudah dijangkau dari seluruh penjuru.", descEn: "Located in the Soekarno-Hatta Airport area, easily accessible from everywhere." },
-  { icon: TrendingUp, label: "Potensi Tinggi", labelEn: "High Potential", desc: "Komunitas olahraga yang aktif dan memiliki daya beli tinggi.", descEn: "An active sports community with high purchasing power." },
-  { icon: Clock, label: "Fleksibel", labelEn: "Flexible", desc: "Pilihan pembayaran bulanan atau tahunan sesuai kebutuhan bisnis Anda.", descEn: "Monthly or yearly payment options to suit your business needs." },
 ];
 
 export default function TenantLanding() {
   const { t } = useLang();
   const { data: user } = useGetMe({ query: { retry: false, queryKey: getGetMeQueryKey(), staleTime: 60_000 } });
-
   const isTenant = user?.role === "tenant";
 
   return (
-    <div className="pb-20">
-      {/* Hero */}
-      <section className="relative overflow-hidden bg-gradient-to-br from-secondary via-secondary to-secondary/90 text-white">
-        <div className="absolute inset-0 bg-gradient-to-br from-primary/20 via-transparent to-primary/5 pointer-events-none" />
-        <div className="absolute top-0 right-0 w-[600px] h-[600px] rounded-full bg-primary/10 blur-3xl -translate-y-1/2 translate-x-1/4 pointer-events-none" />
-        <div className="container mx-auto px-4 md:px-8 py-24 md:py-32 relative z-10">
+    <div className="bg-background">
+
+      {/* ── Hero ── */}
+      <section className="relative overflow-hidden bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white">
+        <div className="absolute inset-0 opacity-10 pointer-events-none">
+          <div className="absolute inset-0" style={{ backgroundImage: "radial-gradient(circle at 20% 50%, hsl(16 90% 55%) 0%, transparent 50%), radial-gradient(circle at 80% 20%, hsl(16 90% 45%) 0%, transparent 40%)" }} />
+        </div>
+        <div className="relative container mx-auto px-6 py-20 md:py-28 max-w-5xl">
           <div className="max-w-2xl">
-            <div className="inline-flex items-center gap-2 bg-white/10 backdrop-blur-sm border border-white/20 rounded-full px-4 py-1.5 text-xs font-bold uppercase tracking-widest text-primary mb-6">
-              <Building2 size={12} /> {t("Program Penyewa Tenan", "Tenant Program")}
-            </div>
-            <h1 className="text-4xl md:text-5xl lg:text-6xl font-black leading-tight mb-6">
-              {t("Buka Bisnis Anda di Sport Center", "Open Your Business at Sport Center")}
+            <Badge className="mb-5 bg-primary/20 text-primary border-primary/30 hover:bg-primary/20 text-xs font-bold uppercase tracking-widest px-4 py-1.5">
+              <Building2 size={11} className="mr-1.5" />
+              {t("Program Sewa Tenan", "Tenant Program")}
+            </Badge>
+            <h1 className="text-4xl md:text-5xl lg:text-6xl font-black leading-tight mb-5">
+              {t("Buka Bisnis Anda", "Open Your Business")}<br />
+              <span className="text-primary">{t("di Sport Center", "at Sport Center")}</span>
             </h1>
-            <p className="text-lg text-white/70 mb-8 leading-relaxed max-w-xl">
+            <p className="text-lg text-white/70 mb-8 leading-relaxed">
               {t(
-                "Jadilah bagian dari ekosistem Sport Center Bandara Soekarno-Hatta. Sewa booth, ruang event, atau space iklan di kawasan olahraga premium kami.",
-                "Be part of the Sport Center Soekarno-Hatta ecosystem. Rent booths, event spaces, or advertising space in our premium sports venue."
+                "Jadilah bagian dari ekosistem Sport Center Bandara Soekarno-Hatta. Sewa booth, ruang event, atau space iklan — daftar online, langsung booking.",
+                "Be part of the Sport Center Soekarno-Hatta ecosystem. Rent a booth, event space, or advertising space — register online, book instantly."
               )}
             </p>
-            <div className="flex flex-wrap gap-3">
+
+            {/* Pricing box */}
+            <div className="inline-flex flex-wrap items-center gap-4 bg-white/10 backdrop-blur-sm border border-white/20 rounded-2xl px-5 py-4 mb-8">
+              <div>
+                <p className="text-xs text-white/50 font-semibold uppercase tracking-wider">{t("Harga Sewa", "Monthly Rate")}</p>
+                <p className="text-3xl font-black text-white">Rp 3.000.000<span className="text-lg font-bold text-white/60"> / bulan</span></p>
+                <p className="text-xs text-white/50 mt-0.5">{t("Sudah termasuk PPN 11%", "Inclusive of 11% VAT")}</p>
+              </div>
+              <div className="hidden sm:block w-px h-12 bg-white/20" />
+              <div className="space-y-1">
+                {[t("Harga flat, tanpa biaya tambahan", "Flat price, no hidden fees"),
+                  t("Kontrak fleksibel mulai 1 bulan", "Flexible contract from 1 month"),
+                  t("Daftar online, langsung booking", "Register online, book instantly"),
+                ].map((item) => (
+                  <div key={item} className="flex items-center gap-2 text-xs text-white/70">
+                    <CheckCircle2 size={12} className="text-green-400 shrink-0" />
+                    {item}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-3">
               {isTenant ? (
-                <Button asChild size="lg" className="rounded-full px-8 font-bold shadow-lg shadow-primary/30">
-                  <Link href="/tenant/dashboard">
-                    <Building2 size={16} className="mr-2" />
-                    {t("Dashboard Tenan", "Tenant Dashboard")}
-                  </Link>
-                </Button>
+                <>
+                  <Button asChild size="lg" className="rounded-full font-black px-8 py-6 text-base shadow-lg shadow-primary/30">
+                    <Link href="/tenant/booking">{t("Ajukan Booking Sewa", "Submit Rental Booking")} <ArrowRight size={16} className="ml-2" /></Link>
+                  </Button>
+                  <Button asChild variant="outline" size="lg" className="rounded-full font-bold px-8 py-6 border-white/30 text-white hover:bg-white/10">
+                    <Link href="/tenant/dashboard">{t("Dashboard Tenant", "Tenant Dashboard")}</Link>
+                  </Button>
+                </>
               ) : (
                 <>
-                  <Button asChild size="lg" className="rounded-full px-8 font-bold shadow-lg shadow-primary/30">
-                    <Link href="/contact">
-                      {t("Hubungi Kami", "Contact Us")} <ArrowRight size={16} className="ml-2" />
-                    </Link>
+                  <Button asChild size="lg" className="rounded-full font-black px-8 py-6 text-base shadow-lg shadow-primary/30">
+                    <Link href="/tenant/register">{t("Daftar Sekarang — Gratis", "Register Now — Free")} <ArrowRight size={16} className="ml-2" /></Link>
                   </Button>
-                  <Button asChild size="lg" variant="outline" className="rounded-full px-8 font-bold border-white/30 bg-white/10 text-white hover:bg-white/20">
-                    <Link href="/login">
-                      {t("Login Tenan", "Tenant Login")}
-                    </Link>
+                  <Button asChild variant="outline" size="lg" className="rounded-full font-bold px-8 py-6 border-white/30 text-white hover:bg-white/10">
+                    <Link href="/login">{t("Sudah punya akun? Login", "Have an account? Login")}</Link>
                   </Button>
                 </>
               )}
             </div>
           </div>
         </div>
-        {/* Stats strip */}
-        <div className="border-t border-white/10 bg-white/5 backdrop-blur-sm">
-          <div className="container mx-auto px-4 md:px-8 py-5 grid grid-cols-2 md:grid-cols-4 gap-4">
-            {[
-              { n: "1,200+", l: t("Member Aktif", "Active Members") },
-              { n: "10+", l: t("Jenis Fasilitas", "Facility Types") },
-              { n: "100+", l: t("Tenan Bergabung", "Tenants Joined") },
-              { n: "24/7", l: t("Keamanan", "Security") },
-            ].map((s) => (
-              <div key={s.l} className="text-center">
-                <div className="text-2xl font-black text-primary">{s.n}</div>
-                <div className="text-xs text-white/50 mt-0.5">{s.l}</div>
+      </section>
+
+      {/* ── Space Types ── */}
+      <section className="py-16 md:py-20 container mx-auto px-6 max-w-5xl">
+        <div className="text-center mb-12">
+          <p className="text-xs font-bold uppercase tracking-widest text-primary mb-3">{t("Pilihan Area", "Available Spaces")}</p>
+          <h2 className="text-3xl font-black">{t("Jenis Area yang Tersedia", "Available Space Types")}</h2>
+        </div>
+        <div className="grid md:grid-cols-3 gap-6">
+          {SPACE_TYPES.map(({ icon: Icon, label, desc, colorClass }) => (
+            <div key={label} className={`rounded-2xl border p-6 ${colorClass}`}>
+              <div className="w-11 h-11 rounded-xl bg-white/60 flex items-center justify-center mb-4">
+                <Icon size={22} />
               </div>
-            ))}
-          </div>
+              <h3 className="font-black text-lg mb-2">{label}</h3>
+              <p className="text-sm opacity-80 leading-relaxed">{desc}</p>
+            </div>
+          ))}
         </div>
       </section>
 
-      {/* Booking Types */}
-      <section className="py-20 bg-background">
-        <div className="container mx-auto px-4 md:px-8">
+      {/* ── Benefits ── */}
+      <section className="py-16 md:py-20 bg-muted/40">
+        <div className="container mx-auto px-6 max-w-5xl">
           <div className="text-center mb-12">
-            <div className="text-xs font-bold uppercase tracking-widest text-primary mb-3">{t("Pilihan Sewa", "Rental Options")}</div>
-            <h2 className="text-3xl md:text-4xl font-black">{t("Jenis Area yang Tersedia", "Available Space Types")}</h2>
+            <p className="text-xs font-bold uppercase tracking-widest text-primary mb-3">{t("Keuntungan", "Benefits")}</p>
+            <h2 className="text-3xl font-black">{t("Mengapa Sewa di Sport Center?", "Why Rent at Sport Center?")}</h2>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {BOOKING_TYPES.map((type) => (
-              <Card key={type.label} className="border border-border/60 hover:border-primary/30 hover:shadow-lg transition-all duration-300 group">
-                <CardContent className="p-7">
-                  <div className={`w-14 h-14 rounded-2xl ${type.bg} flex items-center justify-center mb-5 group-hover:scale-105 transition-transform`}>
-                    <type.icon size={26} className={type.color} />
-                  </div>
-                  <h3 className="text-lg font-black mb-2">{t(type.label, type.labelEn)}</h3>
-                  <p className="text-sm text-muted-foreground leading-relaxed">{t(type.desc, type.descEn)}</p>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Benefits */}
-      <section className="py-20 bg-muted/30">
-        <div className="container mx-auto px-4 md:px-8">
-          <div className="text-center mb-12">
-            <div className="text-xs font-bold uppercase tracking-widest text-primary mb-3">{t("Keuntungan", "Benefits")}</div>
-            <h2 className="text-3xl md:text-4xl font-black">{t("Mengapa Bergabung?", "Why Join Us?")}</h2>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-            {BENEFITS.map((b) => (
-              <div key={b.label} className="text-center p-6">
-                <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto mb-4">
-                  <b.icon size={24} className="text-primary" />
+          <div className="grid md:grid-cols-2 gap-6">
+            {BENEFITS.map(({ icon: Icon, title, desc }) => (
+              <div key={title} className="flex gap-4 bg-background rounded-2xl p-6 border border-border/60">
+                <div className="w-11 h-11 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+                  <Icon size={20} className="text-primary" />
                 </div>
-                <h3 className="font-black mb-2">{t(b.label, b.labelEn)}</h3>
-                <p className="text-sm text-muted-foreground leading-relaxed">{t(b.desc, b.descEn)}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* How it works */}
-      <section className="py-20 bg-background">
-        <div className="container mx-auto px-4 md:px-8">
-          <div className="text-center mb-12">
-            <div className="text-xs font-bold uppercase tracking-widest text-primary mb-3">{t("Cara Kerja", "How It Works")}</div>
-            <h2 className="text-3xl md:text-4xl font-black">{t("Proses Mudah & Cepat", "Easy & Fast Process")}</h2>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 relative">
-            <div className="hidden lg:block absolute top-8 left-[12%] right-[12%] h-px bg-gradient-to-r from-transparent via-primary/30 to-transparent" />
-            {STEPS.map((step) => (
-              <div key={step.num} className="relative text-center group">
-                <div className="w-16 h-16 rounded-2xl bg-primary text-white flex items-center justify-center mx-auto mb-4 text-xl font-black shadow-lg shadow-primary/30 group-hover:scale-105 transition-transform">
-                  {step.num}
+                <div>
+                  <h3 className="font-black mb-1.5">{t(title, title)}</h3>
+                  <p className="text-sm text-muted-foreground leading-relaxed">{t(desc, desc)}</p>
                 </div>
-                <h3 className="font-black mb-2">{t(step.label, step.labelEn)}</h3>
-                <p className="text-sm text-muted-foreground leading-relaxed">{t(step.desc, step.descEn)}</p>
               </div>
             ))}
           </div>
         </div>
       </section>
 
-      {/* CTA */}
-      <section className="py-20 bg-gradient-to-br from-primary to-primary/80 text-white">
-        <div className="container mx-auto px-4 md:px-8 text-center">
-          <Star className="w-10 h-10 mx-auto mb-5 text-white/60" />
+      {/* ── How it works ── */}
+      <section className="py-16 md:py-20 container mx-auto px-6 max-w-4xl">
+        <div className="text-center mb-12">
+          <p className="text-xs font-bold uppercase tracking-widest text-primary mb-3">{t("Cara Daftar", "How It Works")}</p>
+          <h2 className="text-3xl font-black">{t("3 Langkah Mudah", "3 Simple Steps")}</h2>
+        </div>
+        <div className="grid md:grid-cols-3 gap-8">
+          {[
+            { step: "01", title: t("Daftar Online", "Register Online"), desc: t("Isi form pendaftaran dengan data diri dan informasi bisnis Anda. Proses cepat, hanya 2 menit.", "Fill in the registration form with your personal and business info. Quick process, only 2 minutes.") },
+            { step: "02", title: t("Ajukan Booking", "Submit Booking"), desc: t("Setelah daftar, langsung pilih jenis area, durasi sewa, dan kirim pengajuan booking.", "After registering, select the area type, rental duration, and submit your booking request.") },
+            { step: "03", title: t("Tim Kami Konfirmasi", "Our Team Confirms"), desc: t("Admin kami akan meninjau dan menghubungi Anda dalam 1-3 hari kerja untuk konfirmasi.", "Our admin will review and contact you within 1-3 business days for confirmation.") },
+          ].map(({ step, title, desc }, i) => (
+            <div key={step} className="relative text-center">
+              {i < 2 && (
+                <div className="hidden md:block absolute top-6 left-[calc(100%-12px)] w-6 text-muted-foreground/30">
+                  <ChevronRight size={24} />
+                </div>
+              )}
+              <div className="w-14 h-14 rounded-2xl bg-primary text-white font-black text-xl flex items-center justify-center mx-auto mb-4">
+                {step}
+              </div>
+              <h3 className="font-black mb-2">{title}</h3>
+              <p className="text-sm text-muted-foreground leading-relaxed">{desc}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* ── CTA ── */}
+      <section className="py-16 md:py-20 bg-gradient-to-br from-primary to-orange-600">
+        <div className="container mx-auto px-6 max-w-3xl text-center text-white">
           <h2 className="text-3xl md:text-4xl font-black mb-4">
-            {t("Siap Bergabung?", "Ready to Join?")}
+            {t("Siap Buka Bisnis di Sport Center?", "Ready to Open Your Business at Sport Center?")}
           </h2>
-          <p className="text-white/70 max-w-md mx-auto mb-8 leading-relaxed">
-            {t(
-              "Hubungi tim kami untuk informasi lebih lanjut atau daftarkan bisnis Anda sebagai Penyewa Tenan Sport Center sekarang.",
-              "Contact our team for more information or register your business as a Sport Center Tenant now."
-            )}
+          <p className="text-white/80 mb-8 text-lg">
+            {t("Rp 3.000.000 / bulan • Include PPN • Daftar online sekarang", "Rp 3,000,000 / month • VAT inclusive • Register online now")}
           </p>
-          <div className="flex flex-wrap gap-3 justify-center">
-            <Button asChild size="lg" variant="secondary" className="rounded-full px-8 font-bold">
-              <Link href="/contact">{t("Hubungi Kami", "Contact Us")} <ChevronRight size={16} className="ml-1" /></Link>
+          {isTenant ? (
+            <Button asChild size="lg" variant="secondary" className="rounded-full font-black px-10 py-6 text-base">
+              <Link href="/tenant/booking">{t("Ajukan Booking Sewa", "Submit Rental Booking")} <ArrowRight size={16} className="ml-2" /></Link>
             </Button>
-            {isTenant && (
-              <Button asChild size="lg" className="rounded-full px-8 font-bold bg-white text-primary hover:bg-white/90">
-                <Link href="/tenant/dashboard">{t("Dashboard Tenan", "Tenant Dashboard")}</Link>
-              </Button>
-            )}
-          </div>
+          ) : (
+            <Button asChild size="lg" variant="secondary" className="rounded-full font-black px-10 py-6 text-base">
+              <Link href="/tenant/register">{t("Daftar Sebagai Tenant Sekarang", "Register as Tenant Now")} <ArrowRight size={16} className="ml-2" /></Link>
+            </Button>
+          )}
         </div>
       </section>
+
     </div>
   );
 }
