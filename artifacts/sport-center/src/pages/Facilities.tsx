@@ -1,6 +1,6 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef } from "react";
 import { Link } from "wouter";
-import { useListFacilities, useCreateMembership } from "@workspace/api-client-react";
+import { useListFacilities, useCreateMembership, useSubmitMembershipPaymentProof, useGetSettings } from "@workspace/api-client-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,11 +8,20 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Search, MapPin, Dumbbell, CheckCircle2, Star, Users, ArrowRight } from "lucide-react";
+import { Search, MapPin, Dumbbell, CheckCircle2, Star, Users, ArrowRight, Building2, QrCode, Upload, X, ImageIcon, Loader2 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { getFacilityImage } from "@/lib/utils";
 import { useLang } from "@/lib/i18n";
+
+async function uploadProofFile(file: File): Promise<string> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const res = await fetch("/api/storage/upload-proof", { method: "POST", body: formData });
+  if (!res.ok) { const e = await res.json(); throw new Error(e.error || "Upload gagal"); }
+  const { url } = await res.json();
+  return url;
+}
 
 const PRICE_PER_MONTH = 300000;
 const today = new Date().toISOString().split("T")[0];
@@ -27,20 +36,41 @@ function addMonths(dateStr: string, months: number): string {
   return date.toISOString().split("T")[0];
 }
 
+type DialogStep = "form" | "payment" | "upload" | "success";
+
+interface CreatedMem { id: number; name: string; endDate: string; totalPrice: number; months: number; }
+
 function MembershipDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { toast } = useToast();
   const { t } = useLang();
+  const [step, setStep] = useState<DialogStep>("form");
   const [months, setMonths] = useState(1);
   const [form, setForm] = useState({ name: "", email: "", phone: "", startDate: today, notes: "" });
-  const [success, setSuccess] = useState<{ name: string; endDate: string; totalPrice: number } | null>(null);
+  const [created, setCreated] = useState<CreatedMem | null>(null);
+  const [paymentMethod, setPaymentMethod] = useState<"transfer" | "qris" | null>(null);
+  const [proofFile, setProofFile] = useState<File | null>(null);
+  const [proofPreview, setProofPreview] = useState<string | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const { data: settings } = useGetSettings();
 
   const createMutation = useCreateMembership({
     mutation: {
       onSuccess: (data) => {
-        setSuccess({ name: data.name, endDate: data.endDate, totalPrice: data.totalPrice });
+        setCreated({ id: data.id, name: data.name, endDate: data.endDate, totalPrice: data.totalPrice, months: data.months });
+        setStep("payment");
       },
       onError: () => {
         toast({ title: t("Gagal mendaftar", "Registration failed"), description: t("Terjadi kesalahan. Silakan coba lagi.", "An error occurred. Please try again."), variant: "destructive" });
+      },
+    },
+  });
+
+  const proofMutation = useSubmitMembershipPaymentProof({
+    mutation: {
+      onSuccess: () => setStep("success"),
+      onError: () => {
+        toast({ title: t("Gagal mengirim bukti", "Failed to submit proof"), variant: "destructive" });
       },
     },
   });
@@ -54,51 +84,244 @@ function MembershipDialog({ open, onClose }: { open: boolean; onClose: () => voi
     createMutation.mutate({ data: { ...form, months } });
   }
 
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setProofFile(file);
+    const reader = new FileReader();
+    reader.onload = (ev) => setProofPreview(ev.target?.result as string);
+    reader.readAsDataURL(file);
+  }
+
+  async function handleSubmitProof() {
+    if (!proofFile || !paymentMethod || !created) return;
+    try {
+      setIsUploading(true);
+      const proofUrl = await uploadProofFile(proofFile);
+      proofMutation.mutate({ id: created.id, data: { paymentMethod, paymentProofUrl: proofUrl } });
+    } catch (err: any) {
+      toast({ title: "Upload gagal", description: err.message, variant: "destructive" });
+    } finally {
+      setIsUploading(false);
+    }
+  }
+
   function handleClose() {
-    setSuccess(null);
+    setStep("form");
+    setCreated(null);
+    setPaymentMethod(null);
+    setProofFile(null);
+    setProofPreview(null);
     setForm({ name: "", email: "", phone: "", startDate: today, notes: "" });
     setMonths(1);
     onClose();
   }
 
+  const stepLabels = [t("Formulir", "Form"), t("Metode Bayar", "Payment"), t("Upload Bukti", "Upload Proof")];
+  const stepIndex = step === "form" ? 0 : step === "payment" ? 1 : step === "upload" ? 2 : 3;
+
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto rounded-3xl p-0 border-0">
-        <DialogHeader className="p-6 pb-2 border-b bg-muted/30">
-          <DialogTitle className="flex items-center gap-2 text-xl font-black text-secondary dark:text-white">
-            <div className="w-8 h-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center">
+      <DialogContent className="max-w-md max-h-[92vh] overflow-y-auto rounded-3xl p-0 border-0">
+        <DialogHeader className="p-6 pb-3 border-b bg-muted/30 sticky top-0 z-10">
+          <DialogTitle className="flex items-center gap-2 text-lg font-black text-secondary dark:text-white">
+            <div className="w-8 h-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0">
               <Dumbbell size={18} />
             </div>
-            {t("Daftar Member Gym Bulanan", "Monthly Gym Membership Registration")}
+            {t("Daftar Member Gym Bulanan", "Monthly Gym Membership")}
           </DialogTitle>
+          {step !== "success" && (
+            <div className="flex items-center gap-1 mt-3">
+              {stepLabels.map((label, i) => (
+                <div key={i} className="flex items-center flex-1">
+                  <div className="flex flex-col items-center flex-1">
+                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold transition-colors ${stepIndex >= i ? "bg-primary text-white" : "bg-muted text-muted-foreground"}`}>
+                      {stepIndex > i ? <CheckCircle2 size={12} /> : i + 1}
+                    </div>
+                    <span className={`text-[10px] mt-0.5 text-center leading-tight ${stepIndex >= i ? "text-primary font-semibold" : "text-muted-foreground"}`}>{label}</span>
+                  </div>
+                  {i < stepLabels.length - 1 && <div className={`h-px flex-1 mb-4 mx-0.5 ${stepIndex > i ? "bg-primary" : "bg-border"}`} />}
+                </div>
+              ))}
+            </div>
+          )}
         </DialogHeader>
 
         <div className="p-6">
-          {success ? (
+          {/* STEP: SUCCESS */}
+          {step === "success" && created && (
             <div className="text-center py-4 animate-in fade-in zoom-in duration-500">
-              <div className="w-20 h-20 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-6 shadow-inner">
+              <div className="w-20 h-20 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-5 shadow-inner">
                 <CheckCircle2 className="text-green-600 w-10 h-10" />
               </div>
-              <h3 className="text-2xl font-black mb-2 text-secondary dark:text-white">{t("Pendaftaran Berhasil!", "Registration Successful!")}</h3>
-              <p className="text-muted-foreground font-medium mb-6">
-                {t("Selamat", "Congratulations")}, <span className="font-bold text-foreground">{success.name}</span>!<br />
-                {t("Membership gym Anda aktif hingga", "Your gym membership is active until")} <span className="font-bold text-foreground">{success.endDate}</span>.
+              <h3 className="text-2xl font-black mb-2 text-secondary dark:text-white">{t("Bukti Diterima!", "Proof Submitted!")}</h3>
+              <p className="text-muted-foreground font-medium mb-5">
+                {t("Selamat", "Hello")}, <span className="font-bold text-foreground">{created.name}</span>!<br />
+                {t("Pembayaran sedang diverifikasi admin. Membership aktif setelah konfirmasi.", "Your payment is being verified. Membership activates after confirmation.")}
               </p>
-              
-              <div className="bg-[#F8FAFC] dark:bg-slate-900 border border-border rounded-2xl p-5 mb-8 flex flex-col items-center justify-center shadow-sm">
-                <span className="text-sm font-bold text-muted-foreground uppercase tracking-widest mb-1">{t("Total Pembayaran", "Total Payment")}</span>
-                <span className="font-black text-primary text-3xl">{formatCurrency(success.totalPrice)}</span>
+              <div className="bg-[#F8FAFC] dark:bg-slate-900 border border-border rounded-2xl p-5 mb-5 space-y-2 text-sm text-left">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">{t("Total Pembayaran", "Total Payment")}</span>
+                  <span className="font-black text-primary text-base">{formatCurrency(created.totalPrice)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">{t("Durasi", "Duration")}</span>
+                  <span className="font-medium">{created.months} {t("bulan", "months")}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">{t("Berlaku hingga", "Valid until")}</span>
+                  <span className="font-medium">{created.endDate}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">{t("Metode", "Method")}</span>
+                  <span className="font-medium">{paymentMethod === "qris" ? "QRIS" : "Transfer Bank"}</span>
+                </div>
+                <div className="flex justify-between pt-1 border-t">
+                  <span className="text-muted-foreground">Status</span>
+                  <Badge className="bg-yellow-100 text-yellow-700 border-yellow-200 text-xs">{t("Menunggu Konfirmasi", "Awaiting Confirmation")}</Badge>
+                </div>
               </div>
-              
-              <p className="text-sm font-medium text-muted-foreground mb-6 bg-primary/5 p-4 rounded-xl text-left flex gap-3 items-start border border-primary/10">
-                <span className="w-5 h-5 rounded-full bg-primary/20 text-primary flex items-center justify-center text-xs font-bold shrink-0 mt-0.5">!</span>
-                {t("Tunjukkan konfirmasi ini kepada resepsionis saat kunjungan pertama Anda untuk mengaktifkan kartu akses.", "Show this confirmation to the receptionist on your first visit to activate your access card.")}
-              </p>
               <Button onClick={handleClose} size="lg" className="w-full rounded-full font-bold h-12 shadow-lg shadow-primary/20">
                 {t("Tutup & Kembali", "Close & Back")}
               </Button>
             </div>
-          ) : (
+          )}
+
+          {/* STEP: UPLOAD PROOF */}
+          {step === "upload" && created && paymentMethod && (
+            <div className="space-y-5">
+              <div className="bg-[#F8FAFC] dark:bg-slate-900 border border-border rounded-2xl p-4 space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">{t("Total Pembayaran", "Total")}</span>
+                  <span className="font-black text-primary">{formatCurrency(created.totalPrice)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">{t("Metode", "Method")}</span>
+                  <span className="font-medium">{paymentMethod === "qris" ? "QRIS" : "Transfer Bank"}</span>
+                </div>
+              </div>
+
+              <div>
+                <Label className="mb-2 block font-bold">{t("Foto Bukti Pembayaran", "Payment Proof Photo")} <span className="text-destructive">*</span></Label>
+                {proofPreview ? (
+                  <div className="relative">
+                    <img src={proofPreview} alt="Bukti" className="w-full max-h-56 object-contain rounded-2xl border border-border" />
+                    <button onClick={() => { setProofFile(null); setProofPreview(null); if (fileInputRef.current) fileInputRef.current.value = ""; }}
+                      className="absolute top-2 right-2 w-7 h-7 rounded-full bg-destructive text-white flex items-center justify-center">
+                      <X size={14} />
+                    </button>
+                  </div>
+                ) : (
+                  <button type="button" onClick={() => fileInputRef.current?.click()}
+                    className="w-full h-36 rounded-2xl border-2 border-dashed border-border flex flex-col items-center justify-center gap-2 text-muted-foreground hover:border-primary/50 hover:text-primary transition-colors">
+                    <ImageIcon size={28} className="opacity-50" />
+                    <span className="text-sm font-medium">{t("Klik untuk pilih foto", "Click to select photo")}</span>
+                    <span className="text-xs opacity-60">JPG, PNG, WEBP — maks 10MB</span>
+                  </button>
+                )}
+                <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
+              </div>
+
+              <div className="flex gap-3">
+                <Button variant="outline" className="flex-1 rounded-full" onClick={() => setStep("payment")} disabled={isUploading || proofMutation.isPending}>
+                  {t("Kembali", "Back")}
+                </Button>
+                <Button className="flex-1 rounded-full font-bold" onClick={handleSubmitProof} disabled={!proofFile || isUploading || proofMutation.isPending}>
+                  {isUploading || proofMutation.isPending
+                    ? <><Loader2 size={15} className="mr-2 animate-spin" />{t("Mengirim...", "Sending...")}</>
+                    : <><Upload size={15} className="mr-2" />{t("Kirim Bukti", "Submit Proof")}</>}
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* STEP: PAYMENT METHOD */}
+          {step === "payment" && created && (
+            <div className="space-y-5">
+              <div className="rounded-2xl bg-primary/5 border border-primary/20 p-4 space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">{t("Nama", "Name")}</span>
+                  <span className="font-semibold">{created.name}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">{t("Durasi", "Duration")}</span>
+                  <span>{created.months} {t("bulan", "months")}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">{t("Berlaku hingga", "Valid until")}</span>
+                  <span>{created.endDate}</span>
+                </div>
+                <div className="border-t border-primary/20 pt-2 flex justify-between font-bold">
+                  <span>{t("Total Pembayaran", "Total Payment")}</span>
+                  <span className="text-primary text-base">{formatCurrency(created.totalPrice)}</span>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <Label className="font-bold">{t("Pilih Metode Pembayaran", "Choose Payment Method")}</Label>
+                <button type="button" onClick={() => setPaymentMethod("transfer")}
+                  className={`w-full flex items-start gap-3 p-4 rounded-2xl border-2 transition-colors text-left ${paymentMethod === "transfer" ? "border-primary bg-primary/5" : "border-border hover:border-primary/40"}`}>
+                  <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center text-blue-600 shrink-0">
+                    <Building2 size={20} />
+                  </div>
+                  <div className="flex-1">
+                    <div className="font-bold text-sm">{t("Transfer Bank", "Bank Transfer")}</div>
+                    <div className="text-xs text-muted-foreground mt-0.5">
+                      {settings?.bankName ? `${settings.bankName} · ${settings.bankAccount} · a.n. ${settings.bankAccountName}` : t("Transfer ke rekening kami", "Transfer to our bank account")}
+                    </div>
+                  </div>
+                  <div className={`w-5 h-5 rounded-full border-2 mt-0.5 shrink-0 flex items-center justify-center ${paymentMethod === "transfer" ? "border-primary bg-primary" : "border-border"}`}>
+                    {paymentMethod === "transfer" && <div className="w-2 h-2 rounded-full bg-white" />}
+                  </div>
+                </button>
+
+                <button type="button" onClick={() => setPaymentMethod("qris")}
+                  className={`w-full flex items-start gap-3 p-4 rounded-2xl border-2 transition-colors text-left ${paymentMethod === "qris" ? "border-primary bg-primary/5" : "border-border hover:border-primary/40"}`}>
+                  <div className="w-10 h-10 rounded-xl bg-orange-100 flex items-center justify-center text-primary shrink-0">
+                    <QrCode size={20} />
+                  </div>
+                  <div className="flex-1">
+                    <div className="font-bold text-sm">QRIS</div>
+                    <div className="text-xs text-muted-foreground mt-0.5">{t("Scan QRIS dengan aplikasi mobile banking atau e-wallet", "Scan QRIS with your mobile banking or e-wallet")}</div>
+                  </div>
+                  <div className={`w-5 h-5 rounded-full border-2 mt-0.5 shrink-0 flex items-center justify-center ${paymentMethod === "qris" ? "border-primary bg-primary" : "border-border"}`}>
+                    {paymentMethod === "qris" && <div className="w-2 h-2 rounded-full bg-white" />}
+                  </div>
+                </button>
+              </div>
+
+              {paymentMethod === "transfer" && settings && (
+                <div className="rounded-2xl bg-blue-50 border border-blue-200 p-4 space-y-2 text-sm">
+                  <div className="font-semibold text-blue-800 mb-2">{t("Instruksi Transfer", "Transfer Instructions")}</div>
+                  <div className="flex justify-between"><span className="text-blue-600">{t("Bank", "Bank")}</span><span className="font-bold">{settings.bankName || "-"}</span></div>
+                  <div className="flex justify-between"><span className="text-blue-600">{t("No. Rekening", "Account No.")}</span><span className="font-bold font-mono">{settings.bankAccount || "-"}</span></div>
+                  <div className="flex justify-between"><span className="text-blue-600">{t("Atas Nama", "Name")}</span><span className="font-bold">{settings.bankAccountName || "-"}</span></div>
+                  <div className="flex justify-between border-t border-blue-200 pt-2"><span className="text-blue-600">{t("Jumlah", "Amount")}</span><span className="font-black text-primary">{formatCurrency(created.totalPrice)}</span></div>
+                </div>
+              )}
+
+              {paymentMethod === "qris" && settings?.qrisImageUrl && (
+                <div className="rounded-2xl bg-orange-50 border border-orange-200 p-4 flex flex-col items-center gap-3">
+                  <div className="text-sm font-semibold text-orange-800">{t("Scan QRIS di bawah ini", "Scan the QRIS below")}</div>
+                  <img src={settings.qrisImageUrl} alt="QRIS" className="w-44 h-44 object-contain rounded-xl border border-orange-200" />
+                  <div className="text-sm font-black text-primary">{formatCurrency(created.totalPrice)}</div>
+                </div>
+              )}
+
+              {paymentMethod === "qris" && !settings?.qrisImageUrl && (
+                <div className="rounded-2xl bg-orange-50 border border-orange-200 p-3 text-center text-sm text-orange-700">
+                  {t("QRIS belum tersedia. Gunakan transfer bank.", "QRIS not available. Please use bank transfer.")}
+                </div>
+              )}
+
+              <Button className="w-full h-12 rounded-full font-bold shadow-lg shadow-primary/20" disabled={!paymentMethod} onClick={() => setStep("upload")}>
+                {t("Lanjut Upload Bukti", "Continue to Upload Proof")} <ArrowRight size={15} className="ml-2" />
+              </Button>
+            </div>
+          )}
+
+          {/* STEP: FORM */}
+          {step === "form" && (
             <form onSubmit={handleSubmit} className="space-y-5">
               <div className="space-y-1.5">
                 <Label htmlFor="m-name" className="font-bold text-foreground/80">{t("Nama Lengkap", "Full Name")} <span className="text-destructive">*</span></Label>
@@ -123,25 +346,20 @@ function MembershipDialog({ open, onClose }: { open: boolean; onClose: () => voi
                 <div className="grid grid-cols-5 gap-2">
                   {[1, 2, 3, 6, 12].map((m) => (
                     <button key={m} type="button" onClick={() => setMonths(m)}
-                      className={`h-12 rounded-xl text-sm font-bold border-2 transition-all ${
-                        months === m 
-                          ? "bg-primary/10 text-primary border-primary shadow-sm" 
-                          : "bg-[#F8FAFC] dark:bg-slate-900 border-border text-foreground/70 hover:border-primary/40 hover:bg-white"
-                      }`}>
+                      className={`h-12 rounded-xl text-sm font-bold border-2 transition-all ${months === m ? "bg-primary/10 text-primary border-primary shadow-sm" : "bg-[#F8FAFC] dark:bg-slate-900 border-border text-foreground/70 hover:border-primary/40"}`}>
                       {m}<span className="block text-[10px] uppercase font-semibold opacity-70">{t("Bulan", "Month")}</span>
                     </button>
                   ))}
                 </div>
               </div>
-              
-              <div className="rounded-2xl bg-[#F8FAFC] dark:bg-slate-900 border border-border p-5 space-y-3 mt-6">
+              <div className="rounded-2xl bg-[#F8FAFC] dark:bg-slate-900 border border-border p-5 space-y-3">
                 <div className="flex justify-between items-center text-sm font-medium">
                   <span className="text-muted-foreground">{t("Harga Per Bulan", "Price Per Month")}</span>
-                  <span className="text-foreground">{formatCurrency(PRICE_PER_MONTH)}</span>
+                  <span>{formatCurrency(PRICE_PER_MONTH)}</span>
                 </div>
                 <div className="flex justify-between items-center text-sm font-medium">
                   <span className="text-muted-foreground">{t("Durasi Pilihan", "Selected Duration")}</span>
-                  <span className="text-foreground">{months} {t("Bulan", "Months")}</span>
+                  <span>{months} {t("Bulan", "Months")}</span>
                 </div>
                 <div className="h-px bg-border my-1" />
                 <div className="flex justify-between items-end">
@@ -149,9 +367,10 @@ function MembershipDialog({ open, onClose }: { open: boolean; onClose: () => voi
                   <span className="text-2xl font-black text-primary">{formatCurrency(PRICE_PER_MONTH * months)}</span>
                 </div>
               </div>
-              
               <Button type="submit" size="lg" className="w-full h-14 rounded-full font-bold shadow-lg shadow-primary/20 text-base" disabled={createMutation.isPending}>
-                {createMutation.isPending ? t("Memproses Data...", "Processing Data...") : t("Konfirmasi & Lanjut Bayar", "Confirm & Continue to Payment")}
+                {createMutation.isPending
+                  ? <><Loader2 size={16} className="mr-2 animate-spin" />{t("Memproses...", "Processing...")}</>
+                  : <>{t("Lanjut ke Pembayaran", "Continue to Payment")} <ArrowRight size={16} className="ml-2" /></>}
               </Button>
             </form>
           )}
