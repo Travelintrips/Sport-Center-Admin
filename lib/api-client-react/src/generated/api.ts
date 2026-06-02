@@ -55,6 +55,7 @@ import type {
   ListPaymentsParams,
   ListPromosParams,
   LoginInput,
+  MembershipPaymentProofInput,
   MyBookingItem,
   Payment,
   PaymentInput,
@@ -2968,6 +2969,78 @@ export const useCreateMembership = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getCreateMembershipMutationOptions(options));
+    }
+
+export const getSubmitMembershipPaymentProofUrl = (id: number,) => {
+
+
+
+
+  return `/api/memberships/${id}/payment-proof`
+}
+
+/**
+ * @summary Submit payment proof for a membership
+ */
+export const submitMembershipPaymentProof = async (id: number,
+    membershipPaymentProofInput: MembershipPaymentProofInput, options?: RequestInit): Promise<GymMembership> => {
+
+  return customFetch<GymMembership>(getSubmitMembershipPaymentProofUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      membershipPaymentProofInput,)
+  }
+);}
+
+
+
+
+export const getSubmitMembershipPaymentProofMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof submitMembershipPaymentProof>>, TError,{id: number;data: BodyType<MembershipPaymentProofInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof submitMembershipPaymentProof>>, TError,{id: number;data: BodyType<MembershipPaymentProofInput>}, TContext> => {
+
+const mutationKey = ['submitMembershipPaymentProof'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof submitMembershipPaymentProof>>, {id: number;data: BodyType<MembershipPaymentProofInput>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  submitMembershipPaymentProof(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SubmitMembershipPaymentProofMutationResult = NonNullable<Awaited<ReturnType<typeof submitMembershipPaymentProof>>>
+    export type SubmitMembershipPaymentProofMutationBody = BodyType<MembershipPaymentProofInput>
+    export type SubmitMembershipPaymentProofMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Submit payment proof for a membership
+ */
+export const useSubmitMembershipPaymentProof = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof submitMembershipPaymentProof>>, TError,{id: number;data: BodyType<MembershipPaymentProofInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof submitMembershipPaymentProof>>,
+        TError,
+        {id: number;data: BodyType<MembershipPaymentProofInput>},
+        TContext
+      > => {
+      return useMutation(getSubmitMembershipPaymentProofMutationOptions(options));
     }
 
 export const getGetMembershipUrl = (id: number,) => {

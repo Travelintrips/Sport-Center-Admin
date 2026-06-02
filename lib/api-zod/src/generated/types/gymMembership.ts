@@ -19,5 +19,9 @@ export interface GymMembership {
   status: GymMembershipStatus;
   /** @nullable */
   notes?: string | null;
+  /** @nullable */
+  paymentMethod?: string | null;
+  /** @nullable */
+  paymentProofUrl?: string | null;
   createdAt?: string;
 }

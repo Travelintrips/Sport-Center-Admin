@@ -10,6 +10,8 @@ export type GymMembershipUpdateStatus = typeof GymMembershipUpdateStatus[keyof t
 
 
 export const GymMembershipUpdateStatus = {
+  pending_payment: 'pending_payment',
+  waiting_confirmation: 'waiting_confirmation',
   active: 'active',
   expired: 'expired',
   cancelled: 'cancelled',

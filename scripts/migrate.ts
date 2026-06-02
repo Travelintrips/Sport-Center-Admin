@@ -218,6 +218,7 @@ ON CONFLICT (key) DO NOTHING;
 -- ============================================================
 -- 12. tenant_bookings period-based payment fields
 -- ============================================================
+
 ALTER TABLE sport_center.tenant_bookings
   ADD COLUMN IF NOT EXISTS payment_period_type text NOT NULL DEFAULT 'monthly',
   ADD COLUMN IF NOT EXISTS period_start_month integer,
@@ -233,6 +234,20 @@ ALTER TABLE sport_center.tenant_bookings
 ALTER TABLE sport_center.tenant_bookings
   ALTER COLUMN start_date DROP NOT NULL,
   ALTER COLUMN end_date DROP NOT NULL;
+
+-- ============================================================
+-- 13. gym_memberships: payment flow columns + new enum values
+-- ============================================================
+DO $$ BEGIN
+  ALTER TYPE sport_center.membership_status ADD VALUE IF NOT EXISTS 'pending_payment';
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN
+  ALTER TYPE sport_center.membership_status ADD VALUE IF NOT EXISTS 'waiting_confirmation';
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+ALTER TABLE sport_center.gym_memberships
+  ADD COLUMN IF NOT EXISTS payment_method text,
+  ADD COLUMN IF NOT EXISTS payment_proof_url text;
 `;
 
 async function main() {

@@ -788,6 +788,31 @@ paths:
               schema:
                 $ref: "#/components/schemas/GymMembership"
 
+  /memberships/{id}/payment-proof:
+    post:
+      operationId: submitMembershipPaymentProof
+      tags: [memberships]
+      summary: Submit payment proof for a membership
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MembershipPaymentProofInput"
+      responses:
+        "200":
+          description: Payment proof submitted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GymMembership"
+
   /memberships/{id}:
     get:
       operationId: getMembership
@@ -2254,8 +2279,12 @@ components:
           type: number
         status:
           type: string
-          enum: [active, expired, cancelled]
+          enum: [pending_payment, waiting_confirmation, active, expired, cancelled]
         notes:
+          type: ["string", "null"]
+        paymentMethod:
+          type: ["string", "null"]
+        paymentProofUrl:
           type: ["string", "null"]
         createdAt:
           type: string
@@ -2283,8 +2312,18 @@ components:
       properties:
         status:
           type: string
-          enum: [active, expired, cancelled]
+          enum: [pending_payment, waiting_confirmation, active, expired, cancelled]
         notes:
+          type: string
+
+    MembershipPaymentProofInput:
+      type: object
+      required: [paymentMethod, paymentProofUrl]
+      properties:
+        paymentMethod:
+          type: string
+          enum: [transfer, qris]
+        paymentProofUrl:
           type: string
 
     UploadUrlRequest:

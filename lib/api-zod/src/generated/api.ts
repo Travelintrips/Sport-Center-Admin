@@ -822,8 +822,10 @@ export const ListMembershipsResponseItem = zod.object({
   "endDate": zod.string(),
   "months": zod.number(),
   "totalPrice": zod.number(),
-  "status": zod.enum(['active', 'expired', 'cancelled']),
+  "status": zod.enum(['pending_payment', 'waiting_confirmation', 'active', 'expired', 'cancelled']),
   "notes": zod.string().nullish(),
+  "paymentMethod": zod.string().nullish(),
+  "paymentProofUrl": zod.string().nullish(),
   "createdAt": zod.string().optional()
 })
 export const ListMembershipsResponse = zod.array(ListMembershipsResponseItem)
@@ -846,6 +848,35 @@ export const CreateMembershipBody = zod.object({
 
 
 /**
+ * @summary Submit payment proof for a membership
+ */
+export const SubmitMembershipPaymentProofParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const SubmitMembershipPaymentProofBody = zod.object({
+  "paymentMethod": zod.enum(['transfer', 'qris']),
+  "paymentProofUrl": zod.string()
+})
+
+export const SubmitMembershipPaymentProofResponse = zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "email": zod.string(),
+  "phone": zod.string(),
+  "startDate": zod.string(),
+  "endDate": zod.string(),
+  "months": zod.number(),
+  "totalPrice": zod.number(),
+  "status": zod.enum(['pending_payment', 'waiting_confirmation', 'active', 'expired', 'cancelled']),
+  "notes": zod.string().nullish(),
+  "paymentMethod": zod.string().nullish(),
+  "paymentProofUrl": zod.string().nullish(),
+  "createdAt": zod.string().optional()
+})
+
+
+/**
  * @summary Get membership detail
  */
 export const GetMembershipParams = zod.object({
@@ -861,8 +892,10 @@ export const GetMembershipResponse = zod.object({
   "endDate": zod.string(),
   "months": zod.number(),
   "totalPrice": zod.number(),
-  "status": zod.enum(['active', 'expired', 'cancelled']),
+  "status": zod.enum(['pending_payment', 'waiting_confirmation', 'active', 'expired', 'cancelled']),
   "notes": zod.string().nullish(),
+  "paymentMethod": zod.string().nullish(),
+  "paymentProofUrl": zod.string().nullish(),
   "createdAt": zod.string().optional()
 })
 
@@ -875,7 +908,7 @@ export const UpdateMembershipParams = zod.object({
 })
 
 export const UpdateMembershipBody = zod.object({
-  "status": zod.enum(['active', 'expired', 'cancelled']).optional(),
+  "status": zod.enum(['pending_payment', 'waiting_confirmation', 'active', 'expired', 'cancelled']).optional(),
   "notes": zod.string().optional()
 })
 
@@ -888,8 +921,10 @@ export const UpdateMembershipResponse = zod.object({
   "endDate": zod.string(),
   "months": zod.number(),
   "totalPrice": zod.number(),
-  "status": zod.enum(['active', 'expired', 'cancelled']),
+  "status": zod.enum(['pending_payment', 'waiting_confirmation', 'active', 'expired', 'cancelled']),
   "notes": zod.string().nullish(),
+  "paymentMethod": zod.string().nullish(),
+  "paymentProofUrl": zod.string().nullish(),
   "createdAt": zod.string().optional()
 })
 

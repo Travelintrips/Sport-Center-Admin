@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { Users, Search, Trash2, CheckCircle, XCircle, Clock, Dumbbell } from "lucide-react";
+import { Users, Search, Trash2, CheckCircle, Dumbbell, Clock, XCircle, ImageIcon, ExternalLink } from "lucide-react";
 
 function formatCurrency(n: number) {
   return new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(n);
@@ -19,7 +19,10 @@ function formatCurrency(n: number) {
 function StatusBadge({ status }: { status: string }) {
   if (status === "active") return <Badge className="bg-green-100 text-green-700 border-green-200">Aktif</Badge>;
   if (status === "expired") return <Badge className="bg-gray-100 text-gray-600 border-gray-200">Kadaluarsa</Badge>;
-  return <Badge className="bg-red-100 text-red-700 border-red-200">Dibatalkan</Badge>;
+  if (status === "cancelled") return <Badge className="bg-red-100 text-red-700 border-red-200">Dibatalkan</Badge>;
+  if (status === "waiting_confirmation") return <Badge className="bg-yellow-100 text-yellow-700 border-yellow-200">Menunggu Konfirmasi</Badge>;
+  if (status === "pending_payment") return <Badge className="bg-blue-100 text-blue-700 border-blue-200">Menunggu Bayar</Badge>;
+  return <Badge variant="outline">{status}</Badge>;
 }
 
 export default function AdminMemberships() {
@@ -61,7 +64,8 @@ export default function AdminMemberships() {
   });
 
   const totalActive = (memberships || []).filter((m) => m.status === "active").length;
-  const totalRevenue = (memberships || []).reduce((s, m) => s + m.totalPrice, 0);
+  const totalPending = (memberships || []).filter((m) => m.status === "waiting_confirmation" || m.status === "pending_payment").length;
+  const totalRevenue = (memberships || []).filter((m) => m.status === "active" || m.status === "expired").reduce((s, m) => s + m.totalPrice, 0);
 
   function handleUpdateStatus(id: number, status: string) {
     updateMutation.mutate({ id, data: { status: status as any } });
@@ -93,19 +97,19 @@ export default function AdminMemberships() {
         </Card>
         <Card>
           <CardContent className="p-5 flex items-center gap-4">
-            <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
-              <Users size={20} />
+            <div className="w-10 h-10 rounded-lg bg-yellow-100 flex items-center justify-center text-yellow-600">
+              <Clock size={20} />
             </div>
             <div>
-              <div className="text-2xl font-bold">{(memberships || []).length}</div>
-              <div className="text-sm text-muted-foreground">Total Member</div>
+              <div className="text-2xl font-bold">{totalPending}</div>
+              <div className="text-sm text-muted-foreground">Menunggu Konfirmasi</div>
             </div>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-5 flex items-center gap-4">
-            <div className="w-10 h-10 rounded-lg bg-blue-100 flex items-center justify-center text-blue-600">
-              <Dumbbell size={20} />
+            <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
+              <Users size={20} />
             </div>
             <div>
               <div className="text-lg font-bold">{formatCurrency(totalRevenue)}</div>
@@ -126,11 +130,13 @@ export default function AdminMemberships() {
           />
         </div>
         <Select value={filterStatus} onValueChange={setFilterStatus}>
-          <SelectTrigger className="w-full sm:w-44">
+          <SelectTrigger className="w-full sm:w-52">
             <SelectValue placeholder="Filter status" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Semua Status</SelectItem>
+            <SelectItem value="waiting_confirmation">Menunggu Konfirmasi</SelectItem>
+            <SelectItem value="pending_payment">Menunggu Bayar</SelectItem>
             <SelectItem value="active">Aktif</SelectItem>
             <SelectItem value="expired">Kadaluarsa</SelectItem>
             <SelectItem value="cancelled">Dibatalkan</SelectItem>
@@ -182,6 +188,9 @@ export default function AdminMemberships() {
                   </td>
                   <td className="px-4 py-4">
                     <StatusBadge status={m.status} />
+                    {(m as any).paymentMethod && (
+                      <div className="text-xs text-muted-foreground mt-1">{(m as any).paymentMethod === "qris" ? "QRIS" : "Transfer"}</div>
+                    )}
                   </td>
                   <td className="px-4 py-4">
                     <div className="flex items-center justify-end gap-1">
@@ -211,7 +220,7 @@ export default function AdminMemberships() {
             <DialogHeader>
               <DialogTitle>Detail Member</DialogTitle>
             </DialogHeader>
-            <div className="space-y-4">
+            <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1">
               <div className="grid grid-cols-2 gap-3 text-sm">
                 <div className="text-muted-foreground">Nama</div>
                 <div className="font-medium">{viewMember.name}</div>
@@ -229,6 +238,12 @@ export default function AdminMemberships() {
                 <div className="font-bold text-primary">{formatCurrency(viewMember.totalPrice)}</div>
                 <div className="text-muted-foreground">Status</div>
                 <div><StatusBadge status={viewMember.status} /></div>
+                {viewMember.paymentMethod && (
+                  <>
+                    <div className="text-muted-foreground">Metode Bayar</div>
+                    <div className="font-medium">{viewMember.paymentMethod === "qris" ? "QRIS" : "Transfer Bank"}</div>
+                  </>
+                )}
                 {viewMember.notes && (
                   <>
                     <div className="text-muted-foreground">Catatan</div>
@@ -236,18 +251,50 @@ export default function AdminMemberships() {
                   </>
                 )}
               </div>
+
+              {viewMember.paymentProofUrl && (
+                <div className="space-y-2">
+                  <div className="text-sm font-medium flex items-center gap-2">
+                    <ImageIcon size={14} />
+                    Bukti Pembayaran
+                  </div>
+                  <img
+                    src={viewMember.paymentProofUrl}
+                    alt="Bukti Pembayaran"
+                    className="w-full max-h-64 object-contain rounded-xl border border-border cursor-pointer"
+                    onClick={() => window.open(viewMember.paymentProofUrl, "_blank")}
+                  />
+                  <Button variant="outline" size="sm" className="w-full gap-2" onClick={() => window.open(viewMember.paymentProofUrl, "_blank")}>
+                    <ExternalLink size={14} />
+                    Buka Gambar
+                  </Button>
+                </div>
+              )}
+
+              {!viewMember.paymentProofUrl && viewMember.status === "pending_payment" && (
+                <div className="rounded-xl bg-blue-50 border border-blue-200 p-3 text-sm text-blue-700">
+                  Customer belum melakukan pembayaran.
+                </div>
+              )}
+
               <div className="border-t pt-4">
                 <p className="text-sm text-muted-foreground mb-3">Ubah Status</p>
                 <div className="flex gap-2 flex-wrap">
-                  {["active", "expired", "cancelled"].map((s) => (
+                  {[
+                    { value: "active", label: "Aktif" },
+                    { value: "waiting_confirmation", label: "Menunggu Konfirmasi" },
+                    { value: "pending_payment", label: "Menunggu Bayar" },
+                    { value: "expired", label: "Kadaluarsa" },
+                    { value: "cancelled", label: "Dibatalkan" },
+                  ].map((s) => (
                     <Button
-                      key={s}
+                      key={s.value}
                       size="sm"
-                      variant={viewMember.status === s ? "default" : "outline"}
-                      disabled={viewMember.status === s || updateMutation.isPending}
-                      onClick={() => handleUpdateStatus(viewMember.id, s)}
+                      variant={viewMember.status === s.value ? "default" : "outline"}
+                      disabled={viewMember.status === s.value || updateMutation.isPending}
+                      onClick={() => handleUpdateStatus(viewMember.id, s.value)}
                     >
-                      {s === "active" ? "Aktif" : s === "expired" ? "Kadaluarsa" : "Dibatalkan"}
+                      {s.label}
                     </Button>
                   ))}
                 </div>

@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useCreateMembership } from "@workspace/api-client-react";
+import { useState, useRef } from "react";
+import { useCreateMembership, useSubmitMembershipPaymentProof, useGetSettings } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -8,7 +8,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { useLang } from "@/lib/i18n";
-import { CheckCircle2, Dumbbell, Calendar, Shield, Star, Users } from "lucide-react";
+import {
+  CheckCircle2, Dumbbell, Calendar, Shield, Star, Users,
+  ArrowRight, Building2, QrCode, Upload, X, ImageIcon, Loader2
+} from "lucide-react";
 
 const PRICE_PER_MONTH = 300000;
 
@@ -32,19 +35,48 @@ const BENEFITS = [
   { icon: Users, label: "Komunitas Aktif", labelEn: "Active Community", desc: "Bergabung dengan komunitas olahraga kami", descEn: "Join our sports community" },
 ];
 
+type Step = "form" | "payment" | "upload" | "success";
+
+interface CreatedMembership {
+  id: number;
+  name: string;
+  endDate: string;
+  totalPrice: number;
+  months: number;
+  startDate: string;
+}
+
+async function uploadProofFile(file: File): Promise<string> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const res = await fetch("/api/storage/upload-proof", { method: "POST", body: formData });
+  if (!res.ok) { const e = await res.json(); throw new Error(e.error || "Upload gagal"); }
+  const { url } = await res.json();
+  return url;
+}
+
 export default function Membership() {
   const { toast } = useToast();
   const { t } = useLang();
+  const [step, setStep] = useState<Step>("form");
   const [months, setMonths] = useState(1);
   const [form, setForm] = useState({ name: "", email: "", phone: "", startDate: today, notes: "" });
-  const [success, setSuccess] = useState<{ name: string; endDate: string; totalPrice: number } | null>(null);
+  const [created, setCreated] = useState<CreatedMembership | null>(null);
+  const [paymentMethod, setPaymentMethod] = useState<"transfer" | "qris" | null>(null);
+  const [proofFile, setProofFile] = useState<File | null>(null);
+  const [proofPreview, setProofPreview] = useState<string | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const { data: settings } = useGetSettings();
 
   const createMutation = useCreateMembership({
     mutation: {
       onSuccess: (data) => {
-        setSuccess({ name: data.name, endDate: data.endDate, totalPrice: data.totalPrice });
+        setCreated({ id: data.id, name: data.name, endDate: data.endDate, totalPrice: data.totalPrice, months: data.months, startDate: data.startDate });
         setForm({ name: "", email: "", phone: "", startDate: today, notes: "" });
         setMonths(1);
+        setStep("payment");
       },
       onError: () => {
         toast({ title: t("Gagal mendaftar", "Registration failed"), description: t("Terjadi kesalahan. Silakan coba lagi.", "An error occurred. Please try again."), variant: "destructive" });
@@ -52,7 +84,18 @@ export default function Membership() {
     },
   });
 
-  function handleSubmit(e: React.FormEvent) {
+  const proofMutation = useSubmitMembershipPaymentProof({
+    mutation: {
+      onSuccess: () => {
+        setStep("success");
+      },
+      onError: () => {
+        toast({ title: t("Gagal mengirim bukti", "Failed to submit proof"), description: t("Terjadi kesalahan. Silakan coba lagi.", "An error occurred. Please try again."), variant: "destructive" });
+      },
+    },
+  });
+
+  function handleSubmitForm(e: React.FormEvent) {
     e.preventDefault();
     if (!form.name || !form.email || !form.phone || !form.startDate) {
       toast({ title: t("Form tidak lengkap", "Incomplete form"), description: t("Harap isi semua field yang wajib.", "Please fill in all required fields."), variant: "destructive" });
@@ -61,35 +104,306 @@ export default function Membership() {
     createMutation.mutate({ data: { ...form, months } });
   }
 
-  if (success) {
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setProofFile(file);
+    const reader = new FileReader();
+    reader.onload = (ev) => setProofPreview(ev.target?.result as string);
+    reader.readAsDataURL(file);
+  }
+
+  function handleRemoveFile() {
+    setProofFile(null);
+    setProofPreview(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  async function handleSubmitProof() {
+    if (!proofFile) {
+      toast({ title: t("Wajib isi", "Required"), description: t("Pilih foto bukti pembayaran.", "Please select a payment proof photo."), variant: "destructive" });
+      return;
+    }
+    if (!paymentMethod || !created) return;
+    try {
+      setIsUploading(true);
+      const proofUrl = await uploadProofFile(proofFile);
+      proofMutation.mutate({ id: created.id, data: { paymentMethod, paymentProofUrl: proofUrl } });
+    } catch (err: any) {
+      toast({ title: "Upload gagal", description: err.message, variant: "destructive" });
+    } finally {
+      setIsUploading(false);
+    }
+  }
+
+  function handleReset() {
+    setStep("form");
+    setCreated(null);
+    setPaymentMethod(null);
+    setProofFile(null);
+    setProofPreview(null);
+    setMonths(1);
+  }
+
+  if (step === "success" && created) {
     return (
       <div className="container max-w-lg mx-auto px-4 py-20 text-center">
         <div className="w-20 h-20 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-6">
           <CheckCircle2 className="text-green-600 w-10 h-10" />
         </div>
-        <h1 className="text-2xl font-bold mb-2">{t("Pendaftaran Berhasil!", "Registration Successful!")}</h1>
+        <h1 className="text-2xl font-bold mb-2">{t("Bukti Diterima!", "Proof Submitted!")}</h1>
         <p className="text-muted-foreground mb-6">
-          {t("Selamat datang", "Welcome")}, <span className="font-semibold text-foreground">{success.name}</span>!<br />
-          {t("Member Gym Anda aktif hingga", "Your Gym membership is active until")} <span className="font-semibold text-foreground">{success.endDate}</span>.
+          {t("Selamat", "Hello")}, <span className="font-semibold text-foreground">{created.name}</span>!<br />
+          {t("Pembayaran Anda sedang diverifikasi oleh admin. Membership gym akan aktif setelah konfirmasi.", "Your payment is being verified by admin. Gym membership will be activated after confirmation.")}
         </p>
         <Card className="mb-6 text-left">
-          <CardContent className="p-5 flex items-center justify-between">
-            <div>
+          <CardContent className="p-5 space-y-3">
+            <div className="flex items-center justify-between">
               <div className="text-sm text-muted-foreground">{t("Total Pembayaran", "Total Payment")}</div>
-              <div className="text-2xl font-black text-primary">{formatCurrency(success.totalPrice)}</div>
+              <div className="text-xl font-black text-primary">{formatCurrency(created.totalPrice)}</div>
             </div>
-            <Badge className="bg-green-100 text-green-700 border-green-200">{t("Member Aktif", "Active Member")}</Badge>
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">{t("Durasi", "Duration")}</span>
+              <span>{created.months} {t("bulan", "months")}</span>
+            </div>
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">{t("Berlaku hingga", "Valid until")}</span>
+              <span className="font-medium">{created.endDate}</span>
+            </div>
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">{t("Metode", "Method")}</span>
+              <Badge variant="outline">{paymentMethod === "qris" ? "QRIS" : "Transfer Bank"}</Badge>
+            </div>
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">Status</span>
+              <Badge className="bg-yellow-100 text-yellow-700 border-yellow-200">{t("Menunggu Konfirmasi", "Awaiting Confirmation")}</Badge>
+            </div>
           </CardContent>
         </Card>
         <p className="text-sm text-muted-foreground mb-6">
-          {t("Silakan tunjukkan konfirmasi ini kepada petugas kami saat pertama kali datang.", "Please show this confirmation to our staff on your first visit.")}
+          {t("Admin akan mengkonfirmasi pembayaran Anda dalam 1x24 jam. Tunjukkan bukti ini jika dibutuhkan.", "Admin will confirm your payment within 24 hours. Show this confirmation if needed.")}
         </p>
-        <Button onClick={() => setSuccess(null)} variant="outline" className="mr-3">
+        <Button onClick={handleReset} variant="outline" className="mr-3">
           {t("Daftar Lagi", "Register Again")}
         </Button>
         <Button asChild>
           <a href="/">{t("Kembali ke Home", "Back to Home")}</a>
         </Button>
+      </div>
+    );
+  }
+
+  if (step === "upload" && created && paymentMethod) {
+    return (
+      <div className="container max-w-lg mx-auto px-4 py-16">
+        <StepIndicator step={3} />
+        <Card className="mt-6">
+          <CardHeader>
+            <CardTitle className="text-xl">{t("Upload Bukti Pembayaran", "Upload Payment Proof")}</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              {t("Upload foto/screenshot bukti transfer atau QRIS Anda", "Upload your transfer or QRIS payment proof photo")}
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            <div className="rounded-xl bg-muted/40 border border-border p-4 space-y-2 text-sm">
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">{t("Nama", "Name")}</span>
+                <span className="font-medium">{created.name}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">{t("Total Pembayaran", "Total Payment")}</span>
+                <span className="font-bold text-primary">{formatCurrency(created.totalPrice)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">{t("Metode", "Method")}</span>
+                <Badge variant="outline">{paymentMethod === "qris" ? "QRIS" : "Transfer Bank"}</Badge>
+              </div>
+            </div>
+
+            <div>
+              <Label className="mb-2 block">{t("Foto Bukti Pembayaran", "Payment Proof Photo")} <span className="text-destructive">*</span></Label>
+              {proofPreview ? (
+                <div className="relative">
+                  <img src={proofPreview} alt="Bukti" className="w-full max-h-64 object-contain rounded-xl border border-border" />
+                  <button
+                    onClick={handleRemoveFile}
+                    className="absolute top-2 right-2 w-7 h-7 rounded-full bg-destructive text-white flex items-center justify-center"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="w-full h-40 rounded-xl border-2 border-dashed border-border flex flex-col items-center justify-center gap-2 text-muted-foreground hover:border-primary/50 hover:text-primary transition-colors"
+                >
+                  <ImageIcon size={32} className="opacity-50" />
+                  <span className="text-sm">{t("Klik untuk pilih foto", "Click to select photo")}</span>
+                  <span className="text-xs opacity-60">{t("JPG, PNG, WEBP — maks 10MB", "JPG, PNG, WEBP — max 10MB")}</span>
+                </button>
+              )}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handleFileChange}
+              />
+            </div>
+
+            <div className="flex gap-3">
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={() => setStep("payment")}
+                disabled={isUploading || proofMutation.isPending}
+              >
+                {t("Kembali", "Back")}
+              </Button>
+              <Button
+                className="flex-1"
+                onClick={handleSubmitProof}
+                disabled={!proofFile || isUploading || proofMutation.isPending}
+              >
+                {isUploading || proofMutation.isPending ? (
+                  <><Loader2 size={16} className="mr-2 animate-spin" />{t("Mengirim...", "Sending...")}</>
+                ) : (
+                  <><Upload size={16} className="mr-2" />{t("Kirim Bukti", "Submit Proof")}</>
+                )}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  if (step === "payment" && created) {
+    return (
+      <div className="container max-w-lg mx-auto px-4 py-16">
+        <StepIndicator step={2} />
+        <Card className="mt-6">
+          <CardHeader>
+            <CardTitle className="text-xl">{t("Pilih Metode Pembayaran", "Choose Payment Method")}</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              {t("Pilih cara pembayaran dan ikuti instruksi di bawah ini", "Choose your payment method and follow the instructions below")}
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            <div className="rounded-xl bg-primary/5 border border-primary/20 p-4 space-y-2 text-sm">
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">{t("Nama", "Name")}</span>
+                <span className="font-medium">{created.name}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">{t("Durasi", "Duration")}</span>
+                <span>{created.months} {t("bulan", "months")}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">{t("Berlaku hingga", "Valid until")}</span>
+                <span>{created.endDate}</span>
+              </div>
+              <div className="border-t border-primary/20 pt-2 flex justify-between font-bold">
+                <span>{t("Total Pembayaran", "Total Payment")}</span>
+                <span className="text-primary text-base">{formatCurrency(created.totalPrice)}</span>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <Label>{t("Metode Pembayaran", "Payment Method")}</Label>
+              <button
+                type="button"
+                onClick={() => setPaymentMethod("transfer")}
+                className={`w-full flex items-start gap-4 p-4 rounded-xl border-2 transition-colors text-left ${paymentMethod === "transfer" ? "border-primary bg-primary/5" : "border-border hover:border-primary/40"}`}
+              >
+                <div className="w-10 h-10 rounded-lg bg-blue-100 flex items-center justify-center text-blue-600 shrink-0 mt-0.5">
+                  <Building2 size={20} />
+                </div>
+                <div className="flex-1">
+                  <div className="font-semibold">{t("Transfer Bank", "Bank Transfer")}</div>
+                  <div className="text-sm text-muted-foreground mt-0.5">
+                    {settings?.bankName ? (
+                      <span>
+                        {settings.bankName} · {settings.bankAccount} · a.n. {settings.bankAccountName}
+                      </span>
+                    ) : (
+                      t("Transfer ke rekening kami", "Transfer to our bank account")
+                    )}
+                  </div>
+                </div>
+                <div className={`w-5 h-5 rounded-full border-2 mt-0.5 shrink-0 flex items-center justify-center ${paymentMethod === "transfer" ? "border-primary bg-primary" : "border-border"}`}>
+                  {paymentMethod === "transfer" && <div className="w-2 h-2 rounded-full bg-white" />}
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setPaymentMethod("qris")}
+                className={`w-full flex items-start gap-4 p-4 rounded-xl border-2 transition-colors text-left ${paymentMethod === "qris" ? "border-primary bg-primary/5" : "border-border hover:border-primary/40"}`}
+              >
+                <div className="w-10 h-10 rounded-lg bg-orange-100 flex items-center justify-center text-primary shrink-0 mt-0.5">
+                  <QrCode size={20} />
+                </div>
+                <div className="flex-1">
+                  <div className="font-semibold">QRIS</div>
+                  <div className="text-sm text-muted-foreground mt-0.5">
+                    {t("Scan QRIS dengan aplikasi mobile banking atau e-wallet", "Scan QRIS with your mobile banking or e-wallet app")}
+                  </div>
+                </div>
+                <div className={`w-5 h-5 rounded-full border-2 mt-0.5 shrink-0 flex items-center justify-center ${paymentMethod === "qris" ? "border-primary bg-primary" : "border-border"}`}>
+                  {paymentMethod === "qris" && <div className="w-2 h-2 rounded-full bg-white" />}
+                </div>
+              </button>
+            </div>
+
+            {paymentMethod === "transfer" && settings && (
+              <div className="rounded-xl bg-blue-50 border border-blue-200 p-4 space-y-2">
+                <div className="text-sm font-semibold text-blue-800">{t("Instruksi Transfer", "Transfer Instructions")}</div>
+                <div className="space-y-1.5 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-blue-600">{t("Bank", "Bank")}</span>
+                    <span className="font-semibold">{settings.bankName || "-"}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-blue-600">{t("No. Rekening", "Account No.")}</span>
+                    <span className="font-semibold font-mono">{settings.bankAccount || "-"}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-blue-600">{t("Atas Nama", "Account Name")}</span>
+                    <span className="font-semibold">{settings.bankAccountName || "-"}</span>
+                  </div>
+                  <div className="flex justify-between border-t border-blue-200 pt-2">
+                    <span className="text-blue-600">{t("Jumlah Transfer", "Transfer Amount")}</span>
+                    <span className="font-bold text-primary">{formatCurrency(created.totalPrice)}</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {paymentMethod === "qris" && settings?.qrisImageUrl && (
+              <div className="rounded-xl bg-orange-50 border border-orange-200 p-4 flex flex-col items-center gap-3">
+                <div className="text-sm font-semibold text-orange-800">{t("Scan QRIS di bawah ini", "Scan the QRIS below")}</div>
+                <img src={settings.qrisImageUrl} alt="QRIS" className="w-48 h-48 object-contain rounded-lg border border-orange-200" />
+                <div className="text-sm text-orange-700 font-bold">{formatCurrency(created.totalPrice)}</div>
+              </div>
+            )}
+
+            {paymentMethod === "qris" && !settings?.qrisImageUrl && (
+              <div className="rounded-xl bg-orange-50 border border-orange-200 p-4 text-center text-sm text-orange-700">
+                {t("QRIS belum tersedia. Gunakan transfer bank atau hubungi kami.", "QRIS not available. Please use bank transfer or contact us.")}
+              </div>
+            )}
+
+            <Button
+              className="w-full h-12"
+              disabled={!paymentMethod}
+              onClick={() => setStep("upload")}
+            >
+              {t("Lanjut Upload Bukti", "Continue to Upload Proof")} <ArrowRight size={16} className="ml-2" />
+            </Button>
+          </CardContent>
+        </Card>
       </div>
     );
   }
@@ -131,72 +445,35 @@ export default function Membership() {
       <section className="py-16">
         <div className="container px-4 md:px-8">
           <div className="max-w-xl mx-auto">
-            <Card>
+            <StepIndicator step={1} />
+            <Card className="mt-6">
               <CardHeader>
                 <CardTitle className="text-xl">{t("Formulir Pendaftaran Member", "Member Registration Form")}</CardTitle>
               </CardHeader>
               <CardContent>
-                <form onSubmit={handleSubmit} className="space-y-5">
+                <form onSubmit={handleSubmitForm} className="space-y-5">
                   <div>
                     <Label htmlFor="name">{t("Nama Lengkap", "Full Name")} <span className="text-destructive">*</span></Label>
-                    <Input
-                      id="name"
-                      value={form.name}
-                      onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                      placeholder={t("Nama lengkap Anda", "Your full name")}
-                      required
-                      className="mt-1.5"
-                    />
+                    <Input id="name" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder={t("Nama lengkap Anda", "Your full name")} required className="mt-1.5" />
                   </div>
                   <div>
                     <Label htmlFor="email">{t("Email", "Email")} <span className="text-destructive">*</span></Label>
-                    <Input
-                      id="email"
-                      type="email"
-                      value={form.email}
-                      onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
-                      placeholder="email@contoh.com"
-                      required
-                      className="mt-1.5"
-                    />
+                    <Input id="email" type="email" value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} placeholder="email@contoh.com" required className="mt-1.5" />
                   </div>
                   <div>
                     <Label htmlFor="phone">{t("No. Telepon", "Phone No.")} <span className="text-destructive">*</span></Label>
-                    <Input
-                      id="phone"
-                      type="tel"
-                      value={form.phone}
-                      onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
-                      placeholder="08xxxxxxxxxx"
-                      required
-                      className="mt-1.5"
-                    />
+                    <Input id="phone" type="tel" value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))} placeholder="08xxxxxxxxxx" required className="mt-1.5" />
                   </div>
                   <div>
                     <Label htmlFor="startDate">{t("Tanggal Mulai", "Start Date")} <span className="text-destructive">*</span></Label>
-                    <Input
-                      id="startDate"
-                      type="date"
-                      value={form.startDate}
-                      min={today}
-                      onChange={(e) => setForm((f) => ({ ...f, startDate: e.target.value }))}
-                      required
-                      className="mt-1.5"
-                    />
+                    <Input id="startDate" type="date" value={form.startDate} min={today} onChange={(e) => setForm((f) => ({ ...f, startDate: e.target.value }))} required className="mt-1.5" />
                   </div>
                   <div>
                     <Label>{t("Durasi Membership", "Membership Duration")}</Label>
                     <div className="flex gap-2 mt-1.5 flex-wrap">
                       {[1, 2, 3, 6, 12].map((m) => (
-                        <button
-                          key={m}
-                          type="button"
-                          onClick={() => setMonths(m)}
-                          className={`px-4 py-2 rounded-lg text-sm font-medium border transition-colors ${
-                            months === m
-                              ? "bg-primary text-primary-foreground border-primary"
-                              : "bg-background border-border text-foreground hover:border-primary/50"
-                          }`}
+                        <button key={m} type="button" onClick={() => setMonths(m)}
+                          className={`px-4 py-2 rounded-lg text-sm font-medium border transition-colors ${months === m ? "bg-primary text-primary-foreground border-primary" : "bg-background border-border text-foreground hover:border-primary/50"}`}
                         >
                           {m} {t("Bulan", "Months")}
                         </button>
@@ -205,14 +482,7 @@ export default function Membership() {
                   </div>
                   <div>
                     <Label htmlFor="notes">{t("Catatan (opsional)", "Notes (optional)")}</Label>
-                    <Textarea
-                      id="notes"
-                      value={form.notes}
-                      onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
-                      placeholder={t("Catatan atau pertanyaan tambahan...", "Additional notes or questions...")}
-                      className="mt-1.5"
-                      rows={3}
-                    />
+                    <Textarea id="notes" value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} placeholder={t("Catatan atau pertanyaan tambahan...", "Additional notes or questions...")} className="mt-1.5" rows={3} />
                   </div>
 
                   <div className="rounded-xl bg-primary/5 border border-primary/20 p-4 space-y-2">
@@ -237,7 +507,11 @@ export default function Membership() {
                   </div>
 
                   <Button type="submit" className="w-full h-12 text-base" disabled={createMutation.isPending}>
-                    {createMutation.isPending ? t("Mendaftarkan...", "Registering...") : t("Daftar Sekarang", "Register Now")}
+                    {createMutation.isPending ? (
+                      <><Loader2 size={16} className="mr-2 animate-spin" />{t("Mendaftarkan...", "Registering...")}</>
+                    ) : (
+                      <>{t("Lanjut ke Pembayaran", "Continue to Payment")} <ArrowRight size={16} className="ml-2" /></>
+                    )}
                   </Button>
                 </form>
               </CardContent>
@@ -245,6 +519,31 @@ export default function Membership() {
           </div>
         </div>
       </section>
+    </div>
+  );
+}
+
+function StepIndicator({ step }: { step: 1 | 2 | 3 }) {
+  const steps = [
+    { n: 1, label: "Isi Formulir" },
+    { n: 2, label: "Metode Bayar" },
+    { n: 3, label: "Upload Bukti" },
+  ];
+  return (
+    <div className="flex items-center gap-0 max-w-sm mx-auto">
+      {steps.map((s, i) => (
+        <div key={s.n} className="flex items-center flex-1">
+          <div className="flex flex-col items-center flex-1">
+            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold transition-colors ${step >= s.n ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}>
+              {step > s.n ? <CheckCircle2 size={16} /> : s.n}
+            </div>
+            <span className={`text-xs mt-1 text-center ${step >= s.n ? "text-primary font-medium" : "text-muted-foreground"}`}>{s.label}</span>
+          </div>
+          {i < steps.length - 1 && (
+            <div className={`h-0.5 flex-1 mb-5 mx-1 ${step > s.n ? "bg-primary" : "bg-border"}`} />
+          )}
+        </div>
+      ))}
     </div>
   );
 }

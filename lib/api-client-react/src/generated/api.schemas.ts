@@ -628,6 +628,8 @@ export type GymMembershipStatus = typeof GymMembershipStatus[keyof typeof GymMem
 
 
 export const GymMembershipStatus = {
+  pending_payment: 'pending_payment',
+  waiting_confirmation: 'waiting_confirmation',
   active: 'active',
   expired: 'expired',
   cancelled: 'cancelled',
@@ -645,6 +647,10 @@ export interface GymMembership {
   status: GymMembershipStatus;
   /** @nullable */
   notes?: string | null;
+  /** @nullable */
+  paymentMethod?: string | null;
+  /** @nullable */
+  paymentProofUrl?: string | null;
   createdAt?: string;
 }
 
@@ -662,6 +668,8 @@ export type GymMembershipUpdateStatus = typeof GymMembershipUpdateStatus[keyof t
 
 
 export const GymMembershipUpdateStatus = {
+  pending_payment: 'pending_payment',
+  waiting_confirmation: 'waiting_confirmation',
   active: 'active',
   expired: 'expired',
   cancelled: 'cancelled',
@@ -670,6 +678,19 @@ export const GymMembershipUpdateStatus = {
 export interface GymMembershipUpdate {
   status?: GymMembershipUpdateStatus;
   notes?: string;
+}
+
+export type MembershipPaymentProofInputPaymentMethod = typeof MembershipPaymentProofInputPaymentMethod[keyof typeof MembershipPaymentProofInputPaymentMethod];
+
+
+export const MembershipPaymentProofInputPaymentMethod = {
+  transfer: 'transfer',
+  qris: 'qris',
+} as const;
+
+export interface MembershipPaymentProofInput {
+  paymentMethod: MembershipPaymentProofInputPaymentMethod;
+  paymentProofUrl: string;
 }
 
 export interface UploadUrlRequest {

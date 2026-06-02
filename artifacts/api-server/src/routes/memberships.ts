@@ -53,13 +53,42 @@ router.post("/memberships", async (req, res) => {
         months: monthsNum,
         totalPrice: String(totalPrice),
         notes,
-        status: "active",
+        status: "pending_payment",
       })
       .returning();
 
     res.status(201).json({ ...membership, totalPrice: Number(membership.totalPrice) });
   } catch (err) {
     req.log.error({ err }, "Create membership error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.post("/memberships/:id/payment-proof", async (req, res) => {
+  try {
+    const id = parseInt(String(req.params.id));
+    const { paymentMethod, paymentProofUrl } = req.body;
+
+    if (!paymentMethod || !paymentProofUrl) {
+      res.status(400).json({ error: "paymentMethod and paymentProofUrl are required" });
+      return;
+    }
+
+    const [existing] = await db.select().from(gymMembershipsTable).where(eq(gymMembershipsTable.id, id)).limit(1);
+    if (!existing) { res.status(404).json({ error: "Not found" }); return; }
+    if (existing.status !== "pending_payment") {
+      res.status(400).json({ error: "Membership is not in pending_payment status" });
+      return;
+    }
+
+    await db.update(gymMembershipsTable)
+      .set({ paymentMethod, paymentProofUrl, status: "waiting_confirmation" })
+      .where(eq(gymMembershipsTable.id, id));
+
+    const [membership] = await db.select().from(gymMembershipsTable).where(eq(gymMembershipsTable.id, id)).limit(1);
+    res.json({ ...membership, totalPrice: Number(membership.totalPrice) });
+  } catch (err) {
+    req.log.error({ err }, "Submit payment proof error");
     res.status(500).json({ error: "Internal server error" });
   }
 });
