@@ -2,6 +2,7 @@ import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Trophy,
   Clock,
@@ -25,12 +26,183 @@ import {
   Sparkles,
   CalendarCheck,
   TrendingUp,
+  CalendarDays,
 } from "lucide-react";
 import { useListFacilities, useGetSettings, useListPromos } from "@workspace/api-client-react";
+import { useQuery } from "@tanstack/react-query";
 import { getFacilityImage } from "@/lib/utils";
 import { useLang } from "@/lib/i18n";
 import buildingImg from "@assets/1780087062_1780089778393.png";
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
+
+const API = import.meta.env.VITE_API_BASE_URL ?? "/api";
+
+const SCHED_STATUS_COLORS: Record<string, string> = {
+  confirmed: "bg-green-500",
+  completed: "bg-gray-400",
+  blocked: "bg-red-500",
+  maintenance: "bg-purple-500",
+};
+
+const SCHED_STATUS_LABELS: Record<string, { id: string; en: string }> = {
+  confirmed: { id: "Terkonfirmasi", en: "Confirmed" },
+  completed: { id: "Selesai", en: "Completed" },
+  blocked: { id: "Diblokir", en: "Blocked" },
+  maintenance: { id: "Maintenance", en: "Maintenance" },
+};
+
+function formatSchedDate(d: Date) {
+  return d.toISOString().split("T")[0];
+}
+
+function getDaysInMonthSched(year: number, month: number): Date[] {
+  const days: Date[] = [];
+  const first = new Date(year, month, 1);
+  const last = new Date(year, month + 1, 0);
+  for (let i = 0; i < first.getDay(); i++)
+    days.push(new Date(year, month, 1 - first.getDay() + i));
+  for (let d = 1; d <= last.getDate(); d++)
+    days.push(new Date(year, month, d));
+  return days;
+}
+
+function ScheduleCalendar() {
+  const { t } = useLang();
+  const [anchor, setAnchor] = useState(new Date());
+  const [facilityId, setFacilityId] = useState("all");
+
+  const year = anchor.getFullYear();
+  const month = anchor.getMonth();
+  const startDate = formatSchedDate(new Date(year, month, 1));
+  const endDate = formatSchedDate(new Date(year, month + 1, 0));
+
+  const { data, isLoading } = useQuery({
+    queryKey: ["public-calendar", startDate, endDate, facilityId],
+    queryFn: () =>
+      fetch(
+        `${API}/public/calendar?startDate=${startDate}&endDate=${endDate}${facilityId !== "all" ? `&facilityId=${facilityId}` : ""}`
+      ).then((r) => r.json()),
+    staleTime: 60000,
+  });
+
+  const events: any[] = data?.events ?? [];
+  const facilities: any[] = data?.facilities ?? [];
+  const days = useMemo(() => getDaysInMonthSched(year, month), [year, month]);
+  const dayNames = ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"];
+
+  const title = anchor.toLocaleDateString("id-ID", { month: "long", year: "numeric" });
+
+  function navigate(dir: number) {
+    const d = new Date(anchor);
+    d.setMonth(d.getMonth() + dir);
+    setAnchor(d);
+  }
+
+  return (
+    <div>
+      {/* Controls */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => navigate(-1)}
+            className="w-9 h-9 rounded-full border border-border bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center justify-center transition-colors shadow-sm"
+          >
+            <ChevronLeft className="w-4 h-4" />
+          </button>
+          <span className="text-base font-bold text-secondary dark:text-white capitalize min-w-[160px] text-center">{title}</span>
+          <button
+            onClick={() => navigate(1)}
+            className="w-9 h-9 rounded-full border border-border bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center justify-center transition-colors shadow-sm"
+          >
+            <ChevronRight className="w-4 h-4" />
+          </button>
+        </div>
+        <Select value={facilityId} onValueChange={setFacilityId}>
+          <SelectTrigger className="w-full sm:w-52 rounded-full border-border bg-white dark:bg-slate-900 font-medium">
+            <SelectValue placeholder={t("Semua Fasilitas", "All Facilities")} />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">{t("Semua Fasilitas", "All Facilities")}</SelectItem>
+            {facilities.map((f: any) => (
+              <SelectItem key={f.id} value={String(f.id)}>{f.name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      {/* Legend */}
+      <div className="flex flex-wrap gap-3 mb-5">
+        {Object.entries(SCHED_STATUS_LABELS).map(([key, label]) => (
+          <div key={key} className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+            <div className={`w-2.5 h-2.5 rounded-sm ${SCHED_STATUS_COLORS[key]}`} />
+            {t(label.id, label.en)}
+          </div>
+        ))}
+      </div>
+
+      {/* Calendar grid */}
+      <div className="rounded-2xl border border-border overflow-hidden bg-white dark:bg-slate-900 shadow-sm">
+        {/* Day headers */}
+        <div className="grid grid-cols-7 border-b border-border bg-slate-50 dark:bg-slate-800/50">
+          {dayNames.map((d) => (
+            <div key={d} className="text-center text-xs font-bold py-3 text-muted-foreground uppercase tracking-wider">{d}</div>
+          ))}
+        </div>
+
+        {isLoading ? (
+          <div className="h-64 flex items-center justify-center text-muted-foreground text-sm font-medium">
+            {t("Memuat jadwal...", "Loading schedule...")}
+          </div>
+        ) : (
+          <div className="grid grid-cols-7">
+            {days.map((day, i) => {
+              const dateStr = formatSchedDate(day);
+              const dayEvents = events.filter((e) => e.date === dateStr || e.start?.startsWith(dateStr));
+              const isCurrentMonth = day.getMonth() === month;
+              const isToday = dateStr === formatSchedDate(new Date());
+              return (
+                <div
+                  key={i}
+                  className={`min-h-[72px] border-b border-r border-border p-1.5 last:border-r-0 ${!isCurrentMonth ? "bg-slate-50/60 dark:bg-slate-800/30" : ""}`}
+                >
+                  <div
+                    className={`text-xs font-bold mb-1 w-6 h-6 flex items-center justify-center rounded-full mx-auto ${
+                      isToday
+                        ? "bg-primary text-white"
+                        : isCurrentMonth
+                        ? "text-secondary dark:text-white"
+                        : "text-muted-foreground/40"
+                    }`}
+                  >
+                    {day.getDate()}
+                  </div>
+                  <div className="space-y-0.5">
+                    {dayEvents.slice(0, 2).map((e: any) => (
+                      <div
+                        key={e.id}
+                        className={`text-[10px] px-1 py-0.5 rounded truncate text-white font-medium ${SCHED_STATUS_COLORS[e.status] ?? "bg-gray-400"}`}
+                        title={`${e.facilityName} ${e.start?.split("T")[1]?.slice(0, 5) ?? ""}`}
+                      >
+                        {e.start?.split("T")[1]?.slice(0, 5)} {e.facilityName?.split(" ").slice(-1)[0]}
+                      </div>
+                    ))}
+                    {dayEvents.length > 2 && (
+                      <div className="text-[10px] text-muted-foreground pl-0.5 font-medium">+{dayEvents.length - 2}</div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      <p className="text-xs text-muted-foreground mt-3 text-center font-medium">
+        {t("Hanya menampilkan booking yang sudah dikonfirmasi.", "Only showing confirmed bookings.")}
+      </p>
+    </div>
+  );
+}
 
 /* ─── Animated Counter ───────────────────────────────────────────── */
 function useCountUp(target: number, duration = 1800, enabled = false) {
@@ -506,6 +678,35 @@ export default function Home() {
           <Button size="lg" asChild className="w-full mt-8 rounded-xl h-14 font-bold md:hidden text-base">
             <Link href="/facilities">{t("Jelajahi Semua Fasilitas", "Explore All Facilities")}</Link>
           </Button>
+        </div>
+      </section>
+
+      {/* ── Schedule Calendar ─────────────────────────────────────── */}
+      <section className="py-20 md:py-28 bg-[#F8FAFC] dark:bg-slate-900/50 border-y border-slate-100 dark:border-slate-800">
+        <div className="container px-4 md:px-8">
+          <div className="flex flex-col md:flex-row justify-between items-end mb-12 gap-6">
+            <div className="max-w-2xl">
+              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-primary/10 text-primary font-bold text-sm mb-6 border border-primary/20">
+                <CalendarDays className="w-4 h-4" />
+                {t("Jadwal Fasilitas", "Facility Schedule")}
+              </div>
+              <h2 className="text-3xl md:text-5xl font-black tracking-tight text-secondary dark:text-white mb-4">
+                {t("Schedule", "Schedule")} <span className="text-primary">{t("Calendar", "Calendar")}</span>
+              </h2>
+              <p className="text-lg text-muted-foreground font-medium">
+                {t(
+                  "Lihat jadwal ketersediaan fasilitas secara real-time dan rencanakan booking Anda.",
+                  "View real-time facility availability and plan your booking."
+                )}
+              </p>
+            </div>
+            <Button size="lg" className="rounded-full font-bold shadow-md shadow-primary/20 shrink-0" asChild>
+              <Link href="/facilities">
+                {t("Booking Sekarang", "Book Now")} <ArrowRight className="ml-2 w-4 h-4" />
+              </Link>
+            </Button>
+          </div>
+          <ScheduleCalendar />
         </div>
       </section>
 

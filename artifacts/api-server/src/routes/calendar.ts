@@ -19,6 +19,77 @@ const STATUS_COLORS: Record<string, string> = {
   maintenance: "#8B5CF6",
 };
 
+router.get("/public/calendar", async (req, res) => {
+  try {
+    const { startDate, endDate, facilityId } = req.query;
+
+    let bookings = await db.select().from(bookingsTable);
+    const PUBLIC_STATUSES = ["confirmed", "completed"];
+    bookings = bookings.filter((b) => PUBLIC_STATUSES.includes(b.status));
+    if (startDate) bookings = bookings.filter((b) => b.bookingDate >= (startDate as string));
+    if (endDate) bookings = bookings.filter((b) => b.bookingDate <= (endDate as string));
+    if (facilityId) bookings = bookings.filter((b) => b.facilityId === Number(facilityId));
+
+    let blocked = await db.select().from(blockedSchedulesTable);
+    if (startDate) blocked = blocked.filter((b) => b.date >= (startDate as string));
+    if (endDate) blocked = blocked.filter((b) => b.date <= (endDate as string));
+    if (facilityId) blocked = blocked.filter((b) => b.facilityId === Number(facilityId));
+
+    let maintenance: any[] = [];
+    try {
+      const allMaintenance = await db.select().from(maintenanceSchedulesTable);
+      maintenance = allMaintenance.filter((m) => m.isActive);
+      if (facilityId) maintenance = maintenance.filter((m) => m.facilityId === Number(facilityId));
+    } catch { maintenance = []; }
+
+    const facilities = await db.select({ id: facilitiesTable.id, name: facilitiesTable.name, category: facilitiesTable.category }).from(facilitiesTable);
+    const facilityMap: Record<number, { name: string; category: string }> = {};
+    for (const f of facilities) facilityMap[f.id] = { name: f.name, category: f.category };
+
+    const events = [
+      ...bookings.map((b) => ({
+        id: `booking-${b.id}`,
+        type: "booking",
+        start: `${b.bookingDate}T${b.startTime}`,
+        end: `${b.bookingDate}T${b.endTime}`,
+        date: b.bookingDate,
+        status: b.status,
+        color: STATUS_COLORS[b.status] ?? "#6B7280",
+        facilityId: b.facilityId,
+        facilityName: facilityMap[b.facilityId]?.name ?? "",
+      })),
+      ...blocked.map((b) => ({
+        id: `blocked-${b.id}`,
+        type: "blocked",
+        start: `${b.date}T${b.startTime}`,
+        end: `${b.date}T${b.endTime}`,
+        date: b.date,
+        status: "blocked",
+        color: STATUS_COLORS.blocked,
+        facilityId: b.facilityId,
+        facilityName: facilityMap[b.facilityId]?.name ?? "",
+      })),
+      ...maintenance.map((m) => ({
+        id: `maintenance-${m.id}`,
+        type: "maintenance",
+        start: m.allDay ? m.startDate : `${m.startDate}T${m.startTime ?? "00:00"}`,
+        end: m.allDay ? m.endDate : `${m.endDate}T${m.endTime ?? "23:59"}`,
+        date: m.startDate,
+        status: "maintenance",
+        color: STATUS_COLORS.maintenance,
+        facilityId: m.facilityId,
+        facilityName: facilityMap[m.facilityId]?.name ?? "",
+        allDay: m.allDay,
+      })),
+    ];
+
+    res.json({ events, facilities });
+  } catch (err) {
+    req.log.error({ err }, "Public calendar error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 router.get("/admin/calendar", adminMiddleware, async (req, res) => {
   try {
     const { startDate, endDate, facilityId } = req.query;
