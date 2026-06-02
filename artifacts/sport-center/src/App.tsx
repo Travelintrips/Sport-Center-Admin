@@ -53,7 +53,24 @@ import AdminRescheduleRequests from "@/pages/admin/RescheduleRequests";
 import AdminTenants from "@/pages/admin/Tenants";
 import AdminTenantBookings from "@/pages/admin/TenantBookings";
 
-const queryClient = new QueryClient();
+import { removeToken } from "@/lib/auth";
+
+function handle401(error: unknown) {
+  const status = (error as any)?.status ?? (error as any)?.response?.status;
+  if (status === 401) {
+    removeToken();
+    window.location.href = "/admin/login";
+  }
+}
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: { retry: false },
+    mutations: {
+      onError: handle401,
+    },
+  },
+});
 
 function AdminRouter() {
   const [location] = useLocation();
