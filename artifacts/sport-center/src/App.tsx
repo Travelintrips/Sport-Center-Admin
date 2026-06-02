@@ -1,5 +1,5 @@
 import { Switch, Route, Router as WouterRouter, useLocation } from "wouter";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, MutationCache } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { LanguageProvider } from "@/lib/i18n";
@@ -64,11 +64,11 @@ function handle401(error: unknown) {
 }
 
 const queryClient = new QueryClient({
+  mutationCache: new MutationCache({
+    onError: handle401,
+  }),
   defaultOptions: {
     queries: { retry: false },
-    mutations: {
-      onError: handle401,
-    },
   },
 });
 

@@ -87,7 +87,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
     query: {
       retry: false,
       queryKey: getGetMeQueryKey(),
-      staleTime: 5 * 60 * 1000,
+      staleTime: 0,
     }
   });
 
