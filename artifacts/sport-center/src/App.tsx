@@ -42,7 +42,6 @@ import AdminPromos from "@/pages/admin/Promos";
 import AdminSettings from "@/pages/admin/Settings";
 import AdminMemberships from "@/pages/admin/Memberships";
 import AdminApMembers from "@/pages/admin/ApMembers";
-import AdminCalendar from "@/pages/admin/Calendar";
 import AdminAuditLog from "@/pages/admin/AuditLog";
 import AdminPricingRules from "@/pages/admin/PricingRules";
 import AdminMaintenance from "@/pages/admin/Maintenance";
@@ -68,7 +67,6 @@ function AdminRouter() {
     if (location === "/admin/memberships") return <AdminMemberships />;
     if (location === "/admin/ap-members") return <AdminApMembers />;
     if (location === "/admin/settings") return <AdminSettings />;
-    if (location === "/admin/calendar") return <AdminCalendar />;
     if (location === "/admin/audit-log") return <AdminAuditLog />;
     if (location === "/admin/pricing-rules") return <AdminPricingRules />;
     if (location === "/admin/maintenance") return <AdminMaintenance />;
@@ -100,7 +98,6 @@ function Router() {
       <Route path="/admin/memberships" component={AdminRouter} />
       <Route path="/admin/ap-members" component={AdminRouter} />
       <Route path="/admin/settings" component={AdminRouter} />
-      <Route path="/admin/calendar" component={AdminRouter} />
       <Route path="/admin/audit-log" component={AdminRouter} />
       <Route path="/admin/pricing-rules" component={AdminRouter} />
       <Route path="/admin/maintenance" component={AdminRouter} />
