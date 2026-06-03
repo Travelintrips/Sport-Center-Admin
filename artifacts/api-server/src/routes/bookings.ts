@@ -5,6 +5,7 @@ import { adminMiddleware, authMiddleware } from "../lib/auth";
 import { broadcastAvailabilityChange } from "../lib/supabase";
 import { notifyBookingCreated, notifyPaymentConfirmed, notifyBookingCancelled } from "../lib/notifications";
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
+import { syncBookingToBizportal, syncStatusToBizportal } from "../lib/bizportalSync";
 
 const INACTIVE_STATUSES = ["cancelled", "expired", "rejected", "refunded"];
 
@@ -227,6 +228,9 @@ router.post("/bookings", async (req, res) => {
     });
 
     broadcastAvailabilityChange(Number(facilityId), bookingDate);
+
+    // Sync to Bizportal (non-blocking)
+    syncBookingToBizportal({ booking, facilityName: facility.name }).catch(() => {});
 
     // Send WA notification (non-blocking)
     const deadline = new Date(Date.now() + 30 * 60 * 1000);
@@ -491,9 +495,16 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
     if (status) updateData.status = status;
     if (adminNotes !== undefined) updateData.adminNotes = adminNotes;
 
+    const [beforeUpdate] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, id)).limit(1);
     await db.update(bookingsTable).set(updateData).where(eq(bookingsTable.id, id));
     const result = await getBookingWithPayment(id);
     if (!result) { res.status(404).json({ error: "Not found" }); return; }
+
+    if (status && beforeUpdate) {
+      const [payment] = await db.select().from(paymentsTable).where(eq(paymentsTable.bookingId, id)).limit(1);
+      syncStatusToBizportal(beforeUpdate.orderNumber, status, payment?.proofUrl, status === "confirmed" ? new Date() : null).catch(() => {});
+    }
+
     res.json(result);
   } catch (err) {
     req.log.error({ err }, "Update booking error");
