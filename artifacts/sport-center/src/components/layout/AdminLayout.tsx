@@ -127,6 +127,11 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
         <Link href="/admin" className="font-bold text-lg text-primary flex items-center gap-2">
           <div className="w-6 h-6 rounded bg-primary text-primary-foreground flex items-center justify-center text-xs">S</div>
           Admin Portal
+          {import.meta.env.DEV && (
+            <span className="text-[10px] font-black tracking-widest px-2 py-0.5 rounded-full bg-amber-400/15 text-amber-500 border border-amber-400/30 uppercase">
+              DEV
+            </span>
+          )}
         </Link>
         <button onClick={() => setIsMobileOpen(!isMobileOpen)} className="p-2 -mr-2">
           {isMobileOpen ? <X /> : <Menu />}
@@ -142,10 +147,15 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
         ${isMobileOpen ? 'translate-x-0' : '-translate-x-full'}
       `}>
         <div className="h-14 hidden md:flex items-center px-4 border-b border-sidebar-border bg-sidebar-primary text-sidebar-primary-foreground">
-          <Link href="/admin" className="font-bold text-base flex items-center gap-2">
-            <img src={logoUrl} alt="Logo" className="w-7 h-7 rounded object-cover" />
-            Admin Portal
+          <Link href="/admin" className="font-bold text-base flex items-center gap-2 flex-1 min-w-0">
+            <img src={logoUrl} alt="Logo" className="w-7 h-7 rounded object-cover shrink-0" />
+            <span className="truncate">Admin Portal</span>
           </Link>
+          {import.meta.env.DEV && (
+            <span className="ml-2 shrink-0 text-[10px] font-black tracking-widest px-2 py-0.5 rounded-full bg-amber-400/20 text-amber-300 border border-amber-400/30 uppercase">
+              DEV
+            </span>
+          )}
         </div>
 
         <div className="flex-1 overflow-y-auto py-3">
@@ -183,6 +193,15 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
         </div>
 
         <div className="p-3 border-t border-sidebar-border">
+          {import.meta.env.DEV && (
+            <div className="mb-2 flex items-center gap-2 px-3 py-2 rounded-md bg-amber-400/10 border border-amber-400/20">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0 animate-pulse" />
+              <div className="min-w-0">
+                <p className="text-[10px] font-bold text-amber-400 uppercase tracking-wider">Development DB</p>
+                <p className="text-[9px] text-amber-400/60 truncate">Supabase CST DEV</p>
+              </div>
+            </div>
+          )}
           <div className="flex items-center gap-2.5 px-3 py-2 mb-1">
             <div className="w-7 h-7 rounded-full bg-primary/20 flex items-center justify-center text-primary font-bold text-xs flex-shrink-0">
               {user?.name?.charAt(0) || 'A'}
