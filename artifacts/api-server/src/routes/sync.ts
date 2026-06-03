@@ -1,6 +1,8 @@
 import { Router, Request, Response, NextFunction } from "express";
 import { db, bookingsTable, facilitiesTable, paymentsTable, usersTable } from "@workspace/db";
-import { desc, gte, and, lte } from "drizzle-orm";
+import { desc, gte, and, lte, eq } from "drizzle-orm";
+import { adminMiddleware } from "../lib/auth";
+import { syncBookingToBizportal } from "../lib/bizportalSync";
 
 const router = Router();
 
@@ -220,6 +222,51 @@ router.get("/sync/stats", apiKeyMiddleware, async (req, res) => {
     });
   } catch (err) {
     req.log.error({ err }, "Sync stats error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+/**
+ * POST /api/admin/sync-bizportal
+ * Trigger manual full re-sync semua booking ke PROD Bizportal.
+ * Hanya bisa diakses oleh admin yang sudah login.
+ */
+router.post("/admin/sync-bizportal", adminMiddleware, async (req, res) => {
+  try {
+    const allBookings = await db.select().from(bookingsTable).orderBy(desc(bookingsTable.createdAt));
+
+    const facilityIds = [...new Set(allBookings.map((b) => b.facilityId))];
+    const facilities = facilityIds.length
+      ? await db.select({ id: facilitiesTable.id, name: facilitiesTable.name }).from(facilitiesTable)
+      : [];
+
+    const facilityMap = new Map(facilities.map((f) => [f.id, f.name]));
+
+    let synced = 0;
+    let failed = 0;
+    const errors: string[] = [];
+
+    for (const booking of allBookings) {
+      const facilityName = facilityMap.get(booking.facilityId) ?? "Unknown";
+      try {
+        await syncBookingToBizportal({ booking, facilityName });
+        synced++;
+      } catch (err: any) {
+        failed++;
+        errors.push(`${booking.orderNumber}: ${err?.message}`);
+      }
+    }
+
+    res.json({
+      success: true,
+      synced,
+      failed,
+      total: allBookings.length,
+      errors: errors.slice(0, 10),
+      syncedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    req.log.error({ err }, "Manual Bizportal sync error");
     res.status(500).json({ error: "Internal server error" });
   }
 });

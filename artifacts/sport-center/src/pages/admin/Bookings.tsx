@@ -44,6 +44,7 @@ import {
   Receipt,
   Plane,
   ShieldCheck,
+  RefreshCw,
 } from "lucide-react";
 import { getToken } from "@/lib/auth";
 import VerifyIdDialog from "@/components/admin/VerifyIdDialog";
@@ -1106,6 +1107,31 @@ export default function AdminBookings() {
       });
   };
 
+  const [isSyncing, setIsSyncing] = useState(false);
+  const handleSyncBizportal = async () => {
+    setIsSyncing(true);
+    try {
+      const token = getToken();
+      const res = await fetch("/api/admin/sync-bizportal", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (res.ok) {
+        toast({
+          title: "Sync ke Bizportal berhasil",
+          description: `${data.synced} dari ${data.total} booking berhasil disinkronkan.`,
+        });
+      } else {
+        throw new Error(data.error || "Sync gagal");
+      }
+    } catch (err: any) {
+      toast({ title: "Sync gagal", description: err.message, variant: "destructive" });
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   const isUpdating = updateBookingMutation.isPending || updatePaymentMutation.isPending || deletingId !== null;
   const pendingVerification = bookings.filter((b: any) => b.status === "paid").length;
 
@@ -1136,6 +1162,14 @@ export default function AdminBookings() {
               {pendingVerification} perlu verifikasi
             </motion.div>
           )}
+          <button
+            onClick={handleSyncBizportal}
+            disabled={isSyncing}
+            className="flex items-center gap-1.5 h-9 px-3 rounded-xl border border-blue-200 dark:border-blue-700 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <RefreshCw size={13} className={isSyncing ? "animate-spin" : ""} />
+            {isSyncing ? "Syncing..." : "Sync Bizportal"}
+          </button>
           <button
             onClick={handleExport}
             className="flex items-center gap-1.5 h-9 px-3 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
