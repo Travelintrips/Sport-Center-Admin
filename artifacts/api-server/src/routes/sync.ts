@@ -1,0 +1,227 @@
+import { Router, Request, Response, NextFunction } from "express";
+import { db, bookingsTable, facilitiesTable, paymentsTable, usersTable } from "@workspace/db";
+import { desc, gte, and, lte } from "drizzle-orm";
+
+const router = Router();
+
+function apiKeyMiddleware(req: Request, res: Response, next: NextFunction): void {
+  const key = req.headers["x-api-key"] || req.query.api_key;
+  const validKey = process.env.BIZPORTAL_SYNC_API_KEY;
+  if (!validKey) {
+    res.status(503).json({ error: "Sync API not configured" });
+    return;
+  }
+  if (!key || key !== validKey) {
+    res.status(401).json({ error: "Invalid or missing API key" });
+    return;
+  }
+  next();
+}
+
+/**
+ * GET /api/sync/bookings
+ * Endpoint untuk Bizportal mengambil data booking Sport Center.
+ *
+ * Query params:
+ *   - from        : tanggal mulai (YYYY-MM-DD), default 30 hari lalu
+ *   - to          : tanggal akhir (YYYY-MM-DD), default hari ini
+ *   - status      : filter status (comma-separated), misal: confirmed,completed
+ *   - facilityId  : filter per fasilitas
+ *   - limit       : max records (default 500, max 1000)
+ *   - offset      : untuk pagination (default 0)
+ */
+router.get("/sync/bookings", apiKeyMiddleware, async (req, res) => {
+  try {
+    const { from, to, status, facilityId, limit: limitStr, offset: offsetStr } = req.query as Record<string, string>;
+
+    const limit = Math.min(parseInt(limitStr || "500"), 1000);
+    const offset = parseInt(offsetStr || "0");
+
+    const today = new Date().toISOString().split("T")[0];
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+
+    const fromDate = from || thirtyDaysAgo;
+    const toDate = to || today;
+
+    const conditions = [
+      gte(bookingsTable.bookingDate, fromDate),
+      lte(bookingsTable.bookingDate, toDate),
+    ];
+
+    let allBookings = await db
+      .select()
+      .from(bookingsTable)
+      .where(and(...conditions))
+      .orderBy(desc(bookingsTable.createdAt));
+
+    if (status) {
+      const statuses = status.split(",").map((s) => s.trim());
+      allBookings = allBookings.filter((b) => statuses.includes(b.status));
+    }
+
+    if (facilityId) {
+      const fid = parseInt(facilityId);
+      allBookings = allBookings.filter((b) => b.facilityId === fid);
+    }
+
+    const total = allBookings.length;
+    const paged = allBookings.slice(offset, offset + limit);
+
+    const facilityIds = [...new Set(paged.map((b) => b.facilityId))];
+    const facilities = facilityIds.length
+      ? await db.select({ id: facilitiesTable.id, name: facilitiesTable.name, category: facilitiesTable.category }).from(facilitiesTable)
+      : [];
+
+    const bookingIds = paged.map((b) => b.id);
+    const payments = bookingIds.length
+      ? await db.select().from(paymentsTable)
+      : [];
+
+    const customerIds = [...new Set(paged.map((b) => b.customerId).filter(Boolean))] as number[];
+    const users = customerIds.length
+      ? await db.select({ id: usersTable.id, name: usersTable.name, email: usersTable.email }).from(usersTable)
+      : [];
+
+    const result = paged.map((b) => {
+      const facility = facilities.find((f) => f.id === b.facilityId);
+      const payment = payments.find((p) => p.bookingId === b.id);
+      const user = users.find((u) => u.id === b.customerId);
+      return {
+        id: b.id,
+        orderNumber: b.orderNumber,
+        status: b.status,
+        bookingDate: b.bookingDate,
+        startTime: b.startTime,
+        endTime: b.endTime,
+        durationHours: b.durationHours,
+        customerName: b.customerName,
+        customerEmail: b.customerEmail,
+        customerPhone: b.customerPhone,
+        customerType: b.customerType,
+        facilityId: b.facilityId,
+        facilityName: facility?.name ?? "",
+        facilityCategory: facility?.category ?? "",
+        totalPrice: Number(b.totalPrice),
+        discountAmount: Number(b.discountAmount),
+        basePrice: b.basePrice == null ? null : Number(b.basePrice),
+        apDiscountAmount: Number(b.apDiscountAmount),
+        promoCode: b.promoCode,
+        activityType: b.activityType,
+        numberOfPeople: b.numberOfPeople,
+        notes: b.notes,
+        paymentDeadline: b.paymentDeadline,
+        checkedInAt: b.checkedInAt,
+        completedAt: b.completedAt,
+        createdAt: b.createdAt,
+        updatedAt: b.updatedAt,
+        registeredUser: user ? { id: user.id, name: user.name, email: user.email } : null,
+        payment: payment
+          ? {
+              id: payment.id,
+              amount: Number(payment.amount),
+              method: payment.method,
+              status: payment.status,
+              proofUrl: payment.proofUrl,
+              paidAt: payment.paidAt,
+              confirmedAt: payment.confirmedAt,
+            }
+          : null,
+      };
+    });
+
+    res.json({
+      meta: {
+        total,
+        limit,
+        offset,
+        from: fromDate,
+        to: toDate,
+        syncedAt: new Date().toISOString(),
+        source: "sport-center",
+      },
+      data: result,
+    });
+  } catch (err) {
+    req.log.error({ err }, "Sync bookings error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+/**
+ * GET /api/sync/facilities
+ * Daftar fasilitas aktif untuk referensi Bizportal.
+ */
+router.get("/sync/facilities", apiKeyMiddleware, async (req, res) => {
+  try {
+    const facilities = await db.select().from(facilitiesTable);
+    res.json({
+      meta: { total: facilities.length, syncedAt: new Date().toISOString(), source: "sport-center" },
+      data: facilities.map((f) => ({
+        id: f.id,
+        name: f.name,
+        category: f.category,
+        description: f.description,
+        pricePerHour: Number(f.pricePerHour),
+        openTime: f.openTime,
+        closeTime: f.closeTime,
+        minDuration: f.minDuration,
+        maxDuration: f.maxDuration,
+        capacity: f.capacity,
+        bookingMode: f.bookingMode,
+        isActive: f.isActive,
+      })),
+    });
+  } catch (err) {
+    req.log.error({ err }, "Sync facilities error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+/**
+ * GET /api/sync/stats
+ * Statistik ringkas harian untuk Bizportal dashboard.
+ */
+router.get("/sync/stats", apiKeyMiddleware, async (req, res) => {
+  try {
+    const today = new Date().toISOString().split("T")[0];
+    const thisMonth = today.slice(0, 7);
+
+    const allBookings = await db.select().from(bookingsTable);
+
+    const todayBookings = allBookings.filter((b) => b.bookingDate === today);
+    const monthBookings = allBookings.filter((b) => b.bookingDate.startsWith(thisMonth));
+
+    const confirmedStatuses = ["confirmed", "completed", "waiting_confirmation", "paid"];
+
+    const totalRevenue = allBookings
+      .filter((b) => confirmedStatuses.includes(b.status))
+      .reduce((sum, b) => sum + Number(b.totalPrice), 0);
+
+    const monthRevenue = monthBookings
+      .filter((b) => confirmedStatuses.includes(b.status))
+      .reduce((sum, b) => sum + Number(b.totalPrice), 0);
+
+    const byStatus = allBookings.reduce<Record<string, number>>((acc, b) => {
+      acc[b.status] = (acc[b.status] || 0) + 1;
+      return acc;
+    }, {});
+
+    res.json({
+      syncedAt: new Date().toISOString(),
+      source: "sport-center",
+      stats: {
+        totalBookings: allBookings.length,
+        todayBookings: todayBookings.length,
+        monthBookings: monthBookings.length,
+        totalRevenue,
+        monthRevenue,
+        byStatus,
+      },
+    });
+  } catch (err) {
+    req.log.error({ err }, "Sync stats error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+export default router;

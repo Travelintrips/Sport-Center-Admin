@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { adminMiddleware, authMiddleware } from "../lib/auth";
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
 import { notifyBookingCancelled } from "../lib/notifications";
+import { syncStatusToBizportal } from "../lib/bizportalSync";
 
 const router = Router();
 
@@ -62,6 +63,8 @@ router.post("/bookings/:id/cancel", async (req, res) => {
       totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
       reason: reason || "Tidak ada alasan",
     });
+
+    syncStatusToBizportal(booking.orderNumber, "cancelled").catch(() => {});
 
     const userInfo = getUserFromReq(req);
     const clientInfo = getClientInfo(req);
