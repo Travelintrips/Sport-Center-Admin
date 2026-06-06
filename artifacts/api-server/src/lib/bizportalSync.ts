@@ -1,5 +1,5 @@
 import pg from "pg";
-import type { Booking } from "@workspace/db";
+import type { Booking, GymMembership } from "@workspace/db";
 
 const { Pool } = pg;
 
@@ -98,6 +98,51 @@ export async function syncBookingToBizportal(payload: SyncBookingPayload): Promi
   } catch (err: any) {
     // Jangan sampai gagal sync menghentikan operasi utama
     console.error("[bizportalSync] Sync error:", err?.message);
+  }
+}
+
+export async function syncMembershipToBizportal(membership: GymMembership): Promise<void> {
+  const pool = getProdPool();
+  if (!pool) return;
+
+  try {
+    await pool.query(
+      `INSERT INTO public.sport_center_memberships
+        (id, name, email, phone, start_date, end_date, months, total_price,
+         status, notes, payment_method, payment_proof_url, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+       ON CONFLICT (id) DO UPDATE SET
+         name              = EXCLUDED.name,
+         email             = EXCLUDED.email,
+         phone             = EXCLUDED.phone,
+         start_date        = EXCLUDED.start_date,
+         end_date          = EXCLUDED.end_date,
+         months            = EXCLUDED.months,
+         total_price       = EXCLUDED.total_price,
+         status            = EXCLUDED.status,
+         notes             = EXCLUDED.notes,
+         payment_method    = COALESCE(EXCLUDED.payment_method, sport_center_memberships.payment_method),
+         payment_proof_url = COALESCE(EXCLUDED.payment_proof_url, sport_center_memberships.payment_proof_url),
+         updated_at        = EXCLUDED.updated_at`,
+      [
+        membership.id,
+        membership.name,
+        membership.email,
+        membership.phone,
+        membership.startDate,
+        membership.endDate,
+        membership.months,
+        Math.round(Number(membership.totalPrice)),
+        membership.status,
+        membership.notes || null,
+        membership.paymentMethod || null,
+        membership.paymentProofUrl || null,
+        membership.createdAt,
+        membership.updatedAt,
+      ]
+    );
+  } catch (err: any) {
+    console.error("[bizportalSync] Membership sync error:", err?.message);
   }
 }
 

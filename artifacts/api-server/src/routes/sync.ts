@@ -1,8 +1,8 @@
 import { Router, Request, Response, NextFunction } from "express";
-import { db, bookingsTable, facilitiesTable, paymentsTable, usersTable } from "@workspace/db";
+import { db, bookingsTable, facilitiesTable, paymentsTable, usersTable, gymMembershipsTable } from "@workspace/db";
 import { desc, gte, and, lte, eq } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
-import { syncBookingToBizportal } from "../lib/bizportalSync";
+import { syncBookingToBizportal, syncMembershipToBizportal } from "../lib/bizportalSync";
 
 const router = Router();
 
@@ -180,6 +180,51 @@ router.get("/sync/facilities", apiKeyMiddleware, async (req, res) => {
 });
 
 /**
+ * GET /api/sync/memberships
+ * Endpoint untuk Bizportal mengambil data member gym Sport Center.
+ *
+ * Query params:
+ *   - status  : filter status (comma-separated)
+ *   - limit   : max records (default 500, max 1000)
+ *   - offset  : untuk pagination (default 0)
+ */
+router.get("/sync/memberships", apiKeyMiddleware, async (req, res) => {
+  try {
+    const { status, limit: limitStr, offset: offsetStr } = req.query as Record<string, string>;
+
+    const limit = Math.min(parseInt(limitStr || "500"), 1000);
+    const offset = parseInt(offsetStr || "0");
+
+    let memberships = await db
+      .select()
+      .from(gymMembershipsTable)
+      .orderBy(desc(gymMembershipsTable.createdAt));
+
+    if (status) {
+      const statuses = status.split(",").map((s) => s.trim());
+      memberships = memberships.filter((m) => statuses.includes(m.status));
+    }
+
+    const total = memberships.length;
+    const paged = memberships.slice(offset, offset + limit);
+
+    res.json({
+      meta: {
+        total,
+        limit,
+        offset,
+        syncedAt: new Date().toISOString(),
+        source: "sport-center",
+      },
+      data: paged.map((m) => ({ ...m, totalPrice: Number(m.totalPrice) })),
+    });
+  } catch (err) {
+    req.log.error({ err }, "Sync memberships error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+/**
  * GET /api/sync/stats
  * Statistik ringkas harian untuk Bizportal dashboard.
  */
@@ -267,6 +312,42 @@ router.post("/admin/sync-bizportal", adminMiddleware, async (req, res) => {
     });
   } catch (err) {
     req.log.error({ err }, "Manual Bizportal sync error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+/**
+ * POST /api/admin/sync-bizportal-memberships
+ * Trigger manual full re-sync semua member gym ke PROD Bizportal.
+ */
+router.post("/admin/sync-bizportal-memberships", adminMiddleware, async (req, res) => {
+  try {
+    const allMemberships = await db.select().from(gymMembershipsTable).orderBy(desc(gymMembershipsTable.createdAt));
+
+    let synced = 0;
+    let failed = 0;
+    const errors: string[] = [];
+
+    for (const membership of allMemberships) {
+      try {
+        await syncMembershipToBizportal(membership);
+        synced++;
+      } catch (err: any) {
+        failed++;
+        errors.push(`ID ${membership.id}: ${err?.message}`);
+      }
+    }
+
+    res.json({
+      success: true,
+      synced,
+      failed,
+      total: allMemberships.length,
+      errors: errors.slice(0, 10),
+      syncedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    req.log.error({ err }, "Manual Bizportal memberships sync error");
     res.status(500).json({ error: "Internal server error" });
   }
 });
