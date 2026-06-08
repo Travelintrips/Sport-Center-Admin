@@ -1354,7 +1354,7 @@ export default function AdminBookings() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-100 dark:border-slate-800">
-                  {["Order", "Customer", "Fasilitas", "Tanggal & Waktu", "Durasi", "Metode", "Tgl Bayar", "Check-In", "Total", "Status", ""].map((h) => (
+                  {["Order", "Customer", "Fasilitas", "Tanggal & Waktu", "Durasi", "Metode", "Tgl Bayar", "Total", "Status", "Check-In", ""].map((h) => (
                     <th
                       key={h}
                       className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide whitespace-nowrap"
@@ -1444,19 +1444,6 @@ export default function AdminBookings() {
                           <span className="text-xs text-slate-300 dark:text-slate-600">—</span>
                         )}
                       </td>
-                      <td className="px-4 py-3 whitespace-nowrap">
-                        {(b.status === "confirmed" || b.status === "completed" || b.checkedInAt) ? (
-                          <InlineCheckInSelect
-                            booking={b}
-                            onCheckIn={(id) => checkInMutation.mutate({ id })}
-                            onComplete={(id) => updateBookingMutation.mutate({ id, data: { status: "completed" } })}
-                            isCheckingIn={checkInMutation.isPending && checkInMutation.variables?.id === b.id}
-                            isCompleting={updateBookingMutation.isPending && updateBookingMutation.variables?.id === b.id}
-                          />
-                        ) : (
-                          <span className="text-xs text-slate-300 dark:text-slate-600">—</span>
-                        )}
-                      </td>
                       <td className="px-4 py-3">
                         <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
                           {formatCurrency(b.totalPrice)}
@@ -1475,6 +1462,19 @@ export default function AdminBookings() {
                           <div className="text-[10px] text-blue-500 mt-0.5 font-medium">
                             Bukti diterima ↗
                           </div>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        {(b.status === "confirmed" || b.status === "completed" || b.checkedInAt) ? (
+                          <InlineCheckInSelect
+                            booking={b}
+                            onCheckIn={(id) => checkInMutation.mutate({ id })}
+                            onComplete={(id) => updateBookingMutation.mutate({ id, data: { status: "completed" } })}
+                            isCheckingIn={checkInMutation.isPending && checkInMutation.variables?.id === b.id}
+                            isCompleting={updateBookingMutation.isPending && updateBookingMutation.variables?.id === b.id}
+                          />
+                        ) : (
+                          <span className="text-xs text-slate-300 dark:text-slate-600">—</span>
                         )}
                       </td>
                       <td className="px-4 py-3">
