@@ -52,6 +52,7 @@ import AdminNotificationTemplates from "@/pages/admin/NotificationTemplates";
 import AdminRescheduleRequests from "@/pages/admin/RescheduleRequests";
 import AdminTenants from "@/pages/admin/Tenants";
 import AdminTenantBookings from "@/pages/admin/TenantBookings";
+import AdminCalendar from "@/pages/admin/Calendar";
 
 import { removeToken } from "@/lib/auth";
 
@@ -94,6 +95,7 @@ function AdminRouter() {
     if (location === "/admin/reschedule") return <AdminRescheduleRequests />;
     if (location === "/admin/tenants") return <AdminTenants />;
     if (location === "/admin/tenant-bookings") return <AdminTenantBookings />;
+    if (location === "/admin/calendar") return <AdminCalendar />;
     return <NotFound />;
   })();
 
@@ -125,6 +127,7 @@ function Router() {
       <Route path="/admin/reschedule" component={AdminRouter} />
       <Route path="/admin/tenants" component={AdminRouter} />
       <Route path="/admin/tenant-bookings" component={AdminRouter} />
+      <Route path="/admin/calendar" component={AdminRouter} />
       <Route path="/admin" component={AdminRouter} />
 
       {/* Customer Routes */}

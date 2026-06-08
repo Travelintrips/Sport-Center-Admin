@@ -49,9 +49,6 @@ const NAV_GROUPS = [
       { href: "/admin/schedule", label: "Jadwal Blokir", icon: Clock },
       { href: "/admin/maintenance", label: "Pemeliharaan", icon: Wrench },
       { href: "/admin/pricing-rules", label: "Aturan Harga", icon: DollarSign },
-      { href: "/admin/schedule", label: "Kalender", icon: Calendar },
-      { href: "/admin/maintenance", label: "Maintenance", icon: Wrench },
-      { href: "/admin/pricing-rules", label: "Pricing Rules", icon: DollarSign },
     ],
   },
   {
