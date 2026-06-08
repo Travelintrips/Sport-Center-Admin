@@ -55,21 +55,16 @@ import VerifyIdDialog from "@/components/admin/VerifyIdDialog";
 
 function proofImageUrl(rawUrl: string): string {
   if (!rawUrl) return rawUrl;
-  // /api/storage/objects/* → redirect to working /api/uploads/* path
-  if (rawUrl.startsWith("/api/storage/objects/")) {
-    const withoutPrefix = rawUrl.replace(/^\/api\/storage\/objects\//, "");
-    return `/api/uploads/${withoutPrefix}`;
-  }
-  // Already a working /api/uploads/ path — serve as-is
-  if (rawUrl.startsWith("/api/")) return rawUrl;
-  // Old Supabase-style /objects/... → /api/uploads/...
-  if (rawUrl.startsWith("/objects/")) {
-    return `/api/uploads/${rawUrl.replace(/^\/objects\//, "")}`;
-  }
   // External URL — use as-is
   if (rawUrl.startsWith("http")) return rawUrl;
-  // Bare filename or relative path — assume it lives in uploads
-  return `/api/uploads/${rawUrl.replace(/^\/+/, "")}`;
+  // Find /api/uploads/ anywhere (handles malformed /api/storage/objects//api/uploads/... paths)
+  const uploadsIdx = rawUrl.lastIndexOf("/api/uploads/");
+  if (uploadsIdx !== -1) return rawUrl.slice(uploadsIdx);
+  // No leading slash variant: api/uploads/proofs/...
+  if (rawUrl.startsWith("api/uploads/")) return `/${rawUrl}`;
+  // Bare filename — assume proofs/ subdir
+  const bare = rawUrl.replace(/^\/+/, "");
+  return `/api/uploads/proofs/${bare}`;
 }
 
 /* ─── Status Config ────────────────────────────────────────────── */
@@ -992,6 +987,68 @@ const STATUS_OPTIONS = [
   { value: "refunded",        label: "↩️ Dikembalikan" },
 ];
 
+function InlineCheckInSelect({
+  booking,
+  onCheckIn,
+  onComplete,
+  isCheckingIn,
+  isCompleting,
+}: {
+  booking: any;
+  onCheckIn: (id: number) => void;
+  onComplete: (id: number) => void;
+  isCheckingIn: boolean;
+  isCompleting: boolean;
+}) {
+  const todayJKT = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" });
+  const isToday = booking.bookingDate === todayJKT;
+  const isLoading = isCheckingIn || isCompleting;
+
+  const currentLabel = booking.checkedInAt
+    ? `✓ ${new Date(booking.checkedInAt).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}`
+    : "— Pilih";
+
+  const triggerClass = booking.checkedInAt
+    ? "h-7 min-w-[80px] gap-1.5 border rounded-full px-2.5 text-[11px] font-semibold shadow-none focus:ring-0 focus:ring-offset-0 bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-800"
+    : "h-7 min-w-[80px] gap-1.5 border rounded-full px-2.5 text-[11px] font-semibold shadow-none focus:ring-0 focus:ring-offset-0 bg-slate-50 text-slate-500 border-slate-200 dark:bg-slate-800/30 dark:text-slate-400 dark:border-slate-700";
+
+  return (
+    <Select
+      value=""
+      onValueChange={(val) => {
+        if (val === "checkin") onCheckIn(booking.id);
+        else if (val === "complete") onComplete(booking.id);
+      }}
+      disabled={isLoading}
+    >
+      <SelectTrigger className={triggerClass} style={{ outline: "none" }}>
+        {isLoading ? (
+          <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin shrink-0" />
+        ) : null}
+        <span>{currentLabel}</span>
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem
+          value="checkin"
+          disabled={!!booking.checkedInAt || !isToday}
+          className="text-xs"
+        >
+          <span className="flex items-center gap-1.5">
+            <LogIn size={11} className="text-emerald-600" />
+            {booking.checkedInAt ? "Sudah Check-in" : !isToday ? `Check-in (${booking.bookingDate})` : "Check-in"}
+          </span>
+        </SelectItem>
+        <SelectItem value="complete" className="text-xs">
+          <span className="flex items-center gap-1.5">
+            <CheckCircle2 size={11} className="text-blue-600" />
+            Selesai
+          </span>
+        </SelectItem>
+      </SelectContent>
+    </Select>
+  );
+}
+
 function InlineStatusSelect({
   bookingId,
   status,
@@ -1292,7 +1349,7 @@ export default function AdminBookings() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-100 dark:border-slate-800">
-                  {["Order", "Customer", "Fasilitas", "Tanggal & Waktu", "Durasi", "Metode", "Tgl Bayar", "Pmt Status", "Check-In", "Total", "Status", ""].map((h) => (
+                  {["Order", "Customer", "Fasilitas", "Tanggal & Waktu", "Durasi", "Metode", "Tgl Bayar", "Total", "Status", "Check-In", ""].map((h) => (
                     <th
                       key={h}
                       className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide whitespace-nowrap"
@@ -1382,48 +1439,6 @@ export default function AdminBookings() {
                           <span className="text-xs text-slate-300 dark:text-slate-600">—</span>
                         )}
                       </td>
-                      <td className="px-4 py-3 whitespace-nowrap">
-                        {b.payment ? (
-                          <span className={`inline-flex items-center gap-1 text-[11px] font-semibold px-1.5 py-0.5 rounded-md ${
-                            b.payment.status === "confirmed"
-                              ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400"
-                              : b.payment.status === "rejected"
-                              ? "bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-400"
-                              : "bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400"
-                          }`}>
-                            {b.payment.status === "confirmed" ? "✓ Lunas" : b.payment.status === "rejected" ? "✗ Ditolak" : "⏳ Menunggu"}
-                          </span>
-                        ) : (
-                          <span className="text-xs text-slate-300 dark:text-slate-600">—</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 whitespace-nowrap">
-                        {b.checkedInAt ? (
-                          <div className="flex items-center gap-1">
-                            <span className="text-emerald-600 font-bold text-sm">✓</span>
-                            <span className="text-[11px] text-slate-400">
-                              {new Date(b.checkedInAt).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}
-                            </span>
-                          </div>
-                        ) : (b.status === "confirmed" || b.status === "completed") ? (
-                          <motion.button
-                            whileHover={{ scale: 1.05 }}
-                            whileTap={{ scale: 0.95 }}
-                            onClick={() => checkInMutation.mutate({ id: b.id })}
-                            disabled={checkInMutation.isPending && checkInMutation.variables?.id === b.id}
-                            className="flex items-center gap-1 h-6 px-2 rounded-lg text-[11px] font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 dark:bg-emerald-900/20 dark:hover:bg-emerald-900/40 dark:text-emerald-400 dark:border-emerald-800 transition-colors disabled:opacity-50"
-                          >
-                            {checkInMutation.isPending && checkInMutation.variables?.id === b.id ? (
-                              <span className="w-2.5 h-2.5 border border-emerald-500 border-t-transparent rounded-full animate-spin" />
-                            ) : (
-                              <LogIn size={10} />
-                            )}
-                            Check-in
-                          </motion.button>
-                        ) : (
-                          <span className="text-xs text-slate-300 dark:text-slate-600">—</span>
-                        )}
-                      </td>
                       <td className="px-4 py-3">
                         <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
                           {formatCurrency(b.totalPrice)}
@@ -1442,6 +1457,19 @@ export default function AdminBookings() {
                           <div className="text-[10px] text-blue-500 mt-0.5 font-medium">
                             Bukti diterima ↗
                           </div>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        {(b.status === "confirmed" || b.status === "completed" || b.checkedInAt) ? (
+                          <InlineCheckInSelect
+                            booking={b}
+                            onCheckIn={(id) => checkInMutation.mutate({ id })}
+                            onComplete={(id) => updateBookingMutation.mutate({ id, data: { status: "completed" } })}
+                            isCheckingIn={checkInMutation.isPending && checkInMutation.variables?.id === b.id}
+                            isCompleting={updateBookingMutation.isPending && updateBookingMutation.variables?.id === b.id}
+                          />
+                        ) : (
+                          <span className="text-xs text-slate-300 dark:text-slate-600">—</span>
                         )}
                       </td>
                       <td className="px-4 py-3">

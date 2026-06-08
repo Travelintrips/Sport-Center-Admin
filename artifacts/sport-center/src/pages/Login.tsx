@@ -27,8 +27,6 @@ export default function Login() {
         toast({ title: t("Selamat datang kembali!", "Welcome back!"), description: `${t("Halo", "Hello")}, ${data.user.name}` });
         if (redirectTo) {
           setLocation(redirectTo);
-        } else if (data.user.role === "tenant") {
-          setLocation("/tenant/dashboard");
         } else {
           setLocation("/my-bookings");
         }

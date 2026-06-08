@@ -22,8 +22,6 @@ import {
   QrCode,
   Bell,
   RefreshCw,
-  Building2,
-  Store,
 } from "lucide-react";
 import { useGetMe, useLogout, getGetMeQueryKey } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -37,6 +35,8 @@ const NAV_GROUPS = [
     items: [
       { href: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard },
       { href: "/admin/bookings", label: "Pemesanan", icon: CalendarDays },
+
+      { href: "/admin/bookings", label: "Bookings", icon: CalendarDays },
       { href: "/admin/calendar", label: "Kalender", icon: Calendar },
       { href: "/admin/qr-checkin", label: "QR Check-In", icon: QrCode },
       { href: "/admin/reschedule", label: "Reschedule", icon: RefreshCw },
@@ -58,13 +58,6 @@ const NAV_GROUPS = [
       { href: "/admin/memberships", label: "Member Gym", icon: Dumbbell },
       { href: "/admin/ap-members", label: "Member AP", icon: Plane },
       { href: "/admin/promos", label: "Promo", icon: Tag },
-    ],
-  },
-  {
-    label: "Penyewa Tenan",
-    items: [
-      { href: "/admin/tenants", label: "Data Tenant", icon: Building2 },
-      { href: "/admin/tenant-bookings", label: "Booking Tenant", icon: Store },
     ],
   },
   {

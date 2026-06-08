@@ -1,6 +1,6 @@
 import { ReactNode, useState, useEffect } from "react";
 import { Link, useLocation } from "wouter";
-import { Menu, X, LogOut, CalendarDays, ChevronDown, MapPin, Phone, Instagram, Facebook, ShieldCheck, ArrowUp, Dumbbell, Building2 } from "lucide-react";
+import { Menu, X, LogOut, CalendarDays, ChevronDown, MapPin, Phone, Instagram, Facebook, ShieldCheck, ArrowUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useGetMe, useLogout, getGetMeQueryKey, useGetSettings } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -81,16 +81,10 @@ function UserMenu() {
               <div className="text-xs text-muted-foreground truncate">{user.email}</div>
             </div>
             <div className="p-2 space-y-0.5">
-              <Link href={user.role === "tenant" ? "/tenant/bookings" : "/my-bookings"} onClick={() => setOpen(false)}
+              <Link href="/my-bookings" onClick={() => setOpen(false)}
                 className="flex items-center gap-2.5 px-3 py-2.5 text-sm font-medium rounded-xl hover:bg-accent transition-colors w-full">
                 <CalendarDays size={15} className="text-primary" /> {t("Booking Saya", "My Bookings")}
               </Link>
-              {user.role === "tenant" && (
-                <Link href="/tenant/dashboard" onClick={() => setOpen(false)}
-                  className="flex items-center gap-2.5 px-3 py-2.5 text-sm font-medium rounded-xl hover:bg-accent transition-colors w-full">
-                  <Building2 size={15} className="text-primary" /> {t("Dashboard Tenant", "Tenant Dashboard")}
-                </Link>
-              )}
               <div className="h-px bg-border/40 my-1 mx-2" />
               <button onClick={() => { setOpen(false); logoutMutation.mutate(undefined as void); }}
                 className="flex items-center gap-2.5 px-3 py-2.5 text-sm font-medium rounded-xl hover:bg-red-50 dark:hover:bg-red-950/30 w-full text-left text-red-500">
@@ -142,7 +136,6 @@ export default function CustomerLayout({ children }: { children: ReactNode }) {
     { href: "/",            label: t("Beranda",      "Home")     },
     { href: "/facilities",  label: t("Fasilitas",    "Venues")   },
     { href: "/promos",      label: t("Promo",        "Promos")   },
-    { href: "/tenant",      label: t("Sewa Tenan",   "Tenant")   },
     { href: "/contact",     label: t("Hubungi Kami", "Contact")  },
   ];
 
@@ -231,7 +224,7 @@ export default function CustomerLayout({ children }: { children: ReactNode }) {
                       <div className="text-xs text-muted-foreground">{user.email}</div>
                     </div>
                   </div>
-                  <Link href={user.role === "tenant" ? "/tenant/bookings" : "/my-bookings"} onClick={() => setIsMobileMenuOpen(false)}
+                  <Link href="/my-bookings" onClick={() => setIsMobileMenuOpen(false)}
                     className="flex items-center gap-3 px-4 py-3.5 rounded-2xl font-semibold text-[15px] text-foreground/80 hover:bg-muted/60">
                     <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center text-primary"><CalendarDays size={14} /></div>
                     {t("Booking Saya", "My Bookings")}
@@ -307,7 +300,6 @@ export default function CustomerLayout({ children }: { children: ReactNode }) {
                   { href: "/",           label: t("Beranda",          "Home")         },
                   { href: "/facilities", label: t("Daftar Fasilitas", "All Venues")   },
                   { href: "/promos",     label: t("Promo Spesial",    "Special Promos") },
-                  { href: "/tenant",     label: t("Sewa Tenan",       "Tenant Program") },
                   { href: "/contact",    label: t("Hubungi Kami",     "Contact Us")   },
                 ].map((l) => (
                   <li key={l.href}>

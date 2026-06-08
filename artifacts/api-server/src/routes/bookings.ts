@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db, bookingsTable, facilitiesTable, paymentsTable, promosTable, discountSettingsTable, apMembersTable, bookingHistoryTable, usersTable } from "@workspace/db";
-import { eq, and, sql } from "drizzle-orm";
-import { adminMiddleware, authMiddleware } from "../lib/auth";
+import { eq, and, sql, or, ilike } from "drizzle-orm";
+import { adminMiddleware, authMiddleware, verifyToken } from "../lib/auth";
 import { broadcastAvailabilityChange } from "../lib/supabase";
 import { notifyBookingCreated, notifyPaymentConfirmed, notifyBookingCancelled } from "../lib/notifications";
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
@@ -114,6 +114,16 @@ router.post("/bookings", async (req, res) => {
   try {
     const { customerName, customerEmail, customerPhone, facilityId, bookingDate, notes, promoCode, discountAmount, customerType } = req.body;
     let { startTime, durationHours } = req.body;
+
+    // Deteksi user yang sedang login (opsional — tidak wajib)
+    let loggedInUserId: number | null = null;
+    const authHeader = req.headers.authorization;
+    if (authHeader?.startsWith("Bearer ")) {
+      const payload = verifyToken(authHeader.slice(7));
+      if (payload?.userId && payload.role === "customer") {
+        loggedInUserId = payload.userId;
+      }
+    }
     const activityType = req.body.activityType || null;
     const numberOfPeople = req.body.numberOfPeople ? Number(req.body.numberOfPeople) : null;
     const idCardNumber = String(req.body?.idCardNumber || "").trim().toUpperCase() || null;
@@ -191,6 +201,7 @@ router.post("/bookings", async (req, res) => {
 
     const [booking] = await db.insert(bookingsTable).values({
       orderNumber,
+      customerId: loggedInUserId,
       customerName,
       customerEmail,
       customerPhone,
@@ -401,12 +412,16 @@ router.post("/bookings/recurring", async (req, res) => {
 
 router.get("/bookings/my", authMiddleware, async (req, res) => {
   try {
-    const userId = (req as any).userId as number;
+    const userId = (req as any).user?.userId as number;
     const [user] = await db.select().from(usersTable).where(eq(usersTable.id, userId)).limit(1);
     if (!user) { res.status(404).json({ error: "User not found" }); return; }
 
+    // Cocokkan via customerId (booking baru) ATAU customerEmail case-insensitive (booking lama/guest)
     const bookings = await db.select().from(bookingsTable)
-      .where(eq(bookingsTable.customerEmail, user.email));
+      .where(or(
+        eq(bookingsTable.customerId, userId),
+        ilike(bookingsTable.customerEmail, user.email),
+      ));
 
     const facilities = await db.select({ id: facilitiesTable.id, name: facilitiesTable.name, category: facilitiesTable.category }).from(facilitiesTable);
     const payments = await db.select().from(paymentsTable);
@@ -519,7 +534,10 @@ router.post("/bookings/:id/check-in", adminMiddleware, async (req, res) => {
     const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, id)).limit(1);
     if (!booking) { res.status(404).json({ error: "Booking tidak ditemukan" }); return; }
     if (booking.checkedInAt) { res.status(400).json({ error: "Booking sudah check-in" }); return; }
+    if (booking.status !== "confirmed") { res.status(400).json({ error: "Check-in hanya bisa dilakukan untuk booking yang sudah dikonfirmasi" }); return; }
     const now = new Date();
+    const todayJKT = now.toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" });
+    if (booking.bookingDate !== todayJKT) { res.status(400).json({ error: "Check-in hanya bisa dilakukan pada hari H booking" }); return; }
     await db.update(bookingsTable).set({ checkedInAt: now, updatedAt: now }).where(eq(bookingsTable.id, id));
     await db.insert(bookingHistoryTable).values({
       bookingId: id,
