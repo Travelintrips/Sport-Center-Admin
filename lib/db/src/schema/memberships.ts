@@ -3,7 +3,7 @@ import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { scSchema } from "./_schema";
 
-export const membershipStatusEnum = scSchema.enum("membership_status", ["active", "expired", "cancelled"]);
+export const membershipStatusEnum = scSchema.enum("membership_status", ["pending_payment", "waiting_confirmation", "active", "expired", "cancelled"]);
 
 export const gymMembershipsTable = scSchema.table("gym_memberships", {
   id: serial("id").primaryKey(),
@@ -16,6 +16,8 @@ export const gymMembershipsTable = scSchema.table("gym_memberships", {
   totalPrice: numeric("total_price", { precision: 12, scale: 2 }).notNull(),
   status: membershipStatusEnum("status").notNull().default("active"),
   notes: text("notes"),
+  paymentMethod: text("payment_method"),
+  paymentProofUrl: text("payment_proof_url"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });

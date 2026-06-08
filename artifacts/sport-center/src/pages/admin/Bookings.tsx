@@ -3,6 +3,7 @@ import {
   useListBookings,
   useUpdateBooking,
   useUpdatePayment,
+  useCheckInBooking,
   getListBookingsQueryKey,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -44,6 +45,8 @@ import {
   Receipt,
   Plane,
   ShieldCheck,
+  RefreshCw,
+  LogIn,
 } from "lucide-react";
 import { getToken } from "@/lib/auth";
 import VerifyIdDialog from "@/components/admin/VerifyIdDialog";
@@ -354,39 +357,59 @@ function printKwitansi(booking: any, settings?: any) {
 
 /* ─── Summary Stats ─────────────────────────────────────────────── */
 
-function SummaryStats({ bookings }: { bookings: any[] }) {
+function SummaryStats({
+  bookings,
+  activeFilter,
+  onStatClick,
+}: {
+  bookings: any[];
+  activeFilter: string;
+  onStatClick: (filter: string) => void;
+}) {
   const stats = [
     {
       label: "Total Booking",
       value: bookings.length,
+      filter: "all",
       icon: CalendarCheck,
       color: "text-blue-600 dark:text-blue-400",
       bg: "bg-blue-50 dark:bg-blue-900/20",
       border: "border-blue-200/60 dark:border-blue-800/40",
+      activeBorder: "border-blue-400 dark:border-blue-500",
+      activeRing: "ring-2 ring-blue-300/60 dark:ring-blue-600/40",
     },
     {
       label: "Perlu Verifikasi",
-      value: bookings.filter((b) => b.status === "paid").length,
+      value: bookings.filter((b) => b.status === "waiting_confirmation" || b.status === "paid").length,
+      filter: "waiting_confirmation",
       icon: CreditCard,
       color: "text-amber-600 dark:text-amber-400",
       bg: "bg-amber-50 dark:bg-amber-900/20",
       border: "border-amber-200/60 dark:border-amber-800/40",
+      activeBorder: "border-amber-400 dark:border-amber-500",
+      activeRing: "ring-2 ring-amber-300/60 dark:ring-amber-600/40",
     },
     {
       label: "Selesai",
       value: bookings.filter((b) => b.status === "completed" || b.status === "confirmed").length,
+      filter: "completed",
       icon: CheckCircle2,
       color: "text-emerald-600 dark:text-emerald-400",
       bg: "bg-emerald-50 dark:bg-emerald-900/20",
       border: "border-emerald-200/60 dark:border-emerald-800/40",
+      activeBorder: "border-emerald-400 dark:border-emerald-500",
+      activeRing: "ring-2 ring-emerald-300/60 dark:ring-emerald-600/40",
     },
     {
       label: "Dibatalkan / Dikembalikan",
       value: bookings.filter((b) => b.status === "cancelled" || b.status === "refunded").length,
+      filter: "cancelled",
       icon: Ban,
       color: "text-red-600 dark:text-red-400",
       bg: "bg-red-50 dark:bg-red-900/20",
       border: "border-red-200/60 dark:border-red-800/40",
+      activeBorder: "border-red-400 dark:border-red-500",
+      activeRing: "ring-2 ring-red-300/60 dark:ring-red-600/40",
     },
   ];
 
@@ -398,21 +421,35 @@ function SummaryStats({ bookings }: { bookings: any[] }) {
     >
       {stats.map((s, i) => {
         const Icon = s.icon;
+        const isActive = activeFilter === s.filter;
         return (
-          <motion.div
+          <motion.button
             key={s.label}
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: i * 0.07 }}
-            whileHover={{ y: -1 }}
-            className={`rounded-2xl border ${s.border} ${s.bg} bg-white dark:bg-slate-900 p-4 shadow-sm`}
+            whileHover={{ y: -2 }}
+            whileTap={{ scale: 0.97 }}
+            onClick={() => onStatClick(s.filter)}
+            className={`text-left rounded-2xl border p-4 shadow-sm transition-all duration-150 w-full focus:outline-none
+              ${isActive
+                ? `${s.activeBorder} ${s.activeRing} ${s.bg}`
+                : `${s.border} bg-white dark:bg-slate-900 hover:${s.bg}`
+              }`}
           >
-            <div className={`p-2 rounded-xl ${s.bg} w-fit mb-3`}>
-              <Icon size={16} className={s.color} />
+            <div className="flex items-start justify-between mb-3">
+              <div className={`p-2 rounded-xl ${s.bg} w-fit`}>
+                <Icon size={16} className={s.color} />
+              </div>
+              {isActive && (
+                <span className={`text-xs font-semibold px-1.5 py-0.5 rounded-md ${s.bg} ${s.color}`}>
+                  aktif
+                </span>
+              )}
             </div>
             <div className={`text-3xl font-black ${s.color} mb-0.5`}>{s.value}</div>
             <div className="text-xs font-medium text-slate-500 dark:text-slate-400">{s.label}</div>
-          </motion.div>
+          </motion.button>
         );
       })}
     </motion.div>
@@ -1036,12 +1073,26 @@ export default function AdminBookings() {
     },
   });
 
+  const checkInMutation = useCheckInBooking({
+    mutation: {
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: getListBookingsQueryKey() });
+        toast({ title: "Check-in berhasil dicatat" });
+      },
+      onError: () => toast({ title: "Gagal check-in", variant: "destructive" }),
+    },
+  });
+
   const filtered = useMemo(() => {
     return bookings.filter((b: any) => {
       if (statusFilter !== "all") {
         const match =
           statusFilter === "completed"
             ? b.status === "completed" || b.status === "confirmed"
+            : statusFilter === "waiting_confirmation"
+            ? b.status === "waiting_confirmation" || b.status === "paid"
+            : statusFilter === "cancelled"
+            ? b.status === "cancelled" || b.status === "refunded"
             : b.status === statusFilter;
         if (!match) return false;
       }
@@ -1106,6 +1157,31 @@ export default function AdminBookings() {
       });
   };
 
+  const [isSyncing, setIsSyncing] = useState(false);
+  const handleSyncBizportal = async () => {
+    setIsSyncing(true);
+    try {
+      const token = getToken();
+      const res = await fetch("/api/admin/sync-bizportal", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (res.ok) {
+        toast({
+          title: "Sync ke Bizportal berhasil",
+          description: `${data.synced} dari ${data.total} booking berhasil disinkronkan.`,
+        });
+      } else {
+        throw new Error(data.error || "Sync gagal");
+      }
+    } catch (err: any) {
+      toast({ title: "Sync gagal", description: err.message, variant: "destructive" });
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   const isUpdating = updateBookingMutation.isPending || updatePaymentMutation.isPending || deletingId !== null;
   const pendingVerification = bookings.filter((b: any) => b.status === "paid").length;
 
@@ -1137,6 +1213,14 @@ export default function AdminBookings() {
             </motion.div>
           )}
           <button
+            onClick={handleSyncBizportal}
+            disabled={isSyncing}
+            className="flex items-center gap-1.5 h-9 px-3 rounded-xl border border-blue-200 dark:border-blue-700 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <RefreshCw size={13} className={isSyncing ? "animate-spin" : ""} />
+            {isSyncing ? "Syncing..." : "Sync Bizportal"}
+          </button>
+          <button
             onClick={handleExport}
             className="flex items-center gap-1.5 h-9 px-3 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
           >
@@ -1147,10 +1231,22 @@ export default function AdminBookings() {
       </motion.div>
 
       {/* Stats */}
-      {!isLoading && <SummaryStats bookings={bookings} />}
+      {!isLoading && (
+        <SummaryStats
+          bookings={bookings}
+          activeFilter={statusFilter}
+          onStatClick={(filter) => {
+            setStatusFilter(filter);
+            setTimeout(() => {
+              document.getElementById("bookings-table")?.scrollIntoView({ behavior: "smooth", block: "start" });
+            }, 80);
+          }}
+        />
+      )}
 
       {/* Table Card */}
       <motion.div
+        id="bookings-table"
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.12 }}
@@ -1196,7 +1292,7 @@ export default function AdminBookings() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-100 dark:border-slate-800">
-                  {["Order", "Customer", "Fasilitas", "Tanggal & Waktu", "Total", "Status", ""].map((h) => (
+                  {["Order", "Customer", "Fasilitas", "Tanggal & Waktu", "Durasi", "Metode", "Tgl Bayar", "Pmt Status", "Check-In", "Total", "Status", ""].map((h) => (
                     <th
                       key={h}
                       className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide whitespace-nowrap"
@@ -1257,6 +1353,76 @@ export default function AdminBookings() {
                         <div className="text-[11px] text-slate-400">
                           {b.startTime?.slice(0, 5)} – {b.endTime?.slice(0, 5)}
                         </div>
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <span className="text-xs font-medium text-slate-600 dark:text-slate-400">
+                          {b.durationHours} jam
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <span className="text-xs text-slate-600 dark:text-slate-400">
+                          {b.payment?.paymentMethod ?? (b.payment ? "Transfer Bank" : "—")}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        {b.payment?.confirmedAt ? (
+                          <div>
+                            <div className="text-xs font-medium text-slate-700 dark:text-slate-300">
+                              {new Date(b.payment.confirmedAt).toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" })}
+                            </div>
+                            <div className="text-[11px] text-slate-400">
+                              {new Date(b.payment.confirmedAt).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}
+                            </div>
+                          </div>
+                        ) : b.payment?.updatedAt ? (
+                          <span className="text-[11px] text-slate-400">
+                            {new Date(b.payment.updatedAt).toLocaleDateString("id-ID", { day: "2-digit", month: "short" })}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-slate-300 dark:text-slate-600">—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        {b.payment ? (
+                          <span className={`inline-flex items-center gap-1 text-[11px] font-semibold px-1.5 py-0.5 rounded-md ${
+                            b.payment.status === "confirmed"
+                              ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400"
+                              : b.payment.status === "rejected"
+                              ? "bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-400"
+                              : "bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400"
+                          }`}>
+                            {b.payment.status === "confirmed" ? "✓ Lunas" : b.payment.status === "rejected" ? "✗ Ditolak" : "⏳ Menunggu"}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-slate-300 dark:text-slate-600">—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        {b.checkedInAt ? (
+                          <div className="flex items-center gap-1">
+                            <span className="text-emerald-600 font-bold text-sm">✓</span>
+                            <span className="text-[11px] text-slate-400">
+                              {new Date(b.checkedInAt).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}
+                            </span>
+                          </div>
+                        ) : (b.status === "confirmed" || b.status === "completed") ? (
+                          <motion.button
+                            whileHover={{ scale: 1.05 }}
+                            whileTap={{ scale: 0.95 }}
+                            onClick={() => checkInMutation.mutate({ id: b.id })}
+                            disabled={checkInMutation.isPending && checkInMutation.variables?.id === b.id}
+                            className="flex items-center gap-1 h-6 px-2 rounded-lg text-[11px] font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 dark:bg-emerald-900/20 dark:hover:bg-emerald-900/40 dark:text-emerald-400 dark:border-emerald-800 transition-colors disabled:opacity-50"
+                          >
+                            {checkInMutation.isPending && checkInMutation.variables?.id === b.id ? (
+                              <span className="w-2.5 h-2.5 border border-emerald-500 border-t-transparent rounded-full animate-spin" />
+                            ) : (
+                              <LogIn size={10} />
+                            )}
+                            Check-in
+                          </motion.button>
+                        ) : (
+                          <span className="text-xs text-slate-300 dark:text-slate-600">—</span>
+                        )}
                       </td>
                       <td className="px-4 py-3">
                         <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
@@ -1339,7 +1505,7 @@ export default function AdminBookings() {
                 </AnimatePresence>
                 {filtered.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="py-16 text-center text-slate-400 text-sm">
+                    <td colSpan={12} className="py-16 text-center text-slate-400 text-sm">
                       <CalendarCheck size={32} className="mx-auto mb-3 opacity-30" />
                       Tidak ada booking yang ditemukan
                     </td>

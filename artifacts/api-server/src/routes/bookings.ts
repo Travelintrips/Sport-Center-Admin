@@ -5,6 +5,7 @@ import { adminMiddleware, authMiddleware } from "../lib/auth";
 import { broadcastAvailabilityChange } from "../lib/supabase";
 import { notifyBookingCreated, notifyPaymentConfirmed, notifyBookingCancelled } from "../lib/notifications";
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
+import { syncBookingToBizportal, syncStatusToBizportal } from "../lib/bizportalSync";
 
 const INACTIVE_STATUSES = ["cancelled", "expired", "rejected", "refunded"];
 
@@ -227,6 +228,9 @@ router.post("/bookings", async (req, res) => {
     });
 
     broadcastAvailabilityChange(Number(facilityId), bookingDate);
+
+    // Sync to Bizportal (non-blocking)
+    syncBookingToBizportal({ booking, facilityName: facility.name }).catch(() => {});
 
     // Send WA notification (non-blocking)
     const deadline = new Date(Date.now() + 30 * 60 * 1000);
@@ -491,12 +495,43 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
     if (status) updateData.status = status;
     if (adminNotes !== undefined) updateData.adminNotes = adminNotes;
 
+    const [beforeUpdate] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, id)).limit(1);
     await db.update(bookingsTable).set(updateData).where(eq(bookingsTable.id, id));
     const result = await getBookingWithPayment(id);
     if (!result) { res.status(404).json({ error: "Not found" }); return; }
+
+    if (status && beforeUpdate) {
+      const [payment] = await db.select().from(paymentsTable).where(eq(paymentsTable.bookingId, id)).limit(1);
+      syncStatusToBizportal(beforeUpdate.orderNumber, status, payment?.proofUrl, status === "confirmed" ? new Date() : null).catch(() => {});
+    }
+
     res.json(result);
   } catch (err) {
     req.log.error({ err }, "Update booking error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// POST /bookings/:id/check-in — tandai booking sudah check-in (admin)
+router.post("/bookings/:id/check-in", adminMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(String(req.params.id));
+    const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, id)).limit(1);
+    if (!booking) { res.status(404).json({ error: "Booking tidak ditemukan" }); return; }
+    if (booking.checkedInAt) { res.status(400).json({ error: "Booking sudah check-in" }); return; }
+    const now = new Date();
+    await db.update(bookingsTable).set({ checkedInAt: now, updatedAt: now }).where(eq(bookingsTable.id, id));
+    await db.insert(bookingHistoryTable).values({
+      bookingId: id,
+      fromStatus: booking.status,
+      toStatus: booking.status,
+      changedByName: "admin",
+      note: `Check-in pukul ${now.toLocaleTimeString("id-ID", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit" })} WIB`,
+    });
+    const result = await getBookingWithPayment(id);
+    res.json(result);
+  } catch (err) {
+    req.log.error({ err }, "Check-in error");
     res.status(500).json({ error: "Internal server error" });
   }
 });

@@ -44,6 +44,12 @@ export interface Booking {
   adminNotes?: string | null;
   /** @nullable */
   whatsappMessage?: string | null;
+  /** @nullable */
+  checkedInAt?: string | null;
+  /** @nullable */
+  completedAt?: string | null;
+  /** @nullable */
+  paymentDeadline?: string | null;
   payment?: Payment | null;
   createdAt?: string;
 }

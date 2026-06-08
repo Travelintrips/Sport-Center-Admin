@@ -159,10 +159,15 @@ export interface Payment {
   amount: number;
   /** @nullable */
   proofUrl?: string | null;
+  /** @nullable */
+  paymentMethod?: string | null;
   status: PaymentStatus;
+  /** @nullable */
+  confirmedAt?: string | null;
   /** @nullable */
   notes?: string | null;
   createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface Booking {
@@ -199,6 +204,12 @@ export interface Booking {
   adminNotes?: string | null;
   /** @nullable */
   whatsappMessage?: string | null;
+  /** @nullable */
+  checkedInAt?: string | null;
+  /** @nullable */
+  completedAt?: string | null;
+  /** @nullable */
+  paymentDeadline?: string | null;
   payment?: Payment | null;
   createdAt?: string;
 }
@@ -628,6 +639,8 @@ export type GymMembershipStatus = typeof GymMembershipStatus[keyof typeof GymMem
 
 
 export const GymMembershipStatus = {
+  pending_payment: 'pending_payment',
+  waiting_confirmation: 'waiting_confirmation',
   active: 'active',
   expired: 'expired',
   cancelled: 'cancelled',
@@ -645,6 +658,10 @@ export interface GymMembership {
   status: GymMembershipStatus;
   /** @nullable */
   notes?: string | null;
+  /** @nullable */
+  paymentMethod?: string | null;
+  /** @nullable */
+  paymentProofUrl?: string | null;
   createdAt?: string;
 }
 
@@ -662,6 +679,8 @@ export type GymMembershipUpdateStatus = typeof GymMembershipUpdateStatus[keyof t
 
 
 export const GymMembershipUpdateStatus = {
+  pending_payment: 'pending_payment',
+  waiting_confirmation: 'waiting_confirmation',
   active: 'active',
   expired: 'expired',
   cancelled: 'cancelled',
@@ -670,6 +689,19 @@ export const GymMembershipUpdateStatus = {
 export interface GymMembershipUpdate {
   status?: GymMembershipUpdateStatus;
   notes?: string;
+}
+
+export type MembershipPaymentProofInputPaymentMethod = typeof MembershipPaymentProofInputPaymentMethod[keyof typeof MembershipPaymentProofInputPaymentMethod];
+
+
+export const MembershipPaymentProofInputPaymentMethod = {
+  transfer: 'transfer',
+  qris: 'qris',
+} as const;
+
+export interface MembershipPaymentProofInput {
+  paymentMethod: MembershipPaymentProofInputPaymentMethod;
+  paymentProofUrl: string;
 }
 
 export interface UploadUrlRequest {

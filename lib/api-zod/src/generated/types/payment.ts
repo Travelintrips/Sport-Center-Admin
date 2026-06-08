@@ -13,8 +13,13 @@ export interface Payment {
   amount: number;
   /** @nullable */
   proofUrl?: string | null;
+  /** @nullable */
+  paymentMethod?: string | null;
   status: PaymentStatus;
+  /** @nullable */
+  confirmedAt?: string | null;
   /** @nullable */
   notes?: string | null;
   createdAt?: string;
+  updatedAt?: string;
 }

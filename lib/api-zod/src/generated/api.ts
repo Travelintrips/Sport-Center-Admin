@@ -267,14 +267,20 @@ export const ListBookingsResponseItem = zod.object({
   "notes": zod.string().nullish(),
   "adminNotes": zod.string().nullish(),
   "whatsappMessage": zod.string().nullish(),
+  "checkedInAt": zod.string().nullish(),
+  "completedAt": zod.string().nullish(),
+  "paymentDeadline": zod.string().nullish(),
   "payment": zod.object({
   "id": zod.number(),
   "bookingId": zod.number(),
   "amount": zod.number(),
   "proofUrl": zod.string().nullish(),
+  "paymentMethod": zod.string().nullish(),
   "status": zod.enum(['pending', 'confirmed', 'rejected']),
+  "confirmedAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
-  "createdAt": zod.string().optional()
+  "createdAt": zod.string().optional(),
+  "updatedAt": zod.string().optional()
 }).nullish(),
   "createdAt": zod.string().optional()
 })
@@ -378,14 +384,20 @@ export const GetBookingResponse = zod.object({
   "notes": zod.string().nullish(),
   "adminNotes": zod.string().nullish(),
   "whatsappMessage": zod.string().nullish(),
+  "checkedInAt": zod.string().nullish(),
+  "completedAt": zod.string().nullish(),
+  "paymentDeadline": zod.string().nullish(),
   "payment": zod.object({
   "id": zod.number(),
   "bookingId": zod.number(),
   "amount": zod.number(),
   "proofUrl": zod.string().nullish(),
+  "paymentMethod": zod.string().nullish(),
   "status": zod.enum(['pending', 'confirmed', 'rejected']),
+  "confirmedAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
-  "createdAt": zod.string().optional()
+  "createdAt": zod.string().optional(),
+  "updatedAt": zod.string().optional()
 }).nullish(),
   "createdAt": zod.string().optional()
 })
@@ -429,14 +441,20 @@ export const UpdateBookingResponse = zod.object({
   "notes": zod.string().nullish(),
   "adminNotes": zod.string().nullish(),
   "whatsappMessage": zod.string().nullish(),
+  "checkedInAt": zod.string().nullish(),
+  "completedAt": zod.string().nullish(),
+  "paymentDeadline": zod.string().nullish(),
   "payment": zod.object({
   "id": zod.number(),
   "bookingId": zod.number(),
   "amount": zod.number(),
   "proofUrl": zod.string().nullish(),
+  "paymentMethod": zod.string().nullish(),
   "status": zod.enum(['pending', 'confirmed', 'rejected']),
+  "confirmedAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
-  "createdAt": zod.string().optional()
+  "createdAt": zod.string().optional(),
+  "updatedAt": zod.string().optional()
 }).nullish(),
   "createdAt": zod.string().optional()
 })
@@ -475,14 +493,20 @@ export const GetBookingByOrderResponse = zod.object({
   "notes": zod.string().nullish(),
   "adminNotes": zod.string().nullish(),
   "whatsappMessage": zod.string().nullish(),
+  "checkedInAt": zod.string().nullish(),
+  "completedAt": zod.string().nullish(),
+  "paymentDeadline": zod.string().nullish(),
   "payment": zod.object({
   "id": zod.number(),
   "bookingId": zod.number(),
   "amount": zod.number(),
   "proofUrl": zod.string().nullish(),
+  "paymentMethod": zod.string().nullish(),
   "status": zod.enum(['pending', 'confirmed', 'rejected']),
+  "confirmedAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
-  "createdAt": zod.string().optional()
+  "createdAt": zod.string().optional(),
+  "updatedAt": zod.string().optional()
 }).nullish(),
   "createdAt": zod.string().optional()
 })
@@ -500,9 +524,12 @@ export const ListPaymentsResponseItem = zod.object({
   "bookingId": zod.number(),
   "amount": zod.number(),
   "proofUrl": zod.string().nullish(),
+  "paymentMethod": zod.string().nullish(),
   "status": zod.enum(['pending', 'confirmed', 'rejected']),
+  "confirmedAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
-  "createdAt": zod.string().optional()
+  "createdAt": zod.string().optional(),
+  "updatedAt": zod.string().optional()
 })
 export const ListPaymentsResponse = zod.array(ListPaymentsResponseItem)
 
@@ -535,9 +562,12 @@ export const UpdatePaymentResponse = zod.object({
   "bookingId": zod.number(),
   "amount": zod.number(),
   "proofUrl": zod.string().nullish(),
+  "paymentMethod": zod.string().nullish(),
   "status": zod.enum(['pending', 'confirmed', 'rejected']),
+  "confirmedAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
-  "createdAt": zod.string().optional()
+  "createdAt": zod.string().optional(),
+  "updatedAt": zod.string().optional()
 })
 
 
@@ -746,14 +776,20 @@ export const GetDashboardResponse = zod.object({
   "notes": zod.string().nullish(),
   "adminNotes": zod.string().nullish(),
   "whatsappMessage": zod.string().nullish(),
+  "checkedInAt": zod.string().nullish(),
+  "completedAt": zod.string().nullish(),
+  "paymentDeadline": zod.string().nullish(),
   "payment": zod.object({
   "id": zod.number(),
   "bookingId": zod.number(),
   "amount": zod.number(),
   "proofUrl": zod.string().nullish(),
+  "paymentMethod": zod.string().nullish(),
   "status": zod.enum(['pending', 'confirmed', 'rejected']),
+  "confirmedAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
-  "createdAt": zod.string().optional()
+  "createdAt": zod.string().optional(),
+  "updatedAt": zod.string().optional()
 }).nullish(),
   "createdAt": zod.string().optional()
 })),
@@ -822,8 +858,10 @@ export const ListMembershipsResponseItem = zod.object({
   "endDate": zod.string(),
   "months": zod.number(),
   "totalPrice": zod.number(),
-  "status": zod.enum(['active', 'expired', 'cancelled']),
+  "status": zod.enum(['pending_payment', 'waiting_confirmation', 'active', 'expired', 'cancelled']),
   "notes": zod.string().nullish(),
+  "paymentMethod": zod.string().nullish(),
+  "paymentProofUrl": zod.string().nullish(),
   "createdAt": zod.string().optional()
 })
 export const ListMembershipsResponse = zod.array(ListMembershipsResponseItem)
@@ -846,6 +884,35 @@ export const CreateMembershipBody = zod.object({
 
 
 /**
+ * @summary Submit payment proof for a membership
+ */
+export const SubmitMembershipPaymentProofParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const SubmitMembershipPaymentProofBody = zod.object({
+  "paymentMethod": zod.enum(['transfer', 'qris']),
+  "paymentProofUrl": zod.string()
+})
+
+export const SubmitMembershipPaymentProofResponse = zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "email": zod.string(),
+  "phone": zod.string(),
+  "startDate": zod.string(),
+  "endDate": zod.string(),
+  "months": zod.number(),
+  "totalPrice": zod.number(),
+  "status": zod.enum(['pending_payment', 'waiting_confirmation', 'active', 'expired', 'cancelled']),
+  "notes": zod.string().nullish(),
+  "paymentMethod": zod.string().nullish(),
+  "paymentProofUrl": zod.string().nullish(),
+  "createdAt": zod.string().optional()
+})
+
+
+/**
  * @summary Get membership detail
  */
 export const GetMembershipParams = zod.object({
@@ -861,8 +928,10 @@ export const GetMembershipResponse = zod.object({
   "endDate": zod.string(),
   "months": zod.number(),
   "totalPrice": zod.number(),
-  "status": zod.enum(['active', 'expired', 'cancelled']),
+  "status": zod.enum(['pending_payment', 'waiting_confirmation', 'active', 'expired', 'cancelled']),
   "notes": zod.string().nullish(),
+  "paymentMethod": zod.string().nullish(),
+  "paymentProofUrl": zod.string().nullish(),
   "createdAt": zod.string().optional()
 })
 
@@ -875,7 +944,7 @@ export const UpdateMembershipParams = zod.object({
 })
 
 export const UpdateMembershipBody = zod.object({
-  "status": zod.enum(['active', 'expired', 'cancelled']).optional(),
+  "status": zod.enum(['pending_payment', 'waiting_confirmation', 'active', 'expired', 'cancelled']).optional(),
   "notes": zod.string().optional()
 })
 
@@ -888,8 +957,10 @@ export const UpdateMembershipResponse = zod.object({
   "endDate": zod.string(),
   "months": zod.number(),
   "totalPrice": zod.number(),
-  "status": zod.enum(['active', 'expired', 'cancelled']),
+  "status": zod.enum(['pending_payment', 'waiting_confirmation', 'active', 'expired', 'cancelled']),
   "notes": zod.string().nullish(),
+  "paymentMethod": zod.string().nullish(),
+  "paymentProofUrl": zod.string().nullish(),
   "createdAt": zod.string().optional()
 })
 
@@ -1132,6 +1203,58 @@ export const GetReviewsSummaryResponse = zod.array(GetReviewsSummaryResponseItem
 
 
 /**
+ * @summary Mark booking as checked-in (admin)
+ */
+export const CheckInBookingParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const CheckInBookingResponse = zod.object({
+  "id": zod.number(),
+  "orderNumber": zod.string(),
+  "customerId": zod.number().nullish(),
+  "customerName": zod.string(),
+  "customerEmail": zod.string(),
+  "customerPhone": zod.string(),
+  "facilityId": zod.number(),
+  "facilityName": zod.string(),
+  "facilityCategory": zod.string().optional(),
+  "bookingDate": zod.string(),
+  "startTime": zod.string(),
+  "endTime": zod.string(),
+  "durationHours": zod.number(),
+  "totalPrice": zod.number(),
+  "status": zod.enum(['pending_payment', 'paid', 'confirmed', 'cancelled', 'completed', 'refunded']),
+  "customerType": zod.enum(['umum', 'angkasa_pura']).optional(),
+  "idCardNumber": zod.string().nullish(),
+  "verificationStatus": zod.enum(['not_required', 'pending', 'verified', 'rejected']).optional(),
+  "basePrice": zod.number().nullish(),
+  "apDiscountAmount": zod.number().optional(),
+  "activityType": zod.string().nullish(),
+  "numberOfPeople": zod.number().nullish(),
+  "notes": zod.string().nullish(),
+  "adminNotes": zod.string().nullish(),
+  "whatsappMessage": zod.string().nullish(),
+  "checkedInAt": zod.string().nullish(),
+  "completedAt": zod.string().nullish(),
+  "paymentDeadline": zod.string().nullish(),
+  "payment": zod.object({
+  "id": zod.number(),
+  "bookingId": zod.number(),
+  "amount": zod.number(),
+  "proofUrl": zod.string().nullish(),
+  "paymentMethod": zod.string().nullish(),
+  "status": zod.enum(['pending', 'confirmed', 'rejected']),
+  "confirmedAt": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "createdAt": zod.string().optional(),
+  "updatedAt": zod.string().optional()
+}).nullish(),
+  "createdAt": zod.string().optional()
+})
+
+
+/**
  * @summary Verify Angkasa Pura ID card and apply discount (admin)
  */
 export const VerifyBookingParams = zod.object({
@@ -1177,14 +1300,20 @@ export const VerifyBookingResponse = zod.object({
   "notes": zod.string().nullish(),
   "adminNotes": zod.string().nullish(),
   "whatsappMessage": zod.string().nullish(),
+  "checkedInAt": zod.string().nullish(),
+  "completedAt": zod.string().nullish(),
+  "paymentDeadline": zod.string().nullish(),
   "payment": zod.object({
   "id": zod.number(),
   "bookingId": zod.number(),
   "amount": zod.number(),
   "proofUrl": zod.string().nullish(),
+  "paymentMethod": zod.string().nullish(),
   "status": zod.enum(['pending', 'confirmed', 'rejected']),
+  "confirmedAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
-  "createdAt": zod.string().optional()
+  "createdAt": zod.string().optional(),
+  "updatedAt": zod.string().optional()
 }).nullish(),
   "createdAt": zod.string().optional()
 }).nullish()

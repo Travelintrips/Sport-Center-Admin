@@ -8,6 +8,7 @@ import fs from "fs";
 import { randomUUID } from "crypto";
 import { notifyPaymentConfirmed, notifyPaymentProofUploaded } from "../lib/notifications";
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
+import { syncStatusToBizportal } from "../lib/bizportalSync";
 
 const router = Router();
 
@@ -88,6 +89,7 @@ router.post("/payments", async (req, res) => {
 
       const [updated] = await db.select().from(paymentsTable)
         .where(eq(paymentsTable.bookingId, Number(bookingId))).limit(1);
+      if (booking) syncStatusToBizportal(booking.orderNumber, "waiting_confirmation", proofUrl).catch(() => {});
       res.status(201).json({ ...updated, amount: Number(updated.amount) });
       return;
     }
@@ -115,6 +117,7 @@ router.post("/payments", async (req, res) => {
         bookingDate: booking.bookingDate, startTime: booking.startTime, endTime: booking.endTime,
         totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
       });
+      syncStatusToBizportal(booking.orderNumber, "waiting_confirmation", proofUrl).catch(() => {});
     }
 
     res.status(201).json({ ...payment, amount: Number(payment.amount) });
@@ -132,6 +135,7 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
 
     const updateData: Record<string, unknown> = {};
     if (status) updateData.status = status;
+    if (status === "confirmed") updateData.confirmedAt = new Date();
     if (notes !== undefined) updateData.notes = notes;
     await db.update(paymentsTable).set(updateData).where(eq(paymentsTable.id, id));
 
@@ -163,6 +167,7 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
           bookingDate: booking.bookingDate, startTime: booking.startTime, endTime: booking.endTime,
           totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
         });
+        syncStatusToBizportal(booking.orderNumber, "confirmed", payment.proofUrl, new Date()).catch(() => {});
       }
     } else if (status === "rejected") {
       const prevStatus = booking?.status ?? "waiting_confirmation";
@@ -177,6 +182,7 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
           changedByName: userInfo.userName || "admin",
           note: `Pembayaran ditolak: ${notes ?? ""}`,
         });
+        syncStatusToBizportal(booking.orderNumber, "pending_payment").catch(() => {});
       }
     }
 

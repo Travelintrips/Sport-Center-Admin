@@ -53,6 +53,8 @@ export * from './listMembershipsStatus';
 export * from './listPaymentsParams';
 export * from './listPromosParams';
 export * from './loginInput';
+export * from './membershipPaymentProofInput';
+export * from './membershipPaymentProofInputPaymentMethod';
 export * from './monthRevenue';
 export * from './myBookingItem';
 export * from './payment';

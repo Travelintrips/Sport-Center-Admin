@@ -6,6 +6,8 @@ import {
   useCreateBooking,
   useCheckRecurringBooking,
   useCreateRecurringBooking,
+  useGetMe,
+  getGetMeQueryKey,
 } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -58,10 +60,25 @@ export default function Booking() {
     query: { enabled: !!facilityId, queryKey: getGetFacilityQueryKey(facilityId) },
   });
 
+  // --- Auth user ---
+  const { data: currentUser, isLoading: isLoadingUser } = useGetMe({
+    query: { retry: false, queryKey: getGetMeQueryKey(), staleTime: 60_000 },
+  });
+  const isLoggedIn = !!currentUser && currentUser.role !== "admin";
+
   // --- Customer form ---
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
+
+  // Auto-fill from logged-in user
+  useEffect(() => {
+    if (isLoggedIn && currentUser) {
+      if (currentUser.name) setName(currentUser.name);
+      if (currentUser.email) setEmail(currentUser.email);
+      if ((currentUser as any).phone) setPhone((currentUser as any).phone);
+    }
+  }, [isLoggedIn, currentUser]);
   const [notes, setNotes] = useState("");
   const [numberOfPeople, setNumberOfPeople] = useState<string>("1");
 
@@ -194,6 +211,18 @@ export default function Booking() {
     }
   }, [search, facilityId, date, startTime, isWalkIn, setLocation, toast]);
 
+  // Redirect to login if not authenticated
+  useEffect(() => {
+    if (!isLoadingUser && !currentUser) {
+      toast({
+        title: t("Login diperlukan", "Login required"),
+        description: t("Silakan login terlebih dahulu untuk melanjutkan booking.", "Please log in first to continue booking."),
+        variant: "destructive",
+      });
+      setLocation(`/login?redirect=/booking${search ? "?" + search : ""}`);
+    }
+  }, [isLoadingUser, currentUser, setLocation, toast, search]);
+
   // --- Validate coupon ---
   const validateCoupon = async () => {
     if (!couponInput.trim()) return;
@@ -320,7 +349,7 @@ export default function Booking() {
 
   const totalPrice = facility ? facility.pricePerHour * duration : 0;
 
-  if (isLoadingFacility) {
+  if (isLoadingFacility || isLoadingUser) {
     return (
       <div className="container py-20 flex justify-center">
         <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
@@ -404,14 +433,37 @@ export default function Booking() {
             </CardHeader>
             <form onSubmit={handleSubmit} id="booking-form">
               <CardContent className="space-y-4">
+                {isLoggedIn && (
+                  <div className="flex items-center gap-2 text-xs text-primary bg-primary/8 border border-primary/20 rounded-lg px-3 py-2">
+                    <ShieldCheck size={13} className="shrink-0" />
+                    <span>{t("Data diisi otomatis dari akun kamu. Nama dan email tidak dapat diubah.", "Data auto-filled from your account. Name and email cannot be changed.")}</span>
+                  </div>
+                )}
                 <div className="space-y-2">
                   <Label htmlFor="name">{t("Nama Lengkap", "Full Name")} <span className="text-destructive">*</span></Label>
-                  <Input id="name" required value={name} onChange={e => setName(e.target.value)} placeholder="John Doe" />
+                  <Input
+                    id="name"
+                    required
+                    value={name}
+                    onChange={e => !isLoggedIn && setName(e.target.value)}
+                    placeholder={t("Nama lengkap", "Full name")}
+                    readOnly={isLoggedIn}
+                    className={isLoggedIn ? "bg-muted/50 cursor-not-allowed text-foreground font-medium" : ""}
+                  />
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="email">{t("Alamat Email", "Email Address")} <span className="text-destructive">*</span></Label>
-                    <Input id="email" type="email" required value={email} onChange={e => setEmail(e.target.value)} placeholder="john@example.com" />
+                    <Input
+                      id="email"
+                      type="email"
+                      required
+                      value={email}
+                      onChange={e => !isLoggedIn && setEmail(e.target.value)}
+                      placeholder={t("email@kamu.com", "your@email.com")}
+                      readOnly={isLoggedIn}
+                      className={isLoggedIn ? "bg-muted/50 cursor-not-allowed text-foreground" : ""}
+                    />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="phone">{t("No. WhatsApp", "WhatsApp No.")} <span className="text-destructive">*</span></Label>

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useLocation } from "wouter";
+import { Link, useLocation, useSearch } from "wouter";
 import { useLogin } from "@workspace/api-client-react";
 import { setToken } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
@@ -12,17 +12,22 @@ import { LogIn, Eye, EyeOff } from "lucide-react";
 
 export default function Login() {
   const [, setLocation] = useLocation();
+  const search = useSearch();
   const { toast } = useToast();
   const { t } = useLang();
   const [form, setForm] = useState({ email: "", password: "" });
   const [showPw, setShowPw] = useState(false);
+
+  const redirectTo = new URLSearchParams(search).get("redirect");
 
   const loginMutation = useLogin({
     mutation: {
       onSuccess: (data) => {
         setToken(data.token);
         toast({ title: t("Selamat datang kembali!", "Welcome back!"), description: `${t("Halo", "Hello")}, ${data.user.name}` });
-        if (data.user.role === "tenant") {
+        if (redirectTo) {
+          setLocation(redirectTo);
+        } else if (data.user.role === "tenant") {
           setLocation("/tenant/dashboard");
         } else {
           setLocation("/my-bookings");
