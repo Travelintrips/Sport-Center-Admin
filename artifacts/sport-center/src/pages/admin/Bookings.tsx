@@ -355,39 +355,59 @@ function printKwitansi(booking: any, settings?: any) {
 
 /* ─── Summary Stats ─────────────────────────────────────────────── */
 
-function SummaryStats({ bookings }: { bookings: any[] }) {
+function SummaryStats({
+  bookings,
+  activeFilter,
+  onStatClick,
+}: {
+  bookings: any[];
+  activeFilter: string;
+  onStatClick: (filter: string) => void;
+}) {
   const stats = [
     {
       label: "Total Booking",
       value: bookings.length,
+      filter: "all",
       icon: CalendarCheck,
       color: "text-blue-600 dark:text-blue-400",
       bg: "bg-blue-50 dark:bg-blue-900/20",
       border: "border-blue-200/60 dark:border-blue-800/40",
+      activeBorder: "border-blue-400 dark:border-blue-500",
+      activeRing: "ring-2 ring-blue-300/60 dark:ring-blue-600/40",
     },
     {
       label: "Perlu Verifikasi",
-      value: bookings.filter((b) => b.status === "paid").length,
+      value: bookings.filter((b) => b.status === "waiting_confirmation" || b.status === "paid").length,
+      filter: "waiting_confirmation",
       icon: CreditCard,
       color: "text-amber-600 dark:text-amber-400",
       bg: "bg-amber-50 dark:bg-amber-900/20",
       border: "border-amber-200/60 dark:border-amber-800/40",
+      activeBorder: "border-amber-400 dark:border-amber-500",
+      activeRing: "ring-2 ring-amber-300/60 dark:ring-amber-600/40",
     },
     {
       label: "Completed",
       value: bookings.filter((b) => b.status === "completed" || b.status === "confirmed").length,
+      filter: "completed",
       icon: CheckCircle2,
       color: "text-emerald-600 dark:text-emerald-400",
       bg: "bg-emerald-50 dark:bg-emerald-900/20",
       border: "border-emerald-200/60 dark:border-emerald-800/40",
+      activeBorder: "border-emerald-400 dark:border-emerald-500",
+      activeRing: "ring-2 ring-emerald-300/60 dark:ring-emerald-600/40",
     },
     {
       label: "Cancelled / Refunded",
       value: bookings.filter((b) => b.status === "cancelled" || b.status === "refunded").length,
+      filter: "cancelled",
       icon: Ban,
       color: "text-red-600 dark:text-red-400",
       bg: "bg-red-50 dark:bg-red-900/20",
       border: "border-red-200/60 dark:border-red-800/40",
+      activeBorder: "border-red-400 dark:border-red-500",
+      activeRing: "ring-2 ring-red-300/60 dark:ring-red-600/40",
     },
   ];
 
@@ -399,21 +419,35 @@ function SummaryStats({ bookings }: { bookings: any[] }) {
     >
       {stats.map((s, i) => {
         const Icon = s.icon;
+        const isActive = activeFilter === s.filter;
         return (
-          <motion.div
+          <motion.button
             key={s.label}
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: i * 0.07 }}
-            whileHover={{ y: -1 }}
-            className={`rounded-2xl border ${s.border} ${s.bg} bg-white dark:bg-slate-900 p-4 shadow-sm`}
+            whileHover={{ y: -2 }}
+            whileTap={{ scale: 0.97 }}
+            onClick={() => onStatClick(s.filter)}
+            className={`text-left rounded-2xl border p-4 shadow-sm transition-all duration-150 w-full focus:outline-none
+              ${isActive
+                ? `${s.activeBorder} ${s.activeRing} ${s.bg}`
+                : `${s.border} bg-white dark:bg-slate-900 hover:${s.bg}`
+              }`}
           >
-            <div className={`p-2 rounded-xl ${s.bg} w-fit mb-3`}>
-              <Icon size={16} className={s.color} />
+            <div className="flex items-start justify-between mb-3">
+              <div className={`p-2 rounded-xl ${s.bg} w-fit`}>
+                <Icon size={16} className={s.color} />
+              </div>
+              {isActive && (
+                <span className={`text-xs font-semibold px-1.5 py-0.5 rounded-md ${s.bg} ${s.color}`}>
+                  aktif
+                </span>
+              )}
             </div>
             <div className={`text-3xl font-black ${s.color} mb-0.5`}>{s.value}</div>
             <div className="text-xs font-medium text-slate-500 dark:text-slate-400">{s.label}</div>
-          </motion.div>
+          </motion.button>
         );
       })}
     </motion.div>
@@ -1043,6 +1077,10 @@ export default function AdminBookings() {
         const match =
           statusFilter === "completed"
             ? b.status === "completed" || b.status === "confirmed"
+            : statusFilter === "waiting_confirmation"
+            ? b.status === "waiting_confirmation" || b.status === "paid"
+            : statusFilter === "cancelled"
+            ? b.status === "cancelled" || b.status === "refunded"
             : b.status === statusFilter;
         if (!match) return false;
       }
@@ -1181,10 +1219,22 @@ export default function AdminBookings() {
       </motion.div>
 
       {/* Stats */}
-      {!isLoading && <SummaryStats bookings={bookings} />}
+      {!isLoading && (
+        <SummaryStats
+          bookings={bookings}
+          activeFilter={statusFilter}
+          onStatClick={(filter) => {
+            setStatusFilter(filter);
+            setTimeout(() => {
+              document.getElementById("bookings-table")?.scrollIntoView({ behavior: "smooth", block: "start" });
+            }, 80);
+          }}
+        />
+      )}
 
       {/* Table Card */}
       <motion.div
+        id="bookings-table"
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.12 }}
