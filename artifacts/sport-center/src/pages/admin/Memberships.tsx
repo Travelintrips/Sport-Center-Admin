@@ -32,6 +32,8 @@ export default function AdminMemberships() {
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [viewMember, setViewMember] = useState<any>(null);
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+  const [imgError, setImgError] = useState(false);
 
   const { data: memberships, isLoading } = useListMemberships({});
 
@@ -69,6 +71,11 @@ export default function AdminMemberships() {
 
   function handleUpdateStatus(id: number, status: string) {
     updateMutation.mutate({ id, data: { status: status as any } });
+  }
+
+  function openMember(m: any) {
+    setViewMember(m);
+    setImgError(false);
   }
 
   return (
@@ -194,7 +201,7 @@ export default function AdminMemberships() {
                   </td>
                   <td className="px-4 py-4">
                     <div className="flex items-center justify-end gap-1">
-                      <Button size="sm" variant="ghost" onClick={() => setViewMember(m)}>
+                      <Button size="sm" variant="ghost" onClick={() => openMember(m)}>
                         Detail
                       </Button>
                       <Button
@@ -258,16 +265,39 @@ export default function AdminMemberships() {
                     <ImageIcon size={14} />
                     Bukti Pembayaran
                   </div>
-                  <img
-                    src={viewMember.paymentProofUrl}
-                    alt="Bukti Pembayaran"
-                    className="w-full max-h-64 object-contain rounded-xl border border-border cursor-pointer"
-                    onClick={() => window.open(viewMember.paymentProofUrl, "_blank")}
-                  />
-                  <Button variant="outline" size="sm" className="w-full gap-2" onClick={() => window.open(viewMember.paymentProofUrl, "_blank")}>
-                    <ExternalLink size={14} />
-                    Buka Gambar
-                  </Button>
+                  {imgError ? (
+                    <div className="w-full rounded-xl border border-border bg-muted/40 flex flex-col items-center justify-center py-8 gap-2 text-muted-foreground text-sm">
+                      <ImageIcon size={28} className="opacity-40" />
+                      <span>Gambar tidak dapat dimuat</span>
+                      <a
+                        href={viewMember.paymentProofUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-primary underline text-xs"
+                      >
+                        Coba buka langsung
+                      </a>
+                    </div>
+                  ) : (
+                    <img
+                      src={viewMember.paymentProofUrl}
+                      alt="Bukti Pembayaran"
+                      className="w-full max-h-64 object-contain rounded-xl border border-border cursor-zoom-in"
+                      onError={() => setImgError(true)}
+                      onClick={() => setLightboxUrl(viewMember.paymentProofUrl)}
+                    />
+                  )}
+                  {!imgError && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="w-full gap-2"
+                      onClick={() => setLightboxUrl(viewMember.paymentProofUrl)}
+                    >
+                      <ExternalLink size={14} />
+                      Lihat Penuh
+                    </Button>
+                  )}
                 </div>
               )}
 
@@ -326,6 +356,26 @@ export default function AdminMemberships() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {lightboxUrl && (
+        <div
+          className="fixed inset-0 z-[100] bg-black/90 flex items-center justify-center p-4"
+          onClick={() => setLightboxUrl(null)}
+        >
+          <button
+            className="absolute top-4 right-4 text-white bg-white/20 hover:bg-white/30 rounded-full p-2 transition-colors"
+            onClick={() => setLightboxUrl(null)}
+          >
+            <XCircle size={24} />
+          </button>
+          <img
+            src={lightboxUrl}
+            alt="Bukti Pembayaran"
+            className="max-w-full max-h-full object-contain rounded-xl"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
     </div>
   );
 }
