@@ -57,20 +57,14 @@ function proofImageUrl(rawUrl: string): string {
   if (!rawUrl) return rawUrl;
   // External URL — use as-is
   if (rawUrl.startsWith("http")) return rawUrl;
-  // Normalize: strip any leading slashes then work with clean path
-  const clean = rawUrl.replace(/^\/+/, "");
-  // Already a proper api/uploads/... or api/storage/... path (with or without leading slash)
-  if (clean.startsWith("api/uploads/")) return `/${clean}`;
-  // /api/storage/objects/* → /api/uploads/*
-  if (clean.startsWith("api/storage/objects/")) {
-    return `/api/uploads/${clean.replace(/^api\/storage\/objects\//, "")}`;
-  }
-  // Old Supabase-style objects/... → /api/uploads/...
-  if (clean.startsWith("objects/")) {
-    return `/api/uploads/${clean.replace(/^objects\//, "")}`;
-  }
-  // Bare filename or relative path — assume it lives in uploads
-  return `/api/uploads/${clean}`;
+  // Find /api/uploads/ anywhere (handles malformed /api/storage/objects//api/uploads/... paths)
+  const uploadsIdx = rawUrl.lastIndexOf("/api/uploads/");
+  if (uploadsIdx !== -1) return rawUrl.slice(uploadsIdx);
+  // No leading slash variant: api/uploads/proofs/...
+  if (rawUrl.startsWith("api/uploads/")) return `/${rawUrl}`;
+  // Bare filename — assume proofs/ subdir
+  const bare = rawUrl.replace(/^\/+/, "");
+  return `/api/uploads/proofs/${bare}`;
 }
 
 /* ─── Status Config ────────────────────────────────────────────── */
