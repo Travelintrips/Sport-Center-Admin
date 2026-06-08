@@ -80,7 +80,7 @@ PRIVATE_OBJECT_DIR = "/replit-objstore-e357cc66-19c3-4d73-9ca9-3069d78355d1/priv
 PUBLIC_OBJECT_SEARCH_PATHS = "/replit-objstore-e357cc66-19c3-4d73-9ca9-3069d78355d1/public"
 SUPABASE_PG_URL = "postgresql://postgres.nzdweipzckfszczzqtuw:%24%23Admin12345%40%24@aws-1-ap-southeast-2.pooler.supabase.com:6543/postgres"
 SUPABASE_STORAGE_BUCKET = "https://nzdweipzckfszczzqtuw.storage.supabase.co/storage/v1/s3"
-SUPABASE_URL = "nzdweipzckfszczzqtuw"
+SUPABASE_URL = "https://nzdweipzckfszczzqtuw.supabase.co"
 SUPABASE_URL_DEV = "https://xssrfshdrtdfupgqwfdw.supabase.co"
 VITE_SUPABASE_URL = "https://nzdweipzckfszczzqtuw.supabase.co"
 SESSION_SECRET = "OgZyysezieWkipmN0MD4Y37AR4QHIkMqWg4oQ4yN1CXE86wRI0bYI/cFBPS/K+4DffPWvNSIXCJIuR5wXYPebQ=="
