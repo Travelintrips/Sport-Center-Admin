@@ -79,11 +79,6 @@ export default function MyBookings() {
     return null;
   }
 
-  if (user.role === "tenant") {
-    setLocation("/tenant/bookings");
-    return null;
-  }
-
   const active = (bookings ?? []).filter((b) => !INACTIVE.includes(b.status));
   const past   = (bookings ?? []).filter((b) =>  INACTIVE.includes(b.status));
 
