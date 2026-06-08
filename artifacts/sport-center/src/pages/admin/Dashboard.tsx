@@ -218,11 +218,6 @@ export default function AdminDashboard() {
     );
   }
 
-  const stats = [
-    { label: "Total Pemesanan", value: data?.totalBookings ?? 0, icon: CalendarDays, format: (v: number) => v.toString() },
-    { label: "Total Pendapatan", value: data?.totalRevenue ?? 0, icon: DollarSign, format: formatCurrency },
-    { label: "Pemesanan Hari Ini", value: data?.todayBookings ?? 0, icon: TrendingUp, format: (v: number) => v.toString() },
-    { label: "Menunggu Pembayaran", value: data?.pendingBookings ?? 0, icon: Clock, format: (v: number) => v.toString() },
   const stats: { id: StatId; label: string; value: number | string; icon: typeof CalendarDays; raw: number }[] = [
     {
       id: "total",
@@ -423,9 +418,6 @@ export default function AdminDashboard() {
               ))}
               {!data?.recentBookings?.length && (
                 <p className="text-sm text-muted-foreground text-center py-4">Belum ada pemesanan</p>
-                <p className="text-sm text-muted-foreground text-center py-4">
-                  No bookings yet
-                </p>
               )}
             </div>
           </CardContent>

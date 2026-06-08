@@ -38,7 +38,6 @@ const NAV_GROUPS = [
       { href: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard },
       { href: "/admin/bookings", label: "Pemesanan", icon: CalendarDays },
       { href: "/admin/calendar", label: "Kalender", icon: Calendar },
-      { href: "/admin/bookings", label: "Bookings", icon: CalendarDays },
       { href: "/admin/qr-checkin", label: "QR Check-In", icon: QrCode },
       { href: "/admin/reschedule", label: "Reschedule", icon: RefreshCw },
     ],
@@ -50,9 +49,6 @@ const NAV_GROUPS = [
       { href: "/admin/schedule", label: "Jadwal Blokir", icon: Clock },
       { href: "/admin/maintenance", label: "Pemeliharaan", icon: Wrench },
       { href: "/admin/pricing-rules", label: "Aturan Harga", icon: DollarSign },
-      { href: "/admin/schedule", label: "Kalender", icon: Calendar },
-      { href: "/admin/maintenance", label: "Maintenance", icon: Wrench },
-      { href: "/admin/pricing-rules", label: "Pricing Rules", icon: DollarSign },
     ],
   },
   {
