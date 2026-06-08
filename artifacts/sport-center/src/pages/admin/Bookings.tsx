@@ -1100,6 +1100,8 @@ export default function AdminBookings() {
 
   const [statusFilter, setStatusFilter] = useState("all");
   const [search, setSearch] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [selectedBooking, setSelectedBooking] = useState<any>(null);
   const [verifyBooking, setVerifyBooking] = useState<any>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
@@ -1153,6 +1155,8 @@ export default function AdminBookings() {
             : b.status === statusFilter;
         if (!match) return false;
       }
+      if (dateFrom && b.bookingDate < dateFrom) return false;
+      if (dateTo && b.bookingDate > dateTo) return false;
       if (search) {
         const q = search.toLowerCase();
         return (
@@ -1164,7 +1168,7 @@ export default function AdminBookings() {
       }
       return true;
     });
-  }, [bookings, statusFilter, search]);
+  }, [bookings, statusFilter, search, dateFrom, dateTo]);
 
   const handleStatusUpdate = (status: string, adminNotes?: string) => {
     if (!selectedBooking) return;
@@ -1321,7 +1325,7 @@ export default function AdminBookings() {
             />
           </div>
           <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="h-8 w-48 text-xs rounded-lg border-slate-200 dark:border-slate-700">
+            <SelectTrigger className="h-8 w-44 text-xs rounded-lg border-slate-200 dark:border-slate-700">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -1332,6 +1336,30 @@ export default function AdminBookings() {
               ))}
             </SelectContent>
           </Select>
+          <div className="flex items-center gap-1.5">
+            <CalendarDays size={13} className="text-slate-400 shrink-0" />
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+              className="h-8 px-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-1 focus:ring-primary/40"
+            />
+            <span className="text-xs text-slate-400">—</span>
+            <input
+              type="date"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+              className="h-8 px-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-1 focus:ring-primary/40"
+            />
+            {(dateFrom || dateTo) && (
+              <button
+                onClick={() => { setDateFrom(""); setDateTo(""); }}
+                className="w-5 h-5 flex items-center justify-center rounded-full text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+              >
+                <X size={11} />
+              </button>
+            )}
+          </div>
           <span className="text-xs text-slate-400 ml-auto shrink-0">
             {filtered.length} booking
           </span>
