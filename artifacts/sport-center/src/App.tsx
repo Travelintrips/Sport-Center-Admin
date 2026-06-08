@@ -25,13 +25,6 @@ import Login from "@/pages/Login";
 import Register from "@/pages/Register";
 import MyBookings from "@/pages/MyBookings";
 import Membership from "@/pages/Membership";
-import TenantLanding from "@/pages/TenantLanding";
-import TenantRegister from "@/pages/TenantRegister";
-import TenantDashboard from "@/pages/TenantDashboard";
-import TenantBookings from "@/pages/TenantBookings";
-import TenantBookingDetail from "@/pages/TenantBookingDetail";
-import TenantBookingForm from "@/pages/TenantBookingForm";
-
 // Admin Pages
 import AdminLogin from "@/pages/admin/Login";
 import AdminDashboard from "@/pages/admin/Dashboard";
@@ -141,12 +134,6 @@ function Router() {
             <Route path="/terms" component={Terms} />
             <Route path="/privacy" component={Privacy} />
             <Route path="/contact" component={Contact} />
-            <Route path="/tenant" component={TenantLanding} />
-            <Route path="/tenant/register" component={TenantRegister} />
-            <Route path="/tenant/dashboard" component={TenantDashboard} />
-            <Route path="/tenant/bookings" component={TenantBookings} />
-            <Route path="/tenant/bookings/:orderNumber" component={TenantBookingDetail} />
-            <Route path="/tenant/booking" component={TenantBookingForm} />
             <Route component={NotFound} />
           </Switch>
         </CustomerLayout>

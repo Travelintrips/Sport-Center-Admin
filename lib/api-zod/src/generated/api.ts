@@ -49,7 +49,7 @@ export const RegisterBody = zod.object({
 
 
 /**
- * @summary Get bookings for the authenticated customer
+ * @summary Get bookings for the currently logged-in customer
  */
 export const GetMyBookingsResponseItem = zod.object({
   "id": zod.number(),

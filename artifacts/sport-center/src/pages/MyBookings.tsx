@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link, useLocation } from "wouter";
 import { useGetMe, useGetMyBookings, useGetReviews, useCreateReview, useLogout, getGetMeQueryKey, getGetMyBookingsQueryKey } from "@workspace/api-client-react";
 import { removeToken } from "@/lib/auth";
@@ -66,6 +66,18 @@ export default function MyBookings() {
   const setRs = (id: number, patch: Partial<{ rating: number; comment: string; hover: number }>) =>
     setReviewState((prev) => ({ ...prev, [id]: { ...getRs(id), ...patch } }));
 
+  useEffect(() => {
+    if (!userLoading && (isError || !user)) {
+      setLocation("/login");
+    }
+  }, [userLoading, isError, user, setLocation]);
+
+  useEffect(() => {
+    if (user?.role === "tenant") {
+      setLocation("/tenant/bookings");
+    }
+  }, [user, setLocation]);
+
   if (userLoading) {
     return (
       <div className="container mx-auto px-4 py-12 max-w-3xl space-y-4">
@@ -74,15 +86,11 @@ export default function MyBookings() {
     );
   }
 
-  if (isError || !user) {
-    setLocation("/login");
-    return null;
-  }
+  if (isError || !user) return null;
 
-  if (user.role === "tenant") {
-    setLocation("/tenant/bookings");
-    return null;
-  }
+
+  if (user.role === "tenant") return null;
+
 
   const active = (bookings ?? []).filter((b) => !INACTIVE.includes(b.status));
   const past   = (bookings ?? []).filter((b) =>  INACTIVE.includes(b.status));
