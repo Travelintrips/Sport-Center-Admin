@@ -519,7 +519,10 @@ router.post("/bookings/:id/check-in", adminMiddleware, async (req, res) => {
     const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, id)).limit(1);
     if (!booking) { res.status(404).json({ error: "Booking tidak ditemukan" }); return; }
     if (booking.checkedInAt) { res.status(400).json({ error: "Booking sudah check-in" }); return; }
+    if (booking.status !== "confirmed") { res.status(400).json({ error: "Check-in hanya bisa dilakukan untuk booking yang sudah dikonfirmasi" }); return; }
     const now = new Date();
+    const todayJKT = now.toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" });
+    if (booking.bookingDate !== todayJKT) { res.status(400).json({ error: "Check-in hanya bisa dilakukan pada hari H booking" }); return; }
     await db.update(bookingsTable).set({ checkedInAt: now, updatedAt: now }).where(eq(bookingsTable.id, id));
     await db.insert(bookingHistoryTable).values({
       bookingId: id,
