@@ -35,6 +35,9 @@ const NAV_GROUPS = [
     items: [
       { href: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard },
       { href: "/admin/bookings", label: "Pemesanan", icon: CalendarDays },
+
+      { href: "/admin/bookings", label: "Bookings", icon: CalendarDays },
+
       { href: "/admin/calendar", label: "Kalender", icon: Calendar },
       { href: "/admin/qr-checkin", label: "QR Check-In", icon: QrCode },
       { href: "/admin/reschedule", label: "Reschedule", icon: RefreshCw },
