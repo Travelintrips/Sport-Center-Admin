@@ -396,11 +396,11 @@ export const getGetMyBookingsUrl = () => {
 
 
 
-  return `/api/bookings/my`
+  return `/api/my-bookings`
 }
 
 /**
- * @summary Get bookings for the authenticated customer
+ * @summary Get bookings for the currently logged-in customer
  */
 export const getMyBookings = async ( options?: RequestInit): Promise<MyBookingItem[]> => {
 
@@ -419,7 +419,7 @@ export const getMyBookings = async ( options?: RequestInit): Promise<MyBookingIt
 
 export const getGetMyBookingsQueryKey = () => {
     return [
-    `/api/bookings/my`
+    `/api/my-bookings`
     ] as const;
     }
 
@@ -447,7 +447,7 @@ export type GetMyBookingsQueryError = ErrorType<void>
 
 
 /**
- * @summary Get bookings for the authenticated customer
+ * @summary Get bookings for the currently logged-in customer
  */
 
 export function useGetMyBookings<TData = Awaited<ReturnType<typeof getMyBookings>>, TError = ErrorType<void>>(
