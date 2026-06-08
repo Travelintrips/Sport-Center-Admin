@@ -55,21 +55,22 @@ import VerifyIdDialog from "@/components/admin/VerifyIdDialog";
 
 function proofImageUrl(rawUrl: string): string {
   if (!rawUrl) return rawUrl;
-  // /api/storage/objects/* → redirect to working /api/uploads/* path
-  if (rawUrl.startsWith("/api/storage/objects/")) {
-    const withoutPrefix = rawUrl.replace(/^\/api\/storage\/objects\//, "");
-    return `/api/uploads/${withoutPrefix}`;
-  }
-  // Already a working /api/uploads/ path — serve as-is
-  if (rawUrl.startsWith("/api/")) return rawUrl;
-  // Old Supabase-style /objects/... → /api/uploads/...
-  if (rawUrl.startsWith("/objects/")) {
-    return `/api/uploads/${rawUrl.replace(/^\/objects\//, "")}`;
-  }
   // External URL — use as-is
   if (rawUrl.startsWith("http")) return rawUrl;
+  // Normalize: strip any leading slashes then work with clean path
+  const clean = rawUrl.replace(/^\/+/, "");
+  // Already a proper api/uploads/... or api/storage/... path (with or without leading slash)
+  if (clean.startsWith("api/uploads/")) return `/${clean}`;
+  // /api/storage/objects/* → /api/uploads/*
+  if (clean.startsWith("api/storage/objects/")) {
+    return `/api/uploads/${clean.replace(/^api\/storage\/objects\//, "")}`;
+  }
+  // Old Supabase-style objects/... → /api/uploads/...
+  if (clean.startsWith("objects/")) {
+    return `/api/uploads/${clean.replace(/^objects\//, "")}`;
+  }
   // Bare filename or relative path — assume it lives in uploads
-  return `/api/uploads/${rawUrl.replace(/^\/+/, "")}`;
+  return `/api/uploads/${clean}`;
 }
 
 /* ─── Status Config ────────────────────────────────────────────── */
