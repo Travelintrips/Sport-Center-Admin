@@ -82,7 +82,6 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
   const [location, setLocation] = useLocation();
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   
-  const { data: user, isLoading, isError, isFetching } = useGetMe({
   const queryClient = useQueryClient();
 
   const { data: user, isLoading, isError } = useGetMe({
@@ -104,10 +103,10 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
   });
 
   useEffect(() => {
-    if (isError && !isFetching && location !== "/admin/login") {
+    if (isError && location !== "/admin/login") {
       setLocation("/admin/login");
     }
-  }, [isError, isFetching, location, setLocation]);
+  }, [isError, location, setLocation]);
 
   const handleLogout = () => { logoutMutation.mutate(); };
 
