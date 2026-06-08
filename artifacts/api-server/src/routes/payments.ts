@@ -135,6 +135,7 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
 
     const updateData: Record<string, unknown> = {};
     if (status) updateData.status = status;
+    if (status === "confirmed") updateData.confirmedAt = new Date();
     if (notes !== undefined) updateData.notes = notes;
     await db.update(paymentsTable).set(updateData).where(eq(paymentsTable.id, id));
 

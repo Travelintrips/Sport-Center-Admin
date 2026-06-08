@@ -248,6 +248,13 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 ALTER TABLE sport_center.gym_memberships
   ADD COLUMN IF NOT EXISTS payment_method text,
   ADD COLUMN IF NOT EXISTS payment_proof_url text;
+
+-- ============================================================
+-- 14. payments: payment_method + confirmed_at
+-- ============================================================
+ALTER TABLE sport_center.payments
+  ADD COLUMN IF NOT EXISTS payment_method text DEFAULT 'Transfer Bank',
+  ADD COLUMN IF NOT EXISTS confirmed_at timestamptz;
 `;
 
 async function main() {

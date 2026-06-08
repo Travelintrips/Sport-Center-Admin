@@ -1606,6 +1606,12 @@ components:
           type: ["string", "null"]
         whatsappMessage:
           type: ["string", "null"]
+        checkedInAt:
+          type: ["string", "null"]
+        completedAt:
+          type: ["string", "null"]
+        paymentDeadline:
+          type: ["string", "null"]
         payment:
           $ref: "#/components/schemas/Payment"
           nullable: true
@@ -1752,12 +1758,18 @@ components:
           type: number
         proofUrl:
           type: ["string", "null"]
+        paymentMethod:
+          type: ["string", "null"]
         status:
           type: string
           enum: [pending, confirmed, rejected]
+        confirmedAt:
+          type: ["string", "null"]
         notes:
           type: ["string", "null"]
         createdAt:
+          type: string
+        updatedAt:
           type: string
 
     PaymentInput:

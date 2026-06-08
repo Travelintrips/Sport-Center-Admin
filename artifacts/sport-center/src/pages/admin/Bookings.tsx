@@ -1280,7 +1280,7 @@ export default function AdminBookings() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-100 dark:border-slate-800">
-                  {["Order", "Customer", "Fasilitas", "Tanggal & Waktu", "Total", "Status", ""].map((h) => (
+                  {["Order", "Customer", "Fasilitas", "Tanggal & Waktu", "Durasi", "Metode", "Tgl Bayar", "Pmt Status", "Check-In", "Total", "Status", ""].map((h) => (
                     <th
                       key={h}
                       className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide whitespace-nowrap"
@@ -1341,6 +1341,61 @@ export default function AdminBookings() {
                         <div className="text-[11px] text-slate-400">
                           {b.startTime?.slice(0, 5)} – {b.endTime?.slice(0, 5)}
                         </div>
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <span className="text-xs font-medium text-slate-600 dark:text-slate-400">
+                          {b.durationHours} jam
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <span className="text-xs text-slate-600 dark:text-slate-400">
+                          {b.payment?.paymentMethod ?? (b.payment ? "Transfer Bank" : "—")}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        {b.payment?.confirmedAt ? (
+                          <div>
+                            <div className="text-xs font-medium text-slate-700 dark:text-slate-300">
+                              {new Date(b.payment.confirmedAt).toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" })}
+                            </div>
+                            <div className="text-[11px] text-slate-400">
+                              {new Date(b.payment.confirmedAt).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}
+                            </div>
+                          </div>
+                        ) : b.payment?.updatedAt ? (
+                          <span className="text-[11px] text-slate-400">
+                            {new Date(b.payment.updatedAt).toLocaleDateString("id-ID", { day: "2-digit", month: "short" })}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-slate-300 dark:text-slate-600">—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        {b.payment ? (
+                          <span className={`inline-flex items-center gap-1 text-[11px] font-semibold px-1.5 py-0.5 rounded-md ${
+                            b.payment.status === "confirmed"
+                              ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400"
+                              : b.payment.status === "rejected"
+                              ? "bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-400"
+                              : "bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400"
+                          }`}>
+                            {b.payment.status === "confirmed" ? "✓ Lunas" : b.payment.status === "rejected" ? "✗ Ditolak" : "⏳ Menunggu"}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-slate-300 dark:text-slate-600">—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        {b.checkedInAt ? (
+                          <div className="flex items-center gap-1">
+                            <span className="text-emerald-600 font-bold text-sm">✓</span>
+                            <span className="text-[11px] text-slate-400">
+                              {new Date(b.checkedInAt).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-slate-300 dark:text-slate-600">—</span>
+                        )}
                       </td>
                       <td className="px-4 py-3">
                         <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
@@ -1423,7 +1478,7 @@ export default function AdminBookings() {
                 </AnimatePresence>
                 {filtered.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="py-16 text-center text-slate-400 text-sm">
+                    <td colSpan={12} className="py-16 text-center text-slate-400 text-sm">
                       <CalendarCheck size={32} className="mx-auto mb-3 opacity-30" />
                       Tidak ada booking yang ditemukan
                     </td>
