@@ -512,6 +512,30 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
   }
 });
 
+// POST /bookings/:id/check-in — tandai booking sudah check-in (admin)
+router.post("/bookings/:id/check-in", adminMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(String(req.params.id));
+    const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, id)).limit(1);
+    if (!booking) { res.status(404).json({ error: "Booking tidak ditemukan" }); return; }
+    if (booking.checkedInAt) { res.status(400).json({ error: "Booking sudah check-in" }); return; }
+    const now = new Date();
+    await db.update(bookingsTable).set({ checkedInAt: now, updatedAt: now }).where(eq(bookingsTable.id, id));
+    await db.insert(bookingHistoryTable).values({
+      bookingId: id,
+      fromStatus: booking.status,
+      toStatus: booking.status,
+      changedByName: "admin",
+      note: `Check-in pukul ${now.toLocaleTimeString("id-ID", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit" })} WIB`,
+    });
+    const result = await getBookingWithPayment(id);
+    res.json(result);
+  } catch (err) {
+    req.log.error({ err }, "Check-in error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 // POST /bookings/:id/verify — verifikasi ID Card Angkasa Pura & terapkan diskon (admin)
 router.post("/bookings/:id/verify", adminMiddleware, async (req, res) => {
   try {

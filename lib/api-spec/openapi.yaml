@@ -1084,6 +1084,31 @@ paths:
                 items:
                   $ref: "#/components/schemas/ReviewSummary"
 
+  /bookings/{id}/check-in:
+    post:
+      operationId: checkInBooking
+      tags: [bookings]
+      summary: Mark booking as checked-in (admin)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Checked in
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Booking"
+        "400":
+          description: Already checked in
+        "404":
+          description: Booking not found
+
   /bookings/{id}/verify:
     post:
       operationId: verifyBooking

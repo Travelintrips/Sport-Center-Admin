@@ -3,6 +3,7 @@ import {
   useListBookings,
   useUpdateBooking,
   useUpdatePayment,
+  useCheckInBooking,
   getListBookingsQueryKey,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -45,6 +46,7 @@ import {
   Plane,
   ShieldCheck,
   RefreshCw,
+  LogIn,
 } from "lucide-react";
 import { getToken } from "@/lib/auth";
 import VerifyIdDialog from "@/components/admin/VerifyIdDialog";
@@ -1071,6 +1073,16 @@ export default function AdminBookings() {
     },
   });
 
+  const checkInMutation = useCheckInBooking({
+    mutation: {
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: getListBookingsQueryKey() });
+        toast({ title: "Check-in berhasil dicatat" });
+      },
+      onError: () => toast({ title: "Gagal check-in", variant: "destructive" }),
+    },
+  });
+
   const filtered = useMemo(() => {
     return bookings.filter((b: any) => {
       if (statusFilter !== "all") {
@@ -1393,6 +1405,21 @@ export default function AdminBookings() {
                               {new Date(b.checkedInAt).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}
                             </span>
                           </div>
+                        ) : (b.status === "confirmed" || b.status === "completed") ? (
+                          <motion.button
+                            whileHover={{ scale: 1.05 }}
+                            whileTap={{ scale: 0.95 }}
+                            onClick={() => checkInMutation.mutate({ id: b.id })}
+                            disabled={checkInMutation.isPending && checkInMutation.variables?.id === b.id}
+                            className="flex items-center gap-1 h-6 px-2 rounded-lg text-[11px] font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 dark:bg-emerald-900/20 dark:hover:bg-emerald-900/40 dark:text-emerald-400 dark:border-emerald-800 transition-colors disabled:opacity-50"
+                          >
+                            {checkInMutation.isPending && checkInMutation.variables?.id === b.id ? (
+                              <span className="w-2.5 h-2.5 border border-emerald-500 border-t-transparent rounded-full animate-spin" />
+                            ) : (
+                              <LogIn size={10} />
+                            )}
+                            Check-in
+                          </motion.button>
                         ) : (
                           <span className="text-xs text-slate-300 dark:text-slate-600">—</span>
                         )}
