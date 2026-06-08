@@ -1292,7 +1292,7 @@ export default function AdminBookings() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-100 dark:border-slate-800">
-                  {["Order", "Customer", "Fasilitas", "Tanggal & Waktu", "Durasi", "Metode", "Tgl Bayar", "Pmt Status", "Check-In", "Total", "Status", ""].map((h) => (
+                  {["Order", "Customer", "Fasilitas", "Tanggal & Waktu", "Durasi", "Metode", "Tgl Bayar", "Check-In", "Total", "Status", ""].map((h) => (
                     <th
                       key={h}
                       className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide whitespace-nowrap"
@@ -1377,21 +1377,6 @@ export default function AdminBookings() {
                         ) : b.payment?.updatedAt ? (
                           <span className="text-[11px] text-slate-400">
                             {new Date(b.payment.updatedAt).toLocaleDateString("id-ID", { day: "2-digit", month: "short" })}
-                          </span>
-                        ) : (
-                          <span className="text-xs text-slate-300 dark:text-slate-600">—</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 whitespace-nowrap">
-                        {b.payment ? (
-                          <span className={`inline-flex items-center gap-1 text-[11px] font-semibold px-1.5 py-0.5 rounded-md ${
-                            b.payment.status === "confirmed"
-                              ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400"
-                              : b.payment.status === "rejected"
-                              ? "bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-400"
-                              : "bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400"
-                          }`}>
-                            {b.payment.status === "confirmed" ? "✓ Lunas" : b.payment.status === "rejected" ? "✗ Ditolak" : "⏳ Menunggu"}
                           </span>
                         ) : (
                           <span className="text-xs text-slate-300 dark:text-slate-600">—</span>
