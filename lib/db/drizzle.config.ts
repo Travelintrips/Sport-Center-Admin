@@ -1,12 +1,11 @@
 import { defineConfig } from "drizzle-kit";
 import path from "path";
 
-const isProduction = process.env.NODE_ENV === "production";
-const rawUrl = isProduction
-  ? (process.env.SUPABASE_DATABASE_URL ||
-     process.env.PROD_DATABASE_URL ||
-     process.env.DATABASE_URL)
-  : (process.env.SUPABASE_DATABASE_URL_DEV || process.env.DATABASE_URL);
+const rawUrl =
+  process.env.DATABASE_URL ||
+  process.env.SUPABASE_DATABASE_URL ||
+  process.env.SUPABASE_DATABASE_URL_DEV ||
+  process.env.PROD_DATABASE_URL;
 
 if (!rawUrl) {
   throw new Error("DATABASE_URL, ensure the database is provisioned");
