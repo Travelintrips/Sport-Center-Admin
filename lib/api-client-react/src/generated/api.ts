@@ -41,6 +41,7 @@ import type {
   FacilityInput,
   FacilityUpdate,
   GetReviewsParams,
+  GetVerificationLogsParams,
   GoogleLoginInput,
   GymMembership,
   GymMembershipInput,
@@ -90,6 +91,8 @@ import type {
   UploadUrlRequest,
   UploadUrlResponse,
   User,
+  VerificationLog,
+  VerifyByOrderInput,
   VerifyInput,
   VerifyOtpInput,
   VerifyResult
@@ -4666,6 +4669,161 @@ export const useVerifyBooking = <TError = ErrorType<unknown>,
       > => {
       return useMutation(getVerifyBookingMutationOptions(options));
     }
+
+export const getVerifyBookingByOrderUrl = () => {
+
+
+
+
+  return `/api/bookings/verify-by-order`
+}
+
+/**
+ * @summary Self-service AP2 ID card verification by order number (public)
+ */
+export const verifyBookingByOrder = async (verifyByOrderInput: VerifyByOrderInput, options?: RequestInit): Promise<VerifyResult> => {
+
+  return customFetch<VerifyResult>(getVerifyBookingByOrderUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      verifyByOrderInput,)
+  }
+);}
+
+
+
+
+export const getVerifyBookingByOrderMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof verifyBookingByOrder>>, TError,{data: BodyType<VerifyByOrderInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof verifyBookingByOrder>>, TError,{data: BodyType<VerifyByOrderInput>}, TContext> => {
+
+const mutationKey = ['verifyBookingByOrder'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof verifyBookingByOrder>>, {data: BodyType<VerifyByOrderInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  verifyBookingByOrder(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type VerifyBookingByOrderMutationResult = NonNullable<Awaited<ReturnType<typeof verifyBookingByOrder>>>
+    export type VerifyBookingByOrderMutationBody = BodyType<VerifyByOrderInput>
+    export type VerifyBookingByOrderMutationError = ErrorType<void>
+
+    /**
+ * @summary Self-service AP2 ID card verification by order number (public)
+ */
+export const useVerifyBookingByOrder = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof verifyBookingByOrder>>, TError,{data: BodyType<VerifyByOrderInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof verifyBookingByOrder>>,
+        TError,
+        {data: BodyType<VerifyByOrderInput>},
+        TContext
+      > => {
+      return useMutation(getVerifyBookingByOrderMutationOptions(options));
+    }
+
+export const getGetVerificationLogsUrl = (params?: GetVerificationLogsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/verification-logs?${stringifiedParams}` : `/api/verification-logs`
+}
+
+/**
+ * @summary List ID card verification activity logs (admin)
+ */
+export const getVerificationLogs = async (params?: GetVerificationLogsParams, options?: RequestInit): Promise<VerificationLog[]> => {
+
+  return customFetch<VerificationLog[]>(getGetVerificationLogsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetVerificationLogsQueryKey = (params?: GetVerificationLogsParams,) => {
+    return [
+    `/api/verification-logs`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetVerificationLogsQueryOptions = <TData = Awaited<ReturnType<typeof getVerificationLogs>>, TError = ErrorType<unknown>>(params?: GetVerificationLogsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getVerificationLogs>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetVerificationLogsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getVerificationLogs>>> = ({ signal }) => getVerificationLogs(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getVerificationLogs>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetVerificationLogsQueryResult = NonNullable<Awaited<ReturnType<typeof getVerificationLogs>>>
+export type GetVerificationLogsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List ID card verification activity logs (admin)
+ */
+
+export function useGetVerificationLogs<TData = Awaited<ReturnType<typeof getVerificationLogs>>, TError = ErrorType<unknown>>(
+ params?: GetVerificationLogsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getVerificationLogs>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetVerificationLogsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
 
 export const getGetTenantMeUrl = () => {
 

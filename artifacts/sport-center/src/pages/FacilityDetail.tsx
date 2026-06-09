@@ -59,7 +59,7 @@ export default function FacilityDetail() {
     }
   });
 
-  const { data: reviews } = useGetReviews({ facilityId }, { query: { enabled: !!facilityId } });
+  const { data: reviews } = useGetReviews({ facilityId }, { query: { enabled: !!facilityId, queryKey: ["getReviews", facilityId] } });
   const { data: reviewsSummary } = useGetReviewsSummary();
   const facilitySummary = reviewsSummary?.find((s) => s.facilityId === facilityId);
   const avgRating = facilitySummary?.avgRating ?? 0;

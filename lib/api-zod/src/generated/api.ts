@@ -29,7 +29,7 @@ export const LoginResponse = zod.object({
   "id": zod.number(),
   "name": zod.string(),
   "email": zod.string().nullish(),
-  "role": zod.enum(['admin', 'customer']),
+  "role": zod.enum(['admin', 'super_admin', 'admin_booking', 'finance', 'staff', 'customer', 'tenant', 'ap2_employee']),
   "phone": zod.string().nullish(),
   "googleId": zod.string().nullish(),
   "hasPassword": zod.boolean().optional(),
@@ -62,7 +62,7 @@ export const LoginWithGoogleResponse = zod.object({
   "id": zod.number(),
   "name": zod.string(),
   "email": zod.string().nullish(),
-  "role": zod.enum(['admin', 'customer']),
+  "role": zod.enum(['admin', 'super_admin', 'admin_booking', 'finance', 'staff', 'customer', 'tenant', 'ap2_employee']),
   "phone": zod.string().nullish(),
   "googleId": zod.string().nullish(),
   "hasPassword": zod.boolean().optional(),
@@ -99,7 +99,7 @@ export const VerifyOtpResponse = zod.object({
   "id": zod.number(),
   "name": zod.string(),
   "email": zod.string().nullish(),
-  "role": zod.enum(['admin', 'customer']),
+  "role": zod.enum(['admin', 'super_admin', 'admin_booking', 'finance', 'staff', 'customer', 'tenant', 'ap2_employee']),
   "phone": zod.string().nullish(),
   "googleId": zod.string().nullish(),
   "hasPassword": zod.boolean().optional(),
@@ -138,7 +138,7 @@ export const GetMeResponse = zod.object({
   "id": zod.number(),
   "name": zod.string(),
   "email": zod.string().nullish(),
-  "role": zod.enum(['admin', 'customer']),
+  "role": zod.enum(['admin', 'super_admin', 'admin_booking', 'finance', 'staff', 'customer', 'tenant', 'ap2_employee']),
   "phone": zod.string().nullish(),
   "googleId": zod.string().nullish(),
   "hasPassword": zod.boolean().optional(),
@@ -160,7 +160,7 @@ export const UpdateProfileResponse = zod.object({
   "id": zod.number(),
   "name": zod.string(),
   "email": zod.string().nullish(),
-  "role": zod.enum(['admin', 'customer']),
+  "role": zod.enum(['admin', 'super_admin', 'admin_booking', 'finance', 'staff', 'customer', 'tenant', 'ap2_employee']),
   "phone": zod.string().nullish(),
   "googleId": zod.string().nullish(),
   "hasPassword": zod.boolean().optional(),
@@ -179,7 +179,7 @@ export const LinkGoogleResponse = zod.object({
   "id": zod.number(),
   "name": zod.string(),
   "email": zod.string().nullish(),
-  "role": zod.enum(['admin', 'customer']),
+  "role": zod.enum(['admin', 'super_admin', 'admin_booking', 'finance', 'staff', 'customer', 'tenant', 'ap2_employee']),
   "phone": zod.string().nullish(),
   "googleId": zod.string().nullish(),
   "hasPassword": zod.boolean().optional(),
@@ -360,7 +360,7 @@ export const ListBookingsResponseItem = zod.object({
   "endTime": zod.string(),
   "durationHours": zod.number(),
   "totalPrice": zod.number(),
-  "status": zod.enum(['pending_payment', 'paid', 'confirmed', 'cancelled', 'completed', 'refunded']),
+  "status": zod.enum(['pending_payment', 'waiting_confirmation', 'paid', 'confirmed', 'completed', 'cancelled', 'rejected', 'expired', 'refunded']),
   "customerType": zod.enum(['umum', 'angkasa_pura']).optional(),
   "idCardNumber": zod.string().nullish(),
   "verificationStatus": zod.enum(['not_required', 'pending', 'verified', 'rejected']).optional(),
@@ -477,7 +477,7 @@ export const GetBookingResponse = zod.object({
   "endTime": zod.string(),
   "durationHours": zod.number(),
   "totalPrice": zod.number(),
-  "status": zod.enum(['pending_payment', 'paid', 'confirmed', 'cancelled', 'completed', 'refunded']),
+  "status": zod.enum(['pending_payment', 'waiting_confirmation', 'paid', 'confirmed', 'completed', 'cancelled', 'rejected', 'expired', 'refunded']),
   "customerType": zod.enum(['umum', 'angkasa_pura']).optional(),
   "idCardNumber": zod.string().nullish(),
   "verificationStatus": zod.enum(['not_required', 'pending', 'verified', 'rejected']).optional(),
@@ -515,7 +515,7 @@ export const UpdateBookingParams = zod.object({
 })
 
 export const UpdateBookingBody = zod.object({
-  "status": zod.enum(['pending_payment', 'paid', 'confirmed', 'cancelled', 'completed', 'refunded']).optional(),
+  "status": zod.enum(['pending_payment', 'waiting_confirmation', 'paid', 'confirmed', 'completed', 'cancelled', 'rejected', 'expired', 'refunded']).optional(),
   "adminNotes": zod.string().optional()
 })
 
@@ -534,7 +534,7 @@ export const UpdateBookingResponse = zod.object({
   "endTime": zod.string(),
   "durationHours": zod.number(),
   "totalPrice": zod.number(),
-  "status": zod.enum(['pending_payment', 'paid', 'confirmed', 'cancelled', 'completed', 'refunded']),
+  "status": zod.enum(['pending_payment', 'waiting_confirmation', 'paid', 'confirmed', 'completed', 'cancelled', 'rejected', 'expired', 'refunded']),
   "customerType": zod.enum(['umum', 'angkasa_pura']).optional(),
   "idCardNumber": zod.string().nullish(),
   "verificationStatus": zod.enum(['not_required', 'pending', 'verified', 'rejected']).optional(),
@@ -586,7 +586,7 @@ export const GetBookingByOrderResponse = zod.object({
   "endTime": zod.string(),
   "durationHours": zod.number(),
   "totalPrice": zod.number(),
-  "status": zod.enum(['pending_payment', 'paid', 'confirmed', 'cancelled', 'completed', 'refunded']),
+  "status": zod.enum(['pending_payment', 'waiting_confirmation', 'paid', 'confirmed', 'completed', 'cancelled', 'rejected', 'expired', 'refunded']),
   "customerType": zod.enum(['umum', 'angkasa_pura']).optional(),
   "idCardNumber": zod.string().nullish(),
   "verificationStatus": zod.enum(['not_required', 'pending', 'verified', 'rejected']).optional(),
@@ -869,7 +869,7 @@ export const GetDashboardResponse = zod.object({
   "endTime": zod.string(),
   "durationHours": zod.number(),
   "totalPrice": zod.number(),
-  "status": zod.enum(['pending_payment', 'paid', 'confirmed', 'cancelled', 'completed', 'refunded']),
+  "status": zod.enum(['pending_payment', 'waiting_confirmation', 'paid', 'confirmed', 'completed', 'cancelled', 'rejected', 'expired', 'refunded']),
   "customerType": zod.enum(['umum', 'angkasa_pura']).optional(),
   "idCardNumber": zod.string().nullish(),
   "verificationStatus": zod.enum(['not_required', 'pending', 'verified', 'rejected']).optional(),
@@ -1328,7 +1328,7 @@ export const CheckInBookingResponse = zod.object({
   "endTime": zod.string(),
   "durationHours": zod.number(),
   "totalPrice": zod.number(),
-  "status": zod.enum(['pending_payment', 'paid', 'confirmed', 'cancelled', 'completed', 'refunded']),
+  "status": zod.enum(['pending_payment', 'waiting_confirmation', 'paid', 'confirmed', 'completed', 'cancelled', 'rejected', 'expired', 'refunded']),
   "customerType": zod.enum(['umum', 'angkasa_pura']).optional(),
   "idCardNumber": zod.string().nullish(),
   "verificationStatus": zod.enum(['not_required', 'pending', 'verified', 'rejected']).optional(),
@@ -1393,7 +1393,7 @@ export const VerifyBookingResponse = zod.object({
   "endTime": zod.string(),
   "durationHours": zod.number(),
   "totalPrice": zod.number(),
-  "status": zod.enum(['pending_payment', 'paid', 'confirmed', 'cancelled', 'completed', 'refunded']),
+  "status": zod.enum(['pending_payment', 'waiting_confirmation', 'paid', 'confirmed', 'completed', 'cancelled', 'rejected', 'expired', 'refunded']),
   "customerType": zod.enum(['umum', 'angkasa_pura']).optional(),
   "idCardNumber": zod.string().nullish(),
   "verificationStatus": zod.enum(['not_required', 'pending', 'verified', 'rejected']).optional(),
@@ -1422,6 +1422,91 @@ export const VerifyBookingResponse = zod.object({
   "createdAt": zod.string().optional()
 }).nullish()
 })
+
+
+/**
+ * @summary Self-service AP2 ID card verification by order number (public)
+ */
+export const VerifyBookingByOrderBody = zod.object({
+  "orderNumber": zod.string(),
+  "idCardNumber": zod.string()
+})
+
+export const VerifyBookingByOrderResponse = zod.object({
+  "success": zod.boolean(),
+  "result": zod.enum(['verified', 'invalid_card', 'mismatch', 'not_pending']),
+  "message": zod.string().optional(),
+  "discountApplied": zod.boolean().optional(),
+  "discountPercentage": zod.number().optional(),
+  "discountAmount": zod.number().optional(),
+  "finalPrice": zod.number().optional(),
+  "memberName": zod.string().nullish(),
+  "booking": zod.object({
+  "id": zod.number(),
+  "orderNumber": zod.string(),
+  "customerId": zod.number().nullish(),
+  "customerName": zod.string(),
+  "customerEmail": zod.string(),
+  "customerPhone": zod.string(),
+  "facilityId": zod.number(),
+  "facilityName": zod.string(),
+  "facilityCategory": zod.string().optional(),
+  "bookingDate": zod.string(),
+  "startTime": zod.string(),
+  "endTime": zod.string(),
+  "durationHours": zod.number(),
+  "totalPrice": zod.number(),
+  "status": zod.enum(['pending_payment', 'waiting_confirmation', 'paid', 'confirmed', 'completed', 'cancelled', 'rejected', 'expired', 'refunded']),
+  "customerType": zod.enum(['umum', 'angkasa_pura']).optional(),
+  "idCardNumber": zod.string().nullish(),
+  "verificationStatus": zod.enum(['not_required', 'pending', 'verified', 'rejected']).optional(),
+  "basePrice": zod.number().nullish(),
+  "apDiscountAmount": zod.number().optional(),
+  "activityType": zod.string().nullish(),
+  "numberOfPeople": zod.number().nullish(),
+  "notes": zod.string().nullish(),
+  "adminNotes": zod.string().nullish(),
+  "whatsappMessage": zod.string().nullish(),
+  "checkedInAt": zod.string().nullish(),
+  "completedAt": zod.string().nullish(),
+  "paymentDeadline": zod.string().nullish(),
+  "payment": zod.object({
+  "id": zod.number(),
+  "bookingId": zod.number(),
+  "amount": zod.number(),
+  "proofUrl": zod.string().nullish(),
+  "paymentMethod": zod.string().nullish(),
+  "status": zod.enum(['pending', 'confirmed', 'rejected']),
+  "confirmedAt": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "createdAt": zod.string().optional(),
+  "updatedAt": zod.string().optional()
+}).nullish(),
+  "createdAt": zod.string().optional()
+}).nullish()
+})
+
+
+/**
+ * @summary List ID card verification activity logs (admin)
+ */
+export const GetVerificationLogsQueryParams = zod.object({
+  "bookingId": zod.coerce.number().optional(),
+  "limit": zod.coerce.number().optional()
+})
+
+export const GetVerificationLogsResponseItem = zod.object({
+  "id": zod.number(),
+  "bookingId": zod.number().nullish(),
+  "orderNumber": zod.string().nullish(),
+  "verifiedByUserId": zod.number().nullish(),
+  "idCardNumberInput": zod.string(),
+  "status": zod.enum(['success', 'failed', 'mismatch']),
+  "notes": zod.string().nullish(),
+  "ipAddress": zod.string().nullish(),
+  "createdAt": zod.string()
+})
+export const GetVerificationLogsResponse = zod.array(GetVerificationLogsResponseItem)
 
 
 /**

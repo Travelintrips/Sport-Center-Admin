@@ -263,6 +263,28 @@ ALTER TABLE sport_center.users
   ALTER COLUMN email DROP NOT NULL,
   ALTER COLUMN password_hash DROP NOT NULL,
   ADD COLUMN IF NOT EXISTS google_id text UNIQUE;
+
+-- ============================================================
+-- 16. ap2_employee role + verification_logs table
+-- ============================================================
+DO $$ BEGIN
+  ALTER TYPE sport_center.user_role ADD VALUE IF NOT EXISTS 'ap2_employee';
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+CREATE TABLE IF NOT EXISTS sport_center.verification_logs (
+  id serial PRIMARY KEY,
+  booking_id integer REFERENCES sport_center.bookings(id) ON DELETE CASCADE,
+  order_number text,
+  verified_by_user_id integer,
+  id_card_number_input text NOT NULL,
+  status text NOT NULL,
+  notes text,
+  ip_address text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS verification_logs_booking_id_idx ON sport_center.verification_logs(booking_id);
+CREATE INDEX IF NOT EXISTS verification_logs_created_at_idx ON sport_center.verification_logs(created_at DESC);
 `;
 
 async function main() {

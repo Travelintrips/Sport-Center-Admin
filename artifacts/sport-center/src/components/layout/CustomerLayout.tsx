@@ -1,6 +1,6 @@
 import { ReactNode, useState, useEffect } from "react";
 import { Link, useLocation } from "wouter";
-import { Menu, X, LogOut, CalendarDays, ChevronDown, MapPin, Phone, Instagram, Facebook, ShieldCheck, ArrowUp, UserCircle } from "lucide-react";
+import { Menu, X, LogOut, CalendarDays, ChevronDown, MapPin, Phone, Instagram, Facebook, ShieldCheck, ArrowUp, UserCircle, BadgeCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useGetMe, useLogout, getGetMeQueryKey, useGetSettings } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -89,6 +89,12 @@ function UserMenu() {
                 className="flex items-center gap-2.5 px-3 py-2.5 text-sm font-medium rounded-xl hover:bg-accent transition-colors w-full">
                 <UserCircle size={15} className="text-primary" /> {t("Profil Saya", "My Profile")}
               </Link>
+              {(["staff", "admin", "super_admin", "admin_booking", "ap2_employee"] as string[]).includes(user.role) && (
+                <Link href="/verify-id" onClick={() => setOpen(false)}
+                  className="flex items-center gap-2.5 px-3 py-2.5 text-sm font-medium rounded-xl hover:bg-accent transition-colors w-full">
+                  <BadgeCheck size={15} className="text-primary" /> {t("Verifikasi ID AP2", "Verify AP2 ID")}
+                </Link>
+              )}
               <div className="h-px bg-border/40 my-1 mx-2" />
               <button onClick={() => { setOpen(false); logoutMutation.mutate(undefined as void); }}
                 className="flex items-center gap-2.5 px-3 py-2.5 text-sm font-medium rounded-xl hover:bg-red-50 dark:hover:bg-red-950/30 w-full text-left text-red-500">
@@ -238,6 +244,13 @@ export default function CustomerLayout({ children }: { children: ReactNode }) {
                     <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center text-primary"><UserCircle size={14} /></div>
                     {t("Profil Saya", "My Profile")}
                   </Link>
+                  {(["staff", "admin", "super_admin", "admin_booking", "ap2_employee"] as string[]).includes(user.role as string) && (
+                    <Link href="/verify-id" onClick={() => setIsMobileMenuOpen(false)}
+                      className="flex items-center gap-3 px-4 py-3.5 rounded-2xl font-semibold text-[15px] text-foreground/80 hover:bg-muted/60">
+                      <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center text-primary"><BadgeCheck size={14} /></div>
+                      {t("Verifikasi ID AP2", "Verify AP2 ID")}
+                    </Link>
+                  )}
                   <button onClick={() => { setIsMobileMenuOpen(false); logoutMutation.mutate(undefined as void); }}
                     className="flex items-center gap-3 px-4 py-3.5 rounded-2xl font-semibold text-[15px] text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20 w-full text-left">
                     <div className="w-7 h-7 rounded-full bg-red-100 dark:bg-red-950/40 flex items-center justify-center text-red-500"><LogOut size={14} /></div>

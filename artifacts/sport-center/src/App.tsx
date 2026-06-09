@@ -25,6 +25,7 @@ import Login from "@/pages/Login";
 import Register from "@/pages/Register";
 import MyBookings from "@/pages/MyBookings";
 import MyProfile from "@/pages/MyProfile";
+import VerifyId from "@/pages/VerifyId";
 import Membership from "@/pages/Membership";
 // Admin Pages
 import AdminLogin from "@/pages/admin/Login";
@@ -134,6 +135,7 @@ function Router() {
             <Route path="/register" component={Register} />
             <Route path="/my-bookings" component={MyBookings} />
             <Route path="/my-profile" component={MyProfile} />
+            <Route path="/verify-id" component={VerifyId} />
             <Route path="/membership" component={Membership} />
             <Route path="/promos" component={Promos} />
             <Route path="/terms" component={Terms} />
