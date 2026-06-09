@@ -3,8 +3,9 @@ import multer from "multer";
 import path from "path";
 import fs from "fs";
 import { randomUUID } from "crypto";
-import { db, bookingsTable, facilitiesTable, paymentsTable, bookingHistoryTable, waActionTokensTable, settingsTable } from "@workspace/db";
-import { eq, and, desc } from "drizzle-orm";
+import { db, bookingsTable, facilitiesTable, paymentsTable, bookingHistoryTable, waActionTokensTable, settingsTable, usersTable } from "@workspace/db";
+import { eq, and, desc, isNotNull } from "drizzle-orm";
+import { randomBytes } from "crypto";
 import { createWaToken, verifyWaToken, consumeWaToken, getWaTokenRow } from "../lib/waTokens";
 import {
   notifyWaBookingCreated,
@@ -12,8 +13,10 @@ import {
   notifyWaBookingConfirmed,
   notifyWaPaymentRejected,
   notifyWaStaffCheckin,
+  notifyWaCustomerRegistered,
 } from "../lib/notifications";
 import { logAudit } from "../lib/auditLog";
+import { hashPassword } from "../lib/auth";
 import { syncStatusToBizportal } from "../lib/bizportalSync";
 import { broadcastAvailabilityChange } from "../lib/supabase";
 
@@ -52,6 +55,19 @@ function addHours(time: string, hours: number): string {
   const h = Math.floor(total / 60) % 24;
   const m = total % 60;
   return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`;
+}
+
+async function generateCustomerCode(): Promise<string> {
+  const rows = await db.select({ customerCode: usersTable.customerCode }).from(usersTable).where(isNotNull(usersTable.customerCode));
+  let maxNum = 0;
+  for (const row of rows) {
+    const match = row.customerCode?.match(/^SC-CUST-(\d+)$/);
+    if (match) {
+      const n = parseInt(match[1], 10);
+      if (n > maxNum) maxNum = n;
+    }
+  }
+  return `SC-CUST-${String(maxNum + 1).padStart(6, "0")}`;
 }
 
 async function generateOrderNumber(): Promise<string> {
@@ -177,6 +193,107 @@ router.get("/wa/facility/:facilityId", async (req, res) => {
   }
 });
 
+// GET /api/wa/customer/check/:phone — cek apakah nomor WA sudah terdaftar
+router.get("/wa/customer/check/:phone", async (req, res) => {
+  try {
+    const cleaned = cleanPhone(req.params.phone);
+    const [user] = await db.select({
+      id: usersTable.id,
+      name: usersTable.name,
+      customerCode: usersTable.customerCode,
+      registrationSource: usersTable.registrationSource,
+    }).from(usersTable).where(eq(usersTable.phone, cleaned)).limit(1);
+
+    if (!user) {
+      res.json({ registered: false });
+      return;
+    }
+    res.json({ registered: true, name: user.name, customerCode: user.customerCode, registrationSource: user.registrationSource });
+  } catch (err) {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// POST /api/wa/customer/register — registrasi customer baru via WA (public)
+router.post("/wa/customer/register", async (req, res) => {
+  try {
+    const { name, phone, email } = req.body;
+    if (!name || !phone) {
+      res.status(400).json({ error: "Nama dan nomor WhatsApp wajib diisi" });
+      return;
+    }
+
+    const cleanedPhone = cleanPhone(phone);
+
+    // Cek duplikat nomor
+    const [existing] = await db.select({ id: usersTable.id, name: usersTable.name, customerCode: usersTable.customerCode })
+      .from(usersTable).where(eq(usersTable.phone, cleanedPhone)).limit(1);
+    if (existing) {
+      res.status(409).json({
+        error: "Nomor WhatsApp sudah terdaftar",
+        customerCode: existing.customerCode,
+        alreadyRegistered: true,
+      });
+      return;
+    }
+
+    // Generate customer code
+    const customerCode = await generateCustomerCode();
+
+    // Auto-generate email jika tidak diisi
+    const finalEmail = email?.trim() || `wa_${cleanedPhone}@sportcenter.wa`;
+
+    // Cek duplikat email
+    const [emailExists] = await db.select({ id: usersTable.id }).from(usersTable)
+      .where(eq(usersTable.email, finalEmail)).limit(1);
+    if (emailExists) {
+      res.status(409).json({ error: "Email sudah digunakan. Silakan gunakan email lain." });
+      return;
+    }
+
+    // Password random untuk WA users
+    const passwordHash = hashPassword(randomBytes(16).toString("hex"));
+
+    const [user] = await db.insert(usersTable).values({
+      name: name.trim(),
+      email: finalEmail,
+      passwordHash,
+      phone: cleanedPhone,
+      role: "customer",
+      customerCode,
+      registrationSource: "whatsapp",
+    }).returning();
+
+    // Notifikasi WA selamat datang
+    notifyWaCustomerRegistered({
+      customerName: user.name,
+      customerPhone: cleanedPhone,
+      customerCode,
+      facilitiesUrl: `${APP_URL}/facilities`,
+    });
+
+    // Audit log
+    await logAudit({
+      action: "CUSTOMER_REGISTERED_VIA_WA",
+      entity: "user",
+      entityId: user.id,
+      after: { customerCode, phone: cleanedPhone, name: user.name, registrationSource: "whatsapp" },
+    });
+
+    res.status(201).json({
+      id: user.id,
+      name: user.name,
+      phone: user.phone,
+      customerCode,
+      registrationSource: "whatsapp",
+      createdAt: user.createdAt,
+    });
+  } catch (err) {
+    console.error("[wa/customer/register] error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 // POST /api/wa/webhook — Fonnte incoming message handler
 router.post("/wa/webhook", async (req, res) => {
   res.status(200).json({ status: "ok" });
@@ -220,6 +337,20 @@ router.post("/wa/webhook", async (req, res) => {
     }
 
     if (!isBookingIntent(msg)) return;
+
+    // Cek apakah nomor sudah terdaftar sebagai customer
+    const [registeredUser] = await db.select({ id: usersTable.id, name: usersTable.name, customerCode: usersTable.customerCode })
+      .from(usersTable).where(eq(usersTable.phone, senderPhone)).limit(1);
+
+    if (!registeredUser) {
+      const registerUrl = `${APP_URL}/register?phone=${senderPhone}&source=wa`;
+      await sendWAReply(senderPhone,
+        `👋 Halo! Untuk booking fasilitas, kamu perlu *daftar dulu* sebagai customer.\n\n` +
+        `📝 *Daftar gratis sekarang:*\n${registerUrl}\n\n` +
+        `Setelah daftar, ketik *booking* lagi di sini dan kita langsung bantu! 🏅`
+      );
+      return;
+    }
 
     // Detect facility keyword
     const keyword = detectFacilityKeyword(msg);

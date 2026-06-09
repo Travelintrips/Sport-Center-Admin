@@ -248,6 +248,26 @@ export async function notifyWaDayReminder(data: WaDayReminderData): Promise<void
   await sendWA(data.customerPhone, msg);
 }
 
+export interface WaCustomerRegisteredData {
+  customerName: string;
+  customerPhone: string;
+  customerCode: string;
+  facilitiesUrl: string;
+}
+
+export async function notifyWaCustomerRegistered(data: WaCustomerRegisteredData): Promise<void> {
+  const msg =
+    `🎉 *Registrasi Berhasil!*\n\n` +
+    `Halo *${data.customerName}*,\n` +
+    `Akun kamu di *Sport Center Jakarta* sudah aktif ✅\n\n` +
+    `👤 *Kode Customer:* \`${data.customerCode}\`\n\n` +
+    `Simpan kode ini untuk referensi ya!\n\n` +
+    `Sekarang kamu bisa langsung booking fasilitas:\n` +
+    `🏟️ ${data.facilitiesUrl}\n\n` +
+    `Ketik *booking* di sini untuk memulai pemesanan via WhatsApp 🏅`;
+  await sendWA(data.customerPhone, msg);
+}
+
 export interface WaStaffCheckinData {
   orderNumber: string;
   customerName: string;
