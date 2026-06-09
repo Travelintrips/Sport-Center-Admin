@@ -986,7 +986,6 @@ const STATUS_OPTIONS = [
   { value: "pending_payment", label: "⏳ Menunggu Pembayaran" },
   { value: "paid",            label: "💳 Pembayaran Selesai" },
   { value: "confirmed",       label: "✅ Dikonfirmasi" },
-  { value: "completed",       label: "🏁 Selesai" },
   { value: "cancelled",       label: "❌ Dibatalkan" },
   { value: "refunded",        label: "↩️ Pengembalian Dana" },
 ];
