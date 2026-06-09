@@ -2,3 +2,4 @@
 - [Booking PII & access control](booking-pii-access.md) — GET /bookings list is admin-only; public booking reads must redact idCardNumber; normalize ID cards to uppercase/trim.
 - [Migration runner setup](migration-runner.md) — scripts/migrate.ts needs `pg` in scripts/package.json; run via scripts/node_modules/.bin/tsx scripts/migrate.ts (not npx/pnpm tsx which can't find pg).
 - [Booking status flow](booking-status-flow.md) — INACTIVE_STATUSES = [cancelled, expired, rejected, refunded]; conflict check must exclude all; payment proof → waiting_confirmation → confirmed (not completed); auto-expire via scheduler every 5 min.
+- [WhatsApp Booking Flow](wa-booking-flow.md) — Fonnte webhook + tokenized admin links; `wa_action_tokens` table in sport_center schema; standalone `/wa/*` pages outside CustomerLayout.

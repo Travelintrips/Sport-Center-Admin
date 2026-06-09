@@ -29,6 +29,7 @@ import bookingHistoryRouter from "./bookingHistory";
 import qrCheckinRouter from "./qrCheckin";
 import tenantsRouter from "./tenants";
 import syncRouter from "./sync";
+import whatsappRouter from "./whatsapp";
 
 const router: IRouter = Router();
 
@@ -62,5 +63,6 @@ router.use(bookingHistoryRouter);
 router.use(qrCheckinRouter);
 router.use(tenantsRouter);
 router.use(syncRouter);
+router.use(whatsappRouter);
 
 export default router;
