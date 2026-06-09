@@ -1000,6 +1000,20 @@ function isBookingTimePast(bookingDate: string, endTime: string): boolean {
   return nowMinutes >= endH * 60 + endM;
 }
 
+function getNowJKT() {
+  return new Date(Date.now() + 7 * 60 * 60 * 1000);
+}
+
+function isTimeReached(bookingDate: string, time: string): boolean {
+  const nowJKT = getNowJKT();
+  const todayJKT = nowJKT.toISOString().split("T")[0];
+  if (bookingDate < todayJKT) return true;
+  if (bookingDate > todayJKT) return false;
+  const nowMin = nowJKT.getUTCHours() * 60 + nowJKT.getUTCMinutes();
+  const [h, m] = time.split(":").map(Number);
+  return nowMin >= h * 60 + m;
+}
+
 function InlineCheckInSelect({
   booking,
   onCheckIn,
@@ -1013,28 +1027,34 @@ function InlineCheckInSelect({
   isCheckingIn: boolean;
   isCompleting: boolean;
 }) {
-  const todayJKT = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" });
-  const isToday = booking.bookingDate === todayJKT;
-  const isPast = isBookingTimePast(booking.bookingDate, booking.endTime);
-  const isLoading = isCheckingIn || isCompleting;
+  const [, setTick] = useState(0);
 
-  // Jika waktu sudah lewat dan masih confirmed, tampilkan badge "Sudah Lewat" + opsi selesai
-  if (isPast && booking.status === "confirmed") {
+  // Re-render setiap 30 detik agar status berubah otomatis saat jam booking tiba
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 30_000);
+    return () => clearInterval(id);
+  }, []);
+
+  const nowJKT = getNowJKT();
+  const todayJKT = nowJKT.toISOString().split("T")[0];
+  const isToday = booking.bookingDate === todayJKT;
+  const hasStarted = isTimeReached(booking.bookingDate, booking.startTime);
+  const hasEnded   = isTimeReached(booking.bookingDate, booking.endTime);
+  const isLoading  = isCheckingIn || isCompleting;
+
+  // Sudah lewat jam selesai & masih confirmed → Tandai Selesai
+  if (hasEnded && booking.status === "confirmed") {
     return (
       <Select
         value=""
-        onValueChange={(val) => {
-          if (val === "complete") onComplete(booking.id);
-        }}
+        onValueChange={(val) => { if (val === "complete") onComplete(booking.id); }}
         disabled={isLoading}
       >
         <SelectTrigger
           className="h-7 min-w-[90px] gap-1.5 border rounded-full px-2.5 text-[11px] font-semibold shadow-none focus:ring-0 focus:ring-offset-0 bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:text-amber-400 dark:border-amber-800"
           style={{ outline: "none" }}
         >
-          {isLoading ? (
-            <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin shrink-0" />
-          ) : null}
+          {isLoading && <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin shrink-0" />}
           <span>⏰ Sudah Lewat</span>
         </SelectTrigger>
         <SelectContent>
@@ -1049,12 +1069,38 @@ function InlineCheckInSelect({
     );
   }
 
-  const currentLabel = booking.checkedInAt
-    ? `✓ ${new Date(booking.checkedInAt).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}`
-    : "— Pilih";
+  // Sudah check-in
+  if (booking.checkedInAt) {
+    return (
+      <Select
+        value=""
+        onValueChange={(val) => { if (val === "complete") onComplete(booking.id); }}
+        disabled={isLoading}
+      >
+        <SelectTrigger
+          className="h-7 min-w-[80px] gap-1.5 border rounded-full px-2.5 text-[11px] font-semibold shadow-none focus:ring-0 focus:ring-offset-0 bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-800"
+          style={{ outline: "none" }}
+        >
+          {isLoading && <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin shrink-0" />}
+          <span>✓ {new Date(booking.checkedInAt).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}</span>
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="complete" className="text-xs">
+            <span className="flex items-center gap-1.5">
+              <CheckCircle2 size={11} className="text-blue-600" />
+              Tandai Selesai
+            </span>
+          </SelectItem>
+        </SelectContent>
+      </Select>
+    );
+  }
 
-  const triggerClass = booking.checkedInAt
-    ? "h-7 min-w-[80px] gap-1.5 border rounded-full px-2.5 text-[11px] font-semibold shadow-none focus:ring-0 focus:ring-offset-0 bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-800"
+  // Jam booking sudah tiba (startTime tercapai) → aktifkan check-in otomatis
+  const canCheckIn = isToday && hasStarted && !hasEnded;
+
+  const triggerClass = canCheckIn
+    ? "h-7 min-w-[80px] gap-1.5 border rounded-full px-2.5 text-[11px] font-semibold shadow-none focus:ring-0 focus:ring-offset-0 bg-green-50 text-green-700 border-green-300 dark:bg-green-900/20 dark:text-green-400 dark:border-green-800 animate-pulse"
     : "h-7 min-w-[80px] gap-1.5 border rounded-full px-2.5 text-[11px] font-semibold shadow-none focus:ring-0 focus:ring-offset-0 bg-slate-50 text-slate-500 border-slate-200 dark:bg-slate-800/30 dark:text-slate-400 dark:border-slate-700";
 
   return (
@@ -1067,26 +1113,20 @@ function InlineCheckInSelect({
       disabled={isLoading}
     >
       <SelectTrigger className={triggerClass} style={{ outline: "none" }}>
-        {isLoading ? (
-          <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin shrink-0" />
-        ) : null}
-        <span>{currentLabel}</span>
+        {isLoading && <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin shrink-0" />}
+        <span>{canCheckIn ? "🟢 Check-in" : "— Pilih"}</span>
       </SelectTrigger>
       <SelectContent>
-        <SelectItem
-          value="checkin"
-          disabled={!!booking.checkedInAt || !isToday}
-          className="text-xs"
-        >
+        <SelectItem value="checkin" disabled={!canCheckIn} className="text-xs">
           <span className="flex items-center gap-1.5">
             <LogIn size={11} className="text-emerald-600" />
-            {booking.checkedInAt ? "Sudah Check-in" : !isToday ? `Check-in (${booking.bookingDate})` : "Check-in"}
+            {canCheckIn ? "Check-in Sekarang" : !isToday ? `Check-in (${booking.bookingDate})` : `Mulai ${booking.startTime}`}
           </span>
         </SelectItem>
         <SelectItem value="complete" className="text-xs">
           <span className="flex items-center gap-1.5">
             <CheckCircle2 size={11} className="text-blue-600" />
-            Selesai
+            Tandai Selesai
           </span>
         </SelectItem>
       </SelectContent>
