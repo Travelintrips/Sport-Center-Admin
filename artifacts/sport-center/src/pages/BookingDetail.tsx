@@ -677,8 +677,6 @@ export default function BookingDetail() {
           bookingDate={booking.bookingDate}
           startTime={booking.startTime}
           endTime={booking.endTime}
-          pricePerHour={(booking as any).facilityPricePerHour ?? 0}
-          facilityCloseTime={(booking as any).facilityCloseTime ?? undefined}
           onSuccess={() => queryClient.invalidateQueries({ queryKey: getGetBookingByOrderQueryKey(orderNumber) })}
         />
       )}

@@ -18,6 +18,52 @@ function addHours(time: string, hours: number): string {
   return `${String(h + hours).padStart(2, "0")}:00`;
 }
 
+// GET /bookings/:id/extend-options — available extension hours (no conflict, ≤5h, within close time)
+router.get("/bookings/:id/extend-options", async (req, res) => {
+  try {
+    const bookingId = parseInt(String(req.params.id));
+    const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, bookingId)).limit(1);
+    if (!booking) { res.status(404).json({ error: "Booking tidak ditemukan" }); return; }
+
+    const [facility] = await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, booking.facilityId)).limit(1);
+    if (!facility) { res.status(404).json({ error: "Fasilitas tidak ditemukan" }); return; }
+
+    const closeMinutes = timeToMinutes(facility.closeTime);
+    const existingBookings = await db.select().from(bookingsTable)
+      .where(and(
+        eq(bookingsTable.facilityId, booking.facilityId),
+        eq(bookingsTable.bookingDate, booking.bookingDate),
+        not(inArray(bookingsTable.status, INACTIVE_STATUSES)),
+        not(eq(bookingsTable.id, bookingId)),
+      ));
+
+    const availableHours: number[] = [];
+    for (let extra = 1; extra <= 5; extra++) {
+      const newEndTime = addHours(booking.endTime, extra);
+      if (timeToMinutes(newEndTime) > closeMinutes) break;
+      const reqStart = timeToMinutes(booking.endTime);
+      const reqEnd = timeToMinutes(newEndTime);
+      const conflict = existingBookings.find((b) => {
+        const bStart = timeToMinutes(b.startTime);
+        const bEnd = timeToMinutes(b.endTime);
+        return reqStart < bEnd && reqEnd > bStart;
+      });
+      if (conflict) break; // stop at first conflict — can't skip gaps
+      availableHours.push(extra);
+    }
+
+    res.json({
+      availableHours,
+      facilityPricePerHour: Number(facility.pricePerHour),
+      facilityCloseTime: facility.closeTime,
+      currentEndTime: booking.endTime,
+    });
+  } catch (err) {
+    req.log.error({ err }, "Extend options error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 // POST /bookings/:id/extend — customer requests time extension
 router.post("/bookings/:id/extend", async (req, res) => {
   try {

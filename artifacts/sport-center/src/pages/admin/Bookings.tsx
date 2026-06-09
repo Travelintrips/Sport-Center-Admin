@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import {
   useListBookings,
   useUpdateBooking,
@@ -6,7 +6,7 @@ import {
   useCheckInBooking,
   getListBookingsQueryKey,
 } from "@workspace/api-client-react";
-import { useQueryClient, useMutation } from "@tanstack/react-query";
+import { useQueryClient, useMutation, useQuery } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { motion, AnimatePresence } from "framer-motion";
@@ -1094,6 +1094,106 @@ function InlineStatusSelect({
   );
 }
 
+/* ─── ExtendDialogBody ───────────────────────────────────────────── */
+
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "/api";
+
+function ExtendDialogBody({
+  booking,
+  extendHours,
+  setExtendHours,
+  onCancel,
+  onSubmit,
+  isPending,
+}: {
+  booking: { id: number; endTime: string; startTime: string; bookingDate: string; facilityName: string; orderNumber: string; customerName: string };
+  extendHours: string;
+  setExtendHours: (v: string) => void;
+  onCancel: () => void;
+  onSubmit: (extraHours: number) => void;
+  isPending: boolean;
+}) {
+  const { data: options, isLoading } = useQuery({
+    queryKey: ["extend-options", booking.id],
+    queryFn: () =>
+      fetch(`${API_BASE}/bookings/${booking.id}/extend-options`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem("sport_center_token")}` },
+      }).then((r) => r.json()),
+    enabled: !!booking.id,
+  });
+
+  const availableHours: number[] = options?.availableHours ?? [];
+
+  useEffect(() => {
+    if (availableHours.length > 0 && !availableHours.includes(parseInt(extendHours))) {
+      setExtendHours(String(availableHours[0]));
+    }
+  }, [availableHours.join(",")]);
+
+  const extra = parseInt(extendHours) || 1;
+  const newEndTime = (() => {
+    const [h] = booking.endTime.split(":").map(Number);
+    return `${String(h + extra).padStart(2, "0")}:00`;
+  })();
+
+  return (
+    <div className="space-y-4">
+      <div className="bg-muted/40 rounded-lg p-3 text-sm space-y-0.5">
+        <p className="font-semibold">{booking.customerName}</p>
+        <p className="text-muted-foreground">{booking.orderNumber} · {booking.facilityName}</p>
+        <p className="text-muted-foreground">{booking.bookingDate} · {booking.startTime}–<span className="font-semibold text-foreground">{booking.endTime}</span></p>
+      </div>
+
+      {isLoading ? (
+        <p className="text-sm text-muted-foreground text-center py-2">Mengecek ketersediaan slot...</p>
+      ) : availableHours.length === 0 ? (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700 text-center">
+          Tidak ada slot tersedia — jadwal berikutnya sudah penuh atau telah mencapai jam tutup.
+        </div>
+      ) : (
+        <>
+          <div className="space-y-1.5">
+            <Label>Tambah Durasi</Label>
+            <Select value={extendHours} onValueChange={setExtendHours}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {availableHours.map((n) => (
+                  <SelectItem key={n} value={String(n)}>+ {n} jam</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="bg-primary/5 border border-primary/20 rounded-lg p-3 text-sm">
+            <p className="text-xs text-primary font-semibold mb-1">Jadwal setelah diperpanjang</p>
+            <p>
+              <span className="text-muted-foreground line-through">{booking.endTime}</span>
+              {" → "}
+              <span className="font-bold text-primary">{newEndTime}</span>
+            </p>
+          </div>
+        </>
+      )}
+
+      <div className="flex gap-3">
+        <Button variant="outline" className="flex-1" onClick={onCancel} disabled={isPending}>
+          Batal
+        </Button>
+        {availableHours.length > 0 && (
+          <Button
+            className="flex-1 bg-primary hover:bg-primary/90"
+            disabled={isPending}
+            onClick={() => onSubmit(extra)}
+          >
+            {isPending ? "Menyimpan..." : "Perpanjang"}
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /* ─── Main Component ────────────────────────────────────────────── */
 
 export default function AdminBookings() {
@@ -1636,51 +1736,14 @@ export default function AdminBookings() {
             </DialogTitle>
           </DialogHeader>
           {extendBooking && (
-            <div className="space-y-4">
-              <div className="bg-muted/40 rounded-lg p-3 text-sm space-y-0.5">
-                <p className="font-semibold">{extendBooking.customerName}</p>
-                <p className="text-muted-foreground">{extendBooking.orderNumber} · {extendBooking.facilityName}</p>
-                <p className="text-muted-foreground">{extendBooking.bookingDate} · {extendBooking.startTime}–<span className="font-semibold text-foreground">{extendBooking.endTime}</span></p>
-              </div>
-              <div className="space-y-1.5">
-                <Label>Tambah Durasi</Label>
-                <Select value={extendHours} onValueChange={setExtendHours}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {[1,2,3,4,5,6,7,8].map((n) => (
-                      <SelectItem key={n} value={String(n)}>+ {n} jam</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="bg-primary/5 border border-primary/20 rounded-lg p-3 text-sm">
-                <p className="text-xs text-primary font-semibold mb-1">Jadwal setelah diperpanjang</p>
-                <p>
-                  <span className="text-muted-foreground line-through">{extendBooking.endTime}</span>
-                  {" → "}
-                  <span className="font-bold text-primary">
-                    {(() => {
-                      const [h] = extendBooking.endTime.split(":").map(Number);
-                      return `${String(h + parseInt(extendHours)).padStart(2, "0")}:00`;
-                    })()}
-                  </span>
-                </p>
-              </div>
-              <div className="flex gap-3">
-                <Button variant="outline" className="flex-1" onClick={() => setExtendBooking(null)} disabled={extendMutation.isPending}>
-                  Batal
-                </Button>
-                <Button
-                  className="flex-1 bg-primary hover:bg-primary/90"
-                  disabled={extendMutation.isPending}
-                  onClick={() => extendMutation.mutate({ id: extendBooking.id, extraHours: parseInt(extendHours) })}
-                >
-                  {extendMutation.isPending ? "Menyimpan..." : "Perpanjang"}
-                </Button>
-              </div>
-            </div>
+            <ExtendDialogBody
+              booking={extendBooking}
+              extendHours={extendHours}
+              setExtendHours={setExtendHours}
+              onCancel={() => setExtendBooking(null)}
+              onSubmit={(extraHours) => extendMutation.mutate({ id: extendBooking.id, extraHours })}
+              isPending={extendMutation.isPending}
+            />
           )}
         </DialogContent>
       </Dialog>
