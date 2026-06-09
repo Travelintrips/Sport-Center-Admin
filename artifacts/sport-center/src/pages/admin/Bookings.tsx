@@ -1477,10 +1477,10 @@ export default function AdminBookings() {
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.12 }}
-        className="rounded-2xl border border-slate-200/80 dark:border-slate-700/60 bg-white dark:bg-slate-900 shadow-sm overflow-hidden"
+        className="rounded-2xl border border-slate-200/80 dark:border-slate-700/60 bg-white dark:bg-slate-900 shadow-sm"
       >
-        {/* Filters */}
-        <div className="px-4 lg:px-5 py-3.5 border-b border-slate-100 dark:border-slate-800 flex flex-wrap gap-2.5 items-center">
+        {/* Filters — sticky saat scroll */}
+        <div className="sticky top-0 z-20 rounded-t-2xl px-4 lg:px-5 py-3.5 border-b border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 flex flex-wrap gap-2.5 items-center">
           <div className="relative flex-1 min-w-44">
             <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
             <Input
