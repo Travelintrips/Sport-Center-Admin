@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, memo } from "react";
 import { Link, useLocation } from "wouter";
 import { useGetMe, useGetMyBookings, useGetReviews, useCreateReview, useLogout, getGetMeQueryKey, getGetMyBookingsQueryKey } from "@workspace/api-client-react";
 import { removeToken } from "@/lib/auth";
@@ -28,6 +28,134 @@ const STATUS_CONFIG: Record<string, { label: string; labelEn: string; stripe: st
 
 const INACTIVE = ["completed", "cancelled", "expired", "rejected", "refunded"];
 
+type BookingItem = { id: number; facilityName: string; facilityCategory: string; status: string; bookingDate: string; startTime: string; endTime: string; totalPrice: number; orderNumber: string };
+type ReviewItem = { bookingId: number; rating: number; comment?: string | null };
+type Rs = { rating: number; comment: string; hover: number };
+
+interface BookingCardProps {
+  b: BookingItem;
+  review: ReviewItem | undefined;
+  rs: Rs;
+  lang: string;
+  dateLocale: Locale;
+  onReschedule: (b: BookingItem) => void;
+  onSetRating: (id: number, rating: number) => void;
+  onSetHover: (id: number, hover: number) => void;
+  onCommentChange: (id: number, comment: string) => void;
+  onSubmitReview: (id: number) => void;
+  submitPending: boolean;
+}
+
+const BookingCard = memo(function BookingCard({
+  b, review, rs, lang, dateLocale, onReschedule, onSetRating, onSetHover, onCommentChange, onSubmitReview, submitPending,
+}: BookingCardProps) {
+  const { t } = useLang(); // hook in a top-level memo component — valid
+  const cfg = STATUS_CONFIG[b.status] ?? { label: b.status, labelEn: b.status, stripe: "#9ca3af", badge: "bg-gray-100 text-gray-600 border-gray-200" };
+
+  return (
+    <Card className="overflow-hidden hover:shadow-md transition-shadow">
+      <CardContent className="p-0">
+        <div className="flex items-stretch">
+          <div className="w-1.5 flex-shrink-0 rounded-l-xl" style={{ background: cfg.stripe }} />
+          <div className="flex-1 p-5">
+            <div className="flex items-start justify-between gap-3 flex-wrap mb-3">
+              <div>
+                <div className="font-black text-lg leading-tight">{b.facilityName}</div>
+                <div className="text-xs text-primary font-semibold uppercase tracking-wide mt-0.5">{b.facilityCategory}</div>
+              </div>
+              <Badge className={`text-xs font-bold border ${cfg.badge}`}>
+                {lang === "id" ? cfg.label : cfg.labelEn}
+              </Badge>
+            </div>
+
+            <div className="flex flex-wrap gap-3 text-sm text-muted-foreground mb-4">
+              <span className="flex items-center gap-1.5">
+                <CalendarDays size={13} className="text-primary" />
+                {format(new Date(b.bookingDate), "EEE, d MMM yyyy", { locale: dateLocale })}
+              </span>
+              <span className="flex items-center gap-1.5">
+                <Clock size={13} className="text-primary" />
+                {b.startTime.substring(0, 5)} – {b.endTime.substring(0, 5)}
+              </span>
+            </div>
+
+            <div className="flex items-center justify-between">
+              <div className="font-black text-primary">Rp {b.totalPrice.toLocaleString("id-ID")}</div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground font-mono hidden sm:inline">#{b.orderNumber}</span>
+                {["pending_payment", "paid", "confirmed", "waiting_confirmation"].includes(b.status) && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="gap-1 text-orange-600 hover:text-orange-700 hover:bg-orange-50 h-8 px-3"
+                    onClick={() => onReschedule(b)}
+                  >
+                    <CalendarClock size={13} /> {t("Reschedule", "Reschedule")}
+                  </Button>
+                )}
+                <Button asChild variant="ghost" size="sm" className="gap-1 text-primary hover:text-primary h-8 px-3">
+                  <Link href={`/booking/${b.orderNumber}`}>
+                    {t("Detail", "Detail")} <ChevronRight size={13} />
+                  </Link>
+                </Button>
+              </div>
+            </div>
+
+            {/* Inline review form for completed bookings */}
+            {b.status === "completed" && (
+              <div className="mt-4 pt-4 border-t border-border/60">
+                {review ? (
+                  <div className="flex items-center gap-3">
+                    <div className="flex gap-0.5">
+                      {[1,2,3,4,5].map((s) => (
+                        <Star key={s} className={`w-4 h-4 ${s <= review.rating ? "fill-yellow-400 text-yellow-400" : "text-gray-200"}`} />
+                      ))}
+                    </div>
+                    {review.comment && <p className="text-xs text-muted-foreground italic flex-1 truncate">"{review.comment}"</p>}
+                    <span className="text-xs text-green-600 font-semibold shrink-0">✓ {t("Sudah diulas", "Reviewed")}</span>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">{t("Beri Ulasan", "Leave a Review")}</p>
+                    <div className="flex gap-1">
+                      {[1,2,3,4,5].map((s) => (
+                        <button key={s} type="button"
+                          onClick={() => onSetRating(b.id, s)}
+                          onMouseEnter={() => onSetHover(b.id, s)}
+                          onMouseLeave={() => onSetHover(b.id, 0)}
+                          className="focus:outline-none"
+                        >
+                          <Star className={`w-6 h-6 transition-colors ${s <= (rs.hover || rs.rating) ? "fill-yellow-400 text-yellow-400" : "text-gray-200 hover:text-yellow-300"}`} />
+                        </button>
+                      ))}
+                    </div>
+                    {rs.rating > 0 && (
+                      <div className="flex gap-2 mt-2">
+                        <input
+                          className="flex-1 text-sm border border-border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-primary bg-background"
+                          placeholder={t("Komentar (opsional)...", "Comment (optional)...")}
+                          value={rs.comment}
+                          onChange={(e) => onCommentChange(b.id, e.target.value)}
+                        />
+                        <Button size="sm" className="bg-primary hover:bg-primary/90 shrink-0"
+                          disabled={submitPending}
+                          onClick={() => onSubmitReview(b.id)}
+                        >
+                          {t("Kirim", "Submit")}
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+});
+
 export default function MyBookings() {
   const [, setLocation] = useLocation();
   const { t, lang } = useLang();
@@ -40,7 +168,7 @@ export default function MyBookings() {
   const { data: allReviews } = useGetReviews(undefined, { query: { enabled: !!user } });
 
   const [reviewState, setReviewState] = useState<Record<number, { rating: number; comment: string; hover: number }>>({});
-  const [rescheduleTarget, setRescheduleTarget] = useState<NonNullable<typeof bookings>[number] | null>(null);
+  const [rescheduleTarget, setRescheduleTarget] = useState<BookingItem | null>(null);
 
   const logoutMutation = useLogout({
     mutation: {
@@ -64,21 +192,9 @@ export default function MyBookings() {
     },
   });
 
-  const getRs = (id: number) => reviewState[id] ?? { rating: 0, comment: "", hover: 0 };
-  const setRs = (id: number, patch: Partial<{ rating: number; comment: string; hover: number }>) =>
+  const getRs = (id: number): Rs => reviewState[id] ?? { rating: 0, comment: "", hover: 0 };
+  const setRs = (id: number, patch: Partial<Rs>) =>
     setReviewState((prev) => ({ ...prev, [id]: { ...getRs(id), ...patch } }));
-
-  useEffect(() => {
-    if (!userLoading && (isError || !user)) {
-      setLocation("/login");
-    }
-  }, [userLoading, isError, user, setLocation]);
-
-  useEffect(() => {
-    if (user?.role === "tenant") {
-      setLocation("/tenant/bookings");
-    }
-  }, [user, setLocation]);
 
   if (userLoading) {
     return (
@@ -89,122 +205,10 @@ export default function MyBookings() {
   }
 
   if (isError || !user) return null;
-
-
   if (user.role === "tenant") return null;
-
 
   const active = (bookings ?? []).filter((b) => !INACTIVE.includes(b.status));
   const past   = (bookings ?? []).filter((b) =>  INACTIVE.includes(b.status));
-
-  const BookingCard = ({ b }: { b: NonNullable<typeof bookings>[number] }) => {
-    const cfg = STATUS_CONFIG[b.status] ?? { label: b.status, labelEn: b.status, stripe: "#9ca3af", badge: "bg-gray-100 text-gray-600 border-gray-200" };
-    const review = allReviews?.find((r) => r.bookingId === b.id);
-    const rs = getRs(b.id);
-
-    return (
-      <Card className="overflow-hidden hover:shadow-md transition-shadow">
-        <CardContent className="p-0">
-          <div className="flex items-stretch">
-            <div className="w-1.5 flex-shrink-0 rounded-l-xl" style={{ background: cfg.stripe }} />
-            <div className="flex-1 p-5">
-              <div className="flex items-start justify-between gap-3 flex-wrap mb-3">
-                <div>
-                  <div className="font-black text-lg leading-tight">{b.facilityName}</div>
-                  <div className="text-xs text-primary font-semibold uppercase tracking-wide mt-0.5">{b.facilityCategory}</div>
-                </div>
-                <Badge className={`text-xs font-bold border ${cfg.badge}`}>
-                  {lang === "id" ? cfg.label : cfg.labelEn}
-                </Badge>
-              </div>
-
-              <div className="flex flex-wrap gap-3 text-sm text-muted-foreground mb-4">
-                <span className="flex items-center gap-1.5">
-                  <CalendarDays size={13} className="text-primary" />
-                  {format(new Date(b.bookingDate), "EEE, d MMM yyyy", { locale: dateLocale })}
-                </span>
-                <span className="flex items-center gap-1.5">
-                  <Clock size={13} className="text-primary" />
-                  {b.startTime.substring(0, 5)} – {b.endTime.substring(0, 5)}
-                </span>
-              </div>
-
-              <div className="flex items-center justify-between">
-                <div className="font-black text-primary">Rp {b.totalPrice.toLocaleString("id-ID")}</div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-muted-foreground font-mono hidden sm:inline">#{b.orderNumber}</span>
-                  {["pending_payment", "paid", "confirmed", "waiting_confirmation"].includes(b.status) && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="gap-1 text-orange-600 hover:text-orange-700 hover:bg-orange-50 h-8 px-3"
-                      onClick={() => setRescheduleTarget(b)}
-                    >
-                      <CalendarClock size={13} /> {t("Reschedule", "Reschedule")}
-                    </Button>
-                  )}
-                  <Button asChild variant="ghost" size="sm" className="gap-1 text-primary hover:text-primary h-8 px-3">
-                    <Link href={`/booking/${b.orderNumber}`}>
-                      {t("Detail", "Detail")} <ChevronRight size={13} />
-                    </Link>
-                  </Button>
-                </div>
-              </div>
-
-              {/* Inline review form for completed bookings */}
-              {b.status === "completed" && (
-                <div className="mt-4 pt-4 border-t border-border/60">
-                  {review ? (
-                    <div className="flex items-center gap-3">
-                      <div className="flex gap-0.5">
-                        {[1,2,3,4,5].map((s) => (
-                          <Star key={s} className={`w-4 h-4 ${s <= review.rating ? "fill-yellow-400 text-yellow-400" : "text-gray-200"}`} />
-                        ))}
-                      </div>
-                      {review.comment && <p className="text-xs text-muted-foreground italic flex-1 truncate">"{review.comment}"</p>}
-                      <span className="text-xs text-green-600 font-semibold shrink-0">✓ {t("Sudah diulas", "Reviewed")}</span>
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">{t("Beri Ulasan", "Leave a Review")}</p>
-                      <div className="flex gap-1">
-                        {[1,2,3,4,5].map((s) => (
-                          <button key={s} type="button"
-                            onClick={() => setRs(b.id, { rating: s })}
-                            onMouseEnter={() => setRs(b.id, { hover: s })}
-                            onMouseLeave={() => setRs(b.id, { hover: 0 })}
-                            className="focus:outline-none"
-                          >
-                            <Star className={`w-6 h-6 transition-colors ${s <= (rs.hover || rs.rating) ? "fill-yellow-400 text-yellow-400" : "text-gray-200 hover:text-yellow-300"}`} />
-                          </button>
-                        ))}
-                      </div>
-                      {rs.rating > 0 && (
-                        <div className="flex gap-2 mt-2">
-                          <input
-                            className="flex-1 text-sm border border-border rounded-lg px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-primary bg-background"
-                            placeholder={t("Komentar (opsional)...", "Comment (optional)...")}
-                            value={rs.comment}
-                            onChange={(e) => setRs(b.id, { comment: e.target.value })}
-                          />
-                          <Button size="sm" className="bg-primary hover:bg-primary/90 shrink-0"
-                            disabled={submitReview.isPending}
-                            onClick={() => submitReview.mutate({ data: { bookingId: b.id, rating: rs.rating, comment: rs.comment || undefined } })}
-                          >
-                            {t("Kirim", "Submit")}
-                          </Button>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-    );
-  };
 
   return (
     <div className="container mx-auto px-4 py-10 max-w-3xl">
@@ -269,7 +273,23 @@ export default function MyBookings() {
                 {t("Booking Aktif", "Active Bookings")}
                 <span className="text-sm font-normal text-muted-foreground">({active.length})</span>
               </h2>
-              <div className="space-y-3">{active.map((b) => <BookingCard key={b.id} b={b} />)}</div>
+              <div className="space-y-3">{active.map((b) => (
+                <BookingCard
+                  key={b.id} b={b}
+                  review={allReviews?.find((r) => r.bookingId === b.id)}
+                  rs={getRs(b.id)}
+                  lang={lang} dateLocale={dateLocale}
+                  onReschedule={setRescheduleTarget}
+                  onSetRating={(id, rating) => setRs(id, { rating })}
+                  onSetHover={(id, hover) => setRs(id, { hover })}
+                  onCommentChange={(id, comment) => setRs(id, { comment })}
+                  onSubmitReview={(id) => {
+                    const r = getRs(id);
+                    submitReview.mutate({ data: { bookingId: id, rating: r.rating, comment: r.comment || undefined } });
+                  }}
+                  submitPending={submitReview.isPending}
+                />
+              ))}</div>
             </section>
           )}
           {past.length > 0 && (
@@ -279,7 +299,23 @@ export default function MyBookings() {
                 {t("Riwayat", "History")}
                 <span className="text-sm font-normal text-muted-foreground">({past.length})</span>
               </h2>
-              <div className="space-y-3">{past.map((b) => <BookingCard key={b.id} b={b} />)}</div>
+              <div className="space-y-3">{past.map((b) => (
+                <BookingCard
+                  key={b.id} b={b}
+                  review={allReviews?.find((r) => r.bookingId === b.id)}
+                  rs={getRs(b.id)}
+                  lang={lang} dateLocale={dateLocale}
+                  onReschedule={setRescheduleTarget}
+                  onSetRating={(id, rating) => setRs(id, { rating })}
+                  onSetHover={(id, hover) => setRs(id, { hover })}
+                  onCommentChange={(id, comment) => setRs(id, { comment })}
+                  onSubmitReview={(id) => {
+                    const r = getRs(id);
+                    submitReview.mutate({ data: { bookingId: id, rating: r.rating, comment: r.comment || undefined } });
+                  }}
+                  submitPending={submitReview.isPending}
+                />
+              ))}</div>
             </section>
           )}
         </div>
