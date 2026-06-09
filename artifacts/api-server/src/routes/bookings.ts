@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db, bookingsTable, facilitiesTable, paymentsTable, promosTable, discountSettingsTable, apMembersTable, bookingHistoryTable, usersTable } from "@workspace/db";
-import { eq, and, sql, or, ilike } from "drizzle-orm";
+import { eq, and, sql, or, ilike, desc } from "drizzle-orm";
 import { adminMiddleware, authMiddleware, verifyToken } from "../lib/auth";
 import { broadcastAvailabilityChange } from "../lib/supabase";
 import { notifyBookingCreated, notifyPaymentConfirmed, notifyBookingCancelled } from "../lib/notifications";
@@ -56,7 +56,7 @@ async function getBookingWithPayment(id: number) {
 router.get("/bookings", adminMiddleware, async (req, res) => {
   try {
     const { status, date, facilityId, customerId } = req.query;
-    let bookings = await db.select().from(bookingsTable);
+    let bookings = await db.select().from(bookingsTable).orderBy(desc(bookingsTable.createdAt));
     if (status) bookings = bookings.filter((b) => b.status === status);
     if (date) bookings = bookings.filter((b) => b.bookingDate === date);
     if (facilityId) bookings = bookings.filter((b) => b.facilityId === Number(facilityId));
