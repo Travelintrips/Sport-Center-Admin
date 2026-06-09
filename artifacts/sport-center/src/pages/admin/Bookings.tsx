@@ -91,7 +91,7 @@ const STATUS_CONFIG: Record<
     pill: "border-amber-200 dark:border-amber-800",
   },
   paid: {
-    label: "Menunggu Verifikasi",
+    label: "Pembayaran Selesai",
     color: "text-blue-700 dark:text-blue-300",
     bg: "bg-blue-100 dark:bg-blue-900/30",
     icon: CreditCard,
@@ -119,7 +119,7 @@ const STATUS_CONFIG: Record<
     pill: "border-red-200 dark:border-red-800",
   },
   refunded: {
-    label: "Dikembalikan",
+    label: "Pengembalian Dana",
     color: "text-purple-700 dark:text-purple-300",
     bg: "bg-purple-100 dark:bg-purple-900/30",
     icon: RotateCcw,
@@ -128,12 +128,13 @@ const STATUS_CONFIG: Record<
 };
 
 const FILTER_OPTIONS = [
-  { value: "all", label: "Semua Status" },
+  { value: "all",             label: "Semua Status" },
   { value: "pending_payment", label: "Menunggu Pembayaran" },
-  { value: "paid", label: "Menunggu Verifikasi" },
-  { value: "completed", label: "Selesai" },
-  { value: "cancelled", label: "Dibatalkan" },
-  { value: "refunded", label: "Dikembalikan" },
+  { value: "paid",            label: "Pembayaran Selesai" },
+  { value: "confirmed",       label: "Dikonfirmasi" },
+  { value: "completed",       label: "Selesai" },
+  { value: "cancelled",       label: "Dibatalkan" },
+  { value: "refunded",        label: "Pengembalian Dana" },
 ];
 
 function StatusBadge({ status }: { status: string }) {
@@ -983,10 +984,11 @@ function ActionButton({
 
 const STATUS_OPTIONS = [
   { value: "pending_payment", label: "⏳ Menunggu Pembayaran" },
-  { value: "paid",            label: "💳 Menunggu Verifikasi" },
-  { value: "completed",       label: "✅ Selesai" },
+  { value: "paid",            label: "💳 Pembayaran Selesai" },
+  { value: "confirmed",       label: "✅ Dikonfirmasi" },
+  { value: "completed",       label: "🏁 Selesai" },
   { value: "cancelled",       label: "❌ Dibatalkan" },
-  { value: "refunded",        label: "↩️ Dikembalikan" },
+  { value: "refunded",        label: "↩️ Pengembalian Dana" },
 ];
 
 function isBookingTimePast(bookingDate: string, endTime: string): boolean {
@@ -1543,7 +1545,7 @@ export default function AdminBookings() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-100 dark:border-slate-800">
-                  {["Order", "Customer", "Fasilitas", "Tanggal & Waktu", "Durasi", "Metode", "Tgl Bayar", "Total", "Status", "Check-In", ""].map((h) => (
+                  {["Order", "Customer", "Fasilitas", "Tanggal & Waktu", "Durasi", "Metode", "Tgl Bayar", "Total", "Pembayaran", "Check-In", ""].map((h) => (
                     <th
                       key={h}
                       className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide whitespace-nowrap"
