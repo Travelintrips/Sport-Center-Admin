@@ -4,27 +4,16 @@ import { eq } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
 import multer from "multer";
 import path from "path";
-import fs from "fs";
 import { randomUUID } from "crypto";
 import { notifyPaymentConfirmed, notifyPaymentProofUploaded } from "../lib/notifications";
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
 import { syncStatusToBizportal } from "../lib/bizportalSync";
+import { BUCKETS, uploadToStorage } from "../lib/supabaseStorage";
 
 const router = Router();
 
-const PROOFS_DIR = path.resolve(process.cwd(), "uploads", "proofs");
-if (!fs.existsSync(PROOFS_DIR)) fs.mkdirSync(PROOFS_DIR, { recursive: true });
-
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, PROOFS_DIR),
-  filename: (_req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase() || ".jpg";
-    cb(null, `proof-${randomUUID()}${ext}`);
-  },
-});
-
 const upload = multer({
-  storage,
+  storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     const validMime = /image\/(jpeg|png|webp)|application\/pdf/.test(file.mimetype);
@@ -35,8 +24,15 @@ const upload = multer({
 router.post("/payments/proof-upload", upload.single("proof"), async (req, res) => {
   try {
     if (!req.file) { res.status(400).json({ error: "No file provided" }); return; }
-    const objectPath = `/api/uploads/proofs/${req.file.filename}`;
-    res.json({ objectPath });
+    const ext = path.extname(req.file.originalname).toLowerCase() || ".jpg";
+    const objectName = `proof-${randomUUID()}${ext}`;
+    const url = await uploadToStorage(
+      BUCKETS.proof,
+      objectName,
+      req.file.buffer,
+      req.file.mimetype,
+    );
+    res.json({ objectPath: url, url });
   } catch (err) {
     req.log.error({ err }, "Upload proof error");
     res.status(500).json({ error: "Upload failed" });

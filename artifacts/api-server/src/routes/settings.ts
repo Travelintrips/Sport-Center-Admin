@@ -4,23 +4,17 @@ import { eq } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
 import multer from "multer";
 import path from "path";
-import fs from "fs";
 import { randomUUID } from "crypto";
+import {
+  BUCKETS,
+  uploadToStorage,
+  deleteFromStorage,
+} from "../lib/supabaseStorage";
 
 const router = Router();
 
-const uploadsDir = path.join(process.cwd(), "../sport-center/public/uploads");
-if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
-
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, uploadsDir),
-  filename: (_req, file, cb) => {
-    const ext = path.extname(file.originalname);
-    cb(null, `qris-${randomUUID()}${ext}`);
-  },
-});
 const upload = multer({
-  storage,
+  storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     if (file.mimetype.startsWith("image/")) cb(null, true);
@@ -85,10 +79,16 @@ router.post("/settings/qris", adminMiddleware, upload.single("qris"), async (req
     if (!req.file) { res.status(400).json({ error: "No file uploaded" }); return; }
     const settings = await getOrCreateSettings();
     if (settings.qrisImageUrl) {
-      const oldFile = path.join(uploadsDir, path.basename(settings.qrisImageUrl));
-      if (fs.existsSync(oldFile)) fs.unlinkSync(oldFile);
+      await deleteFromStorage(settings.qrisImageUrl);
     }
-    const qrisImageUrl = `/uploads/${req.file.filename}`;
+    const ext = path.extname(req.file.originalname).toLowerCase() || ".png";
+    const objectPath = `qris/qris-${randomUUID()}${ext}`;
+    const qrisImageUrl = await uploadToStorage(
+      BUCKETS.facility,
+      objectPath,
+      req.file.buffer,
+      req.file.mimetype,
+    );
     await db.update(settingsTable).set({ qrisImageUrl }).where(eq(settingsTable.id, settings.id));
     res.json({ qrisImageUrl });
   } catch (err) {
@@ -101,8 +101,7 @@ router.delete("/settings/qris", adminMiddleware, async (req, res) => {
   try {
     const settings = await getOrCreateSettings();
     if (settings.qrisImageUrl) {
-      const oldFile = path.join(uploadsDir, path.basename(settings.qrisImageUrl));
-      if (fs.existsSync(oldFile)) fs.unlinkSync(oldFile);
+      await deleteFromStorage(settings.qrisImageUrl);
     }
     await db.update(settingsTable).set({ qrisImageUrl: null }).where(eq(settingsTable.id, settings.id));
     res.json({ success: true });
