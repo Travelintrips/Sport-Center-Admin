@@ -212,4 +212,94 @@ router.patch("/extension-requests/:id", adminMiddleware, async (req, res) => {
   }
 });
 
+// PATCH /bookings/:id/extend-direct — admin langsung perpanjang (tanpa approval flow)
+router.patch("/bookings/:id/extend-direct", adminMiddleware, async (req, res) => {
+  try {
+    const bookingId = parseInt(String(req.params.id));
+    const { extraHours, adminNote } = req.body;
+
+    if (!extraHours || typeof extraHours !== "number" || extraHours < 1 || extraHours > 8) {
+      res.status(400).json({ error: "extraHours harus antara 1–8" });
+      return;
+    }
+
+    const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, bookingId)).limit(1);
+    if (!booking) { res.status(404).json({ error: "Booking tidak ditemukan" }); return; }
+
+    const [facility] = await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, booking.facilityId)).limit(1);
+    if (!facility) { res.status(404).json({ error: "Fasilitas tidak ditemukan" }); return; }
+
+    const newEndTime = addHours(booking.endTime, extraHours);
+    const closeMinutes = timeToMinutes(facility.closeTime);
+    if (timeToMinutes(newEndTime) > closeMinutes) {
+      res.status(400).json({ error: `Perpanjangan melebihi jam tutup fasilitas (${facility.closeTime})` });
+      return;
+    }
+
+    // Cek konflik slot
+    const existingBookings = await db.select().from(bookingsTable)
+      .where(and(
+        eq(bookingsTable.facilityId, booking.facilityId),
+        eq(bookingsTable.bookingDate, booking.bookingDate),
+        not(inArray(bookingsTable.status, INACTIVE_STATUSES)),
+        not(eq(bookingsTable.id, bookingId)),
+      ));
+
+    const reqStart = timeToMinutes(booking.endTime);
+    const reqEnd = timeToMinutes(newEndTime);
+    const conflict = existingBookings.find((b) => {
+      const bStart = timeToMinutes(b.startTime);
+      const bEnd = timeToMinutes(b.endTime);
+      return reqStart < bEnd && reqEnd > bStart;
+    });
+    if (conflict) {
+      res.status(409).json({ error: "Slot waktu perpanjangan sudah terisi booking lain" });
+      return;
+    }
+
+    const additionalPrice = Number(facility.pricePerHour) * extraHours;
+    const newDuration = booking.durationHours + extraHours;
+    const newTotal = Number(booking.totalPrice) + additionalPrice;
+
+    await db.update(bookingsTable).set({
+      endTime: newEndTime,
+      durationHours: newDuration,
+      totalPrice: String(newTotal),
+      updatedAt: new Date(),
+    }).where(eq(bookingsTable.id, bookingId));
+
+    const userInfo = getUserFromReq(req);
+    const clientInfo = getClientInfo(req);
+
+    await db.insert(bookingHistoryTable).values({
+      bookingId,
+      fromStatus: booking.status,
+      toStatus: booking.status,
+      changedByName: userInfo.userName || "admin",
+      note: `Admin perpanjang waktu: +${extraHours} jam (${booking.endTime} → ${newEndTime}), total baru Rp ${newTotal.toLocaleString("id-ID")}${adminNote ? `. Catatan: ${adminNote}` : ""}`,
+    });
+
+    await logAudit({
+      ...userInfo,
+      action: "extend_direct",
+      entity: "booking",
+      entityId: bookingId,
+      after: { extraHours, newEndTime, newTotal },
+      ...clientInfo,
+    });
+
+    const updated = {
+      ...booking,
+      endTime: newEndTime,
+      durationHours: newDuration,
+      totalPrice: newTotal,
+    };
+
+    res.json({ success: true, booking: updated, additionalPrice });
+  } catch (err) {
+    req.log.error({ err }, "Extend direct error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 export default router;

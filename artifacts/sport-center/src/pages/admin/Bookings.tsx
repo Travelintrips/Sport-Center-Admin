@@ -6,7 +6,9 @@ import {
   useCheckInBooking,
   getListBookingsQueryKey,
 } from "@workspace/api-client-react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, useMutation } from "@tanstack/react-query";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
 import { motion, AnimatePresence } from "framer-motion";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -1106,6 +1108,8 @@ export default function AdminBookings() {
   const [verifyBooking, setVerifyBooking] = useState<any>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
+  const [extendBooking, setExtendBooking] = useState<any>(null);
+  const [extendHours, setExtendHours] = useState("1");
 
   const { data: rawBookings, isLoading } = useListBookings();
   const bookings = rawBookings ?? [];
@@ -1242,6 +1246,26 @@ export default function AdminBookings() {
       setIsSyncing(false);
     }
   };
+
+  const extendMutation = useMutation({
+    mutationFn: ({ id, extraHours }: { id: number; extraHours: number }) =>
+      fetch(`/api/bookings/${id}/extend-direct`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${getToken()}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ extraHours }),
+      }).then(async (r) => {
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || "Gagal memperpanjang");
+        return data;
+      }),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: getListBookingsQueryKey() });
+      toast({ title: `Waktu diperpanjang +${extendHours} jam`, description: `Selesai pukul ${data.booking?.endTime ?? ""}` });
+      setExtendBooking(null);
+      setExtendHours("1");
+    },
+    onError: (err: Error) => toast({ title: "Gagal", description: err.message, variant: "destructive" }),
+  });
 
   const isUpdating = updateBookingMutation.isPending || updatePaymentMutation.isPending || deletingId !== null;
   const pendingVerification = bookings.filter((b: any) => b.status === "paid").length;
@@ -1511,6 +1535,17 @@ export default function AdminBookings() {
                             <Eye size={12} />
                             Detail
                           </motion.button>
+                          {(b.status === "confirmed" || b.status === "paid") && (
+                            <motion.button
+                              whileHover={{ scale: 1.04 }}
+                              whileTap={{ scale: 0.96 }}
+                              onClick={() => { setExtendBooking(b); setExtendHours("1"); }}
+                              className="flex items-center gap-1 h-7 px-2.5 rounded-lg text-xs font-semibold text-orange-600 border border-orange-300 hover:bg-orange-50 transition-colors whitespace-nowrap"
+                            >
+                              <Clock size={12} />
+                              +Waktu
+                            </motion.button>
+                          )}
                           {b.customerType === "angkasa_pura" && b.verificationStatus !== "verified" && (
                             <motion.button
                               whileHover={{ scale: 1.04 }}
@@ -1591,6 +1626,64 @@ export default function AdminBookings() {
       )}
 
       <VerifyIdDialog booking={verifyBooking} onClose={() => setVerifyBooking(null)} />
+
+      {/* Extend Time Dialog */}
+      <Dialog open={!!extendBooking} onOpenChange={(o) => !o && setExtendBooking(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Clock size={18} className="text-primary" /> Tambah Waktu Booking
+            </DialogTitle>
+          </DialogHeader>
+          {extendBooking && (
+            <div className="space-y-4">
+              <div className="bg-muted/40 rounded-lg p-3 text-sm space-y-0.5">
+                <p className="font-semibold">{extendBooking.customerName}</p>
+                <p className="text-muted-foreground">{extendBooking.orderNumber} · {extendBooking.facilityName}</p>
+                <p className="text-muted-foreground">{extendBooking.bookingDate} · {extendBooking.startTime}–<span className="font-semibold text-foreground">{extendBooking.endTime}</span></p>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Tambah Durasi</Label>
+                <Select value={extendHours} onValueChange={setExtendHours}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {[1,2,3,4,5,6,7,8].map((n) => (
+                      <SelectItem key={n} value={String(n)}>+ {n} jam</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="bg-primary/5 border border-primary/20 rounded-lg p-3 text-sm">
+                <p className="text-xs text-primary font-semibold mb-1">Jadwal setelah diperpanjang</p>
+                <p>
+                  <span className="text-muted-foreground line-through">{extendBooking.endTime}</span>
+                  {" → "}
+                  <span className="font-bold text-primary">
+                    {(() => {
+                      const [h] = extendBooking.endTime.split(":").map(Number);
+                      return `${String(h + parseInt(extendHours)).padStart(2, "0")}:00`;
+                    })()}
+                  </span>
+                </p>
+              </div>
+              <div className="flex gap-3">
+                <Button variant="outline" className="flex-1" onClick={() => setExtendBooking(null)} disabled={extendMutation.isPending}>
+                  Batal
+                </Button>
+                <Button
+                  className="flex-1 bg-primary hover:bg-primary/90"
+                  disabled={extendMutation.isPending}
+                  onClick={() => extendMutation.mutate({ id: extendBooking.id, extraHours: parseInt(extendHours) })}
+                >
+                  {extendMutation.isPending ? "Menyimpan..." : "Perpanjang"}
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
