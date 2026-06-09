@@ -32,6 +32,7 @@ import {
   CalendarClock,
 } from "lucide-react";
 import RescheduleDialog from "@/components/RescheduleDialog";
+import ExtendBookingDialog from "@/components/ExtendBookingDialog";
 import { useLang } from "@/lib/i18n";
 
 const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "") || "";
@@ -57,6 +58,7 @@ export default function BookingDetail() {
 
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | null>(null);
   const [showReschedule, setShowReschedule] = useState(false);
+  const [showExtend, setShowExtend] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -528,9 +530,16 @@ export default function BookingDetail() {
                   <p className="text-xs text-green-600 mt-2">{t("Tunjukkan kode ini kepada petugas saat tiba", "Show this code to staff upon arrival")}</p>
                 </div>
 
-                {/* Reschedule button — only for confirmed (not completed) */}
+                {/* Reschedule + Tambah Waktu — only for confirmed */}
                 {booking.status === "confirmed" && (
-                  <div className="border-t border-green-200 pt-4 mt-2">
+                  <div className="border-t border-green-200 pt-4 mt-2 space-y-2">
+                    <Button
+                      variant="outline"
+                      className="w-full border-orange-300 text-orange-600 hover:bg-orange-50 gap-2"
+                      onClick={() => setShowExtend(true)}
+                    >
+                      <Clock size={16} /> {t("Tambah Waktu", "Extend Time")}
+                    </Button>
                     <Button
                       variant="outline"
                       className="w-full border-orange-300 text-orange-600 hover:bg-orange-50 gap-2"
@@ -655,6 +664,21 @@ export default function BookingDetail() {
           currentStart={booking.startTime}
           currentEnd={booking.endTime}
           facilityName={booking.facilityName}
+          onSuccess={() => queryClient.invalidateQueries({ queryKey: getGetBookingByOrderQueryKey(orderNumber) })}
+        />
+      )}
+      {booking && (
+        <ExtendBookingDialog
+          open={showExtend}
+          onOpenChange={setShowExtend}
+          bookingId={booking.id}
+          orderNumber={booking.orderNumber}
+          facilityName={booking.facilityName}
+          bookingDate={booking.bookingDate}
+          startTime={booking.startTime}
+          endTime={booking.endTime}
+          pricePerHour={(booking as any).facilityPricePerHour ?? 0}
+          facilityCloseTime={(booking as any).facilityCloseTime ?? undefined}
           onSuccess={() => queryClient.invalidateQueries({ queryKey: getGetBookingByOrderQueryKey(orderNumber) })}
         />
       )}

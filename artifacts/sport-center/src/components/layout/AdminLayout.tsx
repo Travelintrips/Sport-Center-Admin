@@ -38,6 +38,7 @@ const NAV_GROUPS = [
       { href: "/admin/calendar", label: "Kalender", icon: Calendar },
       { href: "/admin/qr-checkin", label: "QR Check-In", icon: QrCode },
       { href: "/admin/reschedule", label: "Reschedule", icon: RefreshCw },
+      { href: "/admin/extensions", label: "Tambah Waktu", icon: Clock },
     ],
   },
   {

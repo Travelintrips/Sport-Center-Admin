@@ -49,6 +49,8 @@ async function getBookingWithPayment(id: number) {
     apDiscountAmount: Number(booking.apDiscountAmount),
     facilityName: facility?.name ?? "",
     facilityCategory: facility?.category ?? "",
+    facilityPricePerHour: facility ? Number(facility.pricePerHour) : null,
+    facilityCloseTime: facility?.closeTime ?? null,
     payment: payment ? { ...payment, amount: Number(payment.amount) } : null,
   };
 }

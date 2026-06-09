@@ -43,6 +43,7 @@ import AdminReports from "@/pages/admin/Reports";
 import AdminQrCheckin from "@/pages/admin/QrCheckin";
 import AdminNotificationTemplates from "@/pages/admin/NotificationTemplates";
 import AdminRescheduleRequests from "@/pages/admin/RescheduleRequests";
+import AdminExtensionRequests from "@/pages/admin/ExtensionRequests";
 import AdminCalendar from "@/pages/admin/Calendar";
 
 import { removeToken } from "@/lib/auth";
@@ -84,6 +85,7 @@ function AdminRouter() {
     if (location === "/admin/qr-checkin") return <AdminQrCheckin />;
     if (location === "/admin/notification-templates") return <AdminNotificationTemplates />;
     if (location === "/admin/reschedule") return <AdminRescheduleRequests />;
+    if (location === "/admin/extensions") return <AdminExtensionRequests />;
     if (location === "/admin/calendar") return <AdminCalendar />;
     return <NotFound />;
   })();
@@ -114,6 +116,7 @@ function Router() {
       <Route path="/admin/qr-checkin" component={AdminRouter} />
       <Route path="/admin/notification-templates" component={AdminRouter} />
       <Route path="/admin/reschedule" component={AdminRouter} />
+      <Route path="/admin/extensions" component={AdminRouter} />
       <Route path="/admin/calendar" component={AdminRouter} />
       <Route path="/admin" component={AdminRouter} />
 
