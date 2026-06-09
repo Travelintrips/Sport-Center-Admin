@@ -8,7 +8,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useLang } from "@/lib/i18n";
-import { CalendarDays, Clock, ChevronRight, LogOut, ReceiptText, Star, Trophy, MessageCircle } from "lucide-react";
+import { CalendarDays, Clock, ChevronRight, LogOut, ReceiptText, Star, Trophy, MessageCircle, CalendarClock } from "lucide-react";
+import RescheduleDialog from "@/components/RescheduleDialog";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import { id as idLocale, enUS } from "date-fns/locale";
@@ -39,6 +40,7 @@ export default function MyBookings() {
   const { data: allReviews } = useGetReviews(undefined, { query: { enabled: !!user } });
 
   const [reviewState, setReviewState] = useState<Record<number, { rating: number; comment: string; hover: number }>>({});
+  const [rescheduleTarget, setRescheduleTarget] = useState<NonNullable<typeof bookings>[number] | null>(null);
 
   const logoutMutation = useLogout({
     mutation: {
@@ -131,6 +133,16 @@ export default function MyBookings() {
                 <div className="font-black text-primary">Rp {b.totalPrice.toLocaleString("id-ID")}</div>
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-muted-foreground font-mono hidden sm:inline">#{b.orderNumber}</span>
+                  {["pending_payment", "paid", "confirmed", "waiting_confirmation"].includes(b.status) && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="gap-1 text-orange-600 hover:text-orange-700 hover:bg-orange-50 h-8 px-3"
+                      onClick={() => setRescheduleTarget(b)}
+                    >
+                      <CalendarClock size={13} /> {t("Reschedule", "Reschedule")}
+                    </Button>
+                  )}
                   <Button asChild variant="ghost" size="sm" className="gap-1 text-primary hover:text-primary h-8 px-3">
                     <Link href={`/booking/${b.orderNumber}`}>
                       {t("Detail", "Detail")} <ChevronRight size={13} />
@@ -285,6 +297,19 @@ export default function MyBookings() {
           </a>
         </Button>
       </div>
+
+      {rescheduleTarget && (
+        <RescheduleDialog
+          open={!!rescheduleTarget}
+          onOpenChange={(open) => !open && setRescheduleTarget(null)}
+          bookingId={rescheduleTarget.id}
+          orderNumber={rescheduleTarget.orderNumber}
+          currentDate={rescheduleTarget.bookingDate}
+          currentStart={rescheduleTarget.startTime}
+          currentEnd={rescheduleTarget.endTime}
+          facilityName={rescheduleTarget.facilityName}
+        />
+      )}
     </div>
   );
 }

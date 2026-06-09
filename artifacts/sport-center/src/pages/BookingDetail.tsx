@@ -29,7 +29,9 @@ import {
   QrCode,
   ChevronRight,
   Star,
+  CalendarClock,
 } from "lucide-react";
+import RescheduleDialog from "@/components/RescheduleDialog";
 import { useLang } from "@/lib/i18n";
 
 const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "") || "";
@@ -54,6 +56,7 @@ export default function BookingDetail() {
   const existingReview = existingReviews?.find((r) => r.bookingId === booking?.id);
 
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | null>(null);
+  const [showReschedule, setShowReschedule] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -525,6 +528,19 @@ export default function BookingDetail() {
                   <p className="text-xs text-green-600 mt-2">{t("Tunjukkan kode ini kepada petugas saat tiba", "Show this code to staff upon arrival")}</p>
                 </div>
 
+                {/* Reschedule button — only for confirmed (not completed) */}
+                {booking.status === "confirmed" && (
+                  <div className="border-t border-green-200 pt-4 mt-2">
+                    <Button
+                      variant="outline"
+                      className="w-full border-orange-300 text-orange-600 hover:bg-orange-50 gap-2"
+                      onClick={() => setShowReschedule(true)}
+                    >
+                      <CalendarClock size={16} /> {t("Minta Reschedule", "Request Reschedule")}
+                    </Button>
+                  </div>
+                )}
+
                 {/* Review Section — only for completed bookings */}
                 {booking.status === "completed" && (
                   <div className="border-t border-green-200 pt-4 mt-2">
@@ -628,6 +644,20 @@ export default function BookingDetail() {
           </Card>
         </div>
       </div>
+
+      {booking && (
+        <RescheduleDialog
+          open={showReschedule}
+          onOpenChange={setShowReschedule}
+          bookingId={booking.id}
+          orderNumber={booking.orderNumber}
+          currentDate={booking.bookingDate}
+          currentStart={booking.startTime}
+          currentEnd={booking.endTime}
+          facilityName={booking.facilityName}
+          onSuccess={() => queryClient.invalidateQueries({ queryKey: getGetBookingByOrderQueryKey(orderNumber) })}
+        />
+      )}
     </div>
   );
 }
