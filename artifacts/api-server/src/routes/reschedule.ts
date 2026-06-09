@@ -1,8 +1,9 @@
 import { Router } from "express";
-import { db, bookingsTable, rescheduleRequestsTable, bookingHistoryTable, facilitiesTable } from "@workspace/db";
+import { db, bookingsTable, rescheduleRequestsTable, bookingHistoryTable, facilitiesTable, usersTable } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
+import { notifyRescheduleApproved, notifyRescheduleRejected } from "../lib/notifications";
 
 const router = Router();
 
@@ -110,10 +111,19 @@ router.patch("/reschedule-requests/:id", adminMiddleware, async (req, res) => {
     const userInfo = getUserFromReq(req);
     const clientInfo = getClientInfo(req);
 
-    if (action === "approve") {
-      const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, request.bookingId)).limit(1);
-      if (!booking) { res.status(404).json({ error: "Booking tidak ditemukan" }); return; }
+    const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, request.bookingId)).limit(1);
+    if (!booking) { res.status(404).json({ error: "Booking tidak ditemukan" }); return; }
 
+    // Resolve customer phone: from booking.customerPhone or linked user
+    let customerPhone = booking.customerPhone ?? "";
+    if (!customerPhone && booking.userId) {
+      const [user] = await db.select().from(usersTable).where(eq(usersTable.id, booking.userId)).limit(1);
+      customerPhone = user?.phone ?? "";
+    }
+
+    const [facility] = await db.select({ name: facilitiesTable.name }).from(facilitiesTable).where(eq(facilitiesTable.id, booking.facilityId)).limit(1);
+
+    if (action === "approve") {
       await db.update(bookingsTable).set({
         bookingDate: request.newDate,
         startTime: request.newStartTime,
@@ -145,6 +155,23 @@ router.patch("/reschedule-requests/:id", adminMiddleware, async (req, res) => {
       after: { action, reviewNote },
       ...clientInfo,
     });
+
+    // Send WA notification to customer (non-blocking)
+    const notifData = {
+      customerName: booking.customerName,
+      customerPhone,
+      orderNumber: booking.orderNumber,
+      facilityName: facility?.name ?? "",
+      newDate: request.newDate,
+      newStartTime: request.newStartTime,
+      newEndTime: request.newEndTime,
+      reviewNote: reviewNote || undefined,
+    };
+    if (action === "approve") {
+      notifyRescheduleApproved(notifData).catch(() => {});
+    } else {
+      notifyRescheduleRejected(notifData).catch(() => {});
+    }
 
     res.json({ success: true, action });
   } catch (err) {

@@ -106,3 +106,30 @@ export async function notifyReminderH1(data: BookingNotifData): Promise<void> {
   const tpl = await getTemplate("reminder_h1");
   if (tpl) await sendWA(data.customerPhone, interpolate(tpl, data as Record<string, string>));
 }
+
+export interface RescheduleNotifData {
+  customerName: string;
+  customerPhone: string;
+  orderNumber: string;
+  facilityName: string;
+  newDate: string;
+  newStartTime: string;
+  newEndTime: string;
+  reviewNote?: string;
+}
+
+export async function notifyRescheduleApproved(data: RescheduleNotifData): Promise<void> {
+  const tpl = await getTemplate("reschedule_approved");
+  const message = tpl
+    ? interpolate(tpl, { ...data, reviewNote: data.reviewNote ?? "" })
+    : `Halo ${data.customerName}, permintaan reschedule booking *${data.orderNumber}* untuk ${data.facilityName} telah *DISETUJUI* ✅.\n\nJadwal baru: *${data.newDate}* pukul *${data.newStartTime}–${data.newEndTime}*.\n\nSampai jumpa di lapangan! 🏆`;
+  await sendWA(data.customerPhone, message);
+}
+
+export async function notifyRescheduleRejected(data: RescheduleNotifData): Promise<void> {
+  const tpl = await getTemplate("reschedule_rejected");
+  const message = tpl
+    ? interpolate(tpl, { ...data, reviewNote: data.reviewNote ?? "" })
+    : `Halo ${data.customerName}, permintaan reschedule booking *${data.orderNumber}* untuk ${data.facilityName} *DITOLAK* ❌.${data.reviewNote ? `\n\nCatatan admin: ${data.reviewNote}` : ""}\n\nSilakan hubungi admin jika ada pertanyaan.`;
+  await sendWA(data.customerPhone, message);
+}
