@@ -1,5 +1,5 @@
 import { db, bookingsTable, facilitiesTable, paymentsTable } from "@workspace/db";
-import { eq, and, lt, isNotNull, sql } from "drizzle-orm";
+import { eq, and, lt, lte, isNotNull, sql } from "drizzle-orm";
 import { notifyBookingExpired, notifyReminderH1 } from "./notifications";
 
 function getWIBNow(): Date {
@@ -96,19 +96,21 @@ async function autoCompleteBookings(): Promise<void> {
   try {
     const wibNow = getWIBNow();
     const todayWIB = wibNow.toISOString().split("T")[0];
-    const nowHour = wibNow.getUTCHours();
-    const nowMin = wibNow.getUTCMinutes();
-    const nowMinutes = nowHour * 60 + nowMin;
+    const nowMinutes = wibNow.getUTCHours() * 60 + wibNow.getUTCMinutes();
 
+    // Ambil semua booking confirmed s.d. hari ini (termasuk hari-hari sebelumnya)
     const confirmed = await db
       .select()
       .from(bookingsTable)
-      .where(and(eq(bookingsTable.status, "confirmed"), eq(bookingsTable.bookingDate, todayWIB)));
+      .where(and(eq(bookingsTable.status, "confirmed"), lte(bookingsTable.bookingDate, todayWIB)));
 
     for (const booking of confirmed) {
+      const isPastDay = booking.bookingDate < todayWIB;
       const [endH, endM] = booking.endTime.split(":").map(Number);
       const endMinutes = endH * 60 + endM;
-      if (nowMinutes >= endMinutes) {
+
+      // Selesaikan jika: hari sudah lewat, ATAU hari ini & jam sudah lewat
+      if (isPastDay || nowMinutes >= endMinutes) {
         await db
           .update(bookingsTable)
           .set({ status: "completed", completedAt: new Date(), updatedAt: new Date() })
@@ -123,9 +125,10 @@ async function autoCompleteBookings(): Promise<void> {
 
 export function startScheduler(): void {
   console.log("[scheduler] Starting background scheduler...");
-  
+
   // Run immediately on startup
   expireOverdueBookings();
+  autoCompleteBookings();
 
   // Every 5 minutes: expire overdue bookings + auto-complete
   setInterval(async () => {

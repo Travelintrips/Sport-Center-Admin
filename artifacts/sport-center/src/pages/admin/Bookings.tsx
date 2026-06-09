@@ -989,6 +989,16 @@ const STATUS_OPTIONS = [
   { value: "refunded",        label: "↩️ Dikembalikan" },
 ];
 
+function isBookingTimePast(bookingDate: string, endTime: string): boolean {
+  const nowJKT = new Date(Date.now() + 7 * 60 * 60 * 1000);
+  const todayJKT = nowJKT.toISOString().split("T")[0];
+  if (bookingDate < todayJKT) return true;
+  if (bookingDate > todayJKT) return false;
+  const nowMinutes = nowJKT.getUTCHours() * 60 + nowJKT.getUTCMinutes();
+  const [endH, endM] = endTime.split(":").map(Number);
+  return nowMinutes >= endH * 60 + endM;
+}
+
 function InlineCheckInSelect({
   booking,
   onCheckIn,
@@ -1004,7 +1014,39 @@ function InlineCheckInSelect({
 }) {
   const todayJKT = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" });
   const isToday = booking.bookingDate === todayJKT;
+  const isPast = isBookingTimePast(booking.bookingDate, booking.endTime);
   const isLoading = isCheckingIn || isCompleting;
+
+  // Jika waktu sudah lewat dan masih confirmed, tampilkan badge "Sudah Lewat" + opsi selesai
+  if (isPast && booking.status === "confirmed") {
+    return (
+      <Select
+        value=""
+        onValueChange={(val) => {
+          if (val === "complete") onComplete(booking.id);
+        }}
+        disabled={isLoading}
+      >
+        <SelectTrigger
+          className="h-7 min-w-[90px] gap-1.5 border rounded-full px-2.5 text-[11px] font-semibold shadow-none focus:ring-0 focus:ring-offset-0 bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:text-amber-400 dark:border-amber-800"
+          style={{ outline: "none" }}
+        >
+          {isLoading ? (
+            <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin shrink-0" />
+          ) : null}
+          <span>⏰ Sudah Lewat</span>
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="complete" className="text-xs">
+            <span className="flex items-center gap-1.5">
+              <CheckCircle2 size={11} className="text-emerald-600" />
+              Tandai Selesai
+            </span>
+          </SelectItem>
+        </SelectContent>
+      </Select>
+    );
+  }
 
   const currentLabel = booking.checkedInAt
     ? `✓ ${new Date(booking.checkedInAt).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}`
