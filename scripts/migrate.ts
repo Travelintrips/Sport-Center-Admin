@@ -255,6 +255,14 @@ ALTER TABLE sport_center.gym_memberships
 ALTER TABLE sport_center.payments
   ADD COLUMN IF NOT EXISTS payment_method text DEFAULT 'Transfer Bank',
   ADD COLUMN IF NOT EXISTS confirmed_at timestamptz;
+
+-- ============================================================
+-- 15. users: google_id + make email/password_hash nullable
+-- ============================================================
+ALTER TABLE sport_center.users
+  ALTER COLUMN email DROP NOT NULL,
+  ALTER COLUMN password_hash DROP NOT NULL,
+  ADD COLUMN IF NOT EXISTS google_id text UNIQUE;
 `;
 
 async function main() {

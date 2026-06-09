@@ -49,6 +49,61 @@ export const RegisterBody = zod.object({
 
 
 /**
+ * @summary Login or register with Google ID token
+ */
+export const LoginWithGoogleBody = zod.object({
+  "idToken": zod.string()
+})
+
+export const LoginWithGoogleResponse = zod.object({
+  "user": zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "email": zod.string(),
+  "role": zod.enum(['admin', 'customer']),
+  "phone": zod.string().nullish(),
+  "createdAt": zod.string().optional()
+}),
+  "token": zod.string()
+})
+
+
+/**
+ * @summary Send OTP via WhatsApp to phone number
+ */
+export const SendOtpBody = zod.object({
+  "phone": zod.string()
+})
+
+export const SendOtpResponse = zod.object({
+  "success": zod.boolean().optional(),
+  "message": zod.string().optional()
+})
+
+
+/**
+ * @summary Verify OTP and login
+ */
+export const VerifyOtpBody = zod.object({
+  "phone": zod.string(),
+  "otp": zod.string(),
+  "name": zod.string().optional()
+})
+
+export const VerifyOtpResponse = zod.object({
+  "user": zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "email": zod.string(),
+  "role": zod.enum(['admin', 'customer']),
+  "phone": zod.string().nullish(),
+  "createdAt": zod.string().optional()
+}),
+  "token": zod.string()
+})
+
+
+/**
  * @summary Get bookings for the currently logged-in customer
  */
 export const GetMyBookingsResponseItem = zod.object({

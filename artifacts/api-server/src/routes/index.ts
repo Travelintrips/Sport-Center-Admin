@@ -29,6 +29,7 @@ import bookingHistoryRouter from "./bookingHistory";
 import qrCheckinRouter from "./qrCheckin";
 import tenantsRouter from "./tenants";
 import syncRouter from "./sync";
+import authSocialRouter from "./auth-social";
 
 const router: IRouter = Router();
 
@@ -36,6 +37,7 @@ router.use(healthRouter);
 router.use(storageRouter);
 router.use(configRouter);
 router.use(authRouter);
+router.use(authSocialRouter);
 router.use(facilitiesRouter);
 router.use(availabilityRouter);
 router.use(bookingsRouter);

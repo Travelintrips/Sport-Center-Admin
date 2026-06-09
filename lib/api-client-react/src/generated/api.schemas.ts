@@ -9,6 +9,20 @@ export interface HealthStatus {
   status: string;
 }
 
+export interface GoogleLoginInput {
+  idToken: string;
+}
+
+export interface SendOtpInput {
+  phone: string;
+}
+
+export interface VerifyOtpInput {
+  phone: string;
+  otp: string;
+  name?: string;
+}
+
 export interface LoginInput {
   email: string;
   password: string;
@@ -899,6 +913,11 @@ export interface TenantPaymentActionBody {
 export interface ErrorEnvelope {
   error: string;
 }
+
+export type SendOtp200 = {
+  success?: boolean;
+  message?: string;
+};
 
 export type ListFacilitiesParams = {
 activeOnly?: boolean;
