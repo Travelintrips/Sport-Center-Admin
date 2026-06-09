@@ -1313,7 +1313,7 @@ export default function AdminBookings() {
         );
       }
       return true;
-    });
+    }).sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }, [bookings, statusFilter, search, dateFrom, dateTo]);
 
   const handleStatusUpdate = (status: string, adminNotes?: string) => {
