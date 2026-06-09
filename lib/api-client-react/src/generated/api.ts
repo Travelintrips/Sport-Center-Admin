@@ -41,6 +41,8 @@ import type {
   FacilityInput,
   FacilityUpdate,
   GetReviewsParams,
+  GetVerificationLogsParams,
+  GoogleLoginInput,
   GymMembership,
   GymMembershipInput,
   GymMembershipUpdate,
@@ -72,6 +74,8 @@ import type {
   RegisterInput,
   Review,
   ReviewSummary,
+  SendOtp200,
+  SendOtpInput,
   Settings,
   SettingsUpdate,
   Tenant,
@@ -83,10 +87,12 @@ import type {
   TenantPaymentInput,
   TenantStatusUpdateBody,
   TimeSlot,
-  UploadUrlRequest,
-  UploadUrlResponse,
+  UpdateProfileInput,
   User,
+  VerificationLog,
+  VerifyByOrderInput,
   VerifyInput,
+  VerifyOtpInput,
   VerifyResult
 } from './api.schemas';
 
@@ -321,6 +327,219 @@ export const useRegister = <TError = ErrorType<void>,
       return useMutation(getRegisterMutationOptions(options));
     }
 
+export const getLoginWithGoogleUrl = () => {
+
+
+
+
+  return `/api/auth/google`
+}
+
+/**
+ * @summary Login or register with Google ID token
+ */
+export const loginWithGoogle = async (googleLoginInput: GoogleLoginInput, options?: RequestInit): Promise<AuthResponse> => {
+
+  return customFetch<AuthResponse>(getLoginWithGoogleUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      googleLoginInput,)
+  }
+);}
+
+
+
+
+export const getLoginWithGoogleMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof loginWithGoogle>>, TError,{data: BodyType<GoogleLoginInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof loginWithGoogle>>, TError,{data: BodyType<GoogleLoginInput>}, TContext> => {
+
+const mutationKey = ['loginWithGoogle'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof loginWithGoogle>>, {data: BodyType<GoogleLoginInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  loginWithGoogle(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type LoginWithGoogleMutationResult = NonNullable<Awaited<ReturnType<typeof loginWithGoogle>>>
+    export type LoginWithGoogleMutationBody = BodyType<GoogleLoginInput>
+    export type LoginWithGoogleMutationError = ErrorType<void>
+
+    /**
+ * @summary Login or register with Google ID token
+ */
+export const useLoginWithGoogle = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof loginWithGoogle>>, TError,{data: BodyType<GoogleLoginInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof loginWithGoogle>>,
+        TError,
+        {data: BodyType<GoogleLoginInput>},
+        TContext
+      > => {
+      return useMutation(getLoginWithGoogleMutationOptions(options));
+    }
+
+export const getSendOtpUrl = () => {
+
+
+
+
+  return `/api/auth/send-otp`
+}
+
+/**
+ * @summary Send OTP via WhatsApp to phone number
+ */
+export const sendOtp = async (sendOtpInput: SendOtpInput, options?: RequestInit): Promise<SendOtp200> => {
+
+  return customFetch<SendOtp200>(getSendOtpUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      sendOtpInput,)
+  }
+);}
+
+
+
+
+export const getSendOtpMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sendOtp>>, TError,{data: BodyType<SendOtpInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof sendOtp>>, TError,{data: BodyType<SendOtpInput>}, TContext> => {
+
+const mutationKey = ['sendOtp'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof sendOtp>>, {data: BodyType<SendOtpInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  sendOtp(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SendOtpMutationResult = NonNullable<Awaited<ReturnType<typeof sendOtp>>>
+    export type SendOtpMutationBody = BodyType<SendOtpInput>
+    export type SendOtpMutationError = ErrorType<void>
+
+    /**
+ * @summary Send OTP via WhatsApp to phone number
+ */
+export const useSendOtp = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sendOtp>>, TError,{data: BodyType<SendOtpInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof sendOtp>>,
+        TError,
+        {data: BodyType<SendOtpInput>},
+        TContext
+      > => {
+      return useMutation(getSendOtpMutationOptions(options));
+    }
+
+export const getVerifyOtpUrl = () => {
+
+
+
+
+  return `/api/auth/verify-otp`
+}
+
+/**
+ * @summary Verify OTP and login
+ */
+export const verifyOtp = async (verifyOtpInput: VerifyOtpInput, options?: RequestInit): Promise<AuthResponse> => {
+
+  return customFetch<AuthResponse>(getVerifyOtpUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      verifyOtpInput,)
+  }
+);}
+
+
+
+
+export const getVerifyOtpMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof verifyOtp>>, TError,{data: BodyType<VerifyOtpInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof verifyOtp>>, TError,{data: BodyType<VerifyOtpInput>}, TContext> => {
+
+const mutationKey = ['verifyOtp'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof verifyOtp>>, {data: BodyType<VerifyOtpInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  verifyOtp(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type VerifyOtpMutationResult = NonNullable<Awaited<ReturnType<typeof verifyOtp>>>
+    export type VerifyOtpMutationBody = BodyType<VerifyOtpInput>
+    export type VerifyOtpMutationError = ErrorType<void>
+
+    /**
+ * @summary Verify OTP and login
+ */
+export const useVerifyOtp = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof verifyOtp>>, TError,{data: BodyType<VerifyOtpInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof verifyOtp>>,
+        TError,
+        {data: BodyType<VerifyOtpInput>},
+        TContext
+      > => {
+      return useMutation(getVerifyOtpMutationOptions(options));
+    }
+
 export const getLogoutUrl = () => {
 
 
@@ -544,6 +763,148 @@ export function useGetMe<TData = Awaited<ReturnType<typeof getMe>>, TError = Err
 
 
 
+
+export const getUpdateProfileUrl = () => {
+
+
+
+
+  return `/api/auth/profile`
+}
+
+/**
+ * @summary Update current user profile
+ */
+export const updateProfile = async (updateProfileInput: UpdateProfileInput, options?: RequestInit): Promise<User> => {
+
+  return customFetch<User>(getUpdateProfileUrl(),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      updateProfileInput,)
+  }
+);}
+
+
+
+
+export const getUpdateProfileMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateProfile>>, TError,{data: BodyType<UpdateProfileInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateProfile>>, TError,{data: BodyType<UpdateProfileInput>}, TContext> => {
+
+const mutationKey = ['updateProfile'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateProfile>>, {data: BodyType<UpdateProfileInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  updateProfile(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateProfileMutationResult = NonNullable<Awaited<ReturnType<typeof updateProfile>>>
+    export type UpdateProfileMutationBody = BodyType<UpdateProfileInput>
+    export type UpdateProfileMutationError = ErrorType<void>
+
+    /**
+ * @summary Update current user profile
+ */
+export const useUpdateProfile = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateProfile>>, TError,{data: BodyType<UpdateProfileInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateProfile>>,
+        TError,
+        {data: BodyType<UpdateProfileInput>},
+        TContext
+      > => {
+      return useMutation(getUpdateProfileMutationOptions(options));
+    }
+
+export const getLinkGoogleUrl = () => {
+
+
+
+
+  return `/api/auth/link-google`
+}
+
+/**
+ * @summary Link Google account to current user
+ */
+export const linkGoogle = async (googleLoginInput: GoogleLoginInput, options?: RequestInit): Promise<User> => {
+
+  return customFetch<User>(getLinkGoogleUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      googleLoginInput,)
+  }
+);}
+
+
+
+
+export const getLinkGoogleMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof linkGoogle>>, TError,{data: BodyType<GoogleLoginInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof linkGoogle>>, TError,{data: BodyType<GoogleLoginInput>}, TContext> => {
+
+const mutationKey = ['linkGoogle'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof linkGoogle>>, {data: BodyType<GoogleLoginInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  linkGoogle(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type LinkGoogleMutationResult = NonNullable<Awaited<ReturnType<typeof linkGoogle>>>
+    export type LinkGoogleMutationBody = BodyType<GoogleLoginInput>
+    export type LinkGoogleMutationError = ErrorType<void>
+
+    /**
+ * @summary Link Google account to current user
+ */
+export const useLinkGoogle = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof linkGoogle>>, TError,{data: BodyType<GoogleLoginInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof linkGoogle>>,
+        TError,
+        {data: BodyType<GoogleLoginInput>},
+        TContext
+      > => {
+      return useMutation(getLinkGoogleMutationOptions(options));
+    }
 
 export const getListFacilitiesUrl = (params?: ListFacilitiesParams,) => {
   const normalizedParams = new URLSearchParams();
@@ -2668,154 +3029,6 @@ export function useExportBookings<TData = Awaited<ReturnType<typeof exportBookin
 
 
 
-export const getRequestUploadUrlUrl = () => {
-
-
-
-
-  return `/api/storage/uploads/request-url`
-}
-
-/**
- * @summary Request a presigned URL for file upload
- */
-export const requestUploadUrl = async (uploadUrlRequest: UploadUrlRequest, options?: RequestInit): Promise<UploadUrlResponse> => {
-
-  return customFetch<UploadUrlResponse>(getRequestUploadUrlUrl(),
-  {
-    ...options,
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
-    body: JSON.stringify(
-      uploadUrlRequest,)
-  }
-);}
-
-
-
-
-export const getRequestUploadUrlMutationOptions = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof requestUploadUrl>>, TError,{data: BodyType<UploadUrlRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof requestUploadUrl>>, TError,{data: BodyType<UploadUrlRequest>}, TContext> => {
-
-const mutationKey = ['requestUploadUrl'];
-const {mutation: mutationOptions, request: requestOptions} = options ?
-      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
-      options
-      : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, request: undefined};
-
-
-
-
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof requestUploadUrl>>, {data: BodyType<UploadUrlRequest>}> = (props) => {
-          const {data} = props ?? {};
-
-          return  requestUploadUrl(data,requestOptions)
-        }
-
-
-
-
-
-
-  return  { mutationFn, ...mutationOptions }}
-
-    export type RequestUploadUrlMutationResult = NonNullable<Awaited<ReturnType<typeof requestUploadUrl>>>
-    export type RequestUploadUrlMutationBody = BodyType<UploadUrlRequest>
-    export type RequestUploadUrlMutationError = ErrorType<unknown>
-
-    /**
- * @summary Request a presigned URL for file upload
- */
-export const useRequestUploadUrl = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof requestUploadUrl>>, TError,{data: BodyType<UploadUrlRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
- ): UseMutationResult<
-        Awaited<ReturnType<typeof requestUploadUrl>>,
-        TError,
-        {data: BodyType<UploadUrlRequest>},
-        TContext
-      > => {
-      return useMutation(getRequestUploadUrlMutationOptions(options));
-    }
-
-export const getGetStorageObjectUrl = (objectPath: string,) => {
-
-
-
-
-  return `/api/storage/objects/${objectPath}`
-}
-
-/**
- * @summary Serve an object entity
- */
-export const getStorageObject = async (objectPath: string, options?: RequestInit): Promise<Blob> => {
-
-  return customFetch<Blob>(getGetStorageObjectUrl(objectPath),
-  {
-    ...options,
-    method: 'GET'
-
-
-  }
-);}
-
-
-
-
-
-export const getGetStorageObjectQueryKey = (objectPath: string,) => {
-    return [
-    `/api/storage/objects/${objectPath}`
-    ] as const;
-    }
-
-
-export const getGetStorageObjectQueryOptions = <TData = Awaited<ReturnType<typeof getStorageObject>>, TError = ErrorType<unknown>>(objectPath: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getStorageObject>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
-) => {
-
-const {query: queryOptions, request: requestOptions} = options ?? {};
-
-  const queryKey =  queryOptions?.queryKey ?? getGetStorageObjectQueryKey(objectPath);
-
-
-
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getStorageObject>>> = ({ signal }) => getStorageObject(objectPath, { signal, ...requestOptions });
-
-
-
-
-
-   return  { queryKey, queryFn, enabled: !!(objectPath), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getStorageObject>>, TError, TData> & { queryKey: QueryKey }
-}
-
-export type GetStorageObjectQueryResult = NonNullable<Awaited<ReturnType<typeof getStorageObject>>>
-export type GetStorageObjectQueryError = ErrorType<unknown>
-
-
-/**
- * @summary Serve an object entity
- */
-
-export function useGetStorageObject<TData = Awaited<ReturnType<typeof getStorageObject>>, TError = ErrorType<unknown>>(
- objectPath: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getStorageObject>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
-
- ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
-
-  const queryOptions = getGetStorageObjectQueryOptions(objectPath,options)
-
-  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
-
-  return { ...query, queryKey: queryOptions.queryKey };
-}
-
-
-
-
-
-
-
 export const getListMembershipsUrl = (params?: ListMembershipsParams,) => {
   const normalizedParams = new URLSearchParams();
 
@@ -4306,6 +4519,161 @@ export const useVerifyBooking = <TError = ErrorType<unknown>,
       > => {
       return useMutation(getVerifyBookingMutationOptions(options));
     }
+
+export const getVerifyBookingByOrderUrl = () => {
+
+
+
+
+  return `/api/bookings/verify-by-order`
+}
+
+/**
+ * @summary Self-service AP2 ID card verification by order number (public)
+ */
+export const verifyBookingByOrder = async (verifyByOrderInput: VerifyByOrderInput, options?: RequestInit): Promise<VerifyResult> => {
+
+  return customFetch<VerifyResult>(getVerifyBookingByOrderUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      verifyByOrderInput,)
+  }
+);}
+
+
+
+
+export const getVerifyBookingByOrderMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof verifyBookingByOrder>>, TError,{data: BodyType<VerifyByOrderInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof verifyBookingByOrder>>, TError,{data: BodyType<VerifyByOrderInput>}, TContext> => {
+
+const mutationKey = ['verifyBookingByOrder'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof verifyBookingByOrder>>, {data: BodyType<VerifyByOrderInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  verifyBookingByOrder(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type VerifyBookingByOrderMutationResult = NonNullable<Awaited<ReturnType<typeof verifyBookingByOrder>>>
+    export type VerifyBookingByOrderMutationBody = BodyType<VerifyByOrderInput>
+    export type VerifyBookingByOrderMutationError = ErrorType<void>
+
+    /**
+ * @summary Self-service AP2 ID card verification by order number (public)
+ */
+export const useVerifyBookingByOrder = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof verifyBookingByOrder>>, TError,{data: BodyType<VerifyByOrderInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof verifyBookingByOrder>>,
+        TError,
+        {data: BodyType<VerifyByOrderInput>},
+        TContext
+      > => {
+      return useMutation(getVerifyBookingByOrderMutationOptions(options));
+    }
+
+export const getGetVerificationLogsUrl = (params?: GetVerificationLogsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/verification-logs?${stringifiedParams}` : `/api/verification-logs`
+}
+
+/**
+ * @summary List ID card verification activity logs (admin)
+ */
+export const getVerificationLogs = async (params?: GetVerificationLogsParams, options?: RequestInit): Promise<VerificationLog[]> => {
+
+  return customFetch<VerificationLog[]>(getGetVerificationLogsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetVerificationLogsQueryKey = (params?: GetVerificationLogsParams,) => {
+    return [
+    `/api/verification-logs`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetVerificationLogsQueryOptions = <TData = Awaited<ReturnType<typeof getVerificationLogs>>, TError = ErrorType<unknown>>(params?: GetVerificationLogsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getVerificationLogs>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetVerificationLogsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getVerificationLogs>>> = ({ signal }) => getVerificationLogs(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getVerificationLogs>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetVerificationLogsQueryResult = NonNullable<Awaited<ReturnType<typeof getVerificationLogs>>>
+export type GetVerificationLogsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List ID card verification activity logs (admin)
+ */
+
+export function useGetVerificationLogs<TData = Awaited<ReturnType<typeof getVerificationLogs>>, TError = ErrorType<unknown>>(
+ params?: GetVerificationLogsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getVerificationLogs>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetVerificationLogsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
 
 export const getGetTenantMeUrl = () => {
 

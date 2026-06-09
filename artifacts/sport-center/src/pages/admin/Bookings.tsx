@@ -91,7 +91,7 @@ const STATUS_CONFIG: Record<
     pill: "border-amber-200 dark:border-amber-800",
   },
   paid: {
-    label: "Menunggu Verifikasi",
+    label: "Pembayaran Selesai",
     color: "text-blue-700 dark:text-blue-300",
     bg: "bg-blue-100 dark:bg-blue-900/30",
     icon: CreditCard,
@@ -119,7 +119,7 @@ const STATUS_CONFIG: Record<
     pill: "border-red-200 dark:border-red-800",
   },
   refunded: {
-    label: "Dikembalikan",
+    label: "Pengembalian Dana",
     color: "text-purple-700 dark:text-purple-300",
     bg: "bg-purple-100 dark:bg-purple-900/30",
     icon: RotateCcw,
@@ -128,12 +128,13 @@ const STATUS_CONFIG: Record<
 };
 
 const FILTER_OPTIONS = [
-  { value: "all", label: "Semua Status" },
+  { value: "all",             label: "Semua Status" },
   { value: "pending_payment", label: "Menunggu Pembayaran" },
-  { value: "paid", label: "Menunggu Verifikasi" },
-  { value: "completed", label: "Selesai" },
-  { value: "cancelled", label: "Dibatalkan" },
-  { value: "refunded", label: "Dikembalikan" },
+  { value: "paid",            label: "Pembayaran Selesai" },
+  { value: "confirmed",       label: "Dikonfirmasi" },
+  { value: "completed",       label: "Selesai" },
+  { value: "cancelled",       label: "Dibatalkan" },
+  { value: "refunded",        label: "Pengembalian Dana" },
 ];
 
 function StatusBadge({ status }: { status: string }) {
@@ -983,11 +984,35 @@ function ActionButton({
 
 const STATUS_OPTIONS = [
   { value: "pending_payment", label: "⏳ Menunggu Pembayaran" },
-  { value: "paid",            label: "💳 Menunggu Verifikasi" },
-  { value: "completed",       label: "✅ Selesai" },
+  { value: "paid",            label: "💳 Pembayaran Selesai" },
+  { value: "confirmed",       label: "✅ Dikonfirmasi" },
   { value: "cancelled",       label: "❌ Dibatalkan" },
-  { value: "refunded",        label: "↩️ Dikembalikan" },
+  { value: "refunded",        label: "↩️ Pengembalian Dana" },
 ];
+
+function isBookingTimePast(bookingDate: string, endTime: string): boolean {
+  const nowJKT = new Date(Date.now() + 7 * 60 * 60 * 1000);
+  const todayJKT = nowJKT.toISOString().split("T")[0];
+  if (bookingDate < todayJKT) return true;
+  if (bookingDate > todayJKT) return false;
+  const nowMinutes = nowJKT.getUTCHours() * 60 + nowJKT.getUTCMinutes();
+  const [endH, endM] = endTime.split(":").map(Number);
+  return nowMinutes >= endH * 60 + endM;
+}
+
+function getNowJKT() {
+  return new Date(Date.now() + 7 * 60 * 60 * 1000);
+}
+
+function isTimeReached(bookingDate: string, time: string): boolean {
+  const nowJKT = getNowJKT();
+  const todayJKT = nowJKT.toISOString().split("T")[0];
+  if (bookingDate < todayJKT) return true;
+  if (bookingDate > todayJKT) return false;
+  const nowMin = nowJKT.getUTCHours() * 60 + nowJKT.getUTCMinutes();
+  const [h, m] = time.split(":").map(Number);
+  return nowMin >= h * 60 + m;
+}
 
 function InlineCheckInSelect({
   booking,
@@ -1002,16 +1027,80 @@ function InlineCheckInSelect({
   isCheckingIn: boolean;
   isCompleting: boolean;
 }) {
-  const todayJKT = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" });
+  const [, setTick] = useState(0);
+
+  // Re-render setiap 30 detik agar status berubah otomatis saat jam booking tiba
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 30_000);
+    return () => clearInterval(id);
+  }, []);
+
+  const nowJKT = getNowJKT();
+  const todayJKT = nowJKT.toISOString().split("T")[0];
   const isToday = booking.bookingDate === todayJKT;
-  const isLoading = isCheckingIn || isCompleting;
+  const hasStarted = isTimeReached(booking.bookingDate, booking.startTime);
+  const hasEnded   = isTimeReached(booking.bookingDate, booking.endTime);
+  const isLoading  = isCheckingIn || isCompleting;
 
-  const currentLabel = booking.checkedInAt
-    ? `✓ ${new Date(booking.checkedInAt).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}`
-    : "— Pilih";
+  // Sudah lewat jam selesai & masih confirmed → Tandai Selesai
+  if (hasEnded && booking.status === "confirmed") {
+    return (
+      <Select
+        value=""
+        onValueChange={(val) => { if (val === "complete") onComplete(booking.id); }}
+        disabled={isLoading}
+      >
+        <SelectTrigger
+          className="h-7 min-w-[90px] gap-1.5 border rounded-full px-2.5 text-[11px] font-semibold shadow-none focus:ring-0 focus:ring-offset-0 bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:text-amber-400 dark:border-amber-800"
+          style={{ outline: "none" }}
+        >
+          {isLoading && <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin shrink-0" />}
+          <span>⏰ Sudah Lewat</span>
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="complete" className="text-xs">
+            <span className="flex items-center gap-1.5">
+              <CheckCircle2 size={11} className="text-emerald-600" />
+              Tandai Selesai
+            </span>
+          </SelectItem>
+        </SelectContent>
+      </Select>
+    );
+  }
 
-  const triggerClass = booking.checkedInAt
-    ? "h-7 min-w-[80px] gap-1.5 border rounded-full px-2.5 text-[11px] font-semibold shadow-none focus:ring-0 focus:ring-offset-0 bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-800"
+  // Sudah check-in
+  if (booking.checkedInAt) {
+    return (
+      <Select
+        value=""
+        onValueChange={(val) => { if (val === "complete") onComplete(booking.id); }}
+        disabled={isLoading}
+      >
+        <SelectTrigger
+          className="h-7 min-w-[80px] gap-1.5 border rounded-full px-2.5 text-[11px] font-semibold shadow-none focus:ring-0 focus:ring-offset-0 bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-800"
+          style={{ outline: "none" }}
+        >
+          {isLoading && <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin shrink-0" />}
+          <span>✓ {new Date(booking.checkedInAt).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}</span>
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="complete" className="text-xs">
+            <span className="flex items-center gap-1.5">
+              <CheckCircle2 size={11} className="text-blue-600" />
+              Tandai Selesai
+            </span>
+          </SelectItem>
+        </SelectContent>
+      </Select>
+    );
+  }
+
+  // Jam booking sudah tiba (startTime tercapai) → aktifkan check-in otomatis
+  const canCheckIn = isToday && hasStarted && !hasEnded;
+
+  const triggerClass = canCheckIn
+    ? "h-7 min-w-[80px] gap-1.5 border rounded-full px-2.5 text-[11px] font-semibold shadow-none focus:ring-0 focus:ring-offset-0 bg-green-50 text-green-700 border-green-300 dark:bg-green-900/20 dark:text-green-400 dark:border-green-800 animate-pulse"
     : "h-7 min-w-[80px] gap-1.5 border rounded-full px-2.5 text-[11px] font-semibold shadow-none focus:ring-0 focus:ring-offset-0 bg-slate-50 text-slate-500 border-slate-200 dark:bg-slate-800/30 dark:text-slate-400 dark:border-slate-700";
 
   return (
@@ -1024,26 +1113,20 @@ function InlineCheckInSelect({
       disabled={isLoading}
     >
       <SelectTrigger className={triggerClass} style={{ outline: "none" }}>
-        {isLoading ? (
-          <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin shrink-0" />
-        ) : null}
-        <span>{currentLabel}</span>
+        {isLoading && <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin shrink-0" />}
+        <span>{canCheckIn ? "🟢 Check-in" : "— Pilih"}</span>
       </SelectTrigger>
       <SelectContent>
-        <SelectItem
-          value="checkin"
-          disabled={!!booking.checkedInAt || !isToday}
-          className="text-xs"
-        >
+        <SelectItem value="checkin" disabled={!canCheckIn} className="text-xs">
           <span className="flex items-center gap-1.5">
             <LogIn size={11} className="text-emerald-600" />
-            {booking.checkedInAt ? "Sudah Check-in" : !isToday ? `Check-in (${booking.bookingDate})` : "Check-in"}
+            {canCheckIn ? "Check-in Sekarang" : !isToday ? `Check-in (${booking.bookingDate})` : `Mulai ${booking.startTime}`}
           </span>
         </SelectItem>
         <SelectItem value="complete" className="text-xs">
           <span className="flex items-center gap-1.5">
             <CheckCircle2 size={11} className="text-blue-600" />
-            Selesai
+            Tandai Selesai
           </span>
         </SelectItem>
       </SelectContent>
@@ -1271,7 +1354,7 @@ export default function AdminBookings() {
         );
       }
       return true;
-    });
+    }).sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }, [bookings, statusFilter, search, dateFrom, dateTo]);
 
   const handleStatusUpdate = (status: string, adminNotes?: string) => {
@@ -1435,10 +1518,10 @@ export default function AdminBookings() {
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.12 }}
-        className="rounded-2xl border border-slate-200/80 dark:border-slate-700/60 bg-white dark:bg-slate-900 shadow-sm overflow-hidden"
+        className="rounded-2xl border border-slate-200/80 dark:border-slate-700/60 bg-white dark:bg-slate-900 shadow-sm"
       >
-        {/* Filters */}
-        <div className="px-4 lg:px-5 py-3.5 border-b border-slate-100 dark:border-slate-800 flex flex-wrap gap-2.5 items-center">
+        {/* Filters — sticky saat scroll */}
+        <div className="sticky top-0 z-20 rounded-t-2xl px-4 lg:px-5 py-3.5 border-b border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 flex flex-wrap gap-2.5 items-center">
           <div className="relative flex-1 min-w-44">
             <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
             <Input
@@ -1501,7 +1584,7 @@ export default function AdminBookings() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-100 dark:border-slate-800">
-                  {["Order", "Customer", "Fasilitas", "Tanggal & Waktu", "Durasi", "Metode", "Tgl Bayar", "Total", "Status", "Check-In", ""].map((h) => (
+                  {["Order", "Customer", "Fasilitas", "Tanggal & Waktu", "Durasi", "Metode", "Tgl Bayar", "Total", "Pembayaran", "Check-In", ""].map((h) => (
                     <th
                       key={h}
                       className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide whitespace-nowrap"

@@ -3,13 +3,14 @@ import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { scSchema } from "./_schema";
 
-export const userRoleEnum = scSchema.enum("user_role", ["admin", "super_admin", "admin_booking", "finance", "staff", "customer", "tenant"]);
+export const userRoleEnum = scSchema.enum("user_role", ["admin", "super_admin", "admin_booking", "finance", "staff", "customer", "tenant", "ap2_employee"]);
 
 export const usersTable = scSchema.table("users", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
-  email: text("email").notNull().unique(),
-  passwordHash: text("password_hash").notNull(),
+  email: text("email").unique(),
+  passwordHash: text("password_hash"),
+  googleId: text("google_id").unique(),
   role: userRoleEnum("role").notNull().default("customer"),
   phone: text("phone"),
   tenantId: integer("tenant_id"),
