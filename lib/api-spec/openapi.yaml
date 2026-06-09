@@ -200,6 +200,56 @@ paths:
         "401":
           description: Not authenticated
 
+  /auth/profile:
+    put:
+      operationId: updateProfile
+      tags: [auth]
+      summary: Update current user profile
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateProfileInput"
+      responses:
+        "200":
+          description: Profile updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          description: Validation error
+        "401":
+          description: Not authenticated
+
+  /auth/link-google:
+    post:
+      operationId: linkGoogle
+      tags: [auth]
+      summary: Link Google account to current user
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GoogleLoginInput"
+      responses:
+        "200":
+          description: Google account linked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          description: Not authenticated or invalid token
+        "409":
+          description: Google account already linked to another user
+
   /facilities:
     get:
       operationId: listFacilities
@@ -1515,21 +1565,37 @@ components:
         token:
           type: string
 
+    UpdateProfileInput:
+      type: object
+      properties:
+        name:
+          type: string
+        phone:
+          type: string
+        currentPassword:
+          type: string
+        newPassword:
+          type: string
+
     User:
       type: object
-      required: [id, name, email, role]
+      required: [id, name, role]
       properties:
         id:
           type: integer
         name:
           type: string
         email:
-          type: string
+          type: ["string", "null"]
         role:
           type: string
           enum: [admin, customer]
         phone:
           type: ["string", "null"]
+        googleId:
+          type: ["string", "null"]
+        hasPassword:
+          type: boolean
         createdAt:
           type: string
 

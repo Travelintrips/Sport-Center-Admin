@@ -46,16 +46,27 @@ export const UserRole = {
 export interface User {
   id: number;
   name: string;
-  email: string;
+  /** @nullable */
+  email?: string | null;
   role: UserRole;
   /** @nullable */
   phone?: string | null;
+  /** @nullable */
+  googleId?: string | null;
+  hasPassword?: boolean;
   createdAt?: string;
 }
 
 export interface AuthResponse {
   user: User;
   token: string;
+}
+
+export interface UpdateProfileInput {
+  name?: string;
+  phone?: string;
+  currentPassword?: string;
+  newPassword?: string;
 }
 
 export type FacilityBookingMode = typeof FacilityBookingMode[keyof typeof FacilityBookingMode];

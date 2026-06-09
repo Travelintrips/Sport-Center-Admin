@@ -28,9 +28,11 @@ export const LoginResponse = zod.object({
   "user": zod.object({
   "id": zod.number(),
   "name": zod.string(),
-  "email": zod.string(),
+  "email": zod.string().nullish(),
   "role": zod.enum(['admin', 'customer']),
   "phone": zod.string().nullish(),
+  "googleId": zod.string().nullish(),
+  "hasPassword": zod.boolean().optional(),
   "createdAt": zod.string().optional()
 }),
   "token": zod.string()
@@ -59,9 +61,11 @@ export const LoginWithGoogleResponse = zod.object({
   "user": zod.object({
   "id": zod.number(),
   "name": zod.string(),
-  "email": zod.string(),
+  "email": zod.string().nullish(),
   "role": zod.enum(['admin', 'customer']),
   "phone": zod.string().nullish(),
+  "googleId": zod.string().nullish(),
+  "hasPassword": zod.boolean().optional(),
   "createdAt": zod.string().optional()
 }),
   "token": zod.string()
@@ -94,9 +98,11 @@ export const VerifyOtpResponse = zod.object({
   "user": zod.object({
   "id": zod.number(),
   "name": zod.string(),
-  "email": zod.string(),
+  "email": zod.string().nullish(),
   "role": zod.enum(['admin', 'customer']),
   "phone": zod.string().nullish(),
+  "googleId": zod.string().nullish(),
+  "hasPassword": zod.boolean().optional(),
   "createdAt": zod.string().optional()
 }),
   "token": zod.string()
@@ -131,9 +137,52 @@ export const GetMyBookingsResponse = zod.array(GetMyBookingsResponseItem)
 export const GetMeResponse = zod.object({
   "id": zod.number(),
   "name": zod.string(),
-  "email": zod.string(),
+  "email": zod.string().nullish(),
   "role": zod.enum(['admin', 'customer']),
   "phone": zod.string().nullish(),
+  "googleId": zod.string().nullish(),
+  "hasPassword": zod.boolean().optional(),
+  "createdAt": zod.string().optional()
+})
+
+
+/**
+ * @summary Update current user profile
+ */
+export const UpdateProfileBody = zod.object({
+  "name": zod.string().optional(),
+  "phone": zod.string().optional(),
+  "currentPassword": zod.string().optional(),
+  "newPassword": zod.string().optional()
+})
+
+export const UpdateProfileResponse = zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "email": zod.string().nullish(),
+  "role": zod.enum(['admin', 'customer']),
+  "phone": zod.string().nullish(),
+  "googleId": zod.string().nullish(),
+  "hasPassword": zod.boolean().optional(),
+  "createdAt": zod.string().optional()
+})
+
+
+/**
+ * @summary Link Google account to current user
+ */
+export const LinkGoogleBody = zod.object({
+  "idToken": zod.string()
+})
+
+export const LinkGoogleResponse = zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "email": zod.string().nullish(),
+  "role": zod.enum(['admin', 'customer']),
+  "phone": zod.string().nullish(),
+  "googleId": zod.string().nullish(),
+  "hasPassword": zod.boolean().optional(),
   "createdAt": zod.string().optional()
 })
 

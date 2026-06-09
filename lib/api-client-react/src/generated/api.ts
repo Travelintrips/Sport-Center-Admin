@@ -86,6 +86,7 @@ import type {
   TenantPaymentInput,
   TenantStatusUpdateBody,
   TimeSlot,
+  UpdateProfileInput,
   UploadUrlRequest,
   UploadUrlResponse,
   User,
@@ -761,6 +762,148 @@ export function useGetMe<TData = Awaited<ReturnType<typeof getMe>>, TError = Err
 
 
 
+
+export const getUpdateProfileUrl = () => {
+
+
+
+
+  return `/api/auth/profile`
+}
+
+/**
+ * @summary Update current user profile
+ */
+export const updateProfile = async (updateProfileInput: UpdateProfileInput, options?: RequestInit): Promise<User> => {
+
+  return customFetch<User>(getUpdateProfileUrl(),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      updateProfileInput,)
+  }
+);}
+
+
+
+
+export const getUpdateProfileMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateProfile>>, TError,{data: BodyType<UpdateProfileInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateProfile>>, TError,{data: BodyType<UpdateProfileInput>}, TContext> => {
+
+const mutationKey = ['updateProfile'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateProfile>>, {data: BodyType<UpdateProfileInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  updateProfile(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateProfileMutationResult = NonNullable<Awaited<ReturnType<typeof updateProfile>>>
+    export type UpdateProfileMutationBody = BodyType<UpdateProfileInput>
+    export type UpdateProfileMutationError = ErrorType<void>
+
+    /**
+ * @summary Update current user profile
+ */
+export const useUpdateProfile = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateProfile>>, TError,{data: BodyType<UpdateProfileInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateProfile>>,
+        TError,
+        {data: BodyType<UpdateProfileInput>},
+        TContext
+      > => {
+      return useMutation(getUpdateProfileMutationOptions(options));
+    }
+
+export const getLinkGoogleUrl = () => {
+
+
+
+
+  return `/api/auth/link-google`
+}
+
+/**
+ * @summary Link Google account to current user
+ */
+export const linkGoogle = async (googleLoginInput: GoogleLoginInput, options?: RequestInit): Promise<User> => {
+
+  return customFetch<User>(getLinkGoogleUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      googleLoginInput,)
+  }
+);}
+
+
+
+
+export const getLinkGoogleMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof linkGoogle>>, TError,{data: BodyType<GoogleLoginInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof linkGoogle>>, TError,{data: BodyType<GoogleLoginInput>}, TContext> => {
+
+const mutationKey = ['linkGoogle'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof linkGoogle>>, {data: BodyType<GoogleLoginInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  linkGoogle(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type LinkGoogleMutationResult = NonNullable<Awaited<ReturnType<typeof linkGoogle>>>
+    export type LinkGoogleMutationBody = BodyType<GoogleLoginInput>
+    export type LinkGoogleMutationError = ErrorType<void>
+
+    /**
+ * @summary Link Google account to current user
+ */
+export const useLinkGoogle = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof linkGoogle>>, TError,{data: BodyType<GoogleLoginInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof linkGoogle>>,
+        TError,
+        {data: BodyType<GoogleLoginInput>},
+        TContext
+      > => {
+      return useMutation(getLinkGoogleMutationOptions(options));
+    }
 
 export const getListFacilitiesUrl = (params?: ListFacilitiesParams,) => {
   const normalizedParams = new URLSearchParams();

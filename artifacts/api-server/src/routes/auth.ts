@@ -103,7 +103,12 @@ router.get("/auth/me", authMiddleware, async (req, res) => {
       res.status(401).json({ error: "User not found" });
       return;
     }
-    res.json({ id: user.id, name: user.name, email: user.email, role: user.role, phone: user.phone, tenantId: user.tenantId ?? null, createdAt: user.createdAt });
+    res.json({
+      id: user.id, name: user.name, email: user.email, role: user.role,
+      phone: user.phone, tenantId: user.tenantId ?? null, createdAt: user.createdAt,
+      googleId: (user as any).googleId ?? null,
+      hasPassword: !!(user as any).passwordHash,
+    });
   } catch (err) {
     req.log.error({ err }, "Get me error");
     res.status(500).json({ error: "Internal server error" });

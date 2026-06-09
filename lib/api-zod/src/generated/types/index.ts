@@ -102,6 +102,7 @@ export * from './tenantStatus';
 export * from './tenantStatusUpdateBody';
 export * from './tenantStatusUpdateBodyStatus';
 export * from './timeSlot';
+export * from './updateProfileInput';
 export * from './uploadUrlRequest';
 export * from './uploadUrlResponse';
 export * from './user';

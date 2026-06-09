@@ -2,7 +2,7 @@ import { Router } from "express";
 import { db, usersTable } from "@workspace/db";
 import { eq, or } from "drizzle-orm";
 import { OAuth2Client } from "google-auth-library";
-import { createToken } from "../lib/auth";
+import { createToken, authMiddleware, hashPassword, verifyToken } from "../lib/auth";
 import crypto from "crypto";
 
 const router = Router();
@@ -210,6 +210,86 @@ router.post("/auth/verify-otp", async (req, res) => {
     });
   } catch (err) {
     req.log.error({ err }, "Verify OTP error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.put("/auth/profile", authMiddleware, async (req, res) => {
+  try {
+    const userId = (req as any).user.userId;
+    const { name, phone, currentPassword, newPassword } = req.body;
+
+    const [user] = await db.select().from(usersTable).where(eq(usersTable.id, userId)).limit(1);
+    if (!user) { res.status(401).json({ error: "User not found" }); return; }
+
+    const updates: Record<string, any> = {};
+
+    if (name !== undefined) {
+      if (!name.trim()) { res.status(400).json({ error: "Nama tidak boleh kosong" }); return; }
+      updates.name = name.trim();
+    }
+
+    if (phone !== undefined) {
+      updates.phone = phone ? phone.replace(/^0/, "62").replace(/\D/g, "") : null;
+    }
+
+    if (newPassword !== undefined) {
+      if (newPassword.length < 6) { res.status(400).json({ error: "Password baru minimal 6 karakter" }); return; }
+      if (user.passwordHash) {
+        if (!currentPassword) { res.status(400).json({ error: "Password saat ini wajib diisi" }); return; }
+        if (hashPassword(currentPassword) !== user.passwordHash) {
+          res.status(400).json({ error: "Password saat ini salah" }); return;
+        }
+      }
+      updates.passwordHash = hashPassword(newPassword);
+    }
+
+    if (Object.keys(updates).length === 0) {
+      res.status(400).json({ error: "Tidak ada perubahan" }); return;
+    }
+
+    const [updated] = await db.update(usersTable).set(updates).where(eq(usersTable.id, userId)).returning();
+    res.json({
+      id: updated.id, name: updated.name, email: updated.email, role: updated.role,
+      phone: updated.phone, googleId: updated.googleId ?? null,
+      hasPassword: !!updated.passwordHash, createdAt: updated.createdAt,
+    });
+  } catch (err) {
+    req.log.error({ err }, "Update profile error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.post("/auth/link-google", authMiddleware, async (req, res) => {
+  try {
+    const userId = (req as any).user.userId;
+    const { idToken } = req.body;
+    if (!idToken) { res.status(400).json({ error: "idToken is required" }); return; }
+
+    let payload: any;
+    try {
+      const ticket = await googleClient.verifyIdToken({ idToken, audience: GOOGLE_CLIENT_ID });
+      payload = ticket.getPayload();
+    } catch {
+      res.status(401).json({ error: "Invalid Google token" }); return;
+    }
+    if (!payload) { res.status(401).json({ error: "Invalid Google token" }); return; }
+
+    const { sub: googleId } = payload;
+
+    const [existing] = await db.select().from(usersTable).where(eq(usersTable.googleId, googleId)).limit(1);
+    if (existing && existing.id !== userId) {
+      res.status(409).json({ error: "Akun Google ini sudah terhubung ke akun lain" }); return;
+    }
+
+    const [updated] = await db.update(usersTable).set({ googleId }).where(eq(usersTable.id, userId)).returning();
+    res.json({
+      id: updated.id, name: updated.name, email: updated.email, role: updated.role,
+      phone: updated.phone, googleId: updated.googleId ?? null,
+      hasPassword: !!updated.passwordHash, createdAt: updated.createdAt,
+    });
+  } catch (err) {
+    req.log.error({ err }, "Link Google error");
     res.status(500).json({ error: "Internal server error" });
   }
 });
