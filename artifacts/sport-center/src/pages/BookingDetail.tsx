@@ -154,14 +154,14 @@ export default function BookingDetail() {
         throw new Error(err.error || "Upload gagal");
       }
 
-      const { objectPath } = await uploadResp.json();
+      const { url, objectPath } = await uploadResp.json();
       setUploadProgress("done");
 
       submitPayment.mutate({
         data: {
           bookingId: booking.id,
           amount: booking.totalPrice,
-          proofUrl: `${BASE}/api/storage/objects/${objectPath.replace(/^\/objects\//, "")}`,
+          proofUrl: url ?? objectPath,
           notes: notes || undefined,
         },
       });

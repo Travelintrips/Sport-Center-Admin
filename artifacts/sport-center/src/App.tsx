@@ -48,6 +48,12 @@ import AdminRescheduleRequests from "@/pages/admin/RescheduleRequests";
 import AdminExtensionRequests from "@/pages/admin/ExtensionRequests";
 import AdminCalendar from "@/pages/admin/Calendar";
 
+// WhatsApp Booking Flow Pages (standalone, no auth)
+import WaBookingForm from "@/pages/wa/BookingForm";
+import WaBookingStatus from "@/pages/wa/BookingStatus";
+import WaProofUpload from "@/pages/wa/ProofUpload";
+import WaAdminAction from "@/pages/wa/AdminAction";
+
 import { removeToken } from "@/lib/auth";
 
 function handle401(error: unknown) {
@@ -121,6 +127,12 @@ function Router() {
       <Route path="/admin/extensions" component={AdminRouter} />
       <Route path="/admin/calendar" component={AdminRouter} />
       <Route path="/admin" component={AdminRouter} />
+
+      {/* WhatsApp Booking Flow — standalone, no layout wrapper */}
+      <Route path="/wa/booking/:facilityId" component={WaBookingForm} />
+      <Route path="/wa/status/:orderNumber" component={WaBookingStatus} />
+      <Route path="/wa/proof/:token" component={WaProofUpload} />
+      <Route path="/wa/action/:token" component={WaAdminAction} />
 
       {/* Customer Routes */}
       <Route path="*">

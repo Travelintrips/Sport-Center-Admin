@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db, usersTable, bookingsTable } from "@workspace/db";
-import { eq, like, or } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
 
 const router = Router();
@@ -17,14 +17,27 @@ router.get("/customers", adminMiddleware, async (req, res) => {
         .filter((b) => b.status !== "cancelled")
         .reduce((sum, b) => sum + Number(b.totalPrice), 0);
       return {
-        id: u.id, name: u.name, email: u.email, phone: u.phone,
-        totalBookings: userBookings.length, totalSpent, createdAt: u.createdAt,
+        id: u.id,
+        name: u.name,
+        email: u.email,
+        phone: u.phone,
+        customerCode: u.customerCode,
+        registrationSource: u.registrationSource ?? "web",
+        totalBookings: userBookings.length,
+        totalSpent,
+        createdAt: u.createdAt,
       };
     });
 
     if (search) {
       const s = (search as string).toLowerCase();
-      result = result.filter((u) => u.name.toLowerCase().includes(s) || u.email.toLowerCase().includes(s));
+      result = result.filter(
+        (u) =>
+          u.name.toLowerCase().includes(s) ||
+          u.email.toLowerCase().includes(s) ||
+          (u.phone ?? "").includes(s) ||
+          (u.customerCode ?? "").toLowerCase().includes(s)
+      );
     }
 
     res.json(result);
@@ -44,8 +57,15 @@ router.get("/customers/:id", adminMiddleware, async (req, res) => {
       .filter((b) => b.status !== "cancelled")
       .reduce((sum, b) => sum + Number(b.totalPrice), 0);
     res.json({
-      id: user.id, name: user.name, email: user.email, phone: user.phone,
-      totalBookings: userBookings.length, totalSpent, createdAt: user.createdAt,
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      phone: user.phone,
+      customerCode: user.customerCode,
+      registrationSource: user.registrationSource ?? "web",
+      totalBookings: userBookings.length,
+      totalSpent,
+      createdAt: user.createdAt,
     });
   } catch (err) {
     req.log.error({ err }, "Get customer error");

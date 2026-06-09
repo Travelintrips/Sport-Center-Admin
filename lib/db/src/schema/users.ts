@@ -14,6 +14,8 @@ export const usersTable = scSchema.table("users", {
   role: userRoleEnum("role").notNull().default("customer"),
   phone: text("phone"),
   tenantId: integer("tenant_id"),
+  customerCode: text("customer_code").unique(),
+  registrationSource: text("registration_source").default("web"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });

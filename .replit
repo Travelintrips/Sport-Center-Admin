@@ -1,4 +1,10 @@
+
 modules = ["nodejs-20", "web", "bash"]
+
+modules = ["nodejs-20", "web", "bash"]
+
+modules = ["web", "bash", "nodejs-24", "postgresql-16", "python-3.11"]
+
 
 [deployment]
 router = "application"
@@ -105,6 +111,7 @@ SUPABASE_DATABASE_URL_DEV = "postgresql://postgres.xssrfshdrtdfupgqwfdw:admcst00
 VITE_SUPABASE_ANON_KEY_DEV = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhzc3Jmc2hkcnRkZnVwZ3F3ZmR3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg4OTY3MjgsImV4cCI6MjA5NDQ3MjcyOH0.czKzR9GjEL6UK8AhPAX6OYyF74fz1YtImYQSXiiG69U"
 BIZPORTAL_SYNC_API_KEY = "98bad1c799cb429ab9f07d98ba5969189545420747a3fc05da7ddd454c2e00e2"
 VITE_GOOGLE_CLIENT_ID = "751551151000-fqrgt8si0pgnchqkn3pfo6nmqienv38f.apps.googleusercontent.com"
+SUPABASE_SERVICE_ROLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im56ZHdlaXB6Y2tmc3pjenpxdHV3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3ODQwMjg0NCwiZXhwIjoyMDkzOTc4ODQ0fQ.W0uM_UzGfF8Zy4PFQKhz6dKpEVDHS6_k9FtqoM9iGms"
 
 [nix]
 channel = "stable-25_05"
