@@ -4,22 +4,14 @@ import { eq, inArray } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
 import multer from "multer";
 import path from "path";
-import fs from "fs";
-
-const UPLOADS_DIR = path.resolve(process.cwd(), "uploads");
-if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
-
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, UPLOADS_DIR),
-  filename: (_req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase() || ".jpg";
-    const name = `facility-${Date.now()}-${Math.random().toString(36).slice(2, 7)}${ext}`;
-    cb(null, name);
-  },
-});
+import {
+  BUCKETS,
+  uploadToStorage,
+  deleteFromStorage,
+} from "../lib/supabaseStorage";
 
 const upload = multer({
-  storage,
+  storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     const allowed = /jpeg|jpg|png|webp|gif/;
@@ -29,22 +21,6 @@ const upload = multer({
     cb(null, valid);
   },
 });
-
-function getPublicUrl(filename: string): string {
-  return `/api/uploads/${filename}`;
-}
-
-function deleteLocalFile(url: string): void {
-  try {
-    const filename = url.split("/api/uploads/").pop();
-    if (filename) {
-      const filePath = path.join(UPLOADS_DIR, filename);
-      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-    }
-  } catch {
-    // non-fatal
-  }
-}
 
 const router = Router();
 
@@ -145,7 +121,7 @@ router.patch("/facilities/:id", adminMiddleware, async (req, res) => {
         .select()
         .from(facilityImagesTable)
         .where(eq(facilityImagesTable.facilityId, id));
-      oldImages.forEach((img) => deleteLocalFile(img.url));
+      await Promise.all(oldImages.map((img) => deleteFromStorage(img.url)));
       await db
         .delete(facilityImagesTable)
         .where(eq(facilityImagesTable.facilityId, id));
@@ -178,7 +154,7 @@ router.delete("/facilities/:id", adminMiddleware, async (req, res) => {
       .select()
       .from(facilityImagesTable)
       .where(eq(facilityImagesTable.facilityId, id));
-    images.forEach((img) => deleteLocalFile(img.url));
+    await Promise.all(images.map((img) => deleteFromStorage(img.url)));
     await db.delete(facilitiesTable).where(eq(facilitiesTable.id, id));
     res.status(204).send();
   } catch (err) {
@@ -198,7 +174,16 @@ router.post(
         return;
       }
       const id = parseInt(String(req.params.id));
-      const publicUrl = getPublicUrl(req.file.filename);
+      const ext = path.extname(req.file.originalname).toLowerCase() || ".jpg";
+      const objectPath = `facility-${Date.now()}-${Math.random()
+        .toString(36)
+        .slice(2, 7)}${ext}`;
+      const publicUrl = await uploadToStorage(
+        BUCKETS.facility,
+        objectPath,
+        req.file.buffer,
+        req.file.mimetype,
+      );
 
       const existingImages = await db
         .select()
@@ -232,7 +217,7 @@ router.delete(
         .limit(1);
 
       if (img) {
-        deleteLocalFile(img.url);
+        await deleteFromStorage(img.url);
         await db
           .delete(facilityImagesTable)
           .where(eq(facilityImagesTable.id, imageId));

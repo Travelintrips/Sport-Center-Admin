@@ -40,7 +40,13 @@ export type UserRole = typeof UserRole[keyof typeof UserRole];
 
 export const UserRole = {
   admin: 'admin',
+  super_admin: 'super_admin',
+  admin_booking: 'admin_booking',
+  finance: 'finance',
+  staff: 'staff',
   customer: 'customer',
+  tenant: 'tenant',
+  ap2_employee: 'ap2_employee',
 } as const;
 
 export interface User {
@@ -144,10 +150,13 @@ export type BookingStatus = typeof BookingStatus[keyof typeof BookingStatus];
 
 export const BookingStatus = {
   pending_payment: 'pending_payment',
+  waiting_confirmation: 'waiting_confirmation',
   paid: 'paid',
   confirmed: 'confirmed',
-  cancelled: 'cancelled',
   completed: 'completed',
+  cancelled: 'cancelled',
+  rejected: 'rejected',
+  expired: 'expired',
   refunded: 'refunded',
 } as const;
 
@@ -330,10 +339,13 @@ export type BookingUpdateStatus = typeof BookingUpdateStatus[keyof typeof Bookin
 
 export const BookingUpdateStatus = {
   pending_payment: 'pending_payment',
+  waiting_confirmation: 'waiting_confirmation',
   paid: 'paid',
   confirmed: 'confirmed',
-  cancelled: 'cancelled',
   completed: 'completed',
+  cancelled: 'cancelled',
+  rejected: 'rejected',
+  expired: 'expired',
   refunded: 'refunded',
 } as const;
 
@@ -637,6 +649,37 @@ export interface VerifyInput {
   idCardNumber: string;
 }
 
+export interface VerifyByOrderInput {
+  orderNumber: string;
+  idCardNumber: string;
+}
+
+export type VerificationLogStatus = typeof VerificationLogStatus[keyof typeof VerificationLogStatus];
+
+
+export const VerificationLogStatus = {
+  success: 'success',
+  failed: 'failed',
+  mismatch: 'mismatch',
+} as const;
+
+export interface VerificationLog {
+  id: number;
+  /** @nullable */
+  bookingId?: number | null;
+  /** @nullable */
+  orderNumber?: string | null;
+  /** @nullable */
+  verifiedByUserId?: number | null;
+  idCardNumberInput: string;
+  status: VerificationLogStatus;
+  /** @nullable */
+  notes?: string | null;
+  /** @nullable */
+  ipAddress?: string | null;
+  createdAt: string;
+}
+
 export type VerifyResultResult = typeof VerifyResultResult[keyof typeof VerifyResultResult];
 
 
@@ -727,20 +770,6 @@ export const MembershipPaymentProofInputPaymentMethod = {
 export interface MembershipPaymentProofInput {
   paymentMethod: MembershipPaymentProofInputPaymentMethod;
   paymentProofUrl: string;
-}
-
-export interface UploadUrlRequest {
-  /** @minLength 1 */
-  name: string;
-  /** @minimum 1 */
-  size: number;
-  /** @minLength 1 */
-  contentType: string;
-}
-
-export interface UploadUrlResponse {
-  uploadURL: string;
-  objectPath: string;
 }
 
 export type TenantStatus = typeof TenantStatus[keyof typeof TenantStatus];
@@ -988,6 +1017,11 @@ search?: string;
 
 export type GetReviewsParams = {
 facilityId?: number;
+};
+
+export type GetVerificationLogsParams = {
+bookingId?: number;
+limit?: number;
 };
 
 export type ListAdminTenantBookingsParams = {

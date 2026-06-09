@@ -1,7 +1,20 @@
 import { Router } from "express";
 import { db, usersTable, bookingsTable, facilitiesTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { eq, isNotNull } from "drizzle-orm";
 import { createToken, hashPassword, authMiddleware } from "../lib/auth";
+
+async function generateCustomerCode(): Promise<string> {
+  const rows = await db.select({ customerCode: usersTable.customerCode }).from(usersTable).where(isNotNull(usersTable.customerCode));
+  let maxNum = 0;
+  for (const row of rows) {
+    const match = row.customerCode?.match(/^SC-CUST-(\d+)$/);
+    if (match) {
+      const n = parseInt(match[1], 10);
+      if (n > maxNum) maxNum = n;
+    }
+  }
+  return `SC-CUST-${String(maxNum + 1).padStart(6, "0")}`;
+}
 
 const router = Router();
 
@@ -49,12 +62,13 @@ router.post("/auth/register", async (req, res) => {
       return;
     }
     const passwordHash = hashPassword(password);
+    const customerCode = await generateCustomerCode();
     const [user] = await db.insert(usersTable).values({
-      name, email, passwordHash, phone: phone || null, role: "customer",
+      name, email, passwordHash, phone: phone || null, role: "customer", customerCode, registrationSource: "web",
     }).returning();
     const token = createToken(user.id, user.role);
     res.status(201).json({
-      user: { id: user.id, name: user.name, email: user.email, role: user.role, phone: user.phone, createdAt: user.createdAt },
+      user: { id: user.id, name: user.name, email: user.email, role: user.role, phone: user.phone, customerCode: user.customerCode, createdAt: user.createdAt },
       token,
     });
   } catch (err) {

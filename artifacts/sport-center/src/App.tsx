@@ -25,6 +25,7 @@ import Login from "@/pages/Login";
 import Register from "@/pages/Register";
 import MyBookings from "@/pages/MyBookings";
 import MyProfile from "@/pages/MyProfile";
+import VerifyId from "@/pages/VerifyId";
 import Membership from "@/pages/Membership";
 // Admin Pages
 import AdminLogin from "@/pages/admin/Login";
@@ -46,6 +47,12 @@ import AdminNotificationTemplates from "@/pages/admin/NotificationTemplates";
 import AdminRescheduleRequests from "@/pages/admin/RescheduleRequests";
 import AdminExtensionRequests from "@/pages/admin/ExtensionRequests";
 import AdminCalendar from "@/pages/admin/Calendar";
+
+// WhatsApp Booking Flow Pages (standalone, no auth)
+import WaBookingForm from "@/pages/wa/BookingForm";
+import WaBookingStatus from "@/pages/wa/BookingStatus";
+import WaProofUpload from "@/pages/wa/ProofUpload";
+import WaAdminAction from "@/pages/wa/AdminAction";
 
 import { removeToken } from "@/lib/auth";
 
@@ -121,6 +128,12 @@ function Router() {
       <Route path="/admin/calendar" component={AdminRouter} />
       <Route path="/admin" component={AdminRouter} />
 
+      {/* WhatsApp Booking Flow — standalone, no layout wrapper */}
+      <Route path="/wa/booking/:facilityId" component={WaBookingForm} />
+      <Route path="/wa/status/:orderNumber" component={WaBookingStatus} />
+      <Route path="/wa/proof/:token" component={WaProofUpload} />
+      <Route path="/wa/action/:token" component={WaAdminAction} />
+
       {/* Customer Routes */}
       <Route path="*">
         <CustomerLayout>
@@ -134,6 +147,7 @@ function Router() {
             <Route path="/register" component={Register} />
             <Route path="/my-bookings" component={MyBookings} />
             <Route path="/my-profile" component={MyProfile} />
+            <Route path="/verify-id" component={VerifyId} />
             <Route path="/membership" component={Membership} />
             <Route path="/promos" component={Promos} />
             <Route path="/terms" component={Terms} />

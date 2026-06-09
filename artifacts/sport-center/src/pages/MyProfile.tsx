@@ -14,18 +14,6 @@ import { useLocation } from "wouter";
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string;
 
-declare global {
-  interface Window {
-    google?: {
-      accounts: {
-        id: {
-          initialize: (cfg: any) => void;
-          prompt: () => void;
-        };
-      };
-    };
-  }
-}
 
 export default function MyProfile() {
   const { t } = useLang();
@@ -33,7 +21,7 @@ export default function MyProfile() {
   const queryClient = useQueryClient();
   const [, setLocation] = useLocation();
 
-  const { data: user, isLoading, isError } = useGetMe({ query: { retry: false, staleTime: 0 } });
+  const { data: user, isLoading, isError } = useGetMe({ query: { retry: false, staleTime: 0, queryKey: getGetMeQueryKey() } });
 
   const [nameForm, setNameForm] = useState({ name: "", phone: "" });
   const [pwForm, setPwForm] = useState({ currentPassword: "", newPassword: "", confirmPassword: "" });
@@ -94,7 +82,7 @@ export default function MyProfile() {
     script.async = true;
     script.defer = true;
     script.onload = () => {
-      window.google?.accounts.id.initialize({
+      (window as any).google?.accounts.id.initialize({
         client_id: GOOGLE_CLIENT_ID,
         callback: handleGoogleLinkCallback,
         auto_select: false,
@@ -127,7 +115,7 @@ export default function MyProfile() {
       toast({ title: t("Google login belum dikonfigurasi", "Google login not configured"), variant: "destructive" }); return;
     }
     setLinkingGoogle(true);
-    window.google?.accounts.id.prompt();
+    (window as any).google?.accounts.id.prompt();
   }
 
   if (isLoading) {
