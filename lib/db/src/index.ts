@@ -16,6 +16,7 @@ if (!connectionString) {
   );
 }
 
+
 const useSsl = /supabase\.(co|com|in)/.test(connectionString);
 
 export const pool = new Pool({

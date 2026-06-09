@@ -265,6 +265,13 @@ ALTER TABLE sport_center.users
   ADD COLUMN IF NOT EXISTS google_id text UNIQUE;
 
 -- ============================================================
+-- 17. bookings: reminder sent flags (prevent duplicate WA)
+-- ============================================================
+ALTER TABLE sport_center.bookings
+  ADD COLUMN IF NOT EXISTS reminder_h1_sent_at timestamptz,
+  ADD COLUMN IF NOT EXISTS reminder_day_sent_at timestamptz;
+
+-- ============================================================
 -- 16. ap2_employee role + verification_logs table
 -- ============================================================
 DO $$ BEGIN

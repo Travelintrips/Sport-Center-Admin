@@ -1,12 +1,9 @@
-import { db, bookingsTable, facilitiesTable, paymentsTable } from "@workspace/db";
-
-import { eq, and, lt, isNotNull } from "drizzle-orm";
+import { db, bookingsTable, facilitiesTable } from "@workspace/db";
+import { eq, and, lt, lte, isNotNull, isNull } from "drizzle-orm";
 import { notifyBookingExpired, notifyReminderH1, notifyWaDayReminder, notifyWaStaffCheckin } from "./notifications";
 import { createWaToken } from "./waTokens";
 
 const APP_URL = process.env.APP_URL ?? "";
-import { eq, and, lt, lte, isNotNull, sql } from "drizzle-orm";
-import { notifyBookingExpired, notifyReminderH1 } from "./notifications";
 
 function getWIBNow(): Date {
   return new Date(Date.now() + 7 * 60 * 60 * 1000);
@@ -75,16 +72,29 @@ async function sendReminderH1(): Promise<void> {
     // Only send between 08:00-10:00 WIB (01:00-03:00 UTC)
     if (hour < 1 || hour > 3) return;
 
+    // Only bookings where reminderH1SentAt is NULL (never sent)
     const confirmed = await db
       .select()
       .from(bookingsTable)
-      .where(and(eq(bookingsTable.bookingDate, tomorrow), eq(bookingsTable.status, "confirmed")));
+      .where(
+        and(
+          eq(bookingsTable.bookingDate, tomorrow),
+          eq(bookingsTable.status, "confirmed"),
+          isNull(bookingsTable.reminderH1SentAt)
+        )
+      );
 
     const facilities = await db.select({ id: facilitiesTable.id, name: facilitiesTable.name }).from(facilitiesTable);
     const facilityMap: Record<number, string> = {};
     for (const f of facilities) facilityMap[f.id] = f.name;
 
     for (const booking of confirmed) {
+      // Mark as sent FIRST to prevent race conditions
+      await db
+        .update(bookingsTable)
+        .set({ reminderH1SentAt: new Date() })
+        .where(eq(bookingsTable.id, booking.id));
+
       await notifyReminderH1({
         customerName: booking.customerName,
         customerPhone: booking.customerPhone,
@@ -95,6 +105,8 @@ async function sendReminderH1(): Promise<void> {
         endTime: booking.endTime,
         totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
       });
+
+      console.log(`[scheduler] H-1 reminder sent for ${booking.orderNumber}`);
     }
   } catch (err) {
     console.error("[scheduler] sendReminderH1 error:", err);
@@ -102,8 +114,6 @@ async function sendReminderH1(): Promise<void> {
 }
 
 // Day-of reminder: sent at 07:00-08:00 WIB (00:00-01:00 UTC) to confirmed bookings today
-const dayReminderSentToday = new Set<number>();
-
 async function sendDayOfReminder(): Promise<void> {
   try {
     const now = getWIBNow();
@@ -112,18 +122,29 @@ async function sendDayOfReminder(): Promise<void> {
     if (hour !== 0) return;
 
     const today = getTodayWIB();
+
+    // Only bookings where reminderDaySentAt is NULL (never sent)
     const confirmed = await db
       .select()
       .from(bookingsTable)
-      .where(and(eq(bookingsTable.bookingDate, today), eq(bookingsTable.status, "confirmed")));
+      .where(
+        and(
+          eq(bookingsTable.bookingDate, today),
+          eq(bookingsTable.status, "confirmed"),
+          isNull(bookingsTable.reminderDaySentAt)
+        )
+      );
 
     const facilities = await db.select({ id: facilitiesTable.id, name: facilitiesTable.name }).from(facilitiesTable);
     const facilityMap: Record<number, string> = {};
     for (const f of facilities) facilityMap[f.id] = f.name;
 
     for (const booking of confirmed) {
-      if (dayReminderSentToday.has(booking.id)) continue;
-      dayReminderSentToday.add(booking.id);
+      // Mark as sent FIRST to prevent race conditions / server restarts
+      await db
+        .update(bookingsTable)
+        .set({ reminderDaySentAt: new Date() })
+        .where(eq(bookingsTable.id, booking.id));
 
       const statusUrl = `${APP_URL}/wa/status/${booking.orderNumber}`;
       const facilityName = facilityMap[booking.facilityId] ?? "";
@@ -156,6 +177,8 @@ async function sendDayOfReminder(): Promise<void> {
           finishUrl: `${APP_URL}/wa/action/${finishToken}`,
         });
       }
+
+      console.log(`[scheduler] Day-of reminder sent for ${booking.orderNumber}`);
     }
   } catch (err) {
     console.error("[scheduler] sendDayOfReminder error:", err);

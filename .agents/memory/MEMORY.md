@@ -4,3 +4,4 @@
 - [Supabase Storage for uploads](supabase-storage.md) — facility images/proofs/QRIS live in Supabase Storage (project nzdweipzckfszczzqtuw, public buckets), NOT ephemeral disk; store absolute public URLs.
 - [Booking status flow](booking-status-flow.md) — INACTIVE_STATUSES = [cancelled, expired, rejected, refunded]; conflict check must exclude all; payment proof → waiting_confirmation → confirmed (not completed); auto-expire via scheduler every 5 min.
 - [WhatsApp Booking Flow](wa-booking-flow.md) — Fonnte webhook + tokenized admin links; `wa_action_tokens` table in sport_center schema; standalone `/wa/*` pages outside CustomerLayout.
+- [Local DB setup & env var scoping](local-db-setup.md) — Workflow uses DATABASE_URL (heliumdb), NOT Supabase; drizzle-kit push fails on existing enums; apply lib/db/drizzle/*.sql files manually.

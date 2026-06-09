@@ -59,6 +59,8 @@ export const bookingsTable = scSchema.table("bookings", {
   paymentDeadline: timestamp("payment_deadline", { withTimezone: true }),
   checkedInAt: timestamp("checked_in_at", { withTimezone: true }),
   completedAt: timestamp("completed_at", { withTimezone: true }),
+  reminderH1SentAt: timestamp("reminder_h1_sent_at", { withTimezone: true }),
+  reminderDaySentAt: timestamp("reminder_day_sent_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });
