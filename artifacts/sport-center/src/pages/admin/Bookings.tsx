@@ -1157,11 +1157,49 @@ function InlineCheckInSelect({
   const nowJKT = getNowJKT();
   const todayJKT = nowJKT.toISOString().split("T")[0];
   const isToday = booking.bookingDate === todayJKT;
+  const isPast  = booking.bookingDate < todayJKT;
   const hasStarted = isTimeReached(booking.bookingDate, booking.startTime);
   const hasEnded   = isTimeReached(booking.bookingDate, booking.endTime);
   const isLoading  = isCheckingIn || isCompleting;
 
-  // Sudah lewat jam selesai & masih confirmed → Tandai Selesai
+  // Sudah selesai / completed
+  if (booking.status === "completed") {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-800">
+        <CheckCircle2 size={11} />
+        Selesai
+      </span>
+    );
+  }
+
+  // Sudah check-in → sedang berlangsung, bisa tandai selesai
+  if (booking.checkedInAt) {
+    return (
+      <Select
+        value=""
+        onValueChange={(val) => { if (val === "complete") onComplete(booking.id); }}
+        disabled={isLoading}
+      >
+        <SelectTrigger
+          className="h-7 min-w-[110px] gap-1.5 border rounded-full px-2.5 text-[11px] font-semibold shadow-none focus:ring-0 focus:ring-offset-0 bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-800"
+          style={{ outline: "none" }}
+        >
+          {isLoading && <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin shrink-0" />}
+          <span>✓ Check-in {new Date(booking.checkedInAt).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}</span>
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="complete" className="text-xs">
+            <span className="flex items-center gap-1.5">
+              <CheckCircle2 size={11} className="text-emerald-600" />
+              Tandai Selesai
+            </span>
+          </SelectItem>
+        </SelectContent>
+      </Select>
+    );
+  }
+
+  // Sudah lewat jam selesai → perlu ditandai selesai
   if (hasEnded && booking.status === "confirmed") {
     return (
       <Select
@@ -1170,7 +1208,7 @@ function InlineCheckInSelect({
         disabled={isLoading}
       >
         <SelectTrigger
-          className="h-7 min-w-[90px] gap-1.5 border rounded-full px-2.5 text-[11px] font-semibold shadow-none focus:ring-0 focus:ring-offset-0 bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:text-amber-400 dark:border-amber-800"
+          className="h-7 min-w-[110px] gap-1.5 border rounded-full px-2.5 text-[11px] font-semibold shadow-none focus:ring-0 focus:ring-offset-0 bg-red-50 text-red-600 border-red-200 dark:bg-red-900/20 dark:text-red-400 dark:border-red-800"
           style={{ outline: "none" }}
         >
           {isLoading && <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin shrink-0" />}
@@ -1188,22 +1226,32 @@ function InlineCheckInSelect({
     );
   }
 
-  // Sudah check-in
-  if (booking.checkedInAt) {
+  // Sedang berlangsung → check-in tersedia
+  const isOngoing = isToday && hasStarted && !hasEnded;
+  if (isOngoing && booking.status === "confirmed") {
     return (
       <Select
         value=""
-        onValueChange={(val) => { if (val === "complete") onComplete(booking.id); }}
+        onValueChange={(val) => {
+          if (val === "checkin") onCheckIn(booking.id);
+          else if (val === "complete") onComplete(booking.id);
+        }}
         disabled={isLoading}
       >
         <SelectTrigger
-          className="h-7 min-w-[80px] gap-1.5 border rounded-full px-2.5 text-[11px] font-semibold shadow-none focus:ring-0 focus:ring-offset-0 bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-800"
+          className="h-7 min-w-[110px] gap-1.5 border rounded-full px-2.5 text-[11px] font-semibold shadow-none focus:ring-0 focus:ring-offset-0 bg-green-50 text-green-700 border-green-300 dark:bg-green-900/20 dark:text-green-400 dark:border-green-800 animate-pulse"
           style={{ outline: "none" }}
         >
           {isLoading && <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin shrink-0" />}
-          <span>✓ {new Date(booking.checkedInAt).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}</span>
+          <span>🟢 Berlangsung</span>
         </SelectTrigger>
         <SelectContent>
+          <SelectItem value="checkin" className="text-xs">
+            <span className="flex items-center gap-1.5">
+              <LogIn size={11} className="text-emerald-600" />
+              Check-in Sekarang
+            </span>
+          </SelectItem>
           <SelectItem value="complete" className="text-xs">
             <span className="flex items-center gap-1.5">
               <CheckCircle2 size={11} className="text-blue-600" />
@@ -1215,42 +1263,80 @@ function InlineCheckInSelect({
     );
   }
 
-  // Jam booking sudah tiba (startTime tercapai) → aktifkan check-in otomatis
-  const canCheckIn = isToday && hasStarted && !hasEnded;
+  // Hari ini, belum mulai → menunggu jam booking
+  if (isToday && !hasStarted && booking.status === "confirmed") {
+    return (
+      <Select
+        value=""
+        onValueChange={(val) => {
+          if (val === "checkin") onCheckIn(booking.id);
+          else if (val === "complete") onComplete(booking.id);
+        }}
+        disabled={isLoading}
+      >
+        <SelectTrigger
+          className="h-7 min-w-[110px] gap-1.5 border rounded-full px-2.5 text-[11px] font-semibold shadow-none focus:ring-0 focus:ring-offset-0 bg-blue-50 text-blue-600 border-blue-200 dark:bg-blue-900/20 dark:text-blue-400 dark:border-blue-800"
+          style={{ outline: "none" }}
+        >
+          {isLoading && <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin shrink-0" />}
+          <span>🕐 Mulai {booking.startTime?.slice(0, 5)}</span>
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="checkin" disabled className="text-xs text-slate-400">
+            <span className="flex items-center gap-1.5">
+              <LogIn size={11} />
+              Check-in (mulai {booking.startTime?.slice(0, 5)})
+            </span>
+          </SelectItem>
+          <SelectItem value="complete" className="text-xs">
+            <span className="flex items-center gap-1.5">
+              <CheckCircle2 size={11} className="text-blue-600" />
+              Tandai Selesai
+            </span>
+          </SelectItem>
+        </SelectContent>
+      </Select>
+    );
+  }
 
-  const triggerClass = canCheckIn
-    ? "h-7 min-w-[80px] gap-1.5 border rounded-full px-2.5 text-[11px] font-semibold shadow-none focus:ring-0 focus:ring-offset-0 bg-green-50 text-green-700 border-green-300 dark:bg-green-900/20 dark:text-green-400 dark:border-green-800 animate-pulse"
-    : "h-7 min-w-[80px] gap-1.5 border rounded-full px-2.5 text-[11px] font-semibold shadow-none focus:ring-0 focus:ring-offset-0 bg-slate-50 text-slate-500 border-slate-200 dark:bg-slate-800/30 dark:text-slate-400 dark:border-slate-700";
+  // Booking belum hari ini (masa depan) atau booking lampau dikonfirmasi
+  if (booking.status === "confirmed") {
+    const label = isPast ? "📅 Lewat" : `📅 ${booking.bookingDate}`;
+    return (
+      <Select
+        value=""
+        onValueChange={(val) => {
+          if (val === "checkin") onCheckIn(booking.id);
+          else if (val === "complete") onComplete(booking.id);
+        }}
+        disabled={isLoading}
+      >
+        <SelectTrigger
+          className="h-7 min-w-[110px] gap-1.5 border rounded-full px-2.5 text-[11px] font-semibold shadow-none focus:ring-0 focus:ring-offset-0 bg-slate-50 text-slate-500 border-slate-200 dark:bg-slate-800/30 dark:text-slate-400 dark:border-slate-700"
+          style={{ outline: "none" }}
+        >
+          {isLoading && <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin shrink-0" />}
+          <span>{label}</span>
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="checkin" className="text-xs">
+            <span className="flex items-center gap-1.5">
+              <LogIn size={11} className="text-emerald-600" />
+              Check-in Manual
+            </span>
+          </SelectItem>
+          <SelectItem value="complete" className="text-xs">
+            <span className="flex items-center gap-1.5">
+              <CheckCircle2 size={11} className="text-blue-600" />
+              Tandai Selesai
+            </span>
+          </SelectItem>
+        </SelectContent>
+      </Select>
+    );
+  }
 
-  return (
-    <Select
-      value=""
-      onValueChange={(val) => {
-        if (val === "checkin") onCheckIn(booking.id);
-        else if (val === "complete") onComplete(booking.id);
-      }}
-      disabled={isLoading}
-    >
-      <SelectTrigger className={triggerClass} style={{ outline: "none" }}>
-        {isLoading && <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin shrink-0" />}
-        <span>{canCheckIn ? "🟢 Check-in" : "— Pilih"}</span>
-      </SelectTrigger>
-      <SelectContent>
-        <SelectItem value="checkin" disabled={!canCheckIn} className="text-xs">
-          <span className="flex items-center gap-1.5">
-            <LogIn size={11} className="text-emerald-600" />
-            {canCheckIn ? "Check-in Sekarang" : !isToday ? `Check-in (${booking.bookingDate})` : `Mulai ${booking.startTime}`}
-          </span>
-        </SelectItem>
-        <SelectItem value="complete" className="text-xs">
-          <span className="flex items-center gap-1.5">
-            <CheckCircle2 size={11} className="text-blue-600" />
-            Tandai Selesai
-          </span>
-        </SelectItem>
-      </SelectContent>
-    </Select>
-  );
+  return null;
 }
 
 function InlineStatusSelect({
@@ -1703,7 +1789,7 @@ export default function AdminBookings() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-100 dark:border-slate-800">
-                  {["Order", "Customer", "Fasilitas", "Tanggal & Waktu", "Durasi", "Metode", "Tgl Bayar", "Total", "Pembayaran", "Check-In", ""].map((h) => (
+                  {["Order", "Customer", "Fasilitas", "Tanggal & Waktu", "Durasi", "Metode", "Tgl Bayar", "Total", "Pembayaran", "Status", ""].map((h) => (
                     <th
                       key={h}
                       className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide whitespace-nowrap"
@@ -1822,6 +1908,26 @@ export default function AdminBookings() {
                             isCheckingIn={checkInMutation.isPending && checkInMutation.variables?.id === b.id}
                             isCompleting={updateBookingMutation.isPending && updateBookingMutation.variables?.id === b.id}
                           />
+                        ) : b.status === "pending_payment" ? (
+                          <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full border bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:text-amber-400 dark:border-amber-800">
+                            <Clock size={11} />
+                            Menunggu Bayar
+                          </span>
+                        ) : b.status === "waiting_confirmation" || b.status === "paid" ? (
+                          <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full border bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/20 dark:text-blue-400 dark:border-blue-800">
+                            <CreditCard size={11} />
+                            Verifikasi
+                          </span>
+                        ) : b.status === "cancelled" ? (
+                          <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full border bg-red-50 text-red-600 border-red-200 dark:bg-red-900/20 dark:text-red-400 dark:border-red-800">
+                            <XCircle size={11} />
+                            Dibatalkan
+                          </span>
+                        ) : b.status === "refunded" ? (
+                          <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full border bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-900/20 dark:text-purple-400 dark:border-purple-800">
+                            <RotateCcw size={11} />
+                            Refund
+                          </span>
                         ) : (
                           <span className="text-xs text-slate-300 dark:text-slate-600">—</span>
                         )}

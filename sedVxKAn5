@@ -1,8 +1,4 @@
 
-modules = ["nodejs-20", "web", "bash"]
-
-modules = ["nodejs-20", "web", "bash"]
-
 modules = ["web", "bash", "nodejs-24", "postgresql-16", "python-3.11"]
 
 
@@ -91,7 +87,7 @@ ADMIN_EMAILS = "divatranssoetta@gmail.com,admcst001@gmail.com,almanosetiawan@gma
 ADMIN_WA_PHONES = "081382702074,087882639826"
 AI_INTEGRATIONS_OPENAI_API_KEY = "_DUMMY_API_KEY_"
 AI_INTEGRATIONS_OPENAI_BASE_URL = "http://localhost:1106/modelfarm/openai"
-APP_URL = "https://sportcenter.travelintrips.co.id"
+APP_URL = "https://cstlogistic.co.id"
 CASHIER_TOKEN_SECRET = "239a1a73ea517bf5430a357fb7a39aa0deef38cecaf4d8135310a7cf3f2e11a19466d603c1dfd5bc0c735e92d58b135d"
 DEFAULT_OBJECT_STORAGE_BUCKET_ID = "replit-objstore-e357cc66-19c3-4d73-9ca9-3069d78355d1"
 FONNTE_ADMIN_WA = "6281288195206"

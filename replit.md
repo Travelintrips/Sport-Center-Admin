@@ -70,7 +70,7 @@ Web app untuk manajemen dan pemesanan fasilitas olahraga — customer-facing boo
 
 ## Gotchas
 
-- Password hashing uses HMAC-SHA256 with `SESSION_SECRET`. Default secret for local dev: `sport-center-secret-key-2024`. Hash for `admin123` = `673cae722ece4bc8b7d66c76bee2f465e1e835452e7207c44cc6ea8a9db331e1`
+- Password hashing uses HMAC-SHA256 with `SESSION_SECRET`. The hash stored in DB must match HMAC-SHA256(`SESSION_SECRET`, password). After setting `SUPABASE_DATABASE_URL` secret, run: `node -e "const c=require('crypto');console.log(c.createHmac('sha256',process.env.SESSION_SECRET).update('admin123').digest('hex'))"` to get the correct hash, then update the DB.
 - Always run `pnpm --filter @workspace/api-spec run codegen` after changing `openapi.yaml`
 - Do NOT edit files in `lib/api-client-react/src/generated/` — they are overwritten by codegen
 - After updating `routes/index.ts`, the API server needs to rebuild (restart workflow)
