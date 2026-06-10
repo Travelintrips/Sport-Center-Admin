@@ -1,8 +1,3 @@
-
-modules = ["nodejs-20", "web", "bash"]
-
-modules = ["nodejs-20", "web", "bash"]
-
 modules = ["web", "bash", "nodejs-24", "postgresql-16", "python-3.11"]
 
 
@@ -102,16 +97,23 @@ PRIVATE_OBJECT_DIR = "/replit-objstore-e357cc66-19c3-4d73-9ca9-3069d78355d1/priv
 PUBLIC_OBJECT_SEARCH_PATHS = "/replit-objstore-e357cc66-19c3-4d73-9ca9-3069d78355d1/public"
 SUPABASE_PG_URL = "postgresql://postgres.nzdweipzckfszczzqtuw:%24%23Admin12345%40%24@aws-1-ap-southeast-2.pooler.supabase.com:6543/postgres"
 SUPABASE_STORAGE_BUCKET = "https://nzdweipzckfszczzqtuw.storage.supabase.co/storage/v1/s3"
-SUPABASE_URL = "nzdweipzckfszczzqtuw"
-SUPABASE_URL_DEV = "https://xssrfshdrtdfupgqwfdw.supabase.co"
-VITE_SUPABASE_URL = "https://nzdweipzckfszczzqtuw.supabase.co"
 SESSION_SECRET = "OgZyysezieWkipmN0MD4Y37AR4QHIkMqWg4oQ4yN1CXE86wRI0bYI/cFBPS/K+4DffPWvNSIXCJIuR5wXYPebQ=="
-SUPABASE_DATABASE_URL = "postgresql://postgres.nzdweipzckfszczzqtuw:%24%23Admin12345%40%24@aws-1-ap-southeast-2.pooler.supabase.com:6543/postgres"
-SUPABASE_DATABASE_URL_DEV = "postgresql://postgres.xssrfshdrtdfupgqwfdw:admcst0012026@aws-1-ap-southeast-2.pooler.supabase.com:6543/postgres"
-VITE_SUPABASE_ANON_KEY_DEV = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhzc3Jmc2hkcnRkZnVwZ3F3ZmR3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg4OTY3MjgsImV4cCI6MjA5NDQ3MjcyOH0.czKzR9GjEL6UK8AhPAX6OYyF74fz1YtImYQSXiiG69U"
 BIZPORTAL_SYNC_API_KEY = "98bad1c799cb429ab9f07d98ba5969189545420747a3fc05da7ddd454c2e00e2"
 VITE_GOOGLE_CLIENT_ID = "751551151000-fqrgt8si0pgnchqkn3pfo6nmqienv38f.apps.googleusercontent.com"
+
+[userenv.development]
+SUPABASE_DATABASE_URL = "postgresql://postgres.xssrfshdrtdfupgqwfdw:admcst0012026@aws-1-ap-southeast-2.pooler.supabase.com:6543/postgres"
+SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhzc3Jmc2hkcnRkZnVwZ3F3ZmR3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg4OTY3MjgsImV4cCI6MjA5NDQ3MjcyOH0.czKzR9GjEL6UK8AhPAX6OYyF74fz1YtImYQSXiiG69U"
+SUPABASE_SERVICE_ROLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhzc3Jmc2hkcnRkZnVwZ3F3ZmR3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3ODg5NjcyOCwiZXhwIjoyMDk0NDcyNzI4fQ.VFPcBxsVJkYwNo3ojy3uOHglqUA9zILhjw4_0JAhZYI"
+SUPABASE_URL = "https://xssrfshdrtdfupgqwfdw.supabase.co"
+VITE_SUPABASE_URL = "https://xssrfshdrtdfupgqwfdw.supabase.co"
+
+[userenv.production]
+SUPABASE_DATABASE_URL = "postgresql://postgres.nzdweipzckfszczzqtuw:%24%23Admin12345%40%24@aws-1-ap-southeast-2.pooler.supabase.com:6543/postgres"
+SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im56ZHdlaXB6Y2tmc3pjenpxdHV3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg0MDI4NDQsImV4cCI6MjA5Mzk3ODg0NH0.p9k3-qyRjPuXsHLizUrSRMyS-0yJAatUyjQU9NIIu1U"
 SUPABASE_SERVICE_ROLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im56ZHdlaXB6Y2tmc3pjenpxdHV3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3ODQwMjg0NCwiZXhwIjoyMDkzOTc4ODQ0fQ.W0uM_UzGfF8Zy4PFQKhz6dKpEVDHS6_k9FtqoM9iGms"
+SUPABASE_URL = "https://nzdweipzckfszczzqtuw.supabase.co"
+VITE_SUPABASE_URL = "https://nzdweipzckfszczzqtuw.supabase.co"
 
 [nix]
 channel = "stable-25_05"
