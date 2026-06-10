@@ -272,6 +272,12 @@ ALTER TABLE sport_center.bookings
   ADD COLUMN IF NOT EXISTS reminder_day_sent_at timestamptz;
 
 -- ============================================================
+-- 18. bookings: company invoice linkage
+-- ============================================================
+ALTER TABLE sport_center.bookings
+  ADD COLUMN IF NOT EXISTS company_invoice_id integer REFERENCES sport_center.company_invoices(id) ON DELETE SET NULL;
+
+-- ============================================================
 -- 16. ap2_employee role + verification_logs table
 -- ============================================================
 DO $$ BEGIN

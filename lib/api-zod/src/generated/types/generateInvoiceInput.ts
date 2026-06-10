@@ -10,4 +10,5 @@ export interface GenerateInvoiceInput {
   companyCustomerId: number;
   periodMonth: string;
   notes?: string;
+  includePpn?: boolean;
 }

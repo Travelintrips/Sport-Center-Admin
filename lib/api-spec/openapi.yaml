@@ -2387,6 +2387,8 @@ components:
           type: string
         notes:
           type: string
+        includePpn:
+          type: boolean
 
     CompanyInvoiceUpdate:
       type: object

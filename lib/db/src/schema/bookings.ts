@@ -79,6 +79,7 @@ export const bookingsTable = scSchema.table("bookings", {
   bookedForPhone: text("booked_for_phone"),
   paymentRequiredNow: boolean("payment_required_now").default(true),
   billingStatus: billingStatusEnum("billing_status"),
+  companyInvoiceId: integer("company_invoice_id"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });

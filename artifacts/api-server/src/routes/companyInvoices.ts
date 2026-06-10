@@ -180,11 +180,11 @@ router.post("/company-invoices", adminMiddleware, async (req, res) => {
       .where(eq(companyInvoicesTable.id, inv.id))
       .returning();
 
-    // Mark bookings as billed
+    // Mark bookings as billed and link them explicitly to this invoice
     if (companyBookings.length > 0) {
       for (const b of companyBookings) {
         await db.update(bookingsTable)
-          .set({ billingStatus: "billed" })
+          .set({ billingStatus: "billed", companyInvoiceId: inv.id })
           .where(eq(bookingsTable.id, b.id));
       }
     }
@@ -206,17 +206,10 @@ router.get("/company-invoices/:id", adminMiddleware, async (req, res) => {
     if (!inv) { res.status(404).json({ error: "Not found" }); return; }
 
     const [company] = await db.select().from(usersTable).where(eq(usersTable.id, inv.companyCustomerId)).limit(1);
-    const [pYear, pMonth] = inv.periodMonth.split("-").map(Number);
-    const periodStart = `${pYear}-${String(pMonth).padStart(2, "0")}-01`;
-    const periodEndYear = pMonth === 12 ? pYear + 1 : pYear;
-    const periodEndMonth = pMonth === 12 ? 1 : pMonth + 1;
-    const periodEnd = `${periodEndYear}-${String(periodEndMonth).padStart(2, "0")}-01`;
+
+    // Use explicit invoice linkage — only bookings that belong to THIS invoice
     const relatedBookings = await db.select().from(bookingsTable).where(
-      and(
-        eq(bookingsTable.companyCustomerId, inv.companyCustomerId),
-        gte(bookingsTable.bookingDate, periodStart),
-        lt(bookingsTable.bookingDate, periodEnd),
-      )
+      eq(bookingsTable.companyInvoiceId, id)
     );
 
     const facilities = await db.select({ id: facilitiesTable.id, name: facilitiesTable.name }).from(facilitiesTable);
@@ -246,23 +239,11 @@ router.patch("/company-invoices/:id", adminMiddleware, async (req, res) => {
 
     const [updated] = await db.update(companyInvoicesTable).set(updates).where(eq(companyInvoicesTable.id, id)).returning();
 
-    // If marked paid, update billing status of associated bookings within invoice period only
+    // If marked paid, update only bookings explicitly linked to this invoice
     if (status === "paid") {
-      const [iYear, iMonth] = inv.periodMonth.split("-").map(Number);
-      const periodStart = `${iYear}-${String(iMonth).padStart(2, "0")}-01`;
-      const periodEndYear = iMonth === 12 ? iYear + 1 : iYear;
-      const periodEndMonth = iMonth === 12 ? 1 : iMonth + 1;
-      const periodEnd = `${periodEndYear}-${String(periodEndMonth).padStart(2, "0")}-01`;
       await db.update(bookingsTable)
         .set({ billingStatus: "paid" })
-        .where(
-          and(
-            eq(bookingsTable.companyCustomerId, inv.companyCustomerId),
-            eq(bookingsTable.billingStatus, "billed"),
-            gte(bookingsTable.bookingDate, periodStart),
-            lt(bookingsTable.bookingDate, periodEnd),
-          )
-        );
+        .where(eq(bookingsTable.companyInvoiceId, id));
     }
 
     const [company] = await db.select().from(usersTable).where(eq(usersTable.id, updated.companyCustomerId)).limit(1);

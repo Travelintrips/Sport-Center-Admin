@@ -1005,7 +1005,8 @@ export const ListCompanyInvoicesResponse = zod.array(ListCompanyInvoicesResponse
 export const GenerateCompanyInvoiceBody = zod.object({
   "companyCustomerId": zod.number(),
   "periodMonth": zod.string(),
-  "notes": zod.string().optional()
+  "notes": zod.string().optional(),
+  "includePpn": zod.boolean().optional()
 })
 
 

@@ -184,15 +184,18 @@ export default function AdminDashboard() {
   const { data: allBookingsData } = useListBookings();
   const [selectedStat, setSelectedStat] = useState<StatId | null>(null);
 
-  // Revenue split: personal (confirmed/completed/paid) vs company (unbilled/billed/paid)
+  // Revenue split dengan bucket yang tepat:
+  // Pribadi Lunas = payerType != company DAN status confirmed/completed (sudah settled)
+  // Perusahaan Belum Ditagih = payerType company DAN billingStatus = unbilled
+  // Perusahaan Sudah Lunas = payerType company DAN billingStatus = paid
   const revenuePersonal = (allBookingsData ?? []).filter((b: any) =>
-    b.payerType !== "company" && ["confirmed", "completed", "paid", "waiting_confirmation"].includes(b.status)
+    b.payerType !== "company" && ["confirmed", "completed"].includes(b.status)
   ).reduce((s: number, b: any) => s + Number(b.totalPrice), 0);
   const revenueCompanyUnbilled = (allBookingsData ?? []).filter((b: any) =>
     b.payerType === "company" && b.billingStatus === "unbilled"
   ).reduce((s: number, b: any) => s + Number(b.totalPrice), 0);
-  const revenueCompanyBilled = (allBookingsData ?? []).filter((b: any) =>
-    b.payerType === "company" && (b.billingStatus === "billed" || b.billingStatus === "paid")
+  const revenueCompanyPaid = (allBookingsData ?? []).filter((b: any) =>
+    b.payerType === "company" && b.billingStatus === "paid"
   ).reduce((s: number, b: any) => s + Number(b.totalPrice), 0);
 
   const allBookings: StatModalBooking[] = (allBookingsData ?? []).map((b: any) => ({
@@ -300,7 +303,7 @@ export default function AdminDashboard() {
       </div>
 
       {/* Revenue split */}
-      {(revenuePersonal > 0 || revenueCompanyUnbilled > 0 || revenueCompanyBilled > 0) && (
+      {(revenuePersonal > 0 || revenueCompanyUnbilled > 0 || revenueCompanyPaid > 0) && (
         <div className="rounded-xl border border-border bg-card p-4">
           <div className="flex items-center gap-2 mb-3">
             <Building2 size={15} className="text-primary" />
@@ -316,8 +319,8 @@ export default function AdminDashboard() {
               <div className="text-sm font-black text-amber-700 dark:text-amber-300">{formatCurrency(revenueCompanyUnbilled)}</div>
             </div>
             <div className="rounded-lg bg-blue-50 dark:bg-blue-900/20 p-3">
-              <div className="text-[10px] text-blue-600 dark:text-blue-400 font-semibold uppercase mb-1">Perusahaan · Ditagih/Lunas</div>
-              <div className="text-sm font-black text-blue-700 dark:text-blue-300">{formatCurrency(revenueCompanyBilled)}</div>
+              <div className="text-[10px] text-blue-600 dark:text-blue-400 font-semibold uppercase mb-1">Perusahaan · Sudah Lunas</div>
+              <div className="text-sm font-black text-blue-700 dark:text-blue-300">{formatCurrency(revenueCompanyPaid)}</div>
             </div>
           </div>
         </div>

@@ -130,11 +130,18 @@ router.post("/bookings", async (req, res) => {
       }
     }
     // Deteksi apakah company customer dengan tagihan bulanan
-    // Prioritas: explicit companyCustomerId di body (admin-created) → lalu loggedInUser
+    // Prioritas: 1) explicit companyCustomerId di body (admin-created)
+    //            2) customerId di body yang merujuk ke company customer
+    //            3) loggedInUser sendiri adalah company customer
     let companyBillingUser: (typeof usersTable.$inferSelect) | null = null;
     const explicitCompanyId = req.body.companyCustomerId ? Number(req.body.companyCustomerId) : null;
+    const bodyCustomerId = req.body.customerId ? Number(req.body.customerId) : null;
     if (explicitCompanyId && explicitCompanyId !== loggedInUserId) {
       const [cu] = await db.select().from(usersTable).where(eq(usersTable.id, explicitCompanyId)).limit(1);
+      if (cu?.accountType === "company" && cu?.allowMonthlyBilling) companyBillingUser = cu;
+    } else if (bodyCustomerId && bodyCustomerId !== loggedInUserId && !explicitCompanyId) {
+      // customerId points to a company customer — infer company billing
+      const [cu] = await db.select().from(usersTable).where(eq(usersTable.id, bodyCustomerId)).limit(1);
       if (cu?.accountType === "company" && cu?.allowMonthlyBilling) companyBillingUser = cu;
     } else if (loggedInUser?.accountType === "company" && loggedInUser?.allowMonthlyBilling) {
       companyBillingUser = loggedInUser;
