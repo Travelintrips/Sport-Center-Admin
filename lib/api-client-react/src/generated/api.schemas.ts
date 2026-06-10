@@ -468,15 +468,139 @@ export interface BlockedScheduleInput {
   reason: string;
 }
 
+export type CustomerAccountType = typeof CustomerAccountType[keyof typeof CustomerAccountType];
+
+
+export const CustomerAccountType = {
+  personal: 'personal',
+  company: 'company',
+} as const;
+
 export interface Customer {
   id: number;
   name: string;
   email: string;
   /** @nullable */
   phone?: string | null;
+  /** @nullable */
+  customerCode?: string | null;
+  /** @nullable */
+  registrationSource?: string | null;
+  accountType?: CustomerAccountType;
+  /** @nullable */
+  companyName?: string | null;
+  /** @nullable */
+  picName?: string | null;
+  /** @nullable */
+  picPhone?: string | null;
+  /** @nullable */
+  picEmail?: string | null;
+  /** @nullable */
+  billingAddress?: string | null;
+  /** @nullable */
+  paymentTermsDays?: number | null;
+  /** @nullable */
+  monthlyCreditLimit?: number | null;
+  /** @nullable */
+  allowMonthlyBilling?: boolean | null;
+  /** @nullable */
+  accountStatus?: string | null;
   totalBookings?: number;
   totalSpent?: number;
   createdAt?: string;
+}
+
+export type CustomerInputAccountType = typeof CustomerInputAccountType[keyof typeof CustomerInputAccountType];
+
+
+export const CustomerInputAccountType = {
+  personal: 'personal',
+  company: 'company',
+} as const;
+
+export interface CustomerInput {
+  name: string;
+  email: string;
+  phone?: string;
+  accountType: CustomerInputAccountType;
+  companyName?: string;
+  picName?: string;
+  picPhone?: string;
+  picEmail?: string;
+  billingAddress?: string;
+  paymentTermsDays?: number;
+  monthlyCreditLimit?: number;
+  allowMonthlyBilling?: boolean;
+  accountStatus?: string;
+}
+
+export type CustomerUpdateAccountType = typeof CustomerUpdateAccountType[keyof typeof CustomerUpdateAccountType];
+
+
+export const CustomerUpdateAccountType = {
+  personal: 'personal',
+  company: 'company',
+} as const;
+
+export interface CustomerUpdate {
+  name?: string;
+  email?: string;
+  phone?: string;
+  accountType?: CustomerUpdateAccountType;
+  companyName?: string;
+  picName?: string;
+  picPhone?: string;
+  picEmail?: string;
+  billingAddress?: string;
+  paymentTermsDays?: number;
+  monthlyCreditLimit?: number;
+  allowMonthlyBilling?: boolean;
+  accountStatus?: string;
+}
+
+export type CompanyInvoiceStatus = typeof CompanyInvoiceStatus[keyof typeof CompanyInvoiceStatus];
+
+
+export const CompanyInvoiceStatus = {
+  unpaid: 'unpaid',
+  paid: 'paid',
+} as const;
+
+export interface CompanyInvoice {
+  id: number;
+  invoiceNumber: string;
+  companyCustomerId: number;
+  companyName?: string;
+  periodMonth: string;
+  totalAmount: number;
+  ppnAmount: number;
+  grandTotal: number;
+  status: CompanyInvoiceStatus;
+  /** @nullable */
+  paidAt?: string | null;
+  /** @nullable */
+  notes?: string | null;
+  createdAt: string;
+  bookings?: Booking[];
+}
+
+export interface GenerateInvoiceInput {
+  companyCustomerId: number;
+  periodMonth: string;
+  notes?: string;
+}
+
+export type CompanyInvoiceUpdateStatus = typeof CompanyInvoiceUpdateStatus[keyof typeof CompanyInvoiceUpdateStatus];
+
+
+export const CompanyInvoiceUpdateStatus = {
+  unpaid: 'unpaid',
+  paid: 'paid',
+} as const;
+
+export interface CompanyInvoiceUpdate {
+  status?: CompanyInvoiceUpdateStatus;
+  notes?: string;
 }
 
 export interface FacilityStat {
@@ -991,7 +1115,29 @@ date?: string;
 
 export type ListCustomersParams = {
 search?: string;
+accountType?: ListCustomersAccountType;
 };
+
+export type ListCustomersAccountType = typeof ListCustomersAccountType[keyof typeof ListCustomersAccountType];
+
+
+export const ListCustomersAccountType = {
+  personal: 'personal',
+  company: 'company',
+} as const;
+
+export type ListCompanyInvoicesParams = {
+companyCustomerId?: number;
+status?: ListCompanyInvoicesStatus;
+};
+
+export type ListCompanyInvoicesStatus = typeof ListCompanyInvoicesStatus[keyof typeof ListCompanyInvoicesStatus];
+
+
+export const ListCompanyInvoicesStatus = {
+  unpaid: 'unpaid',
+  paid: 'paid',
+} as const;
 
 export type ExportBookingsParams = {
 startDate?: string;

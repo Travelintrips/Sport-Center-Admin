@@ -5,7 +5,9 @@
  * Sport Center API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { ListCustomersAccountType } from './listCustomersAccountType';
 
 export type ListCustomersParams = {
 search?: string;
+accountType?: ListCustomersAccountType;
 };

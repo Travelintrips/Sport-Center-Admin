@@ -29,6 +29,8 @@ tags:
     description: App settings
   - name: Storage
     description: Object storage upload and serving endpoints.
+  - name: company-billing
+    description: Company customer billing and monthly invoices
   - name: memberships
     description: Gym monthly membership management
   - name: tenants
@@ -748,6 +750,11 @@ paths:
           in: query
           schema:
             type: string
+        - name: accountType
+          in: query
+          schema:
+            type: string
+            enum: [personal, company]
       responses:
         "200":
           description: List of customers
@@ -757,6 +764,25 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/Customer"
+    post:
+      operationId: createCustomer
+      tags: [customers]
+      summary: Create a customer account (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CustomerInput"
+      responses:
+        "201":
+          description: Customer created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Customer"
+        "409":
+          description: Email already exists
 
   /customers/{id}:
     get:
@@ -776,6 +802,113 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Customer"
+    patch:
+      operationId: updateCustomer
+      tags: [customers]
+      summary: Update a customer account (admin)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CustomerUpdate"
+      responses:
+        "200":
+          description: Customer updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Customer"
+
+  /company-invoices:
+    get:
+      operationId: listCompanyInvoices
+      tags: [company-billing]
+      summary: List company invoices (admin)
+      parameters:
+        - name: companyCustomerId
+          in: query
+          schema:
+            type: integer
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [unpaid, paid]
+      responses:
+        "200":
+          description: List of company invoices
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CompanyInvoice"
+    post:
+      operationId: generateCompanyInvoice
+      tags: [company-billing]
+      summary: Generate monthly invoice for a company customer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GenerateInvoiceInput"
+      responses:
+        "201":
+          description: Invoice generated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompanyInvoice"
+
+  /company-invoices/{id}:
+    get:
+      operationId: getCompanyInvoice
+      tags: [company-billing]
+      summary: Get a company invoice detail
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Invoice detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompanyInvoice"
+    patch:
+      operationId: updateCompanyInvoice
+      tags: [company-billing]
+      summary: Mark invoice as paid
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompanyInvoiceUpdate"
+      responses:
+        "200":
+          description: Invoice updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompanyInvoice"
 
   /admin/dashboard:
     get:
@@ -2115,11 +2248,153 @@ components:
           type: string
         phone:
           type: ["string", "null"]
+        customerCode:
+          type: ["string", "null"]
+        registrationSource:
+          type: ["string", "null"]
+        accountType:
+          type: string
+          enum: [personal, company]
+        companyName:
+          type: ["string", "null"]
+        picName:
+          type: ["string", "null"]
+        picPhone:
+          type: ["string", "null"]
+        picEmail:
+          type: ["string", "null"]
+        billingAddress:
+          type: ["string", "null"]
+        paymentTermsDays:
+          type: ["integer", "null"]
+        monthlyCreditLimit:
+          type: ["number", "null"]
+        allowMonthlyBilling:
+          type: ["boolean", "null"]
+        accountStatus:
+          type: ["string", "null"]
         totalBookings:
           type: integer
         totalSpent:
           type: number
         createdAt:
+          type: string
+
+    CustomerInput:
+      type: object
+      required: [name, email, accountType]
+      properties:
+        name:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+        accountType:
+          type: string
+          enum: [personal, company]
+        companyName:
+          type: string
+        picName:
+          type: string
+        picPhone:
+          type: string
+        picEmail:
+          type: string
+        billingAddress:
+          type: string
+        paymentTermsDays:
+          type: integer
+        monthlyCreditLimit:
+          type: number
+        allowMonthlyBilling:
+          type: boolean
+        accountStatus:
+          type: string
+
+    CustomerUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+        accountType:
+          type: string
+          enum: [personal, company]
+        companyName:
+          type: string
+        picName:
+          type: string
+        picPhone:
+          type: string
+        picEmail:
+          type: string
+        billingAddress:
+          type: string
+        paymentTermsDays:
+          type: integer
+        monthlyCreditLimit:
+          type: number
+        allowMonthlyBilling:
+          type: boolean
+        accountStatus:
+          type: string
+
+    CompanyInvoice:
+      type: object
+      required: [id, invoiceNumber, companyCustomerId, periodMonth, totalAmount, ppnAmount, grandTotal, status, createdAt]
+      properties:
+        id:
+          type: integer
+        invoiceNumber:
+          type: string
+        companyCustomerId:
+          type: integer
+        companyName:
+          type: string
+        periodMonth:
+          type: string
+        totalAmount:
+          type: number
+        ppnAmount:
+          type: number
+        grandTotal:
+          type: number
+        status:
+          type: string
+          enum: [unpaid, paid]
+        paidAt:
+          type: ["string", "null"]
+        notes:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+        bookings:
+          type: array
+          items:
+            $ref: "#/components/schemas/Booking"
+
+    GenerateInvoiceInput:
+      type: object
+      required: [companyCustomerId, periodMonth]
+      properties:
+        companyCustomerId:
+          type: integer
+        periodMonth:
+          type: string
+        notes:
+          type: string
+
+    CompanyInvoiceUpdate:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [unpaid, paid]
+        notes:
           type: string
 
     DashboardStats:

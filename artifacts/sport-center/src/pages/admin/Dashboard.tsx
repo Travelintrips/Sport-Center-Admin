@@ -29,20 +29,15 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 const STATUS_LABELS: Record<string, string> = {
-  pending_payment: "Menunggu Pembayaran",
-  paid: "Menunggu Verifikasi",
-  confirmed: "Dikonfirmasi",
-  cancelled: "Dibatalkan",
-  completed: "Selesai",
-  pending_payment:      "Pending Payment",
+  pending_payment:      "Menunggu Pembayaran",
   waiting_confirmation: "Menunggu Konfirmasi",
-  paid:                 "Paid",
-  confirmed:            "Confirmed",
-  cancelled:            "Cancelled",
-  completed:            "Completed",
+  paid:                 "Terbayar",
+  confirmed:            "Dikonfirmasi",
+  cancelled:            "Dibatalkan",
+  completed:            "Selesai",
   expired:              "Expired",
-  rejected:             "Rejected",
-  refunded:             "Refunded",
+  rejected:             "Ditolak",
+  refunded:             "Refund",
 };
 
 function formatCurrency(n: number) {

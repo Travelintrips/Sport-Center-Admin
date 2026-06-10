@@ -807,7 +807,8 @@ export const DeleteBlockedScheduleParams = zod.object({
  * @summary List customers
  */
 export const ListCustomersQueryParams = zod.object({
-  "search": zod.coerce.string().optional()
+  "search": zod.coerce.string().optional(),
+  "accountType": zod.enum(['personal', 'company']).optional()
 })
 
 export const ListCustomersResponseItem = zod.object({
@@ -815,11 +816,43 @@ export const ListCustomersResponseItem = zod.object({
   "name": zod.string(),
   "email": zod.string(),
   "phone": zod.string().nullish(),
+  "customerCode": zod.string().nullish(),
+  "registrationSource": zod.string().nullish(),
+  "accountType": zod.enum(['personal', 'company']).optional(),
+  "companyName": zod.string().nullish(),
+  "picName": zod.string().nullish(),
+  "picPhone": zod.string().nullish(),
+  "picEmail": zod.string().nullish(),
+  "billingAddress": zod.string().nullish(),
+  "paymentTermsDays": zod.number().nullish(),
+  "monthlyCreditLimit": zod.number().nullish(),
+  "allowMonthlyBilling": zod.boolean().nullish(),
+  "accountStatus": zod.string().nullish(),
   "totalBookings": zod.number().optional(),
   "totalSpent": zod.number().optional(),
   "createdAt": zod.string().optional()
 })
 export const ListCustomersResponse = zod.array(ListCustomersResponseItem)
+
+
+/**
+ * @summary Create a customer account (admin)
+ */
+export const CreateCustomerBody = zod.object({
+  "name": zod.string(),
+  "email": zod.string(),
+  "phone": zod.string().optional(),
+  "accountType": zod.enum(['personal', 'company']),
+  "companyName": zod.string().optional(),
+  "picName": zod.string().optional(),
+  "picPhone": zod.string().optional(),
+  "picEmail": zod.string().optional(),
+  "billingAddress": zod.string().optional(),
+  "paymentTermsDays": zod.number().optional(),
+  "monthlyCreditLimit": zod.number().optional(),
+  "allowMonthlyBilling": zod.boolean().optional(),
+  "accountStatus": zod.string().optional()
+})
 
 
 /**
@@ -834,9 +867,282 @@ export const GetCustomerResponse = zod.object({
   "name": zod.string(),
   "email": zod.string(),
   "phone": zod.string().nullish(),
+  "customerCode": zod.string().nullish(),
+  "registrationSource": zod.string().nullish(),
+  "accountType": zod.enum(['personal', 'company']).optional(),
+  "companyName": zod.string().nullish(),
+  "picName": zod.string().nullish(),
+  "picPhone": zod.string().nullish(),
+  "picEmail": zod.string().nullish(),
+  "billingAddress": zod.string().nullish(),
+  "paymentTermsDays": zod.number().nullish(),
+  "monthlyCreditLimit": zod.number().nullish(),
+  "allowMonthlyBilling": zod.boolean().nullish(),
+  "accountStatus": zod.string().nullish(),
   "totalBookings": zod.number().optional(),
   "totalSpent": zod.number().optional(),
   "createdAt": zod.string().optional()
+})
+
+
+/**
+ * @summary Update a customer account (admin)
+ */
+export const UpdateCustomerParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const UpdateCustomerBody = zod.object({
+  "name": zod.string().optional(),
+  "email": zod.string().optional(),
+  "phone": zod.string().optional(),
+  "accountType": zod.enum(['personal', 'company']).optional(),
+  "companyName": zod.string().optional(),
+  "picName": zod.string().optional(),
+  "picPhone": zod.string().optional(),
+  "picEmail": zod.string().optional(),
+  "billingAddress": zod.string().optional(),
+  "paymentTermsDays": zod.number().optional(),
+  "monthlyCreditLimit": zod.number().optional(),
+  "allowMonthlyBilling": zod.boolean().optional(),
+  "accountStatus": zod.string().optional()
+})
+
+export const UpdateCustomerResponse = zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "email": zod.string(),
+  "phone": zod.string().nullish(),
+  "customerCode": zod.string().nullish(),
+  "registrationSource": zod.string().nullish(),
+  "accountType": zod.enum(['personal', 'company']).optional(),
+  "companyName": zod.string().nullish(),
+  "picName": zod.string().nullish(),
+  "picPhone": zod.string().nullish(),
+  "picEmail": zod.string().nullish(),
+  "billingAddress": zod.string().nullish(),
+  "paymentTermsDays": zod.number().nullish(),
+  "monthlyCreditLimit": zod.number().nullish(),
+  "allowMonthlyBilling": zod.boolean().nullish(),
+  "accountStatus": zod.string().nullish(),
+  "totalBookings": zod.number().optional(),
+  "totalSpent": zod.number().optional(),
+  "createdAt": zod.string().optional()
+})
+
+
+/**
+ * @summary List company invoices (admin)
+ */
+export const ListCompanyInvoicesQueryParams = zod.object({
+  "companyCustomerId": zod.coerce.number().optional(),
+  "status": zod.enum(['unpaid', 'paid']).optional()
+})
+
+export const ListCompanyInvoicesResponseItem = zod.object({
+  "id": zod.number(),
+  "invoiceNumber": zod.string(),
+  "companyCustomerId": zod.number(),
+  "companyName": zod.string().optional(),
+  "periodMonth": zod.string(),
+  "totalAmount": zod.number(),
+  "ppnAmount": zod.number(),
+  "grandTotal": zod.number(),
+  "status": zod.enum(['unpaid', 'paid']),
+  "paidAt": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "createdAt": zod.string(),
+  "bookings": zod.array(zod.object({
+  "id": zod.number(),
+  "orderNumber": zod.string(),
+  "customerId": zod.number().nullish(),
+  "customerName": zod.string(),
+  "customerEmail": zod.string(),
+  "customerPhone": zod.string(),
+  "facilityId": zod.number(),
+  "facilityName": zod.string(),
+  "facilityCategory": zod.string().optional(),
+  "bookingDate": zod.string(),
+  "startTime": zod.string(),
+  "endTime": zod.string(),
+  "durationHours": zod.number(),
+  "totalPrice": zod.number(),
+  "status": zod.enum(['pending_payment', 'waiting_confirmation', 'paid', 'confirmed', 'completed', 'cancelled', 'rejected', 'expired', 'refunded']),
+  "customerType": zod.enum(['umum', 'angkasa_pura']).optional(),
+  "idCardNumber": zod.string().nullish(),
+  "verificationStatus": zod.enum(['not_required', 'pending', 'verified', 'rejected']).optional(),
+  "basePrice": zod.number().nullish(),
+  "apDiscountAmount": zod.number().optional(),
+  "activityType": zod.string().nullish(),
+  "numberOfPeople": zod.number().nullish(),
+  "notes": zod.string().nullish(),
+  "adminNotes": zod.string().nullish(),
+  "whatsappMessage": zod.string().nullish(),
+  "checkedInAt": zod.string().nullish(),
+  "completedAt": zod.string().nullish(),
+  "paymentDeadline": zod.string().nullish(),
+  "payment": zod.object({
+  "id": zod.number(),
+  "bookingId": zod.number(),
+  "amount": zod.number(),
+  "proofUrl": zod.string().nullish(),
+  "paymentMethod": zod.string().nullish(),
+  "status": zod.enum(['pending', 'confirmed', 'rejected']),
+  "confirmedAt": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "createdAt": zod.string().optional(),
+  "updatedAt": zod.string().optional()
+}).nullish(),
+  "createdAt": zod.string().optional()
+})).optional()
+})
+export const ListCompanyInvoicesResponse = zod.array(ListCompanyInvoicesResponseItem)
+
+
+/**
+ * @summary Generate monthly invoice for a company customer
+ */
+export const GenerateCompanyInvoiceBody = zod.object({
+  "companyCustomerId": zod.number(),
+  "periodMonth": zod.string(),
+  "notes": zod.string().optional()
+})
+
+
+/**
+ * @summary Get a company invoice detail
+ */
+export const GetCompanyInvoiceParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetCompanyInvoiceResponse = zod.object({
+  "id": zod.number(),
+  "invoiceNumber": zod.string(),
+  "companyCustomerId": zod.number(),
+  "companyName": zod.string().optional(),
+  "periodMonth": zod.string(),
+  "totalAmount": zod.number(),
+  "ppnAmount": zod.number(),
+  "grandTotal": zod.number(),
+  "status": zod.enum(['unpaid', 'paid']),
+  "paidAt": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "createdAt": zod.string(),
+  "bookings": zod.array(zod.object({
+  "id": zod.number(),
+  "orderNumber": zod.string(),
+  "customerId": zod.number().nullish(),
+  "customerName": zod.string(),
+  "customerEmail": zod.string(),
+  "customerPhone": zod.string(),
+  "facilityId": zod.number(),
+  "facilityName": zod.string(),
+  "facilityCategory": zod.string().optional(),
+  "bookingDate": zod.string(),
+  "startTime": zod.string(),
+  "endTime": zod.string(),
+  "durationHours": zod.number(),
+  "totalPrice": zod.number(),
+  "status": zod.enum(['pending_payment', 'waiting_confirmation', 'paid', 'confirmed', 'completed', 'cancelled', 'rejected', 'expired', 'refunded']),
+  "customerType": zod.enum(['umum', 'angkasa_pura']).optional(),
+  "idCardNumber": zod.string().nullish(),
+  "verificationStatus": zod.enum(['not_required', 'pending', 'verified', 'rejected']).optional(),
+  "basePrice": zod.number().nullish(),
+  "apDiscountAmount": zod.number().optional(),
+  "activityType": zod.string().nullish(),
+  "numberOfPeople": zod.number().nullish(),
+  "notes": zod.string().nullish(),
+  "adminNotes": zod.string().nullish(),
+  "whatsappMessage": zod.string().nullish(),
+  "checkedInAt": zod.string().nullish(),
+  "completedAt": zod.string().nullish(),
+  "paymentDeadline": zod.string().nullish(),
+  "payment": zod.object({
+  "id": zod.number(),
+  "bookingId": zod.number(),
+  "amount": zod.number(),
+  "proofUrl": zod.string().nullish(),
+  "paymentMethod": zod.string().nullish(),
+  "status": zod.enum(['pending', 'confirmed', 'rejected']),
+  "confirmedAt": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "createdAt": zod.string().optional(),
+  "updatedAt": zod.string().optional()
+}).nullish(),
+  "createdAt": zod.string().optional()
+})).optional()
+})
+
+
+/**
+ * @summary Mark invoice as paid
+ */
+export const UpdateCompanyInvoiceParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const UpdateCompanyInvoiceBody = zod.object({
+  "status": zod.enum(['unpaid', 'paid']).optional(),
+  "notes": zod.string().optional()
+})
+
+export const UpdateCompanyInvoiceResponse = zod.object({
+  "id": zod.number(),
+  "invoiceNumber": zod.string(),
+  "companyCustomerId": zod.number(),
+  "companyName": zod.string().optional(),
+  "periodMonth": zod.string(),
+  "totalAmount": zod.number(),
+  "ppnAmount": zod.number(),
+  "grandTotal": zod.number(),
+  "status": zod.enum(['unpaid', 'paid']),
+  "paidAt": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "createdAt": zod.string(),
+  "bookings": zod.array(zod.object({
+  "id": zod.number(),
+  "orderNumber": zod.string(),
+  "customerId": zod.number().nullish(),
+  "customerName": zod.string(),
+  "customerEmail": zod.string(),
+  "customerPhone": zod.string(),
+  "facilityId": zod.number(),
+  "facilityName": zod.string(),
+  "facilityCategory": zod.string().optional(),
+  "bookingDate": zod.string(),
+  "startTime": zod.string(),
+  "endTime": zod.string(),
+  "durationHours": zod.number(),
+  "totalPrice": zod.number(),
+  "status": zod.enum(['pending_payment', 'waiting_confirmation', 'paid', 'confirmed', 'completed', 'cancelled', 'rejected', 'expired', 'refunded']),
+  "customerType": zod.enum(['umum', 'angkasa_pura']).optional(),
+  "idCardNumber": zod.string().nullish(),
+  "verificationStatus": zod.enum(['not_required', 'pending', 'verified', 'rejected']).optional(),
+  "basePrice": zod.number().nullish(),
+  "apDiscountAmount": zod.number().optional(),
+  "activityType": zod.string().nullish(),
+  "numberOfPeople": zod.number().nullish(),
+  "notes": zod.string().nullish(),
+  "adminNotes": zod.string().nullish(),
+  "whatsappMessage": zod.string().nullish(),
+  "checkedInAt": zod.string().nullish(),
+  "completedAt": zod.string().nullish(),
+  "paymentDeadline": zod.string().nullish(),
+  "payment": zod.object({
+  "id": zod.number(),
+  "bookingId": zod.number(),
+  "amount": zod.number(),
+  "proofUrl": zod.string().nullish(),
+  "paymentMethod": zod.string().nullish(),
+  "status": zod.enum(['pending', 'confirmed', 'rejected']),
+  "confirmedAt": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "createdAt": zod.string().optional(),
+  "updatedAt": zod.string().optional()
+}).nullish(),
+  "createdAt": zod.string().optional()
+})).optional()
 })
 
 

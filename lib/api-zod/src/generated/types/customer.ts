@@ -5,6 +5,7 @@
  * Sport Center API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { CustomerAccountType } from './customerAccountType';
 
 export interface Customer {
   id: number;
@@ -12,6 +13,29 @@ export interface Customer {
   email: string;
   /** @nullable */
   phone?: string | null;
+  /** @nullable */
+  customerCode?: string | null;
+  /** @nullable */
+  registrationSource?: string | null;
+  accountType?: CustomerAccountType;
+  /** @nullable */
+  companyName?: string | null;
+  /** @nullable */
+  picName?: string | null;
+  /** @nullable */
+  picPhone?: string | null;
+  /** @nullable */
+  picEmail?: string | null;
+  /** @nullable */
+  billingAddress?: string | null;
+  /** @nullable */
+  paymentTermsDays?: number | null;
+  /** @nullable */
+  monthlyCreditLimit?: number | null;
+  /** @nullable */
+  allowMonthlyBilling?: boolean | null;
+  /** @nullable */
+  accountStatus?: string | null;
   totalBookings?: number;
   totalSpent?: number;
   createdAt?: string;

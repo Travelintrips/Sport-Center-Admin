@@ -1,4 +1,4 @@
-import { text, serial, timestamp, numeric, integer } from "drizzle-orm/pg-core";
+import { text, serial, timestamp, numeric, integer, boolean } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { facilitiesTable } from "./facilities";
@@ -27,6 +27,17 @@ export const verificationStatusEnum = scSchema.enum("verification_status", [
   "pending",
   "verified",
   "rejected",
+]);
+
+export const payerTypeEnum = scSchema.enum("payer_type", [
+  "personal",
+  "company",
+]);
+
+export const billingStatusEnum = scSchema.enum("billing_status", [
+  "unbilled",
+  "billed",
+  "paid",
 ]);
 
 export const bookingsTable = scSchema.table("bookings", {
@@ -61,6 +72,13 @@ export const bookingsTable = scSchema.table("bookings", {
   completedAt: timestamp("completed_at", { withTimezone: true }),
   reminderH1SentAt: timestamp("reminder_h1_sent_at", { withTimezone: true }),
   reminderDaySentAt: timestamp("reminder_day_sent_at", { withTimezone: true }),
+  // Company billing fields
+  payerType: payerTypeEnum("payer_type").default("personal"),
+  companyCustomerId: integer("company_customer_id").references(() => usersTable.id, { onDelete: "set null" }),
+  bookedForName: text("booked_for_name"),
+  bookedForPhone: text("booked_for_phone"),
+  paymentRequiredNow: boolean("payment_required_now").default(true),
+  billingStatus: billingStatusEnum("billing_status"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });

@@ -22,6 +22,7 @@ import {
   QrCode,
   Bell,
   RefreshCw,
+  Building2,
 } from "lucide-react";
 import { useGetMe, useLogout, getGetMeQueryKey } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -54,6 +55,7 @@ const NAV_GROUPS = [
     label: "Pelanggan",
     items: [
       { href: "/admin/customers", label: "Pelanggan", icon: Users },
+      { href: "/admin/company-billing", label: "Tagihan Perusahaan", icon: Building2 },
       { href: "/admin/memberships", label: "Member Gym", icon: Dumbbell },
       { href: "/admin/ap-members", label: "Member AP", icon: Plane },
       { href: "/admin/promos", label: "Promo", icon: Tag },
