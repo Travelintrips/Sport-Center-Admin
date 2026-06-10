@@ -295,7 +295,7 @@ DO $$ BEGIN
     SELECT 1 FROM pg_type t JOIN pg_namespace n ON t.typnamespace = n.oid
     WHERE n.nspname = 'sport_center' AND t.typname = 'user_account_type'
   ) THEN
-    CREATE TYPE sport_center.user_account_type AS ENUM ('individual', 'company');
+    CREATE TYPE sport_center.user_account_type AS ENUM ('personal', 'company');
   END IF;
 END $$;
 
@@ -315,14 +315,17 @@ CREATE TABLE IF NOT EXISTS sport_center.company_invoices (
 );
 
 ALTER TABLE sport_center.users
-  ADD COLUMN IF NOT EXISTS account_type sport_center.user_account_type DEFAULT 'individual',
+  ADD COLUMN IF NOT EXISTS account_type sport_center.user_account_type DEFAULT 'personal',
   ADD COLUMN IF NOT EXISTS company_name text,
   ADD COLUMN IF NOT EXISTS pic_name text,
   ADD COLUMN IF NOT EXISTS pic_phone text,
   ADD COLUMN IF NOT EXISTS pic_email text,
   ADD COLUMN IF NOT EXISTS billing_address text,
   ADD COLUMN IF NOT EXISTS allow_monthly_billing boolean NOT NULL DEFAULT false,
-  ADD COLUMN IF NOT EXISTS company_tax_id text;
+  ADD COLUMN IF NOT EXISTS company_tax_id text,
+  ADD COLUMN IF NOT EXISTS payment_terms_days integer DEFAULT 30,
+  ADD COLUMN IF NOT EXISTS monthly_credit_limit numeric(14,2),
+  ADD COLUMN IF NOT EXISTS account_status text DEFAULT 'active';
 
 ALTER TABLE sport_center.bookings
   ADD COLUMN IF NOT EXISTS payer_type sport_center.payer_type DEFAULT 'personal',

@@ -42,6 +42,8 @@ function mapInvoice(
       endTime: b.endTime,
       durationHours: b.durationHours,
       customerName: b.customerName,
+      bookedForName: b.bookedForName ?? b.customerName,
+      bookedForPhone: b.bookedForPhone ?? b.customerPhone,
       totalPrice: Number(b.totalPrice),
     })),
   };
@@ -243,10 +245,11 @@ router.patch("/company-invoices/:id", adminMiddleware, async (req, res) => {
 
     const [updated] = await db.update(companyInvoicesTable).set(updates).where(eq(companyInvoicesTable.id, id)).returning();
 
-    // If marked paid, update only bookings explicitly linked to this invoice
+    // If marked paid, update billingStatus to paid and booking status to completed
+    // (company invoice paid = booking payment lifecycle fully settled)
     if (status === "paid") {
       await db.update(bookingsTable)
-        .set({ billingStatus: "paid" })
+        .set({ billingStatus: "paid", status: "completed" })
         .where(eq(bookingsTable.companyInvoiceId, id));
     }
 

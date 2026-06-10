@@ -258,6 +258,8 @@ router.post("/bookings", async (req, res) => {
       paymentRequiredNow: !isCompanyBilling,
       billingStatus: isCompanyBilling ? "unbilled" : null,
       paymentDeadline: isCompanyBilling ? null : new Date(Date.now() + 30 * 60 * 1000),
+      bookedForName: isCompanyBilling ? (req.body.bookedForName?.trim() || customerName) : null,
+      bookedForPhone: isCompanyBilling ? (req.body.bookedForPhone?.trim() || customerPhone) : null,
     }).returning();
 
     if (promoCode && !isAp) {
