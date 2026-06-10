@@ -155,7 +155,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
           <nav className="px-2 space-y-4">
             {NAV_GROUPS.map((group) => (
               <div key={group.label}>
-                <div className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                <div className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-sidebar-foreground/40">
                   {group.label}
                 </div>
                 <div className="space-y-0.5">
@@ -170,11 +170,11 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                           flex items-center gap-2.5 px-3 py-2 rounded-md text-sm font-medium transition-colors
                           ${isActive 
                             ? 'bg-sidebar-accent text-sidebar-accent-foreground' 
-                            : 'text-sidebar-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground'}
+                            : 'text-sidebar-foreground/70 hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground'}
                         `}
                         onClick={() => setIsMobileOpen(false)}
                       >
-                        <Icon size={16} className={isActive ? 'text-primary' : 'text-muted-foreground'} />
+                        <Icon size={16} className={isActive ? 'text-orange-400' : 'text-sidebar-foreground/40'} />
                         {item.label}
                       </Link>
                     );
@@ -196,18 +196,18 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
             </div>
           )}
           <div className="flex items-center gap-2.5 px-3 py-2 mb-1">
-            <div className="w-7 h-7 rounded-full bg-primary/20 flex items-center justify-center text-primary font-bold text-xs flex-shrink-0">
+            <div className="w-7 h-7 rounded-full bg-white/10 flex items-center justify-center text-white font-bold text-xs flex-shrink-0">
               {user?.name?.charAt(0) || 'A'}
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-xs font-semibold truncate">{user?.name || 'Admin'}</p>
-              <p className="text-[10px] text-muted-foreground truncate">{user?.role ?? user?.email}</p>
+              <p className="text-xs font-semibold truncate text-sidebar-foreground">{user?.name || 'Admin'}</p>
+              <p className="text-[10px] text-sidebar-foreground/50 truncate">{user?.role ?? user?.email}</p>
             </div>
           </div>
           <Button 
             variant="ghost" 
             size="sm"
-            className="w-full justify-start text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+            className="w-full justify-start text-sidebar-foreground/60 hover:text-red-400 hover:bg-red-500/10"
             onClick={handleLogout}
             disabled={logoutMutation.isPending}
           >
