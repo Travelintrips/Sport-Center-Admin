@@ -130,6 +130,27 @@ export interface RescheduleNotifData {
   reviewNote?: string;
 }
 
+export interface CompanyBookingNotifData {
+  customerName: string;
+  customerPhone: string;
+  orderNumber: string;
+  facilityName: string;
+  bookingDate: string;
+  startTime: string;
+  endTime: string;
+  totalPrice: string;
+  companyName: string;
+  periodMonth: string;
+}
+
+export async function notifyCompanyBookingCreated(data: CompanyBookingNotifData): Promise<void> {
+  const customerMsg = `Halo ${data.customerName},\n\nBooking Anda *${data.orderNumber}* untuk *${data.facilityName}* pada *${data.bookingDate}* pukul *${data.startTime}–${data.endTime}* telah *DIKONFIRMASI* ✅\n\nPembayaran akan ditagihkan melalui *Tagihan Bulanan Perusahaan* periode ${data.periodMonth}.\n\nTerima kasih! 🏆`;
+  await sendWA(data.customerPhone, customerMsg);
+
+  const adminMsg = `📋 *Booking Perusahaan Baru*\nOrder: *${data.orderNumber}*\nPerusahaan: ${data.companyName}\nFasilitas: ${data.facilityName}\nTanggal: ${data.bookingDate} | ${data.startTime}–${data.endTime}\nTagihan: Bulanan ${data.periodMonth}\nNilai: Rp${data.totalPrice}`;
+  await sendWAToAdmins(adminMsg);
+}
+
 export async function notifyRescheduleApproved(data: RescheduleNotifData): Promise<void> {
   const tpl = await getTemplate("reschedule_approved");
   const message = tpl

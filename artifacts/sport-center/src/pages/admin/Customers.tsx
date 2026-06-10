@@ -152,8 +152,14 @@ function CompanyForm({ initial, onClose }: { initial?: any; onClose: () => void 
         await updateMutation.mutateAsync({ id: initial.id, data: payload });
         toast({ title: "Customer diperbarui" });
       } else {
-        await createMutation.mutateAsync({ data: payload });
-        toast({ title: "Customer perusahaan dibuat", description: "Password default: customer123" });
+        const result = await createMutation.mutateAsync({ data: payload });
+        const tempPwd = (result as any)?.tempPassword;
+        toast({
+          title: "Customer perusahaan dibuat",
+          description: tempPwd
+            ? `Password sementara: ${tempPwd} — simpan sebelum menutup dialog ini`
+            : "Akun berhasil dibuat",
+        });
       }
       qc.invalidateQueries({ queryKey: getListCustomersQueryKey() });
       onClose();

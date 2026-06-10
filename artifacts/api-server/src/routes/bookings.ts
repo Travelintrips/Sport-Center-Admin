@@ -3,7 +3,7 @@ import { db, bookingsTable, facilitiesTable, paymentsTable, promosTable, discoun
 import { eq, and, sql, or, ilike, desc } from "drizzle-orm";
 import { adminMiddleware, authMiddleware, verifyToken } from "../lib/auth";
 import { broadcastAvailabilityChange } from "../lib/supabase";
-import { notifyBookingCreated, notifyPaymentConfirmed, notifyBookingCancelled } from "../lib/notifications";
+import { notifyBookingCreated, notifyPaymentConfirmed, notifyBookingCancelled, notifyCompanyBookingCreated } from "../lib/notifications";
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
 import { syncBookingToBizportal, syncStatusToBizportal } from "../lib/bizportalSync";
 
@@ -130,7 +130,17 @@ router.post("/bookings", async (req, res) => {
       }
     }
     // Deteksi apakah company customer dengan tagihan bulanan
-    const isCompanyBilling = !!(loggedInUser?.accountType === "company" && loggedInUser?.allowMonthlyBilling);
+    // Prioritas: explicit companyCustomerId di body (admin-created) → lalu loggedInUser
+    let companyBillingUser: (typeof usersTable.$inferSelect) | null = null;
+    const explicitCompanyId = req.body.companyCustomerId ? Number(req.body.companyCustomerId) : null;
+    if (explicitCompanyId && explicitCompanyId !== loggedInUserId) {
+      const [cu] = await db.select().from(usersTable).where(eq(usersTable.id, explicitCompanyId)).limit(1);
+      if (cu?.accountType === "company" && cu?.allowMonthlyBilling) companyBillingUser = cu;
+    } else if (loggedInUser?.accountType === "company" && loggedInUser?.allowMonthlyBilling) {
+      companyBillingUser = loggedInUser;
+    }
+    const isCompanyBilling = !!companyBillingUser;
+    const effectiveCompanyCustomerId = companyBillingUser?.id ?? null;
     const activityType = req.body.activityType || null;
     const numberOfPeople = req.body.numberOfPeople ? Number(req.body.numberOfPeople) : null;
     const idCardNumber = String(req.body?.idCardNumber || "").trim().toUpperCase() || null;
@@ -230,7 +240,7 @@ router.post("/bookings", async (req, res) => {
       // Company billing: auto-confirm, no immediate payment required
       status: isCompanyBilling ? "confirmed" : "pending_payment",
       payerType: isCompanyBilling ? "company" : "personal",
-      companyCustomerId: isCompanyBilling ? loggedInUserId : null,
+      companyCustomerId: effectiveCompanyCustomerId,
       paymentRequiredNow: !isCompanyBilling,
       billingStatus: isCompanyBilling ? "unbilled" : null,
       paymentDeadline: isCompanyBilling ? null : new Date(Date.now() + 30 * 60 * 1000),
@@ -257,7 +267,22 @@ router.post("/bookings", async (req, res) => {
     syncBookingToBizportal({ booking, facilityName: facility.name }).catch(() => {});
 
     // Send WA notification (non-blocking)
-    if (!isCompanyBilling) {
+    if (isCompanyBilling) {
+      // Notify customer (confirmed) + admin (new company booking)
+      const bookingMonth = bookingDate.slice(0, 7);
+      notifyCompanyBookingCreated({
+        customerName,
+        customerPhone,
+        orderNumber: booking.orderNumber,
+        facilityName: facility.name,
+        bookingDate,
+        startTime: booking.startTime,
+        endTime: booking.endTime,
+        totalPrice: totalPrice.toLocaleString("id-ID"),
+        companyName: companyBillingUser!.companyName ?? companyBillingUser!.name ?? "",
+        periodMonth: bookingMonth,
+      }).catch(() => {});
+    } else {
       const deadline = new Date(Date.now() + 30 * 60 * 1000);
       const deadlineStr = deadline.toLocaleString("id-ID", { timeZone: "Asia/Jakarta", hour12: false });
       notifyBookingCreated({
