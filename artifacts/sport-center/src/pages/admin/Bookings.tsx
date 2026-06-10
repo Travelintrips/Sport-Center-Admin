@@ -274,11 +274,45 @@ function printInvoice(booking: any, settings?: any) {
   if (w) { w.document.write(html); w.document.close(); }
 }
 
+function terbilang(n: number): string {
+  const satuan = ["", "Satu", "Dua", "Tiga", "Empat", "Lima", "Enam", "Tujuh", "Delapan", "Sembilan",
+    "Sepuluh", "Sebelas", "Dua Belas", "Tiga Belas", "Empat Belas", "Lima Belas", "Enam Belas",
+    "Tujuh Belas", "Delapan Belas", "Sembilan Belas"];
+  if (n === 0) return "Nol";
+  if (n < 0) return "Minus " + terbilang(-n);
+  if (n < 20) return satuan[n];
+  if (n < 100) return satuan[Math.floor(n / 10)] + " Puluh" + (n % 10 !== 0 ? " " + satuan[n % 10] : "");
+  if (n < 200) return "Seratus" + (n % 100 !== 0 ? " " + terbilang(n % 100) : "");
+  if (n < 1000) return satuan[Math.floor(n / 100)] + " Ratus" + (n % 100 !== 0 ? " " + terbilang(n % 100) : "");
+  if (n < 2000) return "Seribu" + (n % 1000 !== 0 ? " " + terbilang(n % 1000) : "");
+  if (n < 1000000) return terbilang(Math.floor(n / 1000)) + " Ribu" + (n % 1000 !== 0 ? " " + terbilang(n % 1000) : "");
+  if (n < 1000000000) return terbilang(Math.floor(n / 1000000)) + " Juta" + (n % 1000000 !== 0 ? " " + terbilang(n % 1000000) : "");
+  return terbilang(Math.floor(n / 1000000000)) + " Miliar" + (n % 1000000000 !== 0 ? " " + terbilang(n % 1000000000) : "");
+}
+
 function printKwitansi(booking: any, settings?: any) {
   const centerName = settings?.centerName ?? "Sport Center";
   const address = settings?.address ?? "";
   const phone = settings?.phone ?? "";
+  const bankName = settings?.bankName ?? "";
+  const bankAccount = settings?.bankAccount ?? "";
+  const bankAccountName = settings?.bankAccountName ?? "";
+  const logoUrl = settings?.logoUrl ?? "";
   const now = new Date().toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" });
+
+  const dpp = Math.round(Number(booking.totalPrice));
+  const ppn = Math.round(dpp * 0.12);
+  const total = dpp + ppn;
+  const terbilangText = terbilang(total) + " Rupiah";
+
+  const statusLabel = booking.status === "completed" ? "Lunas" :
+    booking.status === "confirmed" ? "Dikonfirmasi" :
+    booking.status === "cancelled" ? "Dibatalkan" : booking.status;
+
+  const logoHtml = logoUrl
+    ? `<img src="${logoUrl}" style="width:56px;height:56px;border-radius:50%;object-fit:cover;border:2px solid #e5e7eb;" />`
+    : `<div style="width:56px;height:56px;border-radius:50%;background:#f97316;display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:900;color:#fff;flex-shrink:0;">SC</div>`;
+
   const html = `<!DOCTYPE html>
 <html lang="id">
 <head>
@@ -286,66 +320,151 @@ function printKwitansi(booking: any, settings?: any) {
   <title>Kwitansi ${booking.orderNumber}</title>
   <style>
     * { margin:0; padding:0; box-sizing:border-box; }
-    body { font-family: 'Segoe UI', Arial, sans-serif; color: #1a1a1a; background: #fff; padding: 40px; max-width: 600px; margin: auto; }
-    .outer { border: 2px solid #1a1a1a; border-radius: 8px; padding: 28px 32px; }
-    .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding-bottom: 16px; border-bottom: 2px solid #1a1a1a; }
-    .brand { font-size: 20px; font-weight: 900; color: #f97316; }
-    .brand-sub { font-size: 11px; color: #777; }
-    .kwitansi-title { font-size: 22px; font-weight: 900; letter-spacing: 4px; text-transform: uppercase; }
-    .num-row { display: flex; justify-content: space-between; font-size: 12px; color: #666; margin-bottom: 20px; }
-    .row { display: flex; margin-bottom: 12px; align-items: flex-start; }
-    .row label { width: 160px; font-size: 12px; color: #888; flex-shrink: 0; padding-top: 1px; }
-    .row span { font-size: 14px; font-weight: 600; flex: 1; }
-    .amount-box { background: #fff8f4; border: 2px solid #f97316; border-radius: 6px; padding: 14px 18px; margin: 20px 0; text-align: center; }
-    .amount-label { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #888; margin-bottom: 4px; }
-    .amount-value { font-size: 28px; font-weight: 900; color: #f97316; letter-spacing: -1px; }
-    .sig { display: flex; justify-content: flex-end; margin-top: 32px; }
-    .sig-box { text-align: center; }
-    .sig-box .line { border-bottom: 1px solid #aaa; width: 160px; margin: 48px auto 4px; }
-    .sig-box .name { font-size: 12px; font-weight: 700; }
-    .sig-box .title { font-size: 11px; color: #888; }
-    .stamp { display: inline-block; border: 3px solid #059669; border-radius: 50%; padding: 6px 12px; color: #059669; font-weight: 900; font-size: 13px; letter-spacing: 2px; transform: rotate(-15deg); margin-bottom: 8px; }
-    .footer { margin-top: 20px; font-size: 10px; color: #aaa; text-align: center; }
-    @media print { body { padding: 10px; } }
+    body { font-family: Arial, sans-serif; color: #1a1a1a; background: #fff; padding: 40px; max-width: 720px; margin: auto; font-size: 12px; }
+    .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 18px; }
+    .header-left { display: flex; align-items: flex-start; gap: 14px; }
+    .brand-name { font-size: 18px; font-weight: 900; color: #1a1a1a; line-height: 1.1; }
+    .brand-sub { font-size: 13px; font-weight: 700; color: #f97316; margin: 2px 0 4px; }
+    .brand-addr { font-size: 11px; color: #444; line-height: 1.5; }
+    .header-right { text-align: right; }
+    .kwitansi-title { font-size: 26px; font-weight: 900; color: #1a1a1a; line-height: 1; }
+    .kwitansi-num { font-size: 14px; font-weight: 700; color: #f97316; margin-top: 4px; }
+    .kwitansi-date { font-size: 11px; color: #666; margin-top: 3px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .divider { border: none; border-top: 2.5px solid #f97316; margin: 14px 0; }
+    .section-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #1a1a1a; margin-bottom: 10px; }
+    .info-grid { display: grid; grid-template-columns: 1fr 1fr; margin-bottom: 20px; border-bottom: 1px solid #ddd; padding-bottom: 10px; }
+    .info-cell { padding: 6px 0; border-bottom: 1px solid #eee; }
+    .info-cell:nth-child(odd) { padding-right: 20px; border-right: 1px solid #eee; }
+    .info-cell:nth-child(even) { padding-left: 20px; }
+    .info-label { font-size: 11px; color: #555; margin-bottom: 2px; }
+    .info-value { font-size: 12px; color: #1a1a1a; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 0; }
+    thead tr { background: #f97316; }
+    th { padding: 8px 10px; text-align: left; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #fff; letter-spacing: 0.5px; }
+    th:last-child { text-align: right; }
+    tbody tr:nth-child(odd) { background: #fff7f3; }
+    tbody tr:nth-child(even) { background: #ffeee5; }
+    td { padding: 9px 10px; font-size: 12px; color: #1a1a1a; }
+    td:last-child { text-align: right; font-weight: 600; }
+    .totals-section { display: flex; justify-content: flex-end; margin-top: 8px; margin-bottom: 16px; }
+    .totals-table { width: 280px; }
+    .totals-table td { padding: 4px 8px; font-size: 12px; border: none; background: transparent; }
+    .totals-table td:first-child { color: #f97316; font-weight: 600; text-align: left; }
+    .totals-table td:last-child { color: #f97316; font-weight: 700; text-align: right; }
+    .totals-table tr.grand-total td { font-size: 13px; font-weight: 900; border-top: 1px solid #f97316; padding-top: 6px; }
+    .terbilang { font-style: italic; font-weight: 700; font-size: 12px; color: #1a1a1a; margin-bottom: 18px; }
+    .payment-info { font-size: 12px; color: #1a1a1a; line-height: 1.8; margin-bottom: 24px; }
+    .sig-row { display: flex; justify-content: flex-end; margin-top: 8px; }
+    .sig-box { text-align: center; width: 160px; }
+    .sig-space { height: 52px; }
+    .sig-line { border-top: 1px solid #aaa; padding-top: 4px; }
+    .sig-name { font-size: 12px; font-weight: 700; }
+    .footer { margin-top: 32px; padding-top: 12px; border-top: 1px solid #ddd; font-size: 10px; color: #888; text-align: center; line-height: 1.6; }
+    @media print { body { padding: 20px; } }
   </style>
 </head>
 <body>
-  <div class="outer">
-    <div class="header">
+  <div class="header">
+    <div class="header-left">
+      ${logoHtml}
       <div>
-        <div class="brand">${centerName}</div>
-        <div class="brand-sub">${address}</div>
-        <div class="brand-sub">${phone}</div>
+        <div class="brand-name">${centerName}</div>
+        <div class="brand-sub">${centerName.toUpperCase()}</div>
+        <div class="brand-addr">${address}${phone ? "<br/>" + phone : ""}</div>
       </div>
-      <div class="kwitansi-title">Kwitansi</div>
     </div>
-
-    <div class="num-row">
-      <span>No: <strong>${booking.orderNumber}</strong></span>
-      <span>Tanggal: <strong>${now}</strong></span>
+    <div class="header-right">
+      <div class="kwitansi-title">KWITANSI</div>
+      <div class="kwitansi-num">${booking.orderNumber}</div>
+      <div class="kwitansi-date">Tanggal Kwitansi</div>
+      <div style="font-size:11px;color:#333;margin-top:2px;">${now}</div>
     </div>
+  </div>
 
-    <div class="row"><label>Diterima dari</label><span>${booking.customerName}</span></div>
-    <div class="row"><label>No. HP</label><span>${booking.customerPhone || "-"}</span></div>
-    <div class="row"><label>Untuk pembayaran</label><span>Sewa ${booking.facilityName}</span></div>
-    <div class="row"><label>Tanggal booking</label><span>${formatDate(booking.bookingDate)}</span></div>
-    <div class="row"><label>Waktu</label><span>${booking.startTime?.slice(0,5)} – ${booking.endTime?.slice(0,5)} (${booking.durationHours} jam)</span></div>
+  <hr class="divider"/>
 
-    <div class="amount-box">
-      <div class="amount-label">Jumlah Pembayaran</div>
-      <div class="amount-value">${formatCurrency(booking.totalPrice)}</div>
+  <div class="section-title">Informasi Customer</div>
+  <div class="info-grid">
+    <div class="info-cell">
+      <div class="info-label">Nama</div>
+      <div class="info-value">${booking.customerName}</div>
     </div>
+    <div class="info-cell">
+      <div class="info-label">No. HP</div>
+      <div class="info-value">${booking.customerPhone || "-"}</div>
+    </div>
+    <div class="info-cell">
+      <div class="info-label">Email</div>
+      <div class="info-value">${booking.customerEmail || "-"}</div>
+    </div>
+    <div class="info-cell">
+      <div class="info-label">Status</div>
+      <div class="info-value">${statusLabel}</div>
+    </div>
+  </div>
 
-    <div class="sig">
-      <div class="sig-box">
-        <div class="stamp">LUNAS</div>
-        <div class="line"></div>
-        <div class="name">Admin</div>
-        <div class="title">${centerName}</div>
+  <div class="section-title">Detail Pemesanan</div>
+  <table>
+    <thead>
+      <tr>
+        <th>Fasilitas</th>
+        <th>Tanggal</th>
+        <th>Jam</th>
+        <th>Durasi</th>
+        <th>Harga</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>${booking.facilityName}</td>
+        <td>${formatDate(booking.bookingDate)}</td>
+        <td>${booking.startTime?.slice(0,5)} – ${booking.endTime?.slice(0,5)}</td>
+        <td>${booking.durationHours} Jam</td>
+        <td>${formatCurrency(dpp)}</td>
+      </tr>
+      <tr><td colspan="5" style="padding:4px;background:#fff7f3;"></td></tr>
+    </tbody>
+  </table>
+
+  <div class="totals-section">
+    <table class="totals-table">
+      <tr>
+        <td>DPP</td>
+        <td>${formatCurrency(dpp)}</td>
+      </tr>
+      <tr>
+        <td>PPN 12%</td>
+        <td>${formatCurrency(ppn)}</td>
+      </tr>
+      <tr class="grand-total">
+        <td>Total DPP + PPN</td>
+        <td>${formatCurrency(total)}</td>
+      </tr>
+    </table>
+  </div>
+
+  <div class="terbilang">Terbilang: ${terbilangText}</div>
+
+  ${bankAccountName || bankName || bankAccount ? `
+  <div class="payment-info">
+    Pembayaran: ${bankAccountName || centerName}<br/>
+    ${bankName ? bankName + "<br/>" : ""}
+    ${bankAccount ? "Account No. " + bankAccount : ""}
+  </div>` : ""}
+
+  <div class="sig-row">
+    <div class="sig-box">
+      <div class="sig-space"></div>
+      <div class="sig-line">
+        <div class="sig-name">Finance</div>
       </div>
     </div>
   </div>
-  <div class="footer">Kwitansi ini sah tanpa tanda tangan basah. Dicetak ${now}.</div>
+
+  <div class="footer">
+    Dokumen ini dicetak secara otomatis oleh sistem ${centerName}. Terima kasih atas kepercayaan Anda.<br/>
+    Dikelola oleh <strong>${bankAccountName || centerName}</strong>
+  </div>
   <script>window.onload = function(){ window.print(); }<\/script>
 </body>
 </html>`;
