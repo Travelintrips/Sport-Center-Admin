@@ -123,10 +123,13 @@ export default function Register() {
     return () => clearTimeout(timer);
   }, [countdown]);
 
+  const googleMutationRef = useRef(googleMutation);
+  googleMutationRef.current = googleMutation;
+
   const handleGoogleCallback = useCallback((response: { credential: string }) => {
     setGoogleLoading(true);
-    googleMutation.mutate({ data: { idToken: response.credential } });
-  }, [googleMutation]);
+    googleMutationRef.current.mutate({ data: { idToken: response.credential } });
+  }, []);
 
   useEffect(() => {
     if (!GOOGLE_CLIENT_ID || !googleBtnRef.current) return;
