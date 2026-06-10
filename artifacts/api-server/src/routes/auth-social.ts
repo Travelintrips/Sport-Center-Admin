@@ -171,8 +171,6 @@ router.post("/auth/verify-otp", async (req, res) => {
       return;
     }
 
-    otpStore.delete(cleaned);
-
     let user = await db
       .select()
       .from(usersTable)
@@ -182,18 +180,22 @@ router.post("/auth/verify-otp", async (req, res) => {
 
     if (!user) {
       const displayPhone = "0" + cleaned.slice(2);
+      const placeholderEmail = `wa_${cleaned}@wa.sportcenter.local`;
       const [created] = await db
         .insert(usersTable)
         .values({
           name: name ?? displayPhone,
-          email: null,
+          email: placeholderEmail,
           phone: cleaned,
           passwordHash: null,
           role: "customer",
+          registrationSource: "whatsapp",
         })
         .returning();
       user = created;
     }
+
+    otpStore.delete(cleaned);
 
     const token = createToken(user.id, user.role, null);
     res.json({

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Link, useLocation, useSearch } from "wouter";
 import { useRegister, useSendOtp, useVerifyOtp, useLoginWithGoogle } from "@workspace/api-client-react";
 import { setToken } from "@/lib/auth";
@@ -53,6 +53,7 @@ export default function Register() {
   const [waLoading, setWaLoading] = useState(false);
   const [waSuccess, setWaSuccess] = useState<{ customerCode: string; name: string } | null>(null);
   const [googleLoading, setGoogleLoading] = useState(false);
+  const googleBtnRef = useRef<HTMLDivElement>(null);
 
   const [phone, setPhone] = useState("");
   const [otp, setOtp] = useState("");
@@ -125,34 +126,50 @@ export default function Register() {
   const handleGoogleCallback = useCallback((response: { credential: string }) => {
     setGoogleLoading(true);
     googleMutation.mutate({ data: { idToken: response.credential } });
-  }, []);
+  }, [googleMutation]);
 
   useEffect(() => {
-    if (!GOOGLE_CLIENT_ID) return;
-    const script = document.createElement("script");
-    script.src = "https://accounts.google.com/gsi/client";
-    script.async = true;
-    script.defer = true;
-    script.onload = () => {
+    if (!GOOGLE_CLIENT_ID || !googleBtnRef.current) return;
+
+    function initGoogle() {
+      if (!googleBtnRef.current) return;
       window.google?.accounts.id.initialize({
         client_id: GOOGLE_CLIENT_ID,
         callback: handleGoogleCallback,
         auto_select: false,
       });
-    };
-    document.head.appendChild(script);
-    return () => {
-      document.head.removeChild(script);
-    };
-  }, [handleGoogleCallback]);
+      window.google?.accounts.id.renderButton(googleBtnRef.current, {
+        type: "standard",
+        shape: "rectangular",
+        theme: "outline",
+        text: "signup_with",
+        size: "large",
+        width: googleBtnRef.current.offsetWidth || 380,
+        locale: "id",
+      });
+    }
 
-  function handleGoogleSignIn() {
-    if (!GOOGLE_CLIENT_ID) {
-      toast({ title: "Google login belum dikonfigurasi", variant: "destructive" });
+    if (window.google?.accounts?.id) {
+      initGoogle();
       return;
     }
-    window.google?.accounts.id.prompt();
-  }
+
+    const existing = document.querySelector('script[src*="accounts.google.com/gsi/client"]');
+    if (existing) {
+      existing.addEventListener("load", initGoogle);
+      return () => existing.removeEventListener("load", initGoogle);
+    }
+
+    const script = document.createElement("script");
+    script.src = "https://accounts.google.com/gsi/client";
+    script.async = true;
+    script.defer = true;
+    script.onload = initGoogle;
+    document.head.appendChild(script);
+    return () => {
+      if (document.head.contains(script)) document.head.removeChild(script);
+    };
+  }, [handleGoogleCallback]);
 
   async function handleWaSourceSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -509,18 +526,13 @@ export default function Register() {
                 </div>
               </div>
 
-              <Button
-                type="button"
-                variant="outline"
-                className="w-full gap-2"
-                onClick={handleGoogleSignIn}
-                disabled={googleLoading || googleMutation.isPending}
-              >
-                <FcGoogle size={18} />
-                {googleLoading || googleMutation.isPending
-                  ? t("Memproses...", "Processing...")
-                  : t("Daftar dengan Google", "Sign up with Google")}
-              </Button>
+              {googleLoading || googleMutation.isPending ? (
+                <Button type="button" variant="outline" className="w-full gap-2" disabled>
+                  <FcGoogle size={18} /> {t("Memproses...", "Processing...")}
+                </Button>
+              ) : (
+                <div ref={googleBtnRef} className="w-full flex justify-center min-h-[44px]" />
+              )}
             </>
           )}
 

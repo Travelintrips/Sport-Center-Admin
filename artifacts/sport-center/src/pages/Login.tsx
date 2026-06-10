@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Link, useLocation, useSearch } from "wouter";
 import { useLogin, useSendOtp, useVerifyOtp, useLoginWithGoogle } from "@workspace/api-client-react";
 import { setToken } from "@/lib/auth";
@@ -45,6 +45,7 @@ export default function Login() {
   const [phoneStep, setPhoneStep] = useState<PhoneStep>("input");
   const [countdown, setCountdown] = useState(0);
   const [googleLoading, setGoogleLoading] = useState(false);
+  const googleBtnRef = useRef<HTMLDivElement>(null);
 
   const redirectTo = new URLSearchParams(search).get("redirect");
 
@@ -106,24 +107,48 @@ export default function Login() {
   const handleGoogleCallback = useCallback((response: { credential: string }) => {
     setGoogleLoading(true);
     googleMutation.mutate({ data: { idToken: response.credential } });
-  }, []);
+  }, [googleMutation]);
 
   useEffect(() => {
-    if (!GOOGLE_CLIENT_ID) return;
-    const script = document.createElement("script");
-    script.src = "https://accounts.google.com/gsi/client";
-    script.async = true;
-    script.defer = true;
-    script.onload = () => {
+    if (!GOOGLE_CLIENT_ID || !googleBtnRef.current) return;
+
+    function initGoogle() {
+      if (!googleBtnRef.current) return;
       window.google?.accounts.id.initialize({
         client_id: GOOGLE_CLIENT_ID,
         callback: handleGoogleCallback,
         auto_select: false,
       });
-    };
+      window.google?.accounts.id.renderButton(googleBtnRef.current, {
+        type: "standard",
+        shape: "rectangular",
+        theme: "outline",
+        text: "signin_with",
+        size: "large",
+        width: googleBtnRef.current.offsetWidth || 380,
+        locale: "id",
+      });
+    }
+
+    if (window.google?.accounts?.id) {
+      initGoogle();
+      return;
+    }
+
+    const existing = document.querySelector('script[src*="accounts.google.com/gsi/client"]');
+    if (existing) {
+      existing.addEventListener("load", initGoogle);
+      return () => existing.removeEventListener("load", initGoogle);
+    }
+
+    const script = document.createElement("script");
+    script.src = "https://accounts.google.com/gsi/client";
+    script.async = true;
+    script.defer = true;
+    script.onload = initGoogle;
     document.head.appendChild(script);
     return () => {
-      document.head.removeChild(script);
+      if (document.head.contains(script)) document.head.removeChild(script);
     };
   }, [handleGoogleCallback]);
 
@@ -140,14 +165,6 @@ export default function Login() {
   function handleVerifyOtp(e: React.FormEvent) {
     e.preventDefault();
     verifyOtpMutation.mutate({ data: { phone, otp } });
-  }
-
-  function handleGoogleSignIn() {
-    if (!GOOGLE_CLIENT_ID) {
-      toast({ title: "Google login belum dikonfigurasi", variant: "destructive" });
-      return;
-    }
-    window.google?.accounts.id.prompt();
   }
 
   return (
@@ -306,18 +323,13 @@ export default function Login() {
           </div>
 
           {/* Google Sign-In */}
-          <Button
-            type="button"
-            variant="outline"
-            className="w-full gap-2"
-            onClick={handleGoogleSignIn}
-            disabled={googleLoading || googleMutation.isPending}
-          >
-            <FcGoogle size={18} />
-            {googleLoading || googleMutation.isPending
-              ? t("Memproses...", "Processing...")
-              : t("Lanjutkan dengan Google", "Continue with Google")}
-          </Button>
+          {googleLoading || googleMutation.isPending ? (
+            <Button type="button" variant="outline" className="w-full gap-2" disabled>
+              <FcGoogle size={18} /> {t("Memproses...", "Processing...")}
+            </Button>
+          ) : (
+            <div ref={googleBtnRef} className="w-full flex justify-center min-h-[44px]" />
+          )}
 
           <div className="text-center text-sm text-muted-foreground">
             {t("Belum punya akun?", "Don't have an account?")}{" "}

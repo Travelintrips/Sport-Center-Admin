@@ -77,6 +77,34 @@ router.post("/auth/register", async (req, res) => {
   }
 });
 
+router.post("/auth/setup-admin", async (req, res) => {
+  try {
+    const key = req.headers["x-setup-key"] as string;
+    const PORTAL_ADMIN_KEY = process.env.PORTAL_ADMIN_KEY || "";
+    if (!PORTAL_ADMIN_KEY || key !== PORTAL_ADMIN_KEY) {
+      res.status(403).json({ error: "Forbidden" });
+      return;
+    }
+    const { email, name, password } = req.body;
+    if (!email || !password) {
+      res.status(400).json({ error: "email and password required" });
+      return;
+    }
+    const passwordHash = hashPassword(password);
+    const [existing] = await db.select().from(usersTable).where(eq(usersTable.email, email)).limit(1);
+    if (existing) {
+      const [updated] = await db.update(usersTable).set({ role: "admin", passwordHash }).where(eq(usersTable.email, email)).returning();
+      res.json({ action: "updated", id: updated.id, email: updated.email, role: updated.role });
+    } else {
+      const [created] = await db.insert(usersTable).values({ name: name ?? email, email, passwordHash, role: "admin", registrationSource: "web" }).returning();
+      res.json({ action: "created", id: created.id, email: created.email, role: created.role });
+    }
+  } catch (err) {
+    req.log.error({ err }, "Setup admin error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 router.post("/auth/admin-login", async (req, res) => {
   try {
     const { email, password } = req.body;
