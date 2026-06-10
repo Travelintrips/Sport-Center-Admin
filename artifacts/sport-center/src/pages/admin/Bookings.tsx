@@ -727,12 +727,33 @@ function BookingDetailDrawer({
               <div className="text-xs text-slate-500">
                 {booking.status === "pending_payment" && "Menunggu customer upload bukti pembayaran"}
                 {booking.status === "paid" && "Bukti transfer diterima — perlu verifikasi admin"}
-                {(booking.status === "completed" || booking.status === "confirmed") && "Pembayaran sudah diverifikasi, booking aktif"}
+                {(booking.status === "completed" || booking.status === "confirmed") && (
+                  booking.payerType === "company"
+                    ? "Booking perusahaan — dikonfirmasi otomatis, masuk tagihan bulanan"
+                    : "Pembayaran sudah diverifikasi, booking aktif"
+                )}
                 {booking.status === "cancelled" && "Booking telah dibatalkan"}
                 {booking.status === "refunded" && "Dana telah dikembalikan ke customer"}
               </div>
             </div>
           </div>
+
+          {/* Company Billing Banner */}
+          {booking.payerType === "company" && (
+            <div className="flex items-center gap-3 p-3 rounded-xl border border-orange-200 dark:border-orange-800 bg-orange-50 dark:bg-orange-900/20">
+              <Building2 size={16} className="text-orange-600 dark:text-orange-400 shrink-0" />
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-bold text-orange-700 dark:text-orange-300">Tagihan Bulanan Perusahaan</div>
+                <div className="text-xs text-orange-500 dark:text-orange-400">
+                  Status tagihan: {" "}
+                  {booking.billingStatus === "unbilled" && <span className="font-semibold">Belum Ditagih</span>}
+                  {booking.billingStatus === "billed" && <span className="font-semibold text-blue-600">Sudah Ditagih</span>}
+                  {booking.billingStatus === "paid" && <span className="font-semibold text-emerald-600">✓ Lunas</span>}
+                  {!booking.billingStatus && "—"}
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Customer Info */}
           <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
@@ -1833,6 +1854,16 @@ export default function AdminBookings() {
                                 {b.verificationStatus === "verified" && <span className="text-[9px] text-green-600 font-semibold">✓ Terverifikasi</span>}
                                 {b.verificationStatus === "pending" && <span className="text-[9px] text-amber-600 font-semibold">Menunggu</span>}
                                 {b.verificationStatus === "rejected" && <span className="text-[9px] text-red-500 font-semibold">Ditolak</span>}
+                              </div>
+                            )}
+                            {b.payerType === "company" && (
+                              <div className="mt-0.5 flex items-center gap-1 flex-wrap">
+                                <Badge className="bg-orange-100 text-orange-700 border-orange-200 text-[9px] px-1 py-0 gap-0.5 font-semibold">
+                                  <Building2 size={9} /> Perusahaan
+                                </Badge>
+                                {b.billingStatus === "unbilled" && <span className="text-[9px] text-amber-600 font-semibold">Belum Ditagih</span>}
+                                {b.billingStatus === "billed" && <span className="text-[9px] text-blue-600 font-semibold">Sudah Ditagih</span>}
+                                {b.billingStatus === "paid" && <span className="text-[9px] text-green-600 font-semibold">✓ Lunas</span>}
                               </div>
                             )}
                           </div>

@@ -119,13 +119,18 @@ router.post("/bookings", async (req, res) => {
 
     // Deteksi user yang sedang login (opsional — tidak wajib)
     let loggedInUserId: number | null = null;
+    let loggedInUser: (typeof usersTable.$inferSelect) | null = null;
     const authHeader = req.headers.authorization;
     if (authHeader?.startsWith("Bearer ")) {
       const payload = verifyToken(authHeader.slice(7));
       if (payload?.userId && payload.role === "customer") {
         loggedInUserId = payload.userId;
+        const [u] = await db.select().from(usersTable).where(eq(usersTable.id, payload.userId)).limit(1);
+        if (u) loggedInUser = u;
       }
     }
+    // Deteksi apakah company customer dengan tagihan bulanan
+    const isCompanyBilling = !!(loggedInUser?.accountType === "company" && loggedInUser?.allowMonthlyBilling);
     const activityType = req.body.activityType || null;
     const numberOfPeople = req.body.numberOfPeople ? Number(req.body.numberOfPeople) : null;
     const idCardNumber = String(req.body?.idCardNumber || "").trim().toUpperCase() || null;
@@ -222,7 +227,13 @@ router.post("/bookings", async (req, res) => {
       activityType,
       numberOfPeople,
       notes,
-      paymentDeadline: new Date(Date.now() + 30 * 60 * 1000),
+      // Company billing: auto-confirm, no immediate payment required
+      status: isCompanyBilling ? "confirmed" : "pending_payment",
+      payerType: isCompanyBilling ? "company" : "personal",
+      companyCustomerId: isCompanyBilling ? loggedInUserId : null,
+      paymentRequiredNow: !isCompanyBilling,
+      billingStatus: isCompanyBilling ? "unbilled" : null,
+      paymentDeadline: isCompanyBilling ? null : new Date(Date.now() + 30 * 60 * 1000),
     }).returning();
 
     if (promoCode && !isAp) {
@@ -235,9 +246,9 @@ router.post("/bookings", async (req, res) => {
     await db.insert(bookingHistoryTable).values({
       bookingId: booking.id,
       fromStatus: null,
-      toStatus: "pending_payment",
+      toStatus: booking.status,
       changedByName: customerName,
-      note: "Booking dibuat",
+      note: isCompanyBilling ? "Booking dibuat (Company Customer — tagihan bulanan)" : "Booking dibuat",
     });
 
     broadcastAvailabilityChange(Number(facilityId), bookingDate);
@@ -246,19 +257,21 @@ router.post("/bookings", async (req, res) => {
     syncBookingToBizportal({ booking, facilityName: facility.name }).catch(() => {});
 
     // Send WA notification (non-blocking)
-    const deadline = new Date(Date.now() + 30 * 60 * 1000);
-    const deadlineStr = deadline.toLocaleString("id-ID", { timeZone: "Asia/Jakarta", hour12: false });
-    notifyBookingCreated({
-      customerName,
-      customerPhone,
-      orderNumber: booking.orderNumber,
-      facilityName: facility.name,
-      bookingDate,
-      startTime: booking.startTime,
-      endTime: booking.endTime,
-      totalPrice: totalPrice.toLocaleString("id-ID"),
-      paymentDeadline: deadlineStr,
-    });
+    if (!isCompanyBilling) {
+      const deadline = new Date(Date.now() + 30 * 60 * 1000);
+      const deadlineStr = deadline.toLocaleString("id-ID", { timeZone: "Asia/Jakarta", hour12: false });
+      notifyBookingCreated({
+        customerName,
+        customerPhone,
+        orderNumber: booking.orderNumber,
+        facilityName: facility.name,
+        bookingDate,
+        startTime: booking.startTime,
+        endTime: booking.endTime,
+        totalPrice: totalPrice.toLocaleString("id-ID"),
+        paymentDeadline: deadlineStr,
+      });
+    }
 
     res.status(201).json({
       ...booking,
@@ -422,7 +435,7 @@ router.get("/bookings/my", authMiddleware, async (req, res) => {
     const bookings = await db.select().from(bookingsTable)
       .where(or(
         eq(bookingsTable.customerId, userId),
-        ilike(bookingsTable.customerEmail, user.email),
+        user.email ? ilike(bookingsTable.customerEmail, user.email) : undefined,
       ));
 
     const facilities = await db.select({ id: facilitiesTable.id, name: facilitiesTable.name, category: facilitiesTable.category }).from(facilitiesTable);

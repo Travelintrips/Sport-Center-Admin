@@ -13,7 +13,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line,
 } from "recharts";
-import { CalendarDays, DollarSign, Clock, TrendingUp, X, ArrowRight } from "lucide-react";
+import { CalendarDays, DollarSign, Clock, TrendingUp, X, ArrowRight, Building2 } from "lucide-react";
 import { useLocation } from "wouter";
 
 const STATUS_COLORS: Record<string, string> = {
@@ -184,6 +184,17 @@ export default function AdminDashboard() {
   const { data: allBookingsData } = useListBookings();
   const [selectedStat, setSelectedStat] = useState<StatId | null>(null);
 
+  // Revenue split: personal (confirmed/completed/paid) vs company (unbilled/billed/paid)
+  const revenuePersonal = (allBookingsData ?? []).filter((b: any) =>
+    b.payerType !== "company" && ["confirmed", "completed", "paid", "waiting_confirmation"].includes(b.status)
+  ).reduce((s: number, b: any) => s + Number(b.totalPrice), 0);
+  const revenueCompanyUnbilled = (allBookingsData ?? []).filter((b: any) =>
+    b.payerType === "company" && b.billingStatus === "unbilled"
+  ).reduce((s: number, b: any) => s + Number(b.totalPrice), 0);
+  const revenueCompanyBilled = (allBookingsData ?? []).filter((b: any) =>
+    b.payerType === "company" && (b.billingStatus === "billed" || b.billingStatus === "paid")
+  ).reduce((s: number, b: any) => s + Number(b.totalPrice), 0);
+
   const allBookings: StatModalBooking[] = (allBookingsData ?? []).map((b: any) => ({
     id: b.id,
     orderNumber: b.orderNumber,
@@ -288,6 +299,30 @@ export default function AdminDashboard() {
         })}
       </div>
 
+      {/* Revenue split */}
+      {(revenuePersonal > 0 || revenueCompanyUnbilled > 0 || revenueCompanyBilled > 0) && (
+        <div className="rounded-xl border border-border bg-card p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <Building2 size={15} className="text-primary" />
+            <span className="text-xs font-bold text-muted-foreground uppercase tracking-wide">Rincian Revenue</span>
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="rounded-lg bg-emerald-50 dark:bg-emerald-900/20 p-3">
+              <div className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold uppercase mb-1">Pribadi · Lunas</div>
+              <div className="text-sm font-black text-emerald-700 dark:text-emerald-300">{formatCurrency(revenuePersonal)}</div>
+            </div>
+            <div className="rounded-lg bg-amber-50 dark:bg-amber-900/20 p-3">
+              <div className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold uppercase mb-1">Perusahaan · Belum Ditagih</div>
+              <div className="text-sm font-black text-amber-700 dark:text-amber-300">{formatCurrency(revenueCompanyUnbilled)}</div>
+            </div>
+            <div className="rounded-lg bg-blue-50 dark:bg-blue-900/20 p-3">
+              <div className="text-[10px] text-blue-600 dark:text-blue-400 font-semibold uppercase mb-1">Perusahaan · Ditagih/Lunas</div>
+              <div className="text-sm font-black text-blue-700 dark:text-blue-300">{formatCurrency(revenueCompanyBilled)}</div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Charts */}
       <div className="grid md:grid-cols-2 gap-4">
         {/* Booking by status pie */}
@@ -336,18 +371,6 @@ export default function AdminDashboard() {
                   <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
                   <Tooltip formatter={(v: any) => [formatCurrency(Number(v)), "Pendapatan"]} />
                   <Line type="monotone" dataKey="revenue" stroke="hsl(var(--primary))" strokeWidth={2} dot={{ r: 4 }} />
-                  <YAxis
-                    tick={{ fontSize: 11 }}
-                    tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`}
-                  />
-                  <Tooltip formatter={(v) => [formatCurrency(Number(v)), "Revenue"]} />
-                  <Line
-                    type="monotone"
-                    dataKey="revenue"
-                    stroke="hsl(var(--primary))"
-                    strokeWidth={2}
-                    dot={{ r: 4 }}
-                  />
                 </LineChart>
               </ResponsiveContainer>
             </div>
@@ -367,13 +390,6 @@ export default function AdminDashboard() {
                   <XAxis type="number" tick={{ fontSize: 11 }} />
                   <YAxis dataKey="facilityName" type="category" tick={{ fontSize: 11 }} width={100} />
                   <Tooltip formatter={(v: any) => [v, "Pemesanan"]} />
-                  <YAxis
-                    dataKey="facilityName"
-                    type="category"
-                    tick={{ fontSize: 11 }}
-                    width={100}
-                  />
-                  <Tooltip formatter={(v) => [v, "Bookings"]} />
                   <Bar dataKey="bookingCount" fill="hsl(var(--primary))" radius={[0, 4, 4, 0]} />
                 </BarChart>
               </ResponsiveContainer>

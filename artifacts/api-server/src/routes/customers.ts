@@ -86,9 +86,15 @@ router.post("/customers", adminMiddleware, async (req, res) => {
     const [existing] = await db.select({ id: usersTable.id }).from(usersTable).where(eq(usersTable.email, email)).limit(1);
     if (existing) { res.status(409).json({ error: "Email sudah digunakan" }); return; }
 
-    const sessionSecret = process.env.SESSION_SECRET ?? "default_secret";
-    const defaultPassword = "customer123";
-    const passwordHash = createHmac("sha256", sessionSecret).update(defaultPassword).digest("hex");
+    const sessionSecret = process.env.SESSION_SECRET;
+    if (!sessionSecret) {
+      req.log.error("SESSION_SECRET env var tidak tersedia — tidak bisa membuat akun customer");
+      res.status(500).json({ error: "Server configuration error: SESSION_SECRET not set" });
+      return;
+    }
+    // Generate random password — admin perlu mengatur password via reset flow
+    const randomPassword = Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 10).toUpperCase();
+    const passwordHash = createHmac("sha256", sessionSecret).update(randomPassword).digest("hex");
 
     const [user] = await db.insert(usersTable).values({
       name,
@@ -108,7 +114,7 @@ router.post("/customers", adminMiddleware, async (req, res) => {
       accountStatus: accountStatus ?? "active",
     }).returning();
 
-    res.status(201).json(mapUser(user, []));
+    res.status(201).json({ ...mapUser(user, []), tempPassword: randomPassword });
   } catch (err) {
     req.log.error({ err }, "Create customer error");
     res.status(500).json({ error: "Internal server error" });
