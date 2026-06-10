@@ -3,6 +3,7 @@
 - [Migration runner setup](migration-runner.md) — scripts/migrate.ts needs `pg` in scripts/package.json; run via scripts/node_modules/.bin/tsx scripts/migrate.ts (not npx/pnpm tsx which can't find pg).
 - [Supabase Storage for uploads](supabase-storage.md) — facility images/proofs/QRIS live in Supabase Storage (project nzdweipzckfszczzqtuw, public buckets), NOT ephemeral disk; store absolute public URLs.
 - [Booking status flow](booking-status-flow.md) — INACTIVE_STATUSES = [cancelled, expired, rejected, refunded]; conflict check must exclude all; payment proof → waiting_confirmation → confirmed (not completed); auto-expire via scheduler every 5 min.
+- [Prod/dev DB separation](prod-dev-db-separation.md) — dev/prod scopes hold different Supabase DBs; deployments bake env at publish time, so changing a prod secret needs a re-publish; same seed means distinguish by row counts.
 - [WhatsApp Booking Flow](wa-booking-flow.md) — Fonnte webhook + tokenized admin links; `wa_action_tokens` table in sport_center schema; standalone `/wa/*` pages outside CustomerLayout.
 - [Local DB setup & env var scoping](local-db-setup.md) — Workflow uses DATABASE_URL (heliumdb), NOT Supabase; drizzle-kit push fails on existing enums; apply lib/db/drizzle/*.sql files manually.
 - [Admin login & SESSION_SECRET](admin-login-secret.md) — "Invalid credentials" w/ correct pw = admin hash seeded with a different SESSION_SECRET; dev & prod DBs seed admin independently, reseed the broken one.
