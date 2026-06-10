@@ -68,7 +68,7 @@ router.post("/auth/google", async (req, res) => {
           name: name ?? email ?? "Google User",
           email: email ?? null,
           googleId,
-          passwordHash: null,
+          passwordHash: crypto.randomBytes(32).toString("hex"),
           role: "customer",
         })
         .returning();
@@ -187,7 +187,7 @@ router.post("/auth/verify-otp", async (req, res) => {
           name: name ?? displayPhone,
           email: placeholderEmail,
           phone: cleaned,
-          passwordHash: null,
+          passwordHash: crypto.randomBytes(32).toString("hex"),
           role: "customer",
           registrationSource: "whatsapp",
         })
