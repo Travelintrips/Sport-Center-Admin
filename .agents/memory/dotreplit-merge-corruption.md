@@ -24,3 +24,18 @@ complete line, e.g. `modules = ["web", "bash", "nodejs-24", "postgresql-16",
 
 **Watch for it** after any GitHub merge: `grep -n '^modules' .replit` should show exactly
 one line.
+
+## Sibling symptom: duplicate `start` key in package.json
+The same external merges also duplicate the `start` script in
+`artifacts/api-server/package.json`. JSON keeps the **last** duplicate, so the
+foreign line wins and runs `../booking-manager/src/server.js` on port 21089 plus
+the real server — causing `EADDRINUSE` on 8080/21089 and a failed workflow.
+Unlike `.replit`, the agent CAN fix this: delete the foreign `start` line, keep
+`node --env-file=.env.local --enable-source-maps ./dist/index.mjs`, then restart.
+
+## Artifact-managed duplicate workflows
+Merges also leave duplicate workflows (`artifacts/api-server: API Server`,
+`artifacts/sport-center: web`) that mirror the canonical `Start API server` /
+`Start application` on the same ports, so they perpetually show "failed" on port
+conflict. They are **artifact-managed and cannot be removed** via `removeWorkflow`
+(PROHIBITED_ACTION). Harmless — the canonical workflows serve the app; ignore them.
