@@ -3172,6 +3172,77 @@ export const useGenerateCompanyInvoice = <TError = ErrorType<unknown>,
       return useMutation(getGenerateCompanyInvoiceMutationOptions(options));
     }
 
+export const getGenerateCompanyInvoiceAliasUrl = () => {
+
+
+
+
+  return `/api/company-invoices/generate`
+}
+
+/**
+ * @summary Generate monthly invoice (alias endpoint matching task contract)
+ */
+export const generateCompanyInvoiceAlias = async (generateInvoiceInput: GenerateInvoiceInput, options?: RequestInit): Promise<CompanyInvoice> => {
+
+  return customFetch<CompanyInvoice>(getGenerateCompanyInvoiceAliasUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      generateInvoiceInput,)
+  }
+);}
+
+
+
+
+export const getGenerateCompanyInvoiceAliasMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof generateCompanyInvoiceAlias>>, TError,{data: BodyType<GenerateInvoiceInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof generateCompanyInvoiceAlias>>, TError,{data: BodyType<GenerateInvoiceInput>}, TContext> => {
+
+const mutationKey = ['generateCompanyInvoiceAlias'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof generateCompanyInvoiceAlias>>, {data: BodyType<GenerateInvoiceInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  generateCompanyInvoiceAlias(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type GenerateCompanyInvoiceAliasMutationResult = NonNullable<Awaited<ReturnType<typeof generateCompanyInvoiceAlias>>>
+    export type GenerateCompanyInvoiceAliasMutationBody = BodyType<GenerateInvoiceInput>
+    export type GenerateCompanyInvoiceAliasMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Generate monthly invoice (alias endpoint matching task contract)
+ */
+export const useGenerateCompanyInvoiceAlias = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof generateCompanyInvoiceAlias>>, TError,{data: BodyType<GenerateInvoiceInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof generateCompanyInvoiceAlias>>,
+        TError,
+        {data: BodyType<GenerateInvoiceInput>},
+        TContext
+      > => {
+      return useMutation(getGenerateCompanyInvoiceAliasMutationOptions(options));
+    }
+
 export const getGetCompanyInvoiceUrl = (id: number,) => {
 
 

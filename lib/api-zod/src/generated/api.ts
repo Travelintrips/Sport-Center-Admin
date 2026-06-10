@@ -1011,6 +1011,17 @@ export const GenerateCompanyInvoiceBody = zod.object({
 
 
 /**
+ * @summary Generate monthly invoice (alias endpoint matching task contract)
+ */
+export const GenerateCompanyInvoiceAliasBody = zod.object({
+  "companyCustomerId": zod.number(),
+  "periodMonth": zod.string(),
+  "notes": zod.string().optional(),
+  "includePpn": zod.boolean().optional()
+})
+
+
+/**
  * @summary Get a company invoice detail
  */
 export const GetCompanyInvoiceParams = zod.object({

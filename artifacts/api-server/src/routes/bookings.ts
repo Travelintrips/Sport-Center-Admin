@@ -129,18 +129,25 @@ router.post("/bookings", async (req, res) => {
         if (u) loggedInUser = u;
       }
     }
+    // Deteksi apakah request berasal dari admin (role selain customer)
+    let isAdminRequest = false;
+    if (authHeader?.startsWith("Bearer ")) {
+      const p = verifyToken(authHeader.slice(7));
+      if (p && p.role !== "customer") { isAdminRequest = true; }
+    }
+
     // Deteksi apakah company customer dengan tagihan bulanan
-    // Prioritas: 1) explicit companyCustomerId di body (admin-created)
-    //            2) customerId di body yang merujuk ke company customer
-    //            3) loggedInUser sendiri adalah company customer
+    // Prioritas 1: explicit companyCustomerId di body — HANYA boleh dari admin
+    // Prioritas 2: customerId di body yang merujuk ke company customer — HANYA dari admin
+    // Prioritas 3: loggedInUser sendiri adalah company customer (dari token customer)
     let companyBillingUser: (typeof usersTable.$inferSelect) | null = null;
-    const explicitCompanyId = req.body.companyCustomerId ? Number(req.body.companyCustomerId) : null;
-    const bodyCustomerId = req.body.customerId ? Number(req.body.customerId) : null;
-    if (explicitCompanyId && explicitCompanyId !== loggedInUserId) {
+    const explicitCompanyId = isAdminRequest && req.body.companyCustomerId ? Number(req.body.companyCustomerId) : null;
+    const bodyCustomerId = isAdminRequest && req.body.customerId ? Number(req.body.customerId) : null;
+    if (explicitCompanyId) {
       const [cu] = await db.select().from(usersTable).where(eq(usersTable.id, explicitCompanyId)).limit(1);
       if (cu?.accountType === "company" && cu?.allowMonthlyBilling) companyBillingUser = cu;
-    } else if (bodyCustomerId && bodyCustomerId !== loggedInUserId && !explicitCompanyId) {
-      // customerId points to a company customer — infer company billing
+    } else if (bodyCustomerId && !explicitCompanyId) {
+      // Admin membooking atas nama user perusahaan — infer dari customerId
       const [cu] = await db.select().from(usersTable).where(eq(usersTable.id, bodyCustomerId)).limit(1);
       if (cu?.accountType === "company" && cu?.allowMonthlyBilling) companyBillingUser = cu;
     } else if (loggedInUser?.accountType === "company" && loggedInUser?.allowMonthlyBilling) {

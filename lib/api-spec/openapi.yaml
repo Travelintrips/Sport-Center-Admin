@@ -868,6 +868,25 @@ paths:
               schema:
                 $ref: "#/components/schemas/CompanyInvoice"
 
+  /company-invoices/generate:
+    post:
+      operationId: generateCompanyInvoiceAlias
+      tags: [company-billing]
+      summary: Generate monthly invoice (alias endpoint matching task contract)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GenerateInvoiceInput"
+      responses:
+        "201":
+          description: Invoice generated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompanyInvoice"
+
   /company-invoices/{id}:
     get:
       operationId: getCompanyInvoice

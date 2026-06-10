@@ -272,9 +272,65 @@ ALTER TABLE sport_center.bookings
   ADD COLUMN IF NOT EXISTS reminder_day_sent_at timestamptz;
 
 -- ============================================================
--- 18. bookings: company invoice linkage
+-- 18. company_invoices table (idempotent) + bookings linkage
 -- ============================================================
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_type t JOIN pg_namespace n ON t.typnamespace = n.oid
+    WHERE n.nspname = 'sport_center' AND t.typname = 'payer_type'
+  ) THEN
+    CREATE TYPE sport_center.payer_type AS ENUM ('personal', 'company');
+  END IF;
+END $$;
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_type t JOIN pg_namespace n ON t.typnamespace = n.oid
+    WHERE n.nspname = 'sport_center' AND t.typname = 'billing_status'
+  ) THEN
+    CREATE TYPE sport_center.billing_status AS ENUM ('unbilled', 'billed', 'paid');
+  END IF;
+END $$;
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_type t JOIN pg_namespace n ON t.typnamespace = n.oid
+    WHERE n.nspname = 'sport_center' AND t.typname = 'user_account_type'
+  ) THEN
+    CREATE TYPE sport_center.user_account_type AS ENUM ('individual', 'company');
+  END IF;
+END $$;
+
+CREATE TABLE IF NOT EXISTS sport_center.company_invoices (
+  id serial PRIMARY KEY,
+  invoice_number text NOT NULL UNIQUE,
+  company_customer_id integer NOT NULL REFERENCES sport_center.users(id) ON DELETE CASCADE,
+  period_month text NOT NULL,
+  total_amount numeric(14,2) NOT NULL DEFAULT 0,
+  ppn_amount numeric(14,2) NOT NULL DEFAULT 0,
+  grand_total numeric(14,2) NOT NULL DEFAULT 0,
+  status text NOT NULL DEFAULT 'unpaid',
+  notes text,
+  paid_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE sport_center.users
+  ADD COLUMN IF NOT EXISTS account_type sport_center.user_account_type DEFAULT 'individual',
+  ADD COLUMN IF NOT EXISTS company_name text,
+  ADD COLUMN IF NOT EXISTS pic_name text,
+  ADD COLUMN IF NOT EXISTS pic_phone text,
+  ADD COLUMN IF NOT EXISTS pic_email text,
+  ADD COLUMN IF NOT EXISTS billing_address text,
+  ADD COLUMN IF NOT EXISTS allow_monthly_billing boolean NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS company_tax_id text;
+
 ALTER TABLE sport_center.bookings
+  ADD COLUMN IF NOT EXISTS payer_type sport_center.payer_type DEFAULT 'personal',
+  ADD COLUMN IF NOT EXISTS company_customer_id integer REFERENCES sport_center.users(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS booked_for_name text,
+  ADD COLUMN IF NOT EXISTS booked_for_phone text,
+  ADD COLUMN IF NOT EXISTS payment_required_now boolean DEFAULT true,
+  ADD COLUMN IF NOT EXISTS billing_status sport_center.billing_status,
   ADD COLUMN IF NOT EXISTS company_invoice_id integer REFERENCES sport_center.company_invoices(id) ON DELETE SET NULL;
 
 -- ============================================================

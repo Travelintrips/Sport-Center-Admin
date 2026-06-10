@@ -128,7 +128,7 @@ router.get("/company-invoices/preview", adminMiddleware, async (req, res) => {
   }
 });
 
-router.post("/company-invoices", adminMiddleware, async (req, res) => {
+async function handleGenerateInvoice(req: any, res: any) {
   try {
     const { companyCustomerId, periodMonth, notes, includePpn } = req.body;
     if (!companyCustomerId || !periodMonth) {
@@ -197,7 +197,11 @@ router.post("/company-invoices", adminMiddleware, async (req, res) => {
     req.log.error({ err }, "Generate company invoice error");
     res.status(500).json({ error: "Internal server error" });
   }
-});
+}
+
+// Register both endpoints (task contract: /generate; backwards compat: POST /company-invoices)
+router.post("/company-invoices/generate", adminMiddleware, handleGenerateInvoice);
+router.post("/company-invoices", adminMiddleware, handleGenerateInvoice);
 
 router.get("/company-invoices/:id", adminMiddleware, async (req, res) => {
   try {
