@@ -29,7 +29,15 @@ import {
   QrCode,
   ChevronRight,
   Star,
+  CalendarClock,
+  ShieldCheck,
+  ShieldX,
+  ShieldAlert,
+  ExternalLink,
 } from "lucide-react";
+import { Link } from "wouter";
+import RescheduleDialog from "@/components/RescheduleDialog";
+import ExtendBookingDialog from "@/components/ExtendBookingDialog";
 import { useLang } from "@/lib/i18n";
 
 const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "") || "";
@@ -49,11 +57,13 @@ export default function BookingDetail() {
   });
   const { data: settings } = useGetSettings();
   const { data: existingReviews } = useGetReviews(undefined, {
-    query: { enabled: !!booking?.id },
+    query: { enabled: !!booking?.id, queryKey: ["getReviews"] },
   });
   const existingReview = existingReviews?.find((r) => r.bookingId === booking?.id);
 
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | null>(null);
+  const [showReschedule, setShowReschedule] = useState(false);
+  const [showExtend, setShowExtend] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -144,14 +154,14 @@ export default function BookingDetail() {
         throw new Error(err.error || "Upload gagal");
       }
 
-      const { objectPath } = await uploadResp.json();
+      const { url, objectPath } = await uploadResp.json();
       setUploadProgress("done");
 
       submitPayment.mutate({
         data: {
           bookingId: booking.id,
           amount: booking.totalPrice,
-          proofUrl: `${BASE}/api/storage/objects/${objectPath.replace(/^\/objects\//, "")}`,
+          proofUrl: url ?? objectPath,
           notes: notes || undefined,
         },
       });
@@ -281,6 +291,58 @@ export default function BookingDetail() {
             </div>
           </CardContent>
         </Card>
+
+        {/* AP2 Verification Status */}
+        {(booking as any).customerType === "angkasa_pura" && (
+          <Card className={`border-2 mt-4 ${
+            (booking as any).verificationStatus === "verified"
+              ? "border-green-200 bg-green-50/50"
+              : (booking as any).verificationStatus === "rejected"
+              ? "border-red-200 bg-red-50/50"
+              : "border-orange-200 bg-orange-50/50"
+          }`}>
+            <CardContent className="p-5">
+              <div className="flex items-start gap-3">
+                {(booking as any).verificationStatus === "verified" ? (
+                  <ShieldCheck size={22} className="text-green-600 mt-0.5 shrink-0" />
+                ) : (booking as any).verificationStatus === "rejected" ? (
+                  <ShieldX size={22} className="text-red-600 mt-0.5 shrink-0" />
+                ) : (
+                  <ShieldAlert size={22} className="text-orange-500 mt-0.5 shrink-0" />
+                )}
+                <div className="flex-1 min-w-0">
+                  <div className="font-bold text-sm">
+                    {(booking as any).verificationStatus === "verified"
+                      ? t("ID Card Karyawan AP2 Terverifikasi", "AP2 Employee ID Card Verified")
+                      : (booking as any).verificationStatus === "rejected"
+                      ? t("Verifikasi ID Card Ditolak", "ID Card Verification Rejected")
+                      : t("Verifikasi ID Card Diperlukan", "ID Card Verification Required")}
+                  </div>
+                  <div className={`text-xs mt-0.5 ${
+                    (booking as any).verificationStatus === "verified" ? "text-green-700"
+                    : (booking as any).verificationStatus === "rejected" ? "text-red-700"
+                    : "text-orange-700"
+                  }`}>
+                    {(booking as any).verificationStatus === "verified"
+                      ? t("Diskon karyawan Angkasa Pura telah diterapkan.", "Angkasa Pura employee discount has been applied.")
+                      : (booking as any).verificationStatus === "rejected"
+                      ? t("ID Card tidak valid. Hubungi admin untuk bantuan.", "ID Card invalid. Contact admin for assistance.")
+                      : t("Booking Anda sebagai karyawan AP2 perlu diverifikasi untuk mendapatkan diskon.", "Your booking as an AP2 employee needs verification to receive the discount.")}
+                  </div>
+                  {(booking as any).verificationStatus === "pending" && (
+                    <Link href={`/verify-id?order=${booking.orderNumber}`}>
+                      <Button size="sm" variant="outline" className="mt-3 text-xs h-8 border-orange-300 text-orange-700 hover:bg-orange-100 gap-1.5">
+                        <ShieldCheck size={13} />
+                        {t("Verifikasi ID Card Sekarang", "Verify ID Card Now")}
+                        <ExternalLink size={11} />
+                      </Button>
+                    </Link>
+                  )}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Payment Section */}
         <div className="space-y-6">
@@ -525,6 +587,26 @@ export default function BookingDetail() {
                   <p className="text-xs text-green-600 mt-2">{t("Tunjukkan kode ini kepada petugas saat tiba", "Show this code to staff upon arrival")}</p>
                 </div>
 
+                {/* Reschedule + Tambah Waktu — only for confirmed */}
+                {booking.status === "confirmed" && (
+                  <div className="border-t border-green-200 pt-4 mt-2 space-y-2">
+                    <Button
+                      variant="outline"
+                      className="w-full border-orange-300 text-orange-600 hover:bg-orange-50 gap-2"
+                      onClick={() => setShowExtend(true)}
+                    >
+                      <Clock size={16} /> {t("Tambah Waktu", "Extend Time")}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      className="w-full border-orange-300 text-orange-600 hover:bg-orange-50 gap-2"
+                      onClick={() => setShowReschedule(true)}
+                    >
+                      <CalendarClock size={16} /> {t("Minta Reschedule", "Request Reschedule")}
+                    </Button>
+                  </div>
+                )}
+
                 {/* Review Section — only for completed bookings */}
                 {booking.status === "completed" && (
                   <div className="border-t border-green-200 pt-4 mt-2">
@@ -628,6 +710,33 @@ export default function BookingDetail() {
           </Card>
         </div>
       </div>
+
+      {booking && (
+        <RescheduleDialog
+          open={showReschedule}
+          onOpenChange={setShowReschedule}
+          bookingId={booking.id}
+          orderNumber={booking.orderNumber}
+          currentDate={booking.bookingDate}
+          currentStart={booking.startTime}
+          currentEnd={booking.endTime}
+          facilityName={booking.facilityName}
+          onSuccess={() => queryClient.invalidateQueries({ queryKey: getGetBookingByOrderQueryKey(orderNumber) })}
+        />
+      )}
+      {booking && (
+        <ExtendBookingDialog
+          open={showExtend}
+          onOpenChange={setShowExtend}
+          bookingId={booking.id}
+          orderNumber={booking.orderNumber}
+          facilityName={booking.facilityName}
+          bookingDate={booking.bookingDate}
+          startTime={booking.startTime}
+          endTime={booking.endTime}
+          onSuccess={() => queryClient.invalidateQueries({ queryKey: getGetBookingByOrderQueryKey(orderNumber) })}
+        />
+      )}
     </div>
   );
 }

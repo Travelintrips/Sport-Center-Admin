@@ -1,4 +1,10 @@
-modules = ["web", "bash", "nodejs-24", "postgresql-16"]
+
+modules = ["nodejs-20", "web", "bash"]
+
+modules = ["nodejs-20", "web", "bash"]
+
+modules = ["web", "bash", "nodejs-24", "postgresql-16", "python-3.11"]
+
 
 [deployment]
 router = "application"
@@ -22,6 +28,10 @@ author = "agent"
 task = "workflow.run"
 args = "Start application"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Start API server"
+
 [[workflows.workflow]]
 name = "Start application"
 author = "agent"
@@ -31,8 +41,20 @@ outputType = "webview"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "PORT=8080 pnpm --filter @workspace/api-server run dev & PORT=5000 BASE_PATH=/ pnpm --filter @workspace/sport-center run dev"
+args = "PORT=5000 BASE_PATH=/ pnpm --filter @workspace/sport-center run dev"
 waitForPort = 5000
+
+[[workflows.workflow]]
+name = "Start API server"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "PORT=8080 pnpm --filter @workspace/api-server run dev"
+waitForPort = 8080
+
+[workflows.workflow.metadata]
+outputType = "console"
 
 [agent]
 stack = "BEST_EFFORT_FALLBACK"
@@ -75,7 +97,7 @@ ADMIN_EMAILS = "divatranssoetta@gmail.com,admcst001@gmail.com,almanosetiawan@gma
 ADMIN_WA_PHONES = "081382702074,087882639826"
 AI_INTEGRATIONS_OPENAI_API_KEY = "_DUMMY_API_KEY_"
 AI_INTEGRATIONS_OPENAI_BASE_URL = "http://localhost:1106/modelfarm/openai"
-APP_URL = "https://cstlogistic.co.id"
+APP_URL = "https://sportcenter.travelintrips.co.id"
 CASHIER_TOKEN_SECRET = "239a1a73ea517bf5430a357fb7a39aa0deef38cecaf4d8135310a7cf3f2e11a19466d603c1dfd5bc0c735e92d58b135d"
 DEFAULT_OBJECT_STORAGE_BUCKET_ID = "replit-objstore-e357cc66-19c3-4d73-9ca9-3069d78355d1"
 FONNTE_ADMIN_WA = " 081216104734"
@@ -104,6 +126,8 @@ VAPID_PUBLIC_KEY = "BEAKgZOdT9HxFJLxVNxgtY-Dh2XzGptrjQwQibP2obUjPlLkfk0WR1TyzqbJ
 VITE_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im56ZHdlaXB6Y2tmc3pjenpxdHV3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg0MDI4NDQsImV4cCI6MjA5Mzk3ODg0NH0.p9k3-qyRjPuXsHLizUrSRMyS-0yJAatUyjQU9NIIu1U"
 WATI_API_TOKEN = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1bmlxdWVfbmFtZSI6ImRpdmF0cmFuc3NvZXR0YUBnbWFpbC5jb20iLCJuYW1laWQiOiJkaXZhdHJhbnNzb2V0dGFAZ21haWwuY29tIiwiZW1haWwiOiJkaXZhdHJhbnNzb2V0dGFAZ21haWwuY29tIiwiYXV0aF90aW1lIjoiMDYvMDYvMjAyNiAxMDoyNzowOCIsInRlbmFudF9pZCI6IjEwMTc2NTAzIiwiZGJfbmFtZSI6Im10LXByb2QtVGVuYW50cyIsImh0dHA6Ly9zY2hlbWFzLm1pY3Jvc29mdC5jb20vd3MvMjAwOC8wNi9pZGVudGl0eS9jbGFpbXMvcm9sZSI6IkFETUlOSVNUUkFUT1IiLCJleHAiOjI1MzQwMjMwMDgwMCwiaXNzIjoiQ2xhcmVfQUkiLCJhdWQiOiJDbGFyZV9BSSJ9.kQ6FR4UjFDE0hs-ne0yPzN88Oz-c0eyh4XdLIVQh1ng"
 WATI_BASE_URL = "https://live-mt-server.wati.io/10176503"
+VITE_GOOGLE_CLIENT_ID = "751551151000-fqrgt8si0pgnchqkn3pfo6nmqienv38f.apps.googleusercontent.com"
+SUPABASE_SERVICE_ROLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im56ZHdlaXB6Y2tmc3pjenpxdHV3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3ODQwMjg0NCwiZXhwIjoyMDkzOTc4ODQ0fQ.W0uM_UzGfF8Zy4PFQKhz6dKpEVDHS6_k9FtqoM9iGms"
 
 [nix]
 channel = "stable-25_05"

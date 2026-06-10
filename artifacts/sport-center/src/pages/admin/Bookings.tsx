@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import {
   useListBookings,
   useUpdateBooking,
@@ -6,7 +6,9 @@ import {
   useCheckInBooking,
   getListBookingsQueryKey,
 } from "@workspace/api-client-react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, useMutation, useQuery } from "@tanstack/react-query";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
 import { motion, AnimatePresence } from "framer-motion";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -89,7 +91,7 @@ const STATUS_CONFIG: Record<
     pill: "border-amber-200 dark:border-amber-800",
   },
   paid: {
-    label: "Menunggu Verifikasi",
+    label: "Pembayaran Selesai",
     color: "text-blue-700 dark:text-blue-300",
     bg: "bg-blue-100 dark:bg-blue-900/30",
     icon: CreditCard,
@@ -117,7 +119,7 @@ const STATUS_CONFIG: Record<
     pill: "border-red-200 dark:border-red-800",
   },
   refunded: {
-    label: "Dikembalikan",
+    label: "Pengembalian Dana",
     color: "text-purple-700 dark:text-purple-300",
     bg: "bg-purple-100 dark:bg-purple-900/30",
     icon: RotateCcw,
@@ -126,12 +128,13 @@ const STATUS_CONFIG: Record<
 };
 
 const FILTER_OPTIONS = [
-  { value: "all", label: "Semua Status" },
+  { value: "all",             label: "Semua Status" },
   { value: "pending_payment", label: "Menunggu Pembayaran" },
-  { value: "paid", label: "Menunggu Verifikasi" },
-  { value: "completed", label: "Selesai" },
-  { value: "cancelled", label: "Dibatalkan" },
-  { value: "refunded", label: "Dikembalikan" },
+  { value: "paid",            label: "Pembayaran Selesai" },
+  { value: "confirmed",       label: "Dikonfirmasi" },
+  { value: "completed",       label: "Selesai" },
+  { value: "cancelled",       label: "Dibatalkan" },
+  { value: "refunded",        label: "Pengembalian Dana" },
 ];
 
 function StatusBadge({ status }: { status: string }) {
@@ -271,11 +274,45 @@ function printInvoice(booking: any, settings?: any) {
   if (w) { w.document.write(html); w.document.close(); }
 }
 
+function terbilang(n: number): string {
+  const satuan = ["", "Satu", "Dua", "Tiga", "Empat", "Lima", "Enam", "Tujuh", "Delapan", "Sembilan",
+    "Sepuluh", "Sebelas", "Dua Belas", "Tiga Belas", "Empat Belas", "Lima Belas", "Enam Belas",
+    "Tujuh Belas", "Delapan Belas", "Sembilan Belas"];
+  if (n === 0) return "Nol";
+  if (n < 0) return "Minus " + terbilang(-n);
+  if (n < 20) return satuan[n];
+  if (n < 100) return satuan[Math.floor(n / 10)] + " Puluh" + (n % 10 !== 0 ? " " + satuan[n % 10] : "");
+  if (n < 200) return "Seratus" + (n % 100 !== 0 ? " " + terbilang(n % 100) : "");
+  if (n < 1000) return satuan[Math.floor(n / 100)] + " Ratus" + (n % 100 !== 0 ? " " + terbilang(n % 100) : "");
+  if (n < 2000) return "Seribu" + (n % 1000 !== 0 ? " " + terbilang(n % 1000) : "");
+  if (n < 1000000) return terbilang(Math.floor(n / 1000)) + " Ribu" + (n % 1000 !== 0 ? " " + terbilang(n % 1000) : "");
+  if (n < 1000000000) return terbilang(Math.floor(n / 1000000)) + " Juta" + (n % 1000000 !== 0 ? " " + terbilang(n % 1000000) : "");
+  return terbilang(Math.floor(n / 1000000000)) + " Miliar" + (n % 1000000000 !== 0 ? " " + terbilang(n % 1000000000) : "");
+}
+
 function printKwitansi(booking: any, settings?: any) {
   const centerName = settings?.centerName ?? "Sport Center";
   const address = settings?.address ?? "";
   const phone = settings?.phone ?? "";
+  const bankName = settings?.bankName ?? "";
+  const bankAccount = settings?.bankAccount ?? "";
+  const bankAccountName = settings?.bankAccountName ?? "";
+  const logoUrl = settings?.logoUrl ?? "";
   const now = new Date().toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" });
+
+  const dpp = Math.round(Number(booking.totalPrice));
+  const ppn = Math.round(dpp * 0.12);
+  const total = dpp + ppn;
+  const terbilangText = terbilang(total) + " Rupiah";
+
+  const statusLabel = booking.status === "completed" ? "Lunas" :
+    booking.status === "confirmed" ? "Dikonfirmasi" :
+    booking.status === "cancelled" ? "Dibatalkan" : booking.status;
+
+  const logoHtml = logoUrl
+    ? `<img src="${logoUrl}" style="width:56px;height:56px;border-radius:50%;object-fit:cover;border:2px solid #e5e7eb;" />`
+    : `<div style="width:56px;height:56px;border-radius:50%;background:#f97316;display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:900;color:#fff;flex-shrink:0;">SC</div>`;
+
   const html = `<!DOCTYPE html>
 <html lang="id">
 <head>
@@ -283,66 +320,151 @@ function printKwitansi(booking: any, settings?: any) {
   <title>Kwitansi ${booking.orderNumber}</title>
   <style>
     * { margin:0; padding:0; box-sizing:border-box; }
-    body { font-family: 'Segoe UI', Arial, sans-serif; color: #1a1a1a; background: #fff; padding: 40px; max-width: 600px; margin: auto; }
-    .outer { border: 2px solid #1a1a1a; border-radius: 8px; padding: 28px 32px; }
-    .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding-bottom: 16px; border-bottom: 2px solid #1a1a1a; }
-    .brand { font-size: 20px; font-weight: 900; color: #f97316; }
-    .brand-sub { font-size: 11px; color: #777; }
-    .kwitansi-title { font-size: 22px; font-weight: 900; letter-spacing: 4px; text-transform: uppercase; }
-    .num-row { display: flex; justify-content: space-between; font-size: 12px; color: #666; margin-bottom: 20px; }
-    .row { display: flex; margin-bottom: 12px; align-items: flex-start; }
-    .row label { width: 160px; font-size: 12px; color: #888; flex-shrink: 0; padding-top: 1px; }
-    .row span { font-size: 14px; font-weight: 600; flex: 1; }
-    .amount-box { background: #fff8f4; border: 2px solid #f97316; border-radius: 6px; padding: 14px 18px; margin: 20px 0; text-align: center; }
-    .amount-label { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #888; margin-bottom: 4px; }
-    .amount-value { font-size: 28px; font-weight: 900; color: #f97316; letter-spacing: -1px; }
-    .sig { display: flex; justify-content: flex-end; margin-top: 32px; }
-    .sig-box { text-align: center; }
-    .sig-box .line { border-bottom: 1px solid #aaa; width: 160px; margin: 48px auto 4px; }
-    .sig-box .name { font-size: 12px; font-weight: 700; }
-    .sig-box .title { font-size: 11px; color: #888; }
-    .stamp { display: inline-block; border: 3px solid #059669; border-radius: 50%; padding: 6px 12px; color: #059669; font-weight: 900; font-size: 13px; letter-spacing: 2px; transform: rotate(-15deg); margin-bottom: 8px; }
-    .footer { margin-top: 20px; font-size: 10px; color: #aaa; text-align: center; }
-    @media print { body { padding: 10px; } }
+    body { font-family: Arial, sans-serif; color: #1a1a1a; background: #fff; padding: 40px; max-width: 720px; margin: auto; font-size: 12px; }
+    .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 18px; }
+    .header-left { display: flex; align-items: flex-start; gap: 14px; }
+    .brand-name { font-size: 18px; font-weight: 900; color: #1a1a1a; line-height: 1.1; }
+    .brand-sub { font-size: 13px; font-weight: 700; color: #f97316; margin: 2px 0 4px; }
+    .brand-addr { font-size: 11px; color: #444; line-height: 1.5; }
+    .header-right { text-align: right; }
+    .kwitansi-title { font-size: 26px; font-weight: 900; color: #1a1a1a; line-height: 1; }
+    .kwitansi-num { font-size: 14px; font-weight: 700; color: #f97316; margin-top: 4px; }
+    .kwitansi-date { font-size: 11px; color: #666; margin-top: 3px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .divider { border: none; border-top: 2.5px solid #f97316; margin: 14px 0; }
+    .section-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #1a1a1a; margin-bottom: 10px; }
+    .info-grid { display: grid; grid-template-columns: 1fr 1fr; margin-bottom: 20px; border-bottom: 1px solid #ddd; padding-bottom: 10px; }
+    .info-cell { padding: 6px 0; border-bottom: 1px solid #eee; }
+    .info-cell:nth-child(odd) { padding-right: 20px; border-right: 1px solid #eee; }
+    .info-cell:nth-child(even) { padding-left: 20px; }
+    .info-label { font-size: 11px; color: #555; margin-bottom: 2px; }
+    .info-value { font-size: 12px; color: #1a1a1a; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 0; }
+    thead tr { background: #f97316; }
+    th { padding: 8px 10px; text-align: left; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #fff; letter-spacing: 0.5px; }
+    th:last-child { text-align: right; }
+    tbody tr:nth-child(odd) { background: #fff7f3; }
+    tbody tr:nth-child(even) { background: #ffeee5; }
+    td { padding: 9px 10px; font-size: 12px; color: #1a1a1a; }
+    td:last-child { text-align: right; font-weight: 600; }
+    .totals-section { display: flex; justify-content: flex-end; margin-top: 8px; margin-bottom: 16px; }
+    .totals-table { width: 280px; }
+    .totals-table td { padding: 4px 8px; font-size: 12px; border: none; background: transparent; }
+    .totals-table td:first-child { color: #f97316; font-weight: 600; text-align: left; }
+    .totals-table td:last-child { color: #f97316; font-weight: 700; text-align: right; }
+    .totals-table tr.grand-total td { font-size: 13px; font-weight: 900; border-top: 1px solid #f97316; padding-top: 6px; }
+    .terbilang { font-style: italic; font-weight: 700; font-size: 12px; color: #1a1a1a; margin-bottom: 18px; }
+    .payment-info { font-size: 12px; color: #1a1a1a; line-height: 1.8; margin-bottom: 24px; }
+    .sig-row { display: flex; justify-content: flex-end; margin-top: 8px; }
+    .sig-box { text-align: center; width: 160px; }
+    .sig-space { height: 52px; }
+    .sig-line { border-top: 1px solid #aaa; padding-top: 4px; }
+    .sig-name { font-size: 12px; font-weight: 700; }
+    .footer { margin-top: 32px; padding-top: 12px; border-top: 1px solid #ddd; font-size: 10px; color: #888; text-align: center; line-height: 1.6; }
+    @media print { body { padding: 20px; } }
   </style>
 </head>
 <body>
-  <div class="outer">
-    <div class="header">
+  <div class="header">
+    <div class="header-left">
+      ${logoHtml}
       <div>
-        <div class="brand">${centerName}</div>
-        <div class="brand-sub">${address}</div>
-        <div class="brand-sub">${phone}</div>
+        <div class="brand-name">${centerName}</div>
+        <div class="brand-sub">${centerName.toUpperCase()}</div>
+        <div class="brand-addr">${address}${phone ? "<br/>" + phone : ""}</div>
       </div>
-      <div class="kwitansi-title">Kwitansi</div>
     </div>
-
-    <div class="num-row">
-      <span>No: <strong>${booking.orderNumber}</strong></span>
-      <span>Tanggal: <strong>${now}</strong></span>
+    <div class="header-right">
+      <div class="kwitansi-title">KWITANSI</div>
+      <div class="kwitansi-num">${booking.orderNumber}</div>
+      <div class="kwitansi-date">Tanggal Kwitansi</div>
+      <div style="font-size:11px;color:#333;margin-top:2px;">${now}</div>
     </div>
+  </div>
 
-    <div class="row"><label>Diterima dari</label><span>${booking.customerName}</span></div>
-    <div class="row"><label>No. HP</label><span>${booking.customerPhone || "-"}</span></div>
-    <div class="row"><label>Untuk pembayaran</label><span>Sewa ${booking.facilityName}</span></div>
-    <div class="row"><label>Tanggal booking</label><span>${formatDate(booking.bookingDate)}</span></div>
-    <div class="row"><label>Waktu</label><span>${booking.startTime?.slice(0,5)} – ${booking.endTime?.slice(0,5)} (${booking.durationHours} jam)</span></div>
+  <hr class="divider"/>
 
-    <div class="amount-box">
-      <div class="amount-label">Jumlah Pembayaran</div>
-      <div class="amount-value">${formatCurrency(booking.totalPrice)}</div>
+  <div class="section-title">Informasi Customer</div>
+  <div class="info-grid">
+    <div class="info-cell">
+      <div class="info-label">Nama</div>
+      <div class="info-value">${booking.customerName}</div>
     </div>
+    <div class="info-cell">
+      <div class="info-label">No. HP</div>
+      <div class="info-value">${booking.customerPhone || "-"}</div>
+    </div>
+    <div class="info-cell">
+      <div class="info-label">Email</div>
+      <div class="info-value">${booking.customerEmail || "-"}</div>
+    </div>
+    <div class="info-cell">
+      <div class="info-label">Status</div>
+      <div class="info-value">${statusLabel}</div>
+    </div>
+  </div>
 
-    <div class="sig">
-      <div class="sig-box">
-        <div class="stamp">LUNAS</div>
-        <div class="line"></div>
-        <div class="name">Admin</div>
-        <div class="title">${centerName}</div>
+  <div class="section-title">Detail Pemesanan</div>
+  <table>
+    <thead>
+      <tr>
+        <th>Fasilitas</th>
+        <th>Tanggal</th>
+        <th>Jam</th>
+        <th>Durasi</th>
+        <th>Harga</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>${booking.facilityName}</td>
+        <td>${formatDate(booking.bookingDate)}</td>
+        <td>${booking.startTime?.slice(0,5)} – ${booking.endTime?.slice(0,5)}</td>
+        <td>${booking.durationHours} Jam</td>
+        <td>${formatCurrency(dpp)}</td>
+      </tr>
+      <tr><td colspan="5" style="padding:4px;background:#fff7f3;"></td></tr>
+    </tbody>
+  </table>
+
+  <div class="totals-section">
+    <table class="totals-table">
+      <tr>
+        <td>DPP</td>
+        <td>${formatCurrency(dpp)}</td>
+      </tr>
+      <tr>
+        <td>PPN 12%</td>
+        <td>${formatCurrency(ppn)}</td>
+      </tr>
+      <tr class="grand-total">
+        <td>Total DPP + PPN</td>
+        <td>${formatCurrency(total)}</td>
+      </tr>
+    </table>
+  </div>
+
+  <div class="terbilang">Terbilang: ${terbilangText}</div>
+
+  ${bankAccountName || bankName || bankAccount ? `
+  <div class="payment-info">
+    Pembayaran: ${bankAccountName || centerName}<br/>
+    ${bankName ? bankName + "<br/>" : ""}
+    ${bankAccount ? "Account No. " + bankAccount : ""}
+  </div>` : ""}
+
+  <div class="sig-row">
+    <div class="sig-box">
+      <div class="sig-space"></div>
+      <div class="sig-line">
+        <div class="sig-name">Finance</div>
       </div>
     </div>
   </div>
-  <div class="footer">Kwitansi ini sah tanpa tanda tangan basah. Dicetak ${now}.</div>
+
+  <div class="footer">
+    Dokumen ini dicetak secara otomatis oleh sistem ${centerName}. Terima kasih atas kepercayaan Anda.<br/>
+    Dikelola oleh <strong>${bankAccountName || centerName}</strong>
+  </div>
   <script>window.onload = function(){ window.print(); }<\/script>
 </body>
 </html>`;
@@ -981,11 +1103,35 @@ function ActionButton({
 
 const STATUS_OPTIONS = [
   { value: "pending_payment", label: "⏳ Menunggu Pembayaran" },
-  { value: "paid",            label: "💳 Menunggu Verifikasi" },
-  { value: "completed",       label: "✅ Selesai" },
+  { value: "paid",            label: "💳 Pembayaran Selesai" },
+  { value: "confirmed",       label: "✅ Dikonfirmasi" },
   { value: "cancelled",       label: "❌ Dibatalkan" },
-  { value: "refunded",        label: "↩️ Dikembalikan" },
+  { value: "refunded",        label: "↩️ Pengembalian Dana" },
 ];
+
+function isBookingTimePast(bookingDate: string, endTime: string): boolean {
+  const nowJKT = new Date(Date.now() + 7 * 60 * 60 * 1000);
+  const todayJKT = nowJKT.toISOString().split("T")[0];
+  if (bookingDate < todayJKT) return true;
+  if (bookingDate > todayJKT) return false;
+  const nowMinutes = nowJKT.getUTCHours() * 60 + nowJKT.getUTCMinutes();
+  const [endH, endM] = endTime.split(":").map(Number);
+  return nowMinutes >= endH * 60 + endM;
+}
+
+function getNowJKT() {
+  return new Date(Date.now() + 7 * 60 * 60 * 1000);
+}
+
+function isTimeReached(bookingDate: string, time: string): boolean {
+  const nowJKT = getNowJKT();
+  const todayJKT = nowJKT.toISOString().split("T")[0];
+  if (bookingDate < todayJKT) return true;
+  if (bookingDate > todayJKT) return false;
+  const nowMin = nowJKT.getUTCHours() * 60 + nowJKT.getUTCMinutes();
+  const [h, m] = time.split(":").map(Number);
+  return nowMin >= h * 60 + m;
+}
 
 function InlineCheckInSelect({
   booking,
@@ -1000,53 +1146,197 @@ function InlineCheckInSelect({
   isCheckingIn: boolean;
   isCompleting: boolean;
 }) {
-  const todayJKT = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" });
+  const [, setTick] = useState(0);
+
+  // Re-render setiap 30 detik agar status berubah otomatis saat jam booking tiba
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 30_000);
+    return () => clearInterval(id);
+  }, []);
+
+  const nowJKT = getNowJKT();
+  const todayJKT = nowJKT.toISOString().split("T")[0];
   const isToday = booking.bookingDate === todayJKT;
-  const isLoading = isCheckingIn || isCompleting;
+  const isPast  = booking.bookingDate < todayJKT;
+  const hasStarted = isTimeReached(booking.bookingDate, booking.startTime);
+  const hasEnded   = isTimeReached(booking.bookingDate, booking.endTime);
+  const isLoading  = isCheckingIn || isCompleting;
 
-  const currentLabel = booking.checkedInAt
-    ? `✓ ${new Date(booking.checkedInAt).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}`
-    : "— Pilih";
+  // Sudah selesai / completed
+  if (booking.status === "completed") {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-800">
+        <CheckCircle2 size={11} />
+        Selesai
+      </span>
+    );
+  }
 
-  const triggerClass = booking.checkedInAt
-    ? "h-7 min-w-[80px] gap-1.5 border rounded-full px-2.5 text-[11px] font-semibold shadow-none focus:ring-0 focus:ring-offset-0 bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-800"
-    : "h-7 min-w-[80px] gap-1.5 border rounded-full px-2.5 text-[11px] font-semibold shadow-none focus:ring-0 focus:ring-offset-0 bg-slate-50 text-slate-500 border-slate-200 dark:bg-slate-800/30 dark:text-slate-400 dark:border-slate-700";
-
-  return (
-    <Select
-      value=""
-      onValueChange={(val) => {
-        if (val === "checkin") onCheckIn(booking.id);
-        else if (val === "complete") onComplete(booking.id);
-      }}
-      disabled={isLoading}
-    >
-      <SelectTrigger className={triggerClass} style={{ outline: "none" }}>
-        {isLoading ? (
-          <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin shrink-0" />
-        ) : null}
-        <span>{currentLabel}</span>
-      </SelectTrigger>
-      <SelectContent>
-        <SelectItem
-          value="checkin"
-          disabled={!!booking.checkedInAt || !isToday}
-          className="text-xs"
+  // Sudah check-in → sedang berlangsung, bisa tandai selesai
+  if (booking.checkedInAt) {
+    return (
+      <Select
+        value=""
+        onValueChange={(val) => { if (val === "complete") onComplete(booking.id); }}
+        disabled={isLoading}
+      >
+        <SelectTrigger
+          className="h-7 min-w-[110px] gap-1.5 border rounded-full px-2.5 text-[11px] font-semibold shadow-none focus:ring-0 focus:ring-offset-0 bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-800"
+          style={{ outline: "none" }}
         >
-          <span className="flex items-center gap-1.5">
-            <LogIn size={11} className="text-emerald-600" />
-            {booking.checkedInAt ? "Sudah Check-in" : !isToday ? `Check-in (${booking.bookingDate})` : "Check-in"}
-          </span>
-        </SelectItem>
-        <SelectItem value="complete" className="text-xs">
-          <span className="flex items-center gap-1.5">
-            <CheckCircle2 size={11} className="text-blue-600" />
-            Selesai
-          </span>
-        </SelectItem>
-      </SelectContent>
-    </Select>
-  );
+          {isLoading && <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin shrink-0" />}
+          <span>✓ Check-in {new Date(booking.checkedInAt).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}</span>
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="complete" className="text-xs">
+            <span className="flex items-center gap-1.5">
+              <CheckCircle2 size={11} className="text-emerald-600" />
+              Tandai Selesai
+            </span>
+          </SelectItem>
+        </SelectContent>
+      </Select>
+    );
+  }
+
+  // Sudah lewat jam selesai → perlu ditandai selesai
+  if (hasEnded && booking.status === "confirmed") {
+    return (
+      <Select
+        value=""
+        onValueChange={(val) => { if (val === "complete") onComplete(booking.id); }}
+        disabled={isLoading}
+      >
+        <SelectTrigger
+          className="h-7 min-w-[110px] gap-1.5 border rounded-full px-2.5 text-[11px] font-semibold shadow-none focus:ring-0 focus:ring-offset-0 bg-red-50 text-red-600 border-red-200 dark:bg-red-900/20 dark:text-red-400 dark:border-red-800"
+          style={{ outline: "none" }}
+        >
+          {isLoading && <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin shrink-0" />}
+          <span>⏰ Sudah Lewat</span>
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="complete" className="text-xs">
+            <span className="flex items-center gap-1.5">
+              <CheckCircle2 size={11} className="text-emerald-600" />
+              Tandai Selesai
+            </span>
+          </SelectItem>
+        </SelectContent>
+      </Select>
+    );
+  }
+
+  // Sedang berlangsung → check-in tersedia
+  const isOngoing = isToday && hasStarted && !hasEnded;
+  if (isOngoing && booking.status === "confirmed") {
+    return (
+      <Select
+        value=""
+        onValueChange={(val) => {
+          if (val === "checkin") onCheckIn(booking.id);
+          else if (val === "complete") onComplete(booking.id);
+        }}
+        disabled={isLoading}
+      >
+        <SelectTrigger
+          className="h-7 min-w-[110px] gap-1.5 border rounded-full px-2.5 text-[11px] font-semibold shadow-none focus:ring-0 focus:ring-offset-0 bg-green-50 text-green-700 border-green-300 dark:bg-green-900/20 dark:text-green-400 dark:border-green-800 animate-pulse"
+          style={{ outline: "none" }}
+        >
+          {isLoading && <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin shrink-0" />}
+          <span>🟢 Berlangsung</span>
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="checkin" className="text-xs">
+            <span className="flex items-center gap-1.5">
+              <LogIn size={11} className="text-emerald-600" />
+              Check-in Sekarang
+            </span>
+          </SelectItem>
+          <SelectItem value="complete" className="text-xs">
+            <span className="flex items-center gap-1.5">
+              <CheckCircle2 size={11} className="text-blue-600" />
+              Tandai Selesai
+            </span>
+          </SelectItem>
+        </SelectContent>
+      </Select>
+    );
+  }
+
+  // Hari ini, belum mulai → menunggu jam booking
+  if (isToday && !hasStarted && booking.status === "confirmed") {
+    return (
+      <Select
+        value=""
+        onValueChange={(val) => {
+          if (val === "checkin") onCheckIn(booking.id);
+          else if (val === "complete") onComplete(booking.id);
+        }}
+        disabled={isLoading}
+      >
+        <SelectTrigger
+          className="h-7 min-w-[110px] gap-1.5 border rounded-full px-2.5 text-[11px] font-semibold shadow-none focus:ring-0 focus:ring-offset-0 bg-blue-50 text-blue-600 border-blue-200 dark:bg-blue-900/20 dark:text-blue-400 dark:border-blue-800"
+          style={{ outline: "none" }}
+        >
+          {isLoading && <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin shrink-0" />}
+          <span>🕐 Mulai {booking.startTime?.slice(0, 5)}</span>
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="checkin" disabled className="text-xs text-slate-400">
+            <span className="flex items-center gap-1.5">
+              <LogIn size={11} />
+              Check-in (mulai {booking.startTime?.slice(0, 5)})
+            </span>
+          </SelectItem>
+          <SelectItem value="complete" className="text-xs">
+            <span className="flex items-center gap-1.5">
+              <CheckCircle2 size={11} className="text-blue-600" />
+              Tandai Selesai
+            </span>
+          </SelectItem>
+        </SelectContent>
+      </Select>
+    );
+  }
+
+  // Booking belum hari ini (masa depan) atau booking lampau dikonfirmasi
+  if (booking.status === "confirmed") {
+    const label = isPast ? "📅 Lewat" : `📅 ${booking.bookingDate}`;
+    return (
+      <Select
+        value=""
+        onValueChange={(val) => {
+          if (val === "checkin") onCheckIn(booking.id);
+          else if (val === "complete") onComplete(booking.id);
+        }}
+        disabled={isLoading}
+      >
+        <SelectTrigger
+          className="h-7 min-w-[110px] gap-1.5 border rounded-full px-2.5 text-[11px] font-semibold shadow-none focus:ring-0 focus:ring-offset-0 bg-slate-50 text-slate-500 border-slate-200 dark:bg-slate-800/30 dark:text-slate-400 dark:border-slate-700"
+          style={{ outline: "none" }}
+        >
+          {isLoading && <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin shrink-0" />}
+          <span>{label}</span>
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="checkin" className="text-xs">
+            <span className="flex items-center gap-1.5">
+              <LogIn size={11} className="text-emerald-600" />
+              Check-in Manual
+            </span>
+          </SelectItem>
+          <SelectItem value="complete" className="text-xs">
+            <span className="flex items-center gap-1.5">
+              <CheckCircle2 size={11} className="text-blue-600" />
+              Tandai Selesai
+            </span>
+          </SelectItem>
+        </SelectContent>
+      </Select>
+    );
+  }
+
+  return null;
 }
 
 function InlineStatusSelect({
@@ -1092,6 +1382,106 @@ function InlineStatusSelect({
   );
 }
 
+/* ─── ExtendDialogBody ───────────────────────────────────────────── */
+
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "/api";
+
+function ExtendDialogBody({
+  booking,
+  extendHours,
+  setExtendHours,
+  onCancel,
+  onSubmit,
+  isPending,
+}: {
+  booking: { id: number; endTime: string; startTime: string; bookingDate: string; facilityName: string; orderNumber: string; customerName: string };
+  extendHours: string;
+  setExtendHours: (v: string) => void;
+  onCancel: () => void;
+  onSubmit: (extraHours: number) => void;
+  isPending: boolean;
+}) {
+  const { data: options, isLoading } = useQuery({
+    queryKey: ["extend-options", booking.id],
+    queryFn: () =>
+      fetch(`${API_BASE}/bookings/${booking.id}/extend-options`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem("sport_center_token")}` },
+      }).then((r) => r.json()),
+    enabled: !!booking.id,
+  });
+
+  const availableHours: number[] = options?.availableHours ?? [];
+
+  useEffect(() => {
+    if (availableHours.length > 0 && !availableHours.includes(parseInt(extendHours))) {
+      setExtendHours(String(availableHours[0]));
+    }
+  }, [availableHours.join(",")]);
+
+  const extra = parseInt(extendHours) || 1;
+  const newEndTime = (() => {
+    const [h] = booking.endTime.split(":").map(Number);
+    return `${String(h + extra).padStart(2, "0")}:00`;
+  })();
+
+  return (
+    <div className="space-y-4">
+      <div className="bg-muted/40 rounded-lg p-3 text-sm space-y-0.5">
+        <p className="font-semibold">{booking.customerName}</p>
+        <p className="text-muted-foreground">{booking.orderNumber} · {booking.facilityName}</p>
+        <p className="text-muted-foreground">{booking.bookingDate} · {booking.startTime}–<span className="font-semibold text-foreground">{booking.endTime}</span></p>
+      </div>
+
+      {isLoading ? (
+        <p className="text-sm text-muted-foreground text-center py-2">Mengecek ketersediaan slot...</p>
+      ) : availableHours.length === 0 ? (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700 text-center">
+          Tidak ada slot tersedia — jadwal berikutnya sudah penuh atau telah mencapai jam tutup.
+        </div>
+      ) : (
+        <>
+          <div className="space-y-1.5">
+            <Label>Tambah Durasi</Label>
+            <Select value={extendHours} onValueChange={setExtendHours}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {availableHours.map((n) => (
+                  <SelectItem key={n} value={String(n)}>+ {n} jam</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="bg-primary/5 border border-primary/20 rounded-lg p-3 text-sm">
+            <p className="text-xs text-primary font-semibold mb-1">Jadwal setelah diperpanjang</p>
+            <p>
+              <span className="text-muted-foreground line-through">{booking.endTime}</span>
+              {" → "}
+              <span className="font-bold text-primary">{newEndTime}</span>
+            </p>
+          </div>
+        </>
+      )}
+
+      <div className="flex gap-3">
+        <Button variant="outline" className="flex-1" onClick={onCancel} disabled={isPending}>
+          Batal
+        </Button>
+        {availableHours.length > 0 && (
+          <Button
+            className="flex-1 bg-primary hover:bg-primary/90"
+            disabled={isPending}
+            onClick={() => onSubmit(extra)}
+          >
+            {isPending ? "Menyimpan..." : "Perpanjang"}
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /* ─── Main Component ────────────────────────────────────────────── */
 
 export default function AdminBookings() {
@@ -1106,6 +1496,8 @@ export default function AdminBookings() {
   const [verifyBooking, setVerifyBooking] = useState<any>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
+  const [extendBooking, setExtendBooking] = useState<any>(null);
+  const [extendHours, setExtendHours] = useState("1");
 
   const { data: rawBookings, isLoading } = useListBookings();
   const bookings = rawBookings ?? [];
@@ -1167,7 +1559,7 @@ export default function AdminBookings() {
         );
       }
       return true;
-    });
+    }).sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }, [bookings, statusFilter, search, dateFrom, dateTo]);
 
   const handleStatusUpdate = (status: string, adminNotes?: string) => {
@@ -1243,6 +1635,26 @@ export default function AdminBookings() {
     }
   };
 
+  const extendMutation = useMutation({
+    mutationFn: ({ id, extraHours }: { id: number; extraHours: number }) =>
+      fetch(`/api/bookings/${id}/extend-direct`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${getToken()}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ extraHours }),
+      }).then(async (r) => {
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || "Gagal memperpanjang");
+        return data;
+      }),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: getListBookingsQueryKey() });
+      toast({ title: `Waktu diperpanjang +${extendHours} jam`, description: `Selesai pukul ${data.booking?.endTime ?? ""}` });
+      setExtendBooking(null);
+      setExtendHours("1");
+    },
+    onError: (err: Error) => toast({ title: "Gagal", description: err.message, variant: "destructive" }),
+  });
+
   const isUpdating = updateBookingMutation.isPending || updatePaymentMutation.isPending || deletingId !== null;
   const pendingVerification = bookings.filter((b: any) => b.status === "paid").length;
 
@@ -1311,10 +1723,10 @@ export default function AdminBookings() {
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.12 }}
-        className="rounded-2xl border border-slate-200/80 dark:border-slate-700/60 bg-white dark:bg-slate-900 shadow-sm overflow-hidden"
+        className="rounded-2xl border border-slate-200/80 dark:border-slate-700/60 bg-white dark:bg-slate-900 shadow-sm"
       >
-        {/* Filters */}
-        <div className="px-4 lg:px-5 py-3.5 border-b border-slate-100 dark:border-slate-800 flex flex-wrap gap-2.5 items-center">
+        {/* Filters — sticky saat scroll */}
+        <div className="sticky top-0 z-20 rounded-t-2xl px-4 lg:px-5 py-3.5 border-b border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 flex flex-wrap gap-2.5 items-center">
           <div className="relative flex-1 min-w-44">
             <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
             <Input
@@ -1377,7 +1789,7 @@ export default function AdminBookings() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-100 dark:border-slate-800">
-                  {["Order", "Customer", "Fasilitas", "Tanggal & Waktu", "Durasi", "Metode", "Tgl Bayar", "Total", "Status", "Check-In", ""].map((h) => (
+                  {["Order", "Customer", "Fasilitas", "Tanggal & Waktu", "Durasi", "Metode", "Tgl Bayar", "Total", "Pembayaran", "Status", ""].map((h) => (
                     <th
                       key={h}
                       className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide whitespace-nowrap"
@@ -1496,6 +1908,26 @@ export default function AdminBookings() {
                             isCheckingIn={checkInMutation.isPending && checkInMutation.variables?.id === b.id}
                             isCompleting={updateBookingMutation.isPending && updateBookingMutation.variables?.id === b.id}
                           />
+                        ) : b.status === "pending_payment" ? (
+                          <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full border bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:text-amber-400 dark:border-amber-800">
+                            <Clock size={11} />
+                            Menunggu Bayar
+                          </span>
+                        ) : b.status === "waiting_confirmation" || b.status === "paid" ? (
+                          <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full border bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/20 dark:text-blue-400 dark:border-blue-800">
+                            <CreditCard size={11} />
+                            Verifikasi
+                          </span>
+                        ) : b.status === "cancelled" ? (
+                          <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full border bg-red-50 text-red-600 border-red-200 dark:bg-red-900/20 dark:text-red-400 dark:border-red-800">
+                            <XCircle size={11} />
+                            Dibatalkan
+                          </span>
+                        ) : b.status === "refunded" ? (
+                          <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full border bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-900/20 dark:text-purple-400 dark:border-purple-800">
+                            <RotateCcw size={11} />
+                            Refund
+                          </span>
                         ) : (
                           <span className="text-xs text-slate-300 dark:text-slate-600">—</span>
                         )}
@@ -1511,6 +1943,17 @@ export default function AdminBookings() {
                             <Eye size={12} />
                             Detail
                           </motion.button>
+                          {(b.status === "confirmed" || b.status === "paid") && (
+                            <motion.button
+                              whileHover={{ scale: 1.04 }}
+                              whileTap={{ scale: 0.96 }}
+                              onClick={() => { setExtendBooking(b); setExtendHours("1"); }}
+                              className="flex items-center gap-1 h-7 px-2.5 rounded-lg text-xs font-semibold text-orange-600 border border-orange-300 hover:bg-orange-50 transition-colors whitespace-nowrap"
+                            >
+                              <Clock size={12} />
+                              +Waktu
+                            </motion.button>
+                          )}
                           {b.customerType === "angkasa_pura" && b.verificationStatus !== "verified" && (
                             <motion.button
                               whileHover={{ scale: 1.04 }}
@@ -1591,6 +2034,27 @@ export default function AdminBookings() {
       )}
 
       <VerifyIdDialog booking={verifyBooking} onClose={() => setVerifyBooking(null)} />
+
+      {/* Extend Time Dialog */}
+      <Dialog open={!!extendBooking} onOpenChange={(o) => !o && setExtendBooking(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Clock size={18} className="text-primary" /> Tambah Waktu Booking
+            </DialogTitle>
+          </DialogHeader>
+          {extendBooking && (
+            <ExtendDialogBody
+              booking={extendBooking}
+              extendHours={extendHours}
+              setExtendHours={setExtendHours}
+              onCancel={() => setExtendBooking(null)}
+              onSubmit={(extraHours) => extendMutation.mutate({ id: extendBooking.id, extraHours })}
+              isPending={extendMutation.isPending}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -1,4 +1,9 @@
 - [Supabase shared instance & schema isolation](supabase-shared-instance.md) — DB is shared; our tables live in dedicated `sport_center` schema; `drizzle-kit push` hangs, generate+apply via pg on port 5432.
 - [Booking PII & access control](booking-pii-access.md) — GET /bookings list is admin-only; public booking reads must redact idCardNumber; normalize ID cards to uppercase/trim.
 - [Migration runner setup](migration-runner.md) — scripts/migrate.ts needs `pg` in scripts/package.json; run via scripts/node_modules/.bin/tsx scripts/migrate.ts (not npx/pnpm tsx which can't find pg).
+- [Supabase Storage for uploads](supabase-storage.md) — facility images/proofs/QRIS live in Supabase Storage (project nzdweipzckfszczzqtuw, public buckets), NOT ephemeral disk; store absolute public URLs.
 - [Booking status flow](booking-status-flow.md) — INACTIVE_STATUSES = [cancelled, expired, rejected, refunded]; conflict check must exclude all; payment proof → waiting_confirmation → confirmed (not completed); auto-expire via scheduler every 5 min.
+- [WhatsApp Booking Flow](wa-booking-flow.md) — Fonnte webhook + tokenized admin links; `wa_action_tokens` table in sport_center schema; standalone `/wa/*` pages outside CustomerLayout.
+- [Local DB setup & env var scoping](local-db-setup.md) — Workflow uses DATABASE_URL (heliumdb), NOT Supabase; drizzle-kit push fails on existing enums; apply lib/db/drizzle/*.sql files manually.
+- [Admin login & SESSION_SECRET](admin-login-secret.md) — "Invalid credentials" w/ correct pw = admin hash seeded with a different SESSION_SECRET; dev & prod DBs seed admin independently, reseed the broken one.
+- [.replit merge corruption](dotreplit-merge-corruption.md) — GitHub merges from external repo duplicate `modules` keys → invalid TOML, blocks env/packager tools; agent cannot edit .replit; user must fix via GUI or rollback.

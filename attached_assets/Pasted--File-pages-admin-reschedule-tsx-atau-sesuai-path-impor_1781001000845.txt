@@ -1,0 +1,74 @@
+// File: pages/admin/reschedule.tsx (atau sesuai path)
+import { useState } from "react";
+import { RescheduleBooking } from "@/types"; // tipe data booking
+
+export default function ReschedulePage({ bookings }: { bookings: RescheduleBooking[] }) {
+  const [search, setSearch] = useState("");
+  const [filterDate, setFilterDate] = useState("");
+  const [filterFasilitas, setFilterFasilitas] = useState("");
+
+  const filteredBookings = bookings.filter((b) => {
+    const matchesCustomer = b.customer_name.toLowerCase().includes(search.toLowerCase());
+    const matchesDate = filterDate ? b.date === filterDate : true;
+    const matchesFasilitas = filterFasilitas ? b.facility === filterFasilitas : true;
+    return matchesCustomer && matchesDate && matchesFasilitas;
+  });
+
+  return (
+    <div className="reschedule-page">
+      <h1>Reschedule Booking</h1>
+
+      {/* Filter Bar */}
+      <div className="filter-bar flex gap-2 mb-4">
+        <input
+          type="text"
+          placeholder="Cari nama customer..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="input-filter"
+        />
+        <input
+          type="date"
+          value={filterDate}
+          onChange={(e) => setFilterDate(e.target.value)}
+          className="input-filter"
+        />
+        <select
+          value={filterFasilitas}
+          onChange={(e) => setFilterFasilitas(e.target.value)}
+          className="input-filter"
+        >
+          <option value="">Semua Fasilitas</option>
+          <option value="Lapangan Tennis Outdoor">Lapangan Tennis Outdoor</option>
+          <option value="Billiard Coins (Self-Service)">Billiard Coins (Self-Service)</option>
+          <option value="Badminton Court A">Badminton Court A</option>
+          <option value="Lapangan Multiguna">Lapangan Multiguna</option>
+        </select>
+      </div>
+
+      {/* Tabel Reschedule */}
+      <table className="table-auto w-full">
+        <thead>
+          <tr>
+            <th>Customer</th>
+            <th>Fasilitas</th>
+            <th>Tanggal</th>
+            <th>Jam</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {filteredBookings.map((b) => (
+            <tr key={b.id}>
+              <td>{b.customer_name}</td>
+              <td>{b.facility}</td>
+              <td>{b.date}</td>
+              <td>{b.time}</td>
+              <td>{b.status}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}

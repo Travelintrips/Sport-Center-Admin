@@ -11,9 +11,12 @@ export type BookingUpdateStatus = typeof BookingUpdateStatus[keyof typeof Bookin
 
 export const BookingUpdateStatus = {
   pending_payment: 'pending_payment',
+  waiting_confirmation: 'waiting_confirmation',
   paid: 'paid',
   confirmed: 'confirmed',
-  cancelled: 'cancelled',
   completed: 'completed',
+  cancelled: 'cancelled',
+  rejected: 'rejected',
+  expired: 'expired',
   refunded: 'refunded',
 } as const;

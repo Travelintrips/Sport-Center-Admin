@@ -1,6 +1,6 @@
 import { Router } from "express";
-import { db, bookingsTable, facilitiesTable, paymentsTable, promosTable, discountSettingsTable, apMembersTable, bookingHistoryTable, usersTable } from "@workspace/db";
-import { eq, and, sql, or, ilike } from "drizzle-orm";
+import { db, bookingsTable, facilitiesTable, paymentsTable, promosTable, discountSettingsTable, apMembersTable, bookingHistoryTable, usersTable, verificationLogsTable } from "@workspace/db";
+import { eq, and, sql, or, ilike, desc } from "drizzle-orm";
 import { adminMiddleware, authMiddleware, verifyToken } from "../lib/auth";
 import { broadcastAvailabilityChange } from "../lib/supabase";
 import { notifyBookingCreated, notifyPaymentConfirmed, notifyBookingCancelled } from "../lib/notifications";
@@ -49,6 +49,8 @@ async function getBookingWithPayment(id: number) {
     apDiscountAmount: Number(booking.apDiscountAmount),
     facilityName: facility?.name ?? "",
     facilityCategory: facility?.category ?? "",
+    facilityPricePerHour: facility ? Number(facility.pricePerHour) : null,
+    facilityCloseTime: facility?.closeTime ?? null,
     payment: payment ? { ...payment, amount: Number(payment.amount) } : null,
   };
 }
@@ -56,7 +58,7 @@ async function getBookingWithPayment(id: number) {
 router.get("/bookings", adminMiddleware, async (req, res) => {
   try {
     const { status, date, facilityId, customerId } = req.query;
-    let bookings = await db.select().from(bookingsTable);
+    let bookings = await db.select().from(bookingsTable).orderBy(desc(bookingsTable.createdAt));
     if (status) bookings = bookings.filter((b) => b.status === status);
     if (date) bookings = bookings.filter((b) => b.bookingDate === date);
     if (facilityId) bookings = bookings.filter((b) => b.facilityId === Number(facilityId));
@@ -554,6 +556,107 @@ router.post("/bookings/:id/check-in", adminMiddleware, async (req, res) => {
   }
 });
 
+// Shared helper: run AP2 ID card verification logic
+async function runApVerification(
+  bookingId: number,
+  idCardNumber: string,
+  opts: { verifiedByUserId?: number; ipAddress?: string; orderNumber?: string },
+) {
+  const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, bookingId)).limit(1);
+  if (!booking) return { notFound: true } as const;
+
+  if (booking.customerType !== "angkasa_pura" || booking.verificationStatus !== "pending") {
+    await db.insert(verificationLogsTable).values({
+      bookingId,
+      orderNumber: opts.orderNumber ?? booking.orderNumber,
+      verifiedByUserId: opts.verifiedByUserId ?? null,
+      idCardNumberInput: idCardNumber,
+      status: "failed",
+      notes: `Booking status: ${booking.verificationStatus} / type: ${booking.customerType}`,
+      ipAddress: opts.ipAddress ?? null,
+    });
+    return {
+      success: false, result: "not_pending" as const,
+      message: `Booking sudah berstatus '${booking.verificationStatus}', tidak perlu verifikasi.`,
+    };
+  }
+
+  if (booking.idCardNumber && booking.idCardNumber !== idCardNumber) {
+    await db.insert(verificationLogsTable).values({
+      bookingId,
+      orderNumber: opts.orderNumber ?? booking.orderNumber,
+      verifiedByUserId: opts.verifiedByUserId ?? null,
+      idCardNumberInput: idCardNumber,
+      status: "mismatch",
+      notes: `Expected: ${booking.idCardNumber}, got: ${idCardNumber}`,
+      ipAddress: opts.ipAddress ?? null,
+    });
+    return {
+      success: false, result: "mismatch" as const,
+      message: `ID Card hasil scan (${idCardNumber}) tidak cocok dengan data booking (${booking.idCardNumber}).`,
+    };
+  }
+
+  const [member] = await db.select().from(apMembersTable)
+    .where(and(eq(apMembersTable.idCardNumber, idCardNumber), eq(apMembersTable.isActive, true)))
+    .limit(1);
+
+  if (!member) {
+    await db.update(bookingsTable).set({ verificationStatus: "rejected" }).where(eq(bookingsTable.id, bookingId));
+    await db.insert(verificationLogsTable).values({
+      bookingId,
+      orderNumber: opts.orderNumber ?? booking.orderNumber,
+      verifiedByUserId: opts.verifiedByUserId ?? null,
+      idCardNumberInput: idCardNumber,
+      status: "failed",
+      notes: "ID Card tidak ditemukan di database AP2",
+      ipAddress: opts.ipAddress ?? null,
+    });
+    return {
+      success: false, result: "invalid_card" as const,
+      message: "ID Card tidak valid atau bukan member Angkasa Pura aktif.",
+    };
+  }
+
+  const [setting] = await db.select().from(discountSettingsTable)
+    .where(eq(discountSettingsTable.customerType, "angkasa_pura")).limit(1);
+  const discountEnabled = !!setting && setting.isActive;
+  const discountPct = discountEnabled ? setting.discountPercentage : 0;
+  const basePrice = booking.basePrice == null ? Number(booking.totalPrice) : Number(booking.basePrice);
+  const discountAmount = Math.round((basePrice * discountPct) / 100);
+  const finalPrice = basePrice - discountAmount;
+
+  await db.update(bookingsTable).set({
+    verificationStatus: "verified",
+    idCardNumber,
+    apDiscountAmount: String(discountAmount),
+    totalPrice: String(finalPrice),
+  }).where(eq(bookingsTable.id, bookingId));
+
+  await db.insert(verificationLogsTable).values({
+    bookingId,
+    orderNumber: opts.orderNumber ?? booking.orderNumber,
+    verifiedByUserId: opts.verifiedByUserId ?? null,
+    idCardNumberInput: idCardNumber,
+    status: "success",
+    notes: discountEnabled ? `Diskon ${discountPct}% (Rp ${discountAmount.toLocaleString("id-ID")})` : "Terverifikasi (diskon nonaktif)",
+    ipAddress: opts.ipAddress ?? null,
+  });
+
+  return {
+    success: true, result: "verified" as const,
+    message: discountEnabled
+      ? `Verifikasi berhasil. Diskon ${discountPct}% diterapkan. Harga akhir Rp ${finalPrice.toLocaleString("id-ID")}.`
+      : "ID Card valid. Terverifikasi (diskon Angkasa Pura sedang nonaktif).",
+    discountApplied: discountEnabled,
+    discountPercentage: discountPct,
+    discountAmount,
+    finalPrice,
+    memberName: member.name,
+    bookingId,
+  };
+}
+
 // POST /bookings/:id/verify — verifikasi ID Card Angkasa Pura & terapkan diskon (admin)
 router.post("/bookings/:id/verify", adminMiddleware, async (req, res) => {
   try {
@@ -563,82 +666,54 @@ router.post("/bookings/:id/verify", adminMiddleware, async (req, res) => {
       res.status(400).json({ error: "Nomor ID Card wajib diisi" });
       return;
     }
+    const { ipAddress } = getClientInfo(req);
+    const verifiedByUserId = (req as any).user?.userId ?? undefined;
+    const result = await runApVerification(id, idCardNumber, { verifiedByUserId, ipAddress });
+    if ("notFound" in result) { res.status(404).json({ error: "Booking tidak ditemukan" }); return; }
+    if (!result.success) { res.json(result); return; }
 
-    const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, id)).limit(1);
+    const updated = await getBookingWithPayment(id);
+    res.json({ ...result, booking: updated });
+  } catch (err) {
+    req.log.error({ err }, "Verify booking error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// POST /bookings/verify-by-order — self-service AP2 verification (public, by order number)
+router.post("/bookings/verify-by-order", async (req, res) => {
+  try {
+    const orderNumber = String(req.body?.orderNumber || "").trim().toUpperCase();
+    const idCardNumber = String(req.body?.idCardNumber || "").trim().toUpperCase();
+    if (!orderNumber || !idCardNumber) {
+      res.status(400).json({ error: "Nomor order dan nomor ID Card wajib diisi" });
+      return;
+    }
+
+    const [booking] = await db.select().from(bookingsTable)
+      .where(eq(bookingsTable.orderNumber, orderNumber)).limit(1);
     if (!booking) {
       res.status(404).json({ error: "Booking tidak ditemukan" });
       return;
     }
 
-    if (booking.customerType !== "angkasa_pura" || booking.verificationStatus !== "pending") {
+    if (booking.customerType !== "angkasa_pura") {
       res.json({
-        success: false,
-        result: "not_pending",
-        message: `Booking sudah berstatus '${booking.verificationStatus}', tidak perlu verifikasi.`,
+        success: false, result: "not_pending",
+        message: "Booking ini bukan untuk karyawan Angkasa Pura.",
       });
       return;
     }
 
-    // ID Card di-scan harus cocok dengan yang diisi customer saat booking (jika ada)
-    if (booking.idCardNumber && booking.idCardNumber !== idCardNumber) {
-      res.json({
-        success: false,
-        result: "mismatch",
-        message: `ID Card hasil scan (${idCardNumber}) tidak cocok dengan data booking (${booking.idCardNumber}).`,
-      });
-      return;
-    }
+    const ipAddress = String(req.headers["x-forwarded-for"] || req.socket.remoteAddress || "");
+    const result = await runApVerification(booking.id, idCardNumber, { ipAddress, orderNumber });
+    if ("notFound" in result) { res.status(404).json({ error: "Booking tidak ditemukan" }); return; }
+    if (!result.success) { res.json(result); return; }
 
-    // Cocokkan ke daftar member Angkasa Pura yang aktif
-    const [member] = await db.select().from(apMembersTable)
-      .where(and(eq(apMembersTable.idCardNumber, idCardNumber), eq(apMembersTable.isActive, true)))
-      .limit(1);
-
-    if (!member) {
-      await db.update(bookingsTable)
-        .set({ verificationStatus: "rejected" })
-        .where(eq(bookingsTable.id, id));
-      res.json({
-        success: false,
-        result: "invalid_card",
-        message: "ID Card tidak valid atau bukan member Angkasa Pura aktif.",
-      });
-      return;
-    }
-
-    const [setting] = await db.select().from(discountSettingsTable)
-      .where(eq(discountSettingsTable.customerType, "angkasa_pura"))
-      .limit(1);
-    const discountEnabled = !!setting && setting.isActive;
-    const discountPct = discountEnabled ? setting.discountPercentage : 0;
-    const basePrice = booking.basePrice == null ? Number(booking.totalPrice) : Number(booking.basePrice);
-    const discountAmount = Math.round((basePrice * discountPct) / 100);
-    const finalPrice = basePrice - discountAmount;
-
-    await db.update(bookingsTable).set({
-      verificationStatus: "verified",
-      idCardNumber,
-      apDiscountAmount: String(discountAmount),
-      totalPrice: String(finalPrice),
-    }).where(eq(bookingsTable.id, id));
-
-    const updated = await getBookingWithPayment(id);
-
-    res.json({
-      success: true,
-      result: "verified",
-      message: discountEnabled
-        ? `Verifikasi berhasil. Diskon ${discountPct}% diterapkan. Harga akhir Rp ${finalPrice.toLocaleString("id-ID")}.`
-        : "ID Card valid. Terverifikasi (diskon Angkasa Pura sedang nonaktif).",
-      discountApplied: discountEnabled,
-      discountPercentage: discountPct,
-      discountAmount,
-      finalPrice,
-      memberName: member.name,
-      booking: updated,
-    });
+    const updated = await getBookingWithPayment(booking.id);
+    res.json({ ...result, booking: updated });
   } catch (err) {
-    req.log.error({ err }, "Verify booking error");
+    req.log.error({ err }, "Verify by order error");
     res.status(500).json({ error: "Internal server error" });
   }
 });

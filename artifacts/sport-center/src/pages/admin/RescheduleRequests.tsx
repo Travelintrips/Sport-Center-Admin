@@ -4,10 +4,12 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getToken } from "@/lib/auth";
-import { Calendar, CheckCircle, XCircle, Clock } from "lucide-react";
+import { Calendar, CheckCircle, XCircle, Clock, Search } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 const API = import.meta.env.VITE_API_BASE_URL ?? "/api";
@@ -23,6 +25,9 @@ const STATUS_COLORS: Record<string, string> = {
 export default function AdminRescheduleRequests() {
   const [selected, setSelected] = useState<any>(null);
   const [reviewNote, setReviewNote] = useState("");
+  const [search, setSearch] = useState("");
+  const [filterDate, setFilterDate] = useState("");
+  const [filterFasilitas, setFilterFasilitas] = useState("all");
   const { toast } = useToast();
   const qc = useQueryClient();
 
@@ -43,8 +48,20 @@ export default function AdminRescheduleRequests() {
     onError: () => toast({ title: "Error", description: "Gagal memproses", variant: "destructive" }),
   });
 
-  const pending = requests.filter((r: any) => r.status === "pending");
-  const done = requests.filter((r: any) => r.status !== "pending");
+  const facilityOptions = Array.from(
+    new Set(requests.map((r: any) => r.booking?.facilityName).filter(Boolean))
+  ) as string[];
+
+  const applyFilters = (list: any[]) =>
+    list.filter((r: any) => {
+      const matchesSearch = !search || r.booking?.customerName?.toLowerCase().includes(search.toLowerCase()) || r.booking?.orderNumber?.toLowerCase().includes(search.toLowerCase());
+      const matchesDate = !filterDate || r.newDate === filterDate || r.booking?.bookingDate === filterDate;
+      const matchesFasilitas = filterFasilitas === "all" || r.booking?.facilityName === filterFasilitas;
+      return matchesSearch && matchesDate && matchesFasilitas;
+    });
+
+  const pending = applyFilters(requests.filter((r: any) => r.status === "pending"));
+  const done = applyFilters(requests.filter((r: any) => r.status !== "pending"));
 
   return (
     <div className="space-y-6">
@@ -52,6 +69,45 @@ export default function AdminRescheduleRequests() {
         <h1 className="text-3xl font-black flex items-center gap-2"><Calendar size={28} /> Reschedule Booking</h1>
         <p className="text-muted-foreground mt-1">Kelola permintaan perubahan jadwal dari customer</p>
       </div>
+
+      {/* Filter Bar */}
+      <Card>
+        <CardContent className="pt-4">
+          <div className="flex flex-col sm:flex-row gap-3">
+            <div className="relative flex-1">
+              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder="Cari nama customer atau nomor order..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="pl-9"
+              />
+            </div>
+            <Input
+              type="date"
+              value={filterDate}
+              onChange={(e) => setFilterDate(e.target.value)}
+              className="sm:w-44"
+            />
+            <Select value={filterFasilitas} onValueChange={setFilterFasilitas}>
+              <SelectTrigger className="sm:w-52">
+                <SelectValue placeholder="Semua Fasilitas" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Semua Fasilitas</SelectItem>
+                {facilityOptions.map((f) => (
+                  <SelectItem key={f} value={f}>{f}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {(search || filterDate || filterFasilitas !== "all") && (
+              <Button variant="ghost" onClick={() => { setSearch(""); setFilterDate(""); setFilterFasilitas("all"); }}>
+                Reset
+              </Button>
+            )}
+          </div>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader><CardTitle>Menunggu Persetujuan ({pending.length})</CardTitle></CardHeader>
@@ -99,6 +155,7 @@ export default function AdminRescheduleRequests() {
                 <div key={r.id} className="flex items-center justify-between p-3 border rounded-lg opacity-70">
                   <div className="text-sm">
                     <span className="font-medium">{r.booking?.orderNumber}</span>
+                    {" · "}{r.booking?.customerName}{" · "}{r.booking?.facilityName}
                     {" · "}{r.newDate} {r.newStartTime}–{r.newEndTime}
                   </div>
                   <Badge className={STATUS_COLORS[r.status]}>{STATUS_LABELS[r.status]}</Badge>

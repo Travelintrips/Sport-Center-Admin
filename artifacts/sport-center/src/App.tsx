@@ -24,6 +24,8 @@ import Contact from "@/pages/Contact";
 import Login from "@/pages/Login";
 import Register from "@/pages/Register";
 import MyBookings from "@/pages/MyBookings";
+import MyProfile from "@/pages/MyProfile";
+import VerifyId from "@/pages/VerifyId";
 import Membership from "@/pages/Membership";
 // Admin Pages
 import AdminLogin from "@/pages/admin/Login";
@@ -43,7 +45,14 @@ import AdminReports from "@/pages/admin/Reports";
 import AdminQrCheckin from "@/pages/admin/QrCheckin";
 import AdminNotificationTemplates from "@/pages/admin/NotificationTemplates";
 import AdminRescheduleRequests from "@/pages/admin/RescheduleRequests";
+import AdminExtensionRequests from "@/pages/admin/ExtensionRequests";
 import AdminCalendar from "@/pages/admin/Calendar";
+
+// WhatsApp Booking Flow Pages (standalone, no auth)
+import WaBookingForm from "@/pages/wa/BookingForm";
+import WaBookingStatus from "@/pages/wa/BookingStatus";
+import WaProofUpload from "@/pages/wa/ProofUpload";
+import WaAdminAction from "@/pages/wa/AdminAction";
 
 import { removeToken } from "@/lib/auth";
 
@@ -84,6 +93,7 @@ function AdminRouter() {
     if (location === "/admin/qr-checkin") return <AdminQrCheckin />;
     if (location === "/admin/notification-templates") return <AdminNotificationTemplates />;
     if (location === "/admin/reschedule") return <AdminRescheduleRequests />;
+    if (location === "/admin/extensions") return <AdminExtensionRequests />;
     if (location === "/admin/calendar") return <AdminCalendar />;
     return <NotFound />;
   })();
@@ -114,8 +124,15 @@ function Router() {
       <Route path="/admin/qr-checkin" component={AdminRouter} />
       <Route path="/admin/notification-templates" component={AdminRouter} />
       <Route path="/admin/reschedule" component={AdminRouter} />
+      <Route path="/admin/extensions" component={AdminRouter} />
       <Route path="/admin/calendar" component={AdminRouter} />
       <Route path="/admin" component={AdminRouter} />
+
+      {/* WhatsApp Booking Flow — standalone, no layout wrapper */}
+      <Route path="/wa/booking/:facilityId" component={WaBookingForm} />
+      <Route path="/wa/status/:orderNumber" component={WaBookingStatus} />
+      <Route path="/wa/proof/:token" component={WaProofUpload} />
+      <Route path="/wa/action/:token" component={WaAdminAction} />
 
       {/* Customer Routes */}
       <Route path="*">
@@ -129,6 +146,8 @@ function Router() {
             <Route path="/login" component={Login} />
             <Route path="/register" component={Register} />
             <Route path="/my-bookings" component={MyBookings} />
+            <Route path="/my-profile" component={MyProfile} />
+            <Route path="/verify-id" component={VerifyId} />
             <Route path="/membership" component={Membership} />
             <Route path="/promos" component={Promos} />
             <Route path="/terms" component={Terms} />

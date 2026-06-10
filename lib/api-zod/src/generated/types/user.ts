@@ -10,9 +10,13 @@ import type { UserRole } from './userRole';
 export interface User {
   id: number;
   name: string;
-  email: string;
+  /** @nullable */
+  email?: string | null;
   role: UserRole;
   /** @nullable */
   phone?: string | null;
+  /** @nullable */
+  googleId?: string | null;
+  hasPassword?: boolean;
   createdAt?: string;
 }

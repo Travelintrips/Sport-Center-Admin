@@ -7,6 +7,7 @@ import {
   getCheckAvailabilityQueryKey,
   useGetReviews,
   useGetReviewsSummary,
+  useGetSettings,
 } from "@workspace/api-client-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -28,7 +29,8 @@ import {
   CalendarDays,
   CheckCircle2,
   AlertCircle,
-  Star
+  Star,
+  MessageCircle
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import AvailabilityCalendar from "@/components/AvailabilityCalendar";
@@ -59,7 +61,7 @@ export default function FacilityDetail() {
     }
   });
 
-  const { data: reviews } = useGetReviews({ facilityId }, { query: { enabled: !!facilityId } });
+  const { data: reviews } = useGetReviews({ facilityId }, { query: { enabled: !!facilityId, queryKey: ["getReviews", facilityId] } });
   const { data: reviewsSummary } = useGetReviewsSummary();
   const facilitySummary = reviewsSummary?.find((s) => s.facilityId === facilityId);
   const avgRating = facilitySummary?.avgRating ?? 0;
@@ -79,6 +81,46 @@ export default function FacilityDetail() {
 
   const isWalkIn = facility?.bookingMode === "walk_in";
   const isMultiguna = facility?.category === "Multiguna";
+
+  const { data: settings } = useGetSettings();
+
+  const getWaBookingLink = () => {
+    if (!settings?.whatsapp || !facility || !date) return "#";
+    let phone = settings.whatsapp;
+    if (phone.startsWith("0")) phone = "62" + phone.substring(1);
+
+    const durationNum = parseInt(duration);
+    const [startH, startM] = selectedTime.split(":").map(Number);
+    const endH = startH + durationNum;
+    const endTime = `${String(endH).padStart(2, "0")}:${String(startM).padStart(2, "00")}`;
+    const totalPrice = isWalkIn ? facility.pricePerHour : facility.pricePerHour * durationNum;
+    const dateStr = format(date, "EEEE, d MMMM yyyy", { locale: lang === "en" ? enUS : id });
+    const actLabel = isMultiguna && activityType ? ` (${activityType})` : "";
+
+    let message: string;
+    if (isWalkIn) {
+      message =
+        `Halo Sport Center, saya ingin booking:\n\n` +
+        `📍 Fasilitas: *${facility.name}*\n` +
+        `📅 Tanggal: *${dateStr}*\n` +
+        `💰 Total: *Rp ${totalPrice.toLocaleString("id-ID")}*\n\n` +
+        `Mohon konfirmasi ketersediaan. Terima kasih!`;
+    } else {
+      message =
+        `Halo Sport Center, saya ingin booking:\n\n` +
+        `📍 Fasilitas: *${facility.name}${actLabel}*\n` +
+        `📅 Tanggal: *${dateStr}*\n` +
+        `⏰ Jam: *${selectedTime} – ${endTime} WIB*\n` +
+        `⏱ Durasi: *${durationNum} jam*\n` +
+        `💰 Total: *Rp ${totalPrice.toLocaleString("id-ID")}*\n\n` +
+        `Mohon konfirmasi ketersediaan. Terima kasih!`;
+    }
+    return `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
+  };
+
+  const isWaBookingReady =
+    !!date &&
+    (isWalkIn || (!!selectedTime && (!isMultiguna || !!activityType)));
 
   const handleBook = () => {
     if (!facility || !date) return;
@@ -424,6 +466,24 @@ export default function FacilityDetail() {
                             : t("Lanjut ke Pembayaran", "Continue to Payment"))
                       }
                     </Button>
+
+                    {/* WhatsApp Booking Button */}
+                    {settings?.whatsapp && (
+                      <a
+                        href={isWaBookingReady ? getWaBookingLink() : undefined}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className={`flex items-center justify-center gap-2.5 w-full h-14 rounded-full border-2 font-bold text-base transition-all
+                          ${isWaBookingReady
+                            ? "border-[#25D366] text-[#25D366] hover:bg-[#25D366] hover:text-white hover:-translate-y-1 cursor-pointer"
+                            : "border-muted text-muted-foreground cursor-not-allowed opacity-50 pointer-events-none"
+                          }`}
+                        onClick={(e) => { if (!isWaBookingReady) e.preventDefault(); }}
+                      >
+                        <MessageCircle className="w-5 h-5" />
+                        {t("Pesan via WhatsApp", "Book via WhatsApp")}
+                      </a>
+                    )}
                   </div>
                 </div>
               </CardContent>

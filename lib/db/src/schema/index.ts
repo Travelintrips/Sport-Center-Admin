@@ -18,3 +18,5 @@ export * from "./cancellations";
 export * from "./tenants";
 export * from "./tenantBookings";
 export * from "./tenantPayments";
+export * from "./bookingExtensions";
+export * from "./waActionTokens";
