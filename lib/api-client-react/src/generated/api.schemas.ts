@@ -654,6 +654,14 @@ export interface Settings {
   bankAccountName?: string | null;
   /** @nullable */
   qrisImageUrl?: string | null;
+  /** @nullable */
+  fonnteToken?: string | null;
+  /** @nullable */
+  fonnteAdminWa?: string | null;
+  /** @nullable */
+  adminWaPhones?: string | null;
+  /** @nullable */
+  appUrl?: string | null;
 }
 
 export interface SettingsUpdate {
@@ -669,6 +677,10 @@ export interface SettingsUpdate {
   bankAccount?: string;
   bankAccountName?: string;
   qrisImageUrl?: string;
+  fonnteToken?: string;
+  fonnteAdminWa?: string;
+  adminWaPhones?: string;
+  appUrl?: string;
 }
 
 export interface DiscountSetting {

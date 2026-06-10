@@ -19,4 +19,8 @@ export interface SettingsUpdate {
   bankAccount?: string;
   bankAccountName?: string;
   qrisImageUrl?: string;
+  fonnteToken?: string;
+  fonnteAdminWa?: string;
+  adminWaPhones?: string;
+  appUrl?: string;
 }

@@ -1,22 +1,45 @@
 import { db, notificationTemplatesTable, settingsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 
-const FONNTE_TOKEN = process.env.FONNTE_TOKEN || "";
-const FONNTE_ADMIN_WA = process.env.FONNTE_ADMIN_WA || "";
-const ADMIN_WA_PHONES = process.env.ADMIN_WA_PHONES || "";
+const ENV_FONNTE_TOKEN = process.env.FONNTE_TOKEN || "";
+const ENV_FONNTE_ADMIN_WA = process.env.FONNTE_ADMIN_WA || "";
+const ENV_ADMIN_WA_PHONES = process.env.ADMIN_WA_PHONES || "";
 
 function interpolate(template: string, vars: Record<string, string>): string {
   return template.replace(/\{\{(\w+)\}\}/g, (_, key) => vars[key] ?? "");
 }
 
+async function getWaConfig(): Promise<{ token: string; adminPhones: string[] }> {
+  try {
+    const [s] = await db.select().from(settingsTable).limit(1);
+    const token = s?.fonnteToken || ENV_FONNTE_TOKEN;
+    const phonesRaw = s?.adminWaPhones || ENV_ADMIN_WA_PHONES;
+    const adminWa = s?.fonnteAdminWa || ENV_FONNTE_ADMIN_WA;
+    const adminPhones = phonesRaw
+      ? phonesRaw.split(",").map((p) => p.trim()).filter(Boolean)
+      : adminWa
+      ? [adminWa]
+      : [];
+    return { token, adminPhones };
+  } catch {
+    const adminPhones = ENV_ADMIN_WA_PHONES
+      ? ENV_ADMIN_WA_PHONES.split(",").map((p) => p.trim()).filter(Boolean)
+      : ENV_FONNTE_ADMIN_WA
+      ? [ENV_FONNTE_ADMIN_WA]
+      : [];
+    return { token: ENV_FONNTE_TOKEN, adminPhones };
+  }
+}
+
 async function sendWA(phone: string, message: string): Promise<void> {
-  if (!FONNTE_TOKEN || !phone) return;
+  const { token } = await getWaConfig();
+  if (!token || !phone) return;
   try {
     const cleanPhone = phone.replace(/^0/, "62").replace(/\D/g, "");
     await fetch("https://api.fonnte.com/send", {
       method: "POST",
       headers: {
-        Authorization: FONNTE_TOKEN,
+        Authorization: token,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ target: cleanPhone, message }),
@@ -27,12 +50,8 @@ async function sendWA(phone: string, message: string): Promise<void> {
 }
 
 async function sendWAToAdmins(message: string): Promise<void> {
-  const phones = ADMIN_WA_PHONES
-    ? ADMIN_WA_PHONES.split(",").map((p) => p.trim()).filter(Boolean)
-    : FONNTE_ADMIN_WA
-    ? [FONNTE_ADMIN_WA]
-    : [];
-  for (const phone of phones) {
+  const { adminPhones } = await getWaConfig();
+  for (const phone of adminPhones) {
     await sendWA(phone, message);
   }
 }
@@ -96,7 +115,8 @@ export async function notifyBookingCancelled(data: BookingNotifData): Promise<vo
 }
 
 export async function notifyBookingCompleted(data: BookingNotifData): Promise<void> {
-  const appUrl = process.env.APP_URL ?? "";
+  const [s] = await db.select().from(settingsTable).limit(1).catch(() => [null]);
+  const appUrl = s?.appUrl || process.env.APP_URL || "";
   const tpl = await getTemplate("booking_completed");
   if (tpl) await sendWA(data.customerPhone, interpolate(tpl, { ...data, reviewUrl: `${appUrl}/booking/${data.orderNumber}` }));
 }

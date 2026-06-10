@@ -2510,6 +2510,14 @@ components:
           type: ["string", "null"]
         qrisImageUrl:
           type: ["string", "null"]
+        fonnteToken:
+          type: ["string", "null"]
+        fonnteAdminWa:
+          type: ["string", "null"]
+        adminWaPhones:
+          type: ["string", "null"]
+        appUrl:
+          type: ["string", "null"]
 
     SettingsUpdate:
       type: object
@@ -2537,6 +2545,14 @@ components:
         bankAccountName:
           type: string
         qrisImageUrl:
+          type: string
+        fonnteToken:
+          type: string
+        fonnteAdminWa:
+          type: string
+        adminWaPhones:
+          type: string
+        appUrl:
           type: string
 
     DiscountSetting:

@@ -1383,7 +1383,11 @@ export const GetSettingsResponse = zod.object({
   "bankName": zod.string().nullish(),
   "bankAccount": zod.string().nullish(),
   "bankAccountName": zod.string().nullish(),
-  "qrisImageUrl": zod.string().nullish()
+  "qrisImageUrl": zod.string().nullish(),
+  "fonnteToken": zod.string().nullish(),
+  "fonnteAdminWa": zod.string().nullish(),
+  "adminWaPhones": zod.string().nullish(),
+  "appUrl": zod.string().nullish()
 })
 
 
@@ -1402,7 +1406,11 @@ export const UpdateSettingsBody = zod.object({
   "bankName": zod.string().optional(),
   "bankAccount": zod.string().optional(),
   "bankAccountName": zod.string().optional(),
-  "qrisImageUrl": zod.string().optional()
+  "qrisImageUrl": zod.string().optional(),
+  "fonnteToken": zod.string().optional(),
+  "fonnteAdminWa": zod.string().optional(),
+  "adminWaPhones": zod.string().optional(),
+  "appUrl": zod.string().optional()
 })
 
 export const UpdateSettingsResponse = zod.object({
@@ -1418,7 +1426,11 @@ export const UpdateSettingsResponse = zod.object({
   "bankName": zod.string().nullish(),
   "bankAccount": zod.string().nullish(),
   "bankAccountName": zod.string().nullish(),
-  "qrisImageUrl": zod.string().nullish()
+  "qrisImageUrl": zod.string().nullish(),
+  "fonnteToken": zod.string().nullish(),
+  "fonnteAdminWa": zod.string().nullish(),
+  "adminWaPhones": zod.string().nullish(),
+  "appUrl": zod.string().nullish()
 })
 
 

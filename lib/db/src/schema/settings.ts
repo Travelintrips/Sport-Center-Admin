@@ -17,6 +17,10 @@ export const settingsTable = scSchema.table("settings", {
   bankAccount: text("bank_account"),
   bankAccountName: text("bank_account_name"),
   qrisImageUrl: text("qris_image_url"),
+  fonnteToken: text("fonnte_token"),
+  fonnteAdminWa: text("fonnte_admin_wa"),
+  adminWaPhones: text("admin_wa_phones"),
+  appUrl: text("app_url"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });

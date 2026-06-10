@@ -7,8 +7,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { Save, Upload, Trash2, QrCode, ImageIcon, Plane } from "lucide-react";
+import { Save, Upload, Trash2, QrCode, ImageIcon, Plane, MessageCircle, Eye, EyeOff, CheckCircle2, AlertCircle } from "lucide-react";
 import { getToken } from "@/lib/auth";
 
 function ApDiscountCard() {

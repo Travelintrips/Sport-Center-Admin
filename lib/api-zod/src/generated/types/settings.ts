@@ -27,4 +27,12 @@ export interface Settings {
   bankAccountName?: string | null;
   /** @nullable */
   qrisImageUrl?: string | null;
+  /** @nullable */
+  fonnteToken?: string | null;
+  /** @nullable */
+  fonnteAdminWa?: string | null;
+  /** @nullable */
+  adminWaPhones?: string | null;
+  /** @nullable */
+  appUrl?: string | null;
 }
