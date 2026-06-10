@@ -34,8 +34,19 @@ Unlike `.replit`, the agent CAN fix this: delete the foreign `start` line, keep
 `node --env-file=.env.local --enable-source-maps ./dist/index.mjs`, then restart.
 
 ## Artifact-managed duplicate workflows
-Merges also leave duplicate workflows (`artifacts/api-server: API Server`,
-`artifacts/sport-center: web`) that mirror the canonical `Start API server` /
-`Start application` on the same ports, so they perpetually show "failed" on port
-conflict. They are **artifact-managed and cannot be removed** via `removeWorkflow`
-(PROHIBITED_ACTION). Harmless — the canonical workflows serve the app; ignore them.
+This is an **artifacts-type project**: the platform auto-creates one workflow per
+folder under `artifacts/*` (`artifacts/api-server: API Server`,
+`artifacts/sport-center: web`, etc.). These mirror the agent-authored canonical
+`Start API server` / `Start application` on the same ports, so they perpetually
+show "failed" on port conflict. They are **artifact-managed and cannot be removed**
+via `removeWorkflow` (PROHIBITED_ACTION), and `.replit` cannot be edited directly
+(port mappings are platform-owned). Harmless — the canonical workflows serve the
+app and the deployment; ignore the "failed" entries.
+
+**Removing an artifact folder removes its auto-workflow.** The foreign
+`artifacts/booking-manager` (a separate app, "Sport Center Booking Management
+System", not used by sport-center) was the source of the stale port-21089 mapping.
+Deleting the folder + `pnpm install` removed its workflow and that conflict. Verify
+nothing references a folder before deleting: `rg booking-manager` should only hit
+the lockfile. The api-server/sport-center artifact duplicates remain (inherent to
+the project type) and will keep showing failed — that is expected, not a bug.
