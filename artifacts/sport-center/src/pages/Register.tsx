@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Link, useLocation, useSearch } from "wouter";
-import { useRegister } from "@workspace/api-client-react";
+import { useRegister, useSendOtp, useVerifyOtp, useLoginWithGoogle } from "@workspace/api-client-react";
 import { setToken } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,7 +9,27 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { useLang } from "@/lib/i18n";
-import { UserPlus, Eye, EyeOff, MessageCircle, CheckCircle, Copy } from "lucide-react";
+import { UserPlus, Eye, EyeOff, MessageCircle, CheckCircle, Copy, Phone, ArrowLeft, RefreshCw } from "lucide-react";
+import { FcGoogle } from "react-icons/fc";
+
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string;
+
+type RegisterTab = "email" | "phone" | "wa_source";
+type PhoneStep = "input" | "otp";
+
+declare global {
+  interface Window {
+    google?: {
+      accounts: {
+        id: {
+          initialize: (cfg: any) => void;
+          renderButton: (el: HTMLElement, cfg: any) => void;
+          prompt: () => void;
+        };
+      };
+    };
+  }
+}
 
 export default function Register() {
   const [, setLocation] = useLocation();
@@ -21,6 +41,7 @@ export default function Register() {
   const sourceWA = params.get("source") === "wa";
   const prefilledPhone = params.get("phone") ?? "";
 
+  const [tab, setTab] = useState<RegisterTab>(sourceWA ? "wa_source" : "email");
   const [form, setForm] = useState({
     name: "",
     email: "",
@@ -31,6 +52,12 @@ export default function Register() {
   const [showPw, setShowPw] = useState(false);
   const [waLoading, setWaLoading] = useState(false);
   const [waSuccess, setWaSuccess] = useState<{ customerCode: string; name: string } | null>(null);
+  const [googleLoading, setGoogleLoading] = useState(false);
+
+  const [phone, setPhone] = useState("");
+  const [otp, setOtp] = useState("");
+  const [phoneStep, setPhoneStep] = useState<PhoneStep>("input");
+  const [countdown, setCountdown] = useState(0);
 
   const registerMutation = useRegister({
     mutation: {
@@ -46,7 +73,88 @@ export default function Register() {
     },
   });
 
-  async function handleWaSubmit(e: React.FormEvent) {
+  const googleMutation = useLoginWithGoogle({
+    mutation: {
+      onSuccess: (data) => {
+        setGoogleLoading(false);
+        setToken(data.token);
+        toast({ title: t("Akun berhasil dibuat!", "Account created!"), description: `${t("Selamat datang", "Welcome")}, ${data.user.name}!` });
+        setLocation("/my-bookings");
+      },
+      onError: () => {
+        setGoogleLoading(false);
+        toast({ title: t("Google gagal", "Google failed"), description: t("Coba lagi.", "Please try again."), variant: "destructive" });
+      },
+    },
+  });
+
+  const sendOtpMutation = useSendOtp({
+    mutation: {
+      onSuccess: () => {
+        setPhoneStep("otp");
+        setCountdown(60);
+        toast({ title: t("OTP Terkirim", "OTP Sent"), description: t("Cek WhatsApp Anda untuk kode OTP", "Check your WhatsApp for the OTP code") });
+      },
+      onError: (err: any) => {
+        const msg = err?.response?.data?.error ?? t("Gagal mengirim OTP.", "Failed to send OTP.");
+        toast({ title: t("Gagal", "Failed"), description: msg, variant: "destructive" });
+      },
+    },
+  });
+
+  const verifyOtpMutation = useVerifyOtp({
+    mutation: {
+      onSuccess: (data) => {
+        setToken(data.token);
+        toast({ title: t("Berhasil masuk!", "Signed in!"), description: `${t("Selamat datang", "Welcome")}, ${data.user.name}!` });
+        setLocation("/my-bookings");
+      },
+      onError: (err: any) => {
+        const msg = err?.response?.data?.error ?? t("OTP salah atau kadaluarsa.", "Incorrect or expired OTP.");
+        toast({ title: t("Verifikasi gagal", "Verification failed"), description: msg, variant: "destructive" });
+      },
+    },
+  });
+
+  useEffect(() => {
+    if (countdown <= 0) return;
+    const timer = setTimeout(() => setCountdown((c) => c - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [countdown]);
+
+  const handleGoogleCallback = useCallback((response: { credential: string }) => {
+    setGoogleLoading(true);
+    googleMutation.mutate({ data: { idToken: response.credential } });
+  }, []);
+
+  useEffect(() => {
+    if (!GOOGLE_CLIENT_ID) return;
+    const script = document.createElement("script");
+    script.src = "https://accounts.google.com/gsi/client";
+    script.async = true;
+    script.defer = true;
+    script.onload = () => {
+      window.google?.accounts.id.initialize({
+        client_id: GOOGLE_CLIENT_ID,
+        callback: handleGoogleCallback,
+        auto_select: false,
+      });
+    };
+    document.head.appendChild(script);
+    return () => {
+      document.head.removeChild(script);
+    };
+  }, [handleGoogleCallback]);
+
+  function handleGoogleSignIn() {
+    if (!GOOGLE_CLIENT_ID) {
+      toast({ title: "Google login belum dikonfigurasi", variant: "destructive" });
+      return;
+    }
+    window.google?.accounts.id.prompt();
+  }
+
+  async function handleWaSourceSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!form.name.trim()) {
       toast({ title: "Nama wajib diisi", variant: "destructive" });
@@ -80,7 +188,7 @@ export default function Register() {
     }
   }
 
-  function handleWebSubmit(e: React.FormEvent) {
+  function handleEmailSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (form.password !== form.confirmPassword) {
       toast({ title: t("Password tidak cocok", "Passwords do not match"), description: t("Pastikan kedua password sama.", "Make sure both passwords are the same."), variant: "destructive" });
@@ -91,6 +199,16 @@ export default function Register() {
       return;
     }
     registerMutation.mutate({ data: { name: form.name, email: form.email, password: form.password, phone: form.phone || undefined } });
+  }
+
+  function handleSendOtp(e: React.FormEvent) {
+    e.preventDefault();
+    sendOtpMutation.mutate({ data: { phone } });
+  }
+
+  function handleVerifyOtp(e: React.FormEvent) {
+    e.preventDefault();
+    verifyOtpMutation.mutate({ data: { phone, otp } });
   }
 
   if (waSuccess) {
@@ -143,12 +261,10 @@ export default function Register() {
             {sourceWA ? <MessageCircle size={26} className="text-primary" /> : <UserPlus size={26} className="text-primary" />}
           </div>
           <CardTitle className="text-2xl font-black">
-            {sourceWA ? "Daftar via WhatsApp" : t("Buat Akun Baru", "Create New Account")}
+            {t("Buat Akun Baru", "Create New Account")}
           </CardTitle>
           <CardDescription>
-            {sourceWA
-              ? "Isi data di bawah untuk mengaktifkan akun booking kamu"
-              : t("Daftar untuk melacak riwayat booking Anda", "Register to track your booking history")}
+            {t("Daftar untuk melacak riwayat booking Anda", "Register to track your booking history")}
           </CardDescription>
           {sourceWA && (
             <Badge variant="secondary" className="mx-auto mt-2 gap-1 bg-green-100 text-green-700 border-green-200">
@@ -156,42 +272,42 @@ export default function Register() {
             </Badge>
           )}
         </CardHeader>
+
         <CardContent className="space-y-5 pt-4">
-          <form onSubmit={sourceWA ? handleWaSubmit : handleWebSubmit} className="space-y-4">
-            <div className="space-y-1.5">
-              <Label htmlFor="name">{t("Nama Lengkap", "Full Name")}</Label>
-              <Input
-                id="name"
-                placeholder={t("Nama lengkap Anda", "Your full name")}
-                value={form.name}
-                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                required
-                autoComplete="name"
-              />
+          {!sourceWA && (
+            <div className="flex rounded-lg border p-1 gap-1">
+              <button
+                type="button"
+                onClick={() => setTab("email")}
+                className={`flex-1 rounded-md py-2 text-xs font-semibold transition-colors ${tab === "email" ? "bg-primary text-white shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+              >
+                Email
+              </button>
+              <button
+                type="button"
+                onClick={() => { setTab("phone"); setPhoneStep("input"); }}
+                className={`flex-1 rounded-md py-2 text-xs font-semibold transition-colors flex items-center justify-center gap-1 ${tab === "phone" ? "bg-primary text-white shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+              >
+                <Phone size={12} />
+                WhatsApp OTP
+              </button>
             </div>
+          )}
 
-            <div className="space-y-1.5">
-              <Label htmlFor="phone">
-                Nomor WhatsApp{sourceWA && <span className="text-destructive ml-0.5">*</span>}
-                {!sourceWA && <span className="text-muted-foreground font-normal"> (opsional)</span>}
-              </Label>
-              <Input
-                id="phone"
-                type="tel"
-                placeholder="628xxxxxxxxxx"
-                value={form.phone}
-                onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
-                required={sourceWA}
-                readOnly={sourceWA && !!prefilledPhone}
-                className={sourceWA && prefilledPhone ? "bg-muted" : ""}
-                autoComplete="tel"
-              />
-              {sourceWA && prefilledPhone && (
-                <p className="text-xs text-muted-foreground">Nomor diisi otomatis dari WhatsApp</p>
-              )}
-            </div>
-
-            {!sourceWA && (
+          {/* Email registration */}
+          {(tab === "email") && (
+            <form onSubmit={handleEmailSubmit} className="space-y-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="name">{t("Nama Lengkap", "Full Name")}</Label>
+                <Input
+                  id="name"
+                  placeholder={t("Nama lengkap Anda", "Your full name")}
+                  value={form.name}
+                  onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                  required
+                  autoComplete="name"
+                />
+              </div>
               <div className="space-y-1.5">
                 <Label htmlFor="email">Email</Label>
                 <Input
@@ -204,70 +320,209 @@ export default function Register() {
                   autoComplete="email"
                 />
               </div>
-            )}
-
-            {sourceWA && (
               <div className="space-y-1.5">
-                <Label htmlFor="email">
-                  Email <span className="text-muted-foreground font-normal">(opsional)</span>
+                <Label htmlFor="phone">
+                  {t("No. WhatsApp", "WhatsApp No.")} <span className="text-muted-foreground font-normal text-xs">(opsional)</span>
                 </Label>
                 <Input
-                  id="email"
+                  id="phone"
+                  type="tel"
+                  placeholder="08xxxxxxxxxx"
+                  value={form.phone}
+                  onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
+                  autoComplete="tel"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="password">{t("Password", "Password")}</Label>
+                <div className="relative">
+                  <Input
+                    id="password"
+                    type={showPw ? "text" : "password"}
+                    placeholder={t("Min. 6 karakter", "Min. 6 characters")}
+                    value={form.password}
+                    onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
+                    required
+                    autoComplete="new-password"
+                    className="pr-10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPw((v) => !v)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  >
+                    {showPw ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="confirmPassword">{t("Konfirmasi Password", "Confirm Password")}</Label>
+                <Input
+                  id="confirmPassword"
+                  type={showPw ? "text" : "password"}
+                  placeholder={t("Ulangi password", "Repeat password")}
+                  value={form.confirmPassword}
+                  onChange={(e) => setForm((f) => ({ ...f, confirmPassword: e.target.value }))}
+                  required
+                  autoComplete="new-password"
+                />
+              </div>
+              <Button type="submit" className="w-full" disabled={registerMutation.isPending}>
+                {registerMutation.isPending ? t("Mendaftarkan...", "Registering...") : t("Daftar Sekarang", "Register Now")}
+              </Button>
+            </form>
+          )}
+
+          {/* WA OTP registration */}
+          {tab === "phone" && phoneStep === "input" && (
+            <form onSubmit={handleSendOtp} className="space-y-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="wa-phone">{t("Nomor WhatsApp", "WhatsApp Number")}</Label>
+                <Input
+                  id="wa-phone"
+                  type="tel"
+                  placeholder="08xxxxxxxxxx"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  required
+                  autoComplete="tel"
+                />
+                <p className="text-xs text-muted-foreground">{t("Kode OTP akan dikirim via WhatsApp", "OTP code will be sent via WhatsApp")}</p>
+              </div>
+              <Button type="submit" className="w-full" disabled={sendOtpMutation.isPending}>
+                {sendOtpMutation.isPending ? t("Mengirim...", "Sending...") : t("Kirim Kode OTP", "Send OTP Code")}
+              </Button>
+            </form>
+          )}
+
+          {tab === "phone" && phoneStep === "otp" && (
+            <form onSubmit={handleVerifyOtp} className="space-y-4">
+              <div className="flex items-center gap-2 mb-1">
+                <button type="button" onClick={() => setPhoneStep("input")} className="text-muted-foreground hover:text-foreground">
+                  <ArrowLeft size={16} />
+                </button>
+                <p className="text-sm text-muted-foreground">
+                  {t("Kode dikirim ke", "Code sent to")} <span className="font-semibold text-foreground">{phone}</span>
+                </p>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="otp">{t("Kode OTP", "OTP Code")}</Label>
+                <Input
+                  id="otp"
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]{6}"
+                  maxLength={6}
+                  placeholder="123456"
+                  value={otp}
+                  onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))}
+                  required
+                  autoComplete="one-time-code"
+                  className="text-center text-xl tracking-[0.4em] font-bold"
+                />
+              </div>
+              <Button type="submit" className="w-full" disabled={verifyOtpMutation.isPending || otp.length !== 6}>
+                {verifyOtpMutation.isPending ? t("Memverifikasi...", "Verifying...") : t("Verifikasi & Daftar", "Verify & Register")}
+              </Button>
+              <div className="text-center">
+                {countdown > 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    {t("Kirim ulang dalam", "Resend in")} <span className="font-semibold text-primary">{countdown}s</span>
+                  </p>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => sendOtpMutation.mutate({ data: { phone } })}
+                    disabled={sendOtpMutation.isPending}
+                    className="text-sm text-primary font-semibold hover:underline flex items-center gap-1 mx-auto"
+                  >
+                    <RefreshCw size={13} />
+                    {t("Kirim ulang OTP", "Resend OTP")}
+                  </button>
+                )}
+              </div>
+            </form>
+          )}
+
+          {/* WA source (from WhatsApp bot) */}
+          {tab === "wa_source" && (
+            <form onSubmit={handleWaSourceSubmit} className="space-y-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="name">{t("Nama Lengkap", "Full Name")}</Label>
+                <Input
+                  id="name"
+                  placeholder={t("Nama lengkap Anda", "Your full name")}
+                  value={form.name}
+                  onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                  required
+                  autoComplete="name"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="wa-src-phone">
+                  Nomor WhatsApp<span className="text-destructive ml-0.5">*</span>
+                </Label>
+                <Input
+                  id="wa-src-phone"
+                  type="tel"
+                  placeholder="628xxxxxxxxxx"
+                  value={form.phone}
+                  onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
+                  required
+                  readOnly={!!prefilledPhone}
+                  className={prefilledPhone ? "bg-muted" : ""}
+                  autoComplete="tel"
+                />
+                {prefilledPhone && (
+                  <p className="text-xs text-muted-foreground">Nomor diisi otomatis dari WhatsApp</p>
+                )}
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="wa-email">
+                  Email <span className="text-muted-foreground font-normal text-xs">(opsional)</span>
+                </Label>
+                <Input
+                  id="wa-email"
                   type="email"
                   placeholder="nama@email.com (bisa dikosongkan)"
                   value={form.email}
                   onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
                   autoComplete="email"
                 />
-                <p className="text-xs text-muted-foreground">Jika dikosongkan, email akan dibuat otomatis untuk akun kamu</p>
+                <p className="text-xs text-muted-foreground">Jika dikosongkan, email akan dibuat otomatis</p>
               </div>
-            )}
+              <Button type="submit" className="w-full" disabled={waLoading}>
+                {waLoading ? "Mendaftarkan..." : "Daftar Sekarang 🚀"}
+              </Button>
+            </form>
+          )}
 
-            {!sourceWA && (
-              <>
-                <div className="space-y-1.5">
-                  <Label htmlFor="password">{t("Password", "Password")}</Label>
-                  <div className="relative">
-                    <Input
-                      id="password"
-                      type={showPw ? "text" : "password"}
-                      placeholder={t("Min. 6 karakter", "Min. 6 characters")}
-                      value={form.password}
-                      onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
-                      required
-                      autoComplete="new-password"
-                      className="pr-10"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPw((v) => !v)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                    >
-                      {showPw ? <EyeOff size={16} /> : <Eye size={16} />}
-                    </button>
-                  </div>
+          {/* Divider + Google */}
+          {!sourceWA && (
+            <>
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <span className="w-full border-t" />
                 </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="confirmPassword">{t("Konfirmasi Password", "Confirm Password")}</Label>
-                  <Input
-                    id="confirmPassword"
-                    type={showPw ? "text" : "password"}
-                    placeholder={t("Ulangi password", "Repeat password")}
-                    value={form.confirmPassword}
-                    onChange={(e) => setForm((f) => ({ ...f, confirmPassword: e.target.value }))}
-                    required
-                    autoComplete="new-password"
-                  />
+                <div className="relative flex justify-center text-xs uppercase">
+                  <span className="bg-background px-2 text-muted-foreground">{t("atau", "or")}</span>
                 </div>
-              </>
-            )}
+              </div>
 
-            <Button type="submit" className="w-full" disabled={registerMutation.isPending || waLoading}>
-              {(registerMutation.isPending || waLoading)
-                ? "Mendaftarkan..."
-                : sourceWA ? "Daftar Sekarang 🚀" : t("Daftar Sekarang", "Register Now")}
-            </Button>
-          </form>
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full gap-2"
+                onClick={handleGoogleSignIn}
+                disabled={googleLoading || googleMutation.isPending}
+              >
+                <FcGoogle size={18} />
+                {googleLoading || googleMutation.isPending
+                  ? t("Memproses...", "Processing...")
+                  : t("Daftar dengan Google", "Sign up with Google")}
+              </Button>
+            </>
+          )}
 
           {!sourceWA && (
             <div className="text-center text-sm text-muted-foreground">
