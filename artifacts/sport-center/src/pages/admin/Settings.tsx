@@ -101,6 +101,10 @@ export default function AdminSettings() {
     centerName: "", address: "", phone: "", whatsapp: "", email: "",
     openHour: "", closeHour: "", logoUrl: "", bankName: "", bankAccount: "", bankAccountName: "",
   });
+  const [waForm, setWaForm] = useState({
+    fonnteToken: "", fonnteAdminWa: "", adminWaPhones: "", appUrl: "",
+  });
+  const [showToken, setShowToken] = useState(false);
   const [qrisPreview, setQrisPreview] = useState<string | null>(null);
   const [qrisUploading, setQrisUploading] = useState(false);
   const [qrisDeleting, setQrisDeleting] = useState(false);
@@ -120,6 +124,12 @@ export default function AdminSettings() {
         bankAccount: settings.bankAccount ?? "",
         bankAccountName: settings.bankAccountName ?? "",
       });
+      setWaForm({
+        fonnteToken: (settings as any).fonnteToken ?? "",
+        fonnteAdminWa: (settings as any).fonnteAdminWa ?? "",
+        adminWaPhones: (settings as any).adminWaPhones ?? "",
+        appUrl: (settings as any).appUrl ?? "",
+      });
       setQrisPreview((settings as any).qrisImageUrl ?? null);
     }
   }, [settings]);
@@ -137,6 +147,13 @@ export default function AdminSettings() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const payload: any = { ...form };
+    Object.keys(payload).forEach(k => { if (!payload[k]) delete payload[k]; });
+    updateMutation.mutate({ data: payload });
+  };
+
+  const handleWaSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const payload: any = { ...waForm };
     Object.keys(payload).forEach(k => { if (!payload[k]) delete payload[k]; });
     updateMutation.mutate({ data: payload });
   };
@@ -271,6 +288,125 @@ export default function AdminSettings() {
       </form>
 
       <ApDiscountCard />
+
+      {/* ─── WhatsApp Notification Settings ─────────────────────── */}
+      <form onSubmit={handleWaSubmit}>
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex items-start justify-between flex-wrap gap-2">
+              <div>
+                <CardTitle className="text-base font-bold flex items-center gap-2">
+                  <MessageCircle size={18} className="text-green-600" />
+                  Pengaturan Notifikasi WhatsApp (Fonnte)
+                </CardTitle>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Konfigurasi token Fonnte dan nomor admin penerima notifikasi otomatis.
+                  Jika kosong, sistem pakai nilai dari environment variable.
+                </p>
+              </div>
+              {(settings as any)?.fonnteToken ? (
+                <Badge className="bg-green-100 text-green-700 border-green-200 flex items-center gap-1">
+                  <CheckCircle2 size={12} /> Token Terkonfigurasi
+                </Badge>
+              ) : (
+                <Badge variant="outline" className="text-yellow-700 border-yellow-300 bg-yellow-50 flex items-center gap-1">
+                  <AlertCircle size={12} /> Pakai Env Variable
+                </Badge>
+              )}
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid md:grid-cols-2 gap-4">
+              <div className="md:col-span-2 space-y-2">
+                <Label>Fonnte API Token</Label>
+                <div className="relative">
+                  <Input
+                    type={showToken ? "text" : "password"}
+                    value={waForm.fonnteToken}
+                    onChange={(e) => setWaForm(f => ({ ...f, fonnteToken: e.target.value }))}
+                    placeholder="Token dari dashboard.fonnte.com"
+                    className="pr-10 font-mono text-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowToken(v => !v)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  >
+                    {showToken ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Dapatkan token di{" "}
+                  <a href="https://fonnte.com" target="_blank" rel="noreferrer" className="text-primary underline">
+                    fonnte.com
+                  </a>
+                  . Token digunakan untuk mengirim pesan WA ke customer dan admin.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Nomor WA Admin Utama</Label>
+                <Input
+                  value={waForm.fonnteAdminWa}
+                  onChange={(e) => setWaForm(f => ({ ...f, fonnteAdminWa: e.target.value }))}
+                  placeholder="628123456789 (tanpa + atau spasi)"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Nomor admin utama penerima notifikasi (jika kolom bawah kosong).
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Nomor Admin Tambahan</Label>
+                <Input
+                  value={waForm.adminWaPhones}
+                  onChange={(e) => setWaForm(f => ({ ...f, adminWaPhones: e.target.value }))}
+                  placeholder="6281234,6289876 (pisahkan dengan koma)"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Semua nomor ini akan menerima notifikasi admin (booking baru, bukti bayar, dll).
+                </p>
+              </div>
+
+              <div className="md:col-span-2 space-y-2">
+                <Label>URL Aplikasi (untuk link di notifikasi)</Label>
+                <Input
+                  value={waForm.appUrl}
+                  onChange={(e) => setWaForm(f => ({ ...f, appUrl: e.target.value }))}
+                  placeholder="https://sportcenter.travelintrips.co.id"
+                />
+                <p className="text-xs text-muted-foreground">
+                  URL ini digunakan sebagai base link di pesan WA (status booking, upload bukti, dll).
+                </p>
+              </div>
+            </div>
+
+            <div className="rounded-lg bg-muted/50 border p-3 text-xs text-muted-foreground space-y-1">
+              <p className="font-semibold text-foreground">📋 Notifikasi yang dikirim otomatis:</p>
+              <ul className="space-y-0.5 list-disc list-inside">
+                <li>Booking baru dibuat → customer + admin</li>
+                <li>Bukti pembayaran diupload → admin</li>
+                <li>Pembayaran dikonfirmasi → customer</li>
+                <li>Booking dibatalkan / expired → customer + admin</li>
+                <li>Reminder H-1 bermain → customer</li>
+              </ul>
+              <p className="mt-2">
+                Edit isi pesan di halaman{" "}
+                <a href="/admin/notifications" className="text-primary underline font-medium">
+                  Template Notifikasi
+                </a>.
+              </p>
+            </div>
+
+            <div className="flex justify-end">
+              <Button type="submit" disabled={updateMutation.isPending}>
+                <Save size={16} className="mr-2" />
+                {updateMutation.isPending ? "Menyimpan..." : "Simpan Pengaturan WA"}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </form>
 
       <Card>
         <CardHeader className="pb-3">
