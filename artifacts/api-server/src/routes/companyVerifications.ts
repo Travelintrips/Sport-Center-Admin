@@ -78,6 +78,15 @@ router.get("/company-verifications", adminMiddleware, async (req, res) => {
     const allUsers = await db.select({ id: usersTable.id, name: usersTable.name, email: usersTable.email, phone: usersTable.phone, companyName: usersTable.companyName }).from(usersTable);
     const userMap = Object.fromEntries(allUsers.map((u) => [u.id, u]));
 
+    // Enrich with company_user billing status for approved verifications
+    const companyUserIds = verifications.filter((v) => v.companyUserId).map((v) => v.companyUserId!);
+    let companyUserMap: Record<number, { corporateBillingEnabled: boolean }> = {};
+    if (companyUserIds.length > 0) {
+      const cuRows = await db.select({ id: companyUsersTable.id, corporateBillingEnabled: companyUsersTable.corporateBillingEnabled })
+        .from(companyUsersTable);
+      companyUserMap = Object.fromEntries(cuRows.map((cu) => [cu.id, cu]));
+    }
+
     const result = verifications.map((v) => ({
       ...v,
       customerName: userMap[v.customerId]?.name ?? "",
@@ -85,6 +94,7 @@ router.get("/company-verifications", adminMiddleware, async (req, res) => {
       customerPhone: userMap[v.customerId]?.phone ?? "",
       companyName: userMap[v.companyId]?.companyName ?? userMap[v.companyId]?.name ?? "",
       approvedByName: v.approvedBy ? (userMap[v.approvedBy]?.name ?? "") : null,
+      corporateBillingEnabled: v.companyUserId ? (companyUserMap[v.companyUserId]?.corporateBillingEnabled ?? false) : false,
     }));
 
     res.json(result);
@@ -466,11 +476,20 @@ router.get("/company-users/by-company/:companyId", adminMiddleware, async (req, 
       .from(usersTable);
     const userMap = Object.fromEntries(allUsers.map((u) => [u.id, u]));
 
+    // Fetch verification ID for each member (needed for revoke action)
+    const allVerifications = await db.select({ id: companyVerificationsTable.id, companyUserId: companyVerificationsTable.companyUserId, status: companyVerificationsTable.status })
+      .from(companyVerificationsTable)
+      .where(eq(companyVerificationsTable.companyId, companyId));
+    const verifByCompanyUser = Object.fromEntries(
+      allVerifications.filter((v) => v.companyUserId && v.status === "approved").map((v) => [v.companyUserId!, v.id])
+    );
+
     const result = members.map((m) => ({
       ...m,
       customerName: userMap[m.customerId]?.name ?? "",
       customerEmail: userMap[m.customerId]?.email ?? "",
       customerPhone: userMap[m.customerId]?.phone ?? "",
+      verificationId: verifByCompanyUser[m.id] ?? null,
     }));
 
     res.json(result);

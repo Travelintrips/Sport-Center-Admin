@@ -464,7 +464,7 @@ export default function MyProfile() {
               ) : (
                 <Input
                   type="file"
-                  accept="image/*,application/pdf"
+                  accept="image/*"
                   className="cursor-pointer"
                   onChange={(e) => {
                     const f = e.target.files?.[0];

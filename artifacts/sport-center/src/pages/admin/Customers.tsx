@@ -39,7 +39,7 @@ function SourceBadge({ source }: { source?: string }) {
   return <Badge variant="secondary" className="gap-1 bg-blue-100 text-blue-700 border-blue-200 text-xs"><Globe size={10} /> Web</Badge>;
 }
 
-type CompanyUserRow = { id: number; customerId: number; companyId: number; employeeId: string; officeEmail: string | null; verificationStatus: string; corporateBillingEnabled: boolean; customerName: string; customerEmail: string };
+type CompanyUserRow = { id: number; customerId: number; companyId: number; employeeId: string; officeEmail: string | null; verificationStatus: string; corporateBillingEnabled: boolean; customerName: string; customerEmail: string; verificationId: number | null };
 
 function CompanyMembersPanel({ companyId }: { companyId: number }) {
   const { toast } = useToast();
@@ -72,6 +72,24 @@ function CompanyMembersPanel({ companyId }: { companyId: number }) {
     onError: () => toast({ title: "Gagal mengubah status billing", variant: "destructive" }),
   });
 
+  const revokeMutation = useMutation({
+    mutationFn: async ({ verificationId }: { verificationId: number }) => {
+      const token = getToken();
+      const res = await fetch(`/api/company-verifications/${verificationId}/revoke`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({}),
+      });
+      if (!res.ok) throw new Error("Gagal mencabut akses");
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Akses karyawan dicabut" });
+      qc.invalidateQueries({ queryKey: ["company-users", companyId] });
+    },
+    onError: () => toast({ title: "Gagal mencabut akses", variant: "destructive" }),
+  });
+
   if (isLoading) return <Skeleton className="h-20" />;
   if (!members?.length) return <div className="text-sm text-muted-foreground text-center py-3 border rounded-lg">Belum ada karyawan terverifikasi</div>;
 
@@ -79,7 +97,7 @@ function CompanyMembersPanel({ companyId }: { companyId: number }) {
     <div className="space-y-2">
       {members.map((m) => (
         <div key={m.id} className="flex items-center justify-between p-2.5 rounded-lg border bg-muted/20 text-sm gap-2">
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <div className="font-medium truncate">{m.customerName}</div>
             <div className="text-xs text-muted-foreground">{m.customerEmail} · ID: <span className="font-mono">{m.employeeId}</span></div>
           </div>
@@ -87,9 +105,20 @@ function CompanyMembersPanel({ companyId }: { companyId: number }) {
             <span className="text-xs text-muted-foreground">Billing</span>
             <Switch
               checked={m.corporateBillingEnabled}
-              disabled={toggleMutation.isPending}
+              disabled={toggleMutation.isPending || revokeMutation.isPending}
               onCheckedChange={(v) => toggleMutation.mutate({ id: m.id, enabled: v })}
             />
+            {m.verificationId && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 px-2 text-xs text-red-600 hover:text-red-700 hover:bg-red-50"
+                disabled={revokeMutation.isPending}
+                onClick={() => m.verificationId && revokeMutation.mutate({ verificationId: m.verificationId })}
+              >
+                Cabut
+              </Button>
+            )}
           </div>
         </div>
       ))}
@@ -97,9 +126,11 @@ function CompanyMembersPanel({ companyId }: { companyId: number }) {
   );
 }
 
-type MyVerifRow = { id: number; companyId: number; companyName: string; employeeId: string; status: string; requestedAt: string; rejectionReason: string | null };
+type MyVerifRow = { id: number; companyId: number; companyUserId: number | null; companyName: string; employeeId: string; status: string; requestedAt: string; rejectionReason: string | null; corporateBillingEnabled: boolean };
 
 function PersonalCompanyPanel({ customerId }: { customerId: number }) {
+  const { toast } = useToast();
+  const qc = useQueryClient();
   const { data, isLoading } = useQuery<MyVerifRow[]>({
     queryKey: ["customer-verifications", customerId],
     queryFn: async () => {
@@ -108,6 +139,24 @@ function PersonalCompanyPanel({ customerId }: { customerId: number }) {
       if (!res.ok) return [];
       return res.json();
     },
+  });
+
+  const toggleMutation = useMutation({
+    mutationFn: async ({ companyUserId, enabled }: { companyUserId: number; enabled: boolean }) => {
+      const token = getToken();
+      const res = await fetch(`/api/company-users/${companyUserId}/toggle-billing`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ enabled }),
+      });
+      if (!res.ok) throw new Error("Gagal mengubah status");
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Status billing diperbarui" });
+      qc.invalidateQueries({ queryKey: ["customer-verifications", customerId] });
+    },
+    onError: () => toast({ title: "Gagal", variant: "destructive" }),
   });
 
   const STATUS_COLORS_V: Record<string, string> = {
@@ -122,15 +171,34 @@ function PersonalCompanyPanel({ customerId }: { customerId: number }) {
   if (!data?.length) return <div className="text-xs text-muted-foreground text-center py-2 border rounded-lg">Belum terhubung ke perusahaan</div>;
 
   return (
-    <div className="space-y-1.5">
+    <div className="space-y-2">
       {data.map((v) => (
-        <div key={v.id} className="flex items-center justify-between p-2 rounded-lg border text-xs gap-2">
-          <div className="flex items-center gap-2 min-w-0">
-            <Building2 size={12} className="text-primary shrink-0" />
-            <span className="font-medium truncate">{v.companyName}</span>
-            <span className="text-muted-foreground font-mono">{v.employeeId}</span>
+        <div key={v.id} className="p-2.5 rounded-lg border text-xs space-y-1.5">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <Building2 size={12} className="text-primary shrink-0" />
+              <span className="font-medium truncate">{v.companyName}</span>
+              <span className="text-muted-foreground font-mono">{v.employeeId}</span>
+            </div>
+            <Badge variant="secondary" className={`text-xs shrink-0 ${STATUS_COLORS_V[v.status] ?? ""}`}>{STATUS_LABELS_V[v.status] ?? v.status}</Badge>
           </div>
-          <Badge variant="secondary" className={`text-xs shrink-0 ${STATUS_COLORS_V[v.status] ?? ""}`}>{STATUS_LABELS_V[v.status] ?? v.status}</Badge>
+          {v.status === "approved" && v.companyUserId && (
+            <div className="flex items-center justify-between pt-0.5 border-t">
+              <span className="text-muted-foreground">Tagihan Perusahaan</span>
+              <div className="flex items-center gap-2">
+                <span className={v.corporateBillingEnabled ? "text-green-600 font-medium" : "text-muted-foreground"}>
+                  {v.corporateBillingEnabled ? "Aktif" : "Nonaktif"}
+                </span>
+                <Switch
+                  checked={v.corporateBillingEnabled}
+                  disabled={toggleMutation.isPending}
+                  onCheckedChange={(enabled) => toggleMutation.mutate({ companyUserId: v.companyUserId!, enabled })}
+                  className="scale-75"
+                />
+              </div>
+            </div>
+          )}
+          {v.rejectionReason && <div className="text-red-600">Alasan: {v.rejectionReason}</div>}
         </div>
       ))}
     </div>
