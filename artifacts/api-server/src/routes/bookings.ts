@@ -128,21 +128,19 @@ router.post("/bookings", async (req, res) => {
     // Deteksi user yang sedang login (opsional — tidak wajib)
     let loggedInUserId: number | null = null;
     let loggedInUser: (typeof usersTable.$inferSelect) | null = null;
+    let loggedInRole: string | null = null;
     const authHeader = req.headers.authorization;
     if (authHeader?.startsWith("Bearer ")) {
       const payload = verifyToken(authHeader.slice(7));
-      if (payload?.userId && payload.role === "customer") {
+      if (payload?.userId) {
         loggedInUserId = payload.userId;
+        loggedInRole = payload.role ?? null;
         const [u] = await db.select().from(usersTable).where(eq(usersTable.id, payload.userId)).limit(1);
         if (u) loggedInUser = u;
       }
     }
     // Deteksi apakah request berasal dari admin (role selain customer)
-    let isAdminRequest = false;
-    if (authHeader?.startsWith("Bearer ")) {
-      const p = verifyToken(authHeader.slice(7));
-      if (p && p.role !== "customer") { isAdminRequest = true; }
-    }
+    const isAdminRequest = !!loggedInRole && loggedInRole !== "customer";
 
     // Deteksi apakah company customer dengan tagihan bulanan
     // Prioritas 1: explicit companyCustomerId di body — HANYA boleh dari admin
