@@ -135,11 +135,12 @@ router.get("/admin/reports/export", adminMiddleware, async (req, res) => {
     if (startDate) bookings = bookings.filter((b) => b.bookingDate >= (startDate as string));
     if (endDate) bookings = bookings.filter((b) => b.bookingDate <= (endDate as string));
 
-    const header = "Order Number,Customer,Email,Phone,Facility,Date,Start,End,Duration,Base Price,Discount,Total Price,Status,Customer Type,Created At\n";
+    const header = "Order Number,Customer,Email,Phone,Facility,Date,Start,End,Duration,Base Price,Discount,DPP (Total Price),PPN Rate (%),PPN Amount,Grand Total,Status,Customer Type,Created At\n";
     const rows = bookings.map((b) => [
       b.orderNumber, b.customerName, b.customerEmail, b.customerPhone,
       facilityMap[b.facilityId] ?? "", b.bookingDate, b.startTime, b.endTime,
       b.durationHours, b.basePrice ?? b.totalPrice, b.discountAmount, b.totalPrice,
+      b.ppnRate ?? "", b.ppnAmount ?? "", b.grandTotal ?? b.totalPrice,
       b.status, b.customerType, new Date(b.createdAt).toISOString(),
     ].map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
 
