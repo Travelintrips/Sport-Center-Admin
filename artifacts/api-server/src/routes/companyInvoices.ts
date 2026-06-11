@@ -113,15 +113,21 @@ router.get("/company-invoices/preview", adminMiddleware, async (req, res) => {
       durationHours: b.durationHours,
       customerName: b.customerName,
       totalPrice: Number(b.totalPrice),
+      ppnAmount: b.ppnAmount == null ? null : Number(b.ppnAmount),
+      grandTotal: b.grandTotal == null ? null : Number(b.grandTotal),
     }));
 
     const subtotal = bookingList.reduce((s, b) => s + b.totalPrice, 0);
+    const ppnAmount = bookingList.reduce((s, b) => s + (b.ppnAmount ?? 0), 0);
+    const grandTotal = subtotal + ppnAmount;
     res.json({
       companyName: company.companyName ?? company.name,
       picName: company.picName,
       periodMonth: String(periodMonth),
       bookingCount: bookingList.length,
       subtotal,
+      ppnAmount,
+      grandTotal,
       bookings: bookingList,
     });
   } catch (err) {
@@ -159,8 +165,8 @@ async function handleGenerateInvoice(req: any, res: any) {
     );
 
     const totalAmount = companyBookings.reduce((sum, b) => sum + Number(b.totalPrice), 0);
-    // PPN optional — only applied when includePpn is explicitly true
-    const ppnAmount = includePpn === true ? Math.round(totalAmount * 0.11) : 0;
+    // PPN diambil dari nilai tersimpan per booking (sudah dihitung saat booking dibuat)
+    const ppnAmount = companyBookings.reduce((sum, b) => sum + Number(b.ppnAmount ?? 0), 0);
     const grandTotal = totalAmount + ppnAmount;
 
     // Insert invoice first to get id

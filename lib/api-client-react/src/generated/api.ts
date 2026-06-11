@@ -50,6 +50,7 @@ import type {
   FacilityUpdate,
   GenerateInvoiceInput,
   GetReviewsParams,
+  GetTaxReportParams,
   GetVerificationLogsParams,
   GoogleLoginInput,
   GymMembership,
@@ -93,6 +94,7 @@ import type {
   SendOtpInput,
   Settings,
   SettingsUpdate,
+  TaxReport,
   Tenant,
   TenantBooking,
   TenantBookingInput,
@@ -4150,6 +4152,90 @@ export const useUpdateCompanyInvoice = <TError = ErrorType<unknown>,
       > => {
       return useMutation(getUpdateCompanyInvoiceMutationOptions(options));
     }
+
+export const getGetTaxReportUrl = (params?: GetTaxReportParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/admin/tax-report?${stringifiedParams}` : `/api/admin/tax-report`
+}
+
+/**
+ * @summary Laporan pajak PPN per periode
+ */
+export const getTaxReport = async (params?: GetTaxReportParams, options?: RequestInit): Promise<TaxReport> => {
+
+  return customFetch<TaxReport>(getGetTaxReportUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetTaxReportQueryKey = (params?: GetTaxReportParams,) => {
+    return [
+    `/api/admin/tax-report`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetTaxReportQueryOptions = <TData = Awaited<ReturnType<typeof getTaxReport>>, TError = ErrorType<unknown>>(params?: GetTaxReportParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getTaxReport>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetTaxReportQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getTaxReport>>> = ({ signal }) => getTaxReport(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getTaxReport>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetTaxReportQueryResult = NonNullable<Awaited<ReturnType<typeof getTaxReport>>>
+export type GetTaxReportQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Laporan pajak PPN per periode
+ */
+
+export function useGetTaxReport<TData = Awaited<ReturnType<typeof getTaxReport>>, TError = ErrorType<unknown>>(
+ params?: GetTaxReportParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getTaxReport>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetTaxReportQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
 
 export const getGetDashboardUrl = () => {
 

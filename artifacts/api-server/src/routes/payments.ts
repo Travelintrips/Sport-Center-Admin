@@ -9,6 +9,8 @@ import { notifyPaymentConfirmed, notifyPaymentProofUploaded } from "../lib/notif
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
 import { syncStatusToBizportal } from "../lib/bizportalSync";
 import { BUCKETS, uploadToStorage } from "../lib/supabaseStorage";
+import { createJournalEntry, reverseJournalEntry } from "../lib/accounting";
+import { recordTaxTransaction, reverseTaxTransaction, calculateTax } from "../lib/tax";
 
 const router = Router();
 
@@ -164,6 +166,21 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
           totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
         });
         syncStatusToBizportal(booking.orderNumber, "confirmed", payment.proofUrl, new Date()).catch(() => {});
+
+        // FASE 4 & 5: Catat tax transaction (jika belum ada) + buat jurnal akuntansi
+        const today = new Date().toISOString().split("T")[0];
+        const subtotal = Number(booking.totalPrice);
+        const ppnAmount = booking.ppnAmount != null ? Number(booking.ppnAmount) : 0;
+        const grandTotal = booking.grandTotal != null ? Number(booking.grandTotal) : subtotal + ppnAmount;
+
+        // Buat jurnal akuntansi (non-blocking)
+        createJournalEntry(
+          booking.id,
+          booking.orderNumber,
+          subtotal,
+          ppnAmount,
+          today
+        ).catch(() => {});
       }
     } else if (status === "rejected") {
       const prevStatus = booking?.status ?? "waiting_confirmation";

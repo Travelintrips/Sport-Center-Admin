@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useGetSettings, useUpdateSettings, getGetSettingsQueryKey, useListDiscountSettings, useUpdateDiscountSetting, getListDiscountSettingsQueryKey } from "@workspace/api-client-react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,7 +9,7 @@ import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { Save, Upload, Trash2, QrCode, ImageIcon, Plane, MessageCircle, Eye, EyeOff, CheckCircle2, AlertCircle } from "lucide-react";
+import { Save, Upload, Trash2, QrCode, ImageIcon, Plane, MessageCircle, Eye, EyeOff, CheckCircle2, AlertCircle, Receipt } from "lucide-react";
 import { getToken } from "@/lib/auth";
 
 function ApDiscountCard() {
@@ -83,6 +83,180 @@ function ApDiscountCard() {
               {updateMutation.isPending ? "Menyimpan..." : "Simpan"}
             </Button>
           </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+interface PpnConfig {
+  enabled: boolean;
+  taxRate: number;
+  taxCode: string;
+  taxName: string;
+  effectiveDate: string | null;
+}
+
+const PPN_CONFIG_KEY = ["admin", "tax-config", "ppn"];
+
+async function fetchPpnConfig(token: string | null): Promise<PpnConfig> {
+  const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+  const res = await fetch(`${BASE}/api/admin/tax-config/ppn`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) throw new Error("Gagal memuat konfigurasi PPN");
+  return res.json();
+}
+
+async function patchPpnConfig(
+  token: string | null,
+  patch: Partial<{ enabled: boolean; taxRate: number; effectiveDate: string | null }>
+): Promise<PpnConfig> {
+  const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+  const res = await fetch(`${BASE}/api/admin/tax-config/ppn`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err as any).error ?? "Gagal menyimpan konfigurasi PPN");
+  }
+  return res.json();
+}
+
+function PpnSettingsCard() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const token = getToken();
+
+  const { data: cfg, isLoading } = useQuery<PpnConfig>({
+    queryKey: PPN_CONFIG_KEY,
+    queryFn: () => fetchPpnConfig(token),
+  });
+
+  const [enabled, setEnabled] = useState(true);
+  const [taxRate, setTaxRate] = useState("11");
+  const [effectiveDate, setEffectiveDate] = useState("");
+
+  useEffect(() => {
+    if (cfg) {
+      setEnabled(cfg.enabled);
+      setTaxRate(String(cfg.taxRate));
+      setEffectiveDate(cfg.effectiveDate ?? "");
+    }
+  }, [cfg]);
+
+  const mutation = useMutation<PpnConfig, Error, Partial<{ enabled: boolean; taxRate: number; effectiveDate: string | null }>>({
+    mutationFn: (patch) => patchPpnConfig(token, patch),
+    onSuccess: (data) => {
+      queryClient.setQueryData(PPN_CONFIG_KEY, data);
+      toast({ title: "Konfigurasi PPN disimpan" });
+    },
+    onError: (e) => toast({ title: e.message, variant: "destructive" }),
+  });
+
+  const handleSave = () => {
+    const rate = Number(taxRate);
+    if (Number.isNaN(rate) || rate < 0 || rate > 100) {
+      toast({ title: "Tarif PPN harus 0–100", variant: "destructive" });
+      return;
+    }
+    const dateVal = effectiveDate.trim() || null;
+    if (dateVal && !/^\d{4}-\d{2}-\d{2}$/.test(dateVal)) {
+      toast({ title: "Format tanggal harus YYYY-MM-DD", variant: "destructive" });
+      return;
+    }
+    mutation.mutate({ enabled, taxRate: rate, effectiveDate: dateVal });
+  };
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base font-bold flex items-center gap-2">
+          <Receipt size={18} className="text-orange-500" />
+          Pengaturan PPN (Pajak Pertambahan Nilai)
+        </CardTitle>
+        <p className="text-xs text-muted-foreground mt-1">
+          PPN 11% wajib dikenakan pada booking Sport Center. Data lama tidak diubah otomatis — hanya booking
+          pada/setelah tanggal berlaku yang dikenai PPN.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        {isLoading ? (
+          <Skeleton className="h-24 w-full" />
+        ) : (
+          <>
+            <div className="flex items-center justify-between rounded-lg border p-3">
+              <div>
+                <p className="text-sm font-medium">PPN Aktif</p>
+                <p className="text-xs text-muted-foreground">
+                  Jika dinonaktifkan, tidak ada PPN pada booking baru.
+                </p>
+              </div>
+              <Switch checked={enabled} onCheckedChange={setEnabled} />
+            </div>
+
+            <div className="grid sm:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Tarif PPN (%)</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  max={100}
+                  step={0.01}
+                  value={taxRate}
+                  onChange={(e) => setTaxRate(e.target.value)}
+                  placeholder="11"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Saat ini: <span className="font-semibold">{cfg?.taxRate ?? 11}%</span>
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Tanggal Berlaku (Effective Date)</Label>
+                <Input
+                  type="date"
+                  value={effectiveDate}
+                  onChange={(e) => setEffectiveDate(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  {effectiveDate
+                    ? <>Booking sebelum <span className="font-semibold">{effectiveDate}</span> tidak kena PPN.</>
+                    : "Kosongkan = PPN berlaku untuk semua booking baru."}
+                </p>
+              </div>
+            </div>
+
+            <div className="rounded-lg bg-orange-50 border border-orange-200 p-3 text-xs text-orange-800 space-y-1">
+              <p className="font-semibold">⚠️ Backward Compatibility</p>
+              <ul className="list-disc list-inside space-y-0.5">
+                <li>Data booking lama <strong>tidak diubah</strong> — nilai historis tetap terjaga.</li>
+                <li>Booking baru pada/setelah tanggal berlaku wajib PPN {cfg?.taxRate ?? 11}%.</li>
+                <li>Booking berulang (recurring) dihitung per-tanggal secara individual.</li>
+                <li>Refund membalik jurnal PPN secara otomatis.</li>
+              </ul>
+            </div>
+
+            <div className="flex justify-between items-center">
+              <div className="text-xs text-muted-foreground">
+                Kode pajak: <span className="font-mono font-semibold">{cfg?.taxCode ?? "PPN_OUT_11"}</span>
+                {cfg?.effectiveDate && (
+                  <span className="ml-3 inline-flex items-center gap-1 text-orange-700">
+                    Berlaku mulai: <strong>{cfg.effectiveDate}</strong>
+                  </span>
+                )}
+              </div>
+              <Button onClick={handleSave} disabled={mutation.isPending}>
+                <Save size={16} className="mr-2" />
+                {mutation.isPending ? "Menyimpan..." : "Simpan PPN"}
+              </Button>
+            </div>
+          </>
         )}
       </CardContent>
     </Card>
@@ -288,6 +462,8 @@ export default function AdminSettings() {
       </form>
 
       <ApDiscountCard />
+
+      <PpnSettingsCard />
 
       {/* ─── WhatsApp Notification Settings ─────────────────────── */}
       <form onSubmit={handleWaSubmit}>

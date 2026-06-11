@@ -37,6 +37,8 @@ tags:
     description: Gym monthly membership management
   - name: tenants
     description: Tenant (Penyewa Tenan) management
+  - name: tax
+    description: Tax settings and tax reporting (PPN)
 paths:
   /healthz:
     get:
@@ -1140,6 +1142,36 @@ paths:
               schema:
                 $ref: "#/components/schemas/CompanyInvoice"
 
+  /admin/tax-report:
+    get:
+      operationId: getTaxReport
+      tags: [tax]
+      summary: Laporan pajak PPN per periode
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: startDate
+          in: query
+          schema:
+            type: string
+        - name: endDate
+          in: query
+          schema:
+            type: string
+        - name: groupBy
+          in: query
+          schema:
+            type: string
+            enum: [day, month, year]
+            default: month
+      responses:
+        "200":
+          description: Tax report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaxReport"
+
   /admin/dashboard:
     get:
       operationId: getDashboard
@@ -2150,6 +2182,12 @@ components:
           type: ["string", "null"]
         paymentDeadline:
           type: ["string", "null"]
+        ppnRate:
+          type: ["number", "null"]
+        ppnAmount:
+          type: ["number", "null"]
+        grandTotal:
+          type: ["number", "null"]
         payment:
           $ref: "#/components/schemas/Payment"
           nullable: true
@@ -3333,6 +3371,70 @@ components:
           type: string
         employeeId:
           type: string
+    TaxTransaction:
+      type: object
+      required: [id, referenceType, referenceId, referenceNumber, taxCode, taxRate, dpp, taxAmount, transactionDate, createdAt]
+      properties:
+        id:
+          type: integer
+        referenceType:
+          type: string
+        referenceId:
+          type: integer
+        referenceNumber:
+          type: string
+        taxCode:
+          type: string
+        taxRate:
+          type: number
+        dpp:
+          type: number
+        taxAmount:
+          type: number
+        transactionDate:
+          type: string
+        createdAt:
+          type: string
+
+    TaxPeriodSummary:
+      type: object
+      required: [period, dpp, taxAmount, grandTotal, count]
+      properties:
+        period:
+          type: string
+        dpp:
+          type: number
+        taxAmount:
+          type: number
+        grandTotal:
+          type: number
+        count:
+          type: integer
+
+    TaxReport:
+      type: object
+      required: [summary, byPeriod, transactions]
+      properties:
+        summary:
+          type: object
+          required: [totalDpp, totalTaxAmount, totalGrandTotal, totalTransactions]
+          properties:
+            totalDpp:
+              type: number
+            totalTaxAmount:
+              type: number
+            totalGrandTotal:
+              type: number
+            totalTransactions:
+              type: integer
+        byPeriod:
+          type: array
+          items:
+            $ref: "#/components/schemas/TaxPeriodSummary"
+        transactions:
+          type: array
+          items:
+            $ref: "#/components/schemas/TaxTransaction"
 
     ErrorEnvelope:
       type: object

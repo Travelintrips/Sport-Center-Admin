@@ -189,10 +189,27 @@ export default function WaBookingForm() {
                 <span className="text-gray-500">Jam</span>
                 <span className="font-semibold">{result.startTime} – {result.endTime}</span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-gray-500">Total</span>
-                <span className="font-bold text-orange-600">Rp {result.totalPrice.toLocaleString("id-ID")}</span>
-              </div>
+              {(result as any).ppnAmount != null && Number((result as any).ppnAmount) > 0 ? (
+                <>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Subtotal (DPP)</span>
+                    <span className="font-semibold">Rp {result.totalPrice.toLocaleString("id-ID")}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">PPN {Number((result as any).ppnRate ?? 11)}%</span>
+                    <span className="text-orange-500 font-semibold">+Rp {Number((result as any).ppnAmount).toLocaleString("id-ID")}</span>
+                  </div>
+                  <div className="flex justify-between border-t border-gray-200 pt-1.5">
+                    <span className="font-bold text-gray-700">Grand Total</span>
+                    <span className="font-black text-orange-600">Rp {Number((result as any).grandTotal).toLocaleString("id-ID")}</span>
+                  </div>
+                </>
+              ) : (
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Total</span>
+                  <span className="font-bold text-orange-600">Rp {result.totalPrice.toLocaleString("id-ID")}</span>
+                </div>
+              )}
             </div>
 
             <p className="text-sm text-gray-600 text-center">
@@ -348,15 +365,23 @@ export default function WaBookingForm() {
           {/* Price summary */}
           {form.startTime && (
             <Card className="border-orange-200 bg-orange-50">
-              <CardContent className="pt-4 pb-3">
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-700 font-semibold">Total Harga</span>
+              <CardContent className="pt-4 pb-3 space-y-1.5">
+                <div className="flex justify-between items-center text-sm">
+                  <span className="text-gray-600">Subtotal (DPP)</span>
+                  <span className="font-semibold text-gray-800">Rp {totalPrice.toLocaleString("id-ID")}</span>
+                </div>
+                <div className="flex justify-between items-center text-sm">
+                  <span className="text-gray-600">PPN 11%</span>
+                  <span className="text-orange-500 font-semibold">+Rp {Math.round(totalPrice * 0.11).toLocaleString("id-ID")}</span>
+                </div>
+                <div className="flex justify-between items-center border-t border-orange-200 pt-1.5">
+                  <span className="text-gray-700 font-bold">Grand Total</span>
                   <span className="text-orange-600 font-black text-xl">
-                    Rp {totalPrice.toLocaleString("id-ID")}
+                    Rp {Math.round(totalPrice * 1.11).toLocaleString("id-ID")}
                   </span>
                 </div>
-                <p className="text-xs text-gray-500 mt-1">
-                  {facility?.pricePerHour.toLocaleString("id-ID")}/jam × {form.durationHours} jam
+                <p className="text-xs text-gray-500">
+                  {facility?.pricePerHour.toLocaleString("id-ID")}/jam × {form.durationHours} jam (incl. PPN 11%)
                 </p>
               </CardContent>
             </Card>

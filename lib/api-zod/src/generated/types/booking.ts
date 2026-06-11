@@ -50,6 +50,12 @@ export interface Booking {
   completedAt?: string | null;
   /** @nullable */
   paymentDeadline?: string | null;
+  /** @nullable */
+  ppnRate?: number | null;
+  /** @nullable */
+  ppnAmount?: number | null;
+  /** @nullable */
+  grandTotal?: number | null;
   payment?: Payment | null;
   createdAt?: string;
 }

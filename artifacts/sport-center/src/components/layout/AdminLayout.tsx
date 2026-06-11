@@ -24,6 +24,7 @@ import {
   Bell,
   RefreshCw,
   Building2,
+  Receipt,
 } from "lucide-react";
 import { useGetMe, useLogout, getGetMeQueryKey } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -67,6 +68,7 @@ const NAV_GROUPS = [
     label: "Laporan & Sistem",
     items: [
       { href: "/admin/reports", label: "Laporan Keuangan", icon: TrendingUp },
+      { href: "/admin/tax-report", label: "Laporan Pajak PPN", icon: Receipt },
       { href: "/admin/notification-templates", label: "Notifikasi WA", icon: Bell },
       { href: "/admin/audit-log", label: "Audit Log", icon: Shield },
       { href: "/admin/settings", label: "Pengaturan", icon: SettingsIcon },

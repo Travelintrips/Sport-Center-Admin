@@ -1,5 +1,4 @@
 uploads = []
-outputs = []
 
 [[generated]]
 id = "YDdMT_89l0u49cYH90Wua"
@@ -48,3 +47,9 @@ id = "JTbyYx_9iRTy5pwr4cJiJ"
 uri = "file://artifacts/sport-center/public/billiard.png"
 type = "image"
 title = "Billiard Lounge"
+
+[[outputs]]
+id = "o3MgcoDMRIvjCng4tY3fB"
+uri = "file://ACCOUNTING_AUDIT_REPORT.md"
+type = "text"
+title = "Accounting Audit Report — Sport Center"

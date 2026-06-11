@@ -8,3 +8,4 @@
 - [Local DB setup & env var scoping](local-db-setup.md) — Workflow uses DATABASE_URL (heliumdb), NOT Supabase; drizzle-kit push fails on existing enums; apply lib/db/drizzle/*.sql files manually.
 - [Admin login & SESSION_SECRET](admin-login-secret.md) — "Invalid credentials" w/ correct pw = admin hash seeded with a different SESSION_SECRET; dev & prod DBs seed admin independently, reseed the broken one.
 - [.replit merge corruption](dotreplit-merge-corruption.md) — GitHub merges from external repo duplicate `modules` keys → invalid TOML, blocks env/packager tools; agent cannot edit .replit; user must fix via GUI or rollback.
+- [PPN 11% Tax Engine](tax-engine.md) — Centralized tax calc in api-server/src/lib/tax.ts; bookings.ppnRate/ppnAmount/grandTotal nullable; old bookings untouched; tax_settings seeded with PPN_OUT_11 11%; tax_transactions ledger auto-records per booking.

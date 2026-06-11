@@ -4,10 +4,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useQuery } from "@tanstack/react-query";
 import { getToken } from "@/lib/auth";
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
-import { TrendingUp, Download, DollarSign, CalendarDays, CheckCircle, XCircle } from "lucide-react";
+import { TrendingUp, Download, DollarSign, CalendarDays, CheckCircle, Receipt, Users } from "lucide-react";
 
 const API = import.meta.env.VITE_API_BASE_URL ?? "/api";
 const authHeaders = () => ({ Authorization: `Bearer ${getToken()}` });
@@ -36,6 +37,12 @@ export default function AdminReports() {
     staleTime: 30000,
   });
 
+  const { data: taxData, isLoading: taxLoading } = useQuery({
+    queryKey: ["tax-report", startDate, endDate, groupBy],
+    queryFn: () => fetch(`${API}/admin/tax-report?startDate=${startDate}&endDate=${endDate}&groupBy=${groupBy}`, { headers: authHeaders() }).then(r => r.json()),
+    staleTime: 30000,
+  });
+
   function handleExport() {
     const url = `${API}/admin/reports/export?startDate=${startDate}&endDate=${endDate}`;
     const a = document.createElement("a");
@@ -46,22 +53,40 @@ export default function AdminReports() {
     a.remove();
   }
 
+  function handleTaxExport() {
+    const txs: any[] = taxData?.transactions ?? [];
+    if (!txs.length) return;
+    const header = "No,Nomor Referensi,Tipe,Kode Pajak,Tarif PPN,DPP,PPN,Tanggal Transaksi\n";
+    const rows = txs.map((t: any, i: number) =>
+      `${i + 1},${t.referenceNumber},${t.referenceType},${t.taxCode},${t.taxRate}%,${t.dpp},${t.taxAmount},${t.transactionDate}`
+    ).join("\n");
+    const blob = new Blob([header + rows], { type: "text/csv" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `laporan-pajak-${startDate}-${endDate}.csv`;
+    a.click();
+  }
+
   const summary = data?.summary ?? {};
+  const membershipSummary = data?.membershipSummary ?? {};
   const revenueData = data?.revenueByPeriod ?? [];
   const facilityData = data?.revenueByFacility ?? [];
   const statusData = (data?.revenueByStatus ?? []).filter((s: any) => s.count > 0);
+
+  const taxSummary = taxData?.summary ?? {};
+  const taxByPeriod: any[] = taxData?.byPeriod ?? [];
+  const taxTransactions: any[] = taxData?.transactions ?? [];
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-3xl font-black flex items-center gap-2"><TrendingUp size={28} /> Laporan Keuangan</h1>
-          <p className="text-muted-foreground mt-1">Analisis revenue dan performa booking</p>
+          <h1 className="text-3xl font-black flex items-center gap-2"><TrendingUp size={28} /> Laporan</h1>
+          <p className="text-muted-foreground mt-1">Laporan keuangan, revenue, dan perpajakan</p>
         </div>
-        <Button variant="outline" onClick={handleExport} className="gap-2"><Download size={16} /> Export CSV</Button>
       </div>
 
-      {/* Filters */}
+      {/* Filters — shared across tabs */}
       <Card>
         <CardContent className="pt-4 pb-4">
           <div className="flex gap-3 flex-wrap items-end">
@@ -99,10 +124,22 @@ export default function AdminReports() {
         </CardContent>
       </Card>
 
-      {isLoading ? (
-        <div className="text-center py-16 text-muted-foreground">Memuat laporan...</div>
-      ) : (
-        <>
+      <Tabs defaultValue="revenue">
+        <TabsList className="mb-2">
+          <TabsTrigger value="revenue" className="gap-2"><TrendingUp size={14} /> Laporan Keuangan</TabsTrigger>
+          <TabsTrigger value="tax" className="gap-2"><Receipt size={14} /> Laporan Pajak (PPN)</TabsTrigger>
+        </TabsList>
+
+        {/* ---- REVENUE TAB ---- */}
+        <TabsContent value="revenue" className="space-y-6 mt-0">
+          <div className="flex justify-end">
+            <Button variant="outline" onClick={handleExport} className="gap-2"><Download size={16} /> Export CSV</Button>
+          </div>
+
+          {isLoading ? (
+            <div className="text-center py-16 text-muted-foreground">Memuat laporan...</div>
+          ) : (
+            <>
           {/* Summary cards */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <Card>
@@ -112,6 +149,11 @@ export default function AdminReports() {
                   <div>
                     <div className="text-2xl font-black">{currency(summary.totalRevenue ?? 0)}</div>
                     <div className="text-xs text-muted-foreground">Total Revenue</div>
+                    {(summary.membershipRevenue ?? 0) > 0 && (
+                      <div className="text-[10px] text-purple-500 mt-0.5">
+                        termasuk member Rp {(summary.membershipRevenue ?? 0).toLocaleString("id-ID")}
+                      </div>
+                    )}
                   </div>
                 </div>
               </CardContent>
@@ -144,29 +186,67 @@ export default function AdminReports() {
                   <DollarSign className="text-orange-500" size={24} />
                   <div>
                     <div className="text-2xl font-black">{currency(summary.avgTicketSize ?? 0)}</div>
-                    <div className="text-xs text-muted-foreground">Avg Ticket Size</div>
+                    <div className="text-xs text-muted-foreground">Avg Ticket Booking</div>
                   </div>
                 </div>
               </CardContent>
             </Card>
           </div>
 
+          {/* Membership summary */}
+          {(membershipSummary.totalMemberships ?? 0) > 0 && (
+            <Card className="border-purple-200 dark:border-purple-800">
+              <CardContent className="pt-5 pb-5">
+                <div className="flex items-center gap-2 mb-4">
+                  <Users size={16} className="text-purple-500" />
+                  <span className="text-sm font-bold text-purple-700 dark:text-purple-300">Ringkasan Member Gym</span>
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <div className="rounded-lg bg-purple-50 dark:bg-purple-900/20 p-3">
+                    <div className="text-xl font-black text-purple-700 dark:text-purple-300">{currency(membershipSummary.membershipRevenue ?? 0)}</div>
+                    <div className="text-[10px] text-purple-500 font-semibold uppercase mt-0.5">Revenue Member</div>
+                  </div>
+                  <div className="rounded-lg bg-green-50 dark:bg-green-900/20 p-3">
+                    <div className="text-xl font-black text-green-700 dark:text-green-300">{membershipSummary.activeMemberships ?? 0}</div>
+                    <div className="text-[10px] text-green-500 font-semibold uppercase mt-0.5">Aktif</div>
+                  </div>
+                  <div className="rounded-lg bg-amber-50 dark:bg-amber-900/20 p-3">
+                    <div className="text-xl font-black text-amber-700 dark:text-amber-300">{membershipSummary.pendingMemberships ?? 0}</div>
+                    <div className="text-[10px] text-amber-500 font-semibold uppercase mt-0.5">Menunggu Konfirmasi</div>
+                  </div>
+                  <div className="rounded-lg bg-slate-50 dark:bg-slate-800 p-3">
+                    <div className="text-xl font-black text-slate-700 dark:text-slate-300">{membershipSummary.expiredMemberships ?? 0}</div>
+                    <div className="text-[10px] text-slate-500 font-semibold uppercase mt-0.5">Expired</div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           {/* Revenue chart */}
           <Card>
-            <CardHeader><CardTitle>Tren Revenue</CardTitle></CardHeader>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-3">
+                Tren Revenue
+                <span className="flex items-center gap-3 text-xs font-normal text-muted-foreground">
+                  <span className="flex items-center gap-1"><span className="inline-block w-3 h-2 rounded bg-[#F97316]" /> Booking</span>
+                  <span className="flex items-center gap-1"><span className="inline-block w-3 h-2 rounded bg-[#a855f7]" /> Member Gym</span>
+                </span>
+              </CardTitle>
+            </CardHeader>
             <CardContent>
               {revenueData.length === 0 ? (
                 <div className="text-center py-8 text-muted-foreground">Tidak ada data</div>
               ) : (
                 <ResponsiveContainer width="100%" height={280}>
-                  <LineChart data={revenueData}>
+                  <BarChart data={revenueData}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="period" tick={{ fontSize: 11 }} />
                     <YAxis tickFormatter={(v) => `${(v/1000000).toFixed(1)}jt`} tick={{ fontSize: 11 }} />
-                    <Tooltip formatter={(v: any) => currency(v)} />
-                    <Line type="monotone" dataKey="revenue" stroke="#F97316" strokeWidth={2} dot={false} name="Revenue" />
-                    <Line type="monotone" dataKey="bookings" stroke="#3B82F6" strokeWidth={2} dot={false} name="Booking" yAxisId={0} />
-                  </LineChart>
+                    <Tooltip formatter={(v: any, name: string) => [currency(Number(v)), name === "membershipRevenue" ? "Member Gym" : "Booking"]} />
+                    <Bar dataKey="revenue" stackId="rev" fill="#F97316" name="Booking" radius={[0,0,0,0]} />
+                    <Bar dataKey="membershipRevenue" stackId="rev" fill="#a855f7" name="Member Gym" radius={[4,4,0,0]} />
+                  </BarChart>
                 </ResponsiveContainer>
               )}
             </CardContent>
@@ -233,8 +313,164 @@ export default function AdminReports() {
               </div>
             </CardContent>
           </Card>
-        </>
-      )}
+            </>
+          )}
+        </TabsContent>
+
+        {/* ---- TAX TAB ---- */}
+        <TabsContent value="tax" className="space-y-6 mt-0">
+          <div className="flex justify-end">
+            <Button variant="outline" onClick={handleTaxExport} className="gap-2" disabled={!taxTransactions.length}>
+              <Download size={16} /> Export CSV Pajak
+            </Button>
+          </div>
+
+          {taxLoading ? (
+            <div className="text-center py-16 text-muted-foreground">Memuat laporan pajak...</div>
+          ) : (
+            <>
+              {/* Tax summary cards */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <Card>
+                  <CardContent className="pt-6">
+                    <div>
+                      <div className="text-xl font-black">{currency(taxSummary.totalDpp ?? 0)}</div>
+                      <div className="text-xs text-muted-foreground mt-1">Total DPP</div>
+                    </div>
+                  </CardContent>
+                </Card>
+                <Card className="border-orange-200 bg-orange-50/40">
+                  <CardContent className="pt-6">
+                    <div>
+                      <div className="text-xl font-black text-orange-700">{currency(taxSummary.totalTaxAmount ?? 0)}</div>
+                      <div className="text-xs text-muted-foreground mt-1">Total PPN 11%</div>
+                    </div>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="pt-6">
+                    <div>
+                      <div className="text-xl font-black">{currency(taxSummary.totalGrandTotal ?? 0)}</div>
+                      <div className="text-xs text-muted-foreground mt-1">Grand Total</div>
+                    </div>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="pt-6">
+                    <div>
+                      <div className="text-xl font-black">{taxSummary.totalTransactions ?? 0}</div>
+                      <div className="text-xs text-muted-foreground mt-1">Transaksi Pajak</div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* Tax by period chart */}
+              {taxByPeriod.length > 0 && (
+                <Card>
+                  <CardHeader><CardTitle>Tren PPN per Periode</CardTitle></CardHeader>
+                  <CardContent>
+                    <ResponsiveContainer width="100%" height={260}>
+                      <BarChart data={taxByPeriod}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="period" tick={{ fontSize: 11 }} />
+                        <YAxis tickFormatter={(v) => `${(v/1000000).toFixed(1)}jt`} tick={{ fontSize: 11 }} />
+                        <Tooltip formatter={(v: any) => currency(v)} />
+                        <Bar dataKey="dpp" fill="#94A3B8" name="DPP" stackId="a" />
+                        <Bar dataKey="taxAmount" fill="#F97316" name="PPN 11%" stackId="a" radius={[4,4,0,0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Period table */}
+              {taxByPeriod.length > 0 && (
+                <Card>
+                  <CardHeader><CardTitle>Rekapitulasi per Periode</CardTitle></CardHeader>
+                  <CardContent>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b">
+                            <th className="text-left py-2 font-semibold">Periode</th>
+                            <th className="text-right py-2 font-semibold">Transaksi</th>
+                            <th className="text-right py-2 font-semibold">DPP</th>
+                            <th className="text-right py-2 font-semibold">PPN 11%</th>
+                            <th className="text-right py-2 font-semibold">Grand Total</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {taxByPeriod.map((p: any) => (
+                            <tr key={p.period} className="border-b hover:bg-muted/30">
+                              <td className="py-2 font-medium">{p.period}</td>
+                              <td className="py-2 text-right">{p.count}</td>
+                              <td className="py-2 text-right">{currency(p.dpp)}</td>
+                              <td className="py-2 text-right text-orange-600 font-semibold">{currency(p.taxAmount)}</td>
+                              <td className="py-2 text-right font-bold">{currency(p.grandTotal)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Recent transactions */}
+              <Card>
+                <CardHeader><CardTitle>Transaksi Pajak Terbaru</CardTitle></CardHeader>
+                <CardContent>
+                  {taxTransactions.length === 0 ? (
+                    <div className="text-center py-12 text-muted-foreground">
+                      <Receipt size={36} className="mx-auto mb-3 opacity-30" />
+                      <p className="font-medium">Belum ada transaksi pajak</p>
+                      <p className="text-sm mt-1">Booking baru akan otomatis tercatat di sini dengan PPN 11%</p>
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b">
+                            <th className="text-left py-2 font-semibold">Nomor Booking</th>
+                            <th className="text-left py-2 font-semibold">Tipe</th>
+                            <th className="text-left py-2 font-semibold">Kode Pajak</th>
+                            <th className="text-left py-2 font-semibold">Status Pajak</th>
+                            <th className="text-right py-2 font-semibold">DPP</th>
+                            <th className="text-right py-2 font-semibold">PPN</th>
+                            <th className="text-right py-2 font-semibold">Tanggal</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {taxTransactions.map((t: any) => (
+                            <tr key={t.id} className={`border-b hover:bg-muted/30 ${t.transactionType === "reversal" ? "opacity-60" : ""}`}>
+                              <td className="py-2 font-mono text-xs">{t.referenceNumber}</td>
+                              <td className="py-2 text-muted-foreground">{t.referenceType}</td>
+                              <td className="py-2"><span className="bg-orange-100 text-orange-700 text-xs px-1.5 py-0.5 rounded font-medium">{t.taxCode}</span></td>
+                              <td className="py-2">
+                                {t.status === "reversed" ? (
+                                  <span className="bg-red-100 text-red-700 text-xs px-1.5 py-0.5 rounded font-medium">Dibatalkan</span>
+                                ) : t.transactionType === "reversal" ? (
+                                  <span className="bg-slate-100 text-slate-600 text-xs px-1.5 py-0.5 rounded font-medium">Reversal</span>
+                                ) : (
+                                  <span className="bg-emerald-100 text-emerald-700 text-xs px-1.5 py-0.5 rounded font-medium">Terutang</span>
+                                )}
+                              </td>
+                              <td className={`py-2 text-right ${t.transactionType === "reversal" ? "text-red-500 line-through" : ""}`}>{currency(Math.abs(t.dpp))}</td>
+                              <td className={`py-2 text-right font-semibold ${t.transactionType === "reversal" ? "text-red-500 line-through" : "text-orange-600"}`}>{currency(Math.abs(t.taxAmount))}</td>
+                              <td className="py-2 text-right text-muted-foreground">{t.transactionDate}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </>
+          )}
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

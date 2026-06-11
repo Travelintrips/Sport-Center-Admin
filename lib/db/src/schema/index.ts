@@ -24,3 +24,6 @@ export * from "./companyInvoices";
 export * from "./companyUsers";
 export * from "./companyVerifications";
 export * from "./companyVerificationTokens";
+export * from "./taxSettings";
+export * from "./taxTransactions";
+export * from "./accountingJournals";

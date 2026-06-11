@@ -9,7 +9,6 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -48,7 +47,6 @@ function GenerateInvoiceDialog({ onClose }: { onClose: () => void }) {
   const [companyId, setCompanyId] = useState("");
   const [periodMonth, setPeriodMonth] = useState(getMonthOptions()[1].value);
   const [notes, setNotes] = useState("");
-  const [includePpn, setIncludePpn] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const generateMutation = useGenerateCompanyInvoice();
   const { data: companies } = useListCustomers({ accountType: "company" });
@@ -70,8 +68,8 @@ function GenerateInvoiceDialog({ onClose }: { onClose: () => void }) {
   });
 
   const subtotal = preview?.subtotal ?? 0;
-  const ppnAmount = includePpn ? Math.round(subtotal * 0.11) : 0;
-  const grandTotal = subtotal + ppnAmount;
+  const ppnAmount = preview?.ppnAmount ?? 0;
+  const grandTotal = preview?.grandTotal ?? subtotal;
 
   const handleGenerate = async () => {
     if (!companyId) { toast({ title: "Pilih perusahaan", variant: "destructive" }); return; }
@@ -81,7 +79,7 @@ function GenerateInvoiceDialog({ onClose }: { onClose: () => void }) {
     }
     try {
       await generateMutation.mutateAsync({
-        data: { companyCustomerId: parseInt(companyId), periodMonth, notes: notes || undefined, includePpn },
+        data: { companyCustomerId: parseInt(companyId), periodMonth, notes: notes || undefined },
       });
       toast({ title: "Invoice berhasil dibuat" });
       qc.invalidateQueries({ queryKey: getListCompanyInvoicesQueryKey() });
@@ -161,21 +159,12 @@ function GenerateInvoiceDialog({ onClose }: { onClose: () => void }) {
           </div>
         )}
 
-        {/* PPN toggle */}
-        <div className="flex items-center justify-between rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-2.5">
-          <div>
-            <div className="text-sm font-semibold">Tambahkan PPN 11%</div>
-            <div className="text-xs text-muted-foreground">Opsional — sesuai perjanjian dengan perusahaan</div>
-          </div>
-          <Switch checked={includePpn} onCheckedChange={setIncludePpn} />
-        </div>
-
         {/* Subtotal preview */}
         {companyId && preview && (
           <div className="rounded-lg bg-muted/40 p-3 space-y-1 text-sm">
-            <div className="flex justify-between"><span className="text-muted-foreground">Subtotal</span><span className="font-semibold">{formatCurrency(subtotal)}</span></div>
-            {includePpn && <div className="flex justify-between text-xs"><span className="text-muted-foreground">PPN 11%</span><span>{formatCurrency(ppnAmount)}</span></div>}
-            <div className="flex justify-between border-t pt-1 font-black"><span>Total Invoice</span><span className="text-primary">{formatCurrency(grandTotal)}</span></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">DPP (Harga Netto)</span><span className="font-semibold">{formatCurrency(subtotal)}</span></div>
+            <div className="flex justify-between text-xs"><span className="text-muted-foreground">PPN 11%</span><span>{formatCurrency(ppnAmount)}</span></div>
+            <div className="flex justify-between border-t pt-1 font-black"><span>Grand Total Invoice</span><span className="text-primary">{formatCurrency(grandTotal)}</span></div>
           </div>
         )}
 

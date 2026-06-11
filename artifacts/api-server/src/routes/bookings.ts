@@ -6,6 +6,8 @@ import { broadcastAvailabilityChange } from "../lib/supabase";
 import { notifyBookingCreated, notifyPaymentConfirmed, notifyBookingCancelled, notifyCompanyBookingCreated } from "../lib/notifications";
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
 import { syncBookingToBizportal, syncStatusToBizportal } from "../lib/bizportalSync";
+import { calculateTax, recordTaxTransaction, reverseTaxTransaction } from "../lib/tax";
+import { reverseJournalEntry } from "../lib/accounting";
 
 const INACTIVE_STATUSES = ["cancelled", "expired", "rejected", "refunded"];
 
@@ -51,6 +53,9 @@ async function getBookingWithPayment(id: number) {
     facilityCategory: facility?.category ?? "",
     facilityPricePerHour: facility ? Number(facility.pricePerHour) : null,
     facilityCloseTime: facility?.closeTime ?? null,
+    ppnRate: booking.ppnRate == null ? null : Number(booking.ppnRate),
+    ppnAmount: booking.ppnAmount == null ? null : Number(booking.ppnAmount),
+    grandTotal: booking.grandTotal == null ? null : Number(booking.grandTotal),
     payment: payment ? { ...payment, amount: Number(payment.amount) } : null,
   };
 }
@@ -82,6 +87,9 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
         discountAmount: Number(b.discountAmount),
         basePrice: b.basePrice == null ? null : Number(b.basePrice),
         apDiscountAmount: Number(b.apDiscountAmount),
+        ppnRate: b.ppnRate == null ? null : Number(b.ppnRate),
+        ppnAmount: b.ppnAmount == null ? null : Number(b.ppnAmount),
+        grandTotal: b.grandTotal == null ? null : Number(b.grandTotal),
         facilityName: facility?.name ?? "",
         facilityCategory: facility?.category ?? "",
         payment: payment ? { ...payment, amount: Number(payment.amount) } : null,
@@ -245,6 +253,7 @@ router.post("/bookings", async (req, res) => {
     const basePrice = Number(facility.pricePerHour) * (isWalkIn ? 1 : durationHours);
     const discount = isAp ? 0 : Math.min(Number(discountAmount) || 0, basePrice);
     const totalPrice = basePrice - discount;
+    const taxCalc = await calculateTax(totalPrice, "sport_center_booking", bookingDate);
     const orderNumber = await generateOrderNumber();
 
     const [booking] = await db.insert(bookingsTable).values({
@@ -277,6 +286,9 @@ router.post("/bookings", async (req, res) => {
       paymentDeadline: isCompanyBilling ? null : new Date(Date.now() + 30 * 60 * 1000),
       bookedForName: isCompanyBilling ? (req.body.bookedForName?.trim() || customerName) : null,
       bookedForPhone: isCompanyBilling ? (req.body.bookedForPhone?.trim() || customerPhone) : null,
+      ppnRate: taxCalc.taxRate > 0 ? String(taxCalc.taxRate) : null,
+      ppnAmount: taxCalc.taxAmount > 0 ? String(taxCalc.taxAmount) : null,
+      grandTotal: taxCalc.taxAmount > 0 ? String(taxCalc.grandTotal) : null,
     }).returning();
 
     if (promoCode && !isAp) {
@@ -295,6 +307,11 @@ router.post("/bookings", async (req, res) => {
     });
 
     broadcastAvailabilityChange(Number(facilityId), bookingDate);
+
+    // Record tax transaction (non-blocking)
+    if (taxCalc.taxCode) {
+      recordTaxTransaction("booking", booking.id, booking.orderNumber, taxCalc, bookingDate).catch(() => {});
+    }
 
     // Sync to Bizportal (non-blocking)
     syncBookingToBizportal({ booking, facilityName: facility.name }).catch(() => {});
@@ -337,6 +354,9 @@ router.post("/bookings", async (req, res) => {
       discountAmount: Number(booking.discountAmount),
       basePrice: booking.basePrice == null ? null : Number(booking.basePrice),
       apDiscountAmount: Number(booking.apDiscountAmount),
+      ppnRate: booking.ppnRate == null ? null : Number(booking.ppnRate),
+      ppnAmount: booking.ppnAmount == null ? null : Number(booking.ppnAmount),
+      grandTotal: booking.grandTotal == null ? null : Number(booking.grandTotal),
       facilityName: facility.name,
       facilityCategory: facility.category,
       payment: null,
@@ -443,6 +463,7 @@ router.post("/bookings/recurring", async (req, res) => {
 
     const created: any[] = [];
     const skipped: string[] = [];
+    let accumulatedPpn = 0;
 
     for (const bookingDate of dates) {
       const conflict = await checkSlotConflict(Number(facilityId), bookingDate, startTime, endTime);
@@ -450,6 +471,8 @@ router.post("/bookings/recurring", async (req, res) => {
         skipped.push(bookingDate);
         continue;
       }
+      // Per-date tax calc: respects effectiveDate backward-compat rule
+      const taxCalc = await calculateTax(totalPrice, "sport_center_booking", bookingDate);
       const orderNumber = await generateOrderNumber();
       const [booking] = await db.insert(bookingsTable).values({
         orderNumber,
@@ -465,9 +488,26 @@ router.post("/bookings/recurring", async (req, res) => {
         promoCode: promoCode || null,
         discountAmount: String(discount),
         notes,
+        ppnRate: taxCalc.taxRate > 0 ? String(taxCalc.taxRate) : null,
+        ppnAmount: taxCalc.taxAmount > 0 ? String(taxCalc.taxAmount) : null,
+        grandTotal: taxCalc.taxAmount > 0 ? String(taxCalc.grandTotal) : null,
       }).returning();
       broadcastAvailabilityChange(Number(facilityId), bookingDate);
-      created.push({ ...booking, totalPrice: Number(booking.totalPrice), discountAmount: Number(booking.discountAmount), facilityName: facility.name, facilityCategory: facility.category, payment: null });
+      if (taxCalc.taxCode) {
+        recordTaxTransaction("booking", booking.id, booking.orderNumber, taxCalc, bookingDate).catch(() => {});
+      }
+      accumulatedPpn += taxCalc.taxAmount;
+      created.push({
+        ...booking,
+        totalPrice: Number(booking.totalPrice),
+        discountAmount: Number(booking.discountAmount),
+        ppnRate: booking.ppnRate == null ? null : Number(booking.ppnRate),
+        ppnAmount: booking.ppnAmount == null ? null : Number(booking.ppnAmount),
+        grandTotal: booking.grandTotal == null ? null : Number(booking.grandTotal),
+        facilityName: facility.name,
+        facilityCategory: facility.category,
+        payment: null,
+      });
     }
 
     if (promoCode && created.length > 0) {
@@ -476,7 +516,9 @@ router.post("/bookings/recurring", async (req, res) => {
         .where(eq(promosTable.code, String(promoCode).toUpperCase()));
     }
 
-    res.status(201).json({ created, skipped, totalBookings: created.length, grandTotal: totalPrice * created.length });
+    const totalDpp = totalPrice * created.length;
+    const totalPpn = accumulatedPpn;
+    res.status(201).json({ created, skipped, totalBookings: created.length, grandTotal: totalDpp + totalPpn, totalDpp, totalPpnAmount: totalPpn });
   } catch (err) {
     req.log.error({ err }, "Create recurring booking error");
     res.status(500).json({ error: "Internal server error" });
@@ -591,6 +633,15 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
     if (status && beforeUpdate) {
       const [payment] = await db.select().from(paymentsTable).where(eq(paymentsTable.bookingId, id)).limit(1);
       syncStatusToBizportal(beforeUpdate.orderNumber, status, payment?.proofUrl, status === "confirmed" ? new Date() : null).catch(() => {});
+
+      // FASE 4 & 5: Reversal pajak + jurnal akuntansi saat dibatalkan/refund
+      const REVERSAL_STATUSES = ["cancelled", "refunded", "rejected"];
+      if (REVERSAL_STATUSES.includes(status)) {
+        const today = new Date().toISOString().split("T")[0];
+        const reason = `Booking ${beforeUpdate.orderNumber} — status diubah ke ${status}`;
+        reverseTaxTransaction(beforeUpdate.id, beforeUpdate.orderNumber, today).catch(() => {});
+        reverseJournalEntry(beforeUpdate.id, beforeUpdate.orderNumber, reason, today).catch(() => {});
+      }
     }
 
     res.json(result);

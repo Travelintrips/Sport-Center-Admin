@@ -374,6 +374,9 @@ export const ListBookingsResponseItem = zod.object({
   "checkedInAt": zod.string().nullish(),
   "completedAt": zod.string().nullish(),
   "paymentDeadline": zod.string().nullish(),
+  "ppnRate": zod.number().nullish(),
+  "ppnAmount": zod.number().nullish(),
+  "grandTotal": zod.number().nullish(),
   "payment": zod.object({
   "id": zod.number(),
   "bookingId": zod.number(),
@@ -491,6 +494,9 @@ export const GetBookingResponse = zod.object({
   "checkedInAt": zod.string().nullish(),
   "completedAt": zod.string().nullish(),
   "paymentDeadline": zod.string().nullish(),
+  "ppnRate": zod.number().nullish(),
+  "ppnAmount": zod.number().nullish(),
+  "grandTotal": zod.number().nullish(),
   "payment": zod.object({
   "id": zod.number(),
   "bookingId": zod.number(),
@@ -548,6 +554,9 @@ export const UpdateBookingResponse = zod.object({
   "checkedInAt": zod.string().nullish(),
   "completedAt": zod.string().nullish(),
   "paymentDeadline": zod.string().nullish(),
+  "ppnRate": zod.number().nullish(),
+  "ppnAmount": zod.number().nullish(),
+  "grandTotal": zod.number().nullish(),
   "payment": zod.object({
   "id": zod.number(),
   "bookingId": zod.number(),
@@ -600,6 +609,9 @@ export const GetBookingByOrderResponse = zod.object({
   "checkedInAt": zod.string().nullish(),
   "completedAt": zod.string().nullish(),
   "paymentDeadline": zod.string().nullish(),
+  "ppnRate": zod.number().nullish(),
+  "ppnAmount": zod.number().nullish(),
+  "grandTotal": zod.number().nullish(),
   "payment": zod.object({
   "id": zod.number(),
   "bookingId": zod.number(),
@@ -1132,6 +1144,9 @@ export const ListCompanyInvoicesResponseItem = zod.object({
   "checkedInAt": zod.string().nullish(),
   "completedAt": zod.string().nullish(),
   "paymentDeadline": zod.string().nullish(),
+  "ppnRate": zod.number().nullish(),
+  "ppnAmount": zod.number().nullish(),
+  "grandTotal": zod.number().nullish(),
   "payment": zod.object({
   "id": zod.number(),
   "bookingId": zod.number(),
@@ -1221,6 +1236,9 @@ export const GetCompanyInvoiceResponse = zod.object({
   "checkedInAt": zod.string().nullish(),
   "completedAt": zod.string().nullish(),
   "paymentDeadline": zod.string().nullish(),
+  "ppnRate": zod.number().nullish(),
+  "ppnAmount": zod.number().nullish(),
+  "grandTotal": zod.number().nullish(),
   "payment": zod.object({
   "id": zod.number(),
   "bookingId": zod.number(),
@@ -1292,6 +1310,9 @@ export const UpdateCompanyInvoiceResponse = zod.object({
   "checkedInAt": zod.string().nullish(),
   "completedAt": zod.string().nullish(),
   "paymentDeadline": zod.string().nullish(),
+  "ppnRate": zod.number().nullish(),
+  "ppnAmount": zod.number().nullish(),
+  "grandTotal": zod.number().nullish(),
   "payment": zod.object({
   "id": zod.number(),
   "bookingId": zod.number(),
@@ -1306,6 +1327,46 @@ export const UpdateCompanyInvoiceResponse = zod.object({
 }).nullish(),
   "createdAt": zod.string().optional()
 })).optional()
+})
+
+
+/**
+ * @summary Laporan pajak PPN per periode
+ */
+export const getTaxReportQueryGroupByDefault = `month`;
+
+export const GetTaxReportQueryParams = zod.object({
+  "startDate": zod.coerce.string().optional(),
+  "endDate": zod.coerce.string().optional(),
+  "groupBy": zod.enum(['day', 'month', 'year']).default(getTaxReportQueryGroupByDefault)
+})
+
+export const GetTaxReportResponse = zod.object({
+  "summary": zod.object({
+  "totalDpp": zod.number(),
+  "totalTaxAmount": zod.number(),
+  "totalGrandTotal": zod.number(),
+  "totalTransactions": zod.number()
+}),
+  "byPeriod": zod.array(zod.object({
+  "period": zod.string(),
+  "dpp": zod.number(),
+  "taxAmount": zod.number(),
+  "grandTotal": zod.number(),
+  "count": zod.number()
+})),
+  "transactions": zod.array(zod.object({
+  "id": zod.number(),
+  "referenceType": zod.string(),
+  "referenceId": zod.number(),
+  "referenceNumber": zod.string(),
+  "taxCode": zod.string(),
+  "taxRate": zod.number(),
+  "dpp": zod.number(),
+  "taxAmount": zod.number(),
+  "transactionDate": zod.string(),
+  "createdAt": zod.string()
+}))
 })
 
 
@@ -1352,6 +1413,9 @@ export const GetDashboardResponse = zod.object({
   "checkedInAt": zod.string().nullish(),
   "completedAt": zod.string().nullish(),
   "paymentDeadline": zod.string().nullish(),
+  "ppnRate": zod.number().nullish(),
+  "ppnAmount": zod.number().nullish(),
+  "grandTotal": zod.number().nullish(),
   "payment": zod.object({
   "id": zod.number(),
   "bookingId": zod.number(),
@@ -1795,6 +1859,9 @@ export const CheckInBookingResponse = zod.object({
   "checkedInAt": zod.string().nullish(),
   "completedAt": zod.string().nullish(),
   "paymentDeadline": zod.string().nullish(),
+  "ppnRate": zod.number().nullish(),
+  "ppnAmount": zod.number().nullish(),
+  "grandTotal": zod.number().nullish(),
   "payment": zod.object({
   "id": zod.number(),
   "bookingId": zod.number(),
@@ -1860,6 +1927,9 @@ export const VerifyBookingResponse = zod.object({
   "checkedInAt": zod.string().nullish(),
   "completedAt": zod.string().nullish(),
   "paymentDeadline": zod.string().nullish(),
+  "ppnRate": zod.number().nullish(),
+  "ppnAmount": zod.number().nullish(),
+  "grandTotal": zod.number().nullish(),
   "payment": zod.object({
   "id": zod.number(),
   "bookingId": zod.number(),
@@ -1923,6 +1993,9 @@ export const VerifyBookingByOrderResponse = zod.object({
   "checkedInAt": zod.string().nullish(),
   "completedAt": zod.string().nullish(),
   "paymentDeadline": zod.string().nullish(),
+  "ppnRate": zod.number().nullish(),
+  "ppnAmount": zod.number().nullish(),
+  "grandTotal": zod.number().nullish(),
   "payment": zod.object({
   "id": zod.number(),
   "bookingId": zod.number(),
