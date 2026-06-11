@@ -50,6 +50,10 @@ import AdminCalendar from "@/pages/admin/Calendar";
 import AdminCompanyBilling from "@/pages/admin/CompanyBilling";
 import AdminNotifications from "@/pages/admin/Notifications";
 
+import AdminCompanyVerifications from "@/pages/admin/CompanyVerifications";
+
+import AdminTaxReport from "@/pages/admin/TaxReport";
+
 // WhatsApp Booking Flow Pages (standalone, no auth)
 import WaBookingForm from "@/pages/wa/BookingForm";
 import WaBookingStatus from "@/pages/wa/BookingStatus";
@@ -99,6 +103,8 @@ function AdminRouter() {
     if (location === "/admin/calendar") return <AdminCalendar />;
     if (location === "/admin/company-billing") return <AdminCompanyBilling />;
     if (location === "/admin/notifications") return <AdminNotifications />;
+    if (location === "/admin/company-verifications") return <AdminCompanyVerifications />;
+    if (location === "/admin/tax-report") return <AdminTaxReport />;
     return <NotFound />;
   })();
 
@@ -132,6 +138,8 @@ function Router() {
       <Route path="/admin/calendar" component={AdminRouter} />
       <Route path="/admin/company-billing" component={AdminRouter} />
       <Route path="/admin/notifications" component={AdminRouter} />
+      <Route path="/admin/company-verifications" component={AdminRouter} />
+      <Route path="/admin/tax-report" component={AdminRouter} />
       <Route path="/admin" component={AdminRouter} />
 
       {/* WhatsApp Booking Flow — standalone, no layout wrapper */}

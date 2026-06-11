@@ -33,6 +33,10 @@ import whatsappRouter from "./whatsapp";
 import authSocialRouter from "./auth-social";
 import verificationLogsRouter from "./verificationLogs";
 import companyInvoicesRouter from "./companyInvoices";
+import companyVerificationsRouter from "./companyVerifications";
+
+import taxConfigRouter from "./taxConfig";
+
 
 const router: IRouter = Router();
 
@@ -70,5 +74,7 @@ router.use(syncRouter);
 router.use(whatsappRouter);
 router.use(verificationLogsRouter);
 router.use(companyInvoicesRouter);
+router.use(companyVerificationsRouter);
+router.use(taxConfigRouter);
 
 export default router;

@@ -80,6 +80,9 @@ export const bookingsTable = scSchema.table("bookings", {
   paymentRequiredNow: boolean("payment_required_now").default(true),
   billingStatus: billingStatusEnum("billing_status"),
   companyInvoiceId: integer("company_invoice_id"),
+  ppnRate: numeric("ppn_rate", { precision: 5, scale: 2 }),
+  ppnAmount: numeric("ppn_amount", { precision: 12, scale: 2 }),
+  grandTotal: numeric("grand_total", { precision: 12, scale: 2 }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });

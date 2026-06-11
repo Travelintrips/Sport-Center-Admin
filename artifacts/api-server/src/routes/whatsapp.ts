@@ -18,6 +18,7 @@ import {
 import { logAudit } from "../lib/auditLog";
 import { hashPassword } from "../lib/auth";
 import { syncStatusToBizportal } from "../lib/bizportalSync";
+import { calculateTax, recordTaxTransaction } from "../lib/tax";
 import { broadcastAvailabilityChange } from "../lib/supabase";
 
 const router = Router();
@@ -107,6 +108,9 @@ async function getBookingFull(id: number) {
     discountAmount: Number(booking.discountAmount),
     basePrice: booking.basePrice == null ? null : Number(booking.basePrice),
     apDiscountAmount: Number(booking.apDiscountAmount),
+    ppnRate: booking.ppnRate == null ? null : Number(booking.ppnRate),
+    ppnAmount: booking.ppnAmount == null ? null : Number(booking.ppnAmount),
+    grandTotal: booking.grandTotal == null ? null : Number(booking.grandTotal),
     facilityName: facility?.name ?? "",
     facilityCategory: facility?.category ?? "",
     payment: payment ? { ...payment, amount: Number(payment.amount) } : null,
@@ -444,6 +448,8 @@ router.post("/wa/booking", async (req, res) => {
     }
 
     const totalPrice = Number(facility.pricePerHour) * Number(durationHours);
+    // Hitung PPN — mengikuti effective_date backward-compat rule
+    const taxCalc = await calculateTax(totalPrice, "sport_center_booking", bookingDate);
     const orderNumber = await generateOrderNumber();
     const paymentDeadline = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
 
@@ -465,6 +471,9 @@ router.post("/wa/booking", async (req, res) => {
       notes: notes || null,
       paymentDeadline,
       status: "pending_payment",
+      ppnRate: taxCalc.taxRate > 0 ? String(taxCalc.taxRate) : null,
+      ppnAmount: taxCalc.taxAmount > 0 ? String(taxCalc.taxAmount) : null,
+      grandTotal: taxCalc.taxAmount > 0 ? String(taxCalc.grandTotal) : null,
     }).returning();
 
     // History
@@ -478,6 +487,11 @@ router.post("/wa/booking", async (req, res) => {
 
     broadcastAvailabilityChange(Number(facilityId), bookingDate);
 
+    // Record tax transaction (non-blocking)
+    if (taxCalc.taxCode) {
+      recordTaxTransaction("booking", booking.id, booking.orderNumber, taxCalc, bookingDate).catch(() => {});
+    }
+
     // Create proof upload token (multi-use, 7 days)
     const proofToken = await createWaToken(booking.id, "upload_proof", 7);
 
@@ -485,7 +499,8 @@ router.post("/wa/booking", async (req, res) => {
     const settingsRows = await db.select().from(settingsTable).limit(1);
     const settings = settingsRows[0];
 
-    // Send WA to customer
+    // Send WA to customer — kirim grandTotal (termasuk PPN) sebagai jumlah transfer
+    const amountToPay = taxCalc.taxAmount > 0 ? taxCalc.grandTotal : totalPrice;
     const statusUrl = `${APP_URL}/wa/status/${orderNumber}`;
     const uploadProofUrl = `${APP_URL}/wa/proof/${proofToken}`;
     const deadlineStr = paymentDeadline.toLocaleString("id-ID", { timeZone: "Asia/Jakarta", hour12: false });
@@ -498,7 +513,7 @@ router.post("/wa/booking", async (req, res) => {
       bookingDate,
       startTime: booking.startTime,
       endTime: booking.endTime,
-      totalPrice: totalPrice.toLocaleString("id-ID"),
+      totalPrice: amountToPay.toLocaleString("id-ID"),
       paymentDeadline: deadlineStr,
       statusUrl,
       uploadProofUrl,
@@ -557,6 +572,9 @@ router.get("/wa/status/:orderNumber", async (req, res) => {
       endTime: booking.endTime,
       durationHours: booking.durationHours,
       totalPrice: Number(booking.totalPrice),
+      ppnRate: booking.ppnRate == null ? null : Number(booking.ppnRate),
+      ppnAmount: booking.ppnAmount == null ? null : Number(booking.ppnAmount),
+      grandTotal: booking.grandTotal == null ? null : Number(booking.grandTotal),
       status: booking.status,
       source: booking.source,
       notes: booking.notes,

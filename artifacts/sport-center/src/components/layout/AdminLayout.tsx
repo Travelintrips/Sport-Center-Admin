@@ -16,6 +16,7 @@ import {
   Plane,
   Calendar,
   Shield,
+  ShieldCheck,
   DollarSign,
   Wrench,
   TrendingUp,
@@ -24,6 +25,7 @@ import {
   RefreshCw,
   Building2,
   Send,
+  Receipt,
 } from "lucide-react";
 import { useGetMe, useLogout, getGetMeQueryKey } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -56,6 +58,7 @@ const NAV_GROUPS = [
     label: "Pelanggan",
     items: [
       { href: "/admin/customers", label: "Pelanggan", icon: Users },
+      { href: "/admin/company-verifications", label: "Verifikasi Karyawan", icon: ShieldCheck },
       { href: "/admin/company-billing", label: "Tagihan Perusahaan", icon: Building2 },
       { href: "/admin/memberships", label: "Member Gym", icon: Dumbbell },
       { href: "/admin/ap-members", label: "Member AP", icon: Plane },
@@ -68,6 +71,8 @@ const NAV_GROUPS = [
       { href: "/admin/reports", label: "Laporan Keuangan", icon: TrendingUp },
       { href: "/admin/notifications", label: "Kirim WA", icon: Send },
       { href: "/admin/notification-templates", label: "Template WA", icon: Bell },
+      { href: "/admin/tax-report", label: "Laporan Pajak PPN", icon: Receipt },
+      { href: "/admin/notification-templates", label: "Notifikasi WA", icon: Bell },
       { href: "/admin/audit-log", label: "Audit Log", icon: Shield },
       { href: "/admin/settings", label: "Pengaturan", icon: SettingsIcon },
     ],

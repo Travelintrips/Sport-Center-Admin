@@ -374,6 +374,9 @@ export const ListBookingsResponseItem = zod.object({
   "checkedInAt": zod.string().nullish(),
   "completedAt": zod.string().nullish(),
   "paymentDeadline": zod.string().nullish(),
+  "ppnRate": zod.number().nullish(),
+  "ppnAmount": zod.number().nullish(),
+  "grandTotal": zod.number().nullish(),
   "payment": zod.object({
   "id": zod.number(),
   "bookingId": zod.number(),
@@ -491,6 +494,9 @@ export const GetBookingResponse = zod.object({
   "checkedInAt": zod.string().nullish(),
   "completedAt": zod.string().nullish(),
   "paymentDeadline": zod.string().nullish(),
+  "ppnRate": zod.number().nullish(),
+  "ppnAmount": zod.number().nullish(),
+  "grandTotal": zod.number().nullish(),
   "payment": zod.object({
   "id": zod.number(),
   "bookingId": zod.number(),
@@ -548,6 +554,9 @@ export const UpdateBookingResponse = zod.object({
   "checkedInAt": zod.string().nullish(),
   "completedAt": zod.string().nullish(),
   "paymentDeadline": zod.string().nullish(),
+  "ppnRate": zod.number().nullish(),
+  "ppnAmount": zod.number().nullish(),
+  "grandTotal": zod.number().nullish(),
   "payment": zod.object({
   "id": zod.number(),
   "bookingId": zod.number(),
@@ -600,6 +609,9 @@ export const GetBookingByOrderResponse = zod.object({
   "checkedInAt": zod.string().nullish(),
   "completedAt": zod.string().nullish(),
   "paymentDeadline": zod.string().nullish(),
+  "ppnRate": zod.number().nullish(),
+  "ppnAmount": zod.number().nullish(),
+  "grandTotal": zod.number().nullish(),
   "payment": zod.object({
   "id": zod.number(),
   "bookingId": zod.number(),
@@ -932,6 +944,157 @@ export const UpdateCustomerResponse = zod.object({
 
 
 /**
+ * @summary List company accounts available for employee verification
+ */
+export const ListCompaniesResponseItem = zod.object({
+  "id": zod.number().optional(),
+  "name": zod.string().optional(),
+  "companyName": zod.string().optional()
+})
+export const ListCompaniesResponse = zod.array(ListCompaniesResponseItem)
+
+
+/**
+ * @summary List all company verification requests (admin)
+ */
+export const ListCompanyVerificationsQueryParams = zod.object({
+  "status": zod.coerce.string().optional(),
+  "companyId": zod.coerce.number().optional()
+})
+
+export const ListCompanyVerificationsResponseItem = zod.object({
+  "id": zod.number().optional(),
+  "companyId": zod.number().optional(),
+  "customerId": zod.number().optional(),
+  "companyUserId": zod.number().nullish(),
+  "employeeId": zod.string().optional(),
+  "officeEmail": zod.string().nullish(),
+  "idCardUrl": zod.string().nullish(),
+  "status": zod.enum(['pending', 'approved', 'rejected', 'revoked']).optional(),
+  "requestedAt": zod.coerce.date().optional(),
+  "approvedAt": zod.coerce.date().nullish(),
+  "rejectionReason": zod.string().nullish(),
+  "customerName": zod.string().optional(),
+  "customerEmail": zod.string().optional(),
+  "customerPhone": zod.string().nullish(),
+  "companyName": zod.string().optional(),
+  "approvedByName": zod.string().nullish()
+})
+export const ListCompanyVerificationsResponse = zod.array(ListCompanyVerificationsResponseItem)
+
+
+/**
+ * @summary Submit employee verification request (customer)
+ */
+export const CreateCompanyVerificationBody = zod.object({
+  "companyId": zod.number(),
+  "employeeId": zod.string(),
+  "officeEmail": zod.string().optional(),
+  "idCardUrl": zod.string().optional()
+})
+
+
+/**
+ * @summary Get current customer's verification requests
+ */
+export const ListMyCompanyVerificationsResponseItem = zod.object({
+  "id": zod.number().optional(),
+  "companyId": zod.number().optional(),
+  "customerId": zod.number().optional(),
+  "companyUserId": zod.number().nullish(),
+  "employeeId": zod.string().optional(),
+  "officeEmail": zod.string().nullish(),
+  "idCardUrl": zod.string().nullish(),
+  "status": zod.enum(['pending', 'approved', 'rejected', 'revoked']).optional(),
+  "requestedAt": zod.coerce.date().optional(),
+  "approvedAt": zod.coerce.date().nullish(),
+  "rejectionReason": zod.string().nullish(),
+  "customerName": zod.string().optional(),
+  "customerEmail": zod.string().optional(),
+  "customerPhone": zod.string().nullish(),
+  "companyName": zod.string().optional(),
+  "approvedByName": zod.string().nullish()
+})
+export const ListMyCompanyVerificationsResponse = zod.array(ListMyCompanyVerificationsResponseItem)
+
+
+/**
+ * @summary Check if current customer has corporate billing enabled
+ */
+export const GetCompanyBillingStatusResponse = zod.object({
+  "eligible": zod.boolean().optional(),
+  "companyId": zod.number().optional(),
+  "companyName": zod.string().optional(),
+  "employeeId": zod.string().optional()
+})
+
+
+/**
+ * @summary Approve verification request (admin)
+ */
+export const ApproveCompanyVerificationParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+
+/**
+ * @summary Reject verification request (admin)
+ */
+export const RejectCompanyVerificationParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const RejectCompanyVerificationBody = zod.object({
+  "rejectionReason": zod.string().optional()
+})
+
+
+/**
+ * @summary Revoke approved verification (admin)
+ */
+export const RevokeCompanyVerificationParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const RevokeCompanyVerificationBody = zod.object({
+  "rejectionReason": zod.string().optional()
+})
+
+
+/**
+ * @summary Toggle corporate billing for a verified employee (admin)
+ */
+export const ToggleCompanyUserBillingParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const ToggleCompanyUserBillingBody = zod.object({
+  "enabled": zod.boolean().optional()
+})
+
+
+/**
+ * @summary List verified employees of a company (admin)
+ */
+export const ListCompanyUsersParams = zod.object({
+  "companyId": zod.coerce.number()
+})
+
+export const ListCompanyUsersResponseItem = zod.object({
+  "id": zod.number().optional(),
+  "customerId": zod.number().optional(),
+  "companyId": zod.number().optional(),
+  "employeeId": zod.string().optional(),
+  "officeEmail": zod.string().nullish(),
+  "verificationStatus": zod.string().optional(),
+  "corporateBillingEnabled": zod.boolean().optional(),
+  "customerName": zod.string().optional(),
+  "customerEmail": zod.string().optional()
+})
+export const ListCompanyUsersResponse = zod.array(ListCompanyUsersResponseItem)
+
+
+/**
  * @summary List company invoices (admin)
  */
 export const ListCompanyInvoicesQueryParams = zod.object({
@@ -981,6 +1144,9 @@ export const ListCompanyInvoicesResponseItem = zod.object({
   "checkedInAt": zod.string().nullish(),
   "completedAt": zod.string().nullish(),
   "paymentDeadline": zod.string().nullish(),
+  "ppnRate": zod.number().nullish(),
+  "ppnAmount": zod.number().nullish(),
+  "grandTotal": zod.number().nullish(),
   "payment": zod.object({
   "id": zod.number(),
   "bookingId": zod.number(),
@@ -1070,6 +1236,9 @@ export const GetCompanyInvoiceResponse = zod.object({
   "checkedInAt": zod.string().nullish(),
   "completedAt": zod.string().nullish(),
   "paymentDeadline": zod.string().nullish(),
+  "ppnRate": zod.number().nullish(),
+  "ppnAmount": zod.number().nullish(),
+  "grandTotal": zod.number().nullish(),
   "payment": zod.object({
   "id": zod.number(),
   "bookingId": zod.number(),
@@ -1141,6 +1310,9 @@ export const UpdateCompanyInvoiceResponse = zod.object({
   "checkedInAt": zod.string().nullish(),
   "completedAt": zod.string().nullish(),
   "paymentDeadline": zod.string().nullish(),
+  "ppnRate": zod.number().nullish(),
+  "ppnAmount": zod.number().nullish(),
+  "grandTotal": zod.number().nullish(),
   "payment": zod.object({
   "id": zod.number(),
   "bookingId": zod.number(),
@@ -1155,6 +1327,46 @@ export const UpdateCompanyInvoiceResponse = zod.object({
 }).nullish(),
   "createdAt": zod.string().optional()
 })).optional()
+})
+
+
+/**
+ * @summary Laporan pajak PPN per periode
+ */
+export const getTaxReportQueryGroupByDefault = `month`;
+
+export const GetTaxReportQueryParams = zod.object({
+  "startDate": zod.coerce.string().optional(),
+  "endDate": zod.coerce.string().optional(),
+  "groupBy": zod.enum(['day', 'month', 'year']).default(getTaxReportQueryGroupByDefault)
+})
+
+export const GetTaxReportResponse = zod.object({
+  "summary": zod.object({
+  "totalDpp": zod.number(),
+  "totalTaxAmount": zod.number(),
+  "totalGrandTotal": zod.number(),
+  "totalTransactions": zod.number()
+}),
+  "byPeriod": zod.array(zod.object({
+  "period": zod.string(),
+  "dpp": zod.number(),
+  "taxAmount": zod.number(),
+  "grandTotal": zod.number(),
+  "count": zod.number()
+})),
+  "transactions": zod.array(zod.object({
+  "id": zod.number(),
+  "referenceType": zod.string(),
+  "referenceId": zod.number(),
+  "referenceNumber": zod.string(),
+  "taxCode": zod.string(),
+  "taxRate": zod.number(),
+  "dpp": zod.number(),
+  "taxAmount": zod.number(),
+  "transactionDate": zod.string(),
+  "createdAt": zod.string()
+}))
 })
 
 
@@ -1201,6 +1413,9 @@ export const GetDashboardResponse = zod.object({
   "checkedInAt": zod.string().nullish(),
   "completedAt": zod.string().nullish(),
   "paymentDeadline": zod.string().nullish(),
+  "ppnRate": zod.number().nullish(),
+  "ppnAmount": zod.number().nullish(),
+  "grandTotal": zod.number().nullish(),
   "payment": zod.object({
   "id": zod.number(),
   "bookingId": zod.number(),
@@ -1644,6 +1859,9 @@ export const CheckInBookingResponse = zod.object({
   "checkedInAt": zod.string().nullish(),
   "completedAt": zod.string().nullish(),
   "paymentDeadline": zod.string().nullish(),
+  "ppnRate": zod.number().nullish(),
+  "ppnAmount": zod.number().nullish(),
+  "grandTotal": zod.number().nullish(),
   "payment": zod.object({
   "id": zod.number(),
   "bookingId": zod.number(),
@@ -1709,6 +1927,9 @@ export const VerifyBookingResponse = zod.object({
   "checkedInAt": zod.string().nullish(),
   "completedAt": zod.string().nullish(),
   "paymentDeadline": zod.string().nullish(),
+  "ppnRate": zod.number().nullish(),
+  "ppnAmount": zod.number().nullish(),
+  "grandTotal": zod.number().nullish(),
   "payment": zod.object({
   "id": zod.number(),
   "bookingId": zod.number(),
@@ -1772,6 +1993,9 @@ export const VerifyBookingByOrderResponse = zod.object({
   "checkedInAt": zod.string().nullish(),
   "completedAt": zod.string().nullish(),
   "paymentDeadline": zod.string().nullish(),
+  "ppnRate": zod.number().nullish(),
+  "ppnAmount": zod.number().nullish(),
+  "grandTotal": zod.number().nullish(),
   "payment": zod.object({
   "id": zod.number(),
   "bookingId": zod.number(),

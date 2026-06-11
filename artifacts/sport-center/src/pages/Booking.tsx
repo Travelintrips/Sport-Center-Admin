@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useLocation, useSearch } from "wouter";
 import {
   useGetFacility,
@@ -21,8 +22,9 @@ import { id as idLocale, enUS } from "date-fns/locale";
 import {
   MapPin, Calendar, Clock, Receipt, ChevronLeft,
   RefreshCw, CheckCircle2, XCircle, AlertTriangle, Loader2, Pencil, X as IconX,
-  Plane, ShieldCheck, User
+  Plane, ShieldCheck, User, Building2
 } from "lucide-react";
+import { getToken } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
 import { useLang } from "@/lib/i18n";
 
@@ -86,6 +88,22 @@ export default function Booking() {
   const [customerType, setCustomerType] = useState<"umum" | "angkasa_pura">("umum");
   const [idCardNumber, setIdCardNumber] = useState("");
   const isAP = customerType === "angkasa_pura";
+
+  // --- Corporate billing ---
+  const [isCompanyBilling, setIsCompanyBilling] = useState(false);
+  const { data: billingStatus } = useQuery({
+    queryKey: ["billing-status"],
+    queryFn: async () => {
+      const token = getToken();
+      const res = await fetch("/api/company-verifications/billing-status", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return { eligible: false };
+      return res.json() as Promise<{ eligible: boolean; companyId?: number; companyName?: string; employeeId?: string }>;
+    },
+    enabled: isLoggedIn,
+    staleTime: 60_000,
+  });
 
   // --- Repeat Booking state ---
   const [isRepeat, setIsRepeat] = useState(false);
@@ -307,6 +325,8 @@ export default function Booking() {
           idCardNumber: isAP ? idCardNumber.trim() : undefined,
           promoCode: isAP ? undefined : couponResult?.code || undefined,
           discountAmount: isAP ? undefined : discountPerSession || undefined,
+          payerType: isCompanyBilling ? "company" : "personal",
+          companyCustomerId: isCompanyBilling && billingStatus?.companyId ? billingStatus.companyId : undefined,
         } as any,
       });
     }
@@ -529,6 +549,34 @@ export default function Booking() {
               )}
             </CardContent>
           </Card>
+
+          {/* Corporate Billing */}
+          {isLoggedIn && billingStatus?.eligible && !isAP && (
+            <Card className={isCompanyBilling ? "border-primary/40 bg-primary/5" : ""}>
+              <CardContent className="p-4">
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <Checkbox
+                    id="company-billing"
+                    checked={isCompanyBilling}
+                    onCheckedChange={(v) => setIsCompanyBilling(Boolean(v))}
+                    className="mt-0.5"
+                  />
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <Building2 size={15} className="text-primary" />
+                      <span className="font-semibold text-sm">Tagihkan ke Perusahaan</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Bayar via tagihan bulanan <strong>{billingStatus.companyName}</strong> (ID: {billingStatus.employeeId})
+                    </p>
+                  </div>
+                  {isCompanyBilling && (
+                    <Badge className="bg-primary/10 text-primary border-primary/20 shrink-0 text-xs">Aktif</Badge>
+                  )}
+                </label>
+              </CardContent>
+            </Card>
+          )}
 
           {/* Coupon Code */}
           {!isAP && (
@@ -940,25 +988,38 @@ export default function Booking() {
                     <span>−{formatCurrency(couponResult.discountAmount)}</span>
                   </div>
                 )}
-                <div className="flex justify-between font-bold text-lg pt-3 border-t">
-                  <span>{t("Total", "Total")}</span>
-                  <span className="text-primary">
-                    {(() => {
-                      const disc = couponResult?.discountAmount ?? 0;
-                      if (isRepeat) {
-                        const base = isChecking ? null : (checkResult ? effectiveTotalPrice : totalPrice * repeatCount);
-                        return base === null ? "..." : formatCurrency(Math.max(0, base - disc));
-                      }
-                      return formatCurrency(Math.max(0, totalPrice - disc));
-                    })()}
-                  </span>
-                </div>
-                {isRepeat && !isChecking && checkResult && (
-                  <div className="text-xs text-muted-foreground text-right">
-                    {effectiveCount} {t("sesi", "sessions")} × {duration} {t("jam", "hours")} × {formatCurrency(facility.pricePerHour)}
-                    {couponResult ? ` − ${formatCurrency(couponResult.discountAmount)}` : ""}
-                  </div>
-                )}
+                {(() => {
+                  const PPN_RATE = 0.11;
+                  const disc = couponResult?.discountAmount ?? 0;
+                  const dpp = isRepeat
+                    ? (isChecking ? null : Math.max(0, (checkResult ? effectiveTotalPrice : totalPrice * repeatCount) - disc))
+                    : Math.max(0, totalPrice - disc);
+                  const ppn = dpp == null ? null : Math.round(dpp * PPN_RATE);
+                  const grand = dpp == null || ppn == null ? null : dpp + ppn;
+                  return (
+                    <>
+                      <div className="pt-2 border-t space-y-1.5">
+                        <div className="flex justify-between text-muted-foreground">
+                          <span>DPP</span>
+                          <span>{dpp == null ? "..." : formatCurrency(dpp)}</span>
+                        </div>
+                        <div className="flex justify-between text-orange-600">
+                          <span>PPN 11%</span>
+                          <span>{ppn == null ? "..." : `+${formatCurrency(ppn)}`}</span>
+                        </div>
+                      </div>
+                      <div className="flex justify-between font-bold text-lg pt-2 border-t">
+                        <span>{t("Grand Total", "Grand Total")}</span>
+                        <span className="text-primary">{grand == null ? "..." : formatCurrency(grand)}</span>
+                      </div>
+                      {isRepeat && !isChecking && checkResult && effectiveCount > 0 && (
+                        <div className="text-xs text-muted-foreground text-right">
+                          {effectiveCount} {t("sesi", "sessions")} × {formatCurrency(dpp! / effectiveCount)} DPP + PPN 11%
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
             </CardContent>
 

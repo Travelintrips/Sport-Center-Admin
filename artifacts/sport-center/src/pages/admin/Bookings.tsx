@@ -254,10 +254,23 @@ function printInvoice(booking: any, settings?: any) {
           <td>${booking.durationHours} jam</td>
           <td style="text-align:right;font-weight:600">${formatCurrency(booking.totalPrice)}</td>
         </tr>
+        ${booking.ppnAmount != null && Number(booking.ppnAmount) > 0 ? `
+        <tr>
+          <td colspan="4" style="text-align:right;padding-right:16px;font-size:12px;color:#555">DPP</td>
+          <td style="text-align:right;font-size:12px;color:#555">${formatCurrency(Number(booking.totalPrice))}</td>
+        </tr>
+        <tr>
+          <td colspan="4" style="text-align:right;padding-right:16px;font-size:12px;color:#555">PPN ${Number(booking.ppnRate ?? 11)}%</td>
+          <td style="text-align:right;font-size:12px;color:#555">${formatCurrency(Number(booking.ppnAmount))}</td>
+        </tr>
+        <tr class="total-row">
+          <td colspan="4" style="text-align:right;padding-right:16px">Grand Total (DPP + PPN)</td>
+          <td style="text-align:right">${formatCurrency(Number(booking.grandTotal ?? (Number(booking.totalPrice) + Number(booking.ppnAmount))))}</td>
+        </tr>` : `
         <tr class="total-row">
           <td colspan="4" style="text-align:right;padding-right:16px">Total</td>
           <td style="text-align:right">${formatCurrency(booking.totalPrice)}</td>
-        </tr>
+        </tr>`}
       </tbody>
     </table>
   </div>
@@ -301,8 +314,9 @@ function printKwitansi(booking: any, settings?: any) {
   const now = new Date().toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" });
 
   const dpp = Math.round(Number(booking.totalPrice));
-  const ppn = Math.round(dpp * 0.12);
-  const total = dpp + ppn;
+  const ppnRate = booking.ppnRate != null ? Number(booking.ppnRate) : 11;
+  const ppn = booking.ppnAmount != null ? Math.round(Number(booking.ppnAmount)) : Math.round(dpp * ppnRate / 100);
+  const total = booking.grandTotal != null ? Math.round(Number(booking.grandTotal)) : dpp + ppn;
   const terbilangText = terbilang(total) + " Rupiah";
 
   const statusLabel = booking.status === "completed" ? "Lunas" :
@@ -433,7 +447,7 @@ function printKwitansi(booking: any, settings?: any) {
         <td>${formatCurrency(dpp)}</td>
       </tr>
       <tr>
-        <td>PPN 12%</td>
+        <td>PPN ${ppnRate}%</td>
         <td>${formatCurrency(ppn)}</td>
       </tr>
       <tr class="grand-total">
@@ -766,12 +780,33 @@ function BookingDetailDrawer({
               <InfoRow icon={CalendarDays} label="Tanggal" value={formatDate(booking.bookingDate)} />
               <InfoRow icon={Clock} label="Waktu" value={`${booking.startTime?.slice(0, 5)} – ${booking.endTime?.slice(0, 5)}`} />
               <InfoRow icon={Hash} label="Durasi" value={`${booking.durationHours} jam`} />
-              <InfoRow
-                icon={CreditCard}
-                label="Total"
-                value={formatCurrency(booking.totalPrice)}
-                highlight
-              />
+              {booking.ppnAmount != null && Number(booking.ppnAmount) > 0 ? (
+                <div className="col-span-2 border-t border-slate-100 dark:border-slate-700 pt-3 mt-1 space-y-1.5">
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="flex items-center gap-1 text-slate-500"><CreditCard size={11} />Subtotal (DPP)</span>
+                    <span className="font-semibold text-slate-700 dark:text-slate-300">{formatCurrency(booking.totalPrice)}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-slate-500 pl-3.5">PPN {Number(booking.ppnRate ?? 11)}%</span>
+                    <span className="text-orange-600 font-semibold">+{formatCurrency(Number(booking.ppnAmount))}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-sm border-t border-slate-100 dark:border-slate-700 pt-1.5 mt-1">
+                    <span className="font-bold text-slate-700 dark:text-slate-200">Grand Total</span>
+                    <span className="font-black text-emerald-600 dark:text-emerald-400 text-base">{formatCurrency(Number(booking.grandTotal))}</span>
+                  </div>
+                  <div className="flex items-center gap-2 pt-1">
+                    <span className="text-[10px] bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300 px-2 py-0.5 rounded font-semibold">PPN_OUT_11</span>
+                    <span className="text-[10px] bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 px-2 py-0.5 rounded font-semibold">Terutang PPN</span>
+                  </div>
+                </div>
+              ) : (
+                <InfoRow
+                  icon={CreditCard}
+                  label="Total"
+                  value={formatCurrency(booking.totalPrice)}
+                  highlight
+                />
+              )}
             </div>
           </div>
 

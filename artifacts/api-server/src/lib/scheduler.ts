@@ -2,6 +2,8 @@ import { db, bookingsTable, facilitiesTable } from "@workspace/db";
 import { eq, and, lt, lte, isNotNull, isNull } from "drizzle-orm";
 import { notifyBookingExpired, notifyReminderH1, notifyWaDayReminder, notifyWaStaffCheckin } from "./notifications";
 import { createWaToken } from "./waTokens";
+import { reverseTaxTransaction } from "./tax";
+import { reverseJournalEntry } from "./accounting";
 
 const APP_URL = process.env.APP_URL ?? "";
 
@@ -38,6 +40,12 @@ async function expireOverdueBookings(): Promise<void> {
         .update(bookingsTable)
         .set({ status: "expired", updatedAt: new Date() })
         .where(eq(bookingsTable.id, booking.id));
+
+      // Balik jurnal pajak + akuntansi (jika ada PPN pada booking ini)
+      const today = new Date().toISOString().split("T")[0];
+      const reason = `Booking ${booking.orderNumber} — expired otomatis`;
+      reverseTaxTransaction(booking.id, booking.orderNumber, today).catch(() => {});
+      reverseJournalEntry(booking.id, booking.orderNumber, reason, today).catch(() => {});
 
       const [facility] = await db
         .select({ name: facilitiesTable.name })
