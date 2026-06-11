@@ -1,14 +1,16 @@
 import { useState, useEffect, memo } from "react";
 import { Link, useLocation } from "wouter";
 import { useGetMe, useGetMyBookings, useGetReviews, useCreateReview, useLogout, getGetMeQueryKey, getGetMyBookingsQueryKey } from "@workspace/api-client-react";
-import { removeToken } from "@/lib/auth";
+import { removeToken, getToken } from "@/lib/auth";
 import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Input } from "@/components/ui/input";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { useLang } from "@/lib/i18n";
-import { CalendarDays, Clock, ChevronRight, LogOut, ReceiptText, Star, Trophy, MessageCircle, CalendarClock, UserCheck } from "lucide-react";
+import { CalendarDays, Clock, ChevronRight, LogOut, ReceiptText, Star, Trophy, MessageCircle, CalendarClock, UserCheck, Link2 } from "lucide-react";
 import RescheduleDialog from "@/components/RescheduleDialog";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
@@ -176,6 +178,9 @@ export default function MyBookings() {
 
   const [reviewState, setReviewState] = useState<Record<number, { rating: number; comment: string; hover: number }>>({});
   const [rescheduleTarget, setRescheduleTarget] = useState<BookingItem | null>(null);
+  const [claimOpen, setClaimOpen] = useState(false);
+  const [claimOrder, setClaimOrder] = useState("");
+  const [claimLoading, setClaimLoading] = useState(false);
 
   const logoutMutation = useLogout({
     mutation: {
@@ -198,6 +203,29 @@ export default function MyBookings() {
       },
     },
   });
+
+  const handleClaim = async () => {
+    if (!claimOrder.trim()) return;
+    setClaimLoading(true);
+    try {
+      const token = getToken();
+      const res = await fetch("/api/bookings/claim", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ orderNumber: claimOrder.trim().toUpperCase() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Gagal mengklaim booking");
+      toast({ title: t("Berhasil diklaim!", "Claimed!"), description: t(`Booking ${data.orderNumber} berhasil ditambahkan ke riwayat Anda.`, `Booking ${data.orderNumber} has been added to your history.`) });
+      setClaimOpen(false);
+      setClaimOrder("");
+      queryClient.invalidateQueries({ queryKey: getGetMyBookingsQueryKey() });
+    } catch (err: any) {
+      toast({ title: t("Gagal", "Failed"), description: err.message, variant: "destructive" });
+    } finally {
+      setClaimLoading(false);
+    }
+  };
 
   const getRs = (id: number): Rs => reviewState[id] ?? { rating: 0, comment: "", hover: 0 };
   const setRs = (id: number, patch: Partial<Rs>) =>
@@ -336,12 +364,46 @@ export default function MyBookings() {
             <ReceiptText size={14} className="mr-2" /> {t("+ Pesan Fasilitas Baru", "+ Book a New Facility")}
           </Link>
         </Button>
+        <Button variant="outline" size="sm" onClick={() => setClaimOpen(true)}>
+          <Link2 size={14} className="mr-2" /> {t("Klaim Booking", "Claim Booking")}
+        </Button>
         <Button asChild variant="outline" size="sm" className="border-[#25D366] text-[#25D366] hover:bg-[#25D366] hover:text-white">
           <a href="https://wa.me/6281288195206" target="_blank" rel="noopener noreferrer">
             <MessageCircle size={14} className="mr-2" /> {t("Chat Admin", "Chat Admin")}
           </a>
         </Button>
       </div>
+
+      <Dialog open={claimOpen} onOpenChange={(o) => { setClaimOpen(o); if (!o) setClaimOrder(""); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Link2 size={18} className="text-primary" /> {t("Klaim Booking", "Claim Booking")}</DialogTitle>
+            <DialogDescription>
+              {t("Masukkan nomor order booking yang ingin Anda hubungkan ke akun ini.", "Enter the order number of the booking you want to link to this account.")}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 pt-2">
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">{t("Nomor Order", "Order Number")}</label>
+              <Input
+                placeholder="Contoh: SC-20240611-001"
+                value={claimOrder}
+                onChange={(e) => setClaimOrder(e.target.value.toUpperCase())}
+                onKeyDown={(e) => e.key === "Enter" && handleClaim()}
+                className="font-mono tracking-wider"
+              />
+            </div>
+            <div className="flex gap-2 justify-end">
+              <Button variant="outline" size="sm" onClick={() => setClaimOpen(false)} disabled={claimLoading}>
+                {t("Batal", "Cancel")}
+              </Button>
+              <Button size="sm" onClick={handleClaim} disabled={claimLoading || !claimOrder.trim()} className="bg-primary hover:bg-primary/90">
+                {claimLoading ? t("Memproses...", "Processing...") : t("Klaim", "Claim")}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {rescheduleTarget && (
         <RescheduleDialog

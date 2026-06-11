@@ -563,6 +563,47 @@ router.get("/bookings/my", authMiddleware, async (req, res) => {
   }
 });
 
+// POST /bookings/claim — user mengklaim booking lama via nomor order
+router.post("/bookings/claim", authMiddleware, async (req, res) => {
+  try {
+    const userId = (req as any).user?.userId as number;
+    const { orderNumber } = req.body;
+    if (!orderNumber) {
+      res.status(400).json({ error: "Nomor order wajib diisi" });
+      return;
+    }
+
+    const [booking] = await db.select().from(bookingsTable)
+      .where(eq(bookingsTable.orderNumber, String(orderNumber).trim().toUpperCase())).limit(1);
+
+    if (!booking) {
+      res.status(404).json({ error: "Booking tidak ditemukan. Periksa kembali nomor order Anda." });
+      return;
+    }
+
+    // Sudah milik akun lain
+    if (booking.customerId && booking.customerId !== userId) {
+      res.status(409).json({ error: "Booking ini sudah terhubung ke akun lain." });
+      return;
+    }
+
+    // Sudah milik akun sendiri
+    if (booking.customerId === userId || booking.bookedByUserId === userId) {
+      res.status(409).json({ error: "Booking ini sudah ada di riwayat Anda." });
+      return;
+    }
+
+    await db.update(bookingsTable)
+      .set({ customerId: userId, bookedByUserId: userId })
+      .where(eq(bookingsTable.id, booking.id));
+
+    res.json({ success: true, orderNumber: booking.orderNumber, facilityId: booking.facilityId });
+  } catch (err) {
+    req.log.error({ err }, "Claim booking error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 router.get("/bookings/order/:orderNumber", async (req, res) => {
   try {
     const [booking] = await db.select().from(bookingsTable)
