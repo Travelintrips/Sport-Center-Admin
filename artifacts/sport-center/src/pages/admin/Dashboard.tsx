@@ -13,7 +13,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line,
 } from "recharts";
-import { CalendarDays, DollarSign, Clock, TrendingUp, X, ArrowRight, Building2 } from "lucide-react";
+import { CalendarDays, DollarSign, Clock, TrendingUp, X, ArrowRight, Building2, Users } from "lucide-react";
 import { useLocation } from "wouter";
 
 const STATUS_COLORS: Record<string, string> = {
@@ -303,13 +303,13 @@ export default function AdminDashboard() {
       </div>
 
       {/* Revenue split */}
-      {(revenuePersonal > 0 || revenueCompanyUnbilled > 0 || revenueCompanyPaid > 0) && (
+      {(revenuePersonal > 0 || revenueCompanyUnbilled > 0 || revenueCompanyPaid > 0 || (data?.membershipRevenue ?? 0) > 0) && (
         <div className="rounded-xl border border-border bg-card p-4">
           <div className="flex items-center gap-2 mb-3">
             <Building2 size={15} className="text-primary" />
             <span className="text-xs font-bold text-muted-foreground uppercase tracking-wide">Rincian Revenue</span>
           </div>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <div className="rounded-lg bg-emerald-50 dark:bg-emerald-900/20 p-3">
               <div className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold uppercase mb-1">Pribadi · Lunas</div>
               <div className="text-sm font-black text-emerald-700 dark:text-emerald-300">{formatCurrency(revenuePersonal)}</div>
@@ -321,6 +321,16 @@ export default function AdminDashboard() {
             <div className="rounded-lg bg-blue-50 dark:bg-blue-900/20 p-3">
               <div className="text-[10px] text-blue-600 dark:text-blue-400 font-semibold uppercase mb-1">Perusahaan · Sudah Lunas</div>
               <div className="text-sm font-black text-blue-700 dark:text-blue-300">{formatCurrency(revenueCompanyPaid)}</div>
+            </div>
+            <div className="rounded-lg bg-purple-50 dark:bg-purple-900/20 p-3">
+              <div className="flex items-center gap-1 mb-1">
+                <Users size={9} className="text-purple-500" />
+                <div className="text-[10px] text-purple-600 dark:text-purple-400 font-semibold uppercase">Member Gym</div>
+              </div>
+              <div className="text-sm font-black text-purple-700 dark:text-purple-300">{formatCurrency(data?.membershipRevenue ?? 0)}</div>
+              {(data?.activeMemberships ?? 0) > 0 && (
+                <div className="text-[10px] text-purple-500 mt-0.5">{data?.activeMemberships} aktif</div>
+              )}
             </div>
           </div>
         </div>
@@ -368,13 +378,14 @@ export default function AdminDashboard() {
           <CardContent>
             <div className="h-56">
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={data?.revenueByMonth}>
+                <BarChart data={data?.revenueByMonth}>
                   <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
                   <XAxis dataKey="month" tick={{ fontSize: 11 }} />
                   <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
-                  <Tooltip formatter={(v: any) => [formatCurrency(Number(v)), "Pendapatan"]} />
-                  <Line type="monotone" dataKey="revenue" stroke="hsl(var(--primary))" strokeWidth={2} dot={{ r: 4 }} />
-                </LineChart>
+                  <Tooltip formatter={(v: any, name: string) => [formatCurrency(Number(v)), name === "membershipRevenue" ? "Member Gym" : "Booking"]} />
+                  <Bar dataKey="revenue" stackId="a" fill="hsl(var(--primary))" name="Booking" radius={[0, 0, 0, 0]} />
+                  <Bar dataKey="membershipRevenue" stackId="a" fill="#a855f7" name="Member Gym" radius={[4, 4, 0, 0]} />
+                </BarChart>
               </ResponsiveContainer>
             </div>
           </CardContent>
