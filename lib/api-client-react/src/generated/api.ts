@@ -24,6 +24,7 @@ import type {
   ApMemberInput,
   ApMemberUpdate,
   AuthResponse,
+  BillingStatusResponse,
   BlockedSchedule,
   BlockedScheduleInput,
   Booking,
@@ -32,6 +33,8 @@ import type {
   CheckAvailabilityParams,
   CompanyInvoice,
   CompanyInvoiceUpdate,
+  CompanyVerification,
+  CompanyVerificationRequest,
   CreateReviewInput,
   CreateTenantInput,
   Customer,
@@ -40,6 +43,7 @@ import type {
   DashboardStats,
   DiscountSetting,
   DiscountSettingUpdate,
+  ErrorEnvelope,
   ExportBookingsParams,
   Facility,
   FacilityInput,
@@ -56,7 +60,10 @@ import type {
   ListApMembersParams,
   ListBlockedSchedulesParams,
   ListBookingsParams,
+  ListCompanies200Item,
   ListCompanyInvoicesParams,
+  ListCompanyUsers200Item,
+  ListCompanyVerificationsParams,
   ListCustomersParams,
   ListFacilitiesParams,
   ListMembershipsParams,
@@ -78,8 +85,10 @@ import type {
   RecurringBookingInput,
   RecurringBookingResult,
   RegisterInput,
+  RejectVerificationInput,
   Review,
   ReviewSummary,
+  RevokeVerificationInput,
   SendOtp200,
   SendOtpInput,
   Settings,
@@ -93,6 +102,7 @@ import type {
   TenantPaymentInput,
   TenantStatusUpdateBody,
   TimeSlot,
+  ToggleBillingInput,
   UpdateProfileInput,
   User,
   VerificationLog,
@@ -3016,6 +3026,755 @@ export const useUpdateCustomer = <TError = ErrorType<unknown>,
       > => {
       return useMutation(getUpdateCustomerMutationOptions(options));
     }
+
+export const getListCompaniesUrl = () => {
+
+
+
+
+  return `/api/companies`
+}
+
+/**
+ * @summary List company accounts available for employee verification
+ */
+export const listCompanies = async ( options?: RequestInit): Promise<ListCompanies200Item[]> => {
+
+  return customFetch<ListCompanies200Item[]>(getListCompaniesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListCompaniesQueryKey = () => {
+    return [
+    `/api/companies`
+    ] as const;
+    }
+
+
+export const getListCompaniesQueryOptions = <TData = Awaited<ReturnType<typeof listCompanies>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listCompanies>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListCompaniesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listCompanies>>> = ({ signal }) => listCompanies({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listCompanies>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListCompaniesQueryResult = NonNullable<Awaited<ReturnType<typeof listCompanies>>>
+export type ListCompaniesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List company accounts available for employee verification
+ */
+
+export function useListCompanies<TData = Awaited<ReturnType<typeof listCompanies>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listCompanies>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListCompaniesQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getListCompanyVerificationsUrl = (params?: ListCompanyVerificationsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/company-verifications?${stringifiedParams}` : `/api/company-verifications`
+}
+
+/**
+ * @summary List all company verification requests (admin)
+ */
+export const listCompanyVerifications = async (params?: ListCompanyVerificationsParams, options?: RequestInit): Promise<CompanyVerification[]> => {
+
+  return customFetch<CompanyVerification[]>(getListCompanyVerificationsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListCompanyVerificationsQueryKey = (params?: ListCompanyVerificationsParams,) => {
+    return [
+    `/api/company-verifications`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListCompanyVerificationsQueryOptions = <TData = Awaited<ReturnType<typeof listCompanyVerifications>>, TError = ErrorType<unknown>>(params?: ListCompanyVerificationsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listCompanyVerifications>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListCompanyVerificationsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listCompanyVerifications>>> = ({ signal }) => listCompanyVerifications(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listCompanyVerifications>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListCompanyVerificationsQueryResult = NonNullable<Awaited<ReturnType<typeof listCompanyVerifications>>>
+export type ListCompanyVerificationsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List all company verification requests (admin)
+ */
+
+export function useListCompanyVerifications<TData = Awaited<ReturnType<typeof listCompanyVerifications>>, TError = ErrorType<unknown>>(
+ params?: ListCompanyVerificationsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listCompanyVerifications>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListCompanyVerificationsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getCreateCompanyVerificationUrl = () => {
+
+
+
+
+  return `/api/company-verifications`
+}
+
+/**
+ * @summary Submit employee verification request (customer)
+ */
+export const createCompanyVerification = async (companyVerificationRequest: CompanyVerificationRequest, options?: RequestInit): Promise<void> => {
+
+  return customFetch<void>(getCreateCompanyVerificationUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      companyVerificationRequest,)
+  }
+);}
+
+
+
+
+export const getCreateCompanyVerificationMutationOptions = <TError = ErrorType<ErrorEnvelope>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createCompanyVerification>>, TError,{data: BodyType<CompanyVerificationRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createCompanyVerification>>, TError,{data: BodyType<CompanyVerificationRequest>}, TContext> => {
+
+const mutationKey = ['createCompanyVerification'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createCompanyVerification>>, {data: BodyType<CompanyVerificationRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createCompanyVerification(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateCompanyVerificationMutationResult = NonNullable<Awaited<ReturnType<typeof createCompanyVerification>>>
+    export type CreateCompanyVerificationMutationBody = BodyType<CompanyVerificationRequest>
+    export type CreateCompanyVerificationMutationError = ErrorType<ErrorEnvelope>
+
+    /**
+ * @summary Submit employee verification request (customer)
+ */
+export const useCreateCompanyVerification = <TError = ErrorType<ErrorEnvelope>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createCompanyVerification>>, TError,{data: BodyType<CompanyVerificationRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createCompanyVerification>>,
+        TError,
+        {data: BodyType<CompanyVerificationRequest>},
+        TContext
+      > => {
+      return useMutation(getCreateCompanyVerificationMutationOptions(options));
+    }
+
+export const getListMyCompanyVerificationsUrl = () => {
+
+
+
+
+  return `/api/company-verifications/my`
+}
+
+/**
+ * @summary Get current customer's verification requests
+ */
+export const listMyCompanyVerifications = async ( options?: RequestInit): Promise<CompanyVerification[]> => {
+
+  return customFetch<CompanyVerification[]>(getListMyCompanyVerificationsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListMyCompanyVerificationsQueryKey = () => {
+    return [
+    `/api/company-verifications/my`
+    ] as const;
+    }
+
+
+export const getListMyCompanyVerificationsQueryOptions = <TData = Awaited<ReturnType<typeof listMyCompanyVerifications>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listMyCompanyVerifications>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListMyCompanyVerificationsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listMyCompanyVerifications>>> = ({ signal }) => listMyCompanyVerifications({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listMyCompanyVerifications>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListMyCompanyVerificationsQueryResult = NonNullable<Awaited<ReturnType<typeof listMyCompanyVerifications>>>
+export type ListMyCompanyVerificationsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get current customer's verification requests
+ */
+
+export function useListMyCompanyVerifications<TData = Awaited<ReturnType<typeof listMyCompanyVerifications>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listMyCompanyVerifications>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListMyCompanyVerificationsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getGetCompanyBillingStatusUrl = () => {
+
+
+
+
+  return `/api/company-verifications/billing-status`
+}
+
+/**
+ * @summary Check if current customer has corporate billing enabled
+ */
+export const getCompanyBillingStatus = async ( options?: RequestInit): Promise<BillingStatusResponse> => {
+
+  return customFetch<BillingStatusResponse>(getGetCompanyBillingStatusUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetCompanyBillingStatusQueryKey = () => {
+    return [
+    `/api/company-verifications/billing-status`
+    ] as const;
+    }
+
+
+export const getGetCompanyBillingStatusQueryOptions = <TData = Awaited<ReturnType<typeof getCompanyBillingStatus>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getCompanyBillingStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetCompanyBillingStatusQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getCompanyBillingStatus>>> = ({ signal }) => getCompanyBillingStatus({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getCompanyBillingStatus>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetCompanyBillingStatusQueryResult = NonNullable<Awaited<ReturnType<typeof getCompanyBillingStatus>>>
+export type GetCompanyBillingStatusQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Check if current customer has corporate billing enabled
+ */
+
+export function useGetCompanyBillingStatus<TData = Awaited<ReturnType<typeof getCompanyBillingStatus>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getCompanyBillingStatus>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetCompanyBillingStatusQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getApproveCompanyVerificationUrl = (id: number,) => {
+
+
+
+
+  return `/api/company-verifications/${id}/approve`
+}
+
+/**
+ * @summary Approve verification request (admin)
+ */
+export const approveCompanyVerification = async (id: number, options?: RequestInit): Promise<void> => {
+
+  return customFetch<void>(getApproveCompanyVerificationUrl(id),
+  {
+    ...options,
+    method: 'PATCH'
+
+
+  }
+);}
+
+
+
+
+export const getApproveCompanyVerificationMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof approveCompanyVerification>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof approveCompanyVerification>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['approveCompanyVerification'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof approveCompanyVerification>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  approveCompanyVerification(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ApproveCompanyVerificationMutationResult = NonNullable<Awaited<ReturnType<typeof approveCompanyVerification>>>
+
+    export type ApproveCompanyVerificationMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Approve verification request (admin)
+ */
+export const useApproveCompanyVerification = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof approveCompanyVerification>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof approveCompanyVerification>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getApproveCompanyVerificationMutationOptions(options));
+    }
+
+export const getRejectCompanyVerificationUrl = (id: number,) => {
+
+
+
+
+  return `/api/company-verifications/${id}/reject`
+}
+
+/**
+ * @summary Reject verification request (admin)
+ */
+export const rejectCompanyVerification = async (id: number,
+    rejectVerificationInput?: RejectVerificationInput, options?: RequestInit): Promise<void> => {
+
+  return customFetch<void>(getRejectCompanyVerificationUrl(id),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      rejectVerificationInput,)
+  }
+);}
+
+
+
+
+export const getRejectCompanyVerificationMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rejectCompanyVerification>>, TError,{id: number;data?: BodyType<RejectVerificationInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof rejectCompanyVerification>>, TError,{id: number;data?: BodyType<RejectVerificationInput>}, TContext> => {
+
+const mutationKey = ['rejectCompanyVerification'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof rejectCompanyVerification>>, {id: number;data?: BodyType<RejectVerificationInput>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  rejectCompanyVerification(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RejectCompanyVerificationMutationResult = NonNullable<Awaited<ReturnType<typeof rejectCompanyVerification>>>
+    export type RejectCompanyVerificationMutationBody = BodyType<RejectVerificationInput> | undefined
+    export type RejectCompanyVerificationMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Reject verification request (admin)
+ */
+export const useRejectCompanyVerification = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rejectCompanyVerification>>, TError,{id: number;data?: BodyType<RejectVerificationInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof rejectCompanyVerification>>,
+        TError,
+        {id: number;data?: BodyType<RejectVerificationInput>},
+        TContext
+      > => {
+      return useMutation(getRejectCompanyVerificationMutationOptions(options));
+    }
+
+export const getRevokeCompanyVerificationUrl = (id: number,) => {
+
+
+
+
+  return `/api/company-verifications/${id}/revoke`
+}
+
+/**
+ * @summary Revoke approved verification (admin)
+ */
+export const revokeCompanyVerification = async (id: number,
+    revokeVerificationInput?: RevokeVerificationInput, options?: RequestInit): Promise<void> => {
+
+  return customFetch<void>(getRevokeCompanyVerificationUrl(id),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      revokeVerificationInput,)
+  }
+);}
+
+
+
+
+export const getRevokeCompanyVerificationMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof revokeCompanyVerification>>, TError,{id: number;data?: BodyType<RevokeVerificationInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof revokeCompanyVerification>>, TError,{id: number;data?: BodyType<RevokeVerificationInput>}, TContext> => {
+
+const mutationKey = ['revokeCompanyVerification'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof revokeCompanyVerification>>, {id: number;data?: BodyType<RevokeVerificationInput>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  revokeCompanyVerification(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RevokeCompanyVerificationMutationResult = NonNullable<Awaited<ReturnType<typeof revokeCompanyVerification>>>
+    export type RevokeCompanyVerificationMutationBody = BodyType<RevokeVerificationInput> | undefined
+    export type RevokeCompanyVerificationMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Revoke approved verification (admin)
+ */
+export const useRevokeCompanyVerification = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof revokeCompanyVerification>>, TError,{id: number;data?: BodyType<RevokeVerificationInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof revokeCompanyVerification>>,
+        TError,
+        {id: number;data?: BodyType<RevokeVerificationInput>},
+        TContext
+      > => {
+      return useMutation(getRevokeCompanyVerificationMutationOptions(options));
+    }
+
+export const getToggleCompanyUserBillingUrl = (id: number,) => {
+
+
+
+
+  return `/api/company-users/${id}/toggle-billing`
+}
+
+/**
+ * @summary Toggle corporate billing for a verified employee (admin)
+ */
+export const toggleCompanyUserBilling = async (id: number,
+    toggleBillingInput?: ToggleBillingInput, options?: RequestInit): Promise<void> => {
+
+  return customFetch<void>(getToggleCompanyUserBillingUrl(id),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      toggleBillingInput,)
+  }
+);}
+
+
+
+
+export const getToggleCompanyUserBillingMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof toggleCompanyUserBilling>>, TError,{id: number;data?: BodyType<ToggleBillingInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof toggleCompanyUserBilling>>, TError,{id: number;data?: BodyType<ToggleBillingInput>}, TContext> => {
+
+const mutationKey = ['toggleCompanyUserBilling'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof toggleCompanyUserBilling>>, {id: number;data?: BodyType<ToggleBillingInput>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  toggleCompanyUserBilling(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ToggleCompanyUserBillingMutationResult = NonNullable<Awaited<ReturnType<typeof toggleCompanyUserBilling>>>
+    export type ToggleCompanyUserBillingMutationBody = BodyType<ToggleBillingInput> | undefined
+    export type ToggleCompanyUserBillingMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Toggle corporate billing for a verified employee (admin)
+ */
+export const useToggleCompanyUserBilling = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof toggleCompanyUserBilling>>, TError,{id: number;data?: BodyType<ToggleBillingInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof toggleCompanyUserBilling>>,
+        TError,
+        {id: number;data?: BodyType<ToggleBillingInput>},
+        TContext
+      > => {
+      return useMutation(getToggleCompanyUserBillingMutationOptions(options));
+    }
+
+export const getListCompanyUsersUrl = (companyId: number,) => {
+
+
+
+
+  return `/api/company-users/by-company/${companyId}`
+}
+
+/**
+ * @summary List verified employees of a company (admin)
+ */
+export const listCompanyUsers = async (companyId: number, options?: RequestInit): Promise<ListCompanyUsers200Item[]> => {
+
+  return customFetch<ListCompanyUsers200Item[]>(getListCompanyUsersUrl(companyId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListCompanyUsersQueryKey = (companyId: number,) => {
+    return [
+    `/api/company-users/by-company/${companyId}`
+    ] as const;
+    }
+
+
+export const getListCompanyUsersQueryOptions = <TData = Awaited<ReturnType<typeof listCompanyUsers>>, TError = ErrorType<unknown>>(companyId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listCompanyUsers>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListCompanyUsersQueryKey(companyId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listCompanyUsers>>> = ({ signal }) => listCompanyUsers(companyId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(companyId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listCompanyUsers>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListCompanyUsersQueryResult = NonNullable<Awaited<ReturnType<typeof listCompanyUsers>>>
+export type ListCompanyUsersQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List verified employees of a company (admin)
+ */
+
+export function useListCompanyUsers<TData = Awaited<ReturnType<typeof listCompanyUsers>>, TError = ErrorType<unknown>>(
+ companyId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listCompanyUsers>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListCompanyUsersQueryOptions(companyId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
 
 export const getListCompanyInvoicesUrl = (params?: ListCompanyInvoicesParams,) => {
   const normalizedParams = new URLSearchParams();

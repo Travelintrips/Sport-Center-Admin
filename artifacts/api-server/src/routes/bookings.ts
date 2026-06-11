@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { db, bookingsTable, facilitiesTable, paymentsTable, promosTable, discountSettingsTable, apMembersTable, bookingHistoryTable, usersTable, verificationLogsTable } from "@workspace/db";
+import { db, bookingsTable, facilitiesTable, paymentsTable, promosTable, discountSettingsTable, apMembersTable, bookingHistoryTable, usersTable, verificationLogsTable, companyUsersTable } from "@workspace/db";
 import { eq, and, sql, or, ilike, desc } from "drizzle-orm";
 import { adminMiddleware, authMiddleware, verifyToken } from "../lib/auth";
 import { broadcastAvailabilityChange } from "../lib/supabase";
@@ -140,6 +140,7 @@ router.post("/bookings", async (req, res) => {
     // Prioritas 1: explicit companyCustomerId di body — HANYA boleh dari admin
     // Prioritas 2: customerId di body yang merujuk ke company customer — HANYA dari admin
     // Prioritas 3: loggedInUser sendiri adalah company customer (dari token customer)
+    // Prioritas 4: logged-in customer memilih company billing via verifikasi karyawan
     let companyBillingUser: (typeof usersTable.$inferSelect) | null = null;
     const explicitCompanyId = isAdminRequest && req.body.companyCustomerId ? Number(req.body.companyCustomerId) : null;
     const bodyCustomerId = isAdminRequest && req.body.customerId ? Number(req.body.customerId) : null;
@@ -152,6 +153,22 @@ router.post("/bookings", async (req, res) => {
       if (cu?.accountType === "company" && cu?.allowMonthlyBilling) companyBillingUser = cu;
     } else if (loggedInUser?.accountType === "company" && loggedInUser?.allowMonthlyBilling) {
       companyBillingUser = loggedInUser;
+    } else if (!isAdminRequest && loggedInUserId && req.body.payerType === "company" && req.body.companyCustomerId) {
+      // Prioritas 4: customer yang sudah diverifikasi sebagai karyawan memilih tagih ke perusahaan
+      const requestedCompanyId = Number(req.body.companyCustomerId);
+      const [companyUserRecord] = await db.select().from(companyUsersTable)
+        .where(and(
+          eq(companyUsersTable.customerId, loggedInUserId),
+          eq(companyUsersTable.companyId, requestedCompanyId),
+          eq(companyUsersTable.verificationStatus, "approved"),
+          eq(companyUsersTable.corporateBillingEnabled, true),
+        ))
+        .limit(1);
+      if (companyUserRecord) {
+        const [companyAccount] = await db.select().from(usersTable)
+          .where(eq(usersTable.id, requestedCompanyId)).limit(1);
+        if (companyAccount) companyBillingUser = companyAccount;
+      }
     }
     const isCompanyBilling = !!companyBillingUser;
     const effectiveCompanyCustomerId = companyBillingUser?.id ?? null;

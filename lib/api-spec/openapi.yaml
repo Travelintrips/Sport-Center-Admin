@@ -9,6 +9,8 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: company-verifications
+    description: Employee verification for corporate billing
   - name: auth
     description: Authentication
   - name: facilities
@@ -825,6 +827,215 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Customer"
+
+  /companies:
+    get:
+      operationId: listCompanies
+      tags: [company-verifications]
+      summary: List company accounts available for employee verification
+      responses:
+        "200":
+          description: List of company accounts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: integer
+                    name:
+                      type: string
+                    companyName:
+                      type: string
+
+  /company-verifications:
+    get:
+      operationId: listCompanyVerifications
+      tags: [company-verifications]
+      summary: List all company verification requests (admin)
+      parameters:
+        - in: query
+          name: status
+          schema:
+            type: string
+        - in: query
+          name: companyId
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of verifications
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CompanyVerification"
+    post:
+      operationId: createCompanyVerification
+      tags: [company-verifications]
+      summary: Submit employee verification request (customer)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompanyVerificationRequest"
+      responses:
+        "201":
+          description: Verification request submitted
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
+  /company-verifications/my:
+    get:
+      operationId: listMyCompanyVerifications
+      tags: [company-verifications]
+      summary: Get current customer's verification requests
+      responses:
+        "200":
+          description: My verifications
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CompanyVerification"
+
+  /company-verifications/billing-status:
+    get:
+      operationId: getCompanyBillingStatus
+      tags: [company-verifications]
+      summary: Check if current customer has corporate billing enabled
+      responses:
+        "200":
+          description: Billing eligibility
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingStatusResponse"
+
+  /company-verifications/{id}/approve:
+    patch:
+      operationId: approveCompanyVerification
+      tags: [company-verifications]
+      summary: Approve verification request (admin)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Approved
+
+  /company-verifications/{id}/reject:
+    patch:
+      operationId: rejectCompanyVerification
+      tags: [company-verifications]
+      summary: Reject verification request (admin)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RejectVerificationInput"
+      responses:
+        "200":
+          description: Rejected
+
+  /company-verifications/{id}/revoke:
+    patch:
+      operationId: revokeCompanyVerification
+      tags: [company-verifications]
+      summary: Revoke approved verification (admin)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RevokeVerificationInput"
+      responses:
+        "200":
+          description: Revoked
+
+  /company-users/{id}/toggle-billing:
+    patch:
+      operationId: toggleCompanyUserBilling
+      tags: [company-verifications]
+      summary: Toggle corporate billing for a verified employee (admin)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ToggleBillingInput"
+      responses:
+        "200":
+          description: Updated
+
+  /company-users/by-company/{companyId}:
+    get:
+      operationId: listCompanyUsers
+      tags: [company-verifications]
+      summary: List verified employees of a company (admin)
+      parameters:
+        - in: path
+          name: companyId
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of company users
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: integer
+                    customerId:
+                      type: integer
+                    companyId:
+                      type: integer
+                    employeeId:
+                      type: string
+                    officeEmail:
+                      type: string
+                      nullable: true
+                    verificationStatus:
+                      type: string
+                    corporateBillingEnabled:
+                      type: boolean
+                    customerName:
+                      type: string
+                    customerEmail:
+                      type: string
 
   /company-invoices:
     get:
@@ -3029,6 +3240,98 @@ components:
       type: object
       properties:
         notes:
+          type: string
+
+    CompanyVerificationStatus:
+      type: string
+      enum: [pending, approved, rejected, revoked]
+
+    CompanyVerification:
+      type: object
+      properties:
+        id:
+          type: integer
+        companyId:
+          type: integer
+        customerId:
+          type: integer
+        companyUserId:
+          type: integer
+          nullable: true
+        employeeId:
+          type: string
+        officeEmail:
+          type: string
+          nullable: true
+        idCardUrl:
+          type: string
+          nullable: true
+        status:
+          $ref: "#/components/schemas/CompanyVerificationStatus"
+        requestedAt:
+          type: string
+          format: date-time
+        approvedAt:
+          type: string
+          format: date-time
+          nullable: true
+        rejectionReason:
+          type: string
+          nullable: true
+        customerName:
+          type: string
+        customerEmail:
+          type: string
+        customerPhone:
+          type: string
+          nullable: true
+        companyName:
+          type: string
+        approvedByName:
+          type: string
+          nullable: true
+
+    CompanyVerificationRequest:
+      type: object
+      required: [companyId, employeeId]
+      properties:
+        companyId:
+          type: integer
+        employeeId:
+          type: string
+        officeEmail:
+          type: string
+        idCardUrl:
+          type: string
+
+    RejectVerificationInput:
+      type: object
+      properties:
+        reason:
+          type: string
+
+    RevokeVerificationInput:
+      type: object
+      properties:
+        reason:
+          type: string
+
+    ToggleBillingInput:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+
+    BillingStatusResponse:
+      type: object
+      properties:
+        eligible:
+          type: boolean
+        companyId:
+          type: integer
+        companyName:
+          type: string
+        employeeId:
           type: string
 
     ErrorEnvelope:

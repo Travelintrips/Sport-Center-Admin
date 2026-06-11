@@ -1087,6 +1087,61 @@ export interface TenantPaymentActionBody {
   notes?: string;
 }
 
+export type CompanyVerificationStatus = typeof CompanyVerificationStatus[keyof typeof CompanyVerificationStatus];
+
+
+export const CompanyVerificationStatus = {
+  pending: 'pending',
+  approved: 'approved',
+  rejected: 'rejected',
+  revoked: 'revoked',
+} as const;
+
+export interface CompanyVerification {
+  id?: number;
+  companyId?: number;
+  customerId?: number;
+  companyUserId?: number | null;
+  employeeId?: string;
+  officeEmail?: string | null;
+  idCardUrl?: string | null;
+  status?: CompanyVerificationStatus;
+  requestedAt?: string;
+  approvedAt?: string | null;
+  rejectionReason?: string | null;
+  customerName?: string;
+  customerEmail?: string;
+  customerPhone?: string | null;
+  companyName?: string;
+  approvedByName?: string | null;
+}
+
+export interface CompanyVerificationRequest {
+  companyId: number;
+  employeeId: string;
+  officeEmail?: string;
+  idCardUrl?: string;
+}
+
+export interface RejectVerificationInput {
+  reason?: string;
+}
+
+export interface RevokeVerificationInput {
+  reason?: string;
+}
+
+export interface ToggleBillingInput {
+  enabled?: boolean;
+}
+
+export interface BillingStatusResponse {
+  eligible?: boolean;
+  companyId?: number;
+  companyName?: string;
+  employeeId?: string;
+}
+
 export interface ErrorEnvelope {
   error: string;
 }
@@ -1138,6 +1193,29 @@ export const ListCustomersAccountType = {
   personal: 'personal',
   company: 'company',
 } as const;
+
+export type ListCompanies200Item = {
+  id?: number;
+  name?: string;
+  companyName?: string;
+};
+
+export type ListCompanyVerificationsParams = {
+status?: string;
+companyId?: number;
+};
+
+export type ListCompanyUsers200Item = {
+  id?: number;
+  customerId?: number;
+  companyId?: number;
+  employeeId?: string;
+  officeEmail?: string | null;
+  verificationStatus?: string;
+  corporateBillingEnabled?: boolean;
+  customerName?: string;
+  customerEmail?: string;
+};
 
 export type ListCompanyInvoicesParams = {
 companyCustomerId?: number;

@@ -125,6 +125,8 @@ export default function MyProfile() {
   // ── Company verification ───────────────────────────────────────────────────
   const [showVerifDialog, setShowVerifDialog] = useState(false);
   const [verifForm, setVerifForm] = useState({ companyId: "", employeeId: "", officeEmail: "", idCardUrl: "" });
+  const [idCardFile, setIdCardFile] = useState<File | null>(null);
+  const [idCardUploading, setIdCardUploading] = useState(false);
 
   const { data: myVerifications, isLoading: isLoadingVerif, refetch: refetchVerif } = useQuery({
     queryKey: ["my-verifications"],
@@ -151,9 +153,27 @@ export default function MyProfile() {
     enabled: showVerifDialog,
   });
 
+  async function uploadIdCardFile(file: File): Promise<string> {
+    const formData = new FormData();
+    formData.append("file", file);
+    const res = await fetch("/api/storage/upload-proof", { method: "POST", body: formData });
+    if (!res.ok) { const e = await res.json(); throw new Error(e.error || "Upload gagal"); }
+    const { url } = await res.json();
+    return url;
+  }
+
   const submitVerifMutation = useMutation({
     mutationFn: async () => {
       const token = getToken();
+      let finalIdCardUrl = verifForm.idCardUrl.trim() || undefined;
+      if (idCardFile) {
+        setIdCardUploading(true);
+        try {
+          finalIdCardUrl = await uploadIdCardFile(idCardFile);
+        } finally {
+          setIdCardUploading(false);
+        }
+      }
       const res = await fetch("/api/company-verifications", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
@@ -161,7 +181,7 @@ export default function MyProfile() {
           companyId: parseInt(verifForm.companyId),
           employeeId: verifForm.employeeId.trim(),
           officeEmail: verifForm.officeEmail.trim() || undefined,
-          idCardUrl: verifForm.idCardUrl.trim() || undefined,
+          idCardUrl: finalIdCardUrl,
         }),
       });
       const data = await res.json();
@@ -172,6 +192,7 @@ export default function MyProfile() {
       toast({ title: "Permintaan terkirim!", description: "Menunggu konfirmasi dari perusahaan." });
       setShowVerifDialog(false);
       setVerifForm({ companyId: "", employeeId: "", officeEmail: "", idCardUrl: "" });
+      setIdCardFile(null);
       refetchVerif();
     },
     onError: (err: any) => {
@@ -434,20 +455,30 @@ export default function MyProfile() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label>URL ID Card <span className="text-muted-foreground text-xs">(opsional)</span></Label>
-              <Input
-                type="url"
-                placeholder="https://drive.google.com/..."
-                value={verifForm.idCardUrl}
-                onChange={(e) => setVerifForm((f) => ({ ...f, idCardUrl: e.target.value }))}
-              />
+              <Label>Foto ID Card / KTP <span className="text-muted-foreground text-xs">(opsional)</span></Label>
+              {idCardFile ? (
+                <div className="flex items-center gap-2 p-2 border rounded-lg bg-muted/30 text-sm">
+                  <span className="flex-1 truncate text-muted-foreground">{idCardFile.name}</span>
+                  <button type="button" className="text-red-500 text-xs font-medium" onClick={() => setIdCardFile(null)}>Hapus</button>
+                </div>
+              ) : (
+                <Input
+                  type="file"
+                  accept="image/*,application/pdf"
+                  className="cursor-pointer"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) { setIdCardFile(f); setVerifForm((prev) => ({ ...prev, idCardUrl: "" })); }
+                  }}
+                />
+              )}
             </div>
             <Button
               className="w-full"
               onClick={() => submitVerifMutation.mutate()}
-              disabled={!verifForm.companyId || !verifForm.employeeId.trim() || submitVerifMutation.isPending}
+              disabled={!verifForm.companyId || !verifForm.employeeId.trim() || submitVerifMutation.isPending || idCardUploading}
             >
-              {submitVerifMutation.isPending ? "Mengirim..." : "Kirim Permintaan Verifikasi"}
+              {idCardUploading ? "Mengupload ID Card..." : submitVerifMutation.isPending ? "Mengirim..." : "Kirim Permintaan Verifikasi"}
             </Button>
           </div>
         </DialogContent>
