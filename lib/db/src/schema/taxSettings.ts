@@ -11,6 +11,9 @@ export const taxSettingsTable = scSchema.table("tax_settings", {
   taxType: text("tax_type").notNull().default("output_vat"),
   appliesTo: text("applies_to").notNull().default("sport_center_booking"),
   isActive: boolean("is_active").notNull().default(true),
+  // Backward compatibility: PPN only applies to bookings on/after this date.
+  // NULL means PPN always applies (no restriction).
+  effectiveDate: text("effective_date"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });

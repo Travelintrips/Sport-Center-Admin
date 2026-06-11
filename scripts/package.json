@@ -8,6 +8,7 @@
     "seed-all": "tsx ./src/seed-all.ts",
     "seed-admin": "tsx ./src/seed-admin.ts",
     "migrate": "tsx ../migrate.ts",
+    "test-ppn": "tsx ./src/test-ppn.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

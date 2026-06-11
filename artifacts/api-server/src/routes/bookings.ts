@@ -236,7 +236,7 @@ router.post("/bookings", async (req, res) => {
     const basePrice = Number(facility.pricePerHour) * (isWalkIn ? 1 : durationHours);
     const discount = isAp ? 0 : Math.min(Number(discountAmount) || 0, basePrice);
     const totalPrice = basePrice - discount;
-    const taxCalc = await calculateTax(totalPrice);
+    const taxCalc = await calculateTax(totalPrice, "sport_center_booking", bookingDate);
     const orderNumber = await generateOrderNumber();
 
     const [booking] = await db.insert(bookingsTable).values({
@@ -443,10 +443,10 @@ router.post("/bookings/recurring", async (req, res) => {
     const basePrice = Number(facility.pricePerHour) * durationHours;
     const discount = Math.min(Number(discountAmountPerSession) || 0, basePrice);
     const totalPrice = basePrice - discount;
-    const taxCalc = await calculateTax(totalPrice);
 
     const created: any[] = [];
     const skipped: string[] = [];
+    let accumulatedPpn = 0;
 
     for (const bookingDate of dates) {
       const conflict = await checkSlotConflict(Number(facilityId), bookingDate, startTime, endTime);
@@ -454,6 +454,8 @@ router.post("/bookings/recurring", async (req, res) => {
         skipped.push(bookingDate);
         continue;
       }
+      // Per-date tax calc: respects effectiveDate backward-compat rule
+      const taxCalc = await calculateTax(totalPrice, "sport_center_booking", bookingDate);
       const orderNumber = await generateOrderNumber();
       const [booking] = await db.insert(bookingsTable).values({
         orderNumber,
@@ -477,6 +479,7 @@ router.post("/bookings/recurring", async (req, res) => {
       if (taxCalc.taxCode) {
         recordTaxTransaction("booking", booking.id, booking.orderNumber, taxCalc, bookingDate).catch(() => {});
       }
+      accumulatedPpn += taxCalc.taxAmount;
       created.push({
         ...booking,
         totalPrice: Number(booking.totalPrice),
@@ -497,7 +500,7 @@ router.post("/bookings/recurring", async (req, res) => {
     }
 
     const totalDpp = totalPrice * created.length;
-    const totalPpn = taxCalc.taxAmount * created.length;
+    const totalPpn = accumulatedPpn;
     res.status(201).json({ created, skipped, totalBookings: created.length, grandTotal: totalDpp + totalPpn, totalDpp, totalPpnAmount: totalPpn });
   } catch (err) {
     req.log.error({ err }, "Create recurring booking error");

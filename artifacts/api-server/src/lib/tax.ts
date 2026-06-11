@@ -9,18 +9,34 @@ export interface TaxCalculation {
   taxCode: string;
 }
 
+/**
+ * Calculate PPN for a given subtotal.
+ *
+ * Backward-compatibility rules:
+ * - If the tax setting has `effectiveDate` set, PPN is only applied when
+ *   `bookingDate >= effectiveDate`. Bookings before that date get zero tax,
+ *   preserving historical data integrity.
+ * - If `effectiveDate` is null/empty, PPN is always applied (legacy behaviour).
+ * - If no active tax setting exists, returns zero-tax result.
+ */
 export async function calculateTax(
   subtotal: number,
-  appliesTo: string = "sport_center_booking"
+  appliesTo: string = "sport_center_booking",
+  bookingDate?: string,
 ): Promise<TaxCalculation> {
+  const noTax: TaxCalculation = { dpp: subtotal, taxRate: 0, taxAmount: 0, grandTotal: subtotal, taxCode: "" };
+
   const [setting] = await db
     .select()
     .from(taxSettingsTable)
     .where(and(eq(taxSettingsTable.appliesTo, appliesTo), eq(taxSettingsTable.isActive, true)))
     .limit(1);
 
-  if (!setting) {
-    return { dpp: subtotal, taxRate: 0, taxAmount: 0, grandTotal: subtotal, taxCode: "" };
+  if (!setting) return noTax;
+
+  // Backward-compatibility: if effectiveDate is configured, honour it.
+  if (setting.effectiveDate && bookingDate) {
+    if (bookingDate < setting.effectiveDate) return noTax;
   }
 
   const rate = Number(setting.taxRate);
@@ -98,4 +114,32 @@ export async function reverseTaxTransaction(
     .update(taxTransactionsTable)
     .set({ status: "reversed" })
     .where(eq(taxTransactionsTable.id, original.id));
+}
+
+/**
+ * Get the current PPN configuration for admin display/editing.
+ */
+export async function getPpnConfig(): Promise<{
+  enabled: boolean;
+  taxRate: number;
+  taxCode: string;
+  taxName: string;
+  effectiveDate: string | null;
+}> {
+  const [setting] = await db
+    .select()
+    .from(taxSettingsTable)
+    .where(eq(taxSettingsTable.appliesTo, "sport_center_booking"))
+    .limit(1);
+
+  if (!setting) {
+    return { enabled: false, taxRate: 11, taxCode: "PPN_OUT_11", taxName: "PPN Keluaran 11%", effectiveDate: null };
+  }
+  return {
+    enabled: setting.isActive,
+    taxRate: Number(setting.taxRate),
+    taxCode: setting.taxCode,
+    taxName: setting.taxName,
+    effectiveDate: setting.effectiveDate ?? null,
+  };
 }
