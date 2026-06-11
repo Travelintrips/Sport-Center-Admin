@@ -247,8 +247,8 @@ router.post("/company-verifications", authMiddleware, async (req, res) => {
     // Send WA to company PIC
     const picPhone = company.picPhone;
     if (picPhone) {
-      const approveUrl = `${APP_URL}/wa/verify-action/${approveToken}`;
-      const rejectUrl = `${APP_URL}/wa/verify-action/${rejectToken}`;
+      const approveUrl = `${APP_URL}/wa/verify/${approveToken}`;
+      const rejectUrl = `${APP_URL}/wa/verify/${rejectToken}`;
       const msg =
         `🔔 *Permintaan Verifikasi Karyawan*\n\n` +
         `Karyawan *${customer?.name ?? ""}* mengajukan verifikasi untuk bergabung sebagai karyawan *${company.companyName ?? company.name}*.\n\n` +

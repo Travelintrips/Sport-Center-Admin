@@ -122,14 +122,6 @@ export default function MyProfile() {
     (window as any).google?.accounts.id.prompt();
   }
 
-  if (isLoading) {
-    return (
-      <div className="min-h-[60vh] flex items-center justify-center">
-        <div className="w-8 h-8 border-4 border-primary/30 border-t-primary rounded-full animate-spin" />
-      </div>
-    );
-  }
-
   // ── Company verification ───────────────────────────────────────────────────
   const [showVerifDialog, setShowVerifDialog] = useState(false);
   const [verifForm, setVerifForm] = useState({ companyId: "", employeeId: "", officeEmail: "", idCardUrl: "" });
@@ -146,7 +138,7 @@ export default function MyProfile() {
         rejectionReason: string | null; corporateBillingEnabled: boolean;
       }[]>;
     },
-    enabled: !!user,
+    enabled: !!user && !isLoading,
   });
 
   const { data: companyList } = useQuery({
@@ -193,6 +185,14 @@ export default function MyProfile() {
     rejected: { label: "Ditolak ❌", color: "text-red-600 bg-red-50 border-red-200" },
     revoked: { label: "Dicabut", color: "text-gray-500 bg-gray-50 border-gray-200" },
   };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-[60vh] flex items-center justify-center">
+        <div className="w-8 h-8 border-4 border-primary/30 border-t-primary rounded-full animate-spin" />
+      </div>
+    );
+  }
 
   if (!user) return null;
 
