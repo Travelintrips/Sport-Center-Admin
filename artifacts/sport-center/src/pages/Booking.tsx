@@ -17,6 +17,13 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { format, parseISO } from "date-fns";
 import { id as idLocale, enUS } from "date-fns/locale";
 import {
@@ -68,19 +75,41 @@ export default function Booking() {
   });
   const isLoggedIn = !!currentUser && currentUser.role !== "admin";
 
+  // --- Customer selector (daftar customer terdaftar) ---
+  const [customers, setCustomers] = useState<{ id: number; name: string; email: string | null; phone: string | null }[]>([]);
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string>("self");
+
+  useEffect(() => {
+    const token = getToken();
+    if (!token) return;
+    fetch("/api/customers/simple", { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => r.json())
+      .then((data) => { if (Array.isArray(data)) setCustomers(data); })
+      .catch(() => {});
+  }, []);
+
   // --- Customer form ---
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
 
-  // Auto-fill from logged-in user
+  // Auto-fill dari akun sendiri atau dari customer yang dipilih
   useEffect(() => {
-    if (isLoggedIn && currentUser) {
-      if (currentUser.name) setName(currentUser.name);
-      if (currentUser.email) setEmail(currentUser.email);
-      if ((currentUser as any).phone) setPhone((currentUser as any).phone);
+    if (selectedCustomerId === "self") {
+      if (isLoggedIn && currentUser) {
+        if (currentUser.name) setName(currentUser.name);
+        if (currentUser.email) setEmail(currentUser.email);
+        if ((currentUser as any).phone) setPhone((currentUser as any).phone);
+      }
+    } else {
+      const picked = customers.find((c) => String(c.id) === selectedCustomerId);
+      if (picked) {
+        setName(picked.name);
+        setEmail(picked.email ?? "");
+        setPhone(picked.phone ?? "");
+      }
     }
-  }, [isLoggedIn, currentUser]);
+  }, [selectedCustomerId, isLoggedIn, currentUser, customers]);
   const [notes, setNotes] = useState("");
   const [numberOfPeople, setNumberOfPeople] = useState<string>("1");
 
@@ -453,22 +482,49 @@ export default function Booking() {
             </CardHeader>
             <form onSubmit={handleSubmit} id="booking-form">
               <CardContent className="space-y-4">
-                {isLoggedIn && (
-                  <div className="flex items-center gap-2 text-xs text-primary bg-primary/8 border border-primary/20 rounded-lg px-3 py-2">
-                    <ShieldCheck size={13} className="shrink-0" />
-                    <span>{t("Data diisi otomatis dari akun kamu. Nama dan email tidak dapat diubah.", "Data auto-filled from your account. Name and email cannot be changed.")}</span>
+                {/* Dropdown pemilih customer — tampil jika ada customer terdaftar */}
+                {isLoggedIn && customers.length > 0 && (
+                  <div className="space-y-2">
+                    <Label htmlFor="customerPicker">{t("Nama Pemesan", "Booking For")}</Label>
+                    <Select value={selectedCustomerId} onValueChange={setSelectedCustomerId}>
+                      <SelectTrigger id="customerPicker">
+                        <SelectValue placeholder={t("Pilih pemesan...", "Select customer...")} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {currentUser && (
+                          <SelectItem value="self">
+                            {currentUser.name} ({t("Saya sendiri", "Myself")})
+                          </SelectItem>
+                        )}
+                        {customers
+                          .filter((c) => !currentUser || c.id !== (currentUser as any).id)
+                          .map((c) => (
+                            <SelectItem key={c.id} value={String(c.id)}>
+                              {c.name}{c.phone ? ` — ${c.phone}` : ""}
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                 )}
+
+                {isLoggedIn && selectedCustomerId === "self" && (
+                  <div className="flex items-center gap-2 text-xs text-primary bg-primary/8 border border-primary/20 rounded-lg px-3 py-2">
+                    <ShieldCheck size={13} className="shrink-0" />
+                    <span>{t("Data diisi otomatis dari akun kamu. Pilih pemesan lain di atas untuk mengubah.", "Auto-filled from your account. Select another customer above to change.")}</span>
+                  </div>
+                )}
+
                 <div className="space-y-2">
                   <Label htmlFor="name">{t("Nama Lengkap", "Full Name")} <span className="text-destructive">*</span></Label>
                   <Input
                     id="name"
                     required
                     value={name}
-                    onChange={e => !isLoggedIn && setName(e.target.value)}
+                    onChange={e => setName(e.target.value)}
                     placeholder={t("Nama lengkap", "Full name")}
-                    readOnly={isLoggedIn}
-                    className={isLoggedIn ? "bg-muted/50 cursor-not-allowed text-foreground font-medium" : ""}
+                    readOnly={isLoggedIn && selectedCustomerId === "self"}
+                    className={isLoggedIn && selectedCustomerId === "self" ? "bg-muted/50 cursor-not-allowed text-foreground font-medium" : ""}
                   />
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -479,10 +535,10 @@ export default function Booking() {
                       type="email"
                       required
                       value={email}
-                      onChange={e => !isLoggedIn && setEmail(e.target.value)}
+                      onChange={e => setEmail(e.target.value)}
                       placeholder={t("email@kamu.com", "your@email.com")}
-                      readOnly={isLoggedIn}
-                      className={isLoggedIn ? "bg-muted/50 cursor-not-allowed text-foreground" : ""}
+                      readOnly={isLoggedIn && selectedCustomerId === "self"}
+                      className={isLoggedIn && selectedCustomerId === "self" ? "bg-muted/50 cursor-not-allowed text-foreground" : ""}
                     />
                   </div>
                   <div className="space-y-2">

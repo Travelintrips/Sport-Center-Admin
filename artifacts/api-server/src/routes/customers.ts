@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db, usersTable, bookingsTable } from "@workspace/db";
 import { eq, or, ilike } from "drizzle-orm";
-import { adminMiddleware } from "../lib/auth";
+import { adminMiddleware, authMiddleware } from "../lib/auth";
 import { createHmac } from "crypto";
 
 const router = Router();
@@ -32,6 +32,20 @@ function mapUser(u: typeof usersTable.$inferSelect, userBookings: (typeof bookin
     createdAt: u.createdAt,
   };
 }
+
+// Endpoint ringan — semua user login bisa akses (untuk dropdown pemilih pemesan)
+router.get("/customers/simple", authMiddleware, async (req, res) => {
+  try {
+    const users = await db
+      .select({ id: usersTable.id, name: usersTable.name, email: usersTable.email, phone: usersTable.phone })
+      .from(usersTable)
+      .where(eq(usersTable.role, "customer"));
+    res.json(users);
+  } catch (err) {
+    req.log.error({ err }, "List customers simple error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
 
 router.get("/customers", adminMiddleware, async (req, res) => {
   try {
