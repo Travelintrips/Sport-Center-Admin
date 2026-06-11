@@ -1,16 +1,20 @@
 import { useState, useEffect, useCallback } from "react";
 import { useGetMe, useUpdateProfile, useLinkGoogle, getGetMeQueryKey } from "@workspace/api-client-react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, useQuery, useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { useLang } from "@/lib/i18n";
-import { User, Phone, Lock, Eye, EyeOff, CheckCircle2, Link2, Unlink, Mail, ShieldCheck } from "lucide-react";
+import { User, Phone, Lock, Eye, EyeOff, CheckCircle2, Link2, Mail, ShieldCheck, Building2, Plus, ExternalLink } from "lucide-react";
 import { FcGoogle } from "react-icons/fc";
 import { useLocation } from "wouter";
+import { getToken } from "@/lib/auth";
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string;
 
@@ -125,6 +129,70 @@ export default function MyProfile() {
       </div>
     );
   }
+
+  // ── Company verification ───────────────────────────────────────────────────
+  const [showVerifDialog, setShowVerifDialog] = useState(false);
+  const [verifForm, setVerifForm] = useState({ companyId: "", employeeId: "", officeEmail: "", idCardUrl: "" });
+
+  const { data: myVerifications, isLoading: isLoadingVerif, refetch: refetchVerif } = useQuery({
+    queryKey: ["my-verifications"],
+    queryFn: async () => {
+      const token = getToken();
+      const res = await fetch("/api/company-verifications/my", { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) throw new Error(await res.text());
+      return res.json() as Promise<{
+        id: number; companyId: number; companyName: string; employeeId: string;
+        officeEmail: string | null; status: string; requestedAt: string;
+        rejectionReason: string | null; corporateBillingEnabled: boolean;
+      }[]>;
+    },
+    enabled: !!user,
+  });
+
+  const { data: companyList } = useQuery({
+    queryKey: ["company-list"],
+    queryFn: async () => {
+      const res = await fetch("/api/companies");
+      if (!res.ok) return [];
+      return res.json() as Promise<{ id: number; name: string; companyName: string | null }[]>;
+    },
+    enabled: showVerifDialog,
+  });
+
+  const submitVerifMutation = useMutation({
+    mutationFn: async () => {
+      const token = getToken();
+      const res = await fetch("/api/company-verifications", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          companyId: parseInt(verifForm.companyId),
+          employeeId: verifForm.employeeId.trim(),
+          officeEmail: verifForm.officeEmail.trim() || undefined,
+          idCardUrl: verifForm.idCardUrl.trim() || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Gagal mengirim permintaan");
+      return data;
+    },
+    onSuccess: () => {
+      toast({ title: "Permintaan terkirim!", description: "Menunggu konfirmasi dari perusahaan." });
+      setShowVerifDialog(false);
+      setVerifForm({ companyId: "", employeeId: "", officeEmail: "", idCardUrl: "" });
+      refetchVerif();
+    },
+    onError: (err: any) => {
+      toast({ title: "Gagal", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const statusConfig: Record<string, { label: string; color: string }> = {
+    pending: { label: "Menunggu", color: "text-amber-600 bg-amber-50 border-amber-200" },
+    approved: { label: "Disetujui ✅", color: "text-green-600 bg-green-50 border-green-200" },
+    rejected: { label: "Ditolak ❌", color: "text-red-600 bg-red-50 border-red-200" },
+    revoked: { label: "Dicabut", color: "text-gray-500 bg-gray-50 border-gray-200" },
+  };
 
   if (!user) return null;
 
@@ -272,6 +340,118 @@ export default function MyProfile() {
           </form>
         </CardContent>
       </Card>
+
+      {/* Company connection card */}
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-base font-bold flex items-center gap-2">
+              <Building2 size={16} className="text-primary" />
+              Hubungkan ke Perusahaan
+            </CardTitle>
+            <Button size="sm" variant="outline" className="gap-1 h-8 text-xs" onClick={() => setShowVerifDialog(true)}>
+              <Plus size={13} /> Ajukan Verifikasi
+            </Button>
+          </div>
+          <CardDescription>Verifikasi karyawan untuk gunakan tagihan perusahaan saat booking</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {isLoadingVerif ? (
+            <div className="space-y-2">{[...Array(2)].map((_, i) => <Skeleton key={i} className="h-14" />)}</div>
+          ) : !myVerifications?.length ? (
+            <div className="text-center py-6 text-muted-foreground text-sm border-2 border-dashed rounded-xl">
+              <Building2 size={28} className="mx-auto mb-2 opacity-30" />
+              <p>Belum terhubung ke perusahaan manapun</p>
+              <p className="text-xs mt-1">Ajukan verifikasi untuk gunakan tagihan perusahaan</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {myVerifications.map((v) => {
+                const cfg = statusConfig[v.status] ?? statusConfig.pending;
+                return (
+                  <div key={v.id} className="flex items-start justify-between p-3.5 rounded-xl border bg-muted/20 gap-3">
+                    <div className="flex items-start gap-2.5 min-w-0">
+                      <Building2 size={16} className="text-primary mt-0.5 shrink-0" />
+                      <div className="min-w-0">
+                        <div className="font-semibold text-sm truncate">{v.companyName}</div>
+                        <div className="text-xs text-muted-foreground">ID: <span className="font-mono">{v.employeeId}</span></div>
+                        {v.officeEmail && <div className="text-xs text-muted-foreground">{v.officeEmail}</div>}
+                        {v.rejectionReason && (
+                          <div className="text-xs text-red-600 mt-1">Alasan: {v.rejectionReason}</div>
+                        )}
+                        {v.corporateBillingEnabled && (
+                          <div className="text-xs text-green-600 font-medium mt-1">✅ Tagihan perusahaan aktif</div>
+                        )}
+                      </div>
+                    </div>
+                    <Badge variant="secondary" className={`${cfg.color} text-xs shrink-0`}>{cfg.label}</Badge>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Company verification dialog */}
+      <Dialog open={showVerifDialog} onOpenChange={setShowVerifDialog}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Ajukan Verifikasi Karyawan</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <Label>Pilih Perusahaan</Label>
+              <Select value={verifForm.companyId} onValueChange={(v) => setVerifForm((f) => ({ ...f, companyId: v }))}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Pilih perusahaan..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {(companyList ?? []).map((c) => (
+                    <SelectItem key={c.id} value={String(c.id)}>
+                      {c.companyName ?? c.name}
+                    </SelectItem>
+                  ))}
+                  {!companyList?.length && <SelectItem value="_" disabled>Tidak ada perusahaan terdaftar</SelectItem>}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label>ID Karyawan <span className="text-red-500">*</span></Label>
+              <Input
+                placeholder="Contoh: EMP-001"
+                value={verifForm.employeeId}
+                onChange={(e) => setVerifForm((f) => ({ ...f, employeeId: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Email Kantor <span className="text-muted-foreground text-xs">(opsional)</span></Label>
+              <Input
+                type="email"
+                placeholder="nama@perusahaan.com"
+                value={verifForm.officeEmail}
+                onChange={(e) => setVerifForm((f) => ({ ...f, officeEmail: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>URL ID Card <span className="text-muted-foreground text-xs">(opsional)</span></Label>
+              <Input
+                type="url"
+                placeholder="https://drive.google.com/..."
+                value={verifForm.idCardUrl}
+                onChange={(e) => setVerifForm((f) => ({ ...f, idCardUrl: e.target.value }))}
+              />
+            </div>
+            <Button
+              className="w-full"
+              onClick={() => submitVerifMutation.mutate()}
+              disabled={!verifForm.companyId || !verifForm.employeeId.trim() || submitVerifMutation.isPending}
+            >
+              {submitVerifMutation.isPending ? "Mengirim..." : "Kirim Permintaan Verifikasi"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Linked accounts card */}
       <Card>

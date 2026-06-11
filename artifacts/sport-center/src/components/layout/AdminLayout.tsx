@@ -16,6 +16,7 @@ import {
   Plane,
   Calendar,
   Shield,
+  ShieldCheck,
   DollarSign,
   Wrench,
   TrendingUp,
@@ -55,6 +56,7 @@ const NAV_GROUPS = [
     label: "Pelanggan",
     items: [
       { href: "/admin/customers", label: "Pelanggan", icon: Users },
+      { href: "/admin/company-verifications", label: "Verifikasi Karyawan", icon: ShieldCheck },
       { href: "/admin/company-billing", label: "Tagihan Perusahaan", icon: Building2 },
       { href: "/admin/memberships", label: "Member Gym", icon: Dumbbell },
       { href: "/admin/ap-members", label: "Member AP", icon: Plane },
