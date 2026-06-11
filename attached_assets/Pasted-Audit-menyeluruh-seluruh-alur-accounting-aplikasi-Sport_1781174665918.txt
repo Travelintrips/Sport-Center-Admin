@@ -1,0 +1,76 @@
+Audit menyeluruh seluruh alur accounting aplikasi Sport Center.
+
+Fokus audit:
+1. Pembayaran masuk dari:
+   - booking personal
+   - booking via WhatsApp
+   - booking corporate billing
+   - member gym
+   - tenant/kantin jika ada
+   - reschedule fee
+   - extra time/tambah waktu
+   - refund/cancellation
+
+2. Pembayaran keluar dari:
+   - expense operasional
+   - maintenance fasilitas
+   - refund customer
+   - vendor payment
+   - kasbon/reimbursement jika ada
+   - pembelian perlengkapan sport center
+
+Yang harus dicek:
+1. Setiap transaksi pembayaran masuk wajib membuat:
+   - payment record
+   - invoice/receipt jika diperlukan
+   - jurnal accounting
+   - audit log
+   - update status booking/payment
+
+2. Setiap transaksi pembayaran keluar wajib membuat:
+   - expense/payment record
+   - jurnal accounting
+   - audit log
+   - update status approval/payment
+
+3. Cek apakah jurnal sudah benar:
+   - Cash/Bank Debit saat uang masuk
+   - Revenue Credit saat booking paid
+   - Accounts Receivable Debit untuk corporate billing
+   - Accounts Receivable Credit saat invoice perusahaan dibayar
+   - Expense Debit saat biaya keluar
+   - Cash/Bank Credit saat pembayaran keluar
+   - PPN Keluaran jika booking dikenakan PPN
+   - PPN Masukan jika expense memiliki PPN
+
+4. Cek gap accounting:
+   - booking paid tapi tidak ada jurnal
+   - payment success tapi status booking masih pending
+   - invoice paid tapi AR belum tertutup
+   - refund tidak membalik revenue/cash
+   - corporate billing unbilled/billed/paid tidak sinkron
+   - reschedule fee tidak masuk revenue
+   - extra time tidak masuk tagihan
+   - payment keluar tidak masuk expense
+   - expense approved tapi belum posted
+   - duplicate journal
+   - journal tidak balance debit/credit
+   - nomor invoice/payment/journal duplicate
+   - transaksi tanpa audit log
+
+5. Buat laporan audit:
+   - file ACCOUNTING_AUDIT_REPORT.md
+   - daftar temuan kritikal
+   - daftar temuan warning
+   - rekomendasi perbaikan
+   - tabel transaksi bermasalah
+   - file yang perlu diperbaiki
+   - prioritas fase perbaikan
+
+6. Jangan langsung mengubah kode dulu.
+7. Audit semua database schema, API routes, service accounting, payment webhook, booking flow, corporate billing, expense flow, refund flow, dan laporan revenue.
+8. Setelah audit selesai, tampilkan ringkasan:
+   - apa yang sudah aman
+   - apa yang belum aman
+   - risiko accounting
+   - fase implementasi perbaikan
