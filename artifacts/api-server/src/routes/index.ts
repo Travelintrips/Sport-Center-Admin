@@ -37,6 +37,7 @@ import companyVerificationsRouter from "./companyVerifications";
 
 import taxConfigRouter from "./taxConfig";
 import sportCenterBookingsRouter from "./sportCenterBookings";
+import operatorAccountsRouter from "./operatorAccounts";
 
 
 const router: IRouter = Router();
@@ -78,5 +79,6 @@ router.use(companyInvoicesRouter);
 router.use(companyVerificationsRouter);
 router.use(taxConfigRouter);
 router.use(sportCenterBookingsRouter);
+router.use(operatorAccountsRouter);
 
 export default router;
