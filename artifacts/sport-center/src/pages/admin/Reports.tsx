@@ -140,55 +140,6 @@ export default function AdminReports() {
             <div className="text-center py-16 text-muted-foreground">Memuat laporan...</div>
           ) : (
             <>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <Card>
-                  <CardContent className="pt-6">
-                    <div className="flex items-center gap-3">
-                      <DollarSign className="text-primary" size={24} />
-                      <div>
-                        <div className="text-2xl font-black">{currency(summary.totalRevenue ?? 0)}</div>
-                        <div className="text-xs text-muted-foreground">Total Revenue</div>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardContent className="pt-6">
-                    <div className="flex items-center gap-3">
-                      <CalendarDays className="text-blue-500" size={24} />
-                      <div>
-                        <div className="text-2xl font-black">{summary.totalBookings ?? 0}</div>
-                        <div className="text-xs text-muted-foreground">Total Booking</div>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardContent className="pt-6">
-                    <div className="flex items-center gap-3">
-                      <CheckCircle className="text-green-500" size={24} />
-                      <div>
-                        <div className="text-2xl font-black">{summary.completedBookings ?? 0}</div>
-                        <div className="text-xs text-muted-foreground">Booking Selesai</div>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardContent className="pt-6">
-                    <div className="flex items-center gap-3">
-                      <DollarSign className="text-orange-500" size={24} />
-                      <div>
-                        <div className="text-2xl font-black">{currency(summary.avgTicketSize ?? 0)}</div>
-                        <div className="text-xs text-muted-foreground">Avg Ticket Size</div>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-      {isLoading ? (
-        <div className="text-center py-16 text-muted-foreground">Memuat laporan...</div>
-      ) : (
-        <>
           {/* Summary cards */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <Card>
