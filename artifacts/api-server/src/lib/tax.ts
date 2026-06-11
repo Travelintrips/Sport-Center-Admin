@@ -1,0 +1,55 @@
+import { db, taxSettingsTable, taxTransactionsTable } from "@workspace/db";
+import { eq, and } from "drizzle-orm";
+
+export interface TaxCalculation {
+  dpp: number;
+  taxRate: number;
+  taxAmount: number;
+  grandTotal: number;
+  taxCode: string;
+}
+
+export async function calculateTax(
+  subtotal: number,
+  appliesTo: string = "sport_center_booking"
+): Promise<TaxCalculation> {
+  const [setting] = await db
+    .select()
+    .from(taxSettingsTable)
+    .where(and(eq(taxSettingsTable.appliesTo, appliesTo), eq(taxSettingsTable.isActive, true)))
+    .limit(1);
+
+  if (!setting) {
+    return { dpp: subtotal, taxRate: 0, taxAmount: 0, grandTotal: subtotal, taxCode: "" };
+  }
+
+  const rate = Number(setting.taxRate);
+  const taxAmount = Math.round(subtotal * rate / 100);
+  return {
+    dpp: subtotal,
+    taxRate: rate,
+    taxAmount,
+    grandTotal: subtotal + taxAmount,
+    taxCode: setting.taxCode,
+  };
+}
+
+export async function recordTaxTransaction(
+  referenceType: "booking" | "company_invoice",
+  referenceId: number,
+  referenceNumber: string,
+  taxCalc: TaxCalculation,
+  transactionDate: string
+): Promise<void> {
+  if (!taxCalc.taxCode || taxCalc.taxAmount === 0) return;
+  await db.insert(taxTransactionsTable).values({
+    referenceType,
+    referenceId,
+    referenceNumber,
+    taxCode: taxCalc.taxCode,
+    taxRate: String(taxCalc.taxRate),
+    dpp: String(taxCalc.dpp),
+    taxAmount: String(taxCalc.taxAmount),
+    transactionDate,
+  });
+}

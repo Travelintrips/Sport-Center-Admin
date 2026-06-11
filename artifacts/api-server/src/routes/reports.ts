@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { db, bookingsTable, facilitiesTable, paymentsTable } from "@workspace/db";
+import { db, bookingsTable, facilitiesTable, paymentsTable, taxTransactionsTable } from "@workspace/db";
 import { adminMiddleware } from "../lib/auth";
 
 const router = Router();
@@ -123,6 +123,62 @@ router.get("/admin/reports/export", adminMiddleware, async (req, res) => {
     res.send(header + rows);
   } catch (err) {
     req.log.error({ err }, "Export report error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Tax report endpoint
+router.get("/admin/tax-report", adminMiddleware, async (req, res) => {
+  try {
+    const { startDate, endDate, groupBy = "month" } = req.query;
+
+    let transactions = await db.select().from(taxTransactionsTable);
+
+    if (startDate) transactions = transactions.filter((t) => t.transactionDate >= (startDate as string));
+    if (endDate) transactions = transactions.filter((t) => t.transactionDate <= (endDate as string));
+
+    const totalDpp = transactions.reduce((s, t) => s + Number(t.dpp), 0);
+    const totalTaxAmount = transactions.reduce((s, t) => s + Number(t.taxAmount), 0);
+
+    const byPeriodMap: Record<string, { period: string; dpp: number; taxAmount: number; grandTotal: number; count: number }> = {};
+    for (const t of transactions) {
+      let period = t.transactionDate;
+      if (groupBy === "month") period = t.transactionDate.slice(0, 7);
+      else if (groupBy === "year") period = t.transactionDate.slice(0, 4);
+
+      if (!byPeriodMap[period]) byPeriodMap[period] = { period, dpp: 0, taxAmount: 0, grandTotal: 0, count: 0 };
+      byPeriodMap[period].dpp += Number(t.dpp);
+      byPeriodMap[period].taxAmount += Number(t.taxAmount);
+      byPeriodMap[period].grandTotal += Number(t.dpp) + Number(t.taxAmount);
+      byPeriodMap[period].count++;
+    }
+
+    res.json({
+      summary: {
+        totalDpp,
+        totalTaxAmount,
+        totalGrandTotal: totalDpp + totalTaxAmount,
+        totalTransactions: transactions.length,
+      },
+      byPeriod: Object.values(byPeriodMap).sort((a, b) => a.period.localeCompare(b.period)),
+      transactions: transactions
+        .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+        .slice(0, 200)
+        .map((t) => ({
+          id: t.id,
+          referenceType: t.referenceType,
+          referenceId: t.referenceId,
+          referenceNumber: t.referenceNumber,
+          taxCode: t.taxCode,
+          taxRate: Number(t.taxRate),
+          dpp: Number(t.dpp),
+          taxAmount: Number(t.taxAmount),
+          transactionDate: t.transactionDate,
+          createdAt: t.createdAt,
+        })),
+    });
+  } catch (err) {
+    req.log.error({ err }, "Tax report error");
     res.status(500).json({ error: "Internal server error" });
   }
 });

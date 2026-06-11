@@ -4,10 +4,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useQuery } from "@tanstack/react-query";
 import { getToken } from "@/lib/auth";
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
-import { TrendingUp, Download, DollarSign, CalendarDays, CheckCircle, XCircle } from "lucide-react";
+import { TrendingUp, Download, DollarSign, CalendarDays, CheckCircle, Receipt } from "lucide-react";
 
 const API = import.meta.env.VITE_API_BASE_URL ?? "/api";
 const authHeaders = () => ({ Authorization: `Bearer ${getToken()}` });
@@ -36,6 +37,12 @@ export default function AdminReports() {
     staleTime: 30000,
   });
 
+  const { data: taxData, isLoading: taxLoading } = useQuery({
+    queryKey: ["tax-report", startDate, endDate, groupBy],
+    queryFn: () => fetch(`${API}/admin/tax-report?startDate=${startDate}&endDate=${endDate}&groupBy=${groupBy}`, { headers: authHeaders() }).then(r => r.json()),
+    staleTime: 30000,
+  });
+
   function handleExport() {
     const url = `${API}/admin/reports/export?startDate=${startDate}&endDate=${endDate}`;
     const a = document.createElement("a");
@@ -46,22 +53,39 @@ export default function AdminReports() {
     a.remove();
   }
 
+  function handleTaxExport() {
+    const txs: any[] = taxData?.transactions ?? [];
+    if (!txs.length) return;
+    const header = "No,Nomor Referensi,Tipe,Kode Pajak,Tarif PPN,DPP,PPN,Tanggal Transaksi\n";
+    const rows = txs.map((t: any, i: number) =>
+      `${i + 1},${t.referenceNumber},${t.referenceType},${t.taxCode},${t.taxRate}%,${t.dpp},${t.taxAmount},${t.transactionDate}`
+    ).join("\n");
+    const blob = new Blob([header + rows], { type: "text/csv" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `laporan-pajak-${startDate}-${endDate}.csv`;
+    a.click();
+  }
+
   const summary = data?.summary ?? {};
   const revenueData = data?.revenueByPeriod ?? [];
   const facilityData = data?.revenueByFacility ?? [];
   const statusData = (data?.revenueByStatus ?? []).filter((s: any) => s.count > 0);
 
+  const taxSummary = taxData?.summary ?? {};
+  const taxByPeriod: any[] = taxData?.byPeriod ?? [];
+  const taxTransactions: any[] = taxData?.transactions ?? [];
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-3xl font-black flex items-center gap-2"><TrendingUp size={28} /> Laporan Keuangan</h1>
-          <p className="text-muted-foreground mt-1">Analisis revenue dan performa booking</p>
+          <h1 className="text-3xl font-black flex items-center gap-2"><TrendingUp size={28} /> Laporan</h1>
+          <p className="text-muted-foreground mt-1">Laporan keuangan, revenue, dan perpajakan</p>
         </div>
-        <Button variant="outline" onClick={handleExport} className="gap-2"><Download size={16} /> Export CSV</Button>
       </div>
 
-      {/* Filters */}
+      {/* Filters — shared across tabs */}
       <Card>
         <CardContent className="pt-4 pb-4">
           <div className="flex gap-3 flex-wrap items-end">
@@ -99,142 +123,295 @@ export default function AdminReports() {
         </CardContent>
       </Card>
 
-      {isLoading ? (
-        <div className="text-center py-16 text-muted-foreground">Memuat laporan...</div>
-      ) : (
-        <>
-          {/* Summary cards */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <Card>
-              <CardContent className="pt-6">
-                <div className="flex items-center gap-3">
-                  <DollarSign className="text-primary" size={24} />
-                  <div>
-                    <div className="text-2xl font-black">{currency(summary.totalRevenue ?? 0)}</div>
-                    <div className="text-xs text-muted-foreground">Total Revenue</div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="pt-6">
-                <div className="flex items-center gap-3">
-                  <CalendarDays className="text-blue-500" size={24} />
-                  <div>
-                    <div className="text-2xl font-black">{summary.totalBookings ?? 0}</div>
-                    <div className="text-xs text-muted-foreground">Total Booking</div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="pt-6">
-                <div className="flex items-center gap-3">
-                  <CheckCircle className="text-green-500" size={24} />
-                  <div>
-                    <div className="text-2xl font-black">{summary.completedBookings ?? 0}</div>
-                    <div className="text-xs text-muted-foreground">Booking Selesai</div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="pt-6">
-                <div className="flex items-center gap-3">
-                  <DollarSign className="text-orange-500" size={24} />
-                  <div>
-                    <div className="text-2xl font-black">{currency(summary.avgTicketSize ?? 0)}</div>
-                    <div className="text-xs text-muted-foreground">Avg Ticket Size</div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+      <Tabs defaultValue="revenue">
+        <TabsList className="mb-2">
+          <TabsTrigger value="revenue" className="gap-2"><TrendingUp size={14} /> Laporan Keuangan</TabsTrigger>
+          <TabsTrigger value="tax" className="gap-2"><Receipt size={14} /> Laporan Pajak (PPN)</TabsTrigger>
+        </TabsList>
+
+        {/* ---- REVENUE TAB ---- */}
+        <TabsContent value="revenue" className="space-y-6 mt-0">
+          <div className="flex justify-end">
+            <Button variant="outline" onClick={handleExport} className="gap-2"><Download size={16} /> Export CSV</Button>
           </div>
 
-          {/* Revenue chart */}
-          <Card>
-            <CardHeader><CardTitle>Tren Revenue</CardTitle></CardHeader>
-            <CardContent>
-              {revenueData.length === 0 ? (
-                <div className="text-center py-8 text-muted-foreground">Tidak ada data</div>
-              ) : (
-                <ResponsiveContainer width="100%" height={280}>
-                  <LineChart data={revenueData}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="period" tick={{ fontSize: 11 }} />
-                    <YAxis tickFormatter={(v) => `${(v/1000000).toFixed(1)}jt`} tick={{ fontSize: 11 }} />
-                    <Tooltip formatter={(v: any) => currency(v)} />
-                    <Line type="monotone" dataKey="revenue" stroke="#F97316" strokeWidth={2} dot={false} name="Revenue" />
-                    <Line type="monotone" dataKey="bookings" stroke="#3B82F6" strokeWidth={2} dot={false} name="Booking" yAxisId={0} />
-                  </LineChart>
-                </ResponsiveContainer>
-              )}
-            </CardContent>
-          </Card>
-
-          <div className="grid md:grid-cols-2 gap-6">
-            {/* By facility */}
-            <Card>
-              <CardHeader><CardTitle>Revenue per Fasilitas</CardTitle></CardHeader>
-              <CardContent>
-                <ResponsiveContainer width="100%" height={240}>
-                  <BarChart data={facilityData.slice(0, 8)} layout="vertical">
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis type="number" tickFormatter={(v) => `${(v/1000000).toFixed(1)}jt`} tick={{ fontSize: 10 }} />
-                    <YAxis type="category" dataKey="facilityName" tick={{ fontSize: 10 }} width={90} />
-                    <Tooltip formatter={(v: any) => currency(v)} />
-                    <Bar dataKey="revenue" fill="#F97316" name="Revenue" radius={[0,4,4,0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </CardContent>
-            </Card>
-
-            {/* By status */}
-            <Card>
-              <CardHeader><CardTitle>Booking per Status</CardTitle></CardHeader>
-              <CardContent>
-                <ResponsiveContainer width="100%" height={240}>
-                  <PieChart>
-                    <Pie data={statusData} dataKey="count" nameKey="status" cx="50%" cy="50%" outerRadius={90} label={({ status, count }) => `${status}: ${count}`} labelLine={false}>
-                      {statusData.map((_: any, i: number) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
-                    </Pie>
-                    <Tooltip />
-                  </PieChart>
-                </ResponsiveContainer>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Facility table */}
-          <Card>
-            <CardHeader><CardTitle>Detail per Fasilitas</CardTitle></CardHeader>
-            <CardContent>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b">
-                      <th className="text-left py-2 font-semibold">Fasilitas</th>
-                      <th className="text-left py-2 font-semibold">Kategori</th>
-                      <th className="text-right py-2 font-semibold">Booking</th>
-                      <th className="text-right py-2 font-semibold">Revenue</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {facilityData.map((f: any) => (
-                      <tr key={f.facilityId} className="border-b hover:bg-muted/30">
-                        <td className="py-2">{f.facilityName}</td>
-                        <td className="py-2 text-muted-foreground">{f.category}</td>
-                        <td className="py-2 text-right">{f.bookings}</td>
-                        <td className="py-2 text-right font-semibold">{currency(f.revenue)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+          {isLoading ? (
+            <div className="text-center py-16 text-muted-foreground">Memuat laporan...</div>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <Card>
+                  <CardContent className="pt-6">
+                    <div className="flex items-center gap-3">
+                      <DollarSign className="text-primary" size={24} />
+                      <div>
+                        <div className="text-2xl font-black">{currency(summary.totalRevenue ?? 0)}</div>
+                        <div className="text-xs text-muted-foreground">Total Revenue</div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="pt-6">
+                    <div className="flex items-center gap-3">
+                      <CalendarDays className="text-blue-500" size={24} />
+                      <div>
+                        <div className="text-2xl font-black">{summary.totalBookings ?? 0}</div>
+                        <div className="text-xs text-muted-foreground">Total Booking</div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="pt-6">
+                    <div className="flex items-center gap-3">
+                      <CheckCircle className="text-green-500" size={24} />
+                      <div>
+                        <div className="text-2xl font-black">{summary.completedBookings ?? 0}</div>
+                        <div className="text-xs text-muted-foreground">Booking Selesai</div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="pt-6">
+                    <div className="flex items-center gap-3">
+                      <DollarSign className="text-orange-500" size={24} />
+                      <div>
+                        <div className="text-2xl font-black">{currency(summary.avgTicketSize ?? 0)}</div>
+                        <div className="text-xs text-muted-foreground">Avg Ticket Size</div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
               </div>
-            </CardContent>
-          </Card>
-        </>
-      )}
+
+              <Card>
+                <CardHeader><CardTitle>Tren Revenue</CardTitle></CardHeader>
+                <CardContent>
+                  {revenueData.length === 0 ? (
+                    <div className="text-center py-8 text-muted-foreground">Tidak ada data</div>
+                  ) : (
+                    <ResponsiveContainer width="100%" height={280}>
+                      <LineChart data={revenueData}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="period" tick={{ fontSize: 11 }} />
+                        <YAxis tickFormatter={(v) => `${(v/1000000).toFixed(1)}jt`} tick={{ fontSize: 11 }} />
+                        <Tooltip formatter={(v: any) => currency(v)} />
+                        <Line type="monotone" dataKey="revenue" stroke="#F97316" strokeWidth={2} dot={false} name="Revenue" />
+                        <Line type="monotone" dataKey="bookings" stroke="#3B82F6" strokeWidth={2} dot={false} name="Booking" yAxisId={0} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  )}
+                </CardContent>
+              </Card>
+
+              <div className="grid md:grid-cols-2 gap-6">
+                <Card>
+                  <CardHeader><CardTitle>Revenue per Fasilitas</CardTitle></CardHeader>
+                  <CardContent>
+                    <ResponsiveContainer width="100%" height={240}>
+                      <BarChart data={facilityData.slice(0, 8)} layout="vertical">
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis type="number" tickFormatter={(v) => `${(v/1000000).toFixed(1)}jt`} tick={{ fontSize: 10 }} />
+                        <YAxis type="category" dataKey="facilityName" tick={{ fontSize: 10 }} width={90} />
+                        <Tooltip formatter={(v: any) => currency(v)} />
+                        <Bar dataKey="revenue" fill="#F97316" name="Revenue" radius={[0,4,4,0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader><CardTitle>Booking per Status</CardTitle></CardHeader>
+                  <CardContent>
+                    <ResponsiveContainer width="100%" height={240}>
+                      <PieChart>
+                        <Pie data={statusData} dataKey="count" nameKey="status" cx="50%" cy="50%" outerRadius={90} label={({ status, count }) => `${status}: ${count}`} labelLine={false}>
+                          {statusData.map((_: any, i: number) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                        </Pie>
+                        <Tooltip />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </CardContent>
+                </Card>
+              </div>
+
+              <Card>
+                <CardHeader><CardTitle>Detail per Fasilitas</CardTitle></CardHeader>
+                <CardContent>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b">
+                          <th className="text-left py-2 font-semibold">Fasilitas</th>
+                          <th className="text-left py-2 font-semibold">Kategori</th>
+                          <th className="text-right py-2 font-semibold">Booking</th>
+                          <th className="text-right py-2 font-semibold">Revenue</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {facilityData.map((f: any) => (
+                          <tr key={f.facilityId} className="border-b hover:bg-muted/30">
+                            <td className="py-2">{f.facilityName}</td>
+                            <td className="py-2 text-muted-foreground">{f.category}</td>
+                            <td className="py-2 text-right">{f.bookings}</td>
+                            <td className="py-2 text-right font-semibold">{currency(f.revenue)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </CardContent>
+              </Card>
+            </>
+          )}
+        </TabsContent>
+
+        {/* ---- TAX TAB ---- */}
+        <TabsContent value="tax" className="space-y-6 mt-0">
+          <div className="flex justify-end">
+            <Button variant="outline" onClick={handleTaxExport} className="gap-2" disabled={!taxTransactions.length}>
+              <Download size={16} /> Export CSV Pajak
+            </Button>
+          </div>
+
+          {taxLoading ? (
+            <div className="text-center py-16 text-muted-foreground">Memuat laporan pajak...</div>
+          ) : (
+            <>
+              {/* Tax summary cards */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <Card>
+                  <CardContent className="pt-6">
+                    <div>
+                      <div className="text-xl font-black">{currency(taxSummary.totalDpp ?? 0)}</div>
+                      <div className="text-xs text-muted-foreground mt-1">Total DPP</div>
+                    </div>
+                  </CardContent>
+                </Card>
+                <Card className="border-orange-200 bg-orange-50/40">
+                  <CardContent className="pt-6">
+                    <div>
+                      <div className="text-xl font-black text-orange-700">{currency(taxSummary.totalTaxAmount ?? 0)}</div>
+                      <div className="text-xs text-muted-foreground mt-1">Total PPN 11%</div>
+                    </div>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="pt-6">
+                    <div>
+                      <div className="text-xl font-black">{currency(taxSummary.totalGrandTotal ?? 0)}</div>
+                      <div className="text-xs text-muted-foreground mt-1">Grand Total</div>
+                    </div>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="pt-6">
+                    <div>
+                      <div className="text-xl font-black">{taxSummary.totalTransactions ?? 0}</div>
+                      <div className="text-xs text-muted-foreground mt-1">Transaksi Pajak</div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* Tax by period chart */}
+              {taxByPeriod.length > 0 && (
+                <Card>
+                  <CardHeader><CardTitle>Tren PPN per Periode</CardTitle></CardHeader>
+                  <CardContent>
+                    <ResponsiveContainer width="100%" height={260}>
+                      <BarChart data={taxByPeriod}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="period" tick={{ fontSize: 11 }} />
+                        <YAxis tickFormatter={(v) => `${(v/1000000).toFixed(1)}jt`} tick={{ fontSize: 11 }} />
+                        <Tooltip formatter={(v: any) => currency(v)} />
+                        <Bar dataKey="dpp" fill="#94A3B8" name="DPP" stackId="a" />
+                        <Bar dataKey="taxAmount" fill="#F97316" name="PPN 11%" stackId="a" radius={[4,4,0,0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Period table */}
+              {taxByPeriod.length > 0 && (
+                <Card>
+                  <CardHeader><CardTitle>Rekapitulasi per Periode</CardTitle></CardHeader>
+                  <CardContent>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b">
+                            <th className="text-left py-2 font-semibold">Periode</th>
+                            <th className="text-right py-2 font-semibold">Transaksi</th>
+                            <th className="text-right py-2 font-semibold">DPP</th>
+                            <th className="text-right py-2 font-semibold">PPN 11%</th>
+                            <th className="text-right py-2 font-semibold">Grand Total</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {taxByPeriod.map((p: any) => (
+                            <tr key={p.period} className="border-b hover:bg-muted/30">
+                              <td className="py-2 font-medium">{p.period}</td>
+                              <td className="py-2 text-right">{p.count}</td>
+                              <td className="py-2 text-right">{currency(p.dpp)}</td>
+                              <td className="py-2 text-right text-orange-600 font-semibold">{currency(p.taxAmount)}</td>
+                              <td className="py-2 text-right font-bold">{currency(p.grandTotal)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Recent transactions */}
+              <Card>
+                <CardHeader><CardTitle>Transaksi Pajak Terbaru</CardTitle></CardHeader>
+                <CardContent>
+                  {taxTransactions.length === 0 ? (
+                    <div className="text-center py-12 text-muted-foreground">
+                      <Receipt size={36} className="mx-auto mb-3 opacity-30" />
+                      <p className="font-medium">Belum ada transaksi pajak</p>
+                      <p className="text-sm mt-1">Booking baru akan otomatis tercatat di sini dengan PPN 11%</p>
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b">
+                            <th className="text-left py-2 font-semibold">Nomor Booking</th>
+                            <th className="text-left py-2 font-semibold">Tipe</th>
+                            <th className="text-left py-2 font-semibold">Kode Pajak</th>
+                            <th className="text-right py-2 font-semibold">DPP</th>
+                            <th className="text-right py-2 font-semibold">PPN</th>
+                            <th className="text-right py-2 font-semibold">Tanggal</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {taxTransactions.map((t: any) => (
+                            <tr key={t.id} className="border-b hover:bg-muted/30">
+                              <td className="py-2 font-mono text-xs">{t.referenceNumber}</td>
+                              <td className="py-2 text-muted-foreground">{t.referenceType}</td>
+                              <td className="py-2"><span className="bg-orange-100 text-orange-700 text-xs px-1.5 py-0.5 rounded font-medium">{t.taxCode}</span></td>
+                              <td className="py-2 text-right">{currency(t.dpp)}</td>
+                              <td className="py-2 text-right text-orange-600 font-semibold">{currency(t.taxAmount)}</td>
+                              <td className="py-2 text-right text-muted-foreground">{t.transactionDate}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </>
+          )}
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

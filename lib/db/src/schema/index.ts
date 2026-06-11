@@ -21,3 +21,5 @@ export * from "./tenantPayments";
 export * from "./bookingExtensions";
 export * from "./waActionTokens";
 export * from "./companyInvoices";
+export * from "./taxSettings";
+export * from "./taxTransactions";

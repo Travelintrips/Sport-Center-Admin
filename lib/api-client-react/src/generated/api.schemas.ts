@@ -244,6 +244,12 @@ export interface Booking {
   completedAt?: string | null;
   /** @nullable */
   paymentDeadline?: string | null;
+  /** @nullable */
+  ppnRate?: number | null;
+  /** @nullable */
+  ppnAmount?: number | null;
+  /** @nullable */
+  grandTotal?: number | null;
   payment?: Payment | null;
   createdAt?: string;
 }
@@ -1087,6 +1093,40 @@ export interface TenantPaymentActionBody {
   notes?: string;
 }
 
+export interface TaxTransaction {
+  id: number;
+  referenceType: string;
+  referenceId: number;
+  referenceNumber: string;
+  taxCode: string;
+  taxRate: number;
+  dpp: number;
+  taxAmount: number;
+  transactionDate: string;
+  createdAt: string;
+}
+
+export interface TaxPeriodSummary {
+  period: string;
+  dpp: number;
+  taxAmount: number;
+  grandTotal: number;
+  count: number;
+}
+
+export type TaxReportSummary = {
+  totalDpp: number;
+  totalTaxAmount: number;
+  totalGrandTotal: number;
+  totalTransactions: number;
+};
+
+export interface TaxReport {
+  summary: TaxReportSummary;
+  byPeriod: TaxPeriodSummary[];
+  transactions: TaxTransaction[];
+}
+
 export interface ErrorEnvelope {
   error: string;
 }
@@ -1150,6 +1190,21 @@ export type ListCompanyInvoicesStatus = typeof ListCompanyInvoicesStatus[keyof t
 export const ListCompanyInvoicesStatus = {
   unpaid: 'unpaid',
   paid: 'paid',
+} as const;
+
+export type GetTaxReportParams = {
+startDate?: string;
+endDate?: string;
+groupBy?: GetTaxReportGroupBy;
+};
+
+export type GetTaxReportGroupBy = typeof GetTaxReportGroupBy[keyof typeof GetTaxReportGroupBy];
+
+
+export const GetTaxReportGroupBy = {
+  day: 'day',
+  month: 'month',
+  year: 'year',
 } as const;
 
 export type ExportBookingsParams = {
