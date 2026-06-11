@@ -435,6 +435,7 @@ export default function AdminReports() {
                             <th className="text-left py-2 font-semibold">Nomor Booking</th>
                             <th className="text-left py-2 font-semibold">Tipe</th>
                             <th className="text-left py-2 font-semibold">Kode Pajak</th>
+                            <th className="text-left py-2 font-semibold">Status Pajak</th>
                             <th className="text-right py-2 font-semibold">DPP</th>
                             <th className="text-right py-2 font-semibold">PPN</th>
                             <th className="text-right py-2 font-semibold">Tanggal</th>
@@ -442,12 +443,21 @@ export default function AdminReports() {
                         </thead>
                         <tbody>
                           {taxTransactions.map((t: any) => (
-                            <tr key={t.id} className="border-b hover:bg-muted/30">
+                            <tr key={t.id} className={`border-b hover:bg-muted/30 ${t.transactionType === "reversal" ? "opacity-60" : ""}`}>
                               <td className="py-2 font-mono text-xs">{t.referenceNumber}</td>
                               <td className="py-2 text-muted-foreground">{t.referenceType}</td>
                               <td className="py-2"><span className="bg-orange-100 text-orange-700 text-xs px-1.5 py-0.5 rounded font-medium">{t.taxCode}</span></td>
-                              <td className="py-2 text-right">{currency(t.dpp)}</td>
-                              <td className="py-2 text-right text-orange-600 font-semibold">{currency(t.taxAmount)}</td>
+                              <td className="py-2">
+                                {t.status === "reversed" ? (
+                                  <span className="bg-red-100 text-red-700 text-xs px-1.5 py-0.5 rounded font-medium">Dibatalkan</span>
+                                ) : t.transactionType === "reversal" ? (
+                                  <span className="bg-slate-100 text-slate-600 text-xs px-1.5 py-0.5 rounded font-medium">Reversal</span>
+                                ) : (
+                                  <span className="bg-emerald-100 text-emerald-700 text-xs px-1.5 py-0.5 rounded font-medium">Terutang</span>
+                                )}
+                              </td>
+                              <td className={`py-2 text-right ${t.transactionType === "reversal" ? "text-red-500 line-through" : ""}`}>{currency(Math.abs(t.dpp))}</td>
+                              <td className={`py-2 text-right font-semibold ${t.transactionType === "reversal" ? "text-red-500 line-through" : "text-orange-600"}`}>{currency(Math.abs(t.taxAmount))}</td>
                               <td className="py-2 text-right text-muted-foreground">{t.transactionDate}</td>
                             </tr>
                           ))}

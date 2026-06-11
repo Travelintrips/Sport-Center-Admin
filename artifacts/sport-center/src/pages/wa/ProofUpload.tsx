@@ -14,6 +14,9 @@ interface ActionInfo {
     startTime: string;
     endTime: string;
     totalPrice: number;
+    ppnRate?: number | null;
+    ppnAmount?: number | null;
+    grandTotal?: number | null;
     status: string;
   };
 }
@@ -140,7 +143,15 @@ export default function WaProofUpload() {
               <Row label="Fasilitas" value={b.facilityName} />
               <Row label="Tanggal" value={b.bookingDate} />
               <Row label="Jam" value={`${b.startTime} – ${b.endTime}`} />
-              <Row label="Total" value={`Rp ${b.totalPrice.toLocaleString("id-ID")}`} accent />
+              {b.ppnAmount != null && Number(b.ppnAmount) > 0 ? (
+                <>
+                  <Row label="Subtotal (DPP)" value={`Rp ${b.totalPrice.toLocaleString("id-ID")}`} />
+                  <Row label={`PPN ${Number(b.ppnRate ?? 11)}%`} value={`+Rp ${Number(b.ppnAmount).toLocaleString("id-ID")}`} />
+                  <Row label="Grand Total" value={`Rp ${Number(b.grandTotal).toLocaleString("id-ID")}`} accent />
+                </>
+              ) : (
+                <Row label="Total" value={`Rp ${b.totalPrice.toLocaleString("id-ID")}`} accent />
+              )}
             </CardContent>
           </Card>
         )}

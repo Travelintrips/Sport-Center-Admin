@@ -209,6 +209,9 @@ router.get("/admin/tax-report", adminMiddleware, async (req, res) => {
           dpp: Number(t.dpp),
           taxAmount: Number(t.taxAmount),
           transactionDate: t.transactionDate,
+          status: t.status ?? "posted",
+          transactionType: t.transactionType ?? "original",
+          reversalOfId: t.reversalOfId ?? null,
           createdAt: t.createdAt,
         })),
     });

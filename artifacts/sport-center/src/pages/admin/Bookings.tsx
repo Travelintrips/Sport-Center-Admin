@@ -780,12 +780,33 @@ function BookingDetailDrawer({
               <InfoRow icon={CalendarDays} label="Tanggal" value={formatDate(booking.bookingDate)} />
               <InfoRow icon={Clock} label="Waktu" value={`${booking.startTime?.slice(0, 5)} – ${booking.endTime?.slice(0, 5)}`} />
               <InfoRow icon={Hash} label="Durasi" value={`${booking.durationHours} jam`} />
-              <InfoRow
-                icon={CreditCard}
-                label="Total"
-                value={formatCurrency(booking.totalPrice)}
-                highlight
-              />
+              {booking.ppnAmount != null && Number(booking.ppnAmount) > 0 ? (
+                <div className="col-span-2 border-t border-slate-100 dark:border-slate-700 pt-3 mt-1 space-y-1.5">
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="flex items-center gap-1 text-slate-500"><CreditCard size={11} />Subtotal (DPP)</span>
+                    <span className="font-semibold text-slate-700 dark:text-slate-300">{formatCurrency(booking.totalPrice)}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-slate-500 pl-3.5">PPN {Number(booking.ppnRate ?? 11)}%</span>
+                    <span className="text-orange-600 font-semibold">+{formatCurrency(Number(booking.ppnAmount))}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-sm border-t border-slate-100 dark:border-slate-700 pt-1.5 mt-1">
+                    <span className="font-bold text-slate-700 dark:text-slate-200">Grand Total</span>
+                    <span className="font-black text-emerald-600 dark:text-emerald-400 text-base">{formatCurrency(Number(booking.grandTotal))}</span>
+                  </div>
+                  <div className="flex items-center gap-2 pt-1">
+                    <span className="text-[10px] bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300 px-2 py-0.5 rounded font-semibold">PPN_OUT_11</span>
+                    <span className="text-[10px] bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 px-2 py-0.5 rounded font-semibold">Terutang PPN</span>
+                  </div>
+                </div>
+              ) : (
+                <InfoRow
+                  icon={CreditCard}
+                  label="Total"
+                  value={formatCurrency(booking.totalPrice)}
+                  highlight
+                />
+              )}
             </div>
           </div>
 
