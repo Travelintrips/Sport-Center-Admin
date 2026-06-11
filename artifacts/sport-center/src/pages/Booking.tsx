@@ -74,41 +74,48 @@ export default function Booking() {
     query: { retry: false, queryKey: getGetMeQueryKey(), staleTime: 60_000 },
   });
   const isLoggedIn = !!currentUser && currentUser.role !== "admin";
+  // Akun admin_booking: bisa booking atas nama customer lain
+  const isAdminBooking = currentUser?.role === "admin_booking";
 
-  // --- Customer selector (untuk Nama Lengkap) ---
+  // --- Customer selector (hanya untuk admin_booking) ---
   const [customers, setCustomers] = useState<{ id: number; name: string; email: string | null; phone: string | null }[]>([]);
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>("");
 
   useEffect(() => {
+    if (!isAdminBooking) return; // hanya fetch jika role admin_booking
     const token = getToken();
     if (!token) return;
     fetch("/api/customers/simple", { headers: { Authorization: `Bearer ${token}` } })
       .then((r) => r.json())
       .then((data) => { if (Array.isArray(data)) setCustomers(data); })
       .catch(() => {});
-  }, []);
+  }, [isAdminBooking]);
 
-  // --- Customer form (customerName = nama yg masuk ke booking admin) ---
+  // --- Customer form ---
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
 
-  // Auto-fill email & phone dari customer yang dipilih di dropdown Nama Lengkap
+  // Auto-fill dari dropdown (admin_booking) atau dari akun sendiri (customer biasa)
   useEffect(() => {
-    if (!selectedCustomerId) {
-      // Tidak ada pilihan → kosong
-      setName("");
-      setEmail("");
-      setPhone("");
-    } else {
-      const picked = customers.find((c) => String(c.id) === selectedCustomerId);
-      if (picked) {
-        setName(picked.name);
-        setEmail(picked.email ?? "");
-        setPhone(picked.phone ?? "");
+    if (isAdminBooking) {
+      if (!selectedCustomerId) {
+        setName(""); setEmail(""); setPhone("");
+      } else {
+        const picked = customers.find((c) => String(c.id) === selectedCustomerId);
+        if (picked) {
+          setName(picked.name);
+          setEmail(picked.email ?? "");
+          setPhone(picked.phone ?? "");
+        }
       }
+    } else if (currentUser) {
+      // Customer biasa: auto-fill dari data akun sendiri
+      setName(currentUser.name ?? "");
+      setEmail(currentUser.email ?? "");
+      setPhone((currentUser as any).phone ?? "");
     }
-  }, [selectedCustomerId, customers]);
+  }, [isAdminBooking, selectedCustomerId, customers, currentUser]);
   const [notes, setNotes] = useState("");
   const [numberOfPeople, setNumberOfPeople] = useState<string>("1");
 
@@ -300,8 +307,8 @@ export default function Booking() {
     e.preventDefault();
     if (!facilityId || !date) return;
     if (!isWalkIn && (!startTime || !duration)) return;
-    // Jika ada daftar customer, wajib pilih dari dropdown
-    if (customers.length > 0 && !selectedCustomerId) {
+    // Jika admin_booking, wajib pilih customer dari dropdown
+    if (isAdminBooking && !selectedCustomerId) {
       toast({ title: t("Pilih nama pelanggan", "Select customer name"), description: t("Harap pilih nama dari daftar pelanggan.", "Please select a name from the customer list."), variant: "destructive" });
       return;
     }
@@ -498,10 +505,10 @@ export default function Booking() {
                   </div>
                 )}
 
-                {/* Nama Lengkap — dropdown dari daftar customer di DB */}
+                {/* Nama Lengkap — dropdown untuk admin_booking, read-only untuk customer biasa */}
                 <div className="space-y-2">
                   <Label htmlFor="namaPelanggan">{t("Nama Lengkap", "Full Name")} <span className="text-destructive">*</span></Label>
-                  {customers.length > 0 ? (
+                  {isAdminBooking ? (
                     <Select value={selectedCustomerId} onValueChange={setSelectedCustomerId} required>
                       <SelectTrigger id="namaPelanggan">
                         <SelectValue placeholder={t("Pilih nama pelanggan...", "Select customer name...")} />
@@ -514,6 +521,10 @@ export default function Booking() {
                         ))}
                       </SelectContent>
                     </Select>
+                  ) : isLoggedIn ? (
+                    <div className="flex items-center gap-2 h-10 px-3 rounded-md border bg-muted/50 text-foreground font-medium text-sm cursor-not-allowed select-none">
+                      <span>{name || currentUser?.name}</span>
+                    </div>
                   ) : (
                     <Input
                       id="namaPelanggan"
