@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useLang } from "@/lib/i18n";
-import { CalendarDays, Clock, ChevronRight, LogOut, ReceiptText, Star, Trophy, MessageCircle, CalendarClock } from "lucide-react";
+import { CalendarDays, Clock, ChevronRight, LogOut, ReceiptText, Star, Trophy, MessageCircle, CalendarClock, UserCheck } from "lucide-react";
 import RescheduleDialog from "@/components/RescheduleDialog";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
@@ -28,7 +28,7 @@ const STATUS_CONFIG: Record<string, { label: string; labelEn: string; stripe: st
 
 const INACTIVE = ["completed", "cancelled", "expired", "rejected", "refunded"];
 
-type BookingItem = { id: number; facilityName: string; facilityCategory: string; status: string; bookingDate: string; startTime: string; endTime: string; totalPrice: number; orderNumber: string };
+type BookingItem = { id: number; facilityName: string; facilityCategory: string; status: string; bookingDate: string; startTime: string; endTime: string; totalPrice: number; orderNumber: string; customerName?: string };
 type ReviewItem = { bookingId: number; rating: number; comment?: string | null };
 type Rs = { rating: number; comment: string; hover: number };
 
@@ -38,6 +38,7 @@ interface BookingCardProps {
   rs: Rs;
   lang: string;
   dateLocale: Locale;
+  userName?: string;
   onReschedule: (b: BookingItem) => void;
   onSetRating: (id: number, rating: number) => void;
   onSetHover: (id: number, hover: number) => void;
@@ -47,7 +48,7 @@ interface BookingCardProps {
 }
 
 const BookingCard = memo(function BookingCard({
-  b, review, rs, lang, dateLocale, onReschedule, onSetRating, onSetHover, onCommentChange, onSubmitReview, submitPending,
+  b, review, rs, lang, dateLocale, userName, onReschedule, onSetRating, onSetHover, onCommentChange, onSubmitReview, submitPending,
 }: BookingCardProps) {
   const { t } = useLang(); // hook in a top-level memo component — valid
   const cfg = STATUS_CONFIG[b.status] ?? { label: b.status, labelEn: b.status, stripe: "#9ca3af", badge: "bg-gray-100 text-gray-600 border-gray-200" };
@@ -77,6 +78,12 @@ const BookingCard = memo(function BookingCard({
                 <Clock size={13} className="text-primary" />
                 {b.startTime.substring(0, 5)} – {b.endTime.substring(0, 5)}
               </span>
+              {b.customerName && userName && b.customerName.trim().toLowerCase() !== userName.trim().toLowerCase() && (
+                <span className="flex items-center gap-1.5 text-xs bg-orange-50 text-orange-700 border border-orange-200 rounded-full px-2 py-0.5 font-semibold">
+                  <UserCheck size={11} />
+                  {t("Atas Nama", "On behalf of")}: {b.customerName}
+                </span>
+              )}
             </div>
 
             <div className="flex items-center justify-between">
@@ -279,6 +286,7 @@ export default function MyBookings() {
                   review={allReviews?.find((r) => r.bookingId === b.id)}
                   rs={getRs(b.id)}
                   lang={lang} dateLocale={dateLocale}
+                  userName={user?.name ?? undefined}
                   onReschedule={setRescheduleTarget}
                   onSetRating={(id, rating) => setRs(id, { rating })}
                   onSetHover={(id, hover) => setRs(id, { hover })}
@@ -305,6 +313,7 @@ export default function MyBookings() {
                   review={allReviews?.find((r) => r.bookingId === b.id)}
                   rs={getRs(b.id)}
                   lang={lang} dateLocale={dateLocale}
+                  userName={user?.name ?? undefined}
                   onReschedule={setRescheduleTarget}
                   onSetRating={(id, rating) => setRs(id, { rating })}
                   onSetHover={(id, hover) => setRs(id, { hover })}
