@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useQuery } from "@tanstack/react-query";
 import { getToken } from "@/lib/auth";
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
-import { TrendingUp, Download, DollarSign, CalendarDays, CheckCircle, XCircle } from "lucide-react";
+import { TrendingUp, Download, DollarSign, CalendarDays, CheckCircle, Users } from "lucide-react";
 
 const API = import.meta.env.VITE_API_BASE_URL ?? "/api";
 const authHeaders = () => ({ Authorization: `Bearer ${getToken()}` });
@@ -47,6 +47,7 @@ export default function AdminReports() {
   }
 
   const summary = data?.summary ?? {};
+  const membershipSummary = data?.membershipSummary ?? {};
   const revenueData = data?.revenueByPeriod ?? [];
   const facilityData = data?.revenueByFacility ?? [];
   const statusData = (data?.revenueByStatus ?? []).filter((s: any) => s.count > 0);
@@ -112,6 +113,11 @@ export default function AdminReports() {
                   <div>
                     <div className="text-2xl font-black">{currency(summary.totalRevenue ?? 0)}</div>
                     <div className="text-xs text-muted-foreground">Total Revenue</div>
+                    {(summary.membershipRevenue ?? 0) > 0 && (
+                      <div className="text-[10px] text-purple-500 mt-0.5">
+                        termasuk member Rp {(summary.membershipRevenue ?? 0).toLocaleString("id-ID")}
+                      </div>
+                    )}
                   </div>
                 </div>
               </CardContent>
@@ -144,29 +150,67 @@ export default function AdminReports() {
                   <DollarSign className="text-orange-500" size={24} />
                   <div>
                     <div className="text-2xl font-black">{currency(summary.avgTicketSize ?? 0)}</div>
-                    <div className="text-xs text-muted-foreground">Avg Ticket Size</div>
+                    <div className="text-xs text-muted-foreground">Avg Ticket Booking</div>
                   </div>
                 </div>
               </CardContent>
             </Card>
           </div>
 
+          {/* Membership summary */}
+          {(membershipSummary.totalMemberships ?? 0) > 0 && (
+            <Card className="border-purple-200 dark:border-purple-800">
+              <CardContent className="pt-5 pb-5">
+                <div className="flex items-center gap-2 mb-4">
+                  <Users size={16} className="text-purple-500" />
+                  <span className="text-sm font-bold text-purple-700 dark:text-purple-300">Ringkasan Member Gym</span>
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <div className="rounded-lg bg-purple-50 dark:bg-purple-900/20 p-3">
+                    <div className="text-xl font-black text-purple-700 dark:text-purple-300">{currency(membershipSummary.membershipRevenue ?? 0)}</div>
+                    <div className="text-[10px] text-purple-500 font-semibold uppercase mt-0.5">Revenue Member</div>
+                  </div>
+                  <div className="rounded-lg bg-green-50 dark:bg-green-900/20 p-3">
+                    <div className="text-xl font-black text-green-700 dark:text-green-300">{membershipSummary.activeMemberships ?? 0}</div>
+                    <div className="text-[10px] text-green-500 font-semibold uppercase mt-0.5">Aktif</div>
+                  </div>
+                  <div className="rounded-lg bg-amber-50 dark:bg-amber-900/20 p-3">
+                    <div className="text-xl font-black text-amber-700 dark:text-amber-300">{membershipSummary.pendingMemberships ?? 0}</div>
+                    <div className="text-[10px] text-amber-500 font-semibold uppercase mt-0.5">Menunggu Konfirmasi</div>
+                  </div>
+                  <div className="rounded-lg bg-slate-50 dark:bg-slate-800 p-3">
+                    <div className="text-xl font-black text-slate-700 dark:text-slate-300">{membershipSummary.expiredMemberships ?? 0}</div>
+                    <div className="text-[10px] text-slate-500 font-semibold uppercase mt-0.5">Expired</div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           {/* Revenue chart */}
           <Card>
-            <CardHeader><CardTitle>Tren Revenue</CardTitle></CardHeader>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-3">
+                Tren Revenue
+                <span className="flex items-center gap-3 text-xs font-normal text-muted-foreground">
+                  <span className="flex items-center gap-1"><span className="inline-block w-3 h-2 rounded bg-[#F97316]" /> Booking</span>
+                  <span className="flex items-center gap-1"><span className="inline-block w-3 h-2 rounded bg-[#a855f7]" /> Member Gym</span>
+                </span>
+              </CardTitle>
+            </CardHeader>
             <CardContent>
               {revenueData.length === 0 ? (
                 <div className="text-center py-8 text-muted-foreground">Tidak ada data</div>
               ) : (
                 <ResponsiveContainer width="100%" height={280}>
-                  <LineChart data={revenueData}>
+                  <BarChart data={revenueData}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="period" tick={{ fontSize: 11 }} />
                     <YAxis tickFormatter={(v) => `${(v/1000000).toFixed(1)}jt`} tick={{ fontSize: 11 }} />
-                    <Tooltip formatter={(v: any) => currency(v)} />
-                    <Line type="monotone" dataKey="revenue" stroke="#F97316" strokeWidth={2} dot={false} name="Revenue" />
-                    <Line type="monotone" dataKey="bookings" stroke="#3B82F6" strokeWidth={2} dot={false} name="Booking" yAxisId={0} />
-                  </LineChart>
+                    <Tooltip formatter={(v: any, name: string) => [currency(Number(v)), name === "membershipRevenue" ? "Member Gym" : "Booking"]} />
+                    <Bar dataKey="revenue" stackId="rev" fill="#F97316" name="Booking" radius={[0,0,0,0]} />
+                    <Bar dataKey="membershipRevenue" stackId="rev" fill="#a855f7" name="Member Gym" radius={[4,4,0,0]} />
+                  </BarChart>
                 </ResponsiveContainer>
               )}
             </CardContent>

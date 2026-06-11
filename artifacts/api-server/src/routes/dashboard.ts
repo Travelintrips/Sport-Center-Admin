@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { db, bookingsTable, facilitiesTable } from "@workspace/db";
+import { db, bookingsTable, facilitiesTable, gymMembershipsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
 
@@ -7,16 +7,29 @@ const router = Router();
 
 router.get("/admin/dashboard", adminMiddleware, async (req, res) => {
   try {
-    const bookings = await db.select().from(bookingsTable);
-    const facilities = await db.select().from(facilitiesTable);
+    const [bookings, facilities, memberships] = await Promise.all([
+      db.select().from(bookingsTable),
+      db.select().from(facilitiesTable),
+      db.select().from(gymMembershipsTable),
+    ]);
 
     const today = new Date().toISOString().split("T")[0];
+
+    // Status membership yang sudah terbayar (active = konfirmasi admin, expired = sudah berakhir tapi pernah aktif)
+    const PAID_MEMBERSHIP_STATUSES = ["active", "expired"];
+    const paidMemberships = memberships.filter((m) => PAID_MEMBERSHIP_STATUSES.includes(m.status));
+
     const totalBookings = bookings.length;
-    const totalRevenue = bookings
-      .filter((b) => b.status !== "cancelled")
+    const bookingRevenue = bookings
+      .filter((b) => !["cancelled", "expired", "rejected"].includes(b.status))
       .reduce((sum, b) => sum + Number(b.totalPrice), 0);
+    const membershipRevenue = paidMemberships.reduce((sum, m) => sum + Number(m.totalPrice), 0);
+    const totalRevenue = bookingRevenue + membershipRevenue;
+
     const todayBookings = bookings.filter((b) => b.bookingDate === today).length;
     const pendingBookings = bookings.filter((b) => b.status === "pending_payment").length;
+    const activeMemberships = memberships.filter((m) => m.status === "active").length;
+    const pendingMemberships = memberships.filter((m) => m.status === "waiting_confirmation").length;
 
     const bookingsByStatus = ["pending_payment", "paid", "confirmed", "cancelled", "completed"].map((s) => ({
       status: s,
@@ -24,7 +37,7 @@ router.get("/admin/dashboard", adminMiddleware, async (req, res) => {
     }));
 
     const facilityStats: Record<number, { facilityId: number; facilityName: string; bookingCount: number; revenue: number }> = {};
-    bookings.filter((b) => b.status !== "cancelled").forEach((b) => {
+    bookings.filter((b) => !["cancelled", "expired", "rejected"].includes(b.status)).forEach((b) => {
       if (!facilityStats[b.facilityId]) {
         const fac = facilities.find((f) => f.id === b.facilityId);
         facilityStats[b.facilityId] = { facilityId: b.facilityId, facilityName: fac?.name ?? "", bookingCount: 0, revenue: 0 };
@@ -34,12 +47,19 @@ router.get("/admin/dashboard", adminMiddleware, async (req, res) => {
     });
     const topFacilities = Object.values(facilityStats).sort((a, b) => b.bookingCount - a.bookingCount).slice(0, 5);
 
-    const monthlyData: Record<string, { month: string; revenue: number; bookings: number }> = {};
-    bookings.filter((b) => b.status !== "cancelled").forEach((b) => {
+    // Gabung revenue booking + membership per bulan
+    const monthlyData: Record<string, { month: string; revenue: number; bookings: number; membershipRevenue: number }> = {};
+    bookings.filter((b) => !["cancelled", "expired", "rejected"].includes(b.status)).forEach((b) => {
       const month = b.bookingDate.slice(0, 7);
-      if (!monthlyData[month]) monthlyData[month] = { month, revenue: 0, bookings: 0 };
+      if (!monthlyData[month]) monthlyData[month] = { month, revenue: 0, bookings: 0, membershipRevenue: 0 };
       monthlyData[month].revenue += Number(b.totalPrice);
       monthlyData[month].bookings++;
+    });
+    paidMemberships.forEach((m) => {
+      const month = m.startDate.slice(0, 7);
+      if (!monthlyData[month]) monthlyData[month] = { month, revenue: 0, bookings: 0, membershipRevenue: 0 };
+      monthlyData[month].revenue += Number(m.totalPrice);
+      monthlyData[month].membershipRevenue += Number(m.totalPrice);
     });
     const revenueByMonth = Object.values(monthlyData).sort((a, b) => a.month.localeCompare(b.month)).slice(-6);
 
@@ -48,7 +68,20 @@ router.get("/admin/dashboard", adminMiddleware, async (req, res) => {
       return { ...b, totalPrice: Number(b.totalPrice), facilityName: fac?.name ?? "", facilityCategory: fac?.category ?? "", payment: null };
     });
 
-    res.json({ totalBookings, totalRevenue, todayBookings, pendingBookings, topFacilities, recentBookings, bookingsByStatus, revenueByMonth });
+    res.json({
+      totalBookings,
+      totalRevenue,
+      bookingRevenue,
+      membershipRevenue,
+      todayBookings,
+      pendingBookings,
+      activeMemberships,
+      pendingMemberships,
+      topFacilities,
+      recentBookings,
+      bookingsByStatus,
+      revenueByMonth,
+    });
   } catch (err) {
     req.log.error({ err }, "Dashboard error");
     res.status(500).json({ error: "Internal server error" });
