@@ -8,8 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useQuery } from "@tanstack/react-query";
 import { getToken } from "@/lib/auth";
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
-import { TrendingUp, Download, DollarSign, CalendarDays, CheckCircle, Receipt } from "lucide-react";
-import { TrendingUp, Download, DollarSign, CalendarDays, CheckCircle, Users } from "lucide-react";
+import { TrendingUp, Download, DollarSign, CalendarDays, CheckCircle, Receipt, Users } from "lucide-react";
 
 const API = import.meta.env.VITE_API_BASE_URL ?? "/api";
 const authHeaders = () => ({ Authorization: `Bearer ${getToken()}` });
