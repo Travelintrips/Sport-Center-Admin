@@ -3307,13 +3307,13 @@ components:
     RejectVerificationInput:
       type: object
       properties:
-        reason:
+        rejectionReason:
           type: string
 
     RevokeVerificationInput:
       type: object
       properties:
-        reason:
+        rejectionReason:
           type: string
 
     ToggleBillingInput:

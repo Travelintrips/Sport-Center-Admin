@@ -1033,7 +1033,7 @@ export const RejectCompanyVerificationParams = zod.object({
 })
 
 export const RejectCompanyVerificationBody = zod.object({
-  "reason": zod.string().optional()
+  "rejectionReason": zod.string().optional()
 })
 
 
@@ -1045,7 +1045,7 @@ export const RevokeCompanyVerificationParams = zod.object({
 })
 
 export const RevokeCompanyVerificationBody = zod.object({
-  "reason": zod.string().optional()
+  "rejectionReason": zod.string().optional()
 })
 
 

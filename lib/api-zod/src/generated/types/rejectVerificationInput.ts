@@ -7,5 +7,5 @@
  */
 
 export interface RejectVerificationInput {
-  reason?: string;
+  rejectionReason?: string;
 }

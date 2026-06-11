@@ -1124,11 +1124,11 @@ export interface CompanyVerificationRequest {
 }
 
 export interface RejectVerificationInput {
-  reason?: string;
+  rejectionReason?: string;
 }
 
 export interface RevokeVerificationInput {
-  reason?: string;
+  rejectionReason?: string;
 }
 
 export interface ToggleBillingInput {

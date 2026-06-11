@@ -56,13 +56,14 @@ async function generateTokenPair(verificationId: number): Promise<{ approveToken
 // ─── GET /company-verifications — admin: list all ─────────────────────────────
 router.get("/company-verifications", adminMiddleware, async (req, res) => {
   try {
-    const { status, companyId } = req.query;
+    const { status, companyId, customerId } = req.query;
 
     let verifications = await db.select().from(companyVerificationsTable)
       .orderBy(desc(companyVerificationsTable.requestedAt));
 
     if (status) verifications = verifications.filter((v) => v.status === status);
     if (companyId) verifications = verifications.filter((v) => v.companyId === parseInt(String(companyId)));
+    if (customerId) verifications = verifications.filter((v) => v.customerId === parseInt(String(customerId)));
 
     const userIds = Array.from(new Set([
       ...verifications.map((v) => v.customerId),
@@ -247,8 +248,8 @@ router.post("/company-verifications", authMiddleware, async (req, res) => {
     // Send WA to company PIC
     const picPhone = company.picPhone;
     if (picPhone) {
-      const approveUrl = `${APP_URL}/wa/verify/${approveToken}`;
-      const rejectUrl = `${APP_URL}/wa/verify/${rejectToken}`;
+      const approveUrl = `${APP_URL}/api/wa/verify/${approveToken}`;
+      const rejectUrl = `${APP_URL}/api/wa/verify/${rejectToken}`;
       const msg =
         `🔔 *Permintaan Verifikasi Karyawan*\n\n` +
         `Karyawan *${customer?.name ?? ""}* mengajukan verifikasi untuk bergabung sebagai karyawan *${company.companyName ?? company.name}*.\n\n` +
@@ -459,7 +460,7 @@ router.get("/company-users/by-company/:companyId", adminMiddleware, async (req, 
   try {
     const companyId = parseInt(String(req.params.companyId));
     const members = await db.select().from(companyUsersTable)
-      .where(eq(companyUsersTable.companyId, companyId));
+      .where(and(eq(companyUsersTable.companyId, companyId), eq(companyUsersTable.verificationStatus, "approved")));
 
     const allUsers = await db.select({ id: usersTable.id, name: usersTable.name, email: usersTable.email, phone: usersTable.phone })
       .from(usersTable);
