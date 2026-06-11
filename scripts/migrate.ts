@@ -359,6 +359,21 @@ CREATE INDEX IF NOT EXISTS verification_logs_booking_id_idx ON sport_center.veri
 CREATE INDEX IF NOT EXISTS verification_logs_created_at_idx ON sport_center.verification_logs(created_at DESC);
 
 -- ============================================================
+-- 21. bookings: booked_by_user_id (siapa yang membuat booking)
+-- ============================================================
+ALTER TABLE sport_center.bookings
+  ADD COLUMN IF NOT EXISTS booked_by_user_id integer REFERENCES sport_center.users(id) ON DELETE SET NULL;
+
+-- Backfill: booking yang customer_email cocok dengan email user → set booked_by_user_id ke user tersebut
+UPDATE sport_center.bookings b
+SET booked_by_user_id = u.id
+FROM sport_center.users u
+WHERE b.booked_by_user_id IS NULL
+  AND b.customer_id IS NULL
+  AND LOWER(b.customer_email) = LOWER(u.email)
+  AND u.email IS NOT NULL;
+
+-- ============================================================
 -- 19. tax_transactions: tambah status + transaction_type + reversal_of_id
 -- ============================================================
 ALTER TABLE sport_center.tax_transactions

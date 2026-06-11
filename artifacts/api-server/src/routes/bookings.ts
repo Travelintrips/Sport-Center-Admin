@@ -256,9 +256,13 @@ router.post("/bookings", async (req, res) => {
     const taxCalc = await calculateTax(totalPrice, "sport_center_booking", bookingDate);
     const orderNumber = await generateOrderNumber();
 
+    // customerId: admin → bodyCustomerId atau null; admin_booking/customer → bodyCustomerId atau loggedInUserId
+    const effectiveCustomerId = bodyCustomerId ?? (loggedInRole !== "admin" ? loggedInUserId : null);
+
     const [booking] = await db.insert(bookingsTable).values({
       orderNumber,
-      customerId: loggedInUserId,
+      customerId: effectiveCustomerId,
+      bookedByUserId: loggedInUserId,
       customerName,
       customerEmail,
       customerPhone,
@@ -531,10 +535,11 @@ router.get("/bookings/my", authMiddleware, async (req, res) => {
     const [user] = await db.select().from(usersTable).where(eq(usersTable.id, userId)).limit(1);
     if (!user) { res.status(404).json({ error: "User not found" }); return; }
 
-    // Cocokkan via customerId (booking baru) ATAU customerEmail case-insensitive (booking lama/guest)
+    // Cocokkan via customerId ATAU bookedByUserId (siapa yang buat) ATAU customerEmail (lama/guest)
     const bookings = await db.select().from(bookingsTable)
       .where(or(
         eq(bookingsTable.customerId, userId),
+        eq(bookingsTable.bookedByUserId, userId),
         user.email ? ilike(bookingsTable.customerEmail, user.email) : undefined,
       ));
 

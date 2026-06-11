@@ -83,6 +83,7 @@ export const bookingsTable = scSchema.table("bookings", {
   ppnRate: numeric("ppn_rate", { precision: 5, scale: 2 }),
   ppnAmount: numeric("ppn_amount", { precision: 12, scale: 2 }),
   grandTotal: numeric("grand_total", { precision: 12, scale: 2 }),
+  bookedByUserId: integer("booked_by_user_id").references(() => usersTable.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });
