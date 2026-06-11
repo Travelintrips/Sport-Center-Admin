@@ -24,6 +24,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { ChevronsUpDown, Check } from "lucide-react";
 import { format, parseISO } from "date-fns";
 import { id as idLocale, enUS } from "date-fns/locale";
 import {
@@ -80,6 +83,7 @@ export default function Booking() {
   // --- Customer selector (hanya untuk admin_booking) ---
   const [customers, setCustomers] = useState<{ id: number; name: string; email: string | null; phone: string | null }[]>([]);
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>("");
+  const [comboOpen, setComboOpen] = useState(false);
 
   useEffect(() => {
     if (!isAdminBooking) return; // hanya fetch jika role admin_booking
@@ -509,18 +513,43 @@ export default function Booking() {
                 <div className="space-y-2">
                   <Label htmlFor="namaPelanggan">{t("Nama Lengkap", "Full Name")} <span className="text-destructive">*</span></Label>
                   {isAdminBooking ? (
-                    <Select value={selectedCustomerId} onValueChange={setSelectedCustomerId} required>
-                      <SelectTrigger id="namaPelanggan">
-                        <SelectValue placeholder={t("Pilih nama pelanggan...", "Select customer name...")} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {customers.map((c) => (
-                          <SelectItem key={c.id} value={String(c.id)}>
-                            {c.name}{c.phone ? ` — ${c.phone}` : ""}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <Popover open={comboOpen} onOpenChange={setComboOpen}>
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant="outline"
+                          role="combobox"
+                          aria-expanded={comboOpen}
+                          className="w-full justify-between font-normal h-10"
+                        >
+                          <span className="truncate">
+                            {selectedCustomerId
+                              ? (() => { const c = customers.find((c) => String(c.id) === selectedCustomerId); return c ? `${c.name}${c.phone ? ` — ${c.phone}` : ""}` : t("Pilih nama pelanggan...", "Select customer..."); })()
+                              : t("Pilih nama pelanggan...", "Select customer...")}
+                          </span>
+                          <ChevronsUpDown size={14} className="ml-2 shrink-0 opacity-50" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                        <Command>
+                          <CommandInput placeholder={t("Cari nama atau nomor...", "Search name or number...")} />
+                          <CommandList>
+                            <CommandEmpty>{t("Tidak ditemukan", "No results found")}</CommandEmpty>
+                            <CommandGroup>
+                              {customers.map((c) => (
+                                <CommandItem
+                                  key={c.id}
+                                  value={`${c.name} ${c.phone ?? ""}`}
+                                  onSelect={() => { setSelectedCustomerId(String(c.id)); setComboOpen(false); }}
+                                >
+                                  <Check size={14} className={`mr-2 shrink-0 ${String(c.id) === selectedCustomerId ? "opacity-100" : "opacity-0"}`} />
+                                  <span>{c.name}{c.phone ? ` — ${c.phone}` : ""}</span>
+                                </CommandItem>
+                              ))}
+                            </CommandGroup>
+                          </CommandList>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
                   ) : isLoggedIn ? (
                     <div className="flex items-center gap-2 h-10 px-3 rounded-md border bg-muted/50 text-foreground font-medium text-sm cursor-not-allowed select-none">
                       <span>{name || currentUser?.name}</span>
