@@ -311,85 +311,8 @@ export default function AdminReports() {
                   </tbody>
                 </table>
               </div>
-
-              <Card>
-                <CardHeader><CardTitle>Tren Revenue</CardTitle></CardHeader>
-                <CardContent>
-                  {revenueData.length === 0 ? (
-                    <div className="text-center py-8 text-muted-foreground">Tidak ada data</div>
-                  ) : (
-                    <ResponsiveContainer width="100%" height={280}>
-                      <LineChart data={revenueData}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="period" tick={{ fontSize: 11 }} />
-                        <YAxis tickFormatter={(v) => `${(v/1000000).toFixed(1)}jt`} tick={{ fontSize: 11 }} />
-                        <Tooltip formatter={(v: any) => currency(v)} />
-                        <Line type="monotone" dataKey="revenue" stroke="#F97316" strokeWidth={2} dot={false} name="Revenue" />
-                        <Line type="monotone" dataKey="bookings" stroke="#3B82F6" strokeWidth={2} dot={false} name="Booking" yAxisId={0} />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  )}
-                </CardContent>
-              </Card>
-
-              <div className="grid md:grid-cols-2 gap-6">
-                <Card>
-                  <CardHeader><CardTitle>Revenue per Fasilitas</CardTitle></CardHeader>
-                  <CardContent>
-                    <ResponsiveContainer width="100%" height={240}>
-                      <BarChart data={facilityData.slice(0, 8)} layout="vertical">
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis type="number" tickFormatter={(v) => `${(v/1000000).toFixed(1)}jt`} tick={{ fontSize: 10 }} />
-                        <YAxis type="category" dataKey="facilityName" tick={{ fontSize: 10 }} width={90} />
-                        <Tooltip formatter={(v: any) => currency(v)} />
-                        <Bar dataKey="revenue" fill="#F97316" name="Revenue" radius={[0,4,4,0]} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardHeader><CardTitle>Booking per Status</CardTitle></CardHeader>
-                  <CardContent>
-                    <ResponsiveContainer width="100%" height={240}>
-                      <PieChart>
-                        <Pie data={statusData} dataKey="count" nameKey="status" cx="50%" cy="50%" outerRadius={90} label={({ status, count }) => `${status}: ${count}`} labelLine={false}>
-                          {statusData.map((_: any, i: number) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
-                        </Pie>
-                        <Tooltip />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  </CardContent>
-                </Card>
-              </div>
-
-              <Card>
-                <CardHeader><CardTitle>Detail per Fasilitas</CardTitle></CardHeader>
-                <CardContent>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="border-b">
-                          <th className="text-left py-2 font-semibold">Fasilitas</th>
-                          <th className="text-left py-2 font-semibold">Kategori</th>
-                          <th className="text-right py-2 font-semibold">Booking</th>
-                          <th className="text-right py-2 font-semibold">Revenue</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {facilityData.map((f: any) => (
-                          <tr key={f.facilityId} className="border-b hover:bg-muted/30">
-                            <td className="py-2">{f.facilityName}</td>
-                            <td className="py-2 text-muted-foreground">{f.category}</td>
-                            <td className="py-2 text-right">{f.bookings}</td>
-                            <td className="py-2 text-right font-semibold">{currency(f.revenue)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </CardContent>
-              </Card>
+            </CardContent>
+          </Card>
             </>
           )}
         </TabsContent>
