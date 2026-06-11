@@ -75,9 +75,9 @@ export default function Booking() {
   });
   const isLoggedIn = !!currentUser && currentUser.role !== "admin";
 
-  // --- Customer selector (daftar customer terdaftar) ---
+  // --- Customer selector (untuk Nama Lengkap) ---
   const [customers, setCustomers] = useState<{ id: number; name: string; email: string | null; phone: string | null }[]>([]);
-  const [selectedCustomerId, setSelectedCustomerId] = useState<string>("self");
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string>("");
 
   useEffect(() => {
     const token = getToken();
@@ -88,19 +88,18 @@ export default function Booking() {
       .catch(() => {});
   }, []);
 
-  // --- Customer form ---
+  // --- Customer form (customerName = nama yg masuk ke booking admin) ---
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
 
-  // Auto-fill dari akun sendiri atau dari customer yang dipilih
+  // Auto-fill email & phone dari customer yang dipilih di dropdown Nama Lengkap
   useEffect(() => {
-    if (selectedCustomerId === "self") {
-      if (isLoggedIn && currentUser) {
-        if (currentUser.name) setName(currentUser.name);
-        if (currentUser.email) setEmail(currentUser.email);
-        if ((currentUser as any).phone) setPhone((currentUser as any).phone);
-      }
+    if (!selectedCustomerId) {
+      // Tidak ada pilihan → kosong
+      setName("");
+      setEmail("");
+      setPhone("");
     } else {
       const picked = customers.find((c) => String(c.id) === selectedCustomerId);
       if (picked) {
@@ -109,7 +108,7 @@ export default function Booking() {
         setPhone(picked.phone ?? "");
       }
     }
-  }, [selectedCustomerId, isLoggedIn, currentUser, customers]);
+  }, [selectedCustomerId, customers]);
   const [notes, setNotes] = useState("");
   const [numberOfPeople, setNumberOfPeople] = useState<string>("1");
 
@@ -301,6 +300,11 @@ export default function Booking() {
     e.preventDefault();
     if (!facilityId || !date) return;
     if (!isWalkIn && (!startTime || !duration)) return;
+    // Jika ada daftar customer, wajib pilih dari dropdown
+    if (customers.length > 0 && !selectedCustomerId) {
+      toast({ title: t("Pilih nama pelanggan", "Select customer name"), description: t("Harap pilih nama dari daftar pelanggan.", "Please select a name from the customer list."), variant: "destructive" });
+      return;
+    }
     if (!name || !email || !phone) {
       toast({ title: t("Form tidak lengkap", "Incomplete form"), description: t("Harap isi semua field yang wajib.", "Please fill in all required fields."), variant: "destructive" });
       return;
@@ -482,51 +486,45 @@ export default function Booking() {
             </CardHeader>
             <form onSubmit={handleSubmit} id="booking-form">
               <CardContent className="space-y-4">
-                {/* Dropdown pemilih customer — tampil jika ada customer terdaftar */}
-                {isLoggedIn && customers.length > 0 && (
+                {/* Nama Pemesan — dikunci ke akun yang login, tidak bisa diubah */}
+                {isLoggedIn && (
                   <div className="space-y-2">
-                    <Label htmlFor="customerPicker">{t("Nama Pemesan", "Booking For")}</Label>
-                    <Select value={selectedCustomerId} onValueChange={setSelectedCustomerId}>
-                      <SelectTrigger id="customerPicker">
-                        <SelectValue placeholder={t("Pilih pemesan...", "Select customer...")} />
+                    <Label>{t("Nama Pemesan", "Account Holder")}</Label>
+                    <div className="flex items-center gap-2 h-10 px-3 rounded-md border bg-muted/50 text-foreground font-medium text-sm cursor-not-allowed select-none">
+                      <ShieldCheck size={14} className="text-primary shrink-0" />
+                      <span>{currentUser?.name}</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground">{t("Nama akun tidak dapat diubah.", "Account name cannot be changed.")}</p>
+                  </div>
+                )}
+
+                {/* Nama Lengkap — dropdown dari daftar customer di DB */}
+                <div className="space-y-2">
+                  <Label htmlFor="namaPelanggan">{t("Nama Lengkap", "Full Name")} <span className="text-destructive">*</span></Label>
+                  {customers.length > 0 ? (
+                    <Select value={selectedCustomerId} onValueChange={setSelectedCustomerId} required>
+                      <SelectTrigger id="namaPelanggan">
+                        <SelectValue placeholder={t("Pilih nama pelanggan...", "Select customer name...")} />
                       </SelectTrigger>
                       <SelectContent>
-                        {currentUser && (
-                          <SelectItem value="self">
-                            {currentUser.name} ({t("Saya sendiri", "Myself")})
+                        {customers.map((c) => (
+                          <SelectItem key={c.id} value={String(c.id)}>
+                            {c.name}{c.phone ? ` — ${c.phone}` : ""}
                           </SelectItem>
-                        )}
-                        {customers
-                          .filter((c) => !currentUser || c.id !== (currentUser as any).id)
-                          .map((c) => (
-                            <SelectItem key={c.id} value={String(c.id)}>
-                              {c.name}{c.phone ? ` — ${c.phone}` : ""}
-                            </SelectItem>
-                          ))}
+                        ))}
                       </SelectContent>
                     </Select>
-                  </div>
-                )}
-
-                {isLoggedIn && selectedCustomerId === "self" && (
-                  <div className="flex items-center gap-2 text-xs text-primary bg-primary/8 border border-primary/20 rounded-lg px-3 py-2">
-                    <ShieldCheck size={13} className="shrink-0" />
-                    <span>{t("Data diisi otomatis dari akun kamu. Pilih pemesan lain di atas untuk mengubah.", "Auto-filled from your account. Select another customer above to change.")}</span>
-                  </div>
-                )}
-
-                <div className="space-y-2">
-                  <Label htmlFor="name">{t("Nama Lengkap", "Full Name")} <span className="text-destructive">*</span></Label>
-                  <Input
-                    id="name"
-                    required
-                    value={name}
-                    onChange={e => setName(e.target.value)}
-                    placeholder={t("Nama lengkap", "Full name")}
-                    readOnly={isLoggedIn && selectedCustomerId === "self"}
-                    className={isLoggedIn && selectedCustomerId === "self" ? "bg-muted/50 cursor-not-allowed text-foreground font-medium" : ""}
-                  />
+                  ) : (
+                    <Input
+                      id="namaPelanggan"
+                      required
+                      value={name}
+                      onChange={e => setName(e.target.value)}
+                      placeholder={t("Nama lengkap", "Full name")}
+                    />
+                  )}
                 </div>
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="email">{t("Alamat Email", "Email Address")} <span className="text-destructive">*</span></Label>
@@ -537,8 +535,6 @@ export default function Booking() {
                       value={email}
                       onChange={e => setEmail(e.target.value)}
                       placeholder={t("email@kamu.com", "your@email.com")}
-                      readOnly={isLoggedIn && selectedCustomerId === "self"}
-                      className={isLoggedIn && selectedCustomerId === "self" ? "bg-muted/50 cursor-not-allowed text-foreground" : ""}
                     />
                   </div>
                   <div className="space-y-2">
