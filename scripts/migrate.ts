@@ -357,6 +357,38 @@ CREATE TABLE IF NOT EXISTS sport_center.verification_logs (
 
 CREATE INDEX IF NOT EXISTS verification_logs_booking_id_idx ON sport_center.verification_logs(booking_id);
 CREATE INDEX IF NOT EXISTS verification_logs_created_at_idx ON sport_center.verification_logs(created_at DESC);
+
+-- ============================================================
+-- 19. tax_transactions: tambah status + transaction_type + reversal_of_id
+-- ============================================================
+ALTER TABLE sport_center.tax_transactions
+  ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'posted',
+  ADD COLUMN IF NOT EXISTS transaction_type text NOT NULL DEFAULT 'original',
+  ADD COLUMN IF NOT EXISTS reversal_of_id integer;
+
+-- ============================================================
+-- 20. accounting_journals
+-- ============================================================
+CREATE TABLE IF NOT EXISTS sport_center.accounting_journals (
+  id serial PRIMARY KEY,
+  booking_id integer NOT NULL REFERENCES sport_center.bookings(id) ON DELETE CASCADE,
+  order_number text NOT NULL,
+  journal_type text NOT NULL,
+  debit_account text NOT NULL DEFAULT 'Kas/Bank',
+  debit_amount numeric(14,2) NOT NULL,
+  credit_revenue_account text NOT NULL DEFAULT 'Pendapatan Sport Center',
+  credit_revenue_amount numeric(14,2) NOT NULL,
+  credit_ppn_account text NOT NULL DEFAULT 'PPN Keluaran',
+  credit_ppn_amount numeric(14,2) NOT NULL DEFAULT 0,
+  journal_date text NOT NULL,
+  is_reversal boolean NOT NULL DEFAULT false,
+  reversal_of_id integer,
+  notes text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS accounting_journals_booking_id_idx ON sport_center.accounting_journals(booking_id);
+CREATE INDEX IF NOT EXISTS accounting_journals_journal_date_idx ON sport_center.accounting_journals(journal_date DESC);
 `;
 
 async function main() {

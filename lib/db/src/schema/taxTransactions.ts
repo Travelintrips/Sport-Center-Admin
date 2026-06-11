@@ -13,6 +13,9 @@ export const taxTransactionsTable = scSchema.table("tax_transactions", {
   dpp: numeric("dpp", { precision: 14, scale: 2 }).notNull(),
   taxAmount: numeric("tax_amount", { precision: 14, scale: 2 }).notNull(),
   transactionDate: text("transaction_date").notNull(),
+  status: text("status").notNull().default("posted"),
+  transactionType: text("transaction_type").notNull().default("original"),
+  reversalOfId: integer("reversal_of_id"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

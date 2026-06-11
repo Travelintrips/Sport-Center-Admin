@@ -23,3 +23,4 @@ export * from "./waActionTokens";
 export * from "./companyInvoices";
 export * from "./taxSettings";
 export * from "./taxTransactions";
+export * from "./accountingJournals";

@@ -254,10 +254,23 @@ function printInvoice(booking: any, settings?: any) {
           <td>${booking.durationHours} jam</td>
           <td style="text-align:right;font-weight:600">${formatCurrency(booking.totalPrice)}</td>
         </tr>
+        ${booking.ppnAmount != null && Number(booking.ppnAmount) > 0 ? `
+        <tr>
+          <td colspan="4" style="text-align:right;padding-right:16px;font-size:12px;color:#555">DPP</td>
+          <td style="text-align:right;font-size:12px;color:#555">${formatCurrency(Number(booking.totalPrice))}</td>
+        </tr>
+        <tr>
+          <td colspan="4" style="text-align:right;padding-right:16px;font-size:12px;color:#555">PPN ${Number(booking.ppnRate ?? 11)}%</td>
+          <td style="text-align:right;font-size:12px;color:#555">${formatCurrency(Number(booking.ppnAmount))}</td>
+        </tr>
+        <tr class="total-row">
+          <td colspan="4" style="text-align:right;padding-right:16px">Grand Total (DPP + PPN)</td>
+          <td style="text-align:right">${formatCurrency(Number(booking.grandTotal ?? (Number(booking.totalPrice) + Number(booking.ppnAmount))))}</td>
+        </tr>` : `
         <tr class="total-row">
           <td colspan="4" style="text-align:right;padding-right:16px">Total</td>
           <td style="text-align:right">${formatCurrency(booking.totalPrice)}</td>
-        </tr>
+        </tr>`}
       </tbody>
     </table>
   </div>
@@ -301,8 +314,9 @@ function printKwitansi(booking: any, settings?: any) {
   const now = new Date().toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" });
 
   const dpp = Math.round(Number(booking.totalPrice));
-  const ppn = Math.round(dpp * 0.12);
-  const total = dpp + ppn;
+  const ppnRate = booking.ppnRate != null ? Number(booking.ppnRate) : 11;
+  const ppn = booking.ppnAmount != null ? Math.round(Number(booking.ppnAmount)) : Math.round(dpp * ppnRate / 100);
+  const total = booking.grandTotal != null ? Math.round(Number(booking.grandTotal)) : dpp + ppn;
   const terbilangText = terbilang(total) + " Rupiah";
 
   const statusLabel = booking.status === "completed" ? "Lunas" :
@@ -433,7 +447,7 @@ function printKwitansi(booking: any, settings?: any) {
         <td>${formatCurrency(dpp)}</td>
       </tr>
       <tr>
-        <td>PPN 12%</td>
+        <td>PPN ${ppnRate}%</td>
         <td>${formatCurrency(ppn)}</td>
       </tr>
       <tr class="grand-total">

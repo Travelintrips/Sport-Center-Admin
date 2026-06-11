@@ -6,7 +6,8 @@ import { broadcastAvailabilityChange } from "../lib/supabase";
 import { notifyBookingCreated, notifyPaymentConfirmed, notifyBookingCancelled, notifyCompanyBookingCreated } from "../lib/notifications";
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
 import { syncBookingToBizportal, syncStatusToBizportal } from "../lib/bizportalSync";
-import { calculateTax, recordTaxTransaction } from "../lib/tax";
+import { calculateTax, recordTaxTransaction, reverseTaxTransaction } from "../lib/tax";
+import { reverseJournalEntry } from "../lib/accounting";
 
 const INACTIVE_STATUSES = ["cancelled", "expired", "rejected", "refunded"];
 
@@ -612,6 +613,15 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
     if (status && beforeUpdate) {
       const [payment] = await db.select().from(paymentsTable).where(eq(paymentsTable.bookingId, id)).limit(1);
       syncStatusToBizportal(beforeUpdate.orderNumber, status, payment?.proofUrl, status === "confirmed" ? new Date() : null).catch(() => {});
+
+      // FASE 4 & 5: Reversal pajak + jurnal akuntansi saat dibatalkan/refund
+      const REVERSAL_STATUSES = ["cancelled", "refunded", "rejected"];
+      if (REVERSAL_STATUSES.includes(status)) {
+        const today = new Date().toISOString().split("T")[0];
+        const reason = `Booking ${beforeUpdate.orderNumber} — status diubah ke ${status}`;
+        reverseTaxTransaction(beforeUpdate.id, beforeUpdate.orderNumber, today).catch(() => {});
+        reverseJournalEntry(beforeUpdate.id, beforeUpdate.orderNumber, reason, today).catch(() => {});
+      }
     }
 
     res.json(result);
