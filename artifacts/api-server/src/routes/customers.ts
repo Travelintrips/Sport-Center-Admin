@@ -34,13 +34,37 @@ function mapUser(u: typeof usersTable.$inferSelect, userBookings: (typeof bookin
 }
 
 // Endpoint ringan — semua user login bisa akses (untuk dropdown pemilih pemesan)
+// Gabungkan registered customers + past bookers dari tabel bookings (deduplikasi by phone)
 router.get("/customers/simple", authMiddleware, async (req, res) => {
   try {
-    const users = await db
+    // 1. Registered customers
+    const registeredUsers = await db
       .select({ id: usersTable.id, name: usersTable.name, email: usersTable.email, phone: usersTable.phone })
       .from(usersTable)
       .where(eq(usersTable.role, "customer"));
-    res.json(users);
+
+    // 2. Past bookers dari tabel bookings (yang tidak punya akun registered)
+    const pastBookings = await db
+      .selectDistinctOn([bookingsTable.customerPhone], {
+        customerName: bookingsTable.customerName,
+        customerEmail: bookingsTable.customerEmail,
+        customerPhone: bookingsTable.customerPhone,
+      })
+      .from(bookingsTable)
+      .orderBy(bookingsTable.customerPhone, bookingsTable.createdAt);
+
+    // Gabungkan: registered users mendapat id, past bookers pakai id negatif (agar tidak bentrok)
+    const registeredPhones = new Set(registeredUsers.map((u) => u.phone).filter(Boolean));
+    const pastCustomers = pastBookings
+      .filter((b) => b.customerPhone && !registeredPhones.has(b.customerPhone))
+      .map((b, i) => ({
+        id: -(i + 1),
+        name: b.customerName,
+        email: b.customerEmail,
+        phone: b.customerPhone,
+      }));
+
+    res.json([...registeredUsers, ...pastCustomers]);
   } catch (err) {
     req.log.error({ err }, "List customers simple error");
     res.status(500).json({ error: "Internal server error" });
