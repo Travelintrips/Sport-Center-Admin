@@ -1,0 +1,139 @@
+"use client";
+
+import { useState, useEffect } from "react";
+
+export default function CheckoutForm() {
+  const [customers, setCustomers] = useState([]);
+  const [selectedCustomer, setSelectedCustomer] = useState("");
+  const [facility, setFacility] = useState("");
+  const [startTime, setStartTime] = useState("");
+  const [endTime, setEndTime] = useState("");
+  const [duration, setDuration] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState("");
+
+  useEffect(() => {
+    async function fetchCustomers() {
+      const res = await fetch("/api/customers");
+      const data = await res.json();
+      setCustomers(data);
+    }
+    fetchCustomers();
+  }, []);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (!selectedCustomer) return alert("Pilih customer");
+
+    const res = await fetch("/api/sport-center/bookings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        customerId: selectedCustomer,
+        facility,
+        startTime,
+        endTime,
+        duration,
+        paymentMethod,
+      }),
+    });
+
+    if (res.ok) {
+      alert("Booking berhasil dibuat!");
+      // reset form
+      setSelectedCustomer("");
+      setFacility("");
+      setStartTime("");
+      setEndTime("");
+      setDuration("");
+      setPaymentMethod("");
+    } else {
+      alert("Booking gagal!");
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4 p-4 bg-white rounded shadow">
+      <div>
+        <label>Nama Pemesan</label>
+        <select
+          value={selectedCustomer}
+          onChange={(e) => setSelectedCustomer(e.target.value)}
+          required
+          className="w-full border p-2 rounded"
+        >
+          <option value="">Pilih customer...</option>
+          {customers.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name} ({c.phone})
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div>
+        <label>Fasilitas</label>
+        <input
+          type="text"
+          value={facility}
+          onChange={(e) => setFacility(e.target.value)}
+          required
+          className="w-full border p-2 rounded"
+        />
+      </div>
+
+      <div className="flex gap-2">
+        <div>
+          <label>Start Time</label>
+          <input
+            type="datetime-local"
+            value={startTime}
+            onChange={(e) => setStartTime(e.target.value)}
+            required
+            className="border p-2 rounded"
+          />
+        </div>
+
+        <div>
+          <label>End Time</label>
+          <input
+            type="datetime-local"
+            value={endTime}
+            onChange={(e) => setEndTime(e.target.value)}
+            required
+            className="border p-2 rounded"
+          />
+        </div>
+
+        <div>
+          <label>Durasi</label>
+          <input
+            type="text"
+            value={duration}
+            onChange={(e) => setDuration(e.target.value)}
+            placeholder="1 jam / 2 jam"
+            required
+            className="border p-2 rounded"
+          />
+        </div>
+      </div>
+
+      <div>
+        <label>Metode Pembayaran</label>
+        <select
+          value={paymentMethod}
+          onChange={(e) => setPaymentMethod(e.target.value)}
+          required
+          className="w-full border p-2 rounded"
+        >
+          <option value="">Pilih metode...</option>
+          <option value="cash">Tunai</option>
+          <option value="bank_transfer">Transfer Bank</option>
+        </select>
+      </div>
+
+      <button type="submit" className="bg-orange-500 text-white px-4 py-2 rounded">
+        Konfirmasi Booking
+      </button>
+    </form>
+  );
+}

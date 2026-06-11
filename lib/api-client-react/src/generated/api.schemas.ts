@@ -1146,6 +1146,8 @@ export interface BillingStatusResponse {
   companyId?: number;
   companyName?: string;
   employeeId?: string;
+}
+
 export interface TaxTransaction {
   id: number;
   referenceType: string;
