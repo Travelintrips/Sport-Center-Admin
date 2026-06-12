@@ -2336,3 +2336,156 @@ export const RejectAdminTenantPaymentBody = zod.object({
 })
 
 
+/**
+ * @summary Import bank mutations (multipart file upload handled directly)
+ */
+export const ImportBankMutationsResponse = zod.object({
+  "ok": zod.boolean(),
+  "total": zod.number(),
+  "inserted": zod.number(),
+  "skipped": zod.number(),
+  "matching": zod.object({
+  "processed": zod.number().optional(),
+  "autoApproved": zod.number().optional(),
+  "needsReview": zod.number().optional(),
+  "unmatched": zod.number().optional(),
+  "duplicates": zod.number().optional()
+}).optional()
+})
+
+
+/**
+ * @summary List bank mutations with filters
+ */
+export const ListBankMutationsQueryParams = zod.object({
+  "status": zod.coerce.string().optional(),
+  "direction": zod.coerce.string().optional(),
+  "dateFrom": zod.coerce.string().optional(),
+  "dateTo": zod.coerce.string().optional(),
+  "minAmount": zod.coerce.number().optional(),
+  "maxAmount": zod.coerce.number().optional(),
+  "search": zod.coerce.string().optional(),
+  "page": zod.coerce.number().optional(),
+  "pageSize": zod.coerce.number().optional()
+})
+
+export const ListBankMutationsResponse = zod.object({
+  "mutations": zod.array(zod.object({
+  "id": zod.number(),
+  "bankAccountId": zod.string().nullish(),
+  "transactionDate": zod.string(),
+  "description": zod.string(),
+  "creditAmount": zod.string().nullish(),
+  "debitAmount": zod.string().nullish(),
+  "amount": zod.string(),
+  "direction": zod.string(),
+  "mutationKey": zod.string(),
+  "normalizedDescription": zod.string().nullish(),
+  "providerName": zod.string().nullish(),
+  "providerOrderId": zod.string().nullish(),
+  "status": zod.enum(['unmatched', 'matched', 'duplicate_need_review', 'approved', 'rejected']),
+  "matchedPaymentId": zod.number().nullish(),
+  "matchedOrderId": zod.number().nullish(),
+  "uploadedProofUrl": zod.string().nullish(),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
+})),
+  "total": zod.number(),
+  "page": zod.number(),
+  "pageSize": zod.number()
+})
+
+
+/**
+ * @summary Get match candidates for a mutation
+ */
+export const GetBankMutationMatchesParams = zod.object({
+  "mutationId": zod.coerce.number()
+})
+
+export const GetBankMutationMatchesResponse = zod.object({
+  "mutation": zod.object({
+  "id": zod.number(),
+  "bankAccountId": zod.string().nullish(),
+  "transactionDate": zod.string(),
+  "description": zod.string(),
+  "creditAmount": zod.string().nullish(),
+  "debitAmount": zod.string().nullish(),
+  "amount": zod.string(),
+  "direction": zod.string(),
+  "mutationKey": zod.string(),
+  "normalizedDescription": zod.string().nullish(),
+  "providerName": zod.string().nullish(),
+  "providerOrderId": zod.string().nullish(),
+  "status": zod.enum(['unmatched', 'matched', 'duplicate_need_review', 'approved', 'rejected']),
+  "matchedPaymentId": zod.number().nullish(),
+  "matchedOrderId": zod.number().nullish(),
+  "uploadedProofUrl": zod.string().nullish(),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
+}),
+  "matches": zod.array(zod.object({
+  "id": zod.number(),
+  "mutationId": zod.number(),
+  "candidateType": zod.enum(['payment', 'order', 'invoice', 'expense']),
+  "candidateId": zod.number(),
+  "matchScore": zod.number(),
+  "matchReason": zod.string().nullish(),
+  "amountMatch": zod.boolean().optional(),
+  "dateMatch": zod.boolean().optional(),
+  "nameMatch": zod.boolean().optional(),
+  "orderIdMatch": zod.boolean().optional(),
+  "proofMatch": zod.boolean().optional(),
+  "status": zod.enum(['candidate', 'approved', 'rejected']),
+  "createdAt": zod.string()
+}))
+})
+
+
+/**
+ * @summary Approve a bank mutation match
+ */
+export const ApproveBankMutationParams = zod.object({
+  "mutationId": zod.coerce.number()
+})
+
+export const ApproveBankMutationBody = zod.object({
+  "matchId": zod.number().optional(),
+  "candidateType": zod.string().optional(),
+  "candidateId": zod.number().optional()
+})
+
+export const ApproveBankMutationResponse = zod.object({
+  "ok": zod.boolean()
+})
+
+
+/**
+ * @summary Reject a bank mutation
+ */
+export const RejectBankMutationParams = zod.object({
+  "mutationId": zod.coerce.number()
+})
+
+export const RejectBankMutationResponse = zod.object({
+  "ok": zod.boolean()
+})
+
+
+/**
+ * @summary Run matching algorithm for unmatched mutations
+ */
+export const RunBankMatchingBody = zod.object({
+  "mutationIds": zod.array(zod.number()).optional()
+})
+
+export const RunBankMatchingResponse = zod.object({
+  "ok": zod.boolean(),
+  "processed": zod.number(),
+  "autoApproved": zod.number(),
+  "needsReview": zod.number(),
+  "unmatched": zod.number(),
+  "duplicates": zod.number()
+})
+
+
