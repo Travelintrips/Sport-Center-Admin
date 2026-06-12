@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   useListCustomers, useGetCustomer, useListBookings,
   useCreateCustomer, useUpdateCustomer,
@@ -14,7 +14,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Search, Eye, MessageCircle, Globe, Building2, Plus, Pencil, Users, Sheet, Upload, Download, CheckCircle2, AlertCircle, Link, ChevronDown, ChevronUp, Save } from "lucide-react";
+import { Search, Eye, MessageCircle, Globe, Building2, Plus, Pencil, Users, Sheet, Upload, Download, CheckCircle2, AlertCircle, Link, ChevronDown, ChevronUp, Save, Trash2, RefreshCw } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { getListCustomersQueryKey } from "@workspace/api-client-react";
 import { getToken } from "@/lib/auth";
@@ -530,6 +530,53 @@ function GuestDetailDialog({ guest, onClose }: { guest: any; onClose: () => void
   );
 }
 
+function PersonalForm({ initial, onClose }: { initial: any; onClose: () => void }) {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const updateMutation = useUpdateCustomer();
+  const [form, setForm] = useState({
+    name: initial?.name ?? "",
+    email: initial?.email ?? "",
+    phone: initial?.phone ?? "",
+    accountStatus: initial?.accountStatus ?? "active",
+  });
+  const set = (k: string, v: any) => setForm((f) => ({ ...f, [k]: v }));
+
+  const handleSubmit = async () => {
+    if (!form.name.trim()) { toast({ title: "Nama wajib diisi", variant: "destructive" }); return; }
+    try {
+      await updateMutation.mutateAsync({ id: initial.id, data: form });
+      toast({ title: "Customer diperbarui" });
+      qc.invalidateQueries({ queryKey: getListCustomersQueryKey() });
+      window.dispatchEvent(new CustomEvent("customer-changed"));
+      onClose();
+    } catch (err: any) {
+      toast({ title: err?.response?.data?.error ?? "Gagal memperbarui", variant: "destructive" });
+    }
+  };
+
+  return (
+    <DialogContent className="max-w-md">
+      <DialogHeader><DialogTitle>Edit Customer</DialogTitle></DialogHeader>
+      <div className="space-y-3">
+        <div className="space-y-1"><Label>Nama</Label><Input value={form.name} onChange={e => set("name", e.target.value)} /></div>
+        <div className="space-y-1"><Label>Email</Label><Input type="email" value={form.email} onChange={e => set("email", e.target.value)} /></div>
+        <div className="space-y-1"><Label>No. HP</Label><Input value={form.phone} onChange={e => set("phone", e.target.value)} /></div>
+        <div className="flex items-center justify-between py-1">
+          <Label>Status Aktif</Label>
+          <Switch checked={form.accountStatus === "active"} onCheckedChange={v => set("accountStatus", v ? "active" : "inactive")} />
+        </div>
+        <div className="flex justify-end gap-2 pt-2">
+          <Button variant="outline" onClick={onClose} disabled={updateMutation.isPending}>Batal</Button>
+          <Button onClick={handleSubmit} disabled={updateMutation.isPending}>
+            {updateMutation.isPending ? "Menyimpan..." : "Simpan"}
+          </Button>
+        </div>
+      </div>
+    </DialogContent>
+  );
+}
+
 function extractSheetId(input: string): string {
   const m = input.match(/\/spreadsheets\/d\/([\w-]+)/);
   return m ? m[1] : input.trim();
@@ -607,6 +654,29 @@ function SheetSyncPanel() {
   });
 
   const isBusy = connectMutation.isPending || pushMutation.isPending || pullMutation.isPending;
+  const pushRef = useRef(pushMutation.mutate);
+  const pullRef = useRef(pullMutation.mutate);
+  pushRef.current = pushMutation.mutate;
+  pullRef.current = pullMutation.mutate;
+
+  // Auto-push ke sheet setiap ada perubahan dari app
+  useEffect(() => {
+    const handler = () => {
+      const sheet = (() => { try { const v = localStorage.getItem(LS_SHEET_KEY); return v ? JSON.parse(v) : null; } catch { return null; } })();
+      if (sheet?.id) pushRef.current({ data: { sheetId: sheet.id } });
+    };
+    window.addEventListener("customer-changed", handler);
+    return () => window.removeEventListener("customer-changed", handler);
+  }, []);
+
+  // Auto-pull dari sheet setiap 5 menit jika terhubung
+  useEffect(() => {
+    if (!connectedSheet?.id) return;
+    const id = setInterval(() => {
+      pullRef.current({ data: { sheetId: connectedSheet.id } });
+    }, 5 * 60 * 1000);
+    return () => clearInterval(id);
+  }, [connectedSheet?.id]);
 
   return (
     <Card className="border-green-200 bg-green-50/30">
@@ -740,9 +810,34 @@ export default function AdminCustomers() {
   const [selectedGuest, setSelectedGuest] = useState<any>(null);
   const [showForm, setShowForm] = useState(false);
   const [editCustomer, setEditCustomer] = useState<any>(null);
+  const [showPersonalForm, setShowPersonalForm] = useState(false);
+  const [personalEdit, setPersonalEdit] = useState<any>(null);
+  const [deleteTarget, setDeleteTarget] = useState<any>(null);
+  const [deleting, setDeleting] = useState(false);
   const [migrating, setMigrating] = useState(false);
   const { toast } = useToast();
   const qc = useQueryClient();
+
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      const r = await fetch(`/api/customers/${deleteTarget.id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      const data = await r.json();
+      if (!r.ok) { toast({ title: data.error ?? "Gagal hapus", variant: "destructive" }); return; }
+      toast({ title: `Customer "${deleteTarget.name}" dihapus` });
+      qc.invalidateQueries({ queryKey: getListCustomersQueryKey() });
+      window.dispatchEvent(new CustomEvent("customer-changed"));
+      setDeleteTarget(null);
+    } catch {
+      toast({ title: "Gagal menghapus customer", variant: "destructive" });
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const { data: customers, isLoading } = useListCustomers({
     search: search || undefined,
@@ -854,9 +949,21 @@ export default function AdminCustomers() {
                         <td className="py-3 pr-4 font-semibold">{c.totalBookings}</td>
                         <td className="py-3 pr-4 font-semibold">{formatCurrency(c.totalSpent ?? 0)}</td>
                         <td className="py-3">
-                          <Button size="sm" variant="ghost" onClick={() => isGuest ? setSelectedGuest(c) : setSelectedId(c.id)}>
-                            <Eye size={14} className="mr-1" /> Lihat
-                          </Button>
+                          <div className="flex items-center gap-1">
+                            <Button size="sm" variant="ghost" onClick={() => isGuest ? setSelectedGuest(c) : setSelectedId(c.id)}>
+                              <Eye size={14} className="mr-1" /> Lihat
+                            </Button>
+                            {!isGuest && (
+                              <>
+                                <Button size="sm" variant="ghost" onClick={() => { setPersonalEdit(c); setShowPersonalForm(true); }}>
+                                  <Pencil size={14} />
+                                </Button>
+                                <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => setDeleteTarget(c)}>
+                                  <Trash2 size={14} />
+                                </Button>
+                              </>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     );
@@ -927,6 +1034,25 @@ export default function AdminCustomers() {
 
       <Dialog open={showForm} onOpenChange={(v) => { if (!v) { setShowForm(false); setEditCustomer(null); } }}>
         {showForm && <CompanyForm initial={editCustomer} onClose={() => { setShowForm(false); setEditCustomer(null); }} />}
+      </Dialog>
+
+      <Dialog open={showPersonalForm} onOpenChange={(v) => { if (!v) { setShowPersonalForm(false); setPersonalEdit(null); } }}>
+        {showPersonalForm && personalEdit && <PersonalForm initial={personalEdit} onClose={() => { setShowPersonalForm(false); setPersonalEdit(null); }} />}
+      </Dialog>
+
+      <Dialog open={!!deleteTarget} onOpenChange={(v) => !v && setDeleteTarget(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>Hapus Customer</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Hapus akun <strong>{deleteTarget?.name}</strong>? Data booking tidak akan terhapus, hanya akun customer yang dihapus.
+          </p>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="outline" onClick={() => setDeleteTarget(null)} disabled={deleting}>Batal</Button>
+            <Button variant="destructive" onClick={handleDelete} disabled={deleting}>
+              {deleting ? "Menghapus..." : "Hapus"}
+            </Button>
+          </div>
+        </DialogContent>
       </Dialog>
     </div>
   );

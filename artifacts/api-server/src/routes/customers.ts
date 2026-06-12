@@ -401,4 +401,20 @@ router.patch("/customers/:id", adminMiddleware, async (req, res) => {
   }
 });
 
+router.delete("/customers/:id", adminMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(String(req.params.id));
+    const [existing] = await db.select({ id: usersTable.id, role: usersTable.role })
+      .from(usersTable).where(eq(usersTable.id, id)).limit(1);
+    if (!existing) { res.status(404).json({ error: "Not found" }); return; }
+    if (existing.role === "admin") { res.status(403).json({ error: "Tidak bisa menghapus akun admin" }); return; }
+    await db.update(bookingsTable).set({ customerId: null }).where(eq(bookingsTable.customerId, id));
+    await db.delete(usersTable).where(eq(usersTable.id, id));
+    res.json({ ok: true });
+  } catch (err) {
+    req.log.error({ err }, "Delete customer error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 export default router;
