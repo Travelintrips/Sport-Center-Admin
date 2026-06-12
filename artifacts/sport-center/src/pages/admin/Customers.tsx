@@ -535,12 +535,22 @@ function extractSheetId(input: string): string {
   return m ? m[1] : input.trim();
 }
 
+const LS_SHEET_KEY = "customers_connected_sheet";
+
 function SheetSyncPanel() {
   const { toast } = useToast();
   const [expanded, setExpanded] = useState(true);
   const [rawInput, setRawInput] = useState("");
-  const [connectedSheet, setConnectedSheet] = useState<{ id: string; title: string } | null>(null);
+  const [connectedSheet, setConnectedSheetState] = useState<{ id: string; title: string } | null>(() => {
+    try { const v = localStorage.getItem(LS_SHEET_KEY); return v ? JSON.parse(v) : null; } catch { return null; }
+  });
   const [lastSync, setLastSync] = useState<{ direction: "push" | "pull"; result: string; at: Date } | null>(null);
+
+  const setConnectedSheet = (val: { id: string; title: string } | null) => {
+    setConnectedSheetState(val);
+    if (val) localStorage.setItem(LS_SHEET_KEY, JSON.stringify(val));
+    else localStorage.removeItem(LS_SHEET_KEY);
+  };
 
   const connectMutation = useConnectCustomerSheet({
     mutation: {
