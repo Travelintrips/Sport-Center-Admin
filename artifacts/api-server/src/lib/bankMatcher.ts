@@ -75,6 +75,7 @@ export async function computeMatchesForMutation(mutation: BankMutation): Promise
       customerEmail: bookingsTable.customerEmail,
       bookingDate: bookingsTable.bookingDate,
       totalPrice: bookingsTable.totalPrice,
+      grandTotal: bookingsTable.grandTotal,
       status: bookingsTable.status,
       paymentGatewayRef: bookingsTable.paymentGatewayRef,
     })
@@ -95,7 +96,8 @@ export async function computeMatchesForMutation(mutation: BankMutation): Promise
 
   for (const booking of bookings) {
     const payment = paymentByBookingId.get(booking.id);
-    const bookingAmount = Number(booking.totalPrice);
+    // grandTotal includes PPN; use it if set, otherwise fall back to totalPrice
+    const bookingAmount = Number(booking.grandTotal ?? booking.totalPrice);
 
     const score_parts: string[] = [];
     let score = 0;
