@@ -9,12 +9,18 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Search, Eye, MessageCircle, Globe, Building2, Plus, Pencil, Users, Sheet, Upload, Download, CheckCircle2, AlertCircle, Link, ChevronDown, ChevronUp, Save, Trash2, RefreshCw } from "lucide-react";
+import { Search, Eye, MessageCircle, Globe, Building2, Plus, Pencil, Users, Sheet, Upload, Download, CheckCircle2, AlertCircle, Link, ChevronDown, ChevronUp, Trash2 } from "lucide-react";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+
 import { useToast } from "@/hooks/use-toast";
 import { getListCustomersQueryKey } from "@workspace/api-client-react";
 import { getToken } from "@/lib/auth";
@@ -302,6 +308,106 @@ function CustomerDetail({ customerId, onClose }: { customerId: number; onClose: 
           )}
         </div>
       )}
+    </DialogContent>
+  );
+}
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <Button
+      size="sm" variant="outline"
+      className="h-7 px-2 gap-1 text-xs"
+      onClick={() => { navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
+    >
+      {copied ? <Check size={12} className="text-green-600" /> : <Copy size={12} />}
+      {copied ? "Tersalin" : "Salin"}
+    </Button>
+  );
+}
+
+function TempPasswordDialog({ password, email, onClose }: { password: string; email: string; onClose: () => void }) {
+  return (
+    <DialogContent className="max-w-sm">
+      <DialogHeader>
+        <DialogTitle className="text-green-700">✅ Akun Berhasil Dibuat</DialogTitle>
+        <DialogDescription>Simpan password sementara ini — hanya tampil sekali.</DialogDescription>
+      </DialogHeader>
+      <div className="space-y-3 pt-2">
+        <div className="space-y-1">
+          <Label className="text-xs text-muted-foreground">Email</Label>
+          <div className="flex items-center gap-2 p-2 bg-muted rounded-md font-mono text-sm">
+            <span className="flex-1 break-all">{email}</span>
+            <CopyButton text={email} />
+          </div>
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs text-muted-foreground">Password Sementara</Label>
+          <div className="flex items-center gap-2 p-2 bg-amber-50 border border-amber-200 rounded-md font-mono text-sm">
+            <span className="flex-1 font-bold tracking-wider text-amber-800">{password}</span>
+            <CopyButton text={password} />
+          </div>
+        </div>
+        <p className="text-xs text-muted-foreground">Berikan password ini ke customer agar bisa login. Customer dapat menggantinya setelah masuk.</p>
+        <Button className="w-full" onClick={onClose}>Selesai</Button>
+      </div>
+    </DialogContent>
+  );
+}
+
+function PersonalForm({ onClose, onCreated }: { onClose: () => void; onCreated: (pwd: string, email: string) => void }) {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const createMutation = useCreateCustomer();
+  const [form, setForm] = useState({ name: "", email: "", phone: "" });
+  const [loading, setLoading] = useState(false);
+
+  const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
+
+  const handleSubmit = async () => {
+    if (!form.name.trim() || !form.email.trim()) {
+      toast({ title: "Nama dan email wajib diisi", variant: "destructive" }); return;
+    }
+    setLoading(true);
+    try {
+      const result = await createMutation.mutateAsync({
+        data: { name: form.name.trim(), email: form.email.trim(), phone: form.phone.trim() || undefined, accountType: "personal" as const },
+      });
+      qc.invalidateQueries({ queryKey: getListCustomersQueryKey() });
+      onCreated((result as any).tempPassword ?? "", form.email.trim());
+    } catch (err: any) {
+      toast({ title: "Gagal membuat akun", description: err?.message ?? "Error", variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <DialogContent className="max-w-md">
+      <DialogHeader>
+        <DialogTitle>Buat Akun Customer</DialogTitle>
+        <DialogDescription>Password sementara akan dibuat otomatis. Berikan ke customer agar bisa login.</DialogDescription>
+      </DialogHeader>
+      <div className="space-y-4 pt-2">
+        <div className="space-y-1.5">
+          <Label>Nama Lengkap <span className="text-destructive">*</span></Label>
+          <Input placeholder="Budi Santoso" value={form.name} onChange={(e) => set("name", e.target.value)} />
+        </div>
+        <div className="space-y-1.5">
+          <Label>Email <span className="text-destructive">*</span></Label>
+          <Input type="email" placeholder="customer@email.com" value={form.email} onChange={(e) => set("email", e.target.value)} />
+        </div>
+        <div className="space-y-1.5">
+          <Label>No. WhatsApp</Label>
+          <Input placeholder="08xxxxxxxxxx" value={form.phone} onChange={(e) => set("phone", e.target.value)} />
+        </div>
+        <div className="flex justify-end gap-2 pt-1">
+          <Button variant="outline" onClick={onClose} disabled={loading}>Batal</Button>
+          <Button onClick={handleSubmit} disabled={loading || !form.name.trim() || !form.email.trim()}>
+            {loading ? "Membuat..." : "Buat Akun"}
+          </Button>
+        </div>
+      </div>
     </DialogContent>
   );
 }
@@ -814,7 +920,10 @@ export default function AdminCustomers() {
   const [personalEdit, setPersonalEdit] = useState<any>(null);
   const [deleteTarget, setDeleteTarget] = useState<any>(null);
   const [deleting, setDeleting] = useState(false);
+  const [tempResult, setTempResult] = useState<{ password: string; email: string } | null>(null);
   const [migrating, setMigrating] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: number; name: string } | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const { toast } = useToast();
   const qc = useQueryClient();
 
@@ -834,6 +943,18 @@ export default function AdminCustomers() {
       setDeleteTarget(null);
     } catch {
       toast({ title: "Gagal menghapus customer", variant: "destructive" });
+      const token = getToken();
+      const r = await fetch(`/api/customers/${deleteTarget.id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await r.json();
+      if (!r.ok) { toast({ title: data.error ?? "Gagal menghapus", variant: "destructive" }); return; }
+      toast({ title: data.message ?? "Customer berhasil dihapus" });
+      qc.invalidateQueries({ queryKey: getListCustomersQueryKey() });
+      setDeleteTarget(null);
+    } catch {
+      toast({ title: "Gagal menghapus akun", variant: "destructive" });
     } finally {
       setDeleting(false);
     }
@@ -873,19 +994,36 @@ export default function AdminCustomers() {
           <h1 className="text-2xl font-black">Customers</h1>
           <p className="text-muted-foreground">Kelola daftar customer terdaftar</p>
         </div>
-        <div className="flex gap-2">
-          {tab === "personal" && (
-            <Button variant="outline" onClick={handleMigrateAll} disabled={migrating} className="gap-2">
-              <Users size={16} /> {migrating ? "Memproses..." : "Sinkronisasi Guest → Akun"}
-            </Button>
-          )}
-          {tab === "company" && (
-            <Button onClick={() => { setEditCustomer(null); setShowForm(true); }} className="gap-2">
-              <Plus size={16} /> Tambah Perusahaan
-            </Button>
-          )}
-        </div>
+        {tab === "personal" && (
+          <Button onClick={() => setShowPersonalForm(true)} className="gap-2">
+            <Plus size={16} /> Buat Akun Customer
+          </Button>
+        )}
+        {tab === "company" && (
+          <Button onClick={() => { setEditCustomer(null); setShowForm(true); }} className="gap-2">
+            <Plus size={16} /> Tambah Perusahaan
+          </Button>
+        )}
       </div>
+
+      <Dialog open={showPersonalForm} onOpenChange={setShowPersonalForm}>
+        {showPersonalForm && (
+          <PersonalForm
+            onClose={() => setShowPersonalForm(false)}
+            onCreated={(pwd, email) => { setShowPersonalForm(false); setTempResult({ password: pwd, email }); }}
+          />
+        )}
+      </Dialog>
+
+      <Dialog open={!!tempResult} onOpenChange={(o) => { if (!o) setTempResult(null); }}>
+        {tempResult && (
+          <TempPasswordDialog
+            password={tempResult.password}
+            email={tempResult.email}
+            onClose={() => setTempResult(null)}
+          />
+        )}
+      </Dialog>
 
       <SheetSyncPanel />
 
@@ -1013,6 +1151,7 @@ export default function AdminCustomers() {
                       <td className="py-3 flex gap-1">
                         <Button size="sm" variant="ghost" onClick={() => setSelectedId(c.id)}><Eye size={14} /></Button>
                         <Button size="sm" variant="ghost" onClick={() => { setEditCustomer(c); setShowForm(true); }}><Pencil size={14} /></Button>
+                        <Button size="sm" variant="ghost" className="text-red-500 hover:text-red-600 hover:bg-red-50" onClick={() => setDeleteTarget({ id: c.id, name: c.companyName ?? c.name })}><Trash2 size={14} /></Button>
                       </td>
                     </tr>
                   ))}
@@ -1054,6 +1193,26 @@ export default function AdminCustomers() {
           </div>
         </DialogContent>
       </Dialog>
+      <AlertDialog open={deleteTarget !== null} onOpenChange={(v) => { if (!v) setDeleteTarget(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Hapus Akun Perusahaan?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Akun <strong>{deleteTarget?.name}</strong> akan dihapus permanen. Tindakan ini tidak dapat dibatalkan.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Batal</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDelete}
+              disabled={deleting}
+              className="bg-red-600 hover:bg-red-700 text-white"
+            >
+              {deleting ? "Menghapus..." : "Ya, Hapus"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
