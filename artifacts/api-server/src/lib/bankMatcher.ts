@@ -88,6 +88,7 @@ export async function computeMatchesForMutation(mutation: BankMutation): Promise
       proofUrl: paymentsTable.proofUrl,
       status: paymentsTable.status,
       createdAt: paymentsTable.createdAt,
+      confirmedAt: paymentsTable.confirmedAt,
     })
     .from(paymentsTable);
 
@@ -114,16 +115,30 @@ export async function computeMatchesForMutation(mutation: BankMutation): Promise
       continue; // Must have amount match to be a candidate
     }
 
-    // Date match (25 pts for exact, 15 for ±3 days)
-    const diff = dayDiff(mutation.transactionDate, booking.bookingDate);
+    // Date match — compare against payment created/confirmed date, not booking facility date
+    // Payment date = when customer transferred; booking date = when they use the facility (could be weeks later)
+    const paymentDateStr = payment?.createdAt
+      ? payment.createdAt.toISOString().slice(0, 10)
+      : payment?.confirmedAt
+        ? (payment.confirmedAt as Date).toISOString().slice(0, 10)
+        : null;
+    const compareDateStr = paymentDateStr ?? booking.bookingDate;
+    const diff = dayDiff(mutation.transactionDate, compareDateStr);
     if (diff === 0) {
       score += 25;
       dateMatch = true;
-      score_parts.push("tanggal sama");
+      score_parts.push("tanggal pembayaran sama");
     } else if (diff <= 3) {
       score += 15;
       dateMatch = true;
-      score_parts.push(`tanggal selisih ${diff} hari`);
+      score_parts.push(`tanggal pembayaran selisih ${diff} hari`);
+    } else if (!paymentDateStr) {
+      // No payment record yet — fall back to booking date with smaller bonus
+      const bookingDiff = dayDiff(mutation.transactionDate, booking.bookingDate);
+      if (bookingDiff <= 7) {
+        score += 5;
+        score_parts.push(`tanggal booking selisih ${bookingDiff} hari`);
+      }
     }
 
     // GoPay / provider order ID match (30 pts)
@@ -258,7 +273,7 @@ export async function runMatching(mutationIds?: number[]): Promise<{
 
     const best = candidates[0]!;
 
-    if (best.score >= 95) {
+    if (best.score >= 80) {
       // Auto approve
       await db
         .update(bankMutationsTable)
