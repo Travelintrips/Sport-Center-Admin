@@ -570,8 +570,14 @@ function SheetSyncPanel() {
   const pullMutation = usePullCustomersFromSheet({
     mutation: {
       onSuccess: (data) => {
-        setLastSync({ direction: "pull", result: `${data.updatedCount} diperbarui, ${data.skippedCount} dilewati`, at: new Date() });
-        toast({ title: `✅ ${data.updatedCount} customer diperbarui dari Google Sheet` });
+        const created = (data as any).createdCount ?? 0;
+        const parts = [];
+        if (data.updatedCount) parts.push(`${data.updatedCount} diperbarui`);
+        if (created) parts.push(`${created} ditambahkan`);
+        if (data.skippedCount) parts.push(`${data.skippedCount} dilewati`);
+        const summary = parts.join(", ") || "Tidak ada perubahan";
+        setLastSync({ direction: "pull", result: summary, at: new Date() });
+        toast({ title: `✅ Import selesai: ${summary}` });
       },
       onError: (err: any) => {
         toast({ title: err?.response?.data?.error ?? "Gagal import dari sheet", variant: "destructive" });
