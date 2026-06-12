@@ -77,7 +77,7 @@ export async function computeMatchesForMutation(mutation: BankMutation): Promise
       totalPrice: bookingsTable.totalPrice,
       status: bookingsTable.status,
       paymentGatewayRef: bookingsTable.paymentGatewayRef,
-      updatedAt: bookingsTable.updatedAt,
+      updatedAt: sql<string>`${bookingsTable.updatedAt}`.as("updated_at"),
     })
     .from(bookingsTable);
 

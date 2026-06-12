@@ -1177,9 +1177,6 @@ export default function AdminCustomers() {
       <Dialog open={showPersonalEditForm} onOpenChange={(v) => { if (!v) { setShowPersonalEditForm(false); setPersonalEdit(null); } }}>
         {showPersonalEditForm && personalEdit && <PersonalEditForm initial={personalEdit} onClose={() => { setShowPersonalEditForm(false); setPersonalEdit(null); }} />}
       </Dialog>
-      <Dialog open={showPersonalForm} onOpenChange={(v) => { if (!v) { setShowPersonalForm(false); setPersonalEdit(null); } }}>
-        {showPersonalForm && personalEdit && <PersonalEditForm initial={personalEdit} onClose={() => { setShowPersonalForm(false); setPersonalEdit(null); }} />}
-      </Dialog>
       <Dialog open={!!deleteTarget} onOpenChange={(v) => !v && setDeleteTarget(null)}>
         <DialogContent className="max-w-sm">
           <DialogHeader><DialogTitle>Hapus Customer</DialogTitle></DialogHeader>
