@@ -400,6 +400,13 @@ function CompanyForm({ initial, onClose }: { initial?: any; onClose: () => void 
 
 function GuestDetailDialog({ guest, onClose }: { guest: any; onClose: () => void }) {
   const token = getToken();
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const [showConvert, setShowConvert] = useState(false);
+  const [convertEmail, setConvertEmail] = useState(guest.email ?? "");
+  const [convertName, setConvertName] = useState(guest.name ?? "");
+  const [converting, setConverting] = useState(false);
+
   const { data: bookings, isLoading } = useQuery<any[]>({
     queryKey: ["guest-bookings", guest.phone],
     queryFn: async () => {
@@ -411,6 +418,34 @@ function GuestDetailDialog({ guest, onClose }: { guest: any; onClose: () => void
     },
     enabled: !!guest.phone,
   });
+
+  const handleConvert = async () => {
+    if (!convertEmail.trim()) {
+      toast({ title: "Email wajib diisi", variant: "destructive" });
+      return;
+    }
+    setConverting(true);
+    try {
+      const r = await fetch("/api/customers/from-guest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ phone: guest.phone, name: convertName, email: convertEmail }),
+      });
+      const data = await r.json();
+      if (!r.ok) { toast({ title: data.error ?? "Gagal membuat akun", variant: "destructive" }); return; }
+      toast({
+        title: "Akun customer berhasil dibuat!",
+        description: `Kode: ${data.customerCode} · Password sementara: ${data.tempPassword} — simpan sebelum menutup!`,
+        duration: 15000,
+      });
+      qc.invalidateQueries({ queryKey: getListCustomersQueryKey() });
+      onClose();
+    } catch {
+      toast({ title: "Gagal membuat akun", variant: "destructive" });
+    } finally {
+      setConverting(false);
+    }
+  };
 
   return (
     <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
@@ -429,9 +464,40 @@ function GuestDetailDialog({ guest, onClose }: { guest: any; onClose: () => void
             <div className="text-sm text-muted-foreground">{guest.phone}</div>
           </div>
         </div>
-        <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
-          Customer ini belum memiliki akun terdaftar. Booking berikutnya menggunakan nomor yang sama akan otomatis terhubung ke akun baru.
-        </div>
+
+        {/* Panel konversi */}
+        {!showConvert ? (
+          <div className="rounded-lg border border-dashed border-amber-300 bg-amber-50 p-3 flex items-center justify-between gap-3">
+            <div className="text-sm text-amber-800">Belum punya akun terdaftar. Semua booking akan terhubung otomatis.</div>
+            <Button size="sm" variant="default" className="shrink-0" onClick={() => setShowConvert(true)}>
+              <Users size={14} className="mr-1.5" /> Buat Akun
+            </Button>
+          </div>
+        ) : (
+          <div className="rounded-lg border border-primary/30 bg-primary/5 p-4 space-y-3">
+            <div className="font-semibold text-sm">Buat Akun Customer</div>
+            <div className="space-y-2">
+              <div className="space-y-1">
+                <Label className="text-xs">Nama</Label>
+                <Input value={convertName} onChange={e => setConvertName(e.target.value)} placeholder="Nama lengkap" />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Email <span className="text-destructive">*</span></Label>
+                <Input type="email" value={convertEmail} onChange={e => setConvertEmail(e.target.value)} placeholder="email@customer.com" />
+              </div>
+              <div className="text-xs text-muted-foreground">
+                Semua {bookings?.length ?? 0} booking dengan nomor <span className="font-mono font-semibold">{guest.phone}</span> akan otomatis terhubung ke akun ini.
+              </div>
+            </div>
+            <div className="flex gap-2 pt-1">
+              <Button size="sm" variant="outline" onClick={() => setShowConvert(false)} disabled={converting}>Batal</Button>
+              <Button size="sm" onClick={handleConvert} disabled={converting || !convertEmail.trim()}>
+                {converting ? "Membuat..." : "Konfirmasi Buat Akun"}
+              </Button>
+            </div>
+          </div>
+        )}
+
         <div>
           <div className="font-semibold mb-3">Riwayat Booking ({bookings?.length ?? 0})</div>
           {isLoading ? (

@@ -194,6 +194,65 @@ router.post("/customers", adminMiddleware, async (req, res) => {
   }
 });
 
+// Konversi guest booker → akun customer terdaftar
+router.post("/customers/from-guest", adminMiddleware, async (req, res) => {
+  try {
+    const { phone, name, email } = req.body;
+    if (!phone) { res.status(400).json({ error: "phone required" }); return; }
+
+    // Cek duplikat phone
+    const [existingByPhone] = await db.select({ id: usersTable.id }).from(usersTable)
+      .where(eq(usersTable.phone, String(phone))).limit(1);
+    if (existingByPhone) { res.status(409).json({ error: "Nomor HP sudah terdaftar sebagai akun customer" }); return; }
+
+    if (email) {
+      const [existingByEmail] = await db.select({ id: usersTable.id }).from(usersTable)
+        .where(eq(usersTable.email, String(email))).limit(1);
+      if (existingByEmail) { res.status(409).json({ error: "Email sudah digunakan" }); return; }
+    }
+
+    // Ambil data dari booking terbaru
+    const [latestBooking] = await db.select().from(bookingsTable)
+      .where(eq(bookingsTable.customerPhone, String(phone)))
+      .orderBy(desc(bookingsTable.createdAt)).limit(1);
+    if (!latestBooking) { res.status(404).json({ error: "Tidak ada booking dengan nomor ini" }); return; }
+
+    const resolvedName = name || latestBooking.customerName;
+    const resolvedEmail = email || latestBooking.customerEmail;
+
+    if (!resolvedEmail) { res.status(400).json({ error: "email required — guest tidak memiliki email, harap isi manual" }); return; }
+
+    const code = await generateCustomerCode();
+
+    const sessionSecret = process.env.SESSION_SECRET ?? "";
+    const randomPassword = Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 10).toUpperCase();
+    const passwordHash = createHmac("sha256", sessionSecret).update(randomPassword).digest("hex");
+
+    const [newUser] = await db.insert(usersTable).values({
+      name: resolvedName,
+      email: resolvedEmail,
+      phone: String(phone),
+      passwordHash,
+      role: "customer",
+      accountType: "personal",
+      accountStatus: "active",
+      registrationSource: "guest_converted",
+      customerCode: code,
+    }).returning();
+
+    // Link semua booking dengan phone ini ke akun baru
+    await db.update(bookingsTable)
+      .set({ customerId: newUser.id })
+      .where(eq(bookingsTable.customerPhone, String(phone)));
+
+    const allBookings = await db.select().from(bookingsTable).where(eq(bookingsTable.customerId, newUser.id));
+    res.status(201).json({ ...mapUser(newUser, allBookings), tempPassword: randomPassword });
+  } catch (err) {
+    req.log.error({ err }, "Convert guest to customer error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 router.get("/customers/:id", adminMiddleware, async (req, res) => {
   try {
     const id = parseInt(String(req.params.id));
