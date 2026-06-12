@@ -250,26 +250,68 @@ export async function pullMutationsFromSheet(sheetId: string, sheetName?: string
     return -1;
   };
 
-  const dateIdx = idxOf(["tanggal", "transaction_date", "date", "tgl"]);
-  const descIdx = idxOf(["keterangan", "description", "ket", "narasi", "deskripsi"]);
+  const dateIdx  = idxOf(["tanggal", "transaction_date", "date", "tgl"]);
+  const descIdx  = idxOf(["keterangan", "description", "ket", "narasi", "deskripsi"]);
   const creditIdx = idxOf(["kredit", "credit", "credit_amount", "masuk", "cr"]);
-  const debitIdx = idxOf(["debit", "debit_amount", "keluar", "dr"]);
-  const nominalIdx = idxOf(["nominal", "jumlah", "amount"]);
-  const bankIdx = idxOf(["rekening", "bank_account_id", "bank_account", "account"]);
+  const debitIdx  = idxOf(["debit", "debit_amount", "keluar", "dr"]);
+  // "jumlah" di Mandiri = saldo berjalan, bukan nominal transaksi → tidak dipakai sebagai nominal
+  const nominalIdx = idxOf(["nominal", "amount"]);
+  const bankIdx   = idxOf(["rekening", "bank_account_id", "bank_account", "account"]);
+
+  /** Parse angka IDR: titik sebagai pemisah ribuan (1.360.410 → 1360410) */
+  const parseIDR = (raw: string): number => {
+    const s = String(raw ?? "").trim().replace(/\s/g, "");
+    if (!s) return 0;
+    // Hapus semua titik (pemisah ribuan), ganti koma → titik (desimal)
+    const cleaned = s.replace(/\./g, "").replace(/,/g, ".");
+    return parseFloat(cleaned) || 0;
+  };
+
+  /** Normalisasi tanggal ke YYYY-MM-DD.
+   *  Mendukung: YYYY-MM-DD, M/D/YYYY (format Mandiri), D/M/YYYY, YYYY/MM/DD */
+  const normalizeDate = (raw: string): string => {
+    const s = String(raw ?? "").trim();
+    if (!s) return s;
+    // Sudah ISO
+    if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+    // Slash-separated
+    const parts = s.split("/");
+    if (parts.length === 3) {
+      const a = parseInt(parts[0]!, 10);
+      const b = parseInt(parts[1]!, 10);
+      const c = parseInt(parts[2]!, 10);
+      if (parts[2]!.length === 4) {
+        // a/b/YYYY — jika a > 12 pasti hari, pakai d/m/yyyy; jika b > 12 pasti bulan, pakai m/d/yyyy
+        // Default Mandiri: m/d/yyyy
+        let month = a, day = b;
+        if (a > 12) { day = a; month = b; }
+        return `${parts[2]}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+      }
+      if (parts[0]!.length === 4) {
+        // YYYY/MM/DD
+        return `${parts[0]}-${String(b).padStart(2, "0")}-${String(c).padStart(2, "0")}`;
+      }
+    }
+    // Fallback: native Date
+    const d = new Date(s);
+    if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+    return s;
+  };
 
   const result: SheetMutationRow[] = [];
   for (let i = 1; i < values.length; i++) {
     const row = values[i] as string[];
-    const dateRaw = dateIdx >= 0 ? String(row[dateIdx] ?? "") : "";
+    const dateRaw = dateIdx >= 0 ? normalizeDate(String(row[dateIdx] ?? "")) : "";
     const desc = descIdx >= 0 ? String(row[descIdx] ?? "").trim() : "";
     if (!dateRaw && !desc) continue;
 
     let creditAmount = 0;
-    let debitAmount = 0;
-    if (creditIdx >= 0) creditAmount = parseFloat(String(row[creditIdx] ?? "0").replace(/[^0-9.-]/g, "")) || 0;
-    if (debitIdx >= 0) debitAmount = parseFloat(String(row[debitIdx] ?? "0").replace(/[^0-9.-]/g, "")) || 0;
+    let debitAmount  = 0;
+    if (creditIdx >= 0) creditAmount = parseIDR(String(row[creditIdx] ?? "0"));
+    if (debitIdx >= 0)  debitAmount  = parseIDR(String(row[debitIdx]  ?? "0"));
+    // Kolom nominal (bukan saldo) hanya dipakai jika tidak ada kolom debit/kredit
     if (creditIdx < 0 && debitIdx < 0 && nominalIdx >= 0) {
-      const nom = parseFloat(String(row[nominalIdx] ?? "0").replace(/[^0-9.-]/g, "")) || 0;
+      const nom = parseIDR(String(row[nominalIdx] ?? "0"));
       creditAmount = nom > 0 ? nom : 0;
     }
     const bankAccountId = bankIdx >= 0 ? String(row[bankIdx] ?? "").trim() || undefined : undefined;
