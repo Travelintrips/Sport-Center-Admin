@@ -92,15 +92,19 @@ router.get("/customers", adminMiddleware, async (req, res) => {
       return mapUser(u, userBookings);
     });
 
-    // Untuk tab personal: tambahkan guest bookers (tidak punya akun & phone tidak terdaftar)
+    // Untuk tab personal: tambahkan guest bookers
+    // Guest = booking tanpa customerId ATAU customerId mengarah ke user bukan role "customer"
     if (accountType !== "company") {
+      const customerUserIds = new Set(users.map((u) => u.id));
       const registeredPhones = new Set(users.map((u) => u.phone).filter(Boolean));
       const seenPhones = new Set<string>();
       const guestEntries: ReturnType<typeof mapUser>[] = [];
 
       for (const b of bookings) {
         const phone = b.customerPhone;
-        if (!phone || seenPhones.has(phone) || registeredPhones.has(phone) || b.customerId) continue;
+        // Linked ke real customer → skip
+        const linkedToRealCustomer = b.customerId != null && customerUserIds.has(b.customerId);
+        if (!phone || seenPhones.has(phone) || registeredPhones.has(phone) || linkedToRealCustomer) continue;
         seenPhones.add(phone);
         const guestBookings = bookings.filter((bk) => bk.customerPhone === phone);
         const totalSpent = guestBookings
@@ -199,11 +203,16 @@ router.post("/customers", adminMiddleware, async (req, res) => {
 router.post("/customers/migrate-all-guests", adminMiddleware, async (req, res) => {
   try {
     const sessionSecret = process.env.SESSION_SECRET ?? "";
-    const allBookings = await db.select().from(bookingsTable).where(isNull(bookingsTable.customerId));
-    const allUsers = await db.select({ id: usersTable.id, email: usersTable.email, phone: usersTable.phone }).from(usersTable);
+    // Ambil booking yang customerId null ATAU linked ke non-customer user (misal admin_booking)
+    const allUsersRaw = await db.select({ id: usersTable.id, email: usersTable.email, phone: usersTable.phone, role: usersTable.role }).from(usersTable);
+    const customerIds = new Set(allUsersRaw.filter(u => u.role === "customer").map(u => u.id));
+    const allBookingsRaw = await db.select().from(bookingsTable);
+    const allBookings = allBookingsRaw.filter(b => b.customerId == null || !customerIds.has(b.customerId));
+    const allUsers = allUsersRaw;
 
-    const registeredEmails = new Map(allUsers.filter(u => u.email).map(u => [u.email!, u.id]));
-    const registeredPhones = new Map(allUsers.filter(u => u.phone).map(u => [u.phone!, u.id]));
+    // Hanya index user dengan role="customer" untuk pencocokan
+    const registeredEmails = new Map(allUsers.filter(u => u.email && u.role === "customer").map(u => [u.email!, u.id]));
+    const registeredPhones = new Map(allUsers.filter(u => u.phone && u.role === "customer").map(u => [u.phone!, u.id]));
 
     // Group by phone (primary) atau email (fallback)
     const groups = new Map<string, typeof allBookings>();
