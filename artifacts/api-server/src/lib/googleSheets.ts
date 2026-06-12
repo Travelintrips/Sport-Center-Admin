@@ -29,10 +29,16 @@ function getClient() {
   return google.sheets({ version: "v4", auth });
 }
 
-export async function verifySheetAccess(sheetId: string): Promise<{ title: string }> {
+async function getFirstSheetName(sheets: ReturnType<typeof google.sheets>, sheetId: string): Promise<string> {
+  const meta = await sheets.spreadsheets.get({ spreadsheetId: sheetId });
+  return meta.data.sheets?.[0]?.properties?.title ?? "Sheet1";
+}
+
+export async function verifySheetAccess(sheetId: string): Promise<{ title: string; sheetName: string }> {
   const sheets = getClient();
   const meta = await sheets.spreadsheets.get({ spreadsheetId: sheetId });
-  return { title: meta.data.properties?.title ?? sheetId };
+  const sheetName = meta.data.sheets?.[0]?.properties?.title ?? "Sheet1";
+  return { title: meta.data.properties?.title ?? sheetId, sheetName };
 }
 
 export type CustomerRow = {
@@ -55,6 +61,7 @@ export type CustomerRow = {
 
 export async function pushCustomersToSheet(sheetId: string, customers: CustomerRow[]): Promise<{ updatedRows: number }> {
   const sheets = getClient();
+  const sheetName = await getFirstSheetName(sheets, sheetId);
 
   const rows: string[][] = customers.map((c) => [
     String(c.id),
@@ -76,12 +83,12 @@ export async function pushCustomersToSheet(sheetId: string, customers: CustomerR
 
   await sheets.spreadsheets.values.clear({
     spreadsheetId: sheetId,
-    range: "Sheet1!A1:Z",
+    range: `${sheetName}!A1:Z`,
   });
 
   await sheets.spreadsheets.values.update({
     spreadsheetId: sheetId,
-    range: "Sheet1!A1",
+    range: `${sheetName}!A1`,
     valueInputOption: "RAW",
     requestBody: {
       values: [SHEET_HEADERS, ...rows],
@@ -130,10 +137,11 @@ export type SheetCustomerUpdate = {
 
 export async function pullCustomersFromSheet(sheetId: string): Promise<SheetCustomerUpdate[]> {
   const sheets = getClient();
+  const sheetName = await getFirstSheetName(sheets, sheetId);
 
   const resp = await sheets.spreadsheets.values.get({
     spreadsheetId: sheetId,
-    range: "Sheet1!A1:Z",
+    range: `${sheetName}!A1:Z`,
   });
 
   const values = resp.data.values ?? [];
