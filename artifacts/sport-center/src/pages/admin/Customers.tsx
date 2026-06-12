@@ -635,7 +635,7 @@ function GuestDetailDialog({ guest, onClose }: { guest: any; onClose: () => void
   );
 }
 
-function PersonalForm({ initial, onClose }: { initial: any; onClose: () => void }) {
+function PersonalEditForm({ initial, onClose }: { initial: any; onClose: () => void }) {
   const { toast } = useToast();
   const qc = useQueryClient();
   const updateMutation = useUpdateCustomer();
@@ -915,14 +915,13 @@ export default function AdminCustomers() {
   const [selectedGuest, setSelectedGuest] = useState<any>(null);
   const [showForm, setShowForm] = useState(false);
   const [editCustomer, setEditCustomer] = useState<any>(null);
-  const [showPersonalForm, setShowPersonalForm] = useState(false);
+  const [showPersonalCreateForm, setShowPersonalCreateForm] = useState(false);
+  const [showPersonalEditForm, setShowPersonalEditForm] = useState(false);
   const [personalEdit, setPersonalEdit] = useState<any>(null);
-  const [deleteTarget, setDeleteTarget] = useState<any>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: number; name: string } | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [tempResult, setTempResult] = useState<{ password: string; email: string } | null>(null);
   const [migrating, setMigrating] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState<{ id: number; name: string } | null>(null);
-  const [deleting, setDeleting] = useState(false);
   const { toast } = useToast();
   const qc = useQueryClient();
 
@@ -940,20 +939,8 @@ export default function AdminCustomers() {
       qc.invalidateQueries({ queryKey: getListCustomersQueryKey() });
       window.dispatchEvent(new CustomEvent("customer-changed"));
       setDeleteTarget(null);
-    } catch {
+    } catch (_e) {
       toast({ title: "Gagal menghapus customer", variant: "destructive" });
-      const token = getToken();
-      const r = await fetch(`/api/customers/${deleteTarget.id}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await r.json();
-      if (!r.ok) { toast({ title: data.error ?? "Gagal menghapus", variant: "destructive" }); return; }
-      toast({ title: data.message ?? "Customer berhasil dihapus" });
-      qc.invalidateQueries({ queryKey: getListCustomersQueryKey() });
-      setDeleteTarget(null);
-    } catch {
-      toast({ title: "Gagal menghapus akun", variant: "destructive" });
     } finally {
       setDeleting(false);
     }
@@ -994,7 +981,7 @@ export default function AdminCustomers() {
           <p className="text-muted-foreground">Kelola daftar customer terdaftar</p>
         </div>
         {tab === "personal" && (
-          <Button onClick={() => setShowPersonalForm(true)} className="gap-2">
+          <Button onClick={() => setShowPersonalCreateForm(true)} className="gap-2">
             <Plus size={16} /> Buat Akun Customer
           </Button>
         )}
@@ -1005,11 +992,11 @@ export default function AdminCustomers() {
         )}
       </div>
 
-      <Dialog open={showPersonalForm} onOpenChange={setShowPersonalForm}>
-        {showPersonalForm && (
+      <Dialog open={showPersonalCreateForm} onOpenChange={setShowPersonalCreateForm}>
+        {showPersonalCreateForm && (
           <PersonalForm
-            onClose={() => setShowPersonalForm(false)}
-            onCreated={(pwd, email) => { setShowPersonalForm(false); setTempResult({ password: pwd, email }); }}
+            onClose={() => setShowPersonalCreateForm(false)}
+            onCreated={(pwd, email) => { setShowPersonalCreateForm(false); setTempResult({ password: pwd, email }); }}
           />
         )}
       </Dialog>
@@ -1092,7 +1079,7 @@ export default function AdminCustomers() {
                             </Button>
                             {!isGuest && (
                               <>
-                                <Button size="sm" variant="ghost" onClick={() => { setPersonalEdit(c); setShowPersonalForm(true); }}>
+                                <Button size="sm" variant="ghost" onClick={() => { setPersonalEdit(c); setShowPersonalEditForm(true); }}>
                                   <Pencil size={14} />
                                 </Button>
                                 <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => setDeleteTarget(c)}>
@@ -1174,8 +1161,8 @@ export default function AdminCustomers() {
         {showForm && <CompanyForm initial={editCustomer} onClose={() => { setShowForm(false); setEditCustomer(null); }} />}
       </Dialog>
 
-      <Dialog open={showPersonalForm} onOpenChange={(v) => { if (!v) { setShowPersonalForm(false); setPersonalEdit(null); } }}>
-        {showPersonalForm && personalEdit && <PersonalForm initial={personalEdit} onClose={() => { setShowPersonalForm(false); setPersonalEdit(null); }} />}
+      <Dialog open={showPersonalEditForm} onOpenChange={(v) => { if (!v) { setShowPersonalEditForm(false); setPersonalEdit(null); } }}>
+        {showPersonalEditForm && personalEdit && <PersonalEditForm initial={personalEdit} onClose={() => { setShowPersonalEditForm(false); setPersonalEdit(null); }} />}
       </Dialog>
 
       <Dialog open={!!deleteTarget} onOpenChange={(v) => !v && setDeleteTarget(null)}>
