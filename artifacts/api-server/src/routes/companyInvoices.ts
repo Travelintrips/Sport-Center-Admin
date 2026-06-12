@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db, usersTable, bookingsTable, companyInvoicesTable, companyInvoiceItemsTable, facilitiesTable, auditLogsTable } from "@workspace/db";
-import { eq, and, gte, lt } from "drizzle-orm";
+import { eq, and, gte, lt, inArray, isNull, or } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
 
@@ -351,6 +351,43 @@ async function handleGenerateInvoice(req: any, res: any) {
 router.post("/company-invoices/generate", adminMiddleware, handleGenerateInvoice);
 router.post("/company-invoices", adminMiddleware, handleGenerateInvoice);
 
+async function resolveInvoiceItems(id: number, inv: typeof companyInvoicesTable.$inferSelect) {
+  const facilities = await db.select({ id: facilitiesTable.id, name: facilitiesTable.name }).from(facilitiesTable);
+  const facilityMap = Object.fromEntries(facilities.map((f) => [f.id, f.name]));
+
+  // 1. Items table
+  let items = await db.select().from(companyInvoiceItemsTable).where(eq(companyInvoiceItemsTable.invoiceId, id));
+  if (items.length > 0) return items;
+
+  // 2. Backfill from bookings with companyInvoiceId set
+  const linkedBookings = await db.select().from(bookingsTable).where(eq(bookingsTable.companyInvoiceId, id));
+  if (linkedBookings.length > 0) {
+    await buildAndInsertItems(id, inv.companyCustomerId, linkedBookings, facilityMap);
+    return db.select().from(companyInvoiceItemsTable).where(eq(companyInvoiceItemsTable.invoiceId, id));
+  }
+
+  // 3. Fallback: find billed/paid company bookings in same period not yet linked to another invoice
+  const { startDate, endDate } = periodDateRange(inv.periodMonth);
+  const periodBookings = await db.select().from(bookingsTable).where(
+    and(
+      eq(bookingsTable.companyCustomerId, inv.companyCustomerId),
+      inArray(bookingsTable.billingStatus, ["billed", "paid"]),
+      gte(bookingsTable.bookingDate, startDate),
+      lt(bookingsTable.bookingDate, endDate),
+      or(isNull(bookingsTable.companyInvoiceId), eq(bookingsTable.companyInvoiceId, id)),
+    )
+  );
+  if (periodBookings.length > 0) {
+    await buildAndInsertItems(id, inv.companyCustomerId, periodBookings, facilityMap);
+    for (const b of periodBookings) {
+      await db.update(bookingsTable).set({ companyInvoiceId: id }).where(eq(bookingsTable.id, b.id));
+    }
+    return db.select().from(companyInvoiceItemsTable).where(eq(companyInvoiceItemsTable.invoiceId, id));
+  }
+
+  return [];
+}
+
 router.get("/company-invoices/:id", adminMiddleware, async (req, res) => {
   try {
     const id = parseInt(String(req.params.id));
@@ -358,26 +395,50 @@ router.get("/company-invoices/:id", adminMiddleware, async (req, res) => {
     if (!inv) { res.status(404).json({ error: "Not found" }); return; }
 
     const [company] = await db.select().from(usersTable).where(eq(usersTable.id, inv.companyCustomerId)).limit(1);
-
-    // Get line items (prefer items table, fallback to bookings)
-    let items = await db.select().from(companyInvoiceItemsTable).where(
-      eq(companyInvoiceItemsTable.invoiceId, id)
-    );
-
-    // Backfill: if no items yet, build from linked bookings
-    if (items.length === 0) {
-      const relatedBookings = await db.select().from(bookingsTable).where(eq(bookingsTable.companyInvoiceId, id));
-      if (relatedBookings.length > 0) {
-        const facilities = await db.select({ id: facilitiesTable.id, name: facilitiesTable.name }).from(facilitiesTable);
-        const facilityMap = Object.fromEntries(facilities.map((f) => [f.id, f.name]));
-        await buildAndInsertItems(id, inv.companyCustomerId, relatedBookings, facilityMap);
-        items = await db.select().from(companyInvoiceItemsTable).where(eq(companyInvoiceItemsTable.invoiceId, id));
-      }
-    }
+    const items = await resolveInvoiceItems(id, inv);
 
     res.json(mapInvoice(inv, company?.companyName ?? company?.name, items, company));
   } catch (err) {
     req.log.error({ err }, "Get company invoice error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.post("/company-invoices/:id/rebuild-items", adminMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(String(req.params.id));
+    const [inv] = await db.select().from(companyInvoicesTable).where(eq(companyInvoicesTable.id, id)).limit(1);
+    if (!inv) { res.status(404).json({ error: "Not found" }); return; }
+
+    // Delete existing items and rebuild from scratch
+    await db.delete(companyInvoiceItemsTable).where(eq(companyInvoiceItemsTable.invoiceId, id));
+
+    const { startDate, endDate } = periodDateRange(inv.periodMonth);
+    const facilities = await db.select({ id: facilitiesTable.id, name: facilitiesTable.name }).from(facilitiesTable);
+    const facilityMap = Object.fromEntries(facilities.map((f) => [f.id, f.name]));
+
+    const bookings = await db.select().from(bookingsTable).where(
+      and(
+        eq(bookingsTable.companyCustomerId, inv.companyCustomerId),
+        inArray(bookingsTable.billingStatus, ["billed", "paid"]),
+        gte(bookingsTable.bookingDate, startDate),
+        lt(bookingsTable.bookingDate, endDate),
+        or(isNull(bookingsTable.companyInvoiceId), eq(bookingsTable.companyInvoiceId, id)),
+      )
+    );
+
+    if (bookings.length > 0) {
+      await buildAndInsertItems(id, inv.companyCustomerId, bookings, facilityMap);
+      for (const b of bookings) {
+        await db.update(bookingsTable).set({ companyInvoiceId: id }).where(eq(bookingsTable.id, b.id));
+      }
+    }
+
+    const [company] = await db.select().from(usersTable).where(eq(usersTable.id, inv.companyCustomerId)).limit(1);
+    const items = await db.select().from(companyInvoiceItemsTable).where(eq(companyInvoiceItemsTable.invoiceId, id));
+    res.json({ ...mapInvoice(inv, company?.companyName ?? company?.name, items, company), rebuiltCount: items.length });
+  } catch (err) {
+    req.log.error({ err }, "Rebuild invoice items error");
     res.status(500).json({ error: "Internal server error" });
   }
 });

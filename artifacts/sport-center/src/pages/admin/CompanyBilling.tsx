@@ -356,6 +356,7 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
   const qc = useQueryClient();
   const updateMutation = useUpdateCompanyInvoice();
   const [sendingWa, setSendingWa] = useState(false);
+  const [rebuilding, setRebuilding] = useState(false);
 
   const { data: invoice, isLoading } = useQuery({
     queryKey: ["company-invoice-detail", invoiceId],
@@ -380,6 +381,25 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
       onClose();
     } catch {
       toast({ title: "Gagal memperbarui invoice", variant: "destructive" });
+    }
+  };
+
+  const handleRebuildItems = async () => {
+    setRebuilding(true);
+    try {
+      const token = getToken();
+      const res = await fetch(`/api/company-invoices/${invoiceId}/rebuild-items`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token ?? ""}` },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Gagal sinkronisasi");
+      toast({ title: `Sinkronisasi berhasil`, description: `${data.rebuiltCount} item pemakaian ditemukan` });
+      qc.invalidateQueries({ queryKey: ["company-invoice-detail", invoiceId] });
+    } catch (e: any) {
+      toast({ title: e?.message ?? "Gagal sinkronisasi item", variant: "destructive" });
+    } finally {
+      setRebuilding(false);
     }
   };
 
@@ -472,9 +492,25 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
 
         {/* Line items table */}
         <div>
-          <h4 className="font-semibold mb-2 text-sm">Detail Pemakaian ({items.length} sesi)</h4>
+          <div className="flex items-center justify-between mb-2">
+            <h4 className="font-semibold text-sm">Detail Pemakaian ({items.length} sesi)</h4>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={handleRebuildItems}
+              disabled={rebuilding}
+              className="gap-1.5 text-xs h-7 text-muted-foreground hover:text-foreground"
+            >
+              <RefreshCw size={11} className={rebuilding ? "animate-spin" : ""} />
+              {rebuilding ? "Sinkronisasi..." : "Sinkronisasi Item"}
+            </Button>
+          </div>
           {items.length === 0 ? (
-            <div className="text-sm text-muted-foreground text-center py-6 border rounded-lg">Tidak ada data pemakaian</div>
+            <div className="text-sm text-muted-foreground text-center py-8 border rounded-lg border-dashed space-y-2">
+              <FileText size={28} className="mx-auto text-muted-foreground/40" />
+              <div>Tidak ada data pemakaian</div>
+              <div className="text-xs">Klik "Sinkronisasi Item" untuk mencari booking terkait</div>
+            </div>
           ) : (
             <div className="overflow-x-auto rounded-lg border">
               <table className="w-full text-xs">
@@ -498,8 +534,12 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
                       <td className="p-2.5 whitespace-nowrap font-medium">{item.customerName ?? "-"}</td>
                       <td className="p-2.5 whitespace-nowrap text-muted-foreground">{item.customerPhone ?? "-"}</td>
                       <td className="p-2.5 whitespace-nowrap">{item.facilityName ?? "-"}</td>
-                      <td className="p-2.5 whitespace-nowrap text-muted-foreground">{item.bookingDate ?? "-"}</td>
-                      <td className="p-2.5 whitespace-nowrap text-muted-foreground">{item.startTime ?? "-"}–{item.endTime ?? "-"}</td>
+                      <td className="p-2.5 whitespace-nowrap text-muted-foreground">
+                        {item.bookingDate ? new Date(item.bookingDate).toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" }) : "-"}
+                      </td>
+                      <td className="p-2.5 whitespace-nowrap text-muted-foreground">
+                        {item.startTime ?? "-"}{item.endTime ? `–${item.endTime}` : ""}
+                      </td>
                       <td className="p-2.5 text-center whitespace-nowrap">{item.durationHours ?? 0} jam</td>
                       <td className="p-2.5 text-right whitespace-nowrap">{formatCurrency(item.subtotal ?? 0)}</td>
                       <td className="p-2.5 text-right whitespace-nowrap text-muted-foreground">{formatCurrency(item.taxAmount ?? 0)}</td>
@@ -508,6 +548,15 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
                     </tr>
                   ))}
                 </tbody>
+                <tfoot>
+                  <tr className="border-t bg-muted/30">
+                    <td colSpan={6} className="p-2.5 text-xs font-semibold text-muted-foreground">{items.length} sesi</td>
+                    <td className="p-2.5 text-right text-xs font-semibold">{formatCurrency(items.reduce((s: number, i: any) => s + (i.subtotal ?? 0), 0))}</td>
+                    <td className="p-2.5 text-right text-xs text-muted-foreground">{formatCurrency(items.reduce((s: number, i: any) => s + (i.taxAmount ?? 0), 0))}</td>
+                    <td className="p-2.5 text-right text-xs font-bold text-primary">{formatCurrency(items.reduce((s: number, i: any) => s + (i.totalAmount ?? 0), 0))}</td>
+                    <td />
+                  </tr>
+                </tfoot>
               </table>
             </div>
           )}
