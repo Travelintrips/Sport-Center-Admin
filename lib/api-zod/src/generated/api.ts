@@ -868,6 +868,46 @@ export const CreateCustomerBody = zod.object({
 
 
 /**
+ * @summary Verify Google Sheet access
+ */
+export const ConnectCustomerSheetBody = zod.object({
+  "sheetId": zod.string()
+})
+
+export const ConnectCustomerSheetResponse = zod.object({
+  "ok": zod.boolean(),
+  "title": zod.string()
+})
+
+
+/**
+ * @summary Export all customers to Google Sheet
+ */
+export const PushCustomersToSheetBody = zod.object({
+  "sheetId": zod.string()
+})
+
+export const PushCustomersToSheetResponse = zod.object({
+  "ok": zod.boolean(),
+  "updatedRows": zod.number()
+})
+
+
+/**
+ * @summary Import customer updates from Google Sheet to DB
+ */
+export const PullCustomersFromSheetBody = zod.object({
+  "sheetId": zod.string()
+})
+
+export const PullCustomersFromSheetResponse = zod.object({
+  "ok": zod.boolean(),
+  "updatedCount": zod.number(),
+  "skippedCount": zod.number()
+})
+
+
+/**
  * @summary Get customer detail with booking history
  */
 export const GetCustomerParams = zod.object({
