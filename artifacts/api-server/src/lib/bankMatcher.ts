@@ -281,9 +281,15 @@ export async function runMatching(mutationIds?: number[]): Promise<{
 
       autoApproved++;
     } else {
+      // Candidates found but score < 95 — set to "matched" so user can review
       await db
         .update(bankMutationsTable)
-        .set({ status: "unmatched", updatedAt: new Date() })
+        .set({
+          status: "matched",
+          matchedPaymentId: null,
+          matchedOrderId: null,
+          updatedAt: new Date(),
+        })
         .where(eq(bankMutationsTable.id, mutation.id));
       needsReview++;
     }
