@@ -77,6 +77,7 @@ export async function computeMatchesForMutation(mutation: BankMutation): Promise
       totalPrice: bookingsTable.totalPrice,
       status: bookingsTable.status,
       paymentGatewayRef: bookingsTable.paymentGatewayRef,
+      updatedAt: bookingsTable.updatedAt,
     })
     .from(bookingsTable);
 
@@ -115,12 +116,20 @@ export async function computeMatchesForMutation(mutation: BankMutation): Promise
       continue; // Must have amount match to be a candidate
     }
 
-    // Date match — only compare against payment date (when customer paid), never booking date
-    const paymentDateStr = payment?.createdAt
-      ? payment.createdAt.toISOString().slice(0, 10)
-      : payment?.confirmedAt
-        ? (payment.confirmedAt as Date).toISOString().slice(0, 10)
-        : null;
+    // Date match — use payment.createdAt if exists, else booking.updatedAt (when admin confirmed)
+    // Never use booking.bookingDate (that's when the facility is used, not when money was paid)
+    const toDateStr = (d: Date | string | null | undefined): string | null => {
+      if (!d) return null;
+      if (typeof d === "string") return d.slice(0, 10);
+      return d.toISOString().slice(0, 10);
+    };
+    const paymentDateStr =
+      toDateStr(payment?.createdAt) ??
+      toDateStr(payment?.confirmedAt) ??
+      (["confirmed", "paid", "completed"].includes(booking.status ?? "")
+        ? toDateStr(booking.updatedAt)
+        : null);
+
     if (paymentDateStr) {
       const diff = dayDiff(mutation.transactionDate, paymentDateStr);
       if (diff === 0) {
