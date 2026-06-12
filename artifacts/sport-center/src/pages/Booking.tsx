@@ -332,6 +332,18 @@ export default function Booking() {
     }
   };
 
+  function normalizePhoneInput(raw: string): string {
+    let p = raw.replace(/\D/g, "");
+    if (p.startsWith("0")) p = "62" + p.slice(1);
+    else if (!p.startsWith("62")) p = p ? "62" + p : "";
+    return p;
+  }
+
+  function isValidPhone(raw: string): boolean {
+    const p = normalizePhoneInput(raw);
+    return /^62[0-9]{7,13}$/.test(p);
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!facilityId || !date) return;
@@ -407,19 +419,8 @@ export default function Booking() {
     // ─── Mode Umum & Angkasa Pura ────────────────────────────────────────────
     if (isAdminBooking && !selectedCustomerId) {
       toast({ title: t("Pilih nama pelanggan", "Select customer name"), description: t("Harap pilih nama dari daftar pelanggan.", "Please select a name from the customer list."), variant: "destructive" });
-  function normalizePhoneInput(raw: string): string {
-    let p = raw.replace(/\D/g, "");
-    if (p.startsWith("0")) p = "62" + p.slice(1);
-    else if (!p.startsWith("62")) p = p ? "62" + p : "";
-    return p;
-  }
-
-  function isValidPhone(raw: string): boolean {
-    const p = normalizePhoneInput(raw);
-    return /^62[0-9]{7,13}$/.test(p);
-  }
-
-  const handleSubmit = (e: React.FormEvent) => {
+      return;
+    }
     e.preventDefault();
     if (!facilityId || !date) return;
     if (!isWalkIn && (!startTime || !duration)) return;
