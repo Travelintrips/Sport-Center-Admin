@@ -28,6 +28,8 @@ function extractSheetId(input: string): string {
 
 const LS_RECON_SHEET_KEY = "recon_connected_sheet";
 const LS_RECON_SHEET_URL_KEY = "recon_sheet_raw_url";
+const LS_RECON_SHEET_NAMES_KEY = "recon_sheet_names";
+const LS_RECON_SELECTED_TAB_KEY = "recon_selected_tab";
 
 function SheetSyncPanel({ onImported }: { onImported: () => void }) {
   const { toast } = useToast();
@@ -38,6 +40,12 @@ function SheetSyncPanel({ onImported }: { onImported: () => void }) {
   const [connectedSheet, setConnectedSheetState] = useState<{ id: string; title: string } | null>(() => {
     try { const v = localStorage.getItem(LS_RECON_SHEET_KEY); return v ? JSON.parse(v) : null; } catch { return null; }
   });
+  const [sheetNames, setSheetNamesState] = useState<string[]>(() => {
+    try { const v = localStorage.getItem(LS_RECON_SHEET_NAMES_KEY); return v ? JSON.parse(v) : []; } catch { return []; }
+  });
+  const [selectedTab, setSelectedTabState] = useState<string>(() => {
+    try { return localStorage.getItem(LS_RECON_SELECTED_TAB_KEY) ?? ""; } catch { return ""; }
+  });
   const [lastSync, setLastSync] = useState<{ direction: "push" | "pull"; result: string; at: Date } | null>(null);
   const [pushStatusFilter, setPushStatusFilter] = useState<string>("all");
 
@@ -46,6 +54,18 @@ function SheetSyncPanel({ onImported }: { onImported: () => void }) {
     if (val) localStorage.setItem(LS_RECON_SHEET_KEY, JSON.stringify(val));
     else localStorage.removeItem(LS_RECON_SHEET_KEY);
   };
+
+  const setSheetNames = (names: string[]) => {
+    setSheetNamesState(names);
+    localStorage.setItem(LS_RECON_SHEET_NAMES_KEY, JSON.stringify(names));
+  };
+
+  const setSelectedTab = (tab: string) => {
+    setSelectedTabState(tab);
+    localStorage.setItem(LS_RECON_SELECTED_TAB_KEY, tab);
+  };
+
+  const activeTab = selectedTab || sheetNames[0] || "";
 
   const handleSaveUrl = () => {
     const id = extractSheetId(rawInput);
@@ -60,7 +80,9 @@ function SheetSyncPanel({ onImported }: { onImported: () => void }) {
       onSuccess: (data) => {
         const id = extractSheetId(rawInput);
         setConnectedSheet({ id, title: data.title });
-        toast({ title: `Terhubung ke "${data.title}"` });
+        setSheetNames(data.sheetNames ?? []);
+        if (!selectedTab && data.sheetNames?.length) setSelectedTab(data.sheetNames[0]!);
+        toast({ title: `Terhubung ke "${data.title}"`, description: `${data.sheetNames?.length ?? 0} tab ditemukan` });
       },
       onError: (err: any) => {
         toast({ title: err?.response?.data?.error ?? "Gagal terhubung ke sheet", variant: "destructive" });
@@ -102,7 +124,7 @@ function SheetSyncPanel({ onImported }: { onImported: () => void }) {
   const handlePush = () => {
     if (!connectedSheet) return;
     const statusFilter = pushStatusFilter !== "all" ? [pushStatusFilter] : undefined;
-    pushMutation.mutate({ data: { sheetId: connectedSheet.id, statusFilter } });
+    pushMutation.mutate({ data: { sheetId: connectedSheet.id, sheetName: activeTab || undefined, statusFilter } });
   };
 
   return (
@@ -162,15 +184,32 @@ function SheetSyncPanel({ onImported }: { onImported: () => void }) {
               <div className="space-y-3">
                 <div className="flex items-center gap-2 p-3 rounded-lg bg-blue-100/60 border border-blue-200 text-sm">
                   <CheckCircle2 size={14} className="text-blue-600 shrink-0" />
-                  <span className="font-medium text-blue-800">Terhubung ke: {connectedSheet.title}</span>
+                  <span className="font-medium text-blue-800 flex-1 truncate">Terhubung ke: {connectedSheet.title}</span>
                 </div>
+
+                {sheetNames.length > 0 && (
+                  <div className="space-y-1">
+                    <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Tab / Sheet</Label>
+                    <select
+                      className="w-full border rounded px-2 py-1.5 text-sm bg-white"
+                      value={activeTab}
+                      onChange={(e) => setSelectedTab(e.target.value)}
+                      disabled={isBusy}
+                    >
+                      {sheetNames.map((name) => (
+                        <option key={name} value={name}>{name}</option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-muted-foreground">Pilih tab mana yang digunakan untuk import/export.</p>
+                  </div>
+                )}
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {/* Pull dari sheet */}
                   <button
                     className="flex flex-col items-center gap-2 p-4 rounded-xl border-2 border-blue-200 bg-blue-50 hover:bg-blue-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     disabled={isBusy}
-                    onClick={() => pullMutation.mutate({ data: { sheetId: connectedSheet.id } })}
+                    onClick={() => pullMutation.mutate({ data: { sheetId: connectedSheet.id, sheetName: activeTab || undefined } })}
                   >
                     <div className="w-9 h-9 rounded-full bg-blue-500 flex items-center justify-center">
                       <Download size={16} className="text-white" />

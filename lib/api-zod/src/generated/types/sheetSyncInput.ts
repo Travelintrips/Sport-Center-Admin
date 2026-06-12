@@ -8,4 +8,5 @@
 
 export interface SheetSyncInput {
   sheetId: string;
+  sheetName?: string;
 }

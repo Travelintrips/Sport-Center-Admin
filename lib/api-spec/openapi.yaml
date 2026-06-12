@@ -3698,18 +3698,24 @@ components:
 
     SheetConnectResult:
       type: object
-      required: [ok, title]
+      required: [ok, title, sheetNames]
       properties:
         ok:
           type: boolean
         title:
           type: string
+        sheetNames:
+          type: array
+          items:
+            type: string
 
     SheetSyncInput:
       type: object
       required: [sheetId]
       properties:
         sheetId:
+          type: string
+        sheetName:
           type: string
 
     SheetPushResult:
@@ -3929,6 +3935,8 @@ components:
       required: [sheetId]
       properties:
         sheetId:
+          type: string
+        sheetName:
           type: string
         statusFilter:
           type: array

@@ -1189,10 +1189,12 @@ export interface SheetConnectInput {
 export interface SheetConnectResult {
   ok: boolean;
   title: string;
+  sheetNames: string[];
 }
 
 export interface SheetSyncInput {
   sheetId: string;
+  sheetName?: string;
 }
 
 export interface SheetPushResult {
@@ -1336,6 +1338,7 @@ export interface BankSheetPullResult {
 
 export interface BankSheetPushInput {
   sheetId: string;
+  sheetName?: string;
   statusFilter?: string[];
 }
 

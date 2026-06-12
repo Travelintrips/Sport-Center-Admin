@@ -34,11 +34,13 @@ async function getFirstSheetName(sheets: ReturnType<typeof google.sheets>, sheet
   return meta.data.sheets?.[0]?.properties?.title ?? "Sheet1";
 }
 
-export async function verifySheetAccess(sheetId: string): Promise<{ title: string; sheetName: string }> {
+export async function verifySheetAccess(sheetId: string): Promise<{ title: string; sheetName: string; sheetNames: string[] }> {
   const sheets = getClient();
   const meta = await sheets.spreadsheets.get({ spreadsheetId: sheetId });
-  const sheetName = meta.data.sheets?.[0]?.properties?.title ?? "Sheet1";
-  return { title: meta.data.properties?.title ?? sheetId, sheetName };
+  const allSheets = meta.data.sheets ?? [];
+  const sheetNames = allSheets.map((s) => s.properties?.title ?? "Sheet1").filter(Boolean) as string[];
+  const sheetName = sheetNames[0] ?? "Sheet1";
+  return { title: meta.data.properties?.title ?? sheetId, sheetName, sheetNames };
 }
 
 export type CustomerRow = {
@@ -160,10 +162,11 @@ export type ReconMutationRow = {
 
 export async function pushReconciliationToSheet(
   sheetId: string,
-  mutations: ReconMutationRow[]
+  mutations: ReconMutationRow[],
+  sheetName?: string
 ): Promise<{ updatedRows: number }> {
   const sheets = getClient();
-  const sheetName = await getFirstSheetName(sheets, sheetId);
+  const resolvedSheetName = sheetName ?? (await getFirstSheetName(sheets, sheetId));
 
   const rows: string[][] = mutations.map((m) => [
     String(m.id),
@@ -182,12 +185,12 @@ export async function pushReconciliationToSheet(
 
   await sheets.spreadsheets.values.clear({
     spreadsheetId: sheetId,
-    range: `${sheetName}!A1:Z`,
+    range: `${resolvedSheetName}!A1:Z`,
   });
 
   await sheets.spreadsheets.values.update({
     spreadsheetId: sheetId,
-    range: `${sheetName}!A1`,
+    range: `${resolvedSheetName}!A1`,
     valueInputOption: "RAW",
     requestBody: { values: [RECON_SHEET_HEADERS, ...rows] },
   });
@@ -228,13 +231,13 @@ export type SheetMutationRow = {
   bankAccountId?: string;
 };
 
-export async function pullMutationsFromSheet(sheetId: string): Promise<SheetMutationRow[]> {
+export async function pullMutationsFromSheet(sheetId: string, sheetName?: string): Promise<SheetMutationRow[]> {
   const sheets = getClient();
-  const sheetName = await getFirstSheetName(sheets, sheetId);
+  const resolvedSheetName = sheetName ?? (await getFirstSheetName(sheets, sheetId));
 
   const resp = await sheets.spreadsheets.values.get({
     spreadsheetId: sheetId,
-    range: `${sheetName}!A1:Z`,
+    range: `${resolvedSheetName}!A1:Z`,
   });
 
   const values = resp.data.values ?? [];

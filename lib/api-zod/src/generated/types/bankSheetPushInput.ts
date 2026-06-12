@@ -8,5 +8,6 @@
 
 export interface BankSheetPushInput {
   sheetId: string;
+  sheetName?: string;
   statusFilter?: string[];
 }

@@ -26,7 +26,7 @@ router.post("/bank-reconciliation/sheets/connect", adminMiddleware, async (req, 
       return;
     }
     const info = await verifySheetAccess(sheetId);
-    res.json({ ok: true, title: info.title });
+    res.json({ ok: true, title: info.title, sheetNames: info.sheetNames });
   } catch (err: any) {
     req.log.error({ err }, "Bank recon sheets connect error");
     res.status(400).json({ error: err?.message ?? "Tidak dapat mengakses sheet. Pastikan Service Account memiliki akses editor." });
@@ -37,13 +37,13 @@ router.post("/bank-reconciliation/sheets/connect", adminMiddleware, async (req, 
 // Tarik mutasi dari Google Sheet dan import ke DB
 router.post("/bank-reconciliation/sheets/pull", adminMiddleware, async (req, res) => {
   try {
-    const { sheetId } = req.body;
+    const { sheetId, sheetName } = req.body;
     if (!sheetId || typeof sheetId !== "string") {
       res.status(400).json({ error: "sheetId wajib diisi" });
       return;
     }
 
-    const rows = await pullMutationsFromSheet(sheetId);
+    const rows = await pullMutationsFromSheet(sheetId, sheetName ?? undefined);
     if (!rows.length) {
       res.json({ ok: true, importedCount: 0, skippedCount: 0 });
       return;
@@ -107,7 +107,7 @@ router.post("/bank-reconciliation/sheets/pull", adminMiddleware, async (req, res
 // Push hasil rekonsiliasi ke Google Sheet
 router.post("/bank-reconciliation/sheets/push", adminMiddleware, async (req, res) => {
   try {
-    const { sheetId, statusFilter } = req.body as { sheetId: string; statusFilter?: string[] };
+    const { sheetId, sheetName, statusFilter } = req.body as { sheetId: string; sheetName?: string; statusFilter?: string[] };
     if (!sheetId || typeof sheetId !== "string") {
       res.status(400).json({ error: "sheetId wajib diisi" });
       return;
@@ -135,7 +135,7 @@ router.post("/bank-reconciliation/sheets/push", adminMiddleware, async (req, res
       providerName: m.providerName,
       bankAccountId: m.bankAccountId,
       createdAt: m.createdAt,
-    })));
+    })), sheetName ?? undefined);
 
     res.json({ ok: true, updatedRows: result.updatedRows });
   } catch (err: any) {

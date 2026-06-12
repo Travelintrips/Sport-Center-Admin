@@ -9,4 +9,5 @@
 export interface SheetConnectResult {
   ok: boolean;
   title: string;
+  sheetNames: string[];
 }

@@ -876,7 +876,8 @@ export const ConnectCustomerSheetBody = zod.object({
 
 export const ConnectCustomerSheetResponse = zod.object({
   "ok": zod.boolean(),
-  "title": zod.string()
+  "title": zod.string(),
+  "sheetNames": zod.array(zod.string())
 })
 
 
@@ -884,7 +885,8 @@ export const ConnectCustomerSheetResponse = zod.object({
  * @summary Export all customers to Google Sheet
  */
 export const PushCustomersToSheetBody = zod.object({
-  "sheetId": zod.string()
+  "sheetId": zod.string(),
+  "sheetName": zod.string().optional()
 })
 
 export const PushCustomersToSheetResponse = zod.object({
@@ -897,7 +899,8 @@ export const PushCustomersToSheetResponse = zod.object({
  * @summary Import customer updates from Google Sheet to DB
  */
 export const PullCustomersFromSheetBody = zod.object({
-  "sheetId": zod.string()
+  "sheetId": zod.string(),
+  "sheetName": zod.string().optional()
 })
 
 export const PullCustomersFromSheetResponse = zod.object({
@@ -2498,7 +2501,8 @@ export const ConnectBankReconSheetBody = zod.object({
 
 export const ConnectBankReconSheetResponse = zod.object({
   "ok": zod.boolean(),
-  "title": zod.string()
+  "title": zod.string(),
+  "sheetNames": zod.array(zod.string())
 })
 
 
@@ -2521,6 +2525,7 @@ export const PullBankMutationsFromSheetResponse = zod.object({
  */
 export const PushBankReconToSheetBody = zod.object({
   "sheetId": zod.string(),
+  "sheetName": zod.string().optional(),
   "statusFilter": zod.array(zod.string()).optional()
 })
 
