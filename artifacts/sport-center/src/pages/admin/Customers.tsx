@@ -2,6 +2,7 @@ import { useState } from "react";
 import {
   useListCustomers, useGetCustomer, useListBookings,
   useCreateCustomer, useUpdateCustomer,
+  useConnectCustomerSheet, usePushCustomersToSheet, usePullCustomersFromSheet,
 } from "@workspace/api-client-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
@@ -13,7 +14,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Search, Eye, MessageCircle, Globe, Building2, Plus, Pencil, Users } from "lucide-react";
+import { Search, Eye, MessageCircle, Globe, Building2, Plus, Pencil, Users, Sheet, Upload, Download, CheckCircle2, AlertCircle, Link, ChevronDown, ChevronUp } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { getListCustomersQueryKey } from "@workspace/api-client-react";
 import { getToken } from "@/lib/auth";
@@ -526,6 +527,168 @@ function GuestDetailDialog({ guest, onClose }: { guest: any; onClose: () => void
         </div>
       </div>
     </DialogContent>
+function extractSheetId(input: string): string {
+  const m = input.match(/\/spreadsheets\/d\/([\w-]+)/);
+  return m ? m[1] : input.trim();
+}
+
+function SheetSyncPanel() {
+  const { toast } = useToast();
+  const [expanded, setExpanded] = useState(true);
+  const [rawInput, setRawInput] = useState("");
+  const [connectedSheet, setConnectedSheet] = useState<{ id: string; title: string } | null>(null);
+  const [lastSync, setLastSync] = useState<{ direction: "push" | "pull"; result: string; at: Date } | null>(null);
+
+  const connectMutation = useConnectCustomerSheet({
+    mutation: {
+      onSuccess: (data) => {
+        const id = extractSheetId(rawInput);
+        setConnectedSheet({ id, title: data.title });
+        toast({ title: `Terhubung ke "${data.title}"` });
+      },
+      onError: (err: any) => {
+        toast({ title: err?.response?.data?.error ?? "Gagal terhubung ke sheet", variant: "destructive" });
+      },
+    },
+  });
+
+  const pushMutation = usePushCustomersToSheet({
+    mutation: {
+      onSuccess: (data) => {
+        setLastSync({ direction: "push", result: `${data.updatedRows} customer diekspor`, at: new Date() });
+        toast({ title: `✅ ${data.updatedRows} customer berhasil dikirim ke Google Sheet` });
+      },
+      onError: (err: any) => {
+        toast({ title: err?.response?.data?.error ?? "Gagal export ke sheet", variant: "destructive" });
+      },
+    },
+  });
+
+  const pullMutation = usePullCustomersFromSheet({
+    mutation: {
+      onSuccess: (data) => {
+        setLastSync({ direction: "pull", result: `${data.updatedCount} diperbarui, ${data.skippedCount} dilewati`, at: new Date() });
+        toast({ title: `✅ ${data.updatedCount} customer diperbarui dari Google Sheet` });
+      },
+      onError: (err: any) => {
+        toast({ title: err?.response?.data?.error ?? "Gagal import dari sheet", variant: "destructive" });
+      },
+    },
+  });
+
+  const isBusy = connectMutation.isPending || pushMutation.isPending || pullMutation.isPending;
+
+  return (
+    <Card className="border-green-200 bg-green-50/30">
+      <CardContent className="p-4">
+        <button
+          className="w-full flex items-center justify-between gap-3 text-left"
+          onClick={() => setExpanded((v) => !v)}
+        >
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-lg bg-green-100 flex items-center justify-center shrink-0">
+              <Sheet size={16} className="text-green-700" />
+            </div>
+            <div>
+              <div className="font-semibold text-sm">Sinkronisasi Google Sheets</div>
+              <div className="text-xs text-muted-foreground">
+                {connectedSheet
+                  ? <span className="text-green-700 flex items-center gap-1"><CheckCircle2 size={10} /> {connectedSheet.title}</span>
+                  : "Hubungkan spreadsheet untuk sync dua arah"}
+              </div>
+            </div>
+          </div>
+          {expanded ? <ChevronUp size={16} className="text-muted-foreground shrink-0" /> : <ChevronDown size={16} className="text-muted-foreground shrink-0" />}
+        </button>
+
+        {expanded && (
+          <div className="mt-4 space-y-4 border-t pt-4">
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Google Sheet ID atau URL</Label>
+              <div className="flex gap-2">
+                <Input
+                  placeholder="https://docs.google.com/spreadsheets/d/... atau Sheet ID"
+                  value={rawInput}
+                  onChange={(e) => setRawInput(e.target.value)}
+                  className="flex-1 text-sm"
+                  disabled={isBusy}
+                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5 shrink-0"
+                  disabled={!rawInput.trim() || isBusy}
+                  onClick={() => connectMutation.mutate({ data: { sheetId: extractSheetId(rawInput) } })}
+                >
+                  <Link size={14} />
+                  {connectMutation.isPending ? "Mengecek..." : "Hubungkan"}
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Pastikan <strong>Service Account</strong> sudah diberi akses <em>Editor</em> di spreadsheet tersebut.
+              </p>
+            </div>
+
+            {connectedSheet && (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 p-3 rounded-lg bg-green-100/60 border border-green-200 text-sm">
+                  <CheckCircle2 size={14} className="text-green-600 shrink-0" />
+                  <span className="font-medium text-green-800">Terhubung ke: {connectedSheet.title}</span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    className="flex flex-col items-center gap-2 p-4 rounded-xl border-2 border-orange-200 bg-orange-50 hover:bg-orange-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={isBusy}
+                    onClick={() => pushMutation.mutate({ data: { sheetId: connectedSheet.id } })}
+                  >
+                    <div className="w-9 h-9 rounded-full bg-orange-500 flex items-center justify-center">
+                      <Upload size={16} className="text-white" />
+                    </div>
+                    <div className="text-center">
+                      <div className="font-semibold text-sm text-orange-800">Export ke Sheet</div>
+                      <div className="text-xs text-orange-600 mt-0.5">App → Google Sheet</div>
+                    </div>
+                    {pushMutation.isPending && <div className="text-xs text-orange-600 animate-pulse">Mengekspor...</div>}
+                  </button>
+
+                  <button
+                    className="flex flex-col items-center gap-2 p-4 rounded-xl border-2 border-blue-200 bg-blue-50 hover:bg-blue-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={isBusy}
+                    onClick={() => pullMutation.mutate({ data: { sheetId: connectedSheet.id } })}
+                  >
+                    <div className="w-9 h-9 rounded-full bg-blue-500 flex items-center justify-center">
+                      <Download size={16} className="text-white" />
+                    </div>
+                    <div className="text-center">
+                      <div className="font-semibold text-sm text-blue-800">Import dari Sheet</div>
+                      <div className="text-xs text-blue-600 mt-0.5">Google Sheet → App</div>
+                    </div>
+                    {pullMutation.isPending && <div className="text-xs text-blue-600 animate-pulse">Mengimpor...</div>}
+                  </button>
+                </div>
+
+                {lastSync && (
+                  <div className="flex items-center gap-2 p-2.5 rounded-lg bg-muted/50 text-xs text-muted-foreground">
+                    <CheckCircle2 size={12} className="text-green-500 shrink-0" />
+                    <span>
+                      Terakhir {lastSync.direction === "push" ? "export" : "import"}: <strong>{lastSync.result}</strong>
+                      {" · "}{lastSync.at.toLocaleTimeString("id-ID")}
+                    </span>
+                  </div>
+                )}
+
+                <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-700 space-y-1">
+                  <div className="font-semibold flex items-center gap-1"><AlertCircle size={11} /> Catatan</div>
+                  <div>• <strong>Export</strong>: Menimpa seluruh isi sheet dengan data terbaru dari app.</div>
+                  <div>• <strong>Import</strong>: Memperbarui data customer berdasarkan kolom <strong>ID</strong>. Kolom Kode Customer, Total Booking, dan Total Belanja diabaikan.</div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -587,6 +750,8 @@ export default function AdminCustomers() {
           )}
         </div>
       </div>
+
+      <SheetSyncPanel />
 
       <Card>
         <CardContent className="p-4">

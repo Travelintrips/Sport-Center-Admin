@@ -94,6 +94,11 @@ import type {
   SendOtpInput,
   Settings,
   SettingsUpdate,
+  SheetConnectInput,
+  SheetConnectResult,
+  SheetPullResult,
+  SheetPushResult,
+  SheetSyncInput,
   TaxReport,
   Tenant,
   TenantBooking,
@@ -2878,6 +2883,219 @@ export const useCreateCustomer = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getCreateCustomerMutationOptions(options));
+    }
+
+export const getConnectCustomerSheetUrl = () => {
+
+
+
+
+  return `/api/customers/sheets/connect`
+}
+
+/**
+ * @summary Verify Google Sheet access
+ */
+export const connectCustomerSheet = async (sheetConnectInput: SheetConnectInput, options?: RequestInit): Promise<SheetConnectResult> => {
+
+  return customFetch<SheetConnectResult>(getConnectCustomerSheetUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      sheetConnectInput,)
+  }
+);}
+
+
+
+
+export const getConnectCustomerSheetMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof connectCustomerSheet>>, TError,{data: BodyType<SheetConnectInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof connectCustomerSheet>>, TError,{data: BodyType<SheetConnectInput>}, TContext> => {
+
+const mutationKey = ['connectCustomerSheet'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof connectCustomerSheet>>, {data: BodyType<SheetConnectInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  connectCustomerSheet(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ConnectCustomerSheetMutationResult = NonNullable<Awaited<ReturnType<typeof connectCustomerSheet>>>
+    export type ConnectCustomerSheetMutationBody = BodyType<SheetConnectInput>
+    export type ConnectCustomerSheetMutationError = ErrorType<void>
+
+    /**
+ * @summary Verify Google Sheet access
+ */
+export const useConnectCustomerSheet = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof connectCustomerSheet>>, TError,{data: BodyType<SheetConnectInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof connectCustomerSheet>>,
+        TError,
+        {data: BodyType<SheetConnectInput>},
+        TContext
+      > => {
+      return useMutation(getConnectCustomerSheetMutationOptions(options));
+    }
+
+export const getPushCustomersToSheetUrl = () => {
+
+
+
+
+  return `/api/customers/sheets/push`
+}
+
+/**
+ * @summary Export all customers to Google Sheet
+ */
+export const pushCustomersToSheet = async (sheetSyncInput: SheetSyncInput, options?: RequestInit): Promise<SheetPushResult> => {
+
+  return customFetch<SheetPushResult>(getPushCustomersToSheetUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      sheetSyncInput,)
+  }
+);}
+
+
+
+
+export const getPushCustomersToSheetMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof pushCustomersToSheet>>, TError,{data: BodyType<SheetSyncInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof pushCustomersToSheet>>, TError,{data: BodyType<SheetSyncInput>}, TContext> => {
+
+const mutationKey = ['pushCustomersToSheet'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof pushCustomersToSheet>>, {data: BodyType<SheetSyncInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  pushCustomersToSheet(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PushCustomersToSheetMutationResult = NonNullable<Awaited<ReturnType<typeof pushCustomersToSheet>>>
+    export type PushCustomersToSheetMutationBody = BodyType<SheetSyncInput>
+    export type PushCustomersToSheetMutationError = ErrorType<void>
+
+    /**
+ * @summary Export all customers to Google Sheet
+ */
+export const usePushCustomersToSheet = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof pushCustomersToSheet>>, TError,{data: BodyType<SheetSyncInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof pushCustomersToSheet>>,
+        TError,
+        {data: BodyType<SheetSyncInput>},
+        TContext
+      > => {
+      return useMutation(getPushCustomersToSheetMutationOptions(options));
+    }
+
+export const getPullCustomersFromSheetUrl = () => {
+
+
+
+
+  return `/api/customers/sheets/pull`
+}
+
+/**
+ * @summary Import customer updates from Google Sheet to DB
+ */
+export const pullCustomersFromSheet = async (sheetSyncInput: SheetSyncInput, options?: RequestInit): Promise<SheetPullResult> => {
+
+  return customFetch<SheetPullResult>(getPullCustomersFromSheetUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      sheetSyncInput,)
+  }
+);}
+
+
+
+
+export const getPullCustomersFromSheetMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof pullCustomersFromSheet>>, TError,{data: BodyType<SheetSyncInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof pullCustomersFromSheet>>, TError,{data: BodyType<SheetSyncInput>}, TContext> => {
+
+const mutationKey = ['pullCustomersFromSheet'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof pullCustomersFromSheet>>, {data: BodyType<SheetSyncInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  pullCustomersFromSheet(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PullCustomersFromSheetMutationResult = NonNullable<Awaited<ReturnType<typeof pullCustomersFromSheet>>>
+    export type PullCustomersFromSheetMutationBody = BodyType<SheetSyncInput>
+    export type PullCustomersFromSheetMutationError = ErrorType<void>
+
+    /**
+ * @summary Import customer updates from Google Sheet to DB
+ */
+export const usePullCustomersFromSheet = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof pullCustomersFromSheet>>, TError,{data: BodyType<SheetSyncInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof pullCustomersFromSheet>>,
+        TError,
+        {data: BodyType<SheetSyncInput>},
+        TContext
+      > => {
+      return useMutation(getPullCustomersFromSheetMutationOptions(options));
     }
 
 export const getGetCustomerUrl = (id: number,) => {

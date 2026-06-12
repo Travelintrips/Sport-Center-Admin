@@ -788,6 +788,69 @@ paths:
         "409":
           description: Email already exists
 
+  /customers/sheets/connect:
+    post:
+      operationId: connectCustomerSheet
+      tags: [customers]
+      summary: Verify Google Sheet access
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SheetConnectInput"
+      responses:
+        "200":
+          description: Sheet accessible
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SheetConnectResult"
+        "400":
+          description: Sheet not accessible or invalid
+
+  /customers/sheets/push:
+    post:
+      operationId: pushCustomersToSheet
+      tags: [customers]
+      summary: Export all customers to Google Sheet
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SheetSyncInput"
+      responses:
+        "200":
+          description: Push result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SheetPushResult"
+        "400":
+          description: Sheet error
+
+  /customers/sheets/pull:
+    post:
+      operationId: pullCustomersFromSheet
+      tags: [customers]
+      summary: Import customer updates from Google Sheet to DB
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SheetSyncInput"
+      responses:
+        "200":
+          description: Pull result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SheetPullResult"
+        "400":
+          description: Sheet error
+
   /customers/{id}:
     get:
       operationId: getCustomer
@@ -3435,6 +3498,49 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/TaxTransaction"
+
+    SheetConnectInput:
+      type: object
+      required: [sheetId]
+      properties:
+        sheetId:
+          type: string
+
+    SheetConnectResult:
+      type: object
+      required: [ok, title]
+      properties:
+        ok:
+          type: boolean
+        title:
+          type: string
+
+    SheetSyncInput:
+      type: object
+      required: [sheetId]
+      properties:
+        sheetId:
+          type: string
+
+    SheetPushResult:
+      type: object
+      required: [ok, updatedRows]
+      properties:
+        ok:
+          type: boolean
+        updatedRows:
+          type: integer
+
+    SheetPullResult:
+      type: object
+      required: [ok, updatedCount, skippedCount]
+      properties:
+        ok:
+          type: boolean
+        updatedCount:
+          type: integer
+        skippedCount:
+          type: integer
 
     ErrorEnvelope:
       type: object
