@@ -536,24 +536,56 @@ export default function AdminCustomers() {
   const [selectedGuest, setSelectedGuest] = useState<any>(null);
   const [showForm, setShowForm] = useState(false);
   const [editCustomer, setEditCustomer] = useState<any>(null);
+  const [migrating, setMigrating] = useState(false);
+  const { toast } = useToast();
+  const qc = useQueryClient();
 
   const { data: customers, isLoading } = useListCustomers({
     search: search || undefined,
     accountType: tab as "personal" | "company",
   });
 
+  const handleMigrateAll = async () => {
+    setMigrating(true);
+    try {
+      const token = getToken();
+      const r = await fetch("/api/customers/migrate-all-guests", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await r.json();
+      if (!r.ok) { toast({ title: data.error ?? "Gagal migrasi", variant: "destructive" }); return; }
+      toast({
+        title: `Sinkronisasi selesai`,
+        description: `${data.created} akun baru dibuat · ${data.linked} booking dihubungkan · ${data.skipped} dilewati`,
+      });
+      qc.invalidateQueries({ queryKey: getListCustomersQueryKey() });
+    } catch {
+      toast({ title: "Gagal melakukan sinkronisasi", variant: "destructive" });
+    } finally {
+      setMigrating(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-black">Customers</h1>
           <p className="text-muted-foreground">Kelola daftar customer terdaftar</p>
         </div>
-        {tab === "company" && (
-          <Button onClick={() => { setEditCustomer(null); setShowForm(true); }} className="gap-2">
-            <Plus size={16} /> Tambah Perusahaan
-          </Button>
-        )}
+        <div className="flex gap-2">
+          {tab === "personal" && (
+            <Button variant="outline" onClick={handleMigrateAll} disabled={migrating} className="gap-2">
+              <Users size={16} /> {migrating ? "Memproses..." : "Sinkronisasi Guest → Akun"}
+            </Button>
+          )}
+          {tab === "company" && (
+            <Button onClick={() => { setEditCustomer(null); setShowForm(true); }} className="gap-2">
+              <Plus size={16} /> Tambah Perusahaan
+            </Button>
+          )}
+        </div>
       </div>
 
       <Card>

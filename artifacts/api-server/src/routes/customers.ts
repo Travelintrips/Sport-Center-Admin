@@ -1,8 +1,9 @@
 import { Router } from "express";
 import { db, usersTable, bookingsTable } from "@workspace/db";
-import { eq, or, ilike } from "drizzle-orm";
+import { eq, or, ilike, isNull, desc } from "drizzle-orm";
 import { adminMiddleware, authMiddleware } from "../lib/auth";
 import { createHmac } from "crypto";
+import { normalizePhone } from "./bookings";
 
 const router = Router();
 
@@ -190,6 +191,91 @@ router.post("/customers", adminMiddleware, async (req, res) => {
     res.status(201).json({ ...mapUser(user, []), tempPassword: randomPassword });
   } catch (err) {
     req.log.error({ err }, "Create customer error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Migrasi SEMUA booking lama (tanpa customerId) → buat akun customer otomatis
+router.post("/customers/migrate-all-guests", adminMiddleware, async (req, res) => {
+  try {
+    const sessionSecret = process.env.SESSION_SECRET ?? "";
+    const allBookings = await db.select().from(bookingsTable).where(isNull(bookingsTable.customerId));
+    const allUsers = await db.select({ id: usersTable.id, email: usersTable.email, phone: usersTable.phone }).from(usersTable);
+
+    const registeredEmails = new Map(allUsers.filter(u => u.email).map(u => [u.email!, u.id]));
+    const registeredPhones = new Map(allUsers.filter(u => u.phone).map(u => [u.phone!, u.id]));
+
+    // Group by phone (primary) atau email (fallback)
+    const groups = new Map<string, typeof allBookings>();
+    for (const b of allBookings) {
+      const phone = b.customerPhone ? normalizePhone(b.customerPhone) : null;
+      const key = phone ?? b.customerEmail;
+      if (!key) continue;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(b);
+    }
+
+    let created = 0, linked = 0, skipped = 0;
+
+    for (const [key, bookings] of groups) {
+      // Ambil data dari booking terbaru
+      const latest = bookings.sort((a, b) => new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime())[0];
+      const phone = latest.customerPhone ? normalizePhone(latest.customerPhone) : null;
+      const email = latest.customerEmail || null;
+
+      // Cari user yang sudah ada by phone atau email
+      let existingId = (phone && registeredPhones.get(phone)) ?? (email && registeredEmails.get(email)) ?? null;
+
+      if (existingId) {
+        // Link semua booking ke user yang sudah ada
+        for (const b of bookings) {
+          await db.update(bookingsTable).set({ customerId: existingId }).where(eq(bookingsTable.id, b.id));
+        }
+        linked += bookings.length;
+      } else {
+        // Buat user baru
+        try {
+          // Hitung code customer
+          const allCodes = await db.select({ code: usersTable.customerCode }).from(usersTable);
+          let max = 0;
+          for (const r of allCodes) {
+            const m = (r.code ?? "").match(/^C(\d+)$/);
+            if (m) { const n = parseInt(m[1]); if (n > max) max = n; }
+          }
+          const code = `C${String(max + 1).padStart(5, "0")}`;
+
+          const randomPwd = Math.random().toString(36).slice(2, 10);
+          const passwordHash = createHmac("sha256", sessionSecret).update(randomPwd).digest("hex");
+
+          const [newUser] = await db.insert(usersTable).values({
+            name: latest.customerName,
+            email: email ?? null,
+            phone: phone ?? null,
+            passwordHash,
+            role: "customer",
+            accountType: "personal",
+            accountStatus: "active",
+            registrationSource: "booking_form",
+            customerCode: code,
+          }).returning();
+
+          // Update registeredPhones/Emails agar group berikutnya tidak duplikat
+          if (phone) registeredPhones.set(phone, newUser.id);
+          if (email) registeredEmails.set(email, newUser.id);
+
+          for (const b of bookings) {
+            await db.update(bookingsTable).set({ customerId: newUser.id }).where(eq(bookingsTable.id, b.id));
+          }
+          created++;
+        } catch {
+          skipped++;
+        }
+      }
+    }
+
+    res.json({ created, linked, skipped, total: groups.size });
+  } catch (err) {
+    req.log.error({ err }, "Migrate all guests error");
     res.status(500).json({ error: "Internal server error" });
   }
 });

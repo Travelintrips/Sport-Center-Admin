@@ -323,10 +323,18 @@ router.post("/bookings", async (req, res) => {
     const rawPhone = String(customerPhone ?? "").trim();
     const normalizedPhone = rawPhone ? normalizePhone(rawPhone) : null;
 
-    if (normalizedPhone && customerName && !booking.customerId) {
+    if (customerName && !booking.customerId) {
       try {
-        const [existingUser] = await db.select().from(usersTable)
-          .where(eq(usersTable.phone, normalizedPhone)).limit(1);
+        // Cari existing user by phone atau by email
+        let existingUser: typeof usersTable.$inferSelect | undefined;
+        if (normalizedPhone) {
+          [existingUser] = await db.select().from(usersTable)
+            .where(eq(usersTable.phone, normalizedPhone)).limit(1);
+        }
+        if (!existingUser && customerEmail) {
+          [existingUser] = await db.select().from(usersTable)
+            .where(eq(usersTable.email, String(customerEmail))).limit(1);
+        }
 
         if (existingUser) {
           await db.update(bookingsTable).set({ customerId: existingUser.id }).where(eq(bookingsTable.id, booking.id));
@@ -337,7 +345,7 @@ router.post("/bookings", async (req, res) => {
           const code = await generateCustomerCode();
           const [newUser] = await db.insert(usersTable).values({
             name: String(customerName),
-            phone: normalizedPhone,
+            phone: normalizedPhone ?? null,
             email: customerEmail ? String(customerEmail) : null,
             role: "customer",
             accountType: "personal",
@@ -350,8 +358,8 @@ router.post("/bookings", async (req, res) => {
           customerAutoCreated = true;
           logAudit({ action: "CUSTOMER_AUTO_CREATED_FROM_BOOKING", entity: "user", entityId: newUser.id, after: { name: customerName, phone: normalizedPhone, email: customerEmail }, ...getClientInfo(req) });
         }
-      } catch {
-        // Non-critical — booking already saved
+      } catch (autoErr) {
+        req.log.warn({ autoErr }, "Auto-create customer failed (non-critical)");
       }
     }
 
