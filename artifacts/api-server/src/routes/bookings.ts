@@ -148,36 +148,58 @@ router.post("/bookings", async (req, res) => {
     // Prioritas 3: loggedInUser sendiri adalah company customer (dari token customer)
     // Prioritas 4: logged-in customer memilih company billing via verifikasi karyawan
     let companyBillingUser: (typeof usersTable.$inferSelect) | null = null;
-    const explicitCompanyId = isAdminRequest && req.body.companyCustomerId ? Number(req.body.companyCustomerId) : null;
+    // Pending: ada company_users link tapi belum approved/enabled → waiting_confirmation
+    let pendingCompanyUser: (typeof usersTable.$inferSelect) | null = null;
+    // Admin mengirim companyCustomerId dari form Perusahaan (non-admin pun bisa kirim untuk Prioritas 4)
+    const explicitCompanyId = req.body.companyCustomerId ? Number(req.body.companyCustomerId) : null;
     const bodyCustomerId = isAdminRequest && req.body.customerId ? Number(req.body.customerId) : null;
-    if (explicitCompanyId) {
+    if (explicitCompanyId && isAdminRequest) {
       const [cu] = await db.select().from(usersTable).where(eq(usersTable.id, explicitCompanyId)).limit(1);
-      if (cu?.accountType === "company" && cu?.allowMonthlyBilling) companyBillingUser = cu;
+      if (cu?.accountType === "company") {
+        if (cu.allowMonthlyBilling) {
+          companyBillingUser = cu;
+        } else {
+          // Perusahaan terdaftar tapi billing belum diaktifkan → pending
+          pendingCompanyUser = cu;
+        }
+      }
     } else if (bodyCustomerId && !explicitCompanyId) {
       // Admin membooking atas nama user perusahaan — infer dari customerId
       const [cu] = await db.select().from(usersTable).where(eq(usersTable.id, bodyCustomerId)).limit(1);
       if (cu?.accountType === "company" && cu?.allowMonthlyBilling) companyBillingUser = cu;
     } else if (loggedInUser?.accountType === "company" && loggedInUser?.allowMonthlyBilling) {
       companyBillingUser = loggedInUser;
-    } else if (!isAdminRequest && loggedInUserId && req.body.payerType === "company" && req.body.companyCustomerId) {
+    } else if (!isAdminRequest && loggedInUserId && req.body.payerType === "company" && explicitCompanyId) {
       // Prioritas 4: customer yang sudah diverifikasi sebagai karyawan memilih tagih ke perusahaan
-      const requestedCompanyId = Number(req.body.companyCustomerId);
       const [companyUserRecord] = await db.select().from(companyUsersTable)
         .where(and(
           eq(companyUsersTable.customerId, loggedInUserId),
-          eq(companyUsersTable.companyId, requestedCompanyId),
+          eq(companyUsersTable.companyId, explicitCompanyId),
           eq(companyUsersTable.verificationStatus, "approved"),
           eq(companyUsersTable.corporateBillingEnabled, true),
         ))
         .limit(1);
       if (companyUserRecord) {
         const [companyAccount] = await db.select().from(usersTable)
-          .where(eq(usersTable.id, requestedCompanyId)).limit(1);
+          .where(eq(usersTable.id, explicitCompanyId)).limit(1);
         if (companyAccount) companyBillingUser = companyAccount;
+      } else {
+        // Ada company_users link tapi pending atau billing belum aktif
+        const [pendingRecord] = await db.select().from(companyUsersTable)
+          .where(and(
+            eq(companyUsersTable.customerId, loggedInUserId),
+            eq(companyUsersTable.companyId, explicitCompanyId),
+          )).limit(1);
+        if (pendingRecord) {
+          const [companyAccount] = await db.select().from(usersTable)
+            .where(eq(usersTable.id, explicitCompanyId)).limit(1);
+          if (companyAccount) pendingCompanyUser = companyAccount;
+        }
       }
     }
     const isCompanyBilling = !!companyBillingUser;
-    const effectiveCompanyCustomerId = companyBillingUser?.id ?? null;
+    const isPendingCompany = !isCompanyBilling && !!pendingCompanyUser;
+    const effectiveCompanyCustomerId = companyBillingUser?.id ?? pendingCompanyUser?.id ?? null;
     const activityType = req.body.activityType || null;
     const numberOfPeople = req.body.numberOfPeople ? Number(req.body.numberOfPeople) : null;
     const idCardNumber = String(req.body?.idCardNumber || "").trim().toUpperCase() || null;
@@ -280,14 +302,15 @@ router.post("/bookings", async (req, res) => {
       numberOfPeople,
       notes,
       // Company billing: auto-confirm, no immediate payment required
-      status: isCompanyBilling ? "confirmed" : "pending_payment",
-      payerType: isCompanyBilling ? "company" : "personal",
+      // Pending company: waiting_confirmation (menunggu verifikasi admin perusahaan)
+      status: isCompanyBilling ? "confirmed" : (isPendingCompany ? "waiting_confirmation" : "pending_payment"),
+      payerType: (isCompanyBilling || isPendingCompany) ? "company" : "personal",
       companyCustomerId: effectiveCompanyCustomerId,
-      paymentRequiredNow: !isCompanyBilling,
+      paymentRequiredNow: !isCompanyBilling && !isPendingCompany,
       billingStatus: isCompanyBilling ? "unbilled" : null,
-      paymentDeadline: isCompanyBilling ? null : new Date(Date.now() + 30 * 60 * 1000),
-      bookedForName: isCompanyBilling ? (req.body.bookedForName?.trim() || customerName) : null,
-      bookedForPhone: isCompanyBilling ? (req.body.bookedForPhone?.trim() || customerPhone) : null,
+      paymentDeadline: (isCompanyBilling || isPendingCompany) ? null : new Date(Date.now() + 30 * 60 * 1000),
+      bookedForName: (isCompanyBilling || isPendingCompany) ? (req.body.bookedForName?.trim() || customerName) : null,
+      bookedForPhone: (isCompanyBilling || isPendingCompany) ? (req.body.bookedForPhone?.trim() || customerPhone) : null,
       ppnRate: taxCalc.taxRate > 0 ? String(taxCalc.taxRate) : null,
       ppnAmount: taxCalc.taxAmount > 0 ? String(taxCalc.taxAmount) : null,
       grandTotal: taxCalc.taxAmount > 0 ? String(taxCalc.grandTotal) : null,

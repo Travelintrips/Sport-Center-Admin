@@ -11,11 +11,22 @@ const APP_URL = process.env.APP_URL ?? "";
 // ─── GET /companies — public: list all company accounts ──────────────────────
 router.get("/companies", async (req, res) => {
   try {
-    const companies = await db.select({
+    const { status } = req.query;
+    let query = db.select({
       id: usersTable.id,
       name: usersTable.name,
       companyName: usersTable.companyName,
-    }).from(usersTable).where(eq(usersTable.accountType, "company"));
+      allowMonthlyBilling: usersTable.allowMonthlyBilling,
+      picName: usersTable.picName,
+      picPhone: usersTable.picPhone,
+      picEmail: usersTable.picEmail,
+      accountStatus: usersTable.accountStatus,
+    }).from(usersTable).where(
+      status === "active"
+        ? and(eq(usersTable.accountType, "company"), eq(usersTable.accountStatus, "active"))
+        : eq(usersTable.accountType, "company")
+    );
+    const companies = await query;
     res.json(companies);
   } catch (err) {
     req.log.error({ err }, "List companies error");
