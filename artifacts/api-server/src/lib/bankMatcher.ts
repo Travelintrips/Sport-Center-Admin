@@ -76,7 +76,6 @@ export async function computeMatchesForMutation(mutation: BankMutation): Promise
       bookingDate: bookingsTable.bookingDate,
       totalPrice: bookingsTable.totalPrice,
       status: bookingsTable.status,
-      paymentGatewayRef: bookingsTable.paymentGatewayRef,
       updatedAt: sql<string>`${bookingsTable.updatedAt}`.as("updated_at"),
     })
     .from(bookingsTable);
@@ -145,10 +144,8 @@ export async function computeMatchesForMutation(mutation: BankMutation): Promise
 
     // GoPay / provider order ID match (30 pts)
     if (providerOrderId) {
-      const gatewayRef = booking.paymentGatewayRef ?? "";
       const orderNum = booking.orderNumber ?? "";
       if (
-        gatewayRef.toUpperCase() === providerOrderId.toUpperCase() ||
         orderNum.toUpperCase() === providerOrderId.toUpperCase() ||
         normDesc.includes(providerOrderId.toLowerCase())
       ) {
