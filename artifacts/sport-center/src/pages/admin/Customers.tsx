@@ -20,9 +20,6 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
-import { Search, Eye, MessageCircle, Globe, Building2, Plus, Pencil, Users, Copy, Check } from "lucide-react";
-import { Search, Eye, MessageCircle, Globe, Building2, Plus, Pencil, Users, Sheet, Upload, Download, CheckCircle2, AlertCircle, Link, ChevronDown, ChevronUp } from "lucide-react";
-
 import { useToast } from "@/hooks/use-toast";
 import { getListCustomersQueryKey } from "@workspace/api-client-react";
 import { getToken } from "@/lib/auth";
@@ -903,19 +900,6 @@ export default function AdminCustomers() {
           />
         )}
       </Dialog>
-        <div className="flex gap-2">
-          {tab === "personal" && (
-            <Button variant="outline" onClick={handleMigrateAll} disabled={migrating} className="gap-2">
-              <Users size={16} /> {migrating ? "Memproses..." : "Sinkronisasi Guest → Akun"}
-            </Button>
-          )}
-          {tab === "company" && (
-            <Button onClick={() => { setEditCustomer(null); setShowForm(true); }} className="gap-2">
-              <Plus size={16} /> Tambah Perusahaan
-            </Button>
-          )}
-        </div>
-      </div>
 
       <SheetSyncPanel />
 
