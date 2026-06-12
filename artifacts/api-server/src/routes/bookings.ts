@@ -62,12 +62,13 @@ async function getBookingWithPayment(id: number) {
 
 router.get("/bookings", adminMiddleware, async (req, res) => {
   try {
-    const { status, date, facilityId, customerId } = req.query;
+    const { status, date, facilityId, customerId, customerPhone } = req.query;
     let bookings = await db.select().from(bookingsTable).orderBy(desc(bookingsTable.createdAt));
     if (status) bookings = bookings.filter((b) => b.status === status);
     if (date) bookings = bookings.filter((b) => b.bookingDate === date);
     if (facilityId) bookings = bookings.filter((b) => b.facilityId === Number(facilityId));
     if (customerId) bookings = bookings.filter((b) => b.customerId === Number(customerId));
+    if (customerPhone) bookings = bookings.filter((b) => b.customerPhone === String(customerPhone));
 
     const facilityIds = [...new Set(bookings.map((b) => b.facilityId))];
     const facilities = facilityIds.length > 0
@@ -106,6 +107,23 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
 function timeToMinutesLocal(t: string): number {
   const [h, m] = t.split(":").map(Number);
   return h * 60 + (m || 0);
+}
+
+export function normalizePhone(raw: string): string {
+  let p = String(raw ?? "").replace(/\D/g, "");
+  if (p.startsWith("0")) p = "62" + p.slice(1);
+  else if (!p.startsWith("62")) p = "62" + p;
+  return p;
+}
+
+async function generateCustomerCode(): Promise<string> {
+  const rows = await db.select({ code: usersTable.customerCode }).from(usersTable);
+  let max = 0;
+  for (const row of rows) {
+    const m = (row.code ?? "").match(/^C(\d+)$/);
+    if (m) { const n = parseInt(m[1]); if (n > max) max = n; }
+  }
+  return `C${String(max + 1).padStart(5, "0")}`;
 }
 
 function getTodayWIB(): string {
@@ -148,36 +166,58 @@ router.post("/bookings", async (req, res) => {
     // Prioritas 3: loggedInUser sendiri adalah company customer (dari token customer)
     // Prioritas 4: logged-in customer memilih company billing via verifikasi karyawan
     let companyBillingUser: (typeof usersTable.$inferSelect) | null = null;
-    const explicitCompanyId = isAdminRequest && req.body.companyCustomerId ? Number(req.body.companyCustomerId) : null;
+    // Pending: ada company_users link tapi belum approved/enabled → waiting_confirmation
+    let pendingCompanyUser: (typeof usersTable.$inferSelect) | null = null;
+    // Admin mengirim companyCustomerId dari form Perusahaan (non-admin pun bisa kirim untuk Prioritas 4)
+    const explicitCompanyId = req.body.companyCustomerId ? Number(req.body.companyCustomerId) : null;
     const bodyCustomerId = isAdminRequest && req.body.customerId ? Number(req.body.customerId) : null;
-    if (explicitCompanyId) {
+    if (explicitCompanyId && isAdminRequest) {
       const [cu] = await db.select().from(usersTable).where(eq(usersTable.id, explicitCompanyId)).limit(1);
-      if (cu?.accountType === "company" && cu?.allowMonthlyBilling) companyBillingUser = cu;
+      if (cu?.accountType === "company") {
+        if (cu.allowMonthlyBilling) {
+          companyBillingUser = cu;
+        } else {
+          // Perusahaan terdaftar tapi billing belum diaktifkan → pending
+          pendingCompanyUser = cu;
+        }
+      }
     } else if (bodyCustomerId && !explicitCompanyId) {
       // Admin membooking atas nama user perusahaan — infer dari customerId
       const [cu] = await db.select().from(usersTable).where(eq(usersTable.id, bodyCustomerId)).limit(1);
       if (cu?.accountType === "company" && cu?.allowMonthlyBilling) companyBillingUser = cu;
     } else if (loggedInUser?.accountType === "company" && loggedInUser?.allowMonthlyBilling) {
       companyBillingUser = loggedInUser;
-    } else if (!isAdminRequest && loggedInUserId && req.body.payerType === "company" && req.body.companyCustomerId) {
+    } else if (!isAdminRequest && loggedInUserId && req.body.payerType === "company" && explicitCompanyId) {
       // Prioritas 4: customer yang sudah diverifikasi sebagai karyawan memilih tagih ke perusahaan
-      const requestedCompanyId = Number(req.body.companyCustomerId);
       const [companyUserRecord] = await db.select().from(companyUsersTable)
         .where(and(
           eq(companyUsersTable.customerId, loggedInUserId),
-          eq(companyUsersTable.companyId, requestedCompanyId),
+          eq(companyUsersTable.companyId, explicitCompanyId),
           eq(companyUsersTable.verificationStatus, "approved"),
           eq(companyUsersTable.corporateBillingEnabled, true),
         ))
         .limit(1);
       if (companyUserRecord) {
         const [companyAccount] = await db.select().from(usersTable)
-          .where(eq(usersTable.id, requestedCompanyId)).limit(1);
+          .where(eq(usersTable.id, explicitCompanyId)).limit(1);
         if (companyAccount) companyBillingUser = companyAccount;
+      } else {
+        // Ada company_users link tapi pending atau billing belum aktif
+        const [pendingRecord] = await db.select().from(companyUsersTable)
+          .where(and(
+            eq(companyUsersTable.customerId, loggedInUserId),
+            eq(companyUsersTable.companyId, explicitCompanyId),
+          )).limit(1);
+        if (pendingRecord) {
+          const [companyAccount] = await db.select().from(usersTable)
+            .where(eq(usersTable.id, explicitCompanyId)).limit(1);
+          if (companyAccount) pendingCompanyUser = companyAccount;
+        }
       }
     }
     const isCompanyBilling = !!companyBillingUser;
-    const effectiveCompanyCustomerId = companyBillingUser?.id ?? null;
+    const isPendingCompany = !isCompanyBilling && !!pendingCompanyUser;
+    const effectiveCompanyCustomerId = companyBillingUser?.id ?? pendingCompanyUser?.id ?? null;
     const activityType = req.body.activityType || null;
     const numberOfPeople = req.body.numberOfPeople ? Number(req.body.numberOfPeople) : null;
     const idCardNumber = String(req.body?.idCardNumber || "").trim().toUpperCase() || null;
@@ -280,14 +320,15 @@ router.post("/bookings", async (req, res) => {
       numberOfPeople,
       notes,
       // Company billing: auto-confirm, no immediate payment required
-      status: isCompanyBilling ? "confirmed" : "pending_payment",
-      payerType: isCompanyBilling ? "company" : "personal",
+      // Pending company: waiting_confirmation (menunggu verifikasi admin perusahaan)
+      status: isCompanyBilling ? "confirmed" : (isPendingCompany ? "waiting_confirmation" : "pending_payment"),
+      payerType: (isCompanyBilling || isPendingCompany) ? "company" : "personal",
       companyCustomerId: effectiveCompanyCustomerId,
-      paymentRequiredNow: !isCompanyBilling,
+      paymentRequiredNow: !isCompanyBilling && !isPendingCompany,
       billingStatus: isCompanyBilling ? "unbilled" : null,
-      paymentDeadline: isCompanyBilling ? null : new Date(Date.now() + 30 * 60 * 1000),
-      bookedForName: isCompanyBilling ? (req.body.bookedForName?.trim() || customerName) : null,
-      bookedForPhone: isCompanyBilling ? (req.body.bookedForPhone?.trim() || customerPhone) : null,
+      paymentDeadline: (isCompanyBilling || isPendingCompany) ? null : new Date(Date.now() + 30 * 60 * 1000),
+      bookedForName: (isCompanyBilling || isPendingCompany) ? (req.body.bookedForName?.trim() || customerName) : null,
+      bookedForPhone: (isCompanyBilling || isPendingCompany) ? (req.body.bookedForPhone?.trim() || customerPhone) : null,
       ppnRate: taxCalc.taxRate > 0 ? String(taxCalc.taxRate) : null,
       ppnAmount: taxCalc.taxAmount > 0 ? String(taxCalc.taxAmount) : null,
       grandTotal: taxCalc.taxAmount > 0 ? String(taxCalc.grandTotal) : null,
@@ -298,6 +339,54 @@ router.post("/bookings", async (req, res) => {
         .set({ usedCount: sql`${promosTable.usedCount} + 1` })
         .where(eq(promosTable.code, String(promoCode).toUpperCase()));
     }
+
+    // ── Auto find-or-create customer from phone ───────────────────────
+    let customerAutoCreated = false;
+    let customerReused = false;
+    const rawPhone = String(customerPhone ?? "").trim();
+    const normalizedPhone = rawPhone ? normalizePhone(rawPhone) : null;
+
+    if (customerName && !booking.customerId) {
+      try {
+        // Cari existing user by phone atau by email
+        let existingUser: typeof usersTable.$inferSelect | undefined;
+        if (normalizedPhone) {
+          [existingUser] = await db.select().from(usersTable)
+            .where(eq(usersTable.phone, normalizedPhone)).limit(1);
+        }
+        if (!existingUser && customerEmail) {
+          [existingUser] = await db.select().from(usersTable)
+            .where(eq(usersTable.email, String(customerEmail))).limit(1);
+        }
+
+        if (existingUser) {
+          await db.update(bookingsTable).set({ customerId: existingUser.id }).where(eq(bookingsTable.id, booking.id));
+          (booking as any).customerId = existingUser.id;
+          customerReused = true;
+          logAudit({ action: "CUSTOMER_REUSED_FROM_PHONE", entity: "booking", entityId: booking.id, after: { customerId: existingUser.id, phone: normalizedPhone }, ...getClientInfo(req) });
+        } else {
+          const code = await generateCustomerCode();
+          const [newUser] = await db.insert(usersTable).values({
+            name: String(customerName),
+            phone: normalizedPhone ?? null,
+            email: customerEmail ? String(customerEmail) : null,
+            role: "customer",
+            accountType: "personal",
+            accountStatus: "active",
+            registrationSource: "booking_form",
+            customerCode: code,
+          }).returning();
+          await db.update(bookingsTable).set({ customerId: newUser.id }).where(eq(bookingsTable.id, booking.id));
+          (booking as any).customerId = newUser.id;
+          customerAutoCreated = true;
+          logAudit({ action: "CUSTOMER_AUTO_CREATED_FROM_BOOKING", entity: "user", entityId: newUser.id, after: { name: customerName, phone: normalizedPhone, email: customerEmail }, ...getClientInfo(req) });
+        }
+      } catch (autoErr) {
+        req.log.warn({ autoErr }, "Auto-create customer failed (non-critical)");
+      }
+    }
+
+    logAudit({ action: "BOOKING_CREATED", entity: "booking", entityId: booking.id, after: { orderNumber: booking.orderNumber, customerName, facilityId, bookingDate }, ...getClientInfo(req) });
 
     // Record history
     await db.insert(bookingHistoryTable).values({
@@ -362,6 +451,8 @@ router.post("/bookings", async (req, res) => {
       facilityName: facility.name,
       facilityCategory: facility.category,
       payment: null,
+      customerAutoCreated,
+      customerReused,
     });
   } catch (err) {
     req.log.error({ err }, "Create booking error");

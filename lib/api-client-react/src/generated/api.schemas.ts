@@ -1182,6 +1182,30 @@ export interface TaxReport {
   transactions: TaxTransaction[];
 }
 
+export interface SheetConnectInput {
+  sheetId: string;
+}
+
+export interface SheetConnectResult {
+  ok: boolean;
+  title: string;
+}
+
+export interface SheetSyncInput {
+  sheetId: string;
+}
+
+export interface SheetPushResult {
+  ok: boolean;
+  updatedRows: number;
+}
+
+export interface SheetPullResult {
+  ok: boolean;
+  updatedCount: number;
+  skippedCount: number;
+}
+
 export interface ErrorEnvelope {
   error: string;
 }

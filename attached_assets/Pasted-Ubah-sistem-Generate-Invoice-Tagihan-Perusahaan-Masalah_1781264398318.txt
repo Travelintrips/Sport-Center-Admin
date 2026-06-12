@@ -1,0 +1,109 @@
+Ubah sistem Generate Invoice Tagihan Perusahaan.
+
+Masalah saat ini:
+- Satu perusahaan bisa muncul beberapa invoice dalam bulan yang sama.
+- Contoh PT Diva Servis muncul INV-202606-0003 dan INV-202606-0002.
+- Yang saya mau: 1 perusahaan hanya punya 1 invoice per periode bulan.
+- Detail pemakaian customer dan lapangan masuk sebagai invoice line item.
+
+Aturan baru:
+1. Generate invoice harus group by:
+   - company_id
+   - period_month
+   - period_year
+
+2. Jika perusahaan sudah punya invoice untuk periode yang sama:
+   - jangan buat invoice baru.
+   - tambahkan booking baru ke invoice existing jika invoice masih belum lunas/draft.
+   - atau tampilkan warning: "Invoice periode ini sudah ada."
+
+3. Struktur invoice:
+   Header:
+   - No Invoice
+   - Nama Perusahaan
+   - Periode
+   - Subtotal
+   - PPN 11%
+   - Grand Total
+   - Status
+
+   Detail line item:
+   - Tanggal booking
+   - Nama customer/pemakai
+   - No WA
+   - Fasilitas/lapangan
+   - Jam mulai
+   - Jam selesai
+   - Durasi
+   - Harga/jam
+   - Subtotal
+   - PPN
+   - Total
+   - No booking
+
+4. Tambahkan table invoice items jika belum ada:
+   sport_company_invoice_items:
+   - id
+   - invoice_id
+   - booking_id
+   - customer_id
+   - company_id
+   - booking_date
+   - facility_name
+   - customer_name
+   - customer_phone
+   - start_time
+   - end_time
+   - duration_hours
+   - price_per_hour
+   - subtotal
+   - tax_amount
+   - total_amount
+   - created_at
+
+5. Saat Generate Invoice:
+   - ambil semua booking company dengan billing_status = unbilled
+   - kelompokkan per company_id dan periode bulan
+   - buat hanya 1 invoice per company per bulan
+   - masukkan setiap booking sebagai invoice item
+   - update booking billing_status = billed
+   - simpan invoice_id ke booking jika field tersedia
+
+6. Di halaman Tagihan Perusahaan:
+   - PT Diva Servis bulan Jun 2026 harus tampil 1 baris invoice saja
+   - subtotal merupakan total semua pemakaian
+   - total + PPN merupakan total semua pemakaian + PPN
+
+7. Di tombol Detail invoice:
+   tampilkan tabel detail pemakaian:
+   - Customer
+   - Lapangan/Fasilitas
+   - Tanggal
+   - Jam
+   - Durasi
+   - Subtotal
+   - PPN
+   - Total
+
+8. Tambahkan tombol:
+   - Download PDF
+   - Kirim WA ke PIC Perusahaan
+   - Tandai Lunas
+
+9. PDF invoice harus menampilkan:
+   - header perusahaan
+   - periode tagihan
+   - detail semua pemakaian customer
+   - total DPP
+   - PPN 11%
+   - grand total
+
+10. Tambahkan unique constraint:
+   company_id + period_month + period_year harus unique.
+
+11. Tambahkan audit log:
+   - COMPANY_INVOICE_GENERATED
+   - COMPANY_INVOICE_ITEM_ADDED
+   - COMPANY_INVOICE_PAID
+
+Pastikan tidak ada lagi invoice ganda untuk perusahaan yang sama di bulan yang sama.

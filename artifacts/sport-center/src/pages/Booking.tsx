@@ -84,6 +84,7 @@ export default function Booking() {
   const [customers, setCustomers] = useState<{ id: number; name: string; email: string | null; phone: string | null }[]>([]);
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>("");
   const [comboOpen, setComboOpen] = useState(false);
+  const [comboQuery, setComboQuery] = useState("");
 
   useEffect(() => {
     if (!isAdminBooking) return; // hanya fetch jika role admin_booking
@@ -103,9 +104,7 @@ export default function Booking() {
   // Auto-fill dari dropdown (admin_booking) atau dari akun sendiri (customer biasa)
   useEffect(() => {
     if (isAdminBooking) {
-      if (!selectedCustomerId) {
-        setName(""); setEmail(""); setPhone("");
-      } else {
+      if (selectedCustomerId) {
         const picked = customers.find((c) => String(c.id) === selectedCustomerId);
         if (picked) {
           setName(picked.name);
@@ -113,8 +112,8 @@ export default function Booking() {
           setPhone(picked.phone ?? "");
         }
       }
+      // Jika kosong (new customer mode), biarkan user isi manual
     } else if (currentUser) {
-      // Customer biasa: auto-fill dari data akun sendiri
       setName(currentUser.name ?? "");
       setEmail(currentUser.email ?? "");
       setPhone((currentUser as any).phone ?? "");
@@ -123,10 +122,31 @@ export default function Booking() {
   const [notes, setNotes] = useState("");
   const [numberOfPeople, setNumberOfPeople] = useState<string>("1");
 
-  // --- Customer type (Angkasa Pura) ---
-  const [customerType, setCustomerType] = useState<"umum" | "angkasa_pura">("umum");
+  // --- Booking mode: umum / angkasa_pura / perusahaan ---
+  const [bookingMode, setBookingMode] = useState<"umum" | "angkasa_pura" | "perusahaan">("umum");
+  const isAP = bookingMode === "angkasa_pura";
+  const isCompanyMode = bookingMode === "perusahaan";
   const [idCardNumber, setIdCardNumber] = useState("");
-  const isAP = customerType === "angkasa_pura";
+
+  // --- Company mode state ---
+  const [companies, setCompanies] = useState<{ id: number; name: string; companyName: string | null; allowMonthlyBilling: boolean | null; picPhone: string | null; picName: string | null }[]>([]);
+  const [selectedCompanyId, setSelectedCompanyId] = useState<string>("");
+  const [companyComboOpen, setCompanyComboOpen] = useState(false);
+  const [companyCustomerName, setCompanyCustomerName] = useState("");
+  const [companyCustomerPhone, setCompanyCustomerPhone] = useState("");
+  const [companyEmployeeId, setCompanyEmployeeId] = useState("");
+  const [bookedForName, setBookedForName] = useState("");
+  const [isPreparing, setIsPreparing] = useState(false);
+
+  // Fetch daftar perusahaan aktif saat login
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    const token = getToken();
+    fetch("/api/companies?status=active", { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+      .then((r) => r.json())
+      .then((data) => { if (Array.isArray(data)) setCompanies(data); })
+      .catch(() => {});
+  }, [isLoggedIn]);
 
   // --- Corporate billing ---
   const [isCompanyBilling, setIsCompanyBilling] = useState(false);
@@ -185,7 +205,12 @@ export default function Booking() {
   // ---- Single booking ----
   const createBooking = useCreateBooking({
     mutation: {
-      onSuccess: (data) => {
+      onSuccess: (data: any) => {
+        if (data.customerAutoCreated) {
+          toast({ title: t("Customer baru berhasil dibuat otomatis.", "New customer auto-created."), description: data.customerName });
+        } else if (data.customerReused) {
+          toast({ title: t("Nomor WA sudah terdaftar, booking menggunakan akun customer yang sudah ada.", "WA number found, using existing customer.") });
+        }
         toast({ title: t("Booking Berhasil", "Booking Successful"), description: t("Silakan lanjutkan ke pembayaran.", "Please proceed to payment.") });
         setLocation(`/booking/${data.orderNumber}`);
       },
@@ -307,19 +332,115 @@ export default function Booking() {
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  function normalizePhoneInput(raw: string): string {
+    let p = raw.replace(/\D/g, "");
+    if (p.startsWith("0")) p = "62" + p.slice(1);
+    else if (!p.startsWith("62")) p = p ? "62" + p : "";
+    return p;
+  }
+
+  function isValidPhone(raw: string): boolean {
+    const p = normalizePhoneInput(raw);
+    return /^62[0-9]{7,13}$/.test(p);
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!facilityId || !date) return;
     if (!isWalkIn && (!startTime || !duration)) return;
-    // Jika admin_booking, wajib pilih customer dari dropdown
+
+    // ─── Mode Perusahaan ────────────────────────────────────────────────────
+    if (isCompanyMode) {
+      if (!selectedCompanyId) {
+        toast({ title: t("Pilih perusahaan", "Select company"), description: t("Harap pilih perusahaan dari daftar.", "Please select a company from the list."), variant: "destructive" });
+        return;
+      }
+      const effPhone = isAdminBooking ? companyCustomerPhone.trim() : phone.trim();
+      const effName = isAdminBooking ? companyCustomerName.trim() : name.trim();
+      if (isAdminBooking && !effPhone) {
+        toast({ title: t("Nomor WhatsApp customer wajib", "Customer WhatsApp required"), variant: "destructive" });
+        return;
+      }
+      if (!effName) {
+        toast({ title: t("Nama customer wajib diisi", "Customer name required"), variant: "destructive" });
+        return;
+      }
+      if (!email && !isAdminBooking) {
+        toast({ title: t("Form tidak lengkap", "Incomplete form"), variant: "destructive" });
+        return;
+      }
+
+      setIsPreparing(true);
+      try {
+        const token = getToken();
+        const prepRes = await fetch("/api/company-bookings/prepare-customer", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+          body: JSON.stringify({
+            companyId: Number(selectedCompanyId),
+            customerName: effName,
+            customerPhone: effPhone,
+            employeeId: companyEmployeeId.trim() || undefined,
+          }),
+        });
+        const prepData = await prepRes.json();
+        if (!prepRes.ok) {
+          toast({ title: prepData.error || t("Gagal memverifikasi data perusahaan", "Failed to verify company data"), variant: "destructive" });
+          return;
+        }
+
+        createBooking.mutate({
+          data: {
+            customerName: effName,
+            customerEmail: email || undefined,
+            customerPhone: effPhone,
+            facilityId,
+            bookingDate: date,
+            ...(isWalkIn ? {} : { startTime, durationHours: duration }),
+            activityType: urlActivityType || undefined,
+            numberOfPeople: isWalkIn ? parseInt(numberOfPeople) || 1 : undefined,
+            notes,
+            customerType: "umum",
+            payerType: "company",
+            companyCustomerId: Number(selectedCompanyId),
+            customerId: isAdminBooking ? prepData.customerId : undefined,
+            bookedForName: bookedForName.trim() || effName,
+            bookedForPhone: effPhone,
+          } as any,
+        });
+      } catch {
+        toast({ title: t("Gagal menghubungi server", "Failed to reach server"), variant: "destructive" });
+      } finally {
+        setIsPreparing(false);
+      }
+      return;
+    }
+
+    // ─── Mode Umum & Angkasa Pura ────────────────────────────────────────────
     if (isAdminBooking && !selectedCustomerId) {
       toast({ title: t("Pilih nama pelanggan", "Select customer name"), description: t("Harap pilih nama dari daftar pelanggan.", "Please select a name from the customer list."), variant: "destructive" });
       return;
     }
-    if (!name || !email || !phone) {
+    e.preventDefault();
+    if (!facilityId || !date) return;
+    if (!isWalkIn && (!startTime || !duration)) return;
+    if (!name.trim()) {
+      toast({ title: t("Nama pelanggan wajib diisi", "Customer name required"), variant: "destructive" });
+      return;
+    }
+    if (!phone.trim()) {
+      toast({ title: t("No. WhatsApp wajib diisi", "WhatsApp number required"), variant: "destructive" });
+      return;
+    }
+    if (!isValidPhone(phone)) {
+      toast({ title: t("Format nomor tidak valid", "Invalid phone format"), description: t("Gunakan format Indonesia, contoh: 08123456789", "Use Indonesian format, e.g. 08123456789"), variant: "destructive" });
+      return;
+    }
+    if (!email) {
       toast({ title: t("Form tidak lengkap", "Incomplete form"), description: t("Harap isi semua field yang wajib.", "Please fill in all required fields."), variant: "destructive" });
       return;
     }
+    const normalizedPhone = normalizePhoneInput(phone);
     if (isAP && !idCardNumber.trim()) {
       toast({ title: t("Nomor ID Card wajib", "ID Card number required"), description: t("Masukkan nomor ID Card Angkasa Pura kamu.", "Enter your Angkasa Pura ID Card number."), variant: "destructive" });
       return;
@@ -340,7 +461,7 @@ export default function Booking() {
         data: {
           customerName: name,
           customerEmail: email,
-          customerPhone: phone,
+          customerPhone: normalizedPhone,
           facilityId,
           startDate: date,
           startTime,
@@ -354,23 +475,25 @@ export default function Booking() {
         } as any,
       });
     } else {
+      const existingCustomerId = selectedCustomerId && parseInt(selectedCustomerId) > 0 ? parseInt(selectedCustomerId) : undefined;
       createBooking.mutate({
         data: {
           customerName: name,
           customerEmail: email,
-          customerPhone: phone,
+          customerPhone: normalizedPhone,
           facilityId,
           bookingDate: date,
           ...(isWalkIn ? {} : { startTime, durationHours: duration }),
           activityType: urlActivityType || undefined,
           numberOfPeople: isWalkIn ? parseInt(numberOfPeople) || 1 : undefined,
           notes,
-          customerType,
+          customerType: bookingMode === "angkasa_pura" ? "angkasa_pura" : "umum",
           idCardNumber: isAP ? idCardNumber.trim() : undefined,
           promoCode: isAP ? undefined : couponResult?.code || undefined,
           discountAmount: isAP ? undefined : discountPerSession || undefined,
           payerType: isCompanyBilling ? "company" : "personal",
           companyCustomerId: isCompanyBilling && billingStatus?.companyId ? billingStatus.companyId : undefined,
+          ...(existingCustomerId ? { customerId: existingCustomerId } : {}),
         } as any,
       });
     }
@@ -509,47 +632,102 @@ export default function Booking() {
                   </div>
                 )}
 
-                {/* Nama Lengkap — dropdown untuk admin_booking, read-only untuk customer biasa */}
+                {/* Nama Lengkap — creatable combobox untuk admin_booking, read-only untuk customer biasa */}
                 <div className="space-y-2">
                   <Label htmlFor="namaPelanggan">{t("Nama Lengkap", "Full Name")} <span className="text-destructive">*</span></Label>
                   {isAdminBooking ? (
-                    <Popover open={comboOpen} onOpenChange={setComboOpen}>
-                      <PopoverTrigger asChild>
-                        <Button
-                          variant="outline"
-                          role="combobox"
-                          aria-expanded={comboOpen}
-                          className="w-full justify-between font-normal h-10"
+                    <>
+                      <Popover open={comboOpen} onOpenChange={(open) => { setComboOpen(open); if (!open) setComboQuery(""); }}>
+                        <PopoverTrigger asChild>
+                          <Button
+                            variant="outline"
+                            role="combobox"
+                            aria-expanded={comboOpen}
+                            className="w-full justify-between font-normal h-10"
+                          >
+                            <span className="truncate">
+                              {selectedCustomerId
+                                ? (() => { const c = customers.find((c) => String(c.id) === selectedCustomerId); return c ? `${c.name}${c.phone ? ` — ${c.phone}` : ""}` : name || t("Pilih atau ketik customer baru...", "Select or type new customer..."); })()
+                                : name
+                                  ? <span className="flex items-center gap-1.5"><span className="text-xs bg-primary/15 text-primary rounded px-1.5 py-0.5 font-medium">Baru</span>{name}</span>
+                                  : t("Pilih atau ketik nama customer baru...", "Select or type new customer...")}
+                            </span>
+                            <ChevronsUpDown size={14} className="ml-2 shrink-0 opacity-50" />
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                          <Command filter={(value, search) => {
+                            if (value === "__create__") return 1;
+                            return value.toLowerCase().includes(search.toLowerCase()) ? 1 : 0;
+                          }}>
+                            <CommandInput
+                              placeholder={t("Cari nama / nomor, atau ketik nama baru...", "Search name/phone or type new name...")}
+                              value={comboQuery}
+                              onValueChange={setComboQuery}
+                            />
+                            <CommandList>
+                              <CommandEmpty>{t("Tidak ditemukan", "No results found")}</CommandEmpty>
+                              <CommandGroup>
+                                {customers
+                                  .filter(c => !comboQuery.trim() || `${c.name} ${c.phone ?? ""}`.toLowerCase().includes(comboQuery.toLowerCase()))
+                                  .map((c) => (
+                                    <CommandItem
+                                      key={c.id}
+                                      value={`${c.name} ${c.phone ?? ""}`}
+                                      onSelect={() => {
+                                        setSelectedCustomerId(String(c.id));
+                                        setComboQuery("");
+                                        setComboOpen(false);
+                                      }}
+                                    >
+                                      <Check size={14} className={`mr-2 shrink-0 ${String(c.id) === selectedCustomerId ? "opacity-100" : "opacity-0"}`} />
+                                      <span>{c.name}{c.phone ? ` — ${c.phone}` : ""}</span>
+                                    </CommandItem>
+                                  ))}
+                              </CommandGroup>
+                              {comboQuery.trim() && (
+                                <CommandGroup>
+                                  <CommandItem
+                                    value="__create__"
+                                    onSelect={() => {
+                                      setSelectedCustomerId("");
+                                      setName(comboQuery.trim());
+                                      setEmail("");
+                                      setPhone("");
+                                      setComboQuery("");
+                                      setComboOpen(false);
+                                    }}
+                                    className="text-primary font-medium"
+                                  >
+                                    <span className="mr-2 text-base">＋</span>
+                                    {t(`Buat customer baru: "${comboQuery.trim()}"`, `Create new customer: "${comboQuery.trim()}"`)}
+                                  </CommandItem>
+                                </CommandGroup>
+                              )}
+                            </CommandList>
+                          </Command>
+                        </PopoverContent>
+                      </Popover>
+                      {/* Jika customer baru (belum terdaftar), tampilkan input nama yang bisa diedit */}
+                      {!selectedCustomerId && name && (
+                        <Input
+                          value={name}
+                          onChange={e => setName(e.target.value)}
+                          placeholder={t("Nama lengkap customer baru", "New customer full name")}
+                          className="mt-1"
+                        />
+                      )}
+                      {/* Tombol reset ke mode pilih */}
+                      {(selectedCustomerId || name) && (
+                        <button
+                          type="button"
+                          className="text-xs text-muted-foreground hover:text-foreground underline mt-0.5"
+                          onClick={() => { setSelectedCustomerId(""); setName(""); setEmail(""); setPhone(""); setComboQuery(""); }}
                         >
-                          <span className="truncate">
-                            {selectedCustomerId
-                              ? (() => { const c = customers.find((c) => String(c.id) === selectedCustomerId); return c ? `${c.name}${c.phone ? ` — ${c.phone}` : ""}` : t("Pilih nama pelanggan...", "Select customer..."); })()
-                              : t("Pilih nama pelanggan...", "Select customer...")}
-                          </span>
-                          <ChevronsUpDown size={14} className="ml-2 shrink-0 opacity-50" />
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
-                        <Command>
-                          <CommandInput placeholder={t("Cari nama atau nomor...", "Search name or number...")} />
-                          <CommandList>
-                            <CommandEmpty>{t("Tidak ditemukan", "No results found")}</CommandEmpty>
-                            <CommandGroup>
-                              {customers.map((c) => (
-                                <CommandItem
-                                  key={c.id}
-                                  value={`${c.name} ${c.phone ?? ""}`}
-                                  onSelect={() => { setSelectedCustomerId(String(c.id)); setComboOpen(false); }}
-                                >
-                                  <Check size={14} className={`mr-2 shrink-0 ${String(c.id) === selectedCustomerId ? "opacity-100" : "opacity-0"}`} />
-                                  <span>{c.name}{c.phone ? ` — ${c.phone}` : ""}</span>
-                                </CommandItem>
-                              ))}
-                            </CommandGroup>
-                          </CommandList>
-                        </Command>
-                      </PopoverContent>
-                    </Popover>
+                          {t("Bersihkan pilihan", "Clear selection")}
+                        </button>
+                      )}
+                    </>
                   ) : isLoggedIn ? (
                     <div className="flex items-center gap-2 h-10 px-3 rounded-md border bg-muted/50 text-foreground font-medium text-sm cursor-not-allowed select-none">
                       <span>{name || currentUser?.name}</span>
@@ -591,36 +769,49 @@ export default function Booking() {
           </Card>
 
           {/* Customer Type */}
-          <Card className={isAP ? "border-primary/40 bg-primary/5" : ""}>
+          <Card className={isAP ? "border-primary/40 bg-primary/5" : isCompanyMode ? "border-blue-400/40 bg-blue-50/40" : ""}>
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
                 <ShieldCheck size={16} className="text-primary" /> {t("Tipe Pemesan", "Customer Type")}
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className={`grid gap-2 ${isLoggedIn ? "grid-cols-3" : "grid-cols-2"}`}>
                 <button
                   type="button"
-                  onClick={() => setCustomerType("umum")}
-                  className={`flex items-center gap-3 p-4 rounded-lg border text-left transition-colors ${!isAP ? "bg-primary text-primary-foreground border-primary" : "bg-background border-border hover:border-primary/50"}`}
+                  onClick={() => setBookingMode("umum")}
+                  className={`flex flex-col items-center gap-2 p-3 rounded-lg border text-center transition-colors ${bookingMode === "umum" ? "bg-primary text-primary-foreground border-primary" : "bg-background border-border hover:border-primary/50"}`}
                 >
-                  <User size={20} className="shrink-0" />
+                  <User size={18} className="shrink-0" />
                   <div>
-                    <div className="font-semibold text-sm">{t("Umum", "General")}</div>
-                    <div className={`text-xs ${!isAP ? "text-primary-foreground/80" : "text-muted-foreground"}`}>{t("Harga normal", "Standard price")}</div>
+                    <div className="font-semibold text-xs">{t("Umum", "General")}</div>
+                    <div className={`text-xs ${bookingMode === "umum" ? "text-primary-foreground/80" : "text-muted-foreground"}`}>{t("Harga normal", "Standard")}</div>
                   </div>
                 </button>
                 <button
                   type="button"
-                  onClick={() => setCustomerType("angkasa_pura")}
-                  className={`flex items-center gap-3 p-4 rounded-lg border text-left transition-colors ${isAP ? "bg-primary text-primary-foreground border-primary" : "bg-background border-border hover:border-primary/50"}`}
+                  onClick={() => setBookingMode("angkasa_pura")}
+                  className={`flex flex-col items-center gap-2 p-3 rounded-lg border text-center transition-colors ${isAP ? "bg-primary text-primary-foreground border-primary" : "bg-background border-border hover:border-primary/50"}`}
                 >
-                  <Plane size={20} className="shrink-0" />
+                  <Plane size={18} className="shrink-0" />
                   <div>
-                    <div className="font-semibold text-sm">{t("Karyawan Angkasa Pura", "Angkasa Pura Staff")}</div>
-                    <div className={`text-xs ${isAP ? "text-primary-foreground/80" : "text-muted-foreground"}`}>{t("Diskon khusus", "Special discount")}</div>
+                    <div className="font-semibold text-xs">{t("Angkasa Pura", "Angkasa Pura")}</div>
+                    <div className={`text-xs ${isAP ? "text-primary-foreground/80" : "text-muted-foreground"}`}>{t("Diskon khusus", "Discount")}</div>
                   </div>
                 </button>
+                {isLoggedIn && (
+                  <button
+                    type="button"
+                    onClick={() => setBookingMode("perusahaan")}
+                    className={`flex flex-col items-center gap-2 p-3 rounded-lg border text-center transition-colors ${isCompanyMode ? "bg-blue-600 text-white border-blue-600" : "bg-background border-border hover:border-blue-400/50"}`}
+                  >
+                    <Building2 size={18} className="shrink-0" />
+                    <div>
+                      <div className="font-semibold text-xs">{t("Perusahaan", "Company")}</div>
+                      <div className={`text-xs ${isCompanyMode ? "text-blue-100" : "text-muted-foreground"}`}>{t("Tagihan bulanan", "Monthly bill")}</div>
+                    </div>
+                  </button>
+                )}
               </div>
 
               {isAP && (
@@ -642,8 +833,123 @@ export default function Booking() {
             </CardContent>
           </Card>
 
+          {/* Company Form */}
+          {isCompanyMode && (
+            <Card className="border-blue-400/40 bg-blue-50/30">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Building2 size={16} className="text-blue-600" /> {t("Detail Pemesanan Perusahaan", "Company Booking Details")}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {/* Company Selector */}
+                <div className="space-y-2">
+                  <Label>{t("Nama Perusahaan", "Company Name")} <span className="text-destructive">*</span></Label>
+                  <Popover open={companyComboOpen} onOpenChange={setCompanyComboOpen}>
+                    <PopoverTrigger asChild>
+                      <button
+                        type="button"
+                        role="combobox"
+                        aria-expanded={companyComboOpen}
+                        className="w-full flex items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 h-10"
+                      >
+                        <span className={!selectedCompanyId ? "text-muted-foreground" : ""}>
+                          {selectedCompanyId
+                            ? (companies.find((c) => String(c.id) === selectedCompanyId)?.companyName || companies.find((c) => String(c.id) === selectedCompanyId)?.name || t("Pilih perusahaan...", "Select company..."))
+                            : t("Pilih perusahaan...", "Select company...")}
+                        </span>
+                        <ChevronsUpDown size={14} className="ml-2 shrink-0 text-muted-foreground" />
+                      </button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-full p-0" align="start">
+                      <Command>
+                        <CommandInput placeholder={t("Cari perusahaan...", "Search company...")} />
+                        <CommandList>
+                          <CommandEmpty>{t("Perusahaan tidak ditemukan.", "Company not found.")}</CommandEmpty>
+                          <CommandGroup>
+                            {companies.map((c) => (
+                              <CommandItem
+                                key={c.id}
+                                value={c.companyName || c.name}
+                                onSelect={() => { setSelectedCompanyId(String(c.id)); setCompanyComboOpen(false); }}
+                              >
+                                <Check size={14} className={`mr-2 ${selectedCompanyId === String(c.id) ? "opacity-100" : "opacity-0"}`} />
+                                <div>
+                                  <div className="font-medium text-sm">{c.companyName || c.name}</div>
+                                  {c.picName && <div className="text-xs text-muted-foreground">PIC: {c.picName}</div>}
+                                  {!c.allowMonthlyBilling && <div className="text-xs text-orange-500">{t("Billing belum aktif", "Billing not active")}</div>}
+                                </div>
+                              </CommandItem>
+                            ))}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
+                  {companies.length === 0 && (
+                    <p className="text-xs text-muted-foreground">{t("Belum ada perusahaan aktif terdaftar.", "No active companies registered yet.")}</p>
+                  )}
+                </div>
+
+                {/* Admin booking: input customer */}
+                {isAdminBooking && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className="space-y-2">
+                      <Label>{t("Nama Customer", "Customer Name")} <span className="text-destructive">*</span></Label>
+                      <Input
+                        value={companyCustomerName}
+                        onChange={(e) => setCompanyCustomerName(e.target.value)}
+                        placeholder={t("Nama lengkap customer", "Customer full name")}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>{t("No. WhatsApp Customer", "Customer WhatsApp")} <span className="text-destructive">*</span></Label>
+                      <Input
+                        value={companyCustomerPhone}
+                        onChange={(e) => setCompanyCustomerPhone(e.target.value)}
+                        placeholder="08123456789"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Employee ID + Dipakai untuk */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label>{t("ID Karyawan (opsional)", "Employee ID (optional)")}</Label>
+                    <Input
+                      value={companyEmployeeId}
+                      onChange={(e) => setCompanyEmployeeId(e.target.value)}
+                      placeholder="EMP-001"
+                      className="font-mono"
+                    />
+                    <p className="text-xs text-muted-foreground">{t("Untuk verifikasi keanggotaan perusahaan.", "For company membership verification.")}</p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>{t("Dipakai untuk (nama pengguna)", "Used by (player name)")}</Label>
+                    <Input
+                      value={bookedForName}
+                      onChange={(e) => setBookedForName(e.target.value)}
+                      placeholder={t("Nama yang menggunakan lapangan", "Name of facility user")}
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-2 text-xs text-muted-foreground bg-blue-50 border border-blue-200 rounded-md p-3">
+                  <AlertTriangle size={13} className="mt-0.5 shrink-0 text-blue-500" />
+                  <span>
+                    {t(
+                      "Booking akan ditagihkan ke perusahaan. Jika verifikasi belum selesai, status booking menjadi Menunggu Konfirmasi.",
+                      "Booking will be billed to the company. If verification is pending, booking status will be Waiting Confirmation."
+                    )}
+                  </span>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           {/* Corporate Billing */}
-          {isLoggedIn && billingStatus?.eligible && !isAP && (
+          {isLoggedIn && billingStatus?.eligible && !isAP && !isCompanyMode && (
             <Card className={isCompanyBilling ? "border-primary/40 bg-primary/5" : ""}>
               <CardContent className="p-4">
                 <label className="flex items-start gap-3 cursor-pointer">
@@ -1121,10 +1427,10 @@ export default function Booking() {
                 form="booking-form"
                 size="lg"
                 className="w-full text-base font-bold h-12"
-                disabled={createBooking.isPending || createRecurring.isPending || (isRepeat && isChecking)}
+                disabled={createBooking.isPending || createRecurring.isPending || (isRepeat && isChecking) || isPreparing}
                 onClick={handleSubmit}
               >
-                {(createBooking.isPending || createRecurring.isPending)
+                {(createBooking.isPending || createRecurring.isPending || isPreparing)
                   ? <><Loader2 size={16} className="mr-2 animate-spin" /> {t("Memproses...", "Processing...")}</>
                   : isRepeat
                     ? `${t("Konfirmasi", "Confirm")} ${isChecking ? "..." : effectiveCount || (checkResult?.validCount ?? repeatCount)} ${t("Booking", "Bookings")}`

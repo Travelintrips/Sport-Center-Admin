@@ -13,7 +13,10 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Building2, Plus, CheckCircle, FileText, AlertCircle, RefreshCw, Eye, User, Phone, Mail, MapPin } from "lucide-react";
+import {
+  Building2, Plus, CheckCircle, FileText, AlertCircle, RefreshCw, Eye,
+  User, Phone, Mail, MapPin, Download, MessageSquare, AlertTriangle,
+} from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { getListCompanyInvoicesQueryKey } from "@workspace/api-client-react";
@@ -35,23 +38,154 @@ function getMonthOptions() {
   return opts;
 }
 
+function periodLabel(periodMonth: string) {
+  const [year, month] = periodMonth.split("-");
+  return new Date(parseInt(year), parseInt(month) - 1, 1).toLocaleDateString("id-ID", { year: "numeric", month: "long" });
+}
+
 function StatusBadge({ status }: { status: string }) {
   if (status === "paid")
     return <Badge className="bg-green-100 text-green-700 border-green-200 gap-1"><CheckCircle size={10} /> Lunas</Badge>;
   return <Badge className="bg-yellow-100 text-yellow-700 border-yellow-200 gap-1"><AlertCircle size={10} /> Belum Lunas</Badge>;
 }
 
+function printInvoicePdf(invoice: any) {
+  const items: any[] = invoice.items ?? [];
+  const periodStr = periodLabel(invoice.periodMonth);
+
+  const rows = items.map((item: any, i: number) => `
+    <tr style="border-bottom:1px solid #e5e7eb; ${i % 2 === 1 ? "background:#f9fafb;" : ""}">
+      <td style="padding:7px 8px; font-size:12px;">${item.customerName ?? "-"}</td>
+      <td style="padding:7px 8px; font-size:12px;">${item.customerPhone ?? "-"}</td>
+      <td style="padding:7px 8px; font-size:12px;">${item.facilityName ?? "-"}</td>
+      <td style="padding:7px 8px; font-size:12px;">${item.bookingDate ?? "-"}</td>
+      <td style="padding:7px 8px; font-size:12px;">${item.startTime ?? "-"}–${item.endTime ?? "-"}</td>
+      <td style="padding:7px 8px; font-size:12px; text-align:center;">${item.durationHours ?? 0} jam</td>
+      <td style="padding:7px 8px; font-size:12px; text-align:right;">${formatCurrency(item.subtotal ?? 0)}</td>
+      <td style="padding:7px 8px; font-size:12px; text-align:right;">${formatCurrency(item.taxAmount ?? 0)}</td>
+      <td style="padding:7px 8px; font-size:12px; text-align:right; font-weight:600;">${formatCurrency(item.totalAmount ?? 0)}</td>
+      <td style="padding:7px 8px; font-size:11px; color:#6b7280; font-family:monospace;">${item.orderNumber ?? "-"}</td>
+    </tr>
+  `).join("");
+
+  const html = `<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="utf-8"/>
+  <title>Invoice ${invoice.invoiceNumber}</title>
+  <style>
+    @media print { body { margin: 0; } .no-print { display:none !important; } }
+    body { font-family: 'Segoe UI', Arial, sans-serif; margin: 32px; color: #111; }
+    h1 { margin:0; font-size:22px; color:#ea580c; }
+    h2 { margin:0; font-size:15px; font-weight:700; }
+    table { width:100%; border-collapse:collapse; margin-top:16px; }
+    th { background:#ea580c; color:#fff; padding:8px 8px; font-size:12px; text-align:left; }
+    .total-row td { font-weight:700; background:#fff7ed; border-top:2px solid #ea580c; }
+    .grand-row td { font-weight:900; font-size:14px; background:#ea580c; color:#fff; }
+    .info-box { background:#f9fafb; border:1px solid #e5e7eb; border-radius:8px; padding:14px; margin-bottom:16px; }
+    .flex { display:flex; justify-content:space-between; align-items:flex-start; }
+    .badge-unpaid { background:#fef9c3; color:#a16207; padding:4px 12px; border-radius:99px; font-size:12px; font-weight:600; }
+    .badge-paid { background:#dcfce7; color:#15803d; padding:4px 12px; border-radius:99px; font-size:12px; font-weight:600; }
+  </style>
+</head>
+<body>
+  <div class="flex">
+    <div>
+      <h1>Sport Center Soekarno-Hatta</h1>
+      <div style="color:#6b7280; font-size:13px; margin-top:4px;">Kawasan Bandara Soekarno-Hatta, Tangerang</div>
+    </div>
+    <div style="text-align:right;">
+      <div style="font-size:22px; font-weight:900; color:#ea580c;">${invoice.invoiceNumber}</div>
+      <div style="font-size:13px; color:#6b7280;">Tanggal: ${new Date().toLocaleDateString("id-ID", { day:"numeric", month:"long", year:"numeric" })}</div>
+      <div class="${invoice.status === "paid" ? "badge-paid" : "badge-unpaid"}" style="margin-top:6px; display:inline-block;">${invoice.status === "paid" ? "✓ LUNAS" : "BELUM LUNAS"}</div>
+    </div>
+  </div>
+
+  <hr style="margin:20px 0; border:none; border-top:2px solid #ea580c;"/>
+
+  <div class="flex" style="gap:20px;">
+    <div class="info-box" style="flex:1;">
+      <div style="font-size:11px; color:#9ca3af; font-weight:700; text-transform:uppercase; letter-spacing:.05em; margin-bottom:8px;">Tagihan Kepada</div>
+      <div style="font-weight:700; font-size:14px;">${invoice.companyName}</div>
+      ${invoice.picName ? `<div style="font-size:13px; color:#374151; margin-top:4px;">PIC: ${invoice.picName}</div>` : ""}
+      ${invoice.picPhone ? `<div style="font-size:13px; color:#374151;">Telp: ${invoice.picPhone}</div>` : ""}
+      ${invoice.picEmail ? `<div style="font-size:13px; color:#374151;">Email: ${invoice.picEmail}</div>` : ""}
+      ${invoice.billingAddress ? `<div style="font-size:13px; color:#374151;">${invoice.billingAddress}</div>` : ""}
+    </div>
+    <div class="info-box" style="flex:1;">
+      <div style="font-size:11px; color:#9ca3af; font-weight:700; text-transform:uppercase; letter-spacing:.05em; margin-bottom:8px;">Periode Tagihan</div>
+      <div style="font-weight:700; font-size:14px;">${periodStr}</div>
+      <div style="font-size:13px; color:#374151; margin-top:8px;">Total Pemakaian: <strong>${items.length} sesi</strong></div>
+    </div>
+  </div>
+
+  <h2 style="margin:20px 0 8px; font-size:14px;">Detail Pemakaian</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Customer</th>
+        <th>No. WA</th>
+        <th>Fasilitas</th>
+        <th>Tanggal</th>
+        <th>Jam</th>
+        <th style="text-align:center;">Durasi</th>
+        <th style="text-align:right;">Subtotal</th>
+        <th style="text-align:right;">PPN 11%</th>
+        <th style="text-align:right;">Total</th>
+        <th>No. Booking</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${rows || `<tr><td colspan="10" style="text-align:center;padding:20px;color:#9ca3af;">Tidak ada data</td></tr>`}
+    </tbody>
+    <tfoot>
+      <tr class="total-row">
+        <td colspan="6" style="padding:10px 8px; font-size:13px;">DPP (Subtotal)</td>
+        <td colspan="3" style="padding:10px 8px; text-align:right; font-size:13px;">${formatCurrency(invoice.totalAmount)}</td>
+        <td></td>
+      </tr>
+      <tr class="total-row">
+        <td colspan="6" style="padding:8px 8px; font-size:13px;">PPN 11%</td>
+        <td colspan="3" style="padding:8px 8px; text-align:right; font-size:13px;">${formatCurrency(invoice.ppnAmount)}</td>
+        <td></td>
+      </tr>
+      <tr class="grand-row">
+        <td colspan="6" style="padding:10px 8px; font-size:14px;">GRAND TOTAL</td>
+        <td colspan="3" style="padding:10px 8px; text-align:right; font-size:16px;">${formatCurrency(invoice.grandTotal)}</td>
+        <td></td>
+      </tr>
+    </tfoot>
+  </table>
+
+  ${invoice.notes ? `<div style="margin-top:20px; background:#f9fafb; border:1px solid #e5e7eb; border-radius:8px; padding:12px; font-size:13px;"><strong>Catatan:</strong> ${invoice.notes}</div>` : ""}
+  ${invoice.paidAt ? `<div style="margin-top:16px; color:#15803d; font-size:13px;">✓ Dibayar pada ${new Date(invoice.paidAt).toLocaleDateString("id-ID", { day:"numeric", month:"long", year:"numeric" })}</div>` : ""}
+
+  <hr style="margin:32px 0 16px; border:none; border-top:1px solid #e5e7eb;"/>
+  <div style="font-size:11px; color:#9ca3af; text-align:center;">
+    Dokumen ini dicetak secara otomatis dari sistem Sport Center Soekarno-Hatta
+  </div>
+
+  <script>window.onload = function(){ window.print(); };</script>
+</body>
+</html>`;
+
+  const win = window.open("", "_blank");
+  if (win) {
+    win.document.write(html);
+    win.document.close();
+  }
+}
+
 function GenerateInvoiceDialog({ onClose }: { onClose: () => void }) {
   const { toast } = useToast();
   const qc = useQueryClient();
   const [companyId, setCompanyId] = useState("");
-  const [periodMonth, setPeriodMonth] = useState(getMonthOptions()[1].value);
+  const [periodMonth, setPeriodMonth] = useState(getMonthOptions()[0].value);
   const [notes, setNotes] = useState("");
   const [showPreview, setShowPreview] = useState(false);
   const generateMutation = useGenerateCompanyInvoice();
   const { data: companies } = useListCustomers({ accountType: "company" });
 
-  // Fetch preview of unbilled bookings when company + period are selected
   const { data: preview, isFetching: previewLoading } = useQuery({
     queryKey: ["invoice-preview", companyId, periodMonth],
     queryFn: async () => {
@@ -70,26 +204,35 @@ function GenerateInvoiceDialog({ onClose }: { onClose: () => void }) {
   const subtotal = preview?.subtotal ?? 0;
   const ppnAmount = preview?.ppnAmount ?? 0;
   const grandTotal = preview?.grandTotal ?? subtotal;
+  const existingInvoice = preview?.existingInvoice;
 
   const handleGenerate = async () => {
     if (!companyId) { toast({ title: "Pilih perusahaan", variant: "destructive" }); return; }
-    if (preview?.bookingCount === 0) {
+    if (!existingInvoice && preview?.bookingCount === 0) {
       toast({ title: "Tidak ada booking untuk ditagihkan pada periode ini", variant: "destructive" });
       return;
     }
     try {
-      await generateMutation.mutateAsync({
+      const result = await generateMutation.mutateAsync({
         data: { companyCustomerId: parseInt(companyId), periodMonth, notes: notes || undefined },
       });
-      toast({ title: "Invoice berhasil dibuat" });
+      const msg = (result as any)?.message;
+      toast({ title: msg ?? "Invoice berhasil dibuat" });
       qc.invalidateQueries({ queryKey: getListCompanyInvoicesQueryKey() });
       onClose();
     } catch (e: any) {
-      toast({ title: e?.message ?? "Gagal membuat invoice", variant: "destructive" });
+      const errMsg = e?.message ?? "Gagal membuat invoice";
+      toast({ title: errMsg, variant: "destructive" });
     }
   };
 
   const monthOptions = getMonthOptions();
+
+  const canGenerate = !!companyId && (
+    existingInvoice
+      ? existingInvoice.status !== "paid" && (preview?.bookingCount ?? 0) > 0
+      : (preview?.bookingCount ?? 0) > 0
+  );
 
   return (
     <DialogContent className="max-w-md">
@@ -119,6 +262,23 @@ function GenerateInvoiceDialog({ onClose }: { onClose: () => void }) {
             </Select>
           </div>
         </div>
+
+        {/* Warning: existing invoice */}
+        {companyId && !previewLoading && existingInvoice && (
+          <div className={`rounded-lg border p-3 flex items-start gap-2.5 text-sm ${
+            existingInvoice.status === "paid"
+              ? "border-green-200 bg-green-50 text-green-800"
+              : "border-amber-200 bg-amber-50 text-amber-800"
+          }`}>
+            <AlertTriangle size={15} className="shrink-0 mt-0.5" />
+            <div>
+              {existingInvoice.status === "paid"
+                ? <><strong>Invoice sudah ada dan lunas:</strong> {existingInvoice.invoiceNumber}. Tidak dapat menambahkan booking baru.</>
+                : <><strong>Invoice sudah ada:</strong> {existingInvoice.invoiceNumber} (Belum Lunas). {(preview?.bookingCount ?? 0) > 0 ? `${preview?.bookingCount} booking baru akan ditambahkan ke invoice ini.` : "Tidak ada booking baru."}</>
+              }
+            </div>
+          </div>
+        )}
 
         {/* Preview unbilled bookings */}
         {companyId && (
@@ -159,8 +319,7 @@ function GenerateInvoiceDialog({ onClose }: { onClose: () => void }) {
           </div>
         )}
 
-        {/* Subtotal preview */}
-        {companyId && preview && (
+        {companyId && preview && (preview.bookingCount ?? 0) > 0 && (
           <div className="rounded-lg bg-muted/40 p-3 space-y-1 text-sm">
             <div className="flex justify-between"><span className="text-muted-foreground">DPP (Harga Netto)</span><span className="font-semibold">{formatCurrency(subtotal)}</span></div>
             <div className="flex justify-between text-xs"><span className="text-muted-foreground">PPN 11%</span><span>{formatCurrency(ppnAmount)}</span></div>
@@ -176,10 +335,15 @@ function GenerateInvoiceDialog({ onClose }: { onClose: () => void }) {
           <Button variant="outline" onClick={onClose}>Batal</Button>
           <Button
             onClick={handleGenerate}
-            disabled={generateMutation.isPending || !companyId || (preview?.bookingCount === 0)}
+            disabled={generateMutation.isPending || !canGenerate}
             className="gap-2"
           >
-            <FileText size={14} /> {generateMutation.isPending ? "Memproses..." : "Generate Invoice"}
+            <FileText size={14} />
+            {generateMutation.isPending
+              ? "Memproses..."
+              : existingInvoice && existingInvoice.status !== "paid"
+                ? "Tambah ke Invoice Existing"
+                : "Generate Invoice"}
           </Button>
         </div>
       </div>
@@ -187,43 +351,135 @@ function GenerateInvoiceDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
-function InvoiceDetail({ invoice, onClose }: { invoice: any; onClose: () => void }) {
+function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () => void }) {
   const { toast } = useToast();
   const qc = useQueryClient();
   const updateMutation = useUpdateCompanyInvoice();
+  const [sendingWa, setSendingWa] = useState(false);
+  const [rebuilding, setRebuilding] = useState(false);
+
+  const { data: invoice, isLoading } = useQuery({
+    queryKey: ["company-invoice-detail", invoiceId],
+    queryFn: async () => {
+      const token = getToken();
+      const res = await fetch(`/api/company-invoices/${invoiceId}`, {
+        headers: { Authorization: `Bearer ${token ?? ""}` },
+      });
+      if (!res.ok) throw new Error("Gagal memuat invoice");
+      return res.json();
+    },
+    staleTime: 0,
+    refetchOnMount: "always",
+  });
 
   const handleMarkPaid = async () => {
     try {
-      await updateMutation.mutateAsync({ id: invoice.id, data: { status: "paid" } });
+      await updateMutation.mutateAsync({ id: invoiceId, data: { status: "paid" } });
       toast({ title: "Invoice ditandai sebagai lunas" });
       qc.invalidateQueries({ queryKey: getListCompanyInvoicesQueryKey() });
+      qc.invalidateQueries({ queryKey: ["company-invoice-detail", invoiceId] });
       onClose();
     } catch {
       toast({ title: "Gagal memperbarui invoice", variant: "destructive" });
     }
   };
 
-  const periodLabel = (() => {
-    const [year, month] = invoice.periodMonth.split("-");
-    return new Date(parseInt(year), parseInt(month) - 1, 1).toLocaleDateString("id-ID", { year: "numeric", month: "long" });
-  })();
+  const handleRebuildItems = async () => {
+    setRebuilding(true);
+    try {
+      const token = getToken();
+      const res = await fetch(`/api/company-invoices/${invoiceId}/rebuild-items`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token ?? ""}` },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Gagal sinkronisasi");
+      toast({ title: `Sinkronisasi berhasil`, description: `${data.rebuiltCount} item pemakaian ditemukan` });
+      qc.invalidateQueries({ queryKey: ["company-invoice-detail", invoiceId] });
+    } catch (e: any) {
+      toast({ title: e?.message ?? "Gagal sinkronisasi item", variant: "destructive" });
+    } finally {
+      setRebuilding(false);
+    }
+  };
+
+  const handleSendWa = async () => {
+    setSendingWa(true);
+    try {
+      const token = getToken();
+      const res = await fetch(`/api/company-invoices/${invoiceId}/send-wa`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token ?? ""}` },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Gagal kirim WA");
+      toast({ title: data.message ?? "WA berhasil dikirim" });
+    } catch (e: any) {
+      toast({ title: e?.message ?? "Gagal kirim WA", variant: "destructive" });
+    } finally {
+      setSendingWa(false);
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader><DialogTitle>Detail Invoice</DialogTitle></DialogHeader>
+        <div className="space-y-3 p-2">
+          {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-10" />)}
+        </div>
+      </DialogContent>
+    );
+  }
+
+  if (!invoice) return null;
+
+  const items: any[] = invoice.items ?? [];
 
   return (
-    <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
-      <DialogHeader><DialogTitle>Detail Invoice</DialogTitle></DialogHeader>
+    <DialogContent className="max-w-5xl max-h-[92vh] overflow-y-auto">
+      <DialogHeader>
+        <DialogTitle>Detail Invoice</DialogTitle>
+      </DialogHeader>
+
       <div className="space-y-5">
-        <div className="flex items-start justify-between gap-4">
+        {/* Header */}
+        <div className="flex items-start justify-between gap-4 flex-wrap">
           <div>
-            <div className="font-black text-xl">{invoice.invoiceNumber}</div>
+            <div className="font-black text-2xl">{invoice.invoiceNumber}</div>
             <div className="text-sm text-muted-foreground flex items-center gap-1 mt-0.5">
               <Building2 size={12} /> {invoice.companyName}
             </div>
-            <div className="text-sm text-muted-foreground mt-0.5">{periodLabel}</div>
+            <div className="text-sm text-muted-foreground mt-0.5">{periodLabel(invoice.periodMonth)}</div>
           </div>
-          <StatusBadge status={invoice.status} />
+          <div className="flex items-center gap-2 flex-wrap">
+            <StatusBadge status={invoice.status} />
+            <Button size="sm" variant="outline" onClick={() => printInvoicePdf(invoice)} className="gap-1.5">
+              <Download size={13} /> PDF
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleSendWa}
+              disabled={sendingWa}
+              className="gap-1.5 border-green-300 text-green-700 hover:bg-green-50"
+            >
+              <MessageSquare size={13} /> {sendingWa ? "Mengirim..." : "Kirim WA"}
+            </Button>
+            {invoice.status === "unpaid" && (
+              <Button
+                size="sm"
+                onClick={handleMarkPaid}
+                disabled={updateMutation.isPending}
+                className="gap-1.5 bg-green-600 hover:bg-green-700"
+              >
+                <CheckCircle size={13} /> Tandai Lunas
+              </Button>
+            )}
+          </div>
         </div>
 
-        {/* Company / PIC info */}
+        {/* PIC info */}
         {(invoice.picName || invoice.picPhone || invoice.picEmail || invoice.billingAddress) && (
           <div className="rounded-lg border bg-muted/20 p-3 space-y-1.5 text-xs">
             <div className="font-semibold text-xs text-muted-foreground uppercase tracking-wide mb-2">Informasi PIC</div>
@@ -234,34 +490,85 @@ function InvoiceDetail({ invoice, onClose }: { invoice: any; onClose: () => void
           </div>
         )}
 
-        {/* Booking line items */}
-        {invoice.bookings && invoice.bookings.length > 0 && (
-          <div>
-            <h4 className="font-semibold mb-2 text-sm">Rincian Booking ({invoice.bookings.length})</h4>
-            <div className="space-y-1.5 max-h-56 overflow-y-auto rounded-lg border overflow-hidden">
-              {invoice.bookings.map((b: any, i: number) => (
-                <div key={b.id ?? i} className="flex items-start justify-between text-xs p-2.5 border-b last:border-b-0 bg-white dark:bg-slate-900">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-1.5 mb-0.5">
-                      <span className="font-mono text-[10px] text-muted-foreground">{b.orderNumber}</span>
-                    </div>
-                    <div className="font-semibold">{b.facilityName}</div>
-                    <div className="text-muted-foreground">{b.bookingDate} · {b.startTime}–{b.endTime} · {b.durationHours} jam</div>
-                    {b.customerName && <div className="text-muted-foreground">Untuk: {b.customerName}</div>}
-                  </div>
-                  <span className="font-bold shrink-0 ml-3 mt-0.5">{formatCurrency(b.totalPrice)}</span>
-                </div>
-              ))}
-            </div>
+        {/* Line items table */}
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <h4 className="font-semibold text-sm">Detail Pemakaian ({items.length} sesi)</h4>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={handleRebuildItems}
+              disabled={rebuilding}
+              className="gap-1.5 text-xs h-7 text-muted-foreground hover:text-foreground"
+            >
+              <RefreshCw size={11} className={rebuilding ? "animate-spin" : ""} />
+              {rebuilding ? "Sinkronisasi..." : "Sinkronisasi Item"}
+            </Button>
           </div>
-        )}
+          {items.length === 0 ? (
+            <div className="text-sm text-muted-foreground text-center py-8 border rounded-lg border-dashed space-y-2">
+              <FileText size={28} className="mx-auto text-muted-foreground/40" />
+              <div>Tidak ada data pemakaian</div>
+              <div className="text-xs">Klik "Sinkronisasi Item" untuk mencari booking terkait</div>
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-lg border">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="bg-muted/60 border-b">
+                    <th className="text-left p-2.5 font-semibold text-muted-foreground whitespace-nowrap">Customer</th>
+                    <th className="text-left p-2.5 font-semibold text-muted-foreground whitespace-nowrap">No. WA</th>
+                    <th className="text-left p-2.5 font-semibold text-muted-foreground whitespace-nowrap">Fasilitas</th>
+                    <th className="text-left p-2.5 font-semibold text-muted-foreground whitespace-nowrap">Tanggal</th>
+                    <th className="text-left p-2.5 font-semibold text-muted-foreground whitespace-nowrap">Jam</th>
+                    <th className="text-center p-2.5 font-semibold text-muted-foreground whitespace-nowrap">Durasi</th>
+                    <th className="text-right p-2.5 font-semibold text-muted-foreground whitespace-nowrap">Subtotal</th>
+                    <th className="text-right p-2.5 font-semibold text-muted-foreground whitespace-nowrap">PPN 11%</th>
+                    <th className="text-right p-2.5 font-semibold text-muted-foreground whitespace-nowrap">Total</th>
+                    <th className="text-left p-2.5 font-semibold text-muted-foreground whitespace-nowrap">No. Booking</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {items.map((item: any, i: number) => (
+                    <tr key={item.id ?? i} className="hover:bg-muted/20 transition-colors">
+                      <td className="p-2.5 whitespace-nowrap font-medium">{item.customerName ?? "-"}</td>
+                      <td className="p-2.5 whitespace-nowrap text-muted-foreground">{item.customerPhone ?? "-"}</td>
+                      <td className="p-2.5 whitespace-nowrap">{item.facilityName ?? "-"}</td>
+                      <td className="p-2.5 whitespace-nowrap text-muted-foreground">
+                        {item.bookingDate ? new Date(item.bookingDate).toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" }) : "-"}
+                      </td>
+                      <td className="p-2.5 whitespace-nowrap text-muted-foreground">
+                        {item.startTime ?? "-"}{item.endTime ? `–${item.endTime}` : ""}
+                      </td>
+                      <td className="p-2.5 text-center whitespace-nowrap">{item.durationHours ?? 0} jam</td>
+                      <td className="p-2.5 text-right whitespace-nowrap">{formatCurrency(item.subtotal ?? 0)}</td>
+                      <td className="p-2.5 text-right whitespace-nowrap text-muted-foreground">{formatCurrency(item.taxAmount ?? 0)}</td>
+                      <td className="p-2.5 text-right whitespace-nowrap font-semibold">{formatCurrency(item.totalAmount ?? 0)}</td>
+                      <td className="p-2.5 whitespace-nowrap font-mono text-[10px] text-muted-foreground">{item.orderNumber ?? "-"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t bg-muted/30">
+                    <td colSpan={6} className="p-2.5 text-xs font-semibold text-muted-foreground">{items.length} sesi</td>
+                    <td className="p-2.5 text-right text-xs font-semibold">{formatCurrency(items.reduce((s: number, i: any) => s + (i.subtotal ?? 0), 0))}</td>
+                    <td className="p-2.5 text-right text-xs text-muted-foreground">{formatCurrency(items.reduce((s: number, i: any) => s + (i.taxAmount ?? 0), 0))}</td>
+                    <td className="p-2.5 text-right text-xs font-bold text-primary">{formatCurrency(items.reduce((s: number, i: any) => s + (i.totalAmount ?? 0), 0))}</td>
+                    <td />
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
+        </div>
 
+        {/* Totals */}
         <div className="rounded-lg border p-4 space-y-2 text-sm">
-          <div className="flex justify-between"><span className="text-muted-foreground">Subtotal</span><span className="font-semibold">{formatCurrency(invoice.totalAmount)}</span></div>
+          <div className="flex justify-between"><span className="text-muted-foreground">DPP (Subtotal)</span><span className="font-semibold">{formatCurrency(invoice.totalAmount)}</span></div>
           {invoice.ppnAmount > 0 && (
             <div className="flex justify-between"><span className="text-muted-foreground">PPN 11%</span><span className="font-semibold">{formatCurrency(invoice.ppnAmount)}</span></div>
           )}
-          <div className="flex justify-between border-t pt-2 font-black text-base"><span>Total</span><span className="text-primary">{formatCurrency(invoice.grandTotal)}</span></div>
+          <div className="flex justify-between border-t pt-2 font-black text-base"><span>Grand Total</span><span className="text-primary">{formatCurrency(invoice.grandTotal)}</span></div>
         </div>
 
         {invoice.notes && <div className="text-sm text-muted-foreground bg-muted/40 rounded p-3">{invoice.notes}</div>}
@@ -270,14 +577,6 @@ function InvoiceDetail({ invoice, onClose }: { invoice: any; onClose: () => void
           <div className="flex items-center gap-2 text-green-700 text-sm bg-green-50 dark:bg-green-900/20 rounded-lg p-3 border border-green-200 dark:border-green-800">
             <CheckCircle size={14} />
             Dibayar pada {new Date(invoice.paidAt).toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" })}
-          </div>
-        )}
-
-        {invoice.status === "unpaid" && (
-          <div className="flex justify-end pt-1">
-            <Button onClick={handleMarkPaid} disabled={updateMutation.isPending} className="gap-2 bg-green-600 hover:bg-green-700">
-              <CheckCircle size={14} /> Tandai Lunas
-            </Button>
           </div>
         )}
       </div>
@@ -289,7 +588,7 @@ export default function AdminCompanyBilling() {
   const [filterCompany, setFilterCompany] = useState("all");
   const [filterStatus, setFilterStatus] = useState("all");
   const [showGenerate, setShowGenerate] = useState(false);
-  const [selectedInvoice, setSelectedInvoice] = useState<any>(null);
+  const [selectedInvoiceId, setSelectedInvoiceId] = useState<number | null>(null);
 
   const { data: companies } = useListCustomers({ accountType: "company" });
   const { data: invoices, isLoading, refetch } = useListCompanyInvoices({
@@ -379,7 +678,8 @@ export default function AdminCompanyBilling() {
                     <th className="pb-3 pr-4 font-semibold text-muted-foreground">Perusahaan</th>
                     <th className="pb-3 pr-4 font-semibold text-muted-foreground">Periode</th>
                     <th className="pb-3 pr-4 font-semibold text-muted-foreground">Subtotal</th>
-                    <th className="pb-3 pr-4 font-semibold text-muted-foreground">Total + PPN</th>
+                    <th className="pb-3 pr-4 font-semibold text-muted-foreground">PPN 11%</th>
+                    <th className="pb-3 pr-4 font-semibold text-muted-foreground">Grand Total</th>
                     <th className="pb-3 pr-4 font-semibold text-muted-foreground">Status</th>
                     <th className="pb-3 font-semibold text-muted-foreground">Aksi</th>
                   </tr>
@@ -387,7 +687,7 @@ export default function AdminCompanyBilling() {
                 <tbody className="divide-y">
                   {invoices?.map((inv) => {
                     const [year, month] = inv.periodMonth.split("-");
-                    const periodLabel = new Date(parseInt(year), parseInt(month) - 1, 1)
+                    const label = new Date(parseInt(year), parseInt(month) - 1, 1)
                       .toLocaleDateString("id-ID", { year: "numeric", month: "short" });
                     return (
                       <tr key={inv.id} className="hover:bg-muted/30 transition-colors">
@@ -398,19 +698,20 @@ export default function AdminCompanyBilling() {
                             <span className="font-medium">{inv.companyName}</span>
                           </div>
                         </td>
-                        <td className="py-3 pr-4 text-muted-foreground">{periodLabel}</td>
+                        <td className="py-3 pr-4 text-muted-foreground">{label}</td>
                         <td className="py-3 pr-4">{formatCurrency(inv.totalAmount)}</td>
+                        <td className="py-3 pr-4 text-muted-foreground">{formatCurrency(inv.ppnAmount)}</td>
                         <td className="py-3 pr-4 font-semibold">{formatCurrency(inv.grandTotal)}</td>
                         <td className="py-3 pr-4"><StatusBadge status={inv.status} /></td>
                         <td className="py-3">
-                          <Button size="sm" variant="ghost" onClick={() => setSelectedInvoice(inv)} className="gap-1">
+                          <Button size="sm" variant="ghost" onClick={() => setSelectedInvoiceId(inv.id)} className="gap-1">
                             <FileText size={14} /> Detail
                           </Button>
                         </td>
                       </tr>
                     );
                   })}
-                  {!invoices?.length && <tr><td colSpan={7} className="py-8 text-center text-muted-foreground">Belum ada invoice</td></tr>}
+                  {!invoices?.length && <tr><td colSpan={8} className="py-8 text-center text-muted-foreground">Belum ada invoice</td></tr>}
                 </tbody>
               </table>
             </div>
@@ -422,8 +723,8 @@ export default function AdminCompanyBilling() {
         {showGenerate && <GenerateInvoiceDialog onClose={() => setShowGenerate(false)} />}
       </Dialog>
 
-      <Dialog open={!!selectedInvoice} onOpenChange={(v) => !v && setSelectedInvoice(null)}>
-        {selectedInvoice && <InvoiceDetail invoice={selectedInvoice} onClose={() => setSelectedInvoice(null)} />}
+      <Dialog open={!!selectedInvoiceId} onOpenChange={(v) => !v && setSelectedInvoiceId(null)}>
+        {selectedInvoiceId && <InvoiceDetail key={selectedInvoiceId} invoiceId={selectedInvoiceId} onClose={() => setSelectedInvoiceId(null)} />}
       </Dialog>
     </div>
   );

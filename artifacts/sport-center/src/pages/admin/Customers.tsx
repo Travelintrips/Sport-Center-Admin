@@ -2,6 +2,7 @@ import { useState } from "react";
 import {
   useListCustomers, useGetCustomer, useListBookings,
   useCreateCustomer, useUpdateCustomer,
+  useConnectCustomerSheet, usePushCustomersToSheet, usePullCustomersFromSheet,
 } from "@workspace/api-client-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
@@ -14,6 +15,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Search, Eye, MessageCircle, Globe, Building2, Plus, Pencil, Users, Copy, Check } from "lucide-react";
+import { Search, Eye, MessageCircle, Globe, Building2, Plus, Pencil, Users, Sheet, Upload, Download, CheckCircle2, AlertCircle, Link, ChevronDown, ChevronUp } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { getListCustomersQueryKey } from "@workspace/api-client-react";
 import { getToken } from "@/lib/auth";
@@ -498,23 +500,345 @@ function CompanyForm({ initial, onClose }: { initial?: any; onClose: () => void 
   );
 }
 
+function GuestDetailDialog({ guest, onClose }: { guest: any; onClose: () => void }) {
+  const token = getToken();
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const [showConvert, setShowConvert] = useState(false);
+  const [convertEmail, setConvertEmail] = useState(guest.email ?? "");
+  const [convertName, setConvertName] = useState(guest.name ?? "");
+  const [converting, setConverting] = useState(false);
+
+  const { data: bookings, isLoading } = useQuery<any[]>({
+    queryKey: ["guest-bookings", guest.phone],
+    queryFn: async () => {
+      const r = await fetch(`/api/bookings?customerPhone=${encodeURIComponent(guest.phone)}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!r.ok) return [];
+      return r.json();
+    },
+    enabled: !!guest.phone,
+  });
+
+  const handleConvert = async () => {
+    if (!convertEmail.trim()) {
+      toast({ title: "Email wajib diisi", variant: "destructive" });
+      return;
+    }
+    setConverting(true);
+    try {
+      const r = await fetch("/api/customers/from-guest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ phone: guest.phone, name: convertName, email: convertEmail }),
+      });
+      const data = await r.json();
+      if (!r.ok) { toast({ title: data.error ?? "Gagal membuat akun", variant: "destructive" }); return; }
+      toast({
+        title: "Akun customer berhasil dibuat!",
+        description: `Kode: ${data.customerCode} · Password sementara: ${data.tempPassword} — simpan sebelum menutup!`,
+        duration: 15000,
+      });
+      qc.invalidateQueries({ queryKey: getListCustomersQueryKey() });
+      onClose();
+    } catch {
+      toast({ title: "Gagal membuat akun", variant: "destructive" });
+    } finally {
+      setConverting(false);
+    }
+  };
+
+  return (
+    <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+      <DialogHeader><DialogTitle>Detail Guest Booker</DialogTitle></DialogHeader>
+      <div className="space-y-5">
+        <div className="flex items-center gap-4">
+          <div className="w-14 h-14 rounded-full bg-amber-100 flex items-center justify-center text-amber-600 text-2xl font-black">
+            {guest.name?.charAt(0) ?? "?"}
+          </div>
+          <div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h3 className="font-bold text-lg">{guest.name}</h3>
+              <Badge variant="secondary" className="bg-amber-100 text-amber-700 border-amber-200 text-xs">Guest</Badge>
+            </div>
+            <div className="text-sm text-muted-foreground">{guest.email || "–"}</div>
+            <div className="text-sm text-muted-foreground">{guest.phone}</div>
+          </div>
+        </div>
+
+        {/* Panel konversi */}
+        {!showConvert ? (
+          <div className="rounded-lg border border-dashed border-amber-300 bg-amber-50 p-3 flex items-center justify-between gap-3">
+            <div className="text-sm text-amber-800">Belum punya akun terdaftar. Semua booking akan terhubung otomatis.</div>
+            <Button size="sm" variant="default" className="shrink-0" onClick={() => setShowConvert(true)}>
+              <Users size={14} className="mr-1.5" /> Buat Akun
+            </Button>
+          </div>
+        ) : (
+          <div className="rounded-lg border border-primary/30 bg-primary/5 p-4 space-y-3">
+            <div className="font-semibold text-sm">Buat Akun Customer</div>
+            <div className="space-y-2">
+              <div className="space-y-1">
+                <Label className="text-xs">Nama</Label>
+                <Input value={convertName} onChange={e => setConvertName(e.target.value)} placeholder="Nama lengkap" />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Email <span className="text-destructive">*</span></Label>
+                <Input type="email" value={convertEmail} onChange={e => setConvertEmail(e.target.value)} placeholder="email@customer.com" />
+              </div>
+              <div className="text-xs text-muted-foreground">
+                Semua {bookings?.length ?? 0} booking dengan nomor <span className="font-mono font-semibold">{guest.phone}</span> akan otomatis terhubung ke akun ini.
+              </div>
+            </div>
+            <div className="flex gap-2 pt-1">
+              <Button size="sm" variant="outline" onClick={() => setShowConvert(false)} disabled={converting}>Batal</Button>
+              <Button size="sm" onClick={handleConvert} disabled={converting || !convertEmail.trim()}>
+                {converting ? "Membuat..." : "Konfirmasi Buat Akun"}
+              </Button>
+            </div>
+          </div>
+        )}
+
+        <div>
+          <div className="font-semibold mb-3">Riwayat Booking ({bookings?.length ?? 0})</div>
+          {isLoading ? (
+            <Skeleton className="h-20" />
+          ) : !bookings?.length ? (
+            <div className="text-sm text-muted-foreground text-center py-4 border rounded-lg">Tidak ada booking</div>
+          ) : (
+            <div className="space-y-2">
+              {bookings.map((b: any) => (
+                <div key={b.id} className="flex items-center justify-between p-3 border rounded-lg text-sm gap-2">
+                  <div className="min-w-0">
+                    <div className="font-medium truncate">{b.facilityName}</div>
+                    <div className="text-xs text-muted-foreground">{b.bookingDate} · {b.startTime ?? "Walk-in"}</div>
+                    <div className="font-mono text-xs text-muted-foreground">{b.orderNumber}</div>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <div className="font-semibold">{new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(b.grandTotal ?? b.totalPrice)}</div>
+                    <Badge style={{ backgroundColor: STATUS_COLORS[b.status] + "20", color: STATUS_COLORS[b.status], borderColor: STATUS_COLORS[b.status] + "40" }} variant="outline" className="text-xs mt-1">
+                      {STATUS_LABELS[b.status] ?? b.status}
+                    </Badge>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </DialogContent>
+  );
+}
+
+function extractSheetId(input: string): string {
+  const m = input.match(/\/spreadsheets\/d\/([\w-]+)/);
+  return m ? m[1] : input.trim();
+}
+
+function SheetSyncPanel() {
+  const { toast } = useToast();
+  const [expanded, setExpanded] = useState(true);
+  const [rawInput, setRawInput] = useState("");
+  const [connectedSheet, setConnectedSheet] = useState<{ id: string; title: string } | null>(null);
+  const [lastSync, setLastSync] = useState<{ direction: "push" | "pull"; result: string; at: Date } | null>(null);
+
+  const connectMutation = useConnectCustomerSheet({
+    mutation: {
+      onSuccess: (data) => {
+        const id = extractSheetId(rawInput);
+        setConnectedSheet({ id, title: data.title });
+        toast({ title: `Terhubung ke "${data.title}"` });
+      },
+      onError: (err: any) => {
+        toast({ title: err?.response?.data?.error ?? "Gagal terhubung ke sheet", variant: "destructive" });
+      },
+    },
+  });
+
+  const pushMutation = usePushCustomersToSheet({
+    mutation: {
+      onSuccess: (data) => {
+        setLastSync({ direction: "push", result: `${data.updatedRows} customer diekspor`, at: new Date() });
+        toast({ title: `✅ ${data.updatedRows} customer berhasil dikirim ke Google Sheet` });
+      },
+      onError: (err: any) => {
+        toast({ title: err?.response?.data?.error ?? "Gagal export ke sheet", variant: "destructive" });
+      },
+    },
+  });
+
+  const pullMutation = usePullCustomersFromSheet({
+    mutation: {
+      onSuccess: (data) => {
+        setLastSync({ direction: "pull", result: `${data.updatedCount} diperbarui, ${data.skippedCount} dilewati`, at: new Date() });
+        toast({ title: `✅ ${data.updatedCount} customer diperbarui dari Google Sheet` });
+      },
+      onError: (err: any) => {
+        toast({ title: err?.response?.data?.error ?? "Gagal import dari sheet", variant: "destructive" });
+      },
+    },
+  });
+
+  const isBusy = connectMutation.isPending || pushMutation.isPending || pullMutation.isPending;
+
+  return (
+    <Card className="border-green-200 bg-green-50/30">
+      <CardContent className="p-4">
+        <button
+          className="w-full flex items-center justify-between gap-3 text-left"
+          onClick={() => setExpanded((v) => !v)}
+        >
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-lg bg-green-100 flex items-center justify-center shrink-0">
+              <Sheet size={16} className="text-green-700" />
+            </div>
+            <div>
+              <div className="font-semibold text-sm">Sinkronisasi Google Sheets</div>
+              <div className="text-xs text-muted-foreground">
+                {connectedSheet
+                  ? <span className="text-green-700 flex items-center gap-1"><CheckCircle2 size={10} /> {connectedSheet.title}</span>
+                  : "Hubungkan spreadsheet untuk sync dua arah"}
+              </div>
+            </div>
+          </div>
+          {expanded ? <ChevronUp size={16} className="text-muted-foreground shrink-0" /> : <ChevronDown size={16} className="text-muted-foreground shrink-0" />}
+        </button>
+
+        {expanded && (
+          <div className="mt-4 space-y-4 border-t pt-4">
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Google Sheet ID atau URL</Label>
+              <div className="flex gap-2">
+                <Input
+                  placeholder="https://docs.google.com/spreadsheets/d/... atau Sheet ID"
+                  value={rawInput}
+                  onChange={(e) => setRawInput(e.target.value)}
+                  className="flex-1 text-sm"
+                  disabled={isBusy}
+                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5 shrink-0"
+                  disabled={!rawInput.trim() || isBusy}
+                  onClick={() => connectMutation.mutate({ data: { sheetId: extractSheetId(rawInput) } })}
+                >
+                  <Link size={14} />
+                  {connectMutation.isPending ? "Mengecek..." : "Hubungkan"}
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Pastikan <strong>Service Account</strong> sudah diberi akses <em>Editor</em> di spreadsheet tersebut.
+              </p>
+            </div>
+
+            {connectedSheet && (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 p-3 rounded-lg bg-green-100/60 border border-green-200 text-sm">
+                  <CheckCircle2 size={14} className="text-green-600 shrink-0" />
+                  <span className="font-medium text-green-800">Terhubung ke: {connectedSheet.title}</span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    className="flex flex-col items-center gap-2 p-4 rounded-xl border-2 border-orange-200 bg-orange-50 hover:bg-orange-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={isBusy}
+                    onClick={() => pushMutation.mutate({ data: { sheetId: connectedSheet.id } })}
+                  >
+                    <div className="w-9 h-9 rounded-full bg-orange-500 flex items-center justify-center">
+                      <Upload size={16} className="text-white" />
+                    </div>
+                    <div className="text-center">
+                      <div className="font-semibold text-sm text-orange-800">Export ke Sheet</div>
+                      <div className="text-xs text-orange-600 mt-0.5">App → Google Sheet</div>
+                    </div>
+                    {pushMutation.isPending && <div className="text-xs text-orange-600 animate-pulse">Mengekspor...</div>}
+                  </button>
+
+                  <button
+                    className="flex flex-col items-center gap-2 p-4 rounded-xl border-2 border-blue-200 bg-blue-50 hover:bg-blue-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={isBusy}
+                    onClick={() => pullMutation.mutate({ data: { sheetId: connectedSheet.id } })}
+                  >
+                    <div className="w-9 h-9 rounded-full bg-blue-500 flex items-center justify-center">
+                      <Download size={16} className="text-white" />
+                    </div>
+                    <div className="text-center">
+                      <div className="font-semibold text-sm text-blue-800">Import dari Sheet</div>
+                      <div className="text-xs text-blue-600 mt-0.5">Google Sheet → App</div>
+                    </div>
+                    {pullMutation.isPending && <div className="text-xs text-blue-600 animate-pulse">Mengimpor...</div>}
+                  </button>
+                </div>
+
+                {lastSync && (
+                  <div className="flex items-center gap-2 p-2.5 rounded-lg bg-muted/50 text-xs text-muted-foreground">
+                    <CheckCircle2 size={12} className="text-green-500 shrink-0" />
+                    <span>
+                      Terakhir {lastSync.direction === "push" ? "export" : "import"}: <strong>{lastSync.result}</strong>
+                      {" · "}{lastSync.at.toLocaleTimeString("id-ID")}
+                    </span>
+                  </div>
+                )}
+
+                <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-700 space-y-1">
+                  <div className="font-semibold flex items-center gap-1"><AlertCircle size={11} /> Catatan</div>
+                  <div>• <strong>Export</strong>: Menimpa seluruh isi sheet dengan data terbaru dari app.</div>
+                  <div>• <strong>Import</strong>: Memperbarui data customer berdasarkan kolom <strong>ID</strong>. Kolom Kode Customer, Total Booking, dan Total Belanja diabaikan.</div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function AdminCustomers() {
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState("personal");
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [selectedGuest, setSelectedGuest] = useState<any>(null);
   const [showForm, setShowForm] = useState(false);
   const [editCustomer, setEditCustomer] = useState<any>(null);
   const [showPersonalForm, setShowPersonalForm] = useState(false);
   const [tempResult, setTempResult] = useState<{ password: string; email: string } | null>(null);
+  const [migrating, setMigrating] = useState(false);
+  const { toast } = useToast();
+  const qc = useQueryClient();
 
   const { data: customers, isLoading } = useListCustomers({
     search: search || undefined,
     accountType: tab as "personal" | "company",
   });
 
+  const handleMigrateAll = async () => {
+    setMigrating(true);
+    try {
+      const token = getToken();
+      const r = await fetch("/api/customers/migrate-all-guests", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await r.json();
+      if (!r.ok) { toast({ title: data.error ?? "Gagal migrasi", variant: "destructive" }); return; }
+      toast({
+        title: `Sinkronisasi selesai`,
+        description: `${data.created} akun baru dibuat · ${data.linked} booking dihubungkan · ${data.skipped} dilewati`,
+      });
+      qc.invalidateQueries({ queryKey: getListCustomersQueryKey() });
+    } catch {
+      toast({ title: "Gagal melakukan sinkronisasi", variant: "destructive" });
+    } finally {
+      setMigrating(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-black">Customers</h1>
           <p className="text-muted-foreground">Kelola daftar customer terdaftar</p>
@@ -549,6 +873,21 @@ export default function AdminCustomers() {
           />
         )}
       </Dialog>
+        <div className="flex gap-2">
+          {tab === "personal" && (
+            <Button variant="outline" onClick={handleMigrateAll} disabled={migrating} className="gap-2">
+              <Users size={16} /> {migrating ? "Memproses..." : "Sinkronisasi Guest → Akun"}
+            </Button>
+          )}
+          {tab === "company" && (
+            <Button onClick={() => { setEditCustomer(null); setShowForm(true); }} className="gap-2">
+              <Plus size={16} /> Tambah Perusahaan
+            </Button>
+          )}
+        </div>
+      </div>
+
+      <SheetSyncPanel />
 
       <Card>
         <CardContent className="p-4">
@@ -582,24 +921,41 @@ export default function AdminCustomers() {
                   </tr>
                 </thead>
                 <tbody className="divide-y">
-                  {customers?.map((c) => (
-                    <tr key={c.id} className="hover:bg-muted/30 transition-colors">
-                      <td className="py-3 pr-4">
-                        <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-sm">{c.name.charAt(0)}</div>
-                          <div><div className="font-medium">{c.name}</div><div className="text-xs text-muted-foreground">{c.email}</div></div>
-                        </div>
-                      </td>
-                      <td className="py-3 pr-4">
-                        {c.customerCode ? <span className="font-mono text-xs bg-primary/5 text-primary px-2 py-1 rounded">{c.customerCode}</span> : <span className="text-muted-foreground text-xs">–</span>}
-                      </td>
-                      <td className="py-3 pr-4"><SourceBadge source={c.registrationSource ?? undefined} /></td>
-                      <td className="py-3 pr-4 text-muted-foreground">{c.phone ?? "–"}</td>
-                      <td className="py-3 pr-4 font-semibold">{c.totalBookings}</td>
-                      <td className="py-3 pr-4 font-semibold">{formatCurrency(c.totalSpent ?? 0)}</td>
-                      <td className="py-3"><Button size="sm" variant="ghost" onClick={() => setSelectedId(c.id)}><Eye size={14} className="mr-1" /> Lihat</Button></td>
-                    </tr>
-                  ))}
+                  {customers?.map((c) => {
+                    const isGuest = c.id < 0;
+                    return (
+                      <tr key={c.id} className="hover:bg-muted/30 transition-colors">
+                        <td className="py-3 pr-4">
+                          <div className="flex items-center gap-3">
+                            <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${isGuest ? "bg-amber-100 text-amber-600" : "bg-primary/10 text-primary"}`}>{c.name.charAt(0)}</div>
+                            <div>
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="font-medium">{c.name}</span>
+                                {isGuest && <Badge variant="secondary" className="bg-amber-100 text-amber-700 border-amber-200 text-xs py-0 h-4">Guest</Badge>}
+                              </div>
+                              <div className="text-xs text-muted-foreground">{c.email ?? "–"}</div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="py-3 pr-4">
+                          {c.customerCode ? <span className="font-mono text-xs bg-primary/5 text-primary px-2 py-1 rounded">{c.customerCode}</span> : <span className="text-muted-foreground text-xs">–</span>}
+                        </td>
+                        <td className="py-3 pr-4">
+                          {isGuest
+                            ? <Badge variant="secondary" className="bg-amber-50 text-amber-700 border-amber-200 text-xs gap-1">Booking Langsung</Badge>
+                            : <SourceBadge source={c.registrationSource ?? undefined} />}
+                        </td>
+                        <td className="py-3 pr-4 text-muted-foreground">{c.phone ?? "–"}</td>
+                        <td className="py-3 pr-4 font-semibold">{c.totalBookings}</td>
+                        <td className="py-3 pr-4 font-semibold">{formatCurrency(c.totalSpent ?? 0)}</td>
+                        <td className="py-3">
+                          <Button size="sm" variant="ghost" onClick={() => isGuest ? setSelectedGuest(c) : setSelectedId(c.id)}>
+                            <Eye size={14} className="mr-1" /> Lihat
+                          </Button>
+                        </td>
+                      </tr>
+                    );
+                  })}
                   {!customers?.length && <tr><td colSpan={7} className="py-8 text-center text-muted-foreground">Belum ada customer terdaftar</td></tr>}
                 </tbody>
               </table>
@@ -658,6 +1014,10 @@ export default function AdminCustomers() {
 
       <Dialog open={selectedId !== null} onOpenChange={(v) => !v && setSelectedId(null)}>
         {selectedId && <CustomerDetail customerId={selectedId} onClose={() => setSelectedId(null)} />}
+      </Dialog>
+
+      <Dialog open={selectedGuest !== null} onOpenChange={(v) => !v && setSelectedGuest(null)}>
+        {selectedGuest && <GuestDetailDialog guest={selectedGuest} onClose={() => setSelectedGuest(null)} />}
       </Dialog>
 
       <Dialog open={showForm} onOpenChange={(v) => { if (!v) { setShowForm(false); setEditCustomer(null); } }}>
