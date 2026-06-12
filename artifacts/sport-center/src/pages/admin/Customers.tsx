@@ -14,7 +14,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Search, Eye, MessageCircle, Globe, Building2, Plus, Pencil, Users, Sheet, Upload, Download, CheckCircle2, AlertCircle, Link, ChevronDown, ChevronUp } from "lucide-react";
+import { Search, Eye, MessageCircle, Globe, Building2, Plus, Pencil, Users, Sheet, Upload, Download, CheckCircle2, AlertCircle, Link, ChevronDown, ChevronUp, Save } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { getListCustomersQueryKey } from "@workspace/api-client-react";
 import { getToken } from "@/lib/auth";
@@ -536,11 +536,14 @@ function extractSheetId(input: string): string {
 }
 
 const LS_SHEET_KEY = "customers_connected_sheet";
+const LS_SHEET_URL_KEY = "customers_sheet_raw_url";
 
 function SheetSyncPanel() {
   const { toast } = useToast();
   const [expanded, setExpanded] = useState(true);
-  const [rawInput, setRawInput] = useState("");
+  const [rawInput, setRawInput] = useState(() => {
+    try { return localStorage.getItem(LS_SHEET_URL_KEY) ?? ""; } catch { return ""; }
+  });
   const [connectedSheet, setConnectedSheetState] = useState<{ id: string; title: string } | null>(() => {
     try { const v = localStorage.getItem(LS_SHEET_KEY); return v ? JSON.parse(v) : null; } catch { return null; }
   });
@@ -550,6 +553,14 @@ function SheetSyncPanel() {
     setConnectedSheetState(val);
     if (val) localStorage.setItem(LS_SHEET_KEY, JSON.stringify(val));
     else localStorage.removeItem(LS_SHEET_KEY);
+  };
+
+  const handleSaveUrl = () => {
+    const id = extractSheetId(rawInput);
+    if (!id) return;
+    localStorage.setItem(LS_SHEET_URL_KEY, rawInput.trim());
+    setConnectedSheet({ id, title: id });
+    toast({ title: "URL tersimpan", description: "Klik Verifikasi untuk mengecek koneksi ke sheet." });
   };
 
   const connectMutation = useConnectCustomerSheet({
@@ -631,20 +642,31 @@ function SheetSyncPanel() {
                   onChange={(e) => setRawInput(e.target.value)}
                   className="flex-1 text-sm"
                   disabled={isBusy}
+                  onKeyDown={(e) => e.key === "Enter" && rawInput.trim() && handleSaveUrl()}
                 />
+                <Button
+                  size="sm"
+                  className="gap-1.5 shrink-0 bg-primary hover:bg-primary/90"
+                  disabled={!rawInput.trim() || isBusy}
+                  onClick={handleSaveUrl}
+                >
+                  <Save size={14} />
+                  Simpan
+                </Button>
                 <Button
                   variant="outline"
                   size="sm"
                   className="gap-1.5 shrink-0"
                   disabled={!rawInput.trim() || isBusy}
                   onClick={() => connectMutation.mutate({ data: { sheetId: extractSheetId(rawInput) } })}
+                  title="Verifikasi koneksi ke Google Sheet"
                 >
                   <Link size={14} />
-                  {connectMutation.isPending ? "Mengecek..." : "Hubungkan"}
+                  {connectMutation.isPending ? "..." : "Verifikasi"}
                 </Button>
               </div>
               <p className="text-xs text-muted-foreground">
-                Pastikan <strong>Service Account</strong> sudah diberi akses <em>Editor</em> di spreadsheet tersebut.
+                <strong>Simpan</strong> untuk menyimpan URL. <strong>Verifikasi</strong> untuk cek koneksi (butuh Service Account akses <em>Editor</em>).
               </p>
             </div>
 
