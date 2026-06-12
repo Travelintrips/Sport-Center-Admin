@@ -15,7 +15,6 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Search, Eye, MessageCircle, Globe, Building2, Plus, Pencil, Users, Sheet, Upload, Download, CheckCircle2, AlertCircle, Link, ChevronDown, ChevronUp, Save, Trash2, RefreshCw } from "lucide-react";
-import { Search, Eye, MessageCircle, Globe, Building2, Plus, Pencil, Users, Sheet, Upload, Download, CheckCircle2, AlertCircle, Link, ChevronDown, ChevronUp, Trash2 } from "lucide-react";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -636,7 +635,7 @@ function GuestDetailDialog({ guest, onClose }: { guest: any; onClose: () => void
   );
 }
 
-function PersonalForm({ initial, onClose }: { initial: any; onClose: () => void }) {
+function PersonalEditForm({ initial, onClose }: { initial: any; onClose: () => void }) {
   const { toast } = useToast();
   const qc = useQueryClient();
   const updateMutation = useUpdateCustomer();
@@ -654,7 +653,6 @@ function PersonalForm({ initial, onClose }: { initial: any; onClose: () => void 
       await updateMutation.mutateAsync({ id: initial.id, data: form });
       toast({ title: "Customer diperbarui" });
       qc.invalidateQueries({ queryKey: getListCustomersQueryKey() });
-      window.dispatchEvent(new CustomEvent("customer-changed"));
       onClose();
     } catch (err: any) {
       toast({ title: err?.response?.data?.error ?? "Gagal memperbarui", variant: "destructive" });
@@ -922,8 +920,6 @@ export default function AdminCustomers() {
   const [deleting, setDeleting] = useState(false);
   const [tempResult, setTempResult] = useState<{ password: string; email: string } | null>(null);
   const [migrating, setMigrating] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState<{ id: number; name: string } | null>(null);
-  const [deleting, setDeleting] = useState(false);
   const { toast } = useToast();
   const qc = useQueryClient();
 
@@ -938,19 +934,6 @@ export default function AdminCustomers() {
       const data = await r.json();
       if (!r.ok) { toast({ title: data.error ?? "Gagal hapus", variant: "destructive" }); return; }
       toast({ title: `Customer "${deleteTarget.name}" dihapus` });
-      qc.invalidateQueries({ queryKey: getListCustomersQueryKey() });
-      window.dispatchEvent(new CustomEvent("customer-changed"));
-      setDeleteTarget(null);
-    } catch {
-      toast({ title: "Gagal menghapus customer", variant: "destructive" });
-      const token = getToken();
-      const r = await fetch(`/api/customers/${deleteTarget.id}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await r.json();
-      if (!r.ok) { toast({ title: data.error ?? "Gagal menghapus", variant: "destructive" }); return; }
-      toast({ title: data.message ?? "Customer berhasil dihapus" });
       qc.invalidateQueries({ queryKey: getListCustomersQueryKey() });
       setDeleteTarget(null);
     } catch {
@@ -1176,7 +1159,7 @@ export default function AdminCustomers() {
       </Dialog>
 
       <Dialog open={showPersonalForm} onOpenChange={(v) => { if (!v) { setShowPersonalForm(false); setPersonalEdit(null); } }}>
-        {showPersonalForm && personalEdit && <PersonalForm initial={personalEdit} onClose={() => { setShowPersonalForm(false); setPersonalEdit(null); }} />}
+        {showPersonalForm && personalEdit && <PersonalEditForm initial={personalEdit} onClose={() => { setShowPersonalForm(false); setPersonalEdit(null); }} />}
       </Dialog>
 
       <Dialog open={!!deleteTarget} onOpenChange={(v) => !v && setDeleteTarget(null)}>
@@ -1193,26 +1176,6 @@ export default function AdminCustomers() {
           </div>
         </DialogContent>
       </Dialog>
-      <AlertDialog open={deleteTarget !== null} onOpenChange={(v) => { if (!v) setDeleteTarget(null); }}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Hapus Akun Perusahaan?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Akun <strong>{deleteTarget?.name}</strong> akan dihapus permanen. Tindakan ini tidak dapat dibatalkan.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleting}>Batal</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleDelete}
-              disabled={deleting}
-              className="bg-red-600 hover:bg-red-700 text-white"
-            >
-              {deleting ? "Menghapus..." : "Ya, Hapus"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 }
