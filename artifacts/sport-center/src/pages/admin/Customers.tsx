@@ -406,7 +406,7 @@ function extractSheetId(input: string): string {
 
 function SheetSyncPanel() {
   const { toast } = useToast();
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(true);
   const [rawInput, setRawInput] = useState("");
   const [connectedSheet, setConnectedSheet] = useState<{ id: string; title: string } | null>(null);
   const [lastSync, setLastSync] = useState<{ direction: "push" | "pull"; result: string; at: Date } | null>(null);
