@@ -2020,6 +2020,22 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/BankMutationListResult"
+    delete:
+      operationId: clearBankMutations
+      tags: [bank-reconciliation]
+      summary: Delete bank mutations (all or by status filter)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClearBankMutationsInput"
+      responses:
+        "200":
+          description: Delete result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClearBankMutationsResult"
 
   /bank-reconciliation/matches/{mutationId}:
     get:
@@ -3917,6 +3933,23 @@ components:
         unmatched:
           type: integer
         duplicates:
+          type: integer
+
+    ClearBankMutationsInput:
+      type: object
+      properties:
+        statusFilter:
+          type: array
+          items:
+            type: string
+
+    ClearBankMutationsResult:
+      type: object
+      required: [ok, deletedCount]
+      properties:
+        ok:
+          type: boolean
+        deletedCount:
           type: integer
 
     BankSheetPullResult:

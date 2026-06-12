@@ -380,6 +380,36 @@ router.post("/bank-reconciliation/:mutationId/reject", adminMiddleware, async (r
   }
 });
 
+// DELETE /bank-reconciliation/mutations — hapus semua atau berdasarkan status
+router.delete("/bank-reconciliation/mutations", adminMiddleware, async (req, res) => {
+  try {
+    const { statusFilter } = req.body as { statusFilter?: string[] };
+    let deletedCount = 0;
+    if (statusFilter && statusFilter.length > 0) {
+      const rows = await db
+        .select({ id: bankMutationsTable.id })
+        .from(bankMutationsTable)
+        .where(inArray(bankMutationsTable.status, statusFilter as any));
+      const ids = rows.map((r) => r.id);
+      if (ids.length > 0) {
+        // Hapus matches dulu (foreign key)
+        await db.delete(bankReconciliationMatchesTable).where(inArray(bankReconciliationMatchesTable.mutationId, ids));
+        await db.delete(bankMutationsTable).where(inArray(bankMutationsTable.id, ids));
+        deletedCount = ids.length;
+      }
+    } else {
+      // Hapus semua
+      await db.delete(bankReconciliationMatchesTable);
+      const rows = await db.delete(bankMutationsTable).returning({ id: bankMutationsTable.id });
+      deletedCount = rows.length;
+    }
+    res.json({ ok: true, deletedCount });
+  } catch (err: any) {
+    req.log.error({ err }, "Bank reconciliation delete mutations error");
+    res.status(500).json({ error: err?.message ?? "Gagal menghapus data mutasi" });
+  }
+});
+
 // POST /bank-reconciliation/run-matching
 router.post("/bank-reconciliation/run-matching", adminMiddleware, async (req, res) => {
   try {

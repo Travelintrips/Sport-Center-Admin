@@ -35,6 +35,8 @@ export * from './bookingUpdate';
 export * from './bookingUpdateStatus';
 export * from './bookingVerificationStatus';
 export * from './checkAvailabilityParams';
+export * from './clearBankMutationsInput';
+export * from './clearBankMutationsResult';
 export * from './companyInvoice';
 export * from './companyInvoiceStatus';
 export * from './companyInvoiceUpdate';

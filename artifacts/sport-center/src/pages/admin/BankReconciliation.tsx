@@ -3,6 +3,7 @@ import {
   useListBankMutations, useGetBankMutationMatches, useApproveBankMutation,
   useRejectBankMutation, useRunBankMatching,
   useConnectBankReconSheet, usePullBankMutationsFromSheet, usePushBankReconToSheet,
+  useClearBankMutations,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { getListBankMutationsQueryKey } from "@workspace/api-client-react";
@@ -18,7 +19,7 @@ import { getToken } from "@/lib/auth";
 import {
   Upload, RefreshCw, CheckCircle2, XCircle, AlertTriangle, Search,
   ChevronDown, ChevronUp, Banknote, ArrowDownCircle, ArrowUpCircle,
-  Filter, FileText, Zap, Sheet, Download, Link, Save,
+  Filter, FileText, Zap, Sheet, Download, Link, Save, Trash2,
 } from "lucide-react";
 
 function extractSheetId(input: string): string {
@@ -48,6 +49,7 @@ function SheetSyncPanel({ onImported }: { onImported: () => void }) {
   });
   const [lastSync, setLastSync] = useState<{ direction: "push" | "pull"; result: string; at: Date } | null>(null);
   const [pushStatusFilter, setPushStatusFilter] = useState<string>("all");
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
 
   const setConnectedSheet = (val: { id: string; title: string } | null) => {
     setConnectedSheetState(val);
@@ -119,7 +121,24 @@ function SheetSyncPanel({ onImported }: { onImported: () => void }) {
     },
   });
 
-  const isBusy = connectMutation.isPending || pullMutation.isPending || pushMutation.isPending;
+  const queryClient = useQueryClient();
+
+  const clearMutation = useClearBankMutations({
+    mutation: {
+      onSuccess: (data) => {
+        toast({ title: `🗑️ ${data.deletedCount} data mutasi berhasil dihapus` });
+        setShowClearConfirm(false);
+        queryClient.invalidateQueries({ queryKey: getListBankMutationsQueryKey() });
+        onImported();
+      },
+      onError: (err: any) => {
+        toast({ title: err?.response?.data?.error ?? "Gagal menghapus data", variant: "destructive" });
+        setShowClearConfirm(false);
+      },
+    },
+  });
+
+  const isBusy = connectMutation.isPending || pullMutation.isPending || pushMutation.isPending || clearMutation.isPending;
 
   const handlePush = () => {
     if (!connectedSheet) return;
@@ -260,6 +279,40 @@ function SheetSyncPanel({ onImported }: { onImported: () => void }) {
                     <strong>{lastSync.result}</strong> — {lastSync.at.toLocaleTimeString("id-ID")}
                   </div>
                 )}
+
+                {/* Hapus data */}
+                <div className="border-t pt-3">
+                  {!showClearConfirm ? (
+                    <button
+                      className="flex items-center gap-1.5 text-xs text-red-600 hover:text-red-700 disabled:opacity-50"
+                      disabled={isBusy}
+                      onClick={() => setShowClearConfirm(true)}
+                    >
+                      <Trash2 size={12} /> Hapus semua data mutasi yang diimpor
+                    </button>
+                  ) : (
+                    <div className="flex flex-col gap-2 p-3 rounded-lg bg-red-50 border border-red-200">
+                      <p className="text-xs font-semibold text-red-800">⚠️ Hapus SEMUA data mutasi bank dari database?</p>
+                      <p className="text-xs text-red-600">Tindakan ini tidak dapat dibatalkan. Data rekonsiliasi yang sudah disetujui juga akan dihapus.</p>
+                      <div className="flex gap-2">
+                        <button
+                          className="flex-1 py-1 rounded bg-red-600 hover:bg-red-700 text-white text-xs font-semibold disabled:opacity-50"
+                          disabled={clearMutation.isPending}
+                          onClick={() => clearMutation.mutate({ data: {} })}
+                        >
+                          {clearMutation.isPending ? "Menghapus..." : "Ya, Hapus Semua"}
+                        </button>
+                        <button
+                          className="flex-1 py-1 rounded border text-xs disabled:opacity-50"
+                          disabled={clearMutation.isPending}
+                          onClick={() => setShowClearConfirm(false)}
+                        >
+                          Batal
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </div>

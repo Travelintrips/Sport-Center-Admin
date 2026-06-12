@@ -1330,6 +1330,15 @@ export interface RunMatchingResult {
   duplicates: number;
 }
 
+export interface ClearBankMutationsInput {
+  statusFilter?: string[];
+}
+
+export interface ClearBankMutationsResult {
+  ok: boolean;
+  deletedCount: number;
+}
+
 export interface BankSheetPullResult {
   ok: boolean;
   importedCount: number;

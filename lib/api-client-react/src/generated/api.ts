@@ -38,6 +38,8 @@ import type {
   BookingInput,
   BookingUpdate,
   CheckAvailabilityParams,
+  ClearBankMutationsInput,
+  ClearBankMutationsResult,
   CompanyInvoice,
   CompanyInvoiceUpdate,
   CompanyVerification,
@@ -7396,6 +7398,77 @@ export function useListBankMutations<TData = Awaited<ReturnType<typeof listBankM
 
 
 
+
+export const getClearBankMutationsUrl = () => {
+
+
+
+
+  return `/api/bank-reconciliation/mutations`
+}
+
+/**
+ * @summary Delete bank mutations (all or by status filter)
+ */
+export const clearBankMutations = async (clearBankMutationsInput?: ClearBankMutationsInput, options?: RequestInit): Promise<ClearBankMutationsResult> => {
+
+  return customFetch<ClearBankMutationsResult>(getClearBankMutationsUrl(),
+  {
+    ...options,
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      clearBankMutationsInput,)
+  }
+);}
+
+
+
+
+export const getClearBankMutationsMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof clearBankMutations>>, TError,{data?: BodyType<ClearBankMutationsInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof clearBankMutations>>, TError,{data?: BodyType<ClearBankMutationsInput>}, TContext> => {
+
+const mutationKey = ['clearBankMutations'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof clearBankMutations>>, {data?: BodyType<ClearBankMutationsInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  clearBankMutations(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ClearBankMutationsMutationResult = NonNullable<Awaited<ReturnType<typeof clearBankMutations>>>
+    export type ClearBankMutationsMutationBody = BodyType<ClearBankMutationsInput> | undefined
+    export type ClearBankMutationsMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Delete bank mutations (all or by status filter)
+ */
+export const useClearBankMutations = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof clearBankMutations>>, TError,{data?: BodyType<ClearBankMutationsInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof clearBankMutations>>,
+        TError,
+        {data?: BodyType<ClearBankMutationsInput>},
+        TContext
+      > => {
+      return useMutation(getClearBankMutationsMutationOptions(options));
+    }
 
 export const getGetBankMutationMatchesUrl = (mutationId: number,) => {
 

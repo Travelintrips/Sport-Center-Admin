@@ -2400,6 +2400,19 @@ export const ListBankMutationsResponse = zod.object({
 
 
 /**
+ * @summary Delete bank mutations (all or by status filter)
+ */
+export const ClearBankMutationsBody = zod.object({
+  "statusFilter": zod.array(zod.string()).optional()
+})
+
+export const ClearBankMutationsResponse = zod.object({
+  "ok": zod.boolean(),
+  "deletedCount": zod.number()
+})
+
+
+/**
  * @summary Get match candidates for a mutation
  */
 export const GetBankMutationMatchesParams = zod.object({
