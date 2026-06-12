@@ -77,7 +77,7 @@ export async function computeMatchesForMutation(mutation: BankMutation): Promise
       totalPrice: bookingsTable.totalPrice,
       grandTotal: bookingsTable.grandTotal,
       status: bookingsTable.status,
-      paymentGatewayRef: bookingsTable.paymentGatewayRef,
+      updatedAt: sql<string>`${bookingsTable.updatedAt}`.as("updated_at"),
     })
     .from(bookingsTable);
 
@@ -89,6 +89,7 @@ export async function computeMatchesForMutation(mutation: BankMutation): Promise
       proofUrl: paymentsTable.proofUrl,
       status: paymentsTable.status,
       createdAt: paymentsTable.createdAt,
+      confirmedAt: paymentsTable.confirmedAt,
     })
     .from(paymentsTable);
 
@@ -116,24 +117,37 @@ export async function computeMatchesForMutation(mutation: BankMutation): Promise
       continue; // Must have amount match to be a candidate
     }
 
-    // Date match (25 pts for exact, 15 for ±3 days)
-    const diff = dayDiff(mutation.transactionDate, booking.bookingDate);
-    if (diff === 0) {
-      score += 25;
-      dateMatch = true;
-      score_parts.push("tanggal sama");
-    } else if (diff <= 3) {
-      score += 15;
-      dateMatch = true;
-      score_parts.push(`tanggal selisih ${diff} hari`);
+    // Date match — use payment.createdAt if exists, else booking.updatedAt (when admin confirmed)
+    // Never use booking.bookingDate (that's when the facility is used, not when money was paid)
+    const toDateStr = (d: Date | string | null | undefined): string | null => {
+      if (!d) return null;
+      if (typeof d === "string") return d.slice(0, 10);
+      return d.toISOString().slice(0, 10);
+    };
+    const paymentDateStr =
+      toDateStr(payment?.createdAt) ??
+      toDateStr(payment?.confirmedAt) ??
+      (["confirmed", "paid", "completed"].includes(booking.status ?? "")
+        ? toDateStr(booking.updatedAt)
+        : null);
+
+    if (paymentDateStr) {
+      const diff = dayDiff(mutation.transactionDate, paymentDateStr);
+      if (diff === 0) {
+        score += 25;
+        dateMatch = true;
+        score_parts.push("tanggal pembayaran sama");
+      } else if (diff <= 3) {
+        score += 15;
+        dateMatch = true;
+        score_parts.push(`tanggal pembayaran selisih ${diff} hari`);
+      }
     }
 
     // GoPay / provider order ID match (30 pts)
     if (providerOrderId) {
-      const gatewayRef = booking.paymentGatewayRef ?? "";
       const orderNum = booking.orderNumber ?? "";
       if (
-        gatewayRef.toUpperCase() === providerOrderId.toUpperCase() ||
         orderNum.toUpperCase() === providerOrderId.toUpperCase() ||
         normDesc.includes(providerOrderId.toLowerCase())
       ) {
@@ -260,7 +274,7 @@ export async function runMatching(mutationIds?: number[]): Promise<{
 
     const best = candidates[0]!;
 
-    if (best.score >= 95) {
+    if (best.score >= 80) {
       // Auto approve
       await db
         .update(bankMutationsTable)

@@ -938,8 +938,11 @@ export default function AdminCustomers() {
       qc.invalidateQueries({ queryKey: getListCustomersQueryKey() });
       window.dispatchEvent(new CustomEvent("customer-changed"));
       setDeleteTarget(null);
-    } catch (_e) {
+    } catch {
       toast({ title: "Gagal menghapus customer", variant: "destructive" });
+
+
+      setDeleteTarget(null);
     } finally {
       setDeleting(false);
     }
