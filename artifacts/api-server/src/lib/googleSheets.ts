@@ -34,11 +34,13 @@ async function getFirstSheetName(sheets: ReturnType<typeof google.sheets>, sheet
   return meta.data.sheets?.[0]?.properties?.title ?? "Sheet1";
 }
 
-export async function verifySheetAccess(sheetId: string): Promise<{ title: string; sheetName: string }> {
+export async function verifySheetAccess(sheetId: string): Promise<{ title: string; sheetName: string; sheetNames: string[] }> {
   const sheets = getClient();
   const meta = await sheets.spreadsheets.get({ spreadsheetId: sheetId });
-  const sheetName = meta.data.sheets?.[0]?.properties?.title ?? "Sheet1";
-  return { title: meta.data.properties?.title ?? sheetId, sheetName };
+  const allSheets = meta.data.sheets ?? [];
+  const sheetNames = allSheets.map((s) => s.properties?.title ?? "Sheet1").filter(Boolean) as string[];
+  const sheetName = sheetNames[0] ?? "Sheet1";
+  return { title: meta.data.properties?.title ?? sheetId, sheetName, sheetNames };
 }
 
 export type CustomerRow = {
@@ -135,6 +137,190 @@ export type SheetCustomerUpdate = {
   picEmail?: string;
   accountType?: string;
 };
+
+// ─── Bank Reconciliation Sheet ────────────────────────────────────────────────
+
+export const RECON_SHEET_HEADERS = [
+  "ID", "Tanggal", "Keterangan", "Kredit", "Debit", "Nominal", "Arah",
+  "Status", "Order ID Cocok", "Nama Provider", "Rekening", "Diunggah",
+];
+
+export type ReconMutationRow = {
+  id: number;
+  transactionDate: string;
+  description: string;
+  creditAmount: string | number;
+  debitAmount: string | number;
+  amount: string | number;
+  direction: string;
+  status: string;
+  providerOrderId: string | null;
+  providerName: string | null;
+  bankAccountId: string | null;
+  createdAt: Date | string;
+};
+
+export async function pushReconciliationToSheet(
+  sheetId: string,
+  mutations: ReconMutationRow[],
+  sheetName?: string
+): Promise<{ updatedRows: number }> {
+  const sheets = getClient();
+  const resolvedSheetName = sheetName ?? (await getFirstSheetName(sheets, sheetId));
+
+  const rows: string[][] = mutations.map((m) => [
+    String(m.id),
+    m.transactionDate,
+    m.description,
+    String(m.creditAmount ?? 0),
+    String(m.debitAmount ?? 0),
+    String(m.amount),
+    m.direction,
+    m.status,
+    m.providerOrderId ?? "",
+    m.providerName ?? "",
+    m.bankAccountId ?? "",
+    m.createdAt instanceof Date ? m.createdAt.toISOString() : String(m.createdAt),
+  ]);
+
+  await sheets.spreadsheets.values.clear({
+    spreadsheetId: sheetId,
+    range: `${resolvedSheetName}!A1:Z`,
+  });
+
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: sheetId,
+    range: `${resolvedSheetName}!A1`,
+    valueInputOption: "RAW",
+    requestBody: { values: [RECON_SHEET_HEADERS, ...rows] },
+  });
+
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId: sheetId,
+    requestBody: {
+      requests: [
+        {
+          repeatCell: {
+            range: { sheetId: 0, startRowIndex: 0, endRowIndex: 1 },
+            cell: {
+              userEnteredFormat: {
+                backgroundColor: { red: 0.1, green: 0.45, blue: 0.85 },
+                textFormat: { bold: true, foregroundColor: { red: 1, green: 1, blue: 1 } },
+              },
+            },
+            fields: "userEnteredFormat(backgroundColor,textFormat)",
+          },
+        },
+        {
+          autoResizeDimensions: {
+            dimensions: { sheetId: 0, dimension: "COLUMNS", startIndex: 0, endIndex: RECON_SHEET_HEADERS.length },
+          },
+        },
+      ],
+    },
+  });
+
+  return { updatedRows: rows.length };
+}
+
+export type SheetMutationRow = {
+  transactionDate: string;
+  description: string;
+  creditAmount: number;
+  debitAmount: number;
+  bankAccountId?: string;
+};
+
+export async function pullMutationsFromSheet(sheetId: string, sheetName?: string): Promise<SheetMutationRow[]> {
+  const sheets = getClient();
+  const resolvedSheetName = sheetName ?? (await getFirstSheetName(sheets, sheetId));
+
+  const resp = await sheets.spreadsheets.values.get({
+    spreadsheetId: sheetId,
+    range: `${resolvedSheetName}!A1:Z`,
+  });
+
+  const values = resp.data.values ?? [];
+  if (values.length < 2) return [];
+
+  const header: string[] = (values[0] as string[]).map((h) => h.toLowerCase().replace(/[\s\-\.]+/g, "_"));
+
+  const idxOf = (names: string[]) => {
+    for (const n of names) { const i = header.indexOf(n); if (i >= 0) return i; }
+    return -1;
+  };
+
+  const dateIdx  = idxOf(["tanggal", "transaction_date", "date", "tgl"]);
+  const descIdx  = idxOf(["keterangan", "description", "ket", "narasi", "deskripsi"]);
+  const creditIdx = idxOf(["kredit", "credit", "credit_amount", "masuk", "cr"]);
+  const debitIdx  = idxOf(["debit", "debit_amount", "keluar", "dr"]);
+  // "jumlah" di Mandiri = saldo berjalan, bukan nominal transaksi → tidak dipakai sebagai nominal
+  const nominalIdx = idxOf(["nominal", "amount"]);
+  const bankIdx   = idxOf(["rekening", "bank_account_id", "bank_account", "account"]);
+
+  /** Parse angka IDR: titik sebagai pemisah ribuan (1.360.410 → 1360410) */
+  const parseIDR = (raw: string): number => {
+    const s = String(raw ?? "").trim().replace(/\s/g, "");
+    if (!s) return 0;
+    // Hapus semua titik (pemisah ribuan), ganti koma → titik (desimal)
+    const cleaned = s.replace(/\./g, "").replace(/,/g, ".");
+    return parseFloat(cleaned) || 0;
+  };
+
+  /** Normalisasi tanggal ke YYYY-MM-DD.
+   *  Mendukung: YYYY-MM-DD, M/D/YYYY (format Mandiri), D/M/YYYY, YYYY/MM/DD */
+  const normalizeDate = (raw: string): string => {
+    const s = String(raw ?? "").trim();
+    if (!s) return s;
+    // Sudah ISO
+    if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+    // Slash-separated
+    const parts = s.split("/");
+    if (parts.length === 3) {
+      const a = parseInt(parts[0]!, 10);
+      const b = parseInt(parts[1]!, 10);
+      const c = parseInt(parts[2]!, 10);
+      if (parts[2]!.length === 4) {
+        // a/b/YYYY — jika a > 12 pasti hari, pakai d/m/yyyy; jika b > 12 pasti bulan, pakai m/d/yyyy
+        // Default Mandiri: m/d/yyyy
+        let month = a, day = b;
+        if (a > 12) { day = a; month = b; }
+        return `${parts[2]}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+      }
+      if (parts[0]!.length === 4) {
+        // YYYY/MM/DD
+        return `${parts[0]}-${String(b).padStart(2, "0")}-${String(c).padStart(2, "0")}`;
+      }
+    }
+    // Fallback: native Date
+    const d = new Date(s);
+    if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+    return s;
+  };
+
+  const result: SheetMutationRow[] = [];
+  for (let i = 1; i < values.length; i++) {
+    const row = values[i] as string[];
+    const dateRaw = dateIdx >= 0 ? normalizeDate(String(row[dateIdx] ?? "")) : "";
+    const desc = descIdx >= 0 ? String(row[descIdx] ?? "").trim() : "";
+    if (!dateRaw && !desc) continue;
+
+    let creditAmount = 0;
+    let debitAmount  = 0;
+    if (creditIdx >= 0) creditAmount = parseIDR(String(row[creditIdx] ?? "0"));
+    if (debitIdx >= 0)  debitAmount  = parseIDR(String(row[debitIdx]  ?? "0"));
+    // Kolom nominal (bukan saldo) hanya dipakai jika tidak ada kolom debit/kredit
+    if (creditIdx < 0 && debitIdx < 0 && nominalIdx >= 0) {
+      const nom = parseIDR(String(row[nominalIdx] ?? "0"));
+      creditAmount = nom > 0 ? nom : 0;
+    }
+    const bankAccountId = bankIdx >= 0 ? String(row[bankIdx] ?? "").trim() || undefined : undefined;
+
+    result.push({ transactionDate: dateRaw, description: desc, creditAmount, debitAmount, bankAccountId });
+  }
+
+  return result;
+}
 
 export async function pullCustomersFromSheet(sheetId: string): Promise<SheetCustomerUpdate[]> {
   const sheets = getClient();

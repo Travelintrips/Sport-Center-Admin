@@ -170,8 +170,7 @@ router.post("/customers", adminMiddleware, async (req, res) => {
       res.status(500).json({ error: "Server configuration error: SESSION_SECRET not set" });
       return;
     }
-    // Generate random password — admin perlu mengatur password via reset flow
-    const randomPassword = Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 10).toUpperCase();
+    const randomPassword = name.trim().split(/\s+/)[0].toLowerCase() + "123";
     const passwordHash = createHmac("sha256", sessionSecret).update(randomPassword).digest("hex");
 
     const [user] = await db.insert(usersTable).values({
@@ -320,7 +319,7 @@ router.post("/customers/from-guest", adminMiddleware, async (req, res) => {
     const code = await generateCustomerCode();
 
     const sessionSecret = process.env.SESSION_SECRET ?? "";
-    const randomPassword = Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 10).toUpperCase();
+    const randomPassword = resolvedName.trim().split(/\s+/)[0].toLowerCase() + "123";
     const passwordHash = createHmac("sha256", sessionSecret).update(randomPassword).digest("hex");
 
     const [newUser] = await db.insert(usersTable).values({

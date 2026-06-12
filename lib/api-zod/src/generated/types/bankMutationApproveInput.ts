@@ -6,7 +6,8 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export interface SheetSyncInput {
-  sheetId: string;
-  sheetName?: string;
+export interface BankMutationApproveInput {
+  matchId?: number;
+  candidateType?: string;
+  candidateId?: number;
 }

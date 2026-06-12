@@ -6,8 +6,11 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export interface SheetConnectResult {
+export interface RunMatchingResult {
   ok: boolean;
-  title: string;
-  sheetNames: string[];
+  processed: number;
+  autoApproved: number;
+  needsReview: number;
+  unmatched: number;
+  duplicates: number;
 }

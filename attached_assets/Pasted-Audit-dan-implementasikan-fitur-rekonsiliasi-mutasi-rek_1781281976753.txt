@@ -1,0 +1,161 @@
+Audit dan implementasikan fitur rekonsiliasi mutasi rekening dari Google Sheet / upload Excel.
+
+Tujuan:
+App harus bisa mencocokkan mutasi bank dengan transaksi/order/payment di database berdasarkan:
+1. tanggal transaksi
+2. nominal masuk/keluar
+3. tipe transaksi IN/OUT
+4. keterangan mutasi
+5. nama customer/vendor/tenant
+6. khusus transaksi “DOMPET ANAK BANGSA / GoPay”, cocokkan juga berdasarkan Order ID / ID transaksi yang muncul di keterangan dan bukti transfer.
+
+Format key utama mutasi:
+bank_recon_key =
+YYYYMMDD + "_" + amount + "_" + direction
+
+direction:
+- CR / credit / uang masuk = IN
+- DB / debet / uang keluar = OUT
+
+Contoh:
+20260502_7150000_IN
+
+Tambahkan juga normalized_description:
+- lowercase
+- hapus tanda baca
+- trim spasi ganda
+- ambil nama dari keterangan
+- ambil order id jika ada pola seperti ID261222634814704JM
+
+Buat tabel baru:
+bank_mutations:
+- id
+- bank_account_id
+- transaction_date
+- description
+- credit_amount
+- debit_amount
+- amount
+- direction
+- mutation_key
+- normalized_description
+- provider_name
+- provider_order_id
+- raw_payload
+- status: unmatched, matched, duplicate_need_review, approved, rejected
+- matched_payment_id nullable
+- matched_order_id nullable
+- uploaded_proof_url nullable
+- created_at
+- updated_at
+
+Buat tabel:
+bank_reconciliation_matches:
+- id
+- mutation_id
+- candidate_type: payment/order/invoice/expense
+- candidate_id
+- match_score
+- match_reason
+- amount_match boolean
+- date_match boolean
+- name_match boolean
+- order_id_match boolean
+- proof_match boolean
+- status: candidate, approved, rejected
+- created_at
+
+Matching rules:
+1. Exact match:
+   - tanggal sama
+   - nominal sama
+   - direction sama
+   - order_id sama jika tersedia
+   - otomatis match jika score >= 95
+
+2. Strong match:
+   - nominal sama
+   - tanggal beda maksimal 1-3 hari
+   - nama customer/vendor/tenant muncul di keterangan
+   - score 80-94
+   - masuk ke review admin
+
+3. Duplicate:
+   - jika mutation_key sama lebih dari 1
+   - jangan auto approve
+   - status duplicate_need_review
+   - admin harus pilih transaksi mana yang benar
+
+4. GoPay / DOMPET ANAK BANGSA:
+   - extract Order ID dari keterangan, contoh ID261222634814704JM
+   - cocokkan ke payment_gateway_ref, external_order_id, payment_reference, atau uploaded proof OCR text
+   - jika order id sama dan nominal sama, auto match
+
+5. Upload bukti transfer:
+   - payment/order bisa punya uploaded_proof_url
+   - tambahkan OCR text / extracted_reference bila tersedia
+   - cocokkan keterangan mutasi dengan nama pengirim atau order id di bukti transfer
+   - jika bukti transfer mengandung nominal/tanggal/order id yang sama, naikkan score
+
+Backend:
+- endpoint import mutasi dari Google Sheet / CSV / Excel
+- endpoint POST /api/bank-reconciliation/import
+- endpoint GET /api/bank-reconciliation/mutations
+- endpoint GET /api/bank-reconciliation/matches/:mutationId
+- endpoint POST /api/bank-reconciliation/:mutationId/approve
+- endpoint POST /api/bank-reconciliation/:mutationId/reject
+- endpoint POST /api/bank-reconciliation/run-matching
+
+Frontend:
+Buat halaman admin “Rekonsiliasi Bank”.
+Tampilkan:
+- tanggal
+- keterangan
+- credit
+- debit
+- amount
+- direction
+- mutation_key
+- kandidat match
+- score
+- alasan match
+- status
+- tombol approve/reject/manual match
+
+Tambahkan filter:
+- unmatched
+- matched
+- duplicate
+- tanggal
+- nominal
+- nama
+- provider GoPay / DOMPET ANAK BANGSA
+
+UI penting:
+- Jika kandidat lebih dari 1, tampilkan semua kandidat dan admin wajib pilih.
+- Jika tidak ada match, tampilkan sebagai “Unmatched” dan admin bisa manual assign ke order/payment/invoice/expense.
+- Jika auto match, tetap simpan audit log.
+
+Jangan hanya cocokkan berdasarkan tanggal + nominal, karena bisa banyak duplikat.
+Gunakan kombinasi:
+date + amount + direction + normalized description + customer/vendor name + provider_order_id + uploaded proof reference.
+
+Tambahkan audit log setiap:
+- import mutasi
+- auto match
+- duplicate detected
+- admin approve
+- admin reject
+- manual match
+
+Output akhir:
+1. migration database
+2. service matcher
+3. API routes
+4. halaman admin
+5. test case minimal:
+   - exact match normal
+   - duplicate nominal sama
+   - GoPay dengan Order ID
+   - bukti transfer cocok
+   - unmatched

@@ -6,7 +6,8 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export interface SheetSyncInput {
+export interface BankSheetPushInput {
   sheetId: string;
   sheetName?: string;
+  statusFilter?: string[];
 }

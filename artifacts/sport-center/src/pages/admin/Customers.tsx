@@ -15,6 +15,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Search, Eye, MessageCircle, Globe, Building2, Plus, Pencil, Users, Sheet, Upload, Download, CheckCircle2, AlertCircle, Link, ChevronDown, ChevronUp, Save, Trash2, RefreshCw } from "lucide-react";
+import { Search, Eye, MessageCircle, Globe, Building2, Plus, Pencil, Users, Sheet, Upload, Download, CheckCircle2, AlertCircle, Link, ChevronDown, ChevronUp, Save, Trash2, RefreshCw, Copy, Check } from "lucide-react";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -653,7 +654,6 @@ function PersonalEditForm({ initial, onClose }: { initial: any; onClose: () => v
       await updateMutation.mutateAsync({ id: initial.id, data: form });
       toast({ title: "Customer diperbarui" });
       qc.invalidateQueries({ queryKey: getListCustomersQueryKey() });
-      window.dispatchEvent(new CustomEvent("customer-changed"));
       onClose();
     } catch (err: any) {
       toast({ title: err?.response?.data?.error ?? "Gagal memperbarui", variant: "destructive" });
@@ -941,6 +941,9 @@ export default function AdminCustomers() {
       setDeleteTarget(null);
     } catch (_e) {
       toast({ title: "Gagal menghapus customer", variant: "destructive" });
+      setDeleteTarget(null);
+    } catch {
+      toast({ title: "Gagal menghapus akun", variant: "destructive" });
     } finally {
       setDeleting(false);
     }
@@ -1010,6 +1013,19 @@ export default function AdminCustomers() {
           />
         )}
       </Dialog>
+
+      <div className="flex gap-2">
+        {tab === "personal" && (
+          <Button variant="outline" onClick={handleMigrateAll} disabled={migrating} className="gap-2">
+            <Users size={16} /> {migrating ? "Memproses..." : "Sinkronisasi Guest → Akun"}
+          </Button>
+        )}
+        {tab === "company" && (
+          <Button onClick={() => { setEditCustomer(null); setShowForm(true); }} className="gap-2">
+            <Plus size={16} /> Tambah Perusahaan
+          </Button>
+        )}
+      </div>
 
       <SheetSyncPanel />
 
@@ -1163,8 +1179,9 @@ export default function AdminCustomers() {
 
       <Dialog open={showPersonalEditForm} onOpenChange={(v) => { if (!v) { setShowPersonalEditForm(false); setPersonalEdit(null); } }}>
         {showPersonalEditForm && personalEdit && <PersonalEditForm initial={personalEdit} onClose={() => { setShowPersonalEditForm(false); setPersonalEdit(null); }} />}
+      <Dialog open={showPersonalForm} onOpenChange={(v) => { if (!v) { setShowPersonalForm(false); setPersonalEdit(null); } }}>
+        {showPersonalForm && personalEdit && <PersonalEditForm initial={personalEdit} onClose={() => { setShowPersonalForm(false); setPersonalEdit(null); }} />}
       </Dialog>
-
       <Dialog open={!!deleteTarget} onOpenChange={(v) => !v && setDeleteTarget(null)}>
         <DialogContent className="max-w-sm">
           <DialogHeader><DialogTitle>Hapus Customer</DialogTitle></DialogHeader>
@@ -1179,26 +1196,6 @@ export default function AdminCustomers() {
           </div>
         </DialogContent>
       </Dialog>
-      <AlertDialog open={deleteTarget !== null} onOpenChange={(v) => { if (!v) setDeleteTarget(null); }}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Hapus Akun Perusahaan?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Akun <strong>{deleteTarget?.name}</strong> akan dihapus permanen. Tindakan ini tidak dapat dibatalkan.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleting}>Batal</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleDelete}
-              disabled={deleting}
-              className="bg-red-600 hover:bg-red-700 text-white"
-            >
-              {deleting ? "Menghapus..." : "Ya, Hapus"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 }

@@ -39,6 +39,8 @@ tags:
     description: Tenant (Penyewa Tenan) management
   - name: tax
     description: Tax settings and tax reporting (PPN)
+  - name: bank-reconciliation
+    description: Bank mutation import and reconciliation matching
 paths:
   /healthz:
     get:
@@ -1965,6 +1967,210 @@ paths:
         "200":
           description: Rejected
 
+  /bank-reconciliation/import:
+    post:
+      operationId: importBankMutations
+      tags: [bank-reconciliation]
+      summary: Import bank mutations (multipart file upload handled directly)
+      responses:
+        "200":
+          description: Import result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BankMutationImportResult"
+
+  /bank-reconciliation/mutations:
+    get:
+      operationId: listBankMutations
+      tags: [bank-reconciliation]
+      summary: List bank mutations with filters
+      parameters:
+        - in: query
+          name: status
+          schema: { type: string }
+        - in: query
+          name: direction
+          schema: { type: string }
+        - in: query
+          name: dateFrom
+          schema: { type: string }
+        - in: query
+          name: dateTo
+          schema: { type: string }
+        - in: query
+          name: minAmount
+          schema: { type: number }
+        - in: query
+          name: maxAmount
+          schema: { type: number }
+        - in: query
+          name: search
+          schema: { type: string }
+        - in: query
+          name: page
+          schema: { type: integer }
+        - in: query
+          name: pageSize
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Paginated list of mutations
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BankMutationListResult"
+    delete:
+      operationId: clearBankMutations
+      tags: [bank-reconciliation]
+      summary: Delete bank mutations (all or by status filter)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClearBankMutationsInput"
+      responses:
+        "200":
+          description: Delete result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClearBankMutationsResult"
+
+  /bank-reconciliation/matches/{mutationId}:
+    get:
+      operationId: getBankMutationMatches
+      tags: [bank-reconciliation]
+      summary: Get match candidates for a mutation
+      parameters:
+        - in: path
+          name: mutationId
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Mutation with match candidates
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BankMutationWithMatches"
+
+  /bank-reconciliation/{mutationId}/approve:
+    post:
+      operationId: approveBankMutation
+      tags: [bank-reconciliation]
+      summary: Approve a bank mutation match
+      parameters:
+        - in: path
+          name: mutationId
+          required: true
+          schema: { type: integer }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BankMutationApproveInput"
+      responses:
+        "200":
+          description: Approved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResult"
+
+  /bank-reconciliation/{mutationId}/reject:
+    post:
+      operationId: rejectBankMutation
+      tags: [bank-reconciliation]
+      summary: Reject a bank mutation
+      parameters:
+        - in: path
+          name: mutationId
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Rejected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResult"
+
+  /bank-reconciliation/run-matching:
+    post:
+      operationId: runBankMatching
+      tags: [bank-reconciliation]
+      summary: Run matching algorithm for unmatched mutations
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RunMatchingInput"
+      responses:
+        "200":
+          description: Matching result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunMatchingResult"
+
+  /bank-reconciliation/sheets/connect:
+    post:
+      operationId: connectBankReconSheet
+      tags: [bank-reconciliation]
+      summary: Verify access to a Google Sheet for bank reconciliation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SheetConnectInput"
+      responses:
+        "200":
+          description: Sheet info
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SheetConnectResult"
+
+  /bank-reconciliation/sheets/pull:
+    post:
+      operationId: pullBankMutationsFromSheet
+      tags: [bank-reconciliation]
+      summary: Pull bank mutations from Google Sheet and import to DB
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SheetConnectInput"
+      responses:
+        "200":
+          description: Import result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BankSheetPullResult"
+
+  /bank-reconciliation/sheets/push:
+    post:
+      operationId: pushBankReconToSheet
+      tags: [bank-reconciliation]
+      summary: Push reconciliation results to Google Sheet
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BankSheetPushInput"
+      responses:
+        "200":
+          description: Push result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BankSheetPushResult"
+
 components:
   schemas:
     HealthStatus:
@@ -3508,18 +3714,24 @@ components:
 
     SheetConnectResult:
       type: object
-      required: [ok, title]
+      required: [ok, title, sheetNames]
       properties:
         ok:
           type: boolean
         title:
           type: string
+        sheetNames:
+          type: array
+          items:
+            type: string
 
     SheetSyncInput:
       type: object
       required: [sheetId]
       properties:
         sheetId:
+          type: string
+        sheetName:
           type: string
 
     SheetPushResult:
@@ -3548,3 +3760,227 @@ components:
       properties:
         error:
           type: string
+
+    OkResult:
+      type: object
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+
+    BankMutation:
+      type: object
+      required: [id, transactionDate, description, amount, direction, mutationKey, status, createdAt, updatedAt]
+      properties:
+        id:
+          type: integer
+        bankAccountId:
+          type: string
+          nullable: true
+        transactionDate:
+          type: string
+        description:
+          type: string
+        creditAmount:
+          type: string
+          nullable: true
+        debitAmount:
+          type: string
+          nullable: true
+        amount:
+          type: string
+        direction:
+          type: string
+        mutationKey:
+          type: string
+        normalizedDescription:
+          type: string
+          nullable: true
+        providerName:
+          type: string
+          nullable: true
+        providerOrderId:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [unmatched, matched, duplicate_need_review, approved, rejected]
+        matchedPaymentId:
+          type: integer
+          nullable: true
+        matchedOrderId:
+          type: integer
+          nullable: true
+        uploadedProofUrl:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+
+    BankReconciliationMatch:
+      type: object
+      required: [id, mutationId, candidateType, candidateId, matchScore, status, createdAt]
+      properties:
+        id:
+          type: integer
+        mutationId:
+          type: integer
+        candidateType:
+          type: string
+          enum: [payment, order, invoice, expense]
+        candidateId:
+          type: integer
+        matchScore:
+          type: integer
+        matchReason:
+          type: string
+          nullable: true
+        amountMatch:
+          type: boolean
+        dateMatch:
+          type: boolean
+        nameMatch:
+          type: boolean
+        orderIdMatch:
+          type: boolean
+        proofMatch:
+          type: boolean
+        status:
+          type: string
+          enum: [candidate, approved, rejected]
+        createdAt:
+          type: string
+
+    BankMutationImportResult:
+      type: object
+      required: [ok, total, inserted, skipped]
+      properties:
+        ok:
+          type: boolean
+        total:
+          type: integer
+        inserted:
+          type: integer
+        skipped:
+          type: integer
+        matching:
+          type: object
+          properties:
+            processed: { type: integer }
+            autoApproved: { type: integer }
+            needsReview: { type: integer }
+            unmatched: { type: integer }
+            duplicates: { type: integer }
+
+    BankMutationListResult:
+      type: object
+      required: [mutations, total, page, pageSize]
+      properties:
+        mutations:
+          type: array
+          items:
+            $ref: "#/components/schemas/BankMutation"
+        total:
+          type: integer
+        page:
+          type: integer
+        pageSize:
+          type: integer
+
+    BankMutationWithMatches:
+      type: object
+      required: [mutation, matches]
+      properties:
+        mutation:
+          $ref: "#/components/schemas/BankMutation"
+        matches:
+          type: array
+          items:
+            $ref: "#/components/schemas/BankReconciliationMatch"
+
+    BankMutationApproveInput:
+      type: object
+      properties:
+        matchId:
+          type: integer
+        candidateType:
+          type: string
+        candidateId:
+          type: integer
+
+    RunMatchingInput:
+      type: object
+      properties:
+        mutationIds:
+          type: array
+          items:
+            type: integer
+
+    RunMatchingResult:
+      type: object
+      required: [ok, processed, autoApproved, needsReview, unmatched, duplicates]
+      properties:
+        ok:
+          type: boolean
+        processed:
+          type: integer
+        autoApproved:
+          type: integer
+        needsReview:
+          type: integer
+        unmatched:
+          type: integer
+        duplicates:
+          type: integer
+
+    ClearBankMutationsInput:
+      type: object
+      properties:
+        statusFilter:
+          type: array
+          items:
+            type: string
+
+    ClearBankMutationsResult:
+      type: object
+      required: [ok, deletedCount]
+      properties:
+        ok:
+          type: boolean
+        deletedCount:
+          type: integer
+
+    BankSheetPullResult:
+      type: object
+      required: [ok, importedCount, skippedCount]
+      properties:
+        ok:
+          type: boolean
+        importedCount:
+          type: integer
+        skippedCount:
+          type: integer
+
+    BankSheetPushInput:
+      type: object
+      required: [sheetId]
+      properties:
+        sheetId:
+          type: string
+        sheetName:
+          type: string
+        statusFilter:
+          type: array
+          items:
+            type: string
+
+    BankSheetPushResult:
+      type: object
+      required: [ok, updatedRows]
+      properties:
+        ok:
+          type: boolean
+        updatedRows:
+          type: integer
