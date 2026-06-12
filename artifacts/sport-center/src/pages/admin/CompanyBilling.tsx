@@ -367,6 +367,8 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
       if (!res.ok) throw new Error("Gagal memuat invoice");
       return res.json();
     },
+    staleTime: 0,
+    refetchOnMount: "always",
   });
 
   const handleMarkPaid = async () => {
@@ -673,7 +675,7 @@ export default function AdminCompanyBilling() {
       </Dialog>
 
       <Dialog open={!!selectedInvoiceId} onOpenChange={(v) => !v && setSelectedInvoiceId(null)}>
-        {selectedInvoiceId && <InvoiceDetail invoiceId={selectedInvoiceId} onClose={() => setSelectedInvoiceId(null)} />}
+        {selectedInvoiceId && <InvoiceDetail key={selectedInvoiceId} invoiceId={selectedInvoiceId} onClose={() => setSelectedInvoiceId(null)} />}
       </Dialog>
     </div>
   );
