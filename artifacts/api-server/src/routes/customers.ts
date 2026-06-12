@@ -71,6 +71,8 @@ router.get("/customers/simple", authMiddleware, async (req, res) => {
   }
 });
 
+const INACTIVE = ["cancelled", "expired", "rejected", "refunded"];
+
 router.get("/customers", adminMiddleware, async (req, res) => {
   try {
     const { search, accountType } = req.query;
@@ -84,10 +86,43 @@ router.get("/customers", adminMiddleware, async (req, res) => {
 
     const bookings = await db.select().from(bookingsTable);
 
-    let result = users.map((u) => {
+    let result: ReturnType<typeof mapUser>[] = users.map((u) => {
       const userBookings = bookings.filter((b) => b.customerId === u.id || b.customerEmail === u.email || b.companyCustomerId === u.id);
       return mapUser(u, userBookings);
     });
+
+    // Untuk tab personal: tambahkan guest bookers (tidak punya akun & phone tidak terdaftar)
+    if (accountType !== "company") {
+      const registeredPhones = new Set(users.map((u) => u.phone).filter(Boolean));
+      const seenPhones = new Set<string>();
+      const guestEntries: ReturnType<typeof mapUser>[] = [];
+
+      for (const b of bookings) {
+        const phone = b.customerPhone;
+        if (!phone || seenPhones.has(phone) || registeredPhones.has(phone) || b.customerId) continue;
+        seenPhones.add(phone);
+        const guestBookings = bookings.filter((bk) => bk.customerPhone === phone);
+        const totalSpent = guestBookings
+          .filter((bk) => !INACTIVE.includes(bk.status))
+          .reduce((sum, bk) => sum + Number(bk.totalPrice), 0);
+        guestEntries.push({
+          id: -(guestEntries.length + 1),
+          name: b.customerName,
+          email: b.customerEmail,
+          phone,
+          customerCode: null,
+          registrationSource: "guest",
+          accountType: "personal",
+          companyName: null, picName: null, picPhone: null, picEmail: null,
+          billingAddress: null, paymentTermsDays: null, monthlyCreditLimit: null,
+          allowMonthlyBilling: false, accountStatus: "active",
+          totalBookings: guestBookings.length,
+          totalSpent,
+          createdAt: b.createdAt,
+        } as any);
+      }
+      result = [...result, ...guestEntries];
+    }
 
     if (search) {
       const s = (search as string).toLowerCase();

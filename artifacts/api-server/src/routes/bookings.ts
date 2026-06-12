@@ -62,12 +62,13 @@ async function getBookingWithPayment(id: number) {
 
 router.get("/bookings", adminMiddleware, async (req, res) => {
   try {
-    const { status, date, facilityId, customerId } = req.query;
+    const { status, date, facilityId, customerId, customerPhone } = req.query;
     let bookings = await db.select().from(bookingsTable).orderBy(desc(bookingsTable.createdAt));
     if (status) bookings = bookings.filter((b) => b.status === status);
     if (date) bookings = bookings.filter((b) => b.bookingDate === date);
     if (facilityId) bookings = bookings.filter((b) => b.facilityId === Number(facilityId));
     if (customerId) bookings = bookings.filter((b) => b.customerId === Number(customerId));
+    if (customerPhone) bookings = bookings.filter((b) => b.customerPhone === String(customerPhone));
 
     const facilityIds = [...new Set(bookings.map((b) => b.facilityId))];
     const facilities = facilityIds.length > 0

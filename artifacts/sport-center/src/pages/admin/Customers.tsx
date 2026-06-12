@@ -398,10 +398,76 @@ function CompanyForm({ initial, onClose }: { initial?: any; onClose: () => void 
   );
 }
 
+function GuestDetailDialog({ guest, onClose }: { guest: any; onClose: () => void }) {
+  const token = getToken();
+  const { data: bookings, isLoading } = useQuery<any[]>({
+    queryKey: ["guest-bookings", guest.phone],
+    queryFn: async () => {
+      const r = await fetch(`/api/bookings?customerPhone=${encodeURIComponent(guest.phone)}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!r.ok) return [];
+      return r.json();
+    },
+    enabled: !!guest.phone,
+  });
+
+  return (
+    <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+      <DialogHeader><DialogTitle>Detail Guest Booker</DialogTitle></DialogHeader>
+      <div className="space-y-5">
+        <div className="flex items-center gap-4">
+          <div className="w-14 h-14 rounded-full bg-amber-100 flex items-center justify-center text-amber-600 text-2xl font-black">
+            {guest.name?.charAt(0) ?? "?"}
+          </div>
+          <div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h3 className="font-bold text-lg">{guest.name}</h3>
+              <Badge variant="secondary" className="bg-amber-100 text-amber-700 border-amber-200 text-xs">Guest</Badge>
+            </div>
+            <div className="text-sm text-muted-foreground">{guest.email || "–"}</div>
+            <div className="text-sm text-muted-foreground">{guest.phone}</div>
+          </div>
+        </div>
+        <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
+          Customer ini belum memiliki akun terdaftar. Booking berikutnya menggunakan nomor yang sama akan otomatis terhubung ke akun baru.
+        </div>
+        <div>
+          <div className="font-semibold mb-3">Riwayat Booking ({bookings?.length ?? 0})</div>
+          {isLoading ? (
+            <Skeleton className="h-20" />
+          ) : !bookings?.length ? (
+            <div className="text-sm text-muted-foreground text-center py-4 border rounded-lg">Tidak ada booking</div>
+          ) : (
+            <div className="space-y-2">
+              {bookings.map((b: any) => (
+                <div key={b.id} className="flex items-center justify-between p-3 border rounded-lg text-sm gap-2">
+                  <div className="min-w-0">
+                    <div className="font-medium truncate">{b.facilityName}</div>
+                    <div className="text-xs text-muted-foreground">{b.bookingDate} · {b.startTime ?? "Walk-in"}</div>
+                    <div className="font-mono text-xs text-muted-foreground">{b.orderNumber}</div>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <div className="font-semibold">{new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(b.grandTotal ?? b.totalPrice)}</div>
+                    <Badge style={{ backgroundColor: STATUS_COLORS[b.status] + "20", color: STATUS_COLORS[b.status], borderColor: STATUS_COLORS[b.status] + "40" }} variant="outline" className="text-xs mt-1">
+                      {STATUS_LABELS[b.status] ?? b.status}
+                    </Badge>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </DialogContent>
+  );
+}
+
 export default function AdminCustomers() {
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState("personal");
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [selectedGuest, setSelectedGuest] = useState<any>(null);
   const [showForm, setShowForm] = useState(false);
   const [editCustomer, setEditCustomer] = useState<any>(null);
 
@@ -456,24 +522,41 @@ export default function AdminCustomers() {
                   </tr>
                 </thead>
                 <tbody className="divide-y">
-                  {customers?.map((c) => (
-                    <tr key={c.id} className="hover:bg-muted/30 transition-colors">
-                      <td className="py-3 pr-4">
-                        <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-sm">{c.name.charAt(0)}</div>
-                          <div><div className="font-medium">{c.name}</div><div className="text-xs text-muted-foreground">{c.email}</div></div>
-                        </div>
-                      </td>
-                      <td className="py-3 pr-4">
-                        {c.customerCode ? <span className="font-mono text-xs bg-primary/5 text-primary px-2 py-1 rounded">{c.customerCode}</span> : <span className="text-muted-foreground text-xs">–</span>}
-                      </td>
-                      <td className="py-3 pr-4"><SourceBadge source={c.registrationSource ?? undefined} /></td>
-                      <td className="py-3 pr-4 text-muted-foreground">{c.phone ?? "–"}</td>
-                      <td className="py-3 pr-4 font-semibold">{c.totalBookings}</td>
-                      <td className="py-3 pr-4 font-semibold">{formatCurrency(c.totalSpent ?? 0)}</td>
-                      <td className="py-3"><Button size="sm" variant="ghost" onClick={() => setSelectedId(c.id)}><Eye size={14} className="mr-1" /> Lihat</Button></td>
-                    </tr>
-                  ))}
+                  {customers?.map((c) => {
+                    const isGuest = c.id < 0;
+                    return (
+                      <tr key={c.id} className="hover:bg-muted/30 transition-colors">
+                        <td className="py-3 pr-4">
+                          <div className="flex items-center gap-3">
+                            <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${isGuest ? "bg-amber-100 text-amber-600" : "bg-primary/10 text-primary"}`}>{c.name.charAt(0)}</div>
+                            <div>
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="font-medium">{c.name}</span>
+                                {isGuest && <Badge variant="secondary" className="bg-amber-100 text-amber-700 border-amber-200 text-xs py-0 h-4">Guest</Badge>}
+                              </div>
+                              <div className="text-xs text-muted-foreground">{c.email ?? "–"}</div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="py-3 pr-4">
+                          {c.customerCode ? <span className="font-mono text-xs bg-primary/5 text-primary px-2 py-1 rounded">{c.customerCode}</span> : <span className="text-muted-foreground text-xs">–</span>}
+                        </td>
+                        <td className="py-3 pr-4">
+                          {isGuest
+                            ? <Badge variant="secondary" className="bg-amber-50 text-amber-700 border-amber-200 text-xs gap-1">Booking Langsung</Badge>
+                            : <SourceBadge source={c.registrationSource ?? undefined} />}
+                        </td>
+                        <td className="py-3 pr-4 text-muted-foreground">{c.phone ?? "–"}</td>
+                        <td className="py-3 pr-4 font-semibold">{c.totalBookings}</td>
+                        <td className="py-3 pr-4 font-semibold">{formatCurrency(c.totalSpent ?? 0)}</td>
+                        <td className="py-3">
+                          <Button size="sm" variant="ghost" onClick={() => isGuest ? setSelectedGuest(c) : setSelectedId(c.id)}>
+                            <Eye size={14} className="mr-1" /> Lihat
+                          </Button>
+                        </td>
+                      </tr>
+                    );
+                  })}
                   {!customers?.length && <tr><td colSpan={7} className="py-8 text-center text-muted-foreground">Belum ada customer terdaftar</td></tr>}
                 </tbody>
               </table>
@@ -532,6 +615,10 @@ export default function AdminCustomers() {
 
       <Dialog open={selectedId !== null} onOpenChange={(v) => !v && setSelectedId(null)}>
         {selectedId && <CustomerDetail customerId={selectedId} onClose={() => setSelectedId(null)} />}
+      </Dialog>
+
+      <Dialog open={selectedGuest !== null} onOpenChange={(v) => !v && setSelectedGuest(null)}>
+        {selectedGuest && <GuestDetailDialog guest={selectedGuest} onClose={() => setSelectedGuest(null)} />}
       </Dialog>
 
       <Dialog open={showForm} onOpenChange={(v) => { if (!v) { setShowForm(false); setEditCustomer(null); } }}>
