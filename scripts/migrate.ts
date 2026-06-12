@@ -404,6 +404,46 @@ CREATE TABLE IF NOT EXISTS sport_center.accounting_journals (
 
 CREATE INDEX IF NOT EXISTS accounting_journals_booking_id_idx ON sport_center.accounting_journals(booking_id);
 CREATE INDEX IF NOT EXISTS accounting_journals_journal_date_idx ON sport_center.accounting_journals(journal_date DESC);
+
+-- ============================================================
+-- 21. company_invoice_items + unique constraint on company_invoices
+-- ============================================================
+CREATE TABLE IF NOT EXISTS sport_center.company_invoice_items (
+  id serial PRIMARY KEY,
+  invoice_id integer NOT NULL REFERENCES sport_center.company_invoices(id) ON DELETE CASCADE,
+  booking_id integer,
+  company_id integer,
+  booking_date text,
+  facility_name text,
+  customer_name text,
+  customer_phone text,
+  start_time text,
+  end_time text,
+  duration_hours numeric(6,2),
+  price_per_hour numeric(12,2),
+  subtotal numeric(14,2),
+  tax_amount numeric(14,2),
+  total_amount numeric(14,2),
+  order_number text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS company_invoice_items_invoice_id_idx ON sport_center.company_invoice_items(invoice_id);
+
+-- Add unique constraint: 1 invoice per company per period
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'company_invoices_company_period_unique'
+      AND conrelid = 'sport_center.company_invoices'::regclass
+  ) THEN
+    ALTER TABLE sport_center.company_invoices
+      ADD CONSTRAINT company_invoices_company_period_unique
+      UNIQUE (company_customer_id, period_month);
+  END IF;
+EXCEPTION WHEN others THEN NULL;
+END $$;
 `;
 
 async function main() {

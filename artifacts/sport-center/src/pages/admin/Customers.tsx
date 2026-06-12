@@ -527,6 +527,9 @@ function GuestDetailDialog({ guest, onClose }: { guest: any; onClose: () => void
         </div>
       </div>
     </DialogContent>
+  );
+}
+
 function extractSheetId(input: string): string {
   const m = input.match(/\/spreadsheets\/d\/([\w-]+)/);
   return m ? m[1] : input.trim();
