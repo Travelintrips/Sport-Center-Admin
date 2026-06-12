@@ -27,6 +27,7 @@ import {
   Send,
   Receipt,
   UserCog,
+  Landmark,
 } from "lucide-react";
 import { useGetMe, useLogout, getGetMeQueryKey } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -73,6 +74,7 @@ const NAV_GROUPS = [
       { href: "/admin/notifications", label: "Kirim WA", icon: Send },
       { href: "/admin/notification-templates", label: "Template WA", icon: Bell },
       { href: "/admin/tax-report", label: "Laporan Pajak PPN", icon: Receipt },
+      { href: "/admin/bank-reconciliation", label: "Rekonsiliasi Bank", icon: Landmark },
       { href: "/admin/operator-accounts", label: "Akun Operator", icon: UserCog },
       { href: "/admin/audit-log", label: "Audit Log", icon: Shield },
       { href: "/admin/settings", label: "Pengaturan", icon: SettingsIcon },

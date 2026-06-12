@@ -1210,6 +1210,124 @@ export interface ErrorEnvelope {
   error: string;
 }
 
+export interface OkResult {
+  ok: boolean;
+}
+
+export type BankMutationStatus = typeof BankMutationStatus[keyof typeof BankMutationStatus];
+
+
+export const BankMutationStatus = {
+  unmatched: 'unmatched',
+  matched: 'matched',
+  duplicate_need_review: 'duplicate_need_review',
+  approved: 'approved',
+  rejected: 'rejected',
+} as const;
+
+export interface BankMutation {
+  id: number;
+  bankAccountId?: string | null;
+  transactionDate: string;
+  description: string;
+  creditAmount?: string | null;
+  debitAmount?: string | null;
+  amount: string;
+  direction: string;
+  mutationKey: string;
+  normalizedDescription?: string | null;
+  providerName?: string | null;
+  providerOrderId?: string | null;
+  status: BankMutationStatus;
+  matchedPaymentId?: number | null;
+  matchedOrderId?: number | null;
+  uploadedProofUrl?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type BankReconciliationMatchCandidateType = typeof BankReconciliationMatchCandidateType[keyof typeof BankReconciliationMatchCandidateType];
+
+
+export const BankReconciliationMatchCandidateType = {
+  payment: 'payment',
+  order: 'order',
+  invoice: 'invoice',
+  expense: 'expense',
+} as const;
+
+export type BankReconciliationMatchStatus = typeof BankReconciliationMatchStatus[keyof typeof BankReconciliationMatchStatus];
+
+
+export const BankReconciliationMatchStatus = {
+  candidate: 'candidate',
+  approved: 'approved',
+  rejected: 'rejected',
+} as const;
+
+export interface BankReconciliationMatch {
+  id: number;
+  mutationId: number;
+  candidateType: BankReconciliationMatchCandidateType;
+  candidateId: number;
+  matchScore: number;
+  matchReason?: string | null;
+  amountMatch?: boolean;
+  dateMatch?: boolean;
+  nameMatch?: boolean;
+  orderIdMatch?: boolean;
+  proofMatch?: boolean;
+  status: BankReconciliationMatchStatus;
+  createdAt: string;
+}
+
+export type BankMutationImportResultMatching = {
+  processed?: number;
+  autoApproved?: number;
+  needsReview?: number;
+  unmatched?: number;
+  duplicates?: number;
+};
+
+export interface BankMutationImportResult {
+  ok: boolean;
+  total: number;
+  inserted: number;
+  skipped: number;
+  matching?: BankMutationImportResultMatching;
+}
+
+export interface BankMutationListResult {
+  mutations: BankMutation[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface BankMutationWithMatches {
+  mutation: BankMutation;
+  matches: BankReconciliationMatch[];
+}
+
+export interface BankMutationApproveInput {
+  matchId?: number;
+  candidateType?: string;
+  candidateId?: number;
+}
+
+export interface RunMatchingInput {
+  mutationIds?: number[];
+}
+
+export interface RunMatchingResult {
+  ok: boolean;
+  processed: number;
+  autoApproved: number;
+  needsReview: number;
+  unmatched: number;
+  duplicates: number;
+}
+
 export type SendOtp200 = {
   success?: boolean;
   message?: string;
@@ -1343,5 +1461,17 @@ limit?: number;
 export type ListAdminTenantBookingsParams = {
 status?: string;
 tenantId?: number;
+};
+
+export type ListBankMutationsParams = {
+status?: string;
+direction?: string;
+dateFrom?: string;
+dateTo?: string;
+minAmount?: number;
+maxAmount?: number;
+search?: string;
+page?: number;
+pageSize?: number;
 };
 
