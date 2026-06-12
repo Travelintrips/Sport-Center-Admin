@@ -2489,3 +2489,44 @@ export const RunBankMatchingResponse = zod.object({
 })
 
 
+/**
+ * @summary Verify access to a Google Sheet for bank reconciliation
+ */
+export const ConnectBankReconSheetBody = zod.object({
+  "sheetId": zod.string()
+})
+
+export const ConnectBankReconSheetResponse = zod.object({
+  "ok": zod.boolean(),
+  "title": zod.string()
+})
+
+
+/**
+ * @summary Pull bank mutations from Google Sheet and import to DB
+ */
+export const PullBankMutationsFromSheetBody = zod.object({
+  "sheetId": zod.string()
+})
+
+export const PullBankMutationsFromSheetResponse = zod.object({
+  "ok": zod.boolean(),
+  "importedCount": zod.number(),
+  "skippedCount": zod.number()
+})
+
+
+/**
+ * @summary Push reconciliation results to Google Sheet
+ */
+export const PushBankReconToSheetBody = zod.object({
+  "sheetId": zod.string(),
+  "statusFilter": zod.array(zod.string()).optional()
+})
+
+export const PushBankReconToSheetResponse = zod.object({
+  "ok": zod.boolean(),
+  "updatedRows": zod.number()
+})
+
+

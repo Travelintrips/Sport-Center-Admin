@@ -1328,6 +1328,22 @@ export interface RunMatchingResult {
   duplicates: number;
 }
 
+export interface BankSheetPullResult {
+  ok: boolean;
+  importedCount: number;
+  skippedCount: number;
+}
+
+export interface BankSheetPushInput {
+  sheetId: string;
+  statusFilter?: string[];
+}
+
+export interface BankSheetPushResult {
+  ok: boolean;
+  updatedRows: number;
+}
+
 export type SendOtp200 = {
   success?: boolean;
   message?: string;

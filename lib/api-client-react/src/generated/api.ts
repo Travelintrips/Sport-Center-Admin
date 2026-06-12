@@ -28,6 +28,9 @@ import type {
   BankMutationImportResult,
   BankMutationListResult,
   BankMutationWithMatches,
+  BankSheetPullResult,
+  BankSheetPushInput,
+  BankSheetPushResult,
   BillingStatusResponse,
   BlockedSchedule,
   BlockedScheduleInput,
@@ -7682,5 +7685,218 @@ export const useRunBankMatching = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getRunBankMatchingMutationOptions(options));
+    }
+
+export const getConnectBankReconSheetUrl = () => {
+
+
+
+
+  return `/api/bank-reconciliation/sheets/connect`
+}
+
+/**
+ * @summary Verify access to a Google Sheet for bank reconciliation
+ */
+export const connectBankReconSheet = async (sheetConnectInput: SheetConnectInput, options?: RequestInit): Promise<SheetConnectResult> => {
+
+  return customFetch<SheetConnectResult>(getConnectBankReconSheetUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      sheetConnectInput,)
+  }
+);}
+
+
+
+
+export const getConnectBankReconSheetMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof connectBankReconSheet>>, TError,{data: BodyType<SheetConnectInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof connectBankReconSheet>>, TError,{data: BodyType<SheetConnectInput>}, TContext> => {
+
+const mutationKey = ['connectBankReconSheet'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof connectBankReconSheet>>, {data: BodyType<SheetConnectInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  connectBankReconSheet(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ConnectBankReconSheetMutationResult = NonNullable<Awaited<ReturnType<typeof connectBankReconSheet>>>
+    export type ConnectBankReconSheetMutationBody = BodyType<SheetConnectInput>
+    export type ConnectBankReconSheetMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Verify access to a Google Sheet for bank reconciliation
+ */
+export const useConnectBankReconSheet = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof connectBankReconSheet>>, TError,{data: BodyType<SheetConnectInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof connectBankReconSheet>>,
+        TError,
+        {data: BodyType<SheetConnectInput>},
+        TContext
+      > => {
+      return useMutation(getConnectBankReconSheetMutationOptions(options));
+    }
+
+export const getPullBankMutationsFromSheetUrl = () => {
+
+
+
+
+  return `/api/bank-reconciliation/sheets/pull`
+}
+
+/**
+ * @summary Pull bank mutations from Google Sheet and import to DB
+ */
+export const pullBankMutationsFromSheet = async (sheetConnectInput: SheetConnectInput, options?: RequestInit): Promise<BankSheetPullResult> => {
+
+  return customFetch<BankSheetPullResult>(getPullBankMutationsFromSheetUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      sheetConnectInput,)
+  }
+);}
+
+
+
+
+export const getPullBankMutationsFromSheetMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof pullBankMutationsFromSheet>>, TError,{data: BodyType<SheetConnectInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof pullBankMutationsFromSheet>>, TError,{data: BodyType<SheetConnectInput>}, TContext> => {
+
+const mutationKey = ['pullBankMutationsFromSheet'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof pullBankMutationsFromSheet>>, {data: BodyType<SheetConnectInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  pullBankMutationsFromSheet(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PullBankMutationsFromSheetMutationResult = NonNullable<Awaited<ReturnType<typeof pullBankMutationsFromSheet>>>
+    export type PullBankMutationsFromSheetMutationBody = BodyType<SheetConnectInput>
+    export type PullBankMutationsFromSheetMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Pull bank mutations from Google Sheet and import to DB
+ */
+export const usePullBankMutationsFromSheet = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof pullBankMutationsFromSheet>>, TError,{data: BodyType<SheetConnectInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof pullBankMutationsFromSheet>>,
+        TError,
+        {data: BodyType<SheetConnectInput>},
+        TContext
+      > => {
+      return useMutation(getPullBankMutationsFromSheetMutationOptions(options));
+    }
+
+export const getPushBankReconToSheetUrl = () => {
+
+
+
+
+  return `/api/bank-reconciliation/sheets/push`
+}
+
+/**
+ * @summary Push reconciliation results to Google Sheet
+ */
+export const pushBankReconToSheet = async (bankSheetPushInput: BankSheetPushInput, options?: RequestInit): Promise<BankSheetPushResult> => {
+
+  return customFetch<BankSheetPushResult>(getPushBankReconToSheetUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      bankSheetPushInput,)
+  }
+);}
+
+
+
+
+export const getPushBankReconToSheetMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof pushBankReconToSheet>>, TError,{data: BodyType<BankSheetPushInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof pushBankReconToSheet>>, TError,{data: BodyType<BankSheetPushInput>}, TContext> => {
+
+const mutationKey = ['pushBankReconToSheet'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof pushBankReconToSheet>>, {data: BodyType<BankSheetPushInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  pushBankReconToSheet(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PushBankReconToSheetMutationResult = NonNullable<Awaited<ReturnType<typeof pushBankReconToSheet>>>
+    export type PushBankReconToSheetMutationBody = BodyType<BankSheetPushInput>
+    export type PushBankReconToSheetMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Push reconciliation results to Google Sheet
+ */
+export const usePushBankReconToSheet = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof pushBankReconToSheet>>, TError,{data: BodyType<BankSheetPushInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof pushBankReconToSheet>>,
+        TError,
+        {data: BodyType<BankSheetPushInput>},
+        TContext
+      > => {
+      return useMutation(getPushBankReconToSheetMutationOptions(options));
     }
 

@@ -1,11 +1,16 @@
 import { useState, useRef } from "react";
-import { useListBankMutations, useGetBankMutationMatches, useApproveBankMutation, useRejectBankMutation, useRunBankMatching } from "@workspace/api-client-react";
+import {
+  useListBankMutations, useGetBankMutationMatches, useApproveBankMutation,
+  useRejectBankMutation, useRunBankMatching,
+  useConnectBankReconSheet, usePullBankMutationsFromSheet, usePushBankReconToSheet,
+} from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { getListBankMutationsQueryKey } from "@workspace/api-client-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
@@ -13,8 +18,217 @@ import { getToken } from "@/lib/auth";
 import {
   Upload, RefreshCw, CheckCircle2, XCircle, AlertTriangle, Search,
   ChevronDown, ChevronUp, Banknote, ArrowDownCircle, ArrowUpCircle,
-  Filter, FileText, Zap,
+  Filter, FileText, Zap, Sheet, Download, Link, Save,
 } from "lucide-react";
+
+function extractSheetId(input: string): string {
+  const m = input.match(/\/spreadsheets\/d\/([\w-]+)/);
+  return m ? m[1]! : input.trim();
+}
+
+const LS_RECON_SHEET_KEY = "recon_connected_sheet";
+const LS_RECON_SHEET_URL_KEY = "recon_sheet_raw_url";
+
+function SheetSyncPanel({ onImported }: { onImported: () => void }) {
+  const { toast } = useToast();
+  const [expanded, setExpanded] = useState(false);
+  const [rawInput, setRawInput] = useState(() => {
+    try { return localStorage.getItem(LS_RECON_SHEET_URL_KEY) ?? ""; } catch { return ""; }
+  });
+  const [connectedSheet, setConnectedSheetState] = useState<{ id: string; title: string } | null>(() => {
+    try { const v = localStorage.getItem(LS_RECON_SHEET_KEY); return v ? JSON.parse(v) : null; } catch { return null; }
+  });
+  const [lastSync, setLastSync] = useState<{ direction: "push" | "pull"; result: string; at: Date } | null>(null);
+  const [pushStatusFilter, setPushStatusFilter] = useState<string>("all");
+
+  const setConnectedSheet = (val: { id: string; title: string } | null) => {
+    setConnectedSheetState(val);
+    if (val) localStorage.setItem(LS_RECON_SHEET_KEY, JSON.stringify(val));
+    else localStorage.removeItem(LS_RECON_SHEET_KEY);
+  };
+
+  const handleSaveUrl = () => {
+    const id = extractSheetId(rawInput);
+    if (!id) return;
+    localStorage.setItem(LS_RECON_SHEET_URL_KEY, rawInput.trim());
+    setConnectedSheet({ id, title: id });
+    toast({ title: "URL tersimpan", description: "Klik Verifikasi untuk cek koneksi." });
+  };
+
+  const connectMutation = useConnectBankReconSheet({
+    mutation: {
+      onSuccess: (data) => {
+        const id = extractSheetId(rawInput);
+        setConnectedSheet({ id, title: data.title });
+        toast({ title: `Terhubung ke "${data.title}"` });
+      },
+      onError: (err: any) => {
+        toast({ title: err?.response?.data?.error ?? "Gagal terhubung ke sheet", variant: "destructive" });
+      },
+    },
+  });
+
+  const pullMutation = usePullBankMutationsFromSheet({
+    mutation: {
+      onSuccess: (data) => {
+        const parts = [];
+        if (data.importedCount) parts.push(`${data.importedCount} diimpor`);
+        if (data.skippedCount) parts.push(`${data.skippedCount} dilewati`);
+        const summary = parts.join(", ") || "Tidak ada data baru";
+        setLastSync({ direction: "pull", result: summary, at: new Date() });
+        toast({ title: `✅ Import dari Sheet selesai: ${summary}` });
+        onImported();
+      },
+      onError: (err: any) => {
+        toast({ title: err?.response?.data?.error ?? "Gagal import dari sheet", variant: "destructive" });
+      },
+    },
+  });
+
+  const pushMutation = usePushBankReconToSheet({
+    mutation: {
+      onSuccess: (data) => {
+        setLastSync({ direction: "push", result: `${data.updatedRows} baris diekspor`, at: new Date() });
+        toast({ title: `✅ ${data.updatedRows} mutasi berhasil dikirim ke Google Sheet` });
+      },
+      onError: (err: any) => {
+        toast({ title: err?.response?.data?.error ?? "Gagal push ke sheet", variant: "destructive" });
+      },
+    },
+  });
+
+  const isBusy = connectMutation.isPending || pullMutation.isPending || pushMutation.isPending;
+
+  const handlePush = () => {
+    if (!connectedSheet) return;
+    const statusFilter = pushStatusFilter !== "all" ? [pushStatusFilter] : undefined;
+    pushMutation.mutate({ data: { sheetId: connectedSheet.id, statusFilter } });
+  };
+
+  return (
+    <Card className="border-blue-200 bg-blue-50/30">
+      <CardContent className="p-4">
+        <button
+          className="w-full flex items-center justify-between gap-3 text-left"
+          onClick={() => setExpanded((v) => !v)}
+        >
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center shrink-0">
+              <Sheet size={16} className="text-blue-700" />
+            </div>
+            <div>
+              <div className="font-semibold text-sm">Sinkronisasi Google Sheets</div>
+              <div className="text-xs text-muted-foreground">
+                {connectedSheet
+                  ? <span className="text-blue-700 flex items-center gap-1"><CheckCircle2 size={10} /> {connectedSheet.title}</span>
+                  : "Hubungkan spreadsheet untuk import/export mutasi rekonsiliasi"}
+              </div>
+            </div>
+          </div>
+          {expanded ? <ChevronUp size={16} className="text-muted-foreground shrink-0" /> : <ChevronDown size={16} className="text-muted-foreground shrink-0" />}
+        </button>
+
+        {expanded && (
+          <div className="mt-4 space-y-4 border-t pt-4">
+            {/* URL Input */}
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Google Sheet ID atau URL</Label>
+              <div className="flex gap-2">
+                <Input
+                  placeholder="https://docs.google.com/spreadsheets/d/... atau Sheet ID"
+                  value={rawInput}
+                  onChange={(e) => setRawInput(e.target.value)}
+                  className="flex-1 text-sm"
+                  disabled={isBusy}
+                  onKeyDown={(e) => e.key === "Enter" && rawInput.trim() && handleSaveUrl()}
+                />
+                <Button size="sm" className="gap-1.5 shrink-0 bg-primary hover:bg-primary/90"
+                  disabled={!rawInput.trim() || isBusy} onClick={handleSaveUrl}>
+                  <Save size={14} /> Simpan
+                </Button>
+                <Button variant="outline" size="sm" className="gap-1.5 shrink-0"
+                  disabled={!rawInput.trim() || isBusy}
+                  onClick={() => connectMutation.mutate({ data: { sheetId: extractSheetId(rawInput) } })}>
+                  <Link size={14} />
+                  {connectMutation.isPending ? "..." : "Verifikasi"}
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                <strong>Simpan</strong> untuk menyimpan URL. <strong>Verifikasi</strong> untuk cek akses (Service Account perlu hak <em>Editor</em>).
+              </p>
+            </div>
+
+            {connectedSheet && (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 p-3 rounded-lg bg-blue-100/60 border border-blue-200 text-sm">
+                  <CheckCircle2 size={14} className="text-blue-600 shrink-0" />
+                  <span className="font-medium text-blue-800">Terhubung ke: {connectedSheet.title}</span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {/* Pull dari sheet */}
+                  <button
+                    className="flex flex-col items-center gap-2 p-4 rounded-xl border-2 border-blue-200 bg-blue-50 hover:bg-blue-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={isBusy}
+                    onClick={() => pullMutation.mutate({ data: { sheetId: connectedSheet.id } })}
+                  >
+                    <div className="w-9 h-9 rounded-full bg-blue-500 flex items-center justify-center">
+                      <Download size={16} className="text-white" />
+                    </div>
+                    <div className="text-center">
+                      <div className="font-semibold text-sm text-blue-800">Tarik dari Sheet</div>
+                      <div className="text-xs text-blue-600 mt-0.5">Google Sheet → Import mutasi</div>
+                    </div>
+                    {pullMutation.isPending && <div className="text-xs text-blue-600 animate-pulse">Mengimpor...</div>}
+                  </button>
+
+                  {/* Push ke sheet */}
+                  <div className="flex flex-col gap-2 p-4 rounded-xl border-2 border-orange-200 bg-orange-50">
+                    <div className="flex flex-col items-center gap-2">
+                      <div className="w-9 h-9 rounded-full bg-orange-500 flex items-center justify-center">
+                        <Upload size={16} className="text-white" />
+                      </div>
+                      <div className="text-center">
+                        <div className="font-semibold text-sm text-orange-800">Push Hasil Rekonsiliasi</div>
+                        <div className="text-xs text-orange-600 mt-0.5">App → Google Sheet</div>
+                      </div>
+                    </div>
+                    <select
+                      className="border rounded px-2 py-1 text-xs bg-white w-full"
+                      value={pushStatusFilter}
+                      onChange={(e) => setPushStatusFilter(e.target.value)}
+                      disabled={isBusy}
+                    >
+                      <option value="all">Semua status</option>
+                      <option value="approved">Hanya Disetujui</option>
+                      <option value="unmatched">Hanya Belum Match</option>
+                      <option value="matched">Hanya Matched</option>
+                      <option value="rejected">Hanya Ditolak</option>
+                    </select>
+                    <button
+                      className="w-full py-1.5 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-xs font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      disabled={isBusy}
+                      onClick={handlePush}
+                    >
+                      {pushMutation.isPending ? "Mengekspor..." : "Export ke Sheet"}
+                    </button>
+                  </div>
+                </div>
+
+                {lastSync && (
+                  <div className="text-xs text-muted-foreground p-2 rounded bg-muted/50 border">
+                    {lastSync.direction === "pull" ? "⬇️ Terakhir tarik" : "⬆️ Terakhir push"}:{" "}
+                    <strong>{lastSync.result}</strong> — {lastSync.at.toLocaleTimeString("id-ID")}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 const STATUS_COLORS: Record<string, string> = {
   unmatched: "bg-yellow-100 text-yellow-800 border-yellow-200",
@@ -348,6 +562,9 @@ export default function AdminBankReconciliation() {
           </button>
         ))}
       </div>
+
+      {/* Google Sheets Sync */}
+      <SheetSyncPanel onImported={() => qc.invalidateQueries({ queryKey: getListBankMutationsQueryKey() })} />
 
       {/* Filter row */}
       <Card>

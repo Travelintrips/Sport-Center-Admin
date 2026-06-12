@@ -136,6 +136,147 @@ export type SheetCustomerUpdate = {
   accountType?: string;
 };
 
+// ─── Bank Reconciliation Sheet ────────────────────────────────────────────────
+
+export const RECON_SHEET_HEADERS = [
+  "ID", "Tanggal", "Keterangan", "Kredit", "Debit", "Nominal", "Arah",
+  "Status", "Order ID Cocok", "Nama Provider", "Rekening", "Diunggah",
+];
+
+export type ReconMutationRow = {
+  id: number;
+  transactionDate: string;
+  description: string;
+  creditAmount: string | number;
+  debitAmount: string | number;
+  amount: string | number;
+  direction: string;
+  status: string;
+  providerOrderId: string | null;
+  providerName: string | null;
+  bankAccountId: string | null;
+  createdAt: Date | string;
+};
+
+export async function pushReconciliationToSheet(
+  sheetId: string,
+  mutations: ReconMutationRow[]
+): Promise<{ updatedRows: number }> {
+  const sheets = getClient();
+  const sheetName = await getFirstSheetName(sheets, sheetId);
+
+  const rows: string[][] = mutations.map((m) => [
+    String(m.id),
+    m.transactionDate,
+    m.description,
+    String(m.creditAmount ?? 0),
+    String(m.debitAmount ?? 0),
+    String(m.amount),
+    m.direction,
+    m.status,
+    m.providerOrderId ?? "",
+    m.providerName ?? "",
+    m.bankAccountId ?? "",
+    m.createdAt instanceof Date ? m.createdAt.toISOString() : String(m.createdAt),
+  ]);
+
+  await sheets.spreadsheets.values.clear({
+    spreadsheetId: sheetId,
+    range: `${sheetName}!A1:Z`,
+  });
+
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: sheetId,
+    range: `${sheetName}!A1`,
+    valueInputOption: "RAW",
+    requestBody: { values: [RECON_SHEET_HEADERS, ...rows] },
+  });
+
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId: sheetId,
+    requestBody: {
+      requests: [
+        {
+          repeatCell: {
+            range: { sheetId: 0, startRowIndex: 0, endRowIndex: 1 },
+            cell: {
+              userEnteredFormat: {
+                backgroundColor: { red: 0.1, green: 0.45, blue: 0.85 },
+                textFormat: { bold: true, foregroundColor: { red: 1, green: 1, blue: 1 } },
+              },
+            },
+            fields: "userEnteredFormat(backgroundColor,textFormat)",
+          },
+        },
+        {
+          autoResizeDimensions: {
+            dimensions: { sheetId: 0, dimension: "COLUMNS", startIndex: 0, endIndex: RECON_SHEET_HEADERS.length },
+          },
+        },
+      ],
+    },
+  });
+
+  return { updatedRows: rows.length };
+}
+
+export type SheetMutationRow = {
+  transactionDate: string;
+  description: string;
+  creditAmount: number;
+  debitAmount: number;
+  bankAccountId?: string;
+};
+
+export async function pullMutationsFromSheet(sheetId: string): Promise<SheetMutationRow[]> {
+  const sheets = getClient();
+  const sheetName = await getFirstSheetName(sheets, sheetId);
+
+  const resp = await sheets.spreadsheets.values.get({
+    spreadsheetId: sheetId,
+    range: `${sheetName}!A1:Z`,
+  });
+
+  const values = resp.data.values ?? [];
+  if (values.length < 2) return [];
+
+  const header: string[] = (values[0] as string[]).map((h) => h.toLowerCase().replace(/[\s\-\.]+/g, "_"));
+
+  const idxOf = (names: string[]) => {
+    for (const n of names) { const i = header.indexOf(n); if (i >= 0) return i; }
+    return -1;
+  };
+
+  const dateIdx = idxOf(["tanggal", "transaction_date", "date", "tgl"]);
+  const descIdx = idxOf(["keterangan", "description", "ket", "narasi", "deskripsi"]);
+  const creditIdx = idxOf(["kredit", "credit", "credit_amount", "masuk", "cr"]);
+  const debitIdx = idxOf(["debit", "debit_amount", "keluar", "dr"]);
+  const nominalIdx = idxOf(["nominal", "jumlah", "amount"]);
+  const bankIdx = idxOf(["rekening", "bank_account_id", "bank_account", "account"]);
+
+  const result: SheetMutationRow[] = [];
+  for (let i = 1; i < values.length; i++) {
+    const row = values[i] as string[];
+    const dateRaw = dateIdx >= 0 ? String(row[dateIdx] ?? "") : "";
+    const desc = descIdx >= 0 ? String(row[descIdx] ?? "").trim() : "";
+    if (!dateRaw && !desc) continue;
+
+    let creditAmount = 0;
+    let debitAmount = 0;
+    if (creditIdx >= 0) creditAmount = parseFloat(String(row[creditIdx] ?? "0").replace(/[^0-9.-]/g, "")) || 0;
+    if (debitIdx >= 0) debitAmount = parseFloat(String(row[debitIdx] ?? "0").replace(/[^0-9.-]/g, "")) || 0;
+    if (creditIdx < 0 && debitIdx < 0 && nominalIdx >= 0) {
+      const nom = parseFloat(String(row[nominalIdx] ?? "0").replace(/[^0-9.-]/g, "")) || 0;
+      creditAmount = nom > 0 ? nom : 0;
+    }
+    const bankAccountId = bankIdx >= 0 ? String(row[bankIdx] ?? "").trim() || undefined : undefined;
+
+    result.push({ transactionDate: dateRaw, description: desc, creditAmount, debitAmount, bankAccountId });
+  }
+
+  return result;
+}
+
 export async function pullCustomersFromSheet(sheetId: string): Promise<SheetCustomerUpdate[]> {
   const sheets = getClient();
   const sheetName = await getFirstSheetName(sheets, sheetId);
