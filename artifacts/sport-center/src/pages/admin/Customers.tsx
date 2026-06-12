@@ -14,7 +14,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Search, Eye, MessageCircle, Globe, Building2, Plus, Pencil, Users, Sheet, Upload, Download, CheckCircle2, AlertCircle, Link, ChevronDown, ChevronUp, Save, Trash2, RefreshCw } from "lucide-react";
 import { Search, Eye, MessageCircle, Globe, Building2, Plus, Pencil, Users, Sheet, Upload, Download, CheckCircle2, AlertCircle, Link, ChevronDown, ChevronUp, Save, Trash2, RefreshCw, Copy, Check } from "lucide-react";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -941,9 +940,6 @@ export default function AdminCustomers() {
       setDeleteTarget(null);
     } catch (_e) {
       toast({ title: "Gagal menghapus customer", variant: "destructive" });
-      setDeleteTarget(null);
-    } catch {
-      toast({ title: "Gagal menghapus akun", variant: "destructive" });
     } finally {
       setDeleting(false);
     }
@@ -1179,8 +1175,6 @@ export default function AdminCustomers() {
 
       <Dialog open={showPersonalEditForm} onOpenChange={(v) => { if (!v) { setShowPersonalEditForm(false); setPersonalEdit(null); } }}>
         {showPersonalEditForm && personalEdit && <PersonalEditForm initial={personalEdit} onClose={() => { setShowPersonalEditForm(false); setPersonalEdit(null); }} />}
-      <Dialog open={showPersonalForm} onOpenChange={(v) => { if (!v) { setShowPersonalForm(false); setPersonalEdit(null); } }}>
-        {showPersonalForm && personalEdit && <PersonalEditForm initial={personalEdit} onClose={() => { setShowPersonalForm(false); setPersonalEdit(null); }} />}
       </Dialog>
       <Dialog open={!!deleteTarget} onOpenChange={(v) => !v && setDeleteTarget(null)}>
         <DialogContent className="max-w-sm">
