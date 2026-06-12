@@ -170,8 +170,7 @@ router.post("/customers", adminMiddleware, async (req, res) => {
       res.status(500).json({ error: "Server configuration error: SESSION_SECRET not set" });
       return;
     }
-    // Generate random password — admin perlu mengatur password via reset flow
-    const randomPassword = Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 10).toUpperCase();
+    const randomPassword = name.trim().split(/\s+/)[0].toLowerCase() + "123";
     const passwordHash = createHmac("sha256", sessionSecret).update(randomPassword).digest("hex");
 
     const [user] = await db.insert(usersTable).values({
@@ -320,7 +319,7 @@ router.post("/customers/from-guest", adminMiddleware, async (req, res) => {
     const code = await generateCustomerCode();
 
     const sessionSecret = process.env.SESSION_SECRET ?? "";
-    const randomPassword = Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 10).toUpperCase();
+    const randomPassword = resolvedName.trim().split(/\s+/)[0].toLowerCase() + "123";
     const passwordHash = createHmac("sha256", sessionSecret).update(randomPassword).digest("hex");
 
     const [newUser] = await db.insert(usersTable).values({
@@ -363,6 +362,19 @@ router.get("/customers/:id", adminMiddleware, async (req, res) => {
   }
 });
 
+router.delete("/customers/:id", adminMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(String(req.params.id));
+    const [existing] = await db.select().from(usersTable).where(eq(usersTable.id, id)).limit(1);
+    if (!existing) { res.status(404).json({ error: "Not found" }); return; }
+    await db.delete(usersTable).where(eq(usersTable.id, id));
+    res.json({ message: "Customer berhasil dihapus" });
+  } catch (err) {
+    req.log.error({ err }, "Delete customer error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 router.patch("/customers/:id", adminMiddleware, async (req, res) => {
   try {
     const id = parseInt(String(req.params.id));
@@ -397,6 +409,22 @@ router.patch("/customers/:id", adminMiddleware, async (req, res) => {
     res.json(mapUser(updated, userBookings));
   } catch (err) {
     req.log.error({ err }, "Update customer error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.delete("/customers/:id", adminMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(String(req.params.id));
+    const [existing] = await db.select({ id: usersTable.id, role: usersTable.role })
+      .from(usersTable).where(eq(usersTable.id, id)).limit(1);
+    if (!existing) { res.status(404).json({ error: "Not found" }); return; }
+    if (existing.role === "admin") { res.status(403).json({ error: "Tidak bisa menghapus akun admin" }); return; }
+    await db.update(bookingsTable).set({ customerId: null }).where(eq(bookingsTable.customerId, id));
+    await db.delete(usersTable).where(eq(usersTable.id, id));
+    res.json({ ok: true });
+  } catch (err) {
+    req.log.error({ err }, "Delete customer error");
     res.status(500).json({ error: "Internal server error" });
   }
 });

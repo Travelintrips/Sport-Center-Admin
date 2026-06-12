@@ -124,7 +124,7 @@ export async function pushCustomersToSheet(sheetId: string, customers: CustomerR
 }
 
 export type SheetCustomerUpdate = {
-  id: number;
+  id: number | null;
   name?: string;
   email?: string;
   phone?: string;
@@ -133,6 +133,7 @@ export type SheetCustomerUpdate = {
   picName?: string;
   picPhone?: string;
   picEmail?: string;
+  accountType?: string;
 };
 
 export async function pullCustomersFromSheet(sheetId: string): Promise<SheetCustomerUpdate[]> {
@@ -157,26 +158,34 @@ export async function pullCustomersFromSheet(sheetId: string): Promise<SheetCust
   const picNameIdx = header.findIndex((h: string) => h === "Nama PIC");
   const picPhoneIdx = header.findIndex((h: string) => h === "Telepon PIC");
   const picEmailIdx = header.findIndex((h: string) => h === "Email PIC");
+  const typeIdx = header.findIndex((h: string) => h === "Tipe Akun");
 
   if (idIdx === -1) throw new Error("Kolom 'ID' tidak ditemukan di sheet. Pastikan header sheet sesuai format.");
 
   const updates: SheetCustomerUpdate[] = [];
   for (let i = 1; i < values.length; i++) {
     const row = values[i];
-    const rawId = row[idIdx];
-    if (!rawId) continue;
-    const id = parseInt(String(rawId));
-    if (isNaN(id) || id <= 0) continue;
+
+    const name = nameIdx >= 0 ? String(row[nameIdx] ?? "").trim() : "";
+    const email = emailIdx >= 0 ? String(row[emailIdx] ?? "").trim() : "";
+    const phone = phoneIdx >= 0 ? String(row[phoneIdx] ?? "").trim() : "";
+
+    if (!name && !email && !phone) continue;
+
+    const rawId = idIdx >= 0 ? row[idIdx] : undefined;
+    const parsedId = rawId ? parseInt(String(rawId)) : NaN;
+    const id = !isNaN(parsedId) && parsedId > 0 ? parsedId : null;
 
     const update: SheetCustomerUpdate = { id };
-    if (nameIdx >= 0 && row[nameIdx] !== undefined) update.name = String(row[nameIdx]).trim();
-    if (emailIdx >= 0 && row[emailIdx] !== undefined) update.email = String(row[emailIdx]).trim() || undefined;
-    if (phoneIdx >= 0 && row[phoneIdx] !== undefined) update.phone = String(row[phoneIdx]).trim() || undefined;
-    if (statusIdx >= 0 && row[statusIdx] !== undefined) update.accountStatus = String(row[statusIdx]).trim() || undefined;
-    if (companyIdx >= 0 && row[companyIdx] !== undefined) update.companyName = String(row[companyIdx]).trim() || undefined;
-    if (picNameIdx >= 0 && row[picNameIdx] !== undefined) update.picName = String(row[picNameIdx]).trim() || undefined;
-    if (picPhoneIdx >= 0 && row[picPhoneIdx] !== undefined) update.picPhone = String(row[picPhoneIdx]).trim() || undefined;
-    if (picEmailIdx >= 0 && row[picEmailIdx] !== undefined) update.picEmail = String(row[picEmailIdx]).trim() || undefined;
+    if (name) update.name = name;
+    if (email) update.email = email;
+    if (phone) update.phone = phone;
+    if (statusIdx >= 0 && row[statusIdx]) update.accountStatus = String(row[statusIdx]).trim();
+    if (companyIdx >= 0 && row[companyIdx]) update.companyName = String(row[companyIdx]).trim();
+    if (picNameIdx >= 0 && row[picNameIdx]) update.picName = String(row[picNameIdx]).trim();
+    if (picPhoneIdx >= 0 && row[picPhoneIdx]) update.picPhone = String(row[picPhoneIdx]).trim();
+    if (picEmailIdx >= 0 && row[picEmailIdx]) update.picEmail = String(row[picEmailIdx]).trim();
+    if (typeIdx >= 0 && row[typeIdx]) update.accountType = String(row[typeIdx]).trim();
     updates.push(update);
   }
 

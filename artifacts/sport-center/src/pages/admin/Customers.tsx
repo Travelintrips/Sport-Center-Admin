@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   useListCustomers, useGetCustomer, useListBookings,
   useCreateCustomer, useUpdateCustomer,
@@ -9,12 +9,19 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Search, Eye, MessageCircle, Globe, Building2, Plus, Pencil, Users, Sheet, Upload, Download, CheckCircle2, AlertCircle, Link, ChevronDown, ChevronUp } from "lucide-react";
+import { Search, Eye, MessageCircle, Globe, Building2, Plus, Pencil, Users, Sheet, Upload, Download, CheckCircle2, AlertCircle, Link, ChevronDown, ChevronUp, Save, Trash2, RefreshCw, Copy, Check } from "lucide-react";
+import { Search, Eye, MessageCircle, Globe, Building2, Plus, Pencil, Users, Copy, Check, Sheet, Upload, Download, CheckCircle2, AlertCircle, Link, ChevronDown, ChevronUp } from "lucide-react";
+import { Search, Eye, MessageCircle, Globe, Building2, Plus, Pencil, Users, Sheet, Upload, Download, CheckCircle2, AlertCircle, Link, ChevronDown, ChevronUp, Save, Trash2, RefreshCw } from "lucide-react";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+
 import { useToast } from "@/hooks/use-toast";
 import { getListCustomersQueryKey } from "@workspace/api-client-react";
 import { getToken } from "@/lib/auth";
@@ -306,6 +313,106 @@ function CustomerDetail({ customerId, onClose }: { customerId: number; onClose: 
   );
 }
 
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <Button
+      size="sm" variant="outline"
+      className="h-7 px-2 gap-1 text-xs"
+      onClick={() => { navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
+    >
+      {copied ? <Check size={12} className="text-green-600" /> : <Copy size={12} />}
+      {copied ? "Tersalin" : "Salin"}
+    </Button>
+  );
+}
+
+function TempPasswordDialog({ password, email, onClose }: { password: string; email: string; onClose: () => void }) {
+  return (
+    <DialogContent className="max-w-sm">
+      <DialogHeader>
+        <DialogTitle className="text-green-700">✅ Akun Berhasil Dibuat</DialogTitle>
+        <DialogDescription>Simpan password sementara ini — hanya tampil sekali.</DialogDescription>
+      </DialogHeader>
+      <div className="space-y-3 pt-2">
+        <div className="space-y-1">
+          <Label className="text-xs text-muted-foreground">Email</Label>
+          <div className="flex items-center gap-2 p-2 bg-muted rounded-md font-mono text-sm">
+            <span className="flex-1 break-all">{email}</span>
+            <CopyButton text={email} />
+          </div>
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs text-muted-foreground">Password Sementara</Label>
+          <div className="flex items-center gap-2 p-2 bg-amber-50 border border-amber-200 rounded-md font-mono text-sm">
+            <span className="flex-1 font-bold tracking-wider text-amber-800">{password}</span>
+            <CopyButton text={password} />
+          </div>
+        </div>
+        <p className="text-xs text-muted-foreground">Berikan password ini ke customer agar bisa login. Customer dapat menggantinya setelah masuk.</p>
+        <Button className="w-full" onClick={onClose}>Selesai</Button>
+      </div>
+    </DialogContent>
+  );
+}
+
+function PersonalForm({ onClose, onCreated }: { onClose: () => void; onCreated: (pwd: string, email: string) => void }) {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const createMutation = useCreateCustomer();
+  const [form, setForm] = useState({ name: "", email: "", phone: "" });
+  const [loading, setLoading] = useState(false);
+
+  const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
+
+  const handleSubmit = async () => {
+    if (!form.name.trim() || !form.email.trim()) {
+      toast({ title: "Nama dan email wajib diisi", variant: "destructive" }); return;
+    }
+    setLoading(true);
+    try {
+      const result = await createMutation.mutateAsync({
+        data: { name: form.name.trim(), email: form.email.trim(), phone: form.phone.trim() || undefined, accountType: "personal" as const },
+      });
+      qc.invalidateQueries({ queryKey: getListCustomersQueryKey() });
+      onCreated((result as any).tempPassword ?? "", form.email.trim());
+    } catch (err: any) {
+      toast({ title: "Gagal membuat akun", description: err?.message ?? "Error", variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <DialogContent className="max-w-md">
+      <DialogHeader>
+        <DialogTitle>Buat Akun Customer</DialogTitle>
+        <DialogDescription>Password sementara akan dibuat otomatis. Berikan ke customer agar bisa login.</DialogDescription>
+      </DialogHeader>
+      <div className="space-y-4 pt-2">
+        <div className="space-y-1.5">
+          <Label>Nama Lengkap <span className="text-destructive">*</span></Label>
+          <Input placeholder="Budi Santoso" value={form.name} onChange={(e) => set("name", e.target.value)} />
+        </div>
+        <div className="space-y-1.5">
+          <Label>Email <span className="text-destructive">*</span></Label>
+          <Input type="email" placeholder="customer@email.com" value={form.email} onChange={(e) => set("email", e.target.value)} />
+        </div>
+        <div className="space-y-1.5">
+          <Label>No. WhatsApp</Label>
+          <Input placeholder="08xxxxxxxxxx" value={form.phone} onChange={(e) => set("phone", e.target.value)} />
+        </div>
+        <div className="flex justify-end gap-2 pt-1">
+          <Button variant="outline" onClick={onClose} disabled={loading}>Batal</Button>
+          <Button onClick={handleSubmit} disabled={loading || !form.name.trim() || !form.email.trim()}>
+            {loading ? "Membuat..." : "Buat Akun"}
+          </Button>
+        </div>
+      </div>
+    </DialogContent>
+  );
+}
+
 function CompanyForm({ initial, onClose }: { initial?: any; onClose: () => void }) {
   const { toast } = useToast();
   const qc = useQueryClient();
@@ -530,17 +637,84 @@ function GuestDetailDialog({ guest, onClose }: { guest: any; onClose: () => void
   );
 }
 
+function PersonalEditForm({ initial, onClose }: { initial: any; onClose: () => void }) {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const updateMutation = useUpdateCustomer();
+  const [form, setForm] = useState({
+    name: initial?.name ?? "",
+    email: initial?.email ?? "",
+    phone: initial?.phone ?? "",
+    accountStatus: initial?.accountStatus ?? "active",
+  });
+  const set = (k: string, v: any) => setForm((f) => ({ ...f, [k]: v }));
+
+  const handleSubmit = async () => {
+    if (!form.name.trim()) { toast({ title: "Nama wajib diisi", variant: "destructive" }); return; }
+    try {
+      await updateMutation.mutateAsync({ id: initial.id, data: form });
+      toast({ title: "Customer diperbarui" });
+      qc.invalidateQueries({ queryKey: getListCustomersQueryKey() });
+      onClose();
+    } catch (err: any) {
+      toast({ title: err?.response?.data?.error ?? "Gagal memperbarui", variant: "destructive" });
+    }
+  };
+
+  return (
+    <DialogContent className="max-w-md">
+      <DialogHeader><DialogTitle>Edit Customer</DialogTitle></DialogHeader>
+      <div className="space-y-3">
+        <div className="space-y-1"><Label>Nama</Label><Input value={form.name} onChange={e => set("name", e.target.value)} /></div>
+        <div className="space-y-1"><Label>Email</Label><Input type="email" value={form.email} onChange={e => set("email", e.target.value)} /></div>
+        <div className="space-y-1"><Label>No. HP</Label><Input value={form.phone} onChange={e => set("phone", e.target.value)} /></div>
+        <div className="flex items-center justify-between py-1">
+          <Label>Status Aktif</Label>
+          <Switch checked={form.accountStatus === "active"} onCheckedChange={v => set("accountStatus", v ? "active" : "inactive")} />
+        </div>
+        <div className="flex justify-end gap-2 pt-2">
+          <Button variant="outline" onClick={onClose} disabled={updateMutation.isPending}>Batal</Button>
+          <Button onClick={handleSubmit} disabled={updateMutation.isPending}>
+            {updateMutation.isPending ? "Menyimpan..." : "Simpan"}
+          </Button>
+        </div>
+      </div>
+    </DialogContent>
+  );
+}
+
 function extractSheetId(input: string): string {
   const m = input.match(/\/spreadsheets\/d\/([\w-]+)/);
   return m ? m[1] : input.trim();
 }
 
+const LS_SHEET_KEY = "customers_connected_sheet";
+const LS_SHEET_URL_KEY = "customers_sheet_raw_url";
+
 function SheetSyncPanel() {
   const { toast } = useToast();
   const [expanded, setExpanded] = useState(true);
-  const [rawInput, setRawInput] = useState("");
-  const [connectedSheet, setConnectedSheet] = useState<{ id: string; title: string } | null>(null);
+  const [rawInput, setRawInput] = useState(() => {
+    try { return localStorage.getItem(LS_SHEET_URL_KEY) ?? ""; } catch { return ""; }
+  });
+  const [connectedSheet, setConnectedSheetState] = useState<{ id: string; title: string } | null>(() => {
+    try { const v = localStorage.getItem(LS_SHEET_KEY); return v ? JSON.parse(v) : null; } catch { return null; }
+  });
   const [lastSync, setLastSync] = useState<{ direction: "push" | "pull"; result: string; at: Date } | null>(null);
+
+  const setConnectedSheet = (val: { id: string; title: string } | null) => {
+    setConnectedSheetState(val);
+    if (val) localStorage.setItem(LS_SHEET_KEY, JSON.stringify(val));
+    else localStorage.removeItem(LS_SHEET_KEY);
+  };
+
+  const handleSaveUrl = () => {
+    const id = extractSheetId(rawInput);
+    if (!id) return;
+    localStorage.setItem(LS_SHEET_URL_KEY, rawInput.trim());
+    setConnectedSheet({ id, title: id });
+    toast({ title: "URL tersimpan", description: "Klik Verifikasi untuk mengecek koneksi ke sheet." });
+  };
 
   const connectMutation = useConnectCustomerSheet({
     mutation: {
@@ -570,8 +744,14 @@ function SheetSyncPanel() {
   const pullMutation = usePullCustomersFromSheet({
     mutation: {
       onSuccess: (data) => {
-        setLastSync({ direction: "pull", result: `${data.updatedCount} diperbarui, ${data.skippedCount} dilewati`, at: new Date() });
-        toast({ title: `✅ ${data.updatedCount} customer diperbarui dari Google Sheet` });
+        const created = (data as any).createdCount ?? 0;
+        const parts = [];
+        if (data.updatedCount) parts.push(`${data.updatedCount} diperbarui`);
+        if (created) parts.push(`${created} ditambahkan`);
+        if (data.skippedCount) parts.push(`${data.skippedCount} dilewati`);
+        const summary = parts.join(", ") || "Tidak ada perubahan";
+        setLastSync({ direction: "pull", result: summary, at: new Date() });
+        toast({ title: `✅ Import selesai: ${summary}` });
       },
       onError: (err: any) => {
         toast({ title: err?.response?.data?.error ?? "Gagal import dari sheet", variant: "destructive" });
@@ -580,6 +760,29 @@ function SheetSyncPanel() {
   });
 
   const isBusy = connectMutation.isPending || pushMutation.isPending || pullMutation.isPending;
+  const pushRef = useRef(pushMutation.mutate);
+  const pullRef = useRef(pullMutation.mutate);
+  pushRef.current = pushMutation.mutate;
+  pullRef.current = pullMutation.mutate;
+
+  // Auto-push ke sheet setiap ada perubahan dari app
+  useEffect(() => {
+    const handler = () => {
+      const sheet = (() => { try { const v = localStorage.getItem(LS_SHEET_KEY); return v ? JSON.parse(v) : null; } catch { return null; } })();
+      if (sheet?.id) pushRef.current({ data: { sheetId: sheet.id } });
+    };
+    window.addEventListener("customer-changed", handler);
+    return () => window.removeEventListener("customer-changed", handler);
+  }, []);
+
+  // Auto-pull dari sheet setiap 5 menit jika terhubung
+  useEffect(() => {
+    if (!connectedSheet?.id) return;
+    const id = setInterval(() => {
+      pullRef.current({ data: { sheetId: connectedSheet.id } });
+    }, 5 * 60 * 1000);
+    return () => clearInterval(id);
+  }, [connectedSheet?.id]);
 
   return (
     <Card className="border-green-200 bg-green-50/30">
@@ -615,20 +818,31 @@ function SheetSyncPanel() {
                   onChange={(e) => setRawInput(e.target.value)}
                   className="flex-1 text-sm"
                   disabled={isBusy}
+                  onKeyDown={(e) => e.key === "Enter" && rawInput.trim() && handleSaveUrl()}
                 />
+                <Button
+                  size="sm"
+                  className="gap-1.5 shrink-0 bg-primary hover:bg-primary/90"
+                  disabled={!rawInput.trim() || isBusy}
+                  onClick={handleSaveUrl}
+                >
+                  <Save size={14} />
+                  Simpan
+                </Button>
                 <Button
                   variant="outline"
                   size="sm"
                   className="gap-1.5 shrink-0"
                   disabled={!rawInput.trim() || isBusy}
                   onClick={() => connectMutation.mutate({ data: { sheetId: extractSheetId(rawInput) } })}
+                  title="Verifikasi koneksi ke Google Sheet"
                 >
                   <Link size={14} />
-                  {connectMutation.isPending ? "Mengecek..." : "Hubungkan"}
+                  {connectMutation.isPending ? "..." : "Verifikasi"}
                 </Button>
               </div>
               <p className="text-xs text-muted-foreground">
-                Pastikan <strong>Service Account</strong> sudah diberi akses <em>Editor</em> di spreadsheet tersebut.
+                <strong>Simpan</strong> untuk menyimpan URL. <strong>Verifikasi</strong> untuk cek koneksi (butuh Service Account akses <em>Editor</em>).
               </p>
             </div>
 
@@ -702,9 +916,34 @@ export default function AdminCustomers() {
   const [selectedGuest, setSelectedGuest] = useState<any>(null);
   const [showForm, setShowForm] = useState(false);
   const [editCustomer, setEditCustomer] = useState<any>(null);
+  const [showPersonalForm, setShowPersonalForm] = useState(false);
+  const [personalEdit, setPersonalEdit] = useState<any>(null);
+  const [deleteTarget, setDeleteTarget] = useState<any>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [tempResult, setTempResult] = useState<{ password: string; email: string } | null>(null);
   const [migrating, setMigrating] = useState(false);
   const { toast } = useToast();
   const qc = useQueryClient();
+
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      const r = await fetch(`/api/customers/${deleteTarget.id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      const data = await r.json();
+      if (!r.ok) { toast({ title: data.error ?? "Gagal hapus", variant: "destructive" }); return; }
+      toast({ title: `Customer "${deleteTarget.name}" dihapus` });
+      qc.invalidateQueries({ queryKey: getListCustomersQueryKey() });
+      setDeleteTarget(null);
+    } catch {
+      toast({ title: "Gagal menghapus akun", variant: "destructive" });
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const { data: customers, isLoading } = useListCustomers({
     search: search || undefined,
@@ -740,18 +979,48 @@ export default function AdminCustomers() {
           <h1 className="text-2xl font-black">Customers</h1>
           <p className="text-muted-foreground">Kelola daftar customer terdaftar</p>
         </div>
-        <div className="flex gap-2">
-          {tab === "personal" && (
-            <Button variant="outline" onClick={handleMigrateAll} disabled={migrating} className="gap-2">
-              <Users size={16} /> {migrating ? "Memproses..." : "Sinkronisasi Guest → Akun"}
-            </Button>
-          )}
-          {tab === "company" && (
-            <Button onClick={() => { setEditCustomer(null); setShowForm(true); }} className="gap-2">
-              <Plus size={16} /> Tambah Perusahaan
-            </Button>
-          )}
-        </div>
+        {tab === "personal" && (
+          <Button onClick={() => setShowPersonalForm(true)} className="gap-2">
+            <Plus size={16} /> Buat Akun Customer
+          </Button>
+        )}
+        {tab === "company" && (
+          <Button onClick={() => { setEditCustomer(null); setShowForm(true); }} className="gap-2">
+            <Plus size={16} /> Tambah Perusahaan
+          </Button>
+        )}
+      </div>
+
+      <Dialog open={showPersonalForm} onOpenChange={setShowPersonalForm}>
+        {showPersonalForm && (
+          <PersonalForm
+            onClose={() => setShowPersonalForm(false)}
+            onCreated={(pwd, email) => { setShowPersonalForm(false); setTempResult({ password: pwd, email }); }}
+          />
+        )}
+      </Dialog>
+
+      <Dialog open={!!tempResult} onOpenChange={(o) => { if (!o) setTempResult(null); }}>
+        {tempResult && (
+          <TempPasswordDialog
+            password={tempResult.password}
+            email={tempResult.email}
+            onClose={() => setTempResult(null)}
+          />
+        )}
+      </Dialog>
+
+      <div className="flex gap-2">
+        {tab === "personal" && (
+          <Button variant="outline" onClick={handleMigrateAll} disabled={migrating} className="gap-2">
+            <Users size={16} /> {migrating ? "Memproses..." : "Sinkronisasi Guest → Akun"}
+          </Button>
+        )}
+        {tab === "company" && (
+          <Button onClick={() => { setEditCustomer(null); setShowForm(true); }} className="gap-2">
+            <Plus size={16} /> Tambah Perusahaan
+          </Button>
+        )}
       </div>
 
       <SheetSyncPanel />
@@ -816,9 +1085,21 @@ export default function AdminCustomers() {
                         <td className="py-3 pr-4 font-semibold">{c.totalBookings}</td>
                         <td className="py-3 pr-4 font-semibold">{formatCurrency(c.totalSpent ?? 0)}</td>
                         <td className="py-3">
-                          <Button size="sm" variant="ghost" onClick={() => isGuest ? setSelectedGuest(c) : setSelectedId(c.id)}>
-                            <Eye size={14} className="mr-1" /> Lihat
-                          </Button>
+                          <div className="flex items-center gap-1">
+                            <Button size="sm" variant="ghost" onClick={() => isGuest ? setSelectedGuest(c) : setSelectedId(c.id)}>
+                              <Eye size={14} className="mr-1" /> Lihat
+                            </Button>
+                            {!isGuest && (
+                              <>
+                                <Button size="sm" variant="ghost" onClick={() => { setPersonalEdit(c); setShowPersonalForm(true); }}>
+                                  <Pencil size={14} />
+                                </Button>
+                                <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => setDeleteTarget(c)}>
+                                  <Trash2 size={14} />
+                                </Button>
+                              </>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     );
@@ -868,6 +1149,7 @@ export default function AdminCustomers() {
                       <td className="py-3 flex gap-1">
                         <Button size="sm" variant="ghost" onClick={() => setSelectedId(c.id)}><Eye size={14} /></Button>
                         <Button size="sm" variant="ghost" onClick={() => { setEditCustomer(c); setShowForm(true); }}><Pencil size={14} /></Button>
+                        <Button size="sm" variant="ghost" className="text-red-500 hover:text-red-600 hover:bg-red-50" onClick={() => setDeleteTarget({ id: c.id, name: c.companyName ?? c.name })}><Trash2 size={14} /></Button>
                       </td>
                     </tr>
                   ))}
@@ -889,6 +1171,25 @@ export default function AdminCustomers() {
 
       <Dialog open={showForm} onOpenChange={(v) => { if (!v) { setShowForm(false); setEditCustomer(null); } }}>
         {showForm && <CompanyForm initial={editCustomer} onClose={() => { setShowForm(false); setEditCustomer(null); }} />}
+      </Dialog>
+
+      <Dialog open={showPersonalForm} onOpenChange={(v) => { if (!v) { setShowPersonalForm(false); setPersonalEdit(null); } }}>
+        {showPersonalForm && personalEdit && <PersonalEditForm initial={personalEdit} onClose={() => { setShowPersonalForm(false); setPersonalEdit(null); }} />}
+      </Dialog>
+
+      <Dialog open={!!deleteTarget} onOpenChange={(v) => !v && setDeleteTarget(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>Hapus Customer</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Hapus akun <strong>{deleteTarget?.name}</strong>? Data booking tidak akan terhapus, hanya akun customer yang dihapus.
+          </p>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="outline" onClick={() => setDeleteTarget(null)} disabled={deleting}>Batal</Button>
+            <Button variant="destructive" onClick={handleDelete} disabled={deleting}>
+              {deleting ? "Menghapus..." : "Hapus"}
+            </Button>
+          </div>
+        </DialogContent>
       </Dialog>
     </div>
   );

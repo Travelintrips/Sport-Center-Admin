@@ -444,6 +444,68 @@ BEGIN
   END IF;
 EXCEPTION WHEN others THEN NULL;
 END $$;
+
+-- ============================================================
+-- Bank Reconciliation
+-- ============================================================
+
+DO $$ BEGIN
+  CREATE TYPE sport_center.bank_mutation_status AS ENUM (
+    'unmatched', 'matched', 'duplicate_need_review', 'approved', 'rejected'
+  );
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE sport_center.recon_match_status AS ENUM ('candidate', 'approved', 'rejected');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE TYPE sport_center.recon_candidate_type AS ENUM ('payment', 'order', 'invoice', 'expense');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+CREATE TABLE IF NOT EXISTS sport_center.bank_mutations (
+  id                     serial PRIMARY KEY,
+  bank_account_id        text,
+  transaction_date       text NOT NULL,
+  description            text NOT NULL,
+  credit_amount          numeric(14,2) DEFAULT 0,
+  debit_amount           numeric(14,2) DEFAULT 0,
+  amount                 numeric(14,2) NOT NULL,
+  direction              text NOT NULL,
+  mutation_key           text NOT NULL,
+  normalized_description text,
+  provider_name          text,
+  provider_order_id      text,
+  raw_payload            jsonb,
+  status                 sport_center.bank_mutation_status NOT NULL DEFAULT 'unmatched',
+  matched_payment_id     integer,
+  matched_order_id       integer,
+  uploaded_proof_url     text,
+  created_at             timestamptz NOT NULL DEFAULT now(),
+  updated_at             timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS bank_mutations_mutation_key_idx    ON sport_center.bank_mutations(mutation_key);
+CREATE INDEX IF NOT EXISTS bank_mutations_status_idx          ON sport_center.bank_mutations(status);
+CREATE INDEX IF NOT EXISTS bank_mutations_transaction_date_idx ON sport_center.bank_mutations(transaction_date);
+
+CREATE TABLE IF NOT EXISTS sport_center.bank_reconciliation_matches (
+  id             serial PRIMARY KEY,
+  mutation_id    integer NOT NULL REFERENCES sport_center.bank_mutations(id) ON DELETE CASCADE,
+  candidate_type sport_center.recon_candidate_type NOT NULL,
+  candidate_id   integer NOT NULL,
+  match_score    integer NOT NULL DEFAULT 0,
+  match_reason   text,
+  amount_match   boolean NOT NULL DEFAULT false,
+  date_match     boolean NOT NULL DEFAULT false,
+  name_match     boolean NOT NULL DEFAULT false,
+  order_id_match boolean NOT NULL DEFAULT false,
+  proof_match    boolean NOT NULL DEFAULT false,
+  status         sport_center.recon_match_status NOT NULL DEFAULT 'candidate',
+  created_at     timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS bank_recon_matches_mutation_id_idx ON sport_center.bank_reconciliation_matches(mutation_id);
 `;
 
 async function main() {
