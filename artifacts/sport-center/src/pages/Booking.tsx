@@ -84,6 +84,7 @@ export default function Booking() {
   const [customers, setCustomers] = useState<{ id: number; name: string; email: string | null; phone: string | null }[]>([]);
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>("");
   const [comboOpen, setComboOpen] = useState(false);
+  const [comboQuery, setComboQuery] = useState("");
 
   useEffect(() => {
     if (!isAdminBooking) return; // hanya fetch jika role admin_booking
@@ -103,9 +104,7 @@ export default function Booking() {
   // Auto-fill dari dropdown (admin_booking) atau dari akun sendiri (customer biasa)
   useEffect(() => {
     if (isAdminBooking) {
-      if (!selectedCustomerId) {
-        setName(""); setEmail(""); setPhone("");
-      } else {
+      if (selectedCustomerId) {
         const picked = customers.find((c) => String(c.id) === selectedCustomerId);
         if (picked) {
           setName(picked.name);
@@ -113,8 +112,8 @@ export default function Booking() {
           setPhone(picked.phone ?? "");
         }
       }
+      // Jika kosong (new customer mode), biarkan user isi manual
     } else if (currentUser) {
-      // Customer biasa: auto-fill dari data akun sendiri
       setName(currentUser.name ?? "");
       setEmail(currentUser.email ?? "");
       setPhone((currentUser as any).phone ?? "");
@@ -206,7 +205,12 @@ export default function Booking() {
   // ---- Single booking ----
   const createBooking = useCreateBooking({
     mutation: {
-      onSuccess: (data) => {
+      onSuccess: (data: any) => {
+        if (data.customerAutoCreated) {
+          toast({ title: t("Customer baru berhasil dibuat otomatis.", "New customer auto-created."), description: data.customerName });
+        } else if (data.customerReused) {
+          toast({ title: t("Nomor WA sudah terdaftar, booking menggunakan akun customer yang sudah ada.", "WA number found, using existing customer.") });
+        }
         toast({ title: t("Booking Berhasil", "Booking Successful"), description: t("Silakan lanjutkan ke pembayaran.", "Please proceed to payment.") });
         setLocation(`/booking/${data.orderNumber}`);
       },
@@ -403,12 +407,39 @@ export default function Booking() {
     // ─── Mode Umum & Angkasa Pura ────────────────────────────────────────────
     if (isAdminBooking && !selectedCustomerId) {
       toast({ title: t("Pilih nama pelanggan", "Select customer name"), description: t("Harap pilih nama dari daftar pelanggan.", "Please select a name from the customer list."), variant: "destructive" });
+  function normalizePhoneInput(raw: string): string {
+    let p = raw.replace(/\D/g, "");
+    if (p.startsWith("0")) p = "62" + p.slice(1);
+    else if (!p.startsWith("62")) p = p ? "62" + p : "";
+    return p;
+  }
+
+  function isValidPhone(raw: string): boolean {
+    const p = normalizePhoneInput(raw);
+    return /^62[0-9]{7,13}$/.test(p);
+  }
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!facilityId || !date) return;
+    if (!isWalkIn && (!startTime || !duration)) return;
+    if (!name.trim()) {
+      toast({ title: t("Nama pelanggan wajib diisi", "Customer name required"), variant: "destructive" });
       return;
     }
-    if (!name || !email || !phone) {
+    if (!phone.trim()) {
+      toast({ title: t("No. WhatsApp wajib diisi", "WhatsApp number required"), variant: "destructive" });
+      return;
+    }
+    if (!isValidPhone(phone)) {
+      toast({ title: t("Format nomor tidak valid", "Invalid phone format"), description: t("Gunakan format Indonesia, contoh: 08123456789", "Use Indonesian format, e.g. 08123456789"), variant: "destructive" });
+      return;
+    }
+    if (!email) {
       toast({ title: t("Form tidak lengkap", "Incomplete form"), description: t("Harap isi semua field yang wajib.", "Please fill in all required fields."), variant: "destructive" });
       return;
     }
+    const normalizedPhone = normalizePhoneInput(phone);
     if (isAP && !idCardNumber.trim()) {
       toast({ title: t("Nomor ID Card wajib", "ID Card number required"), description: t("Masukkan nomor ID Card Angkasa Pura kamu.", "Enter your Angkasa Pura ID Card number."), variant: "destructive" });
       return;
@@ -429,7 +460,7 @@ export default function Booking() {
         data: {
           customerName: name,
           customerEmail: email,
-          customerPhone: phone,
+          customerPhone: normalizedPhone,
           facilityId,
           startDate: date,
           startTime,
@@ -443,11 +474,12 @@ export default function Booking() {
         } as any,
       });
     } else {
+      const existingCustomerId = selectedCustomerId && parseInt(selectedCustomerId) > 0 ? parseInt(selectedCustomerId) : undefined;
       createBooking.mutate({
         data: {
           customerName: name,
           customerEmail: email,
-          customerPhone: phone,
+          customerPhone: normalizedPhone,
           facilityId,
           bookingDate: date,
           ...(isWalkIn ? {} : { startTime, durationHours: duration }),
@@ -460,6 +492,7 @@ export default function Booking() {
           discountAmount: isAP ? undefined : discountPerSession || undefined,
           payerType: isCompanyBilling ? "company" : "personal",
           companyCustomerId: isCompanyBilling && billingStatus?.companyId ? billingStatus.companyId : undefined,
+          ...(existingCustomerId ? { customerId: existingCustomerId } : {}),
         } as any,
       });
     }
@@ -598,47 +631,102 @@ export default function Booking() {
                   </div>
                 )}
 
-                {/* Nama Lengkap — dropdown untuk admin_booking, read-only untuk customer biasa */}
+                {/* Nama Lengkap — creatable combobox untuk admin_booking, read-only untuk customer biasa */}
                 <div className="space-y-2">
                   <Label htmlFor="namaPelanggan">{t("Nama Lengkap", "Full Name")} <span className="text-destructive">*</span></Label>
                   {isAdminBooking ? (
-                    <Popover open={comboOpen} onOpenChange={setComboOpen}>
-                      <PopoverTrigger asChild>
-                        <Button
-                          variant="outline"
-                          role="combobox"
-                          aria-expanded={comboOpen}
-                          className="w-full justify-between font-normal h-10"
+                    <>
+                      <Popover open={comboOpen} onOpenChange={(open) => { setComboOpen(open); if (!open) setComboQuery(""); }}>
+                        <PopoverTrigger asChild>
+                          <Button
+                            variant="outline"
+                            role="combobox"
+                            aria-expanded={comboOpen}
+                            className="w-full justify-between font-normal h-10"
+                          >
+                            <span className="truncate">
+                              {selectedCustomerId
+                                ? (() => { const c = customers.find((c) => String(c.id) === selectedCustomerId); return c ? `${c.name}${c.phone ? ` — ${c.phone}` : ""}` : name || t("Pilih atau ketik customer baru...", "Select or type new customer..."); })()
+                                : name
+                                  ? <span className="flex items-center gap-1.5"><span className="text-xs bg-primary/15 text-primary rounded px-1.5 py-0.5 font-medium">Baru</span>{name}</span>
+                                  : t("Pilih atau ketik nama customer baru...", "Select or type new customer...")}
+                            </span>
+                            <ChevronsUpDown size={14} className="ml-2 shrink-0 opacity-50" />
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                          <Command filter={(value, search) => {
+                            if (value === "__create__") return 1;
+                            return value.toLowerCase().includes(search.toLowerCase()) ? 1 : 0;
+                          }}>
+                            <CommandInput
+                              placeholder={t("Cari nama / nomor, atau ketik nama baru...", "Search name/phone or type new name...")}
+                              value={comboQuery}
+                              onValueChange={setComboQuery}
+                            />
+                            <CommandList>
+                              <CommandEmpty>{t("Tidak ditemukan", "No results found")}</CommandEmpty>
+                              <CommandGroup>
+                                {customers
+                                  .filter(c => !comboQuery.trim() || `${c.name} ${c.phone ?? ""}`.toLowerCase().includes(comboQuery.toLowerCase()))
+                                  .map((c) => (
+                                    <CommandItem
+                                      key={c.id}
+                                      value={`${c.name} ${c.phone ?? ""}`}
+                                      onSelect={() => {
+                                        setSelectedCustomerId(String(c.id));
+                                        setComboQuery("");
+                                        setComboOpen(false);
+                                      }}
+                                    >
+                                      <Check size={14} className={`mr-2 shrink-0 ${String(c.id) === selectedCustomerId ? "opacity-100" : "opacity-0"}`} />
+                                      <span>{c.name}{c.phone ? ` — ${c.phone}` : ""}</span>
+                                    </CommandItem>
+                                  ))}
+                              </CommandGroup>
+                              {comboQuery.trim() && (
+                                <CommandGroup>
+                                  <CommandItem
+                                    value="__create__"
+                                    onSelect={() => {
+                                      setSelectedCustomerId("");
+                                      setName(comboQuery.trim());
+                                      setEmail("");
+                                      setPhone("");
+                                      setComboQuery("");
+                                      setComboOpen(false);
+                                    }}
+                                    className="text-primary font-medium"
+                                  >
+                                    <span className="mr-2 text-base">＋</span>
+                                    {t(`Buat customer baru: "${comboQuery.trim()}"`, `Create new customer: "${comboQuery.trim()}"`)}
+                                  </CommandItem>
+                                </CommandGroup>
+                              )}
+                            </CommandList>
+                          </Command>
+                        </PopoverContent>
+                      </Popover>
+                      {/* Jika customer baru (belum terdaftar), tampilkan input nama yang bisa diedit */}
+                      {!selectedCustomerId && name && (
+                        <Input
+                          value={name}
+                          onChange={e => setName(e.target.value)}
+                          placeholder={t("Nama lengkap customer baru", "New customer full name")}
+                          className="mt-1"
+                        />
+                      )}
+                      {/* Tombol reset ke mode pilih */}
+                      {(selectedCustomerId || name) && (
+                        <button
+                          type="button"
+                          className="text-xs text-muted-foreground hover:text-foreground underline mt-0.5"
+                          onClick={() => { setSelectedCustomerId(""); setName(""); setEmail(""); setPhone(""); setComboQuery(""); }}
                         >
-                          <span className="truncate">
-                            {selectedCustomerId
-                              ? (() => { const c = customers.find((c) => String(c.id) === selectedCustomerId); return c ? `${c.name}${c.phone ? ` — ${c.phone}` : ""}` : t("Pilih nama pelanggan...", "Select customer..."); })()
-                              : t("Pilih nama pelanggan...", "Select customer...")}
-                          </span>
-                          <ChevronsUpDown size={14} className="ml-2 shrink-0 opacity-50" />
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
-                        <Command>
-                          <CommandInput placeholder={t("Cari nama atau nomor...", "Search name or number...")} />
-                          <CommandList>
-                            <CommandEmpty>{t("Tidak ditemukan", "No results found")}</CommandEmpty>
-                            <CommandGroup>
-                              {customers.map((c) => (
-                                <CommandItem
-                                  key={c.id}
-                                  value={`${c.name} ${c.phone ?? ""}`}
-                                  onSelect={() => { setSelectedCustomerId(String(c.id)); setComboOpen(false); }}
-                                >
-                                  <Check size={14} className={`mr-2 shrink-0 ${String(c.id) === selectedCustomerId ? "opacity-100" : "opacity-0"}`} />
-                                  <span>{c.name}{c.phone ? ` — ${c.phone}` : ""}</span>
-                                </CommandItem>
-                              ))}
-                            </CommandGroup>
-                          </CommandList>
-                        </Command>
-                      </PopoverContent>
-                    </Popover>
+                          {t("Bersihkan pilihan", "Clear selection")}
+                        </button>
+                      )}
+                    </>
                   ) : isLoggedIn ? (
                     <div className="flex items-center gap-2 h-10 px-3 rounded-md border bg-muted/50 text-foreground font-medium text-sm cursor-not-allowed select-none">
                       <span>{name || currentUser?.name}</span>

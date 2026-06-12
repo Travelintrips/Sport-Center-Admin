@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import ws from "ws";
 
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
 
@@ -32,6 +33,7 @@ function getClient(): SupabaseClient {
   if (!client) {
     client = createClient(STORAGE_URL, SERVICE_KEY, {
       auth: { persistSession: false, autoRefreshToken: false },
+      realtime: { transport: ws as any },
     });
   }
   return client;

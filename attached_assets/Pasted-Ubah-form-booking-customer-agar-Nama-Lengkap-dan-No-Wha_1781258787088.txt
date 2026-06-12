@@ -1,0 +1,67 @@
+Ubah form booking customer agar Nama Lengkap dan No WhatsApp bisa ditambahkan manual, bukan hanya pilih dari dropdown customer existing.
+
+Kondisi saat ini:
+- Nama Lengkap masih dropdown "Pilih nama pelanggan..."
+- Saya ingin admin/customer bisa input manual nama pelanggan baru.
+- Nomor WhatsApp juga bisa input manual.
+- Setelah booking dikonfirmasi, data tersebut otomatis dibuat menjadi akun/customer baru di database.
+
+Implementasi yang diminta:
+
+1. Pada form booking:
+   - Field Nama Lengkap jangan hanya dropdown.
+   - Buat mode combo box:
+     a. Bisa pilih customer existing
+     b. Bisa ketik nama customer baru manual
+
+2. Field No WhatsApp:
+   - Bisa diisi manual
+   - Wajib validasi format nomor Indonesia
+   - Normalisasi ke format 62
+   - Contoh 08123456789 menjadi 628123456789
+
+3. Saat user mengetik nama baru dan nomor WA baru:
+   - Sistem cek ke database sport_customers berdasarkan nomor WhatsApp.
+   - Jika nomor WA belum ada, otomatis buat customer baru.
+   - Jika nomor WA sudah ada, gunakan customer existing dan jangan buat duplikat.
+
+4. Customer baru otomatis dibuat dengan data:
+   - name = nama yang diinput
+   - phone = nomor WA hasil normalisasi
+   - email = email jika diisi
+   - customer_code auto generate
+   - customer_type = personal
+   - status = active
+   - source = booking_form
+   - created_at
+
+5. Setelah customer otomatis dibuat:
+   - booking harus memakai customer_id baru tersebut.
+   - customer langsung muncul di Admin Portal > Pelanggan.
+   - customer bisa dipakai lagi untuk booking berikutnya.
+
+6. Jika customer baru dibuat dari form booking, tampilkan notifikasi:
+   "Customer baru berhasil dibuat otomatis."
+
+7. Jika nomor WA sudah terdaftar, tampilkan:
+   "Nomor WA sudah terdaftar, booking akan menggunakan akun customer yang sudah ada."
+
+8. Tambahkan audit log:
+   - CUSTOMER_AUTO_CREATED_FROM_BOOKING
+   - CUSTOMER_REUSED_FROM_PHONE
+   - BOOKING_CREATED
+
+9. Pastikan tidak membuat customer duplikat walaupun nama berbeda tapi nomor WA sama.
+
+10. Pastikan fitur ini berlaku untuk:
+   - booking public customer
+   - booking via WhatsApp mini form
+   - booking admin portal jika memakai form yang sama
+
+11. Update UI:
+   - Nama Lengkap menjadi searchable creatable combo box.
+   - Placeholder: "Pilih atau ketik nama pelanggan..."
+   - Tambahkan teks kecil:
+     "Jika nama belum terdaftar, sistem akan membuat akun customer otomatis."
+
+12. Jangan merusak fitur customer existing, corporate billing, verifikasi karyawan, dan tipe pemesan Angkasa Pura.

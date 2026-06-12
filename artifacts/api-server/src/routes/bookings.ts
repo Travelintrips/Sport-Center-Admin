@@ -62,12 +62,13 @@ async function getBookingWithPayment(id: number) {
 
 router.get("/bookings", adminMiddleware, async (req, res) => {
   try {
-    const { status, date, facilityId, customerId } = req.query;
+    const { status, date, facilityId, customerId, customerPhone } = req.query;
     let bookings = await db.select().from(bookingsTable).orderBy(desc(bookingsTable.createdAt));
     if (status) bookings = bookings.filter((b) => b.status === status);
     if (date) bookings = bookings.filter((b) => b.bookingDate === date);
     if (facilityId) bookings = bookings.filter((b) => b.facilityId === Number(facilityId));
     if (customerId) bookings = bookings.filter((b) => b.customerId === Number(customerId));
+    if (customerPhone) bookings = bookings.filter((b) => b.customerPhone === String(customerPhone));
 
     const facilityIds = [...new Set(bookings.map((b) => b.facilityId))];
     const facilities = facilityIds.length > 0
@@ -106,6 +107,23 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
 function timeToMinutesLocal(t: string): number {
   const [h, m] = t.split(":").map(Number);
   return h * 60 + (m || 0);
+}
+
+export function normalizePhone(raw: string): string {
+  let p = String(raw ?? "").replace(/\D/g, "");
+  if (p.startsWith("0")) p = "62" + p.slice(1);
+  else if (!p.startsWith("62")) p = "62" + p;
+  return p;
+}
+
+async function generateCustomerCode(): Promise<string> {
+  const rows = await db.select({ code: usersTable.customerCode }).from(usersTable);
+  let max = 0;
+  for (const row of rows) {
+    const m = (row.code ?? "").match(/^C(\d+)$/);
+    if (m) { const n = parseInt(m[1]); if (n > max) max = n; }
+  }
+  return `C${String(max + 1).padStart(5, "0")}`;
 }
 
 function getTodayWIB(): string {
@@ -322,6 +340,54 @@ router.post("/bookings", async (req, res) => {
         .where(eq(promosTable.code, String(promoCode).toUpperCase()));
     }
 
+    // ── Auto find-or-create customer from phone ───────────────────────
+    let customerAutoCreated = false;
+    let customerReused = false;
+    const rawPhone = String(customerPhone ?? "").trim();
+    const normalizedPhone = rawPhone ? normalizePhone(rawPhone) : null;
+
+    if (customerName && !booking.customerId) {
+      try {
+        // Cari existing user by phone atau by email
+        let existingUser: typeof usersTable.$inferSelect | undefined;
+        if (normalizedPhone) {
+          [existingUser] = await db.select().from(usersTable)
+            .where(eq(usersTable.phone, normalizedPhone)).limit(1);
+        }
+        if (!existingUser && customerEmail) {
+          [existingUser] = await db.select().from(usersTable)
+            .where(eq(usersTable.email, String(customerEmail))).limit(1);
+        }
+
+        if (existingUser) {
+          await db.update(bookingsTable).set({ customerId: existingUser.id }).where(eq(bookingsTable.id, booking.id));
+          (booking as any).customerId = existingUser.id;
+          customerReused = true;
+          logAudit({ action: "CUSTOMER_REUSED_FROM_PHONE", entity: "booking", entityId: booking.id, after: { customerId: existingUser.id, phone: normalizedPhone }, ...getClientInfo(req) });
+        } else {
+          const code = await generateCustomerCode();
+          const [newUser] = await db.insert(usersTable).values({
+            name: String(customerName),
+            phone: normalizedPhone ?? null,
+            email: customerEmail ? String(customerEmail) : null,
+            role: "customer",
+            accountType: "personal",
+            accountStatus: "active",
+            registrationSource: "booking_form",
+            customerCode: code,
+          }).returning();
+          await db.update(bookingsTable).set({ customerId: newUser.id }).where(eq(bookingsTable.id, booking.id));
+          (booking as any).customerId = newUser.id;
+          customerAutoCreated = true;
+          logAudit({ action: "CUSTOMER_AUTO_CREATED_FROM_BOOKING", entity: "user", entityId: newUser.id, after: { name: customerName, phone: normalizedPhone, email: customerEmail }, ...getClientInfo(req) });
+        }
+      } catch (autoErr) {
+        req.log.warn({ autoErr }, "Auto-create customer failed (non-critical)");
+      }
+    }
+
+    logAudit({ action: "BOOKING_CREATED", entity: "booking", entityId: booking.id, after: { orderNumber: booking.orderNumber, customerName, facilityId, bookingDate }, ...getClientInfo(req) });
+
     // Record history
     await db.insert(bookingHistoryTable).values({
       bookingId: booking.id,
@@ -385,6 +451,8 @@ router.post("/bookings", async (req, res) => {
       facilityName: facility.name,
       facilityCategory: facility.category,
       payment: null,
+      customerAutoCreated,
+      customerReused,
     });
   } catch (err) {
     req.log.error({ err }, "Create booking error");
