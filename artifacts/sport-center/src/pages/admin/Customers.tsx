@@ -14,7 +14,11 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Search, Eye, MessageCircle, Globe, Building2, Plus, Pencil, Users, Sheet, Upload, Download, CheckCircle2, AlertCircle, Link, ChevronDown, ChevronUp } from "lucide-react";
+import { Search, Eye, MessageCircle, Globe, Building2, Plus, Pencil, Users, Sheet, Upload, Download, CheckCircle2, AlertCircle, Link, ChevronDown, ChevronUp, Trash2 } from "lucide-react";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { getListCustomersQueryKey } from "@workspace/api-client-react";
 import { getToken } from "@/lib/auth";
@@ -703,8 +707,31 @@ export default function AdminCustomers() {
   const [showForm, setShowForm] = useState(false);
   const [editCustomer, setEditCustomer] = useState<any>(null);
   const [migrating, setMigrating] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: number; name: string } | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const { toast } = useToast();
   const qc = useQueryClient();
+
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      const token = getToken();
+      const r = await fetch(`/api/customers/${deleteTarget.id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await r.json();
+      if (!r.ok) { toast({ title: data.error ?? "Gagal menghapus", variant: "destructive" }); return; }
+      toast({ title: data.message ?? "Customer berhasil dihapus" });
+      qc.invalidateQueries({ queryKey: getListCustomersQueryKey() });
+      setDeleteTarget(null);
+    } catch {
+      toast({ title: "Gagal menghapus akun", variant: "destructive" });
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const { data: customers, isLoading } = useListCustomers({
     search: search || undefined,
@@ -868,6 +895,7 @@ export default function AdminCustomers() {
                       <td className="py-3 flex gap-1">
                         <Button size="sm" variant="ghost" onClick={() => setSelectedId(c.id)}><Eye size={14} /></Button>
                         <Button size="sm" variant="ghost" onClick={() => { setEditCustomer(c); setShowForm(true); }}><Pencil size={14} /></Button>
+                        <Button size="sm" variant="ghost" className="text-red-500 hover:text-red-600 hover:bg-red-50" onClick={() => setDeleteTarget({ id: c.id, name: c.companyName ?? c.name })}><Trash2 size={14} /></Button>
                       </td>
                     </tr>
                   ))}
@@ -890,6 +918,27 @@ export default function AdminCustomers() {
       <Dialog open={showForm} onOpenChange={(v) => { if (!v) { setShowForm(false); setEditCustomer(null); } }}>
         {showForm && <CompanyForm initial={editCustomer} onClose={() => { setShowForm(false); setEditCustomer(null); }} />}
       </Dialog>
+
+      <AlertDialog open={deleteTarget !== null} onOpenChange={(v) => { if (!v) setDeleteTarget(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Hapus Akun Perusahaan?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Akun <strong>{deleteTarget?.name}</strong> akan dihapus permanen. Tindakan ini tidak dapat dibatalkan.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Batal</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDelete}
+              disabled={deleting}
+              className="bg-red-600 hover:bg-red-700 text-white"
+            >
+              {deleting ? "Menghapus..." : "Ya, Hapus"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

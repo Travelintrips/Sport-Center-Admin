@@ -363,6 +363,19 @@ router.get("/customers/:id", adminMiddleware, async (req, res) => {
   }
 });
 
+router.delete("/customers/:id", adminMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(String(req.params.id));
+    const [existing] = await db.select().from(usersTable).where(eq(usersTable.id, id)).limit(1);
+    if (!existing) { res.status(404).json({ error: "Not found" }); return; }
+    await db.delete(usersTable).where(eq(usersTable.id, id));
+    res.json({ message: "Customer berhasil dihapus" });
+  } catch (err) {
+    req.log.error({ err }, "Delete customer error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 router.patch("/customers/:id", adminMiddleware, async (req, res) => {
   try {
     const id = parseInt(String(req.params.id));
