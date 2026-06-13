@@ -1294,8 +1294,7 @@ export default function Booking() {
           )}
 
           {/* Down Payment Option */}
-          {!isRepeat && (
-            <Card className={paymentType === "dp" ? "border-violet-300 bg-violet-50/50 dark:bg-violet-900/10" : ""}>
+          <Card className={paymentType === "dp" ? "border-violet-300 bg-violet-50/50 dark:bg-violet-900/10" : ""}>
               <CardHeader className="pb-3">
                 <CardTitle className="text-base flex items-center gap-2">
                   <Banknote size={16} className="text-primary" /> {t("Pilihan Pembayaran", "Payment Option")}
@@ -1352,7 +1351,6 @@ export default function Booking() {
                 )}
               </CardContent>
             </Card>
-          )}
 
           {/* Submit Button (mobile) */}
           <div className="lg:hidden">
