@@ -1617,11 +1617,10 @@ async function startBookingSession(phone: string, msg: string, waName: string): 
   }
 
   // Determine the booking name:
-  // 1. If message explicitly names a friend → use that
-  // 2. Else if registered customer → use their name (can be overridden later)
-  // 3. Else null (will be asked at ask_name step)
+  // 1. If message explicitly names someone ("untuk teman Toto", "a/n Budi") → use that
+  // 2. Otherwise always ask — NEVER prefill from customer DB record (would silently reuse old name)
   const friendName = intent.personName;
-  const resolvedName = friendName ?? (customer?.name ?? null);
+  const resolvedName = friendName ?? null;
 
   const step = getNextStep({
     facilityId,
