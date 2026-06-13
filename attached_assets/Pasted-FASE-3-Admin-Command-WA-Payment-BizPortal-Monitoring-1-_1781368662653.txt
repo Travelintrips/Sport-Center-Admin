@@ -1,0 +1,85 @@
+FASE 3 — Admin Command WA + Payment + BizPortal Monitoring
+
+1. Admin command tetap rule-based, bukan AI.
+
+2. Command admin:
+   - STATUS BK-xxxx
+   - APPROVE BK-xxxx
+   - REJECT BK-xxxx alasan
+   - PAID BK-xxxx
+   - CANCEL BK-xxxx alasan
+   - RESEND BK-xxxx
+   - HELP
+
+3. Hanya nomor di ENV FONNTE_ADMIN_PHONES yang boleh menjalankan command admin.
+
+4. Jika admin approve:
+   - update booking status = pending_payment
+   - payment_status = waiting_payment
+   - approved_at
+   - approved_by_admin_phone
+   - kirim WA customer berisi instruksi pembayaran/link pembayaran
+
+5. Jika admin reject:
+   - update booking status = rejected
+   - simpan rejected_reason
+   - kirim WA customer alasan ditolak
+
+6. Jika admin paid:
+   - update booking status = confirmed
+   - payment_status = paid
+   - paid_at
+   - buat sport_payments
+   - kirim WA customer booking confirmed
+   - kirim WA admin notifikasi paid
+
+7. Jika customer mengirim bukti bayar:
+   - simpan attachment/payment proof
+   - update payment_status = waiting_verification
+   - kirim WA ke admin untuk verifikasi
+   - jangan otomatis paid kecuali payment gateway success
+
+8. Tambahkan menu BizPortal:
+   Sport Center > AI WA Assistant
+
+9. Isi halaman:
+   - histori chat AI
+   - daftar session booking
+   - intent yang terdeteksi
+   - booking dari whatsapp_ai
+   - status approval
+   - tombol approve/reject
+   - tombol ambil alih chat
+   - tombol resend WA
+   - log error AI
+
+10. Tambahkan fallback:
+   Jika AI tidak yakin atau data tidak tersedia:
+   - kirim jawaban sopan ke customer
+   - teruskan chat ke admin
+   - buat log ai_fallback_to_admin
+
+11. Testing wajib:
+   - tanya daftar fasilitas
+   - tanya harga
+   - tanya slot kosong
+   - booking lengkap via bahasa bebas
+   - booking tidak lengkap lalu AI bertanya lanjutan
+   - jadwal bentrok ditolak
+   - slot alternatif muncul
+   - customer balas YA lalu booking dibuat
+   - admin approve via WA
+   - admin reject via WA
+   - customer kirim bukti bayar
+   - admin PAID via WA
+   - AI tidak mengarang harga
+   - AI tidak mengarang jadwal
+   - nomor bukan admin tidak bisa approve
+
+12. Setelah selesai laporkan:
+   - file yang diubah
+   - endpoint baru
+   - tabel baru
+   - ENV baru
+   - prompt system AI
+   - hasil testing

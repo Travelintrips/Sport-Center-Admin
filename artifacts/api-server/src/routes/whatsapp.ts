@@ -954,10 +954,17 @@ async function sendWAMsg(phone: string, message: string): Promise<void> {
 async function getAdminPhones(): Promise<string[]> {
   try {
     const [s] = await db.select().from(settingsTable).limit(1);
-    const raw = s?.adminWaPhones || process.env.ADMIN_WA_PHONES || process.env.FONNTE_ADMIN_WA || "";
+    const raw = s?.adminWaPhones
+      || process.env.FONNTE_ADMIN_PHONES
+      || process.env.ADMIN_WA_PHONES
+      || process.env.FONNTE_ADMIN_WA
+      || "";
     return raw.split(",").map((p: string) => cleanPhone(p)).filter(Boolean);
   } catch {
-    const raw = process.env.ADMIN_WA_PHONES || process.env.FONNTE_ADMIN_WA || "";
+    const raw = process.env.FONNTE_ADMIN_PHONES
+      || process.env.ADMIN_WA_PHONES
+      || process.env.FONNTE_ADMIN_WA
+      || "";
     return raw.split(",").map((p: string) => cleanPhone(p)).filter(Boolean);
   }
 }
@@ -1080,6 +1087,22 @@ async function handleAdminCommand(adminPhone: string, msg: string): Promise<bool
   if (resendMatch) {
     const orderNumber = resendMatch[1].toUpperCase();
     await execAdminResend(adminPhone, orderNumber);
+    return true;
+  }
+
+  // HELP — tampilkan daftar perintah admin
+  if (/^HELP$/i.test(upper)) {
+    await sendWAMsg(adminPhone,
+      `🏅 *Perintah Admin Sport Center*\n\n` +
+      `📋 *APPROVE SC-xxxx*\n   Setujui booking, kirim instruksi bayar ke customer\n\n` +
+      `🚫 *REJECT SC-xxxx [alasan]*\n   Tolak booking dengan alasan\n\n` +
+      `✅ *PAID SC-xxxx*\n   Konfirmasi pembayaran diterima\n\n` +
+      `❌ *CANCEL SC-xxxx [alasan]*\n   Batalkan booking\n\n` +
+      `🔁 *RESEND SC-xxxx*\n   Kirim ulang notifikasi WA\n\n` +
+      `🔍 *STATUS SC-xxxx*\n   Cek detail booking\n\n` +
+      `ℹ️ *HELP*\n   Tampilkan menu ini\n\n` +
+      `_Contoh: APPROVE SC-0012_`
+    );
     return true;
   }
 
