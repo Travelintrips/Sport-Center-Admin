@@ -32,7 +32,7 @@ import { id as idLocale, enUS } from "date-fns/locale";
 import {
   MapPin, Calendar, Clock, Receipt, ChevronLeft,
   RefreshCw, CheckCircle2, XCircle, AlertTriangle, Loader2, Pencil, X as IconX,
-  Plane, ShieldCheck, User, Building2
+  Plane, ShieldCheck, User, Building2, CreditCard, Banknote
 } from "lucide-react";
 import { getToken } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
@@ -194,6 +194,10 @@ export default function Booking() {
   } | null>(null);
   const [couponError, setCouponError] = useState<string | null>(null);
 
+  // --- DP (Down Payment) ---
+  const [paymentType, setPaymentType] = useState<"full" | "dp">("full");
+  const [dpAmount, setDpAmount] = useState("");
+
   // --- Submit success ---
   const [recurringResult, setRecurringResult] = useState<{
     totalBookings: number;
@@ -206,11 +210,21 @@ export default function Booking() {
   // ---- Single booking ----
   const createBooking = useCreateBooking({
     mutation: {
-      onSuccess: (data: any) => {
+      onSuccess: async (data: any) => {
         if (data.customerAutoCreated) {
           toast({ title: t("Customer baru berhasil dibuat otomatis.", "New customer auto-created."), description: data.customerName });
         } else if (data.customerReused) {
           toast({ title: t("Nomor WA sudah terdaftar, booking menggunakan akun customer yang sudah ada.", "WA number found, using existing customer.") });
+        }
+        if (paymentType === "dp" && dpAmount && data.id) {
+          const parsedDp = parseFloat(dpAmount.replace(/[^0-9]/g, ""));
+          if (parsedDp > 0) {
+            await fetch(`/api/bookings/${data.id}/dp`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ downPaymentAmount: parsedDp }),
+            }).catch(() => {});
+          }
         }
         toast({ title: t("Booking Berhasil", "Booking Successful"), description: t("Silakan lanjutkan ke pembayaran.", "Please proceed to payment.") });
         setLocation(`/booking/${data.orderNumber}`);
@@ -1277,6 +1291,67 @@ export default function Booking() {
               </CardContent>
             )}
           </Card>
+          )}
+
+          {/* Down Payment Option */}
+          {!isRepeat && (
+            <Card className={paymentType === "dp" ? "border-violet-300 bg-violet-50/50 dark:bg-violet-900/10" : ""}>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Banknote size={16} className="text-primary" /> {t("Pilihan Pembayaran", "Payment Option")}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPaymentType("full")}
+                    className={`flex items-center justify-center gap-2 py-3 rounded-xl border-2 text-sm font-semibold transition-all ${paymentType === "full" ? "border-primary bg-primary text-primary-foreground" : "border-border hover:border-primary/50 bg-background"}`}
+                  >
+                    <CheckCircle2 size={15} />
+                    {t("Bayar Penuh", "Full Payment")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPaymentType("dp")}
+                    className={`flex items-center justify-center gap-2 py-3 rounded-xl border-2 text-sm font-semibold transition-all ${paymentType === "dp" ? "border-violet-500 bg-violet-600 text-white" : "border-border hover:border-violet-400/60 bg-background"}`}
+                  >
+                    <CreditCard size={15} />
+                    {t("Bayar DP", "Down Payment")}
+                  </button>
+                </div>
+                {paymentType === "dp" && (
+                  <div className="space-y-2.5 pt-1">
+                    <div className="space-y-1.5">
+                      <Label className="text-sm font-semibold">{t("Jumlah Down Payment", "Down Payment Amount")} <span className="text-destructive">*</span></Label>
+                      <Input
+                        type="text"
+                        inputMode="numeric"
+                        value={dpAmount ? Number(dpAmount).toLocaleString("id-ID") : ""}
+                        onChange={(e) => setDpAmount(e.target.value.replace(/[^0-9]/g, ""))}
+                        placeholder="Contoh: 150.000"
+                        className="font-mono"
+                      />
+                    </div>
+                    {dpAmount && Number(dpAmount) > 0 && (
+                      <div className="text-sm bg-violet-50 dark:bg-violet-900/20 border border-violet-200 dark:border-violet-800 rounded-lg p-3 space-y-1.5">
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">{t("DP Dibayar Sekarang", "DP Paid Now")}</span>
+                          <span className="font-bold text-violet-700 dark:text-violet-300">Rp {Number(dpAmount).toLocaleString("id-ID")}</span>
+                        </div>
+                        {facility && (
+                          <div className="flex justify-between border-t border-violet-200 dark:border-violet-800 pt-1.5">
+                            <span className="text-muted-foreground">{t("Sisa Pembayaran", "Remaining")}</span>
+                            <span className="font-bold text-foreground">Rp {Math.max(0, facility.pricePerHour * duration - Number(dpAmount)).toLocaleString("id-ID")}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    <p className="text-xs text-muted-foreground">{t("Sisa pembayaran harus dilunasi sebelum sesi dimulai.", "Remaining payment must be settled before the session starts.")}</p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           )}
 
           {/* Submit Button (mobile) */}

@@ -140,9 +140,17 @@ const FILTER_OPTIONS = [
   { value: "refunded",        label: "Pengembalian Dana" },
 ];
 
-function StatusBadge({ status }: { status: string }) {
+function StatusBadge({ status, isDpPaid }: { status: string; isDpPaid?: boolean }) {
   const cfg = STATUS_CONFIG[status as BookingStatus] ?? STATUS_CONFIG.pending_payment;
   const Icon = cfg.icon;
+  if (isDpPaid && status === "pending_payment") {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full border border-violet-200 dark:border-violet-800 bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300">
+        <CreditCard size={11} />
+        Menunggu Sisa
+      </span>
+    );
+  }
   return (
     <span
       className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full border ${cfg.bg} ${cfg.color} ${cfg.pill}`}
@@ -809,6 +817,18 @@ function BookingDetailDrawer({
                   value={formatCurrency(booking.totalPrice)}
                   highlight
                 />
+              )}
+              {booking.isDpPaid && (
+                <div className="col-span-2 border-t border-violet-100 dark:border-violet-800 pt-2.5 mt-1 space-y-1">
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="flex items-center gap-1 text-violet-600 dark:text-violet-400"><CreditCard size={11} />DP Dibayar</span>
+                    <span className="font-bold text-violet-700 dark:text-violet-300">{formatCurrency(Number(booking.downPayment || 0))}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-slate-500">Sisa Pembayaran</span>
+                    <span className="font-bold text-amber-600 dark:text-amber-400">{formatCurrency(Math.max(0, Number(booking.totalPrice) - Number(booking.downPayment || 0)))}</span>
+                  </div>
+                </div>
               )}
             </div>
           </div>
@@ -2176,10 +2196,17 @@ export default function AdminBookings() {
                             isCompleting={updateBookingMutation.isPending && updateBookingMutation.variables?.id === b.id}
                           />
                         ) : b.status === "pending_payment" ? (
-                          <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full border bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:text-amber-400 dark:border-amber-800">
-                            <Clock size={11} />
-                            Menunggu Bayar
-                          </span>
+                          b.isDpPaid ? (
+                            <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full border bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-900/20 dark:text-violet-400 dark:border-violet-800">
+                              <CreditCard size={11} />
+                              Sisa DP
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full border bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:text-amber-400 dark:border-amber-800">
+                              <Clock size={11} />
+                              Menunggu Bayar
+                            </span>
+                          )
                         ) : b.status === "waiting_confirmation" || b.status === "paid" ? (
                           <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full border bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/20 dark:text-blue-400 dark:border-blue-800">
                             <CreditCard size={11} />

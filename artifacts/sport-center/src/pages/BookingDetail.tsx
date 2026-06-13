@@ -8,6 +8,7 @@ import {
   useCreatePayment,
   useGetReviews,
   useCreateReview,
+  usePayBookingDp,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -62,6 +63,8 @@ export default function BookingDetail() {
   const existingReview = existingReviews?.find((r) => r.bookingId === booking?.id);
 
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | null>(null);
+  const [dpMode, setDpMode] = useState(false);
+  const [dpInputAmount, setDpInputAmount] = useState("");
   const [showReschedule, setShowReschedule] = useState(false);
   const [showExtend, setShowExtend] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -72,6 +75,20 @@ export default function BookingDetail() {
   const [reviewRating, setReviewRating] = useState(0);
   const [reviewComment, setReviewComment] = useState("");
   const [hoverRating, setHoverRating] = useState(0);
+
+  const payDp = usePayBookingDp({
+    mutation: {
+      onSuccess: () => {
+        toast({ title: t("DP berhasil dicatat!", "DP recorded!"), description: t("Admin akan mengkonfirmasi pembayaran Anda.", "Admin will confirm your payment.") });
+        queryClient.invalidateQueries({ queryKey: getGetBookingByOrderQueryKey(orderNumber) });
+        setDpMode(false);
+        setDpInputAmount("");
+      },
+      onError: (error: any) => {
+        toast({ title: t("Gagal mencatat DP", "Failed to record DP"), description: error?.message || t("Terjadi kesalahan", "An error occurred"), variant: "destructive" });
+      },
+    },
+  });
 
   const submitPayment = useCreatePayment({
     mutation: {
@@ -355,12 +372,93 @@ export default function BookingDetail() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="p-6 space-y-5">
+                {/* DP Info Banner */}
+                {(booking as any).isDpPaid && (
+                  <div className="flex items-start gap-3 p-3.5 rounded-xl border border-violet-200 bg-violet-50 dark:bg-violet-900/20 dark:border-violet-800">
+                    <div className="w-8 h-8 rounded-lg bg-violet-100 dark:bg-violet-900/40 flex items-center justify-center shrink-0">
+                      <CreditCard size={16} className="text-violet-600 dark:text-violet-300" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-semibold text-sm text-violet-800 dark:text-violet-200">{t("DP Sudah Dicatat", "Down Payment Recorded")}</div>
+                      <div className="text-xs text-violet-600 dark:text-violet-400 mt-0.5 space-y-0.5">
+                        <div>{t("DP", "DP")}: <span className="font-bold">Rp {Number((booking as any).downPayment || 0).toLocaleString("id-ID")}</span></div>
+                        <div>{t("Sisa Pembayaran", "Remaining")}: <span className="font-bold">Rp {Math.max(0, Number(booking.totalPrice) - Number((booking as any).downPayment || 0)).toLocaleString("id-ID")}</span></div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* DP Toggle (only if isDpPaid is false) */}
+                {!(booking as any).isDpPaid && !dpMode && !paymentMethod && (
+                  <div className="flex items-center justify-between p-3 rounded-xl border border-dashed border-violet-300 dark:border-violet-700 bg-violet-50/50 dark:bg-violet-900/10">
+                    <div className="text-sm text-muted-foreground">{t("Ingin bayar sebagian (DP)?", "Want to pay partially (DP)?")}</div>
+                    <button
+                      type="button"
+                      onClick={() => setDpMode(true)}
+                      className="text-xs font-semibold text-violet-600 dark:text-violet-300 hover:underline shrink-0 ml-2"
+                    >
+                      {t("Bayar DP →", "Pay DP →")}
+                    </button>
+                  </div>
+                )}
+
+                {/* DP Input Mode */}
+                {dpMode && !(booking as any).isDpPaid && (
+                  <div className="space-y-3 p-4 rounded-xl border border-violet-200 dark:border-violet-700 bg-violet-50 dark:bg-violet-900/20">
+                    <div className="flex items-center justify-between">
+                      <div className="font-semibold text-sm text-violet-800 dark:text-violet-200">{t("Bayar Down Payment", "Pay Down Payment")}</div>
+                      <button type="button" onClick={() => { setDpMode(false); setDpInputAmount(""); }} className="text-xs text-muted-foreground hover:text-foreground">✕</button>
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-xs text-muted-foreground font-medium">{t("Jumlah DP (Rp)", "DP Amount (Rp)")}</label>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        value={dpInputAmount ? Number(dpInputAmount).toLocaleString("id-ID") : ""}
+                        onChange={(e) => setDpInputAmount(e.target.value.replace(/[^0-9]/g, ""))}
+                        placeholder="Contoh: 150.000"
+                        className="w-full px-3 py-2 rounded-lg border border-violet-200 dark:border-violet-700 bg-background text-sm font-mono focus:outline-none focus:ring-2 focus:ring-violet-400"
+                      />
+                    </div>
+                    {dpInputAmount && Number(dpInputAmount) > 0 && (
+                      <div className="text-xs space-y-1 text-muted-foreground">
+                        <div className="flex justify-between"><span>{t("DP Dibayar", "DP Paid")}:</span><span className="font-bold text-violet-700 dark:text-violet-300">Rp {Number(dpInputAmount).toLocaleString("id-ID")}</span></div>
+                        <div className="flex justify-between"><span>{t("Sisa", "Remaining")}:</span><span className="font-bold">Rp {Math.max(0, Number(booking.totalPrice) - Number(dpInputAmount)).toLocaleString("id-ID")}</span></div>
+                      </div>
+                    )}
+                    <Button
+                      size="sm"
+                      className="w-full bg-violet-600 hover:bg-violet-700 text-white"
+                      disabled={!dpInputAmount || Number(dpInputAmount) <= 0 || payDp.isPending}
+                      onClick={() => {
+                        if (!booking?.id || !dpInputAmount) return;
+                        payDp.mutate({ id: booking.id, data: { downPaymentAmount: Number(dpInputAmount) } });
+                      }}
+                    >
+                      {payDp.isPending ? t("Menyimpan...", "Saving...") : t("Konfirmasi DP", "Confirm DP")}
+                    </Button>
+                    <p className="text-[11px] text-muted-foreground text-center">{t("Setelah konfirmasi DP, upload bukti transfer sejumlah DP di bawah ini.", "After confirming DP, upload transfer proof for the DP amount below.")}</p>
+                  </div>
+                )}
+
                 <div className="text-sm font-semibold text-foreground">
-                  {t("Bayar", "Pay")}{" "}
-                  <span className="text-primary text-base">
-                    Rp {booking.totalPrice.toLocaleString("id-ID")}
-                  </span>{" "}
-                  {t("via:", "via:")}
+                  {(booking as any).isDpPaid ? (
+                    <>
+                      {t("Bayar sisa", "Pay remaining")}{" "}
+                      <span className="text-primary text-base">
+                        Rp {Math.max(0, Number(booking.totalPrice) - Number((booking as any).downPayment || 0)).toLocaleString("id-ID")}
+                      </span>{" "}
+                      {t("via:", "via:")}
+                    </>
+                  ) : (
+                    <>
+                      {t("Bayar", "Pay")}{" "}
+                      <span className="text-primary text-base">
+                        Rp {booking.totalPrice.toLocaleString("id-ID")}
+                      </span>{" "}
+                      {t("via:", "via:")}
+                    </>
+                  )}
                 </div>
 
                 {/* Payment Method Selector */}
