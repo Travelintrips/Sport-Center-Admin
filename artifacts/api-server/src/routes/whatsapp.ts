@@ -53,17 +53,32 @@ const INACTIVE_STATUSES = ["cancelled", "expired", "rejected", "refunded"];
 
 // ─── Webhook deduplication — cegah Fonnte retry/outgoing loop ─────────────────
 const _processedMsgIds = new Set<string>();
+
+function isOutgoingMessage(body: Record<string, unknown>): boolean {
+  // Semua variasi field Fonnte untuk pesan outgoing (balasan bot sendiri)
+  if (body.me === true || body.me === "true") return true;
+  if (body.is_me === true || body.is_me === "true") return true;
+  if (body.from_me === true || body.from_me === "true") return true;
+  if (body.is_from_me === true || body.is_from_me === "true") return true;
+  if (body.outgoing === true || body.outgoing === "true") return true;
+  // Fonnte kadang kirim type "outgoing" atau "sent"
+  const type = String(body.type ?? body.message_type ?? "").toLowerCase();
+  if (type === "outgoing" || type === "sent") return true;
+  return false;
+}
+
 function isDuplicateWebhook(body: Record<string, unknown>): boolean {
-  // Fonnte kirim me=true untuk pesan outgoing (balasan bot sendiri) → skip
-  if (body.me === true || body.me === "true" || body.is_me === true) return true;
+  // Skip pesan outgoing (balasan bot sendiri)
+  if (isOutgoingMessage(body)) return true;
+
   // Cek message ID unik — Fonnte kadang retry dengan id yang sama
-  const id = body.id ?? body.message_id;
+  const id = body.id ?? body.message_id ?? body.msg_id ?? body.msgId;
   if (id) {
     const key = String(id);
     if (_processedMsgIds.has(key)) return true;
     _processedMsgIds.add(key);
-    // Bersihkan setelah 5 menit agar tidak memory leak
-    setTimeout(() => _processedMsgIds.delete(key), 5 * 60 * 1000);
+    // Bersihkan setelah 10 menit agar tidak memory leak
+    setTimeout(() => _processedMsgIds.delete(key), 10 * 60 * 1000);
   }
   return false;
 }
@@ -152,8 +167,8 @@ async function getBookingFull(id: number) {
 
 // ─── Keyword detection ────────────────────────────────────────────────────────
 const FACILITY_KEYWORDS: Record<string, string[]> = {
+  serbaguna: ["serbaguna", "multiguna", "hall", "aula", "futsal", "sepak bola", "bola", "mini soccer"],
   basket: ["basket", "basketball", "bola basket"],
-  futsal: ["futsal", "sepak bola", "bola", "mini soccer"],
   badminton: ["badminton", "bulutangkis", "bulu tangkis", "shuttle"],
   tennis: ["tennis", "tenis"],
   gym: ["gym", "fitness", "fitnes"],
@@ -161,6 +176,7 @@ const FACILITY_KEYWORDS: Record<string, string[]> = {
   renang: ["renang", "kolam", "swimming"],
   squash: ["squash"],
   golf: ["golf", "driving range"],
+  billiard: ["billiard", "biliar", "bilyard"],
 };
 
 function detectFacilityKeyword(msg: string): string | null {
@@ -936,6 +952,8 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
 async function sendWAMsg(phone: string, message: string): Promise<void> {
   const FONNTE_TOKEN = process.env.FONNTE_TOKEN || "";
   if (!FONNTE_TOKEN || !phone) return;
+  // Catat teks outgoing agar Fonnte echo-back bisa diblokir di webhook
+  trackSentMessage(message);
   try {
     await fetch("https://api.fonnte.com/send", {
       method: "POST",
@@ -987,7 +1005,7 @@ async function getFacilityByKeyword(keyword: string) {
     renang: ["renang", "kolam", "swimming"],
     squash: ["squash"],
     golf: ["golf"],
-    serbaguna: ["serbaguna", "multiguna", "hall", "aula"],
+    serbaguna: ["serbaguna", "multiguna", "hall", "aula", "futsal", "sepak bola", "bola", "mini soccer"],
     billiard: ["billiard", "biliar", "bilyard"],
   };
   const kws = FACILITY_KEYWORDS[keyword] ?? [keyword];
@@ -2277,11 +2295,45 @@ async function execCreateBookingFromSession(session: WaBookingSessionRow, phone:
 
 // ─── POST /api/wa/fonnte/webhook — Fonnte inbound message handler ─────────────
 
+// ─── Per-phone message hash dedup (survives ID-less retries) ─────────────────
+const _recentMsgHashes = new Map<string, number>(); // "phone:msgHash" → timestamp
+
+// ─── Outgoing message cache — blokir Fonnte echo-back ────────────────────────
+// Setiap kali bot kirim pesan via sendWAMsg, simpan teks-nya di sini.
+// Kalau Fonnte kirim balik pesan itu ke webhook, langsung diabaikan.
+const _sentMsgTexts = new Map<string, number>(); // msgTextHash → timestamp
+function trackSentMessage(msg: string): void {
+  const key = msg.trim().toLowerCase().substring(0, 120);
+  _sentMsgTexts.set(key, Date.now());
+  setTimeout(() => _sentMsgTexts.delete(key), 60 * 1000); // hapus setelah 60 detik
+}
+function isBotEcho(msg: string): boolean {
+  const key = msg.trim().toLowerCase().substring(0, 120);
+  const ts = _sentMsgTexts.get(key);
+  return !!ts && Date.now() - ts < 60 * 1000;
+}
+
+function isDuplicateByContent(phone: string, msg: string): boolean {
+  // Blokir jika teks ini persis sama dengan yang baru saja bot kirim (Fonnte echo)
+  if (isBotEcho(msg)) return true;
+
+  const hash = `${phone}:${msg.trim().toLowerCase().substring(0, 80)}`;
+  const now = Date.now();
+  const last = _recentMsgHashes.get(hash);
+  if (last && now - last < 8000) return true; // same msg from same phone within 8 detik → duplicate
+  _recentMsgHashes.set(hash, now);
+  setTimeout(() => _recentMsgHashes.delete(hash), 30 * 1000);
+  return false;
+}
+
 router.post("/wa/fonnte/webhook", async (req, res) => {
-  // Respond immediately to avoid Fonnte timeout
+  // Respond immediately to avoid Fonnte timeout/retry
   res.status(200).json({ status: "ok" });
 
   try {
+    // Log raw payload (debug — lihat field apa yang Fonnte kirim)
+    req.log?.debug?.({ body: req.body }, "[wa-webhook] raw payload");
+
     if (isDuplicateWebhook(req.body)) return;
     const { sender, message = "", name = "" } = req.body;
     if (!sender) return;
@@ -2289,6 +2341,9 @@ router.post("/wa/fonnte/webhook", async (req, res) => {
     const phone = cleanPhone(String(sender));
     const msg = String(message).trim();
     if (!msg || !phone) return;
+
+    // Dedup berdasarkan konten (cegah Fonnte retry tanpa message_id)
+    if (isDuplicateByContent(phone, msg)) return;
 
     // 1. Audit log — every inbound message
     await logAiMessageReceived(phone, msg, String(name));
