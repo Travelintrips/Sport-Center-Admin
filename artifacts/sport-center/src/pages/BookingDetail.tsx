@@ -479,8 +479,15 @@ export default function BookingDetail() {
                     <>
                       {t("Bayar", "Pay")}{" "}
                       <span className="text-primary text-base">
-                        Rp {booking.totalPrice.toLocaleString("id-ID")}
+                        Rp {(booking as any).groupInfo
+                          ? (booking as any).groupInfo.groupTotalPayment.toLocaleString("id-ID")
+                          : booking.totalPrice.toLocaleString("id-ID")}
                       </span>{" "}
+                      {(booking as any).groupInfo && (
+                        <span className="text-xs text-muted-foreground font-normal">
+                          ({(booking as any).groupInfo.groupSessionCount} {t("sesi", "sessions")} × Rp {booking.totalPrice.toLocaleString("id-ID")})
+                        </span>
+                      )}{" "}
                       {t("via:", "via:")}
                     </>
                   )}
