@@ -9,7 +9,7 @@ import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { Save, Upload, Trash2, QrCode, ImageIcon, Plane, MessageCircle, Eye, EyeOff, CheckCircle2, AlertCircle, Receipt } from "lucide-react";
+import { Save, Upload, Trash2, QrCode, ImageIcon, Plane, MessageCircle, Eye, EyeOff, CheckCircle2, AlertCircle, Receipt, FlaskConical, RefreshCw } from "lucide-react";
 import { getToken } from "@/lib/auth";
 
 function ApDiscountCard() {
@@ -265,6 +265,78 @@ function PpnSettingsCard() {
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
+function SeedDemoCard() {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [result, setResult] = useState<{ bookings: number; payments: number; reviews: number; promoRegistrations: number } | null>(null);
+
+  const mutation = useMutation({
+    mutationFn: async () => {
+      const token = getToken();
+      const res = await fetch("/api/admin/seed-demo", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Gagal" }));
+        throw new Error(err.error ?? "Terjadi kesalahan");
+      }
+      return res.json();
+    },
+    onSuccess: (data) => {
+      setResult(data.summary);
+      queryClient.invalidateQueries();
+      toast({ title: "✅ Data demo berhasil di-seed!", description: `${data.summary.bookings} booking, ${data.summary.payments} pembayaran, ${data.summary.reviews} ulasan` });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Gagal seed data demo", description: err.message, variant: "destructive" });
+    },
+  });
+
+  return (
+    <Card className="border-dashed border-2 border-amber-300 bg-amber-50/40">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base font-bold flex items-center gap-2 text-amber-700">
+          <FlaskConical size={18} />
+          Data Demo (Development Only)
+        </CardTitle>
+        <p className="text-xs text-amber-600 mt-1">
+          Hapus semua transaksi lama dan isi ulang dengan data demo realistis — booking, pembayaran, ulasan, dll.
+          <strong className="block mt-0.5">⚠ Tidak tersedia di production. Data lama akan dihapus permanen.</strong>
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {result && (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {[
+              { label: "Booking", value: result.bookings },
+              { label: "Pembayaran", value: result.payments },
+              { label: "Ulasan", value: result.reviews },
+              { label: "Registrasi Promo", value: result.promoRegistrations },
+            ].map(({ label, value }) => (
+              <div key={label} className="bg-white rounded-lg border border-amber-200 p-3 text-center">
+                <p className="text-2xl font-black text-amber-700">{value}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">{label}</p>
+              </div>
+            ))}
+          </div>
+        )}
+        <Button
+          onClick={() => mutation.mutate()}
+          disabled={mutation.isPending}
+          className="bg-amber-500 hover:bg-amber-600 text-white gap-2"
+        >
+          {mutation.isPending ? (
+            <><RefreshCw size={16} className="animate-spin" /> Memproses...</>
+          ) : (
+            <><FlaskConical size={16} /> Reset & Seed Data Demo</>
+          )}
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function AdminSettings() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -464,6 +536,8 @@ export default function AdminSettings() {
       <ApDiscountCard />
 
       <PpnSettingsCard />
+
+      <SeedDemoCard />
 
       {/* ─── WhatsApp Notification Settings ─────────────────────── */}
       <form onSubmit={handleWaSubmit}>
