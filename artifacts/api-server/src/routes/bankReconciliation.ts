@@ -440,9 +440,10 @@ router.delete("/bank-reconciliation/mutations", adminMiddleware, async (req, res
 // GET /bank-reconciliation/report — laporan bulanan rekonsiliasi
 router.get("/bank-reconciliation/report", adminMiddleware, async (req, res) => {
   try {
+    // mutation_key format: YYYYMMDD_amount_direction — reliable date source
     const { rows } = await db.execute(sql`
       SELECT
-        LEFT(transaction_date, 7) AS month,
+        TO_CHAR(TO_DATE(LEFT(mutation_key, 8), 'YYYYMMDD'), 'YYYY-MM') AS month,
         COUNT(*)::int AS total,
         COUNT(*) FILTER (WHERE direction = 'IN')::int AS total_in,
         COUNT(*) FILTER (WHERE direction = 'OUT')::int AS total_out,
@@ -456,8 +457,9 @@ router.get("/bank-reconciliation/report", adminMiddleware, async (req, res) => {
         COALESCE(SUM(amount) FILTER (WHERE direction = 'IN' AND status = 'approved'), 0)::numeric AS approved_amount_in,
         COALESCE(SUM(amount) FILTER (WHERE direction = 'IN' AND status != 'approved' AND status != 'rejected'), 0)::numeric AS pending_amount_in
       FROM sport_center.bank_mutations
-      GROUP BY LEFT(transaction_date, 7)
-      ORDER BY LEFT(transaction_date, 7) DESC
+      WHERE mutation_key ~ '^20[0-9]{6}_'
+      GROUP BY TO_CHAR(TO_DATE(LEFT(mutation_key, 8), 'YYYYMMDD'), 'YYYY-MM')
+      ORDER BY TO_CHAR(TO_DATE(LEFT(mutation_key, 8), 'YYYYMMDD'), 'YYYY-MM') DESC
     `);
 
     // totals keseluruhan
@@ -579,6 +581,9 @@ router.post("/bank-reconciliation/scan-ocr", adminMiddleware, async (req, res) =
   } catch (err: any) {
     req.log.error({ err }, "OCR scan error");
     res.status(500).json({ error: err?.message ?? "Gagal scan OCR" });
+  }
+});
+
 // GET /bank-reconciliation/mutations/:id/candidates — enriched candidates with booking/payment details
 router.get("/bank-reconciliation/mutations/:id/candidates", adminMiddleware, async (req, res) => {
   try {
