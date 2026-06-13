@@ -1283,6 +1283,241 @@ function ReportTab() {
   );
 }
 
+// ===== Fase 5: Exception Dashboard Tab =====
+function ExceptionDashboardTab() {
+  const { toast } = useToast();
+  const [data, setData] = useState<any>(null);
+  const [auditData, setAuditData] = useState<any>(null);
+  const [balances, setBalances] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [activeException, setActiveException] = useState<"needReview" | "unmatched" | "duplicate" | "approvedUnposted" | "closedViolations">("needReview");
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const [dashRes, balRes] = await Promise.all([
+        fetch(`${API_BASE}/bank-reconciliation/exception-dashboard`, { headers: authHeaders() }),
+        fetch(`${API_BASE}/bank-reconciliation/balances`, { headers: authHeaders() }),
+      ]);
+      const dashData = await dashRes.json();
+      const balData = await balRes.json();
+      setData(dashData);
+      setBalances(balData.balances ?? []);
+    } catch { /* ignore */ }
+    setLoading(false);
+  };
+
+  const runAudit = async () => {
+    setAuditLoading(true);
+    try {
+      const r = await fetch(`${API_BASE}/bank-reconciliation/audit`, { headers: authHeaders() });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? "Gagal audit");
+      setAuditData(d);
+    } catch (e: any) { toast({ title: e.message, variant: "destructive" }); }
+    setAuditLoading(false);
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const kpi = data?.kpi;
+  const exc = data?.exceptions;
+
+  const KPI_CARDS = kpi ? [
+    { label: "Total Mutasi", value: kpi.totalMutations, color: "text-foreground", bg: "" },
+    { label: "Approved", value: kpi.totalApproved, color: "text-green-700", bg: "bg-green-50" },
+    { label: "Need Review", value: kpi.totalNeedReview, color: "text-orange-700", bg: "bg-orange-50" },
+    { label: "Unmatched", value: kpi.totalUnmatched, color: "text-red-700", bg: "bg-red-50" },
+    { label: "Duplikat", value: kpi.totalDuplicate, color: "text-yellow-700", bg: "bg-yellow-50" },
+    { label: "Belum Jurnal", value: kpi.totalUnpostedJournal, color: kpi.totalUnpostedJournal > 0 ? "text-red-700" : "text-green-700", bg: kpi.totalUnpostedJournal > 0 ? "bg-red-50" : "bg-green-50" },
+    { label: "Outstanding IN", value: formatCurrency(kpi.outstandingDifference), color: "text-blue-700", bg: "bg-blue-50" },
+  ] : [];
+
+  const EXCEPTION_TABS = [
+    { key: "needReview", label: "Need Review", count: kpi?.totalNeedReview ?? 0, color: "text-orange-700" },
+    { key: "unmatched", label: "Unmatched", count: kpi?.totalUnmatched ?? 0, color: "text-red-700" },
+    { key: "duplicate", label: "Duplikat", count: kpi?.totalDuplicate ?? 0, color: "text-yellow-700" },
+    { key: "approvedUnposted", label: "Belum Jurnal", count: kpi?.totalUnpostedJournal ?? 0, color: "text-red-700" },
+    { key: "closedViolations", label: "Closed Violations", count: exc?.closedPeriodViolations?.length ?? 0, color: "text-purple-700" },
+  ] as const;
+
+  const currentList: any[] = exc ? (
+    activeException === "needReview" ? exc.needReview :
+    activeException === "unmatched" ? exc.unmatched :
+    activeException === "duplicate" ? exc.duplicate :
+    activeException === "approvedUnposted" ? exc.approvedUnposted :
+    exc.closedPeriodViolations
+  ) : [];
+
+  return (
+    <div className="space-y-6">
+      {/* KPI Cards */}
+      <div>
+        <h2 className="font-bold text-lg mb-3">Exception Dashboard</h2>
+        {loading ? (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {[1,2,3,4,5,6,7].map(i => <Skeleton key={i} className="h-16 rounded-xl" />)}
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {KPI_CARDS.map((c) => (
+              <Card key={c.label} className={`${c.bg} border`}>
+                <CardContent className="p-3">
+                  <p className="text-xs text-muted-foreground">{c.label}</p>
+                  <p className={`text-xl font-black ${c.color}`}>{typeof c.value === "number" ? c.value.toLocaleString("id-ID") : c.value}</p>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Bank Balance Ledger */}
+      {balances.length > 0 && (
+        <Card>
+          <CardContent className="p-4">
+            <p className="font-semibold text-sm mb-3">Saldo Rekening Bank</p>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b bg-muted/40">
+                    <th className="px-3 py-2 text-left">Rekening</th>
+                    <th className="px-3 py-2 text-right">Saldo Berjalan</th>
+                    <th className="px-3 py-2 text-right">Terakhir Rekonsiliasi</th>
+                    <th className="px-3 py-2 text-center">Update Terakhir</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {balances.map((b: any) => (
+                    <tr key={b.id} className="border-b hover:bg-muted/20">
+                      <td className="px-3 py-2 font-mono font-semibold">{b.bankAccountId}</td>
+                      <td className={`px-3 py-2 text-right font-bold ${parseFloat(b.currentBalance) >= 0 ? "text-green-700" : "text-red-700"}`}>
+                        {formatCurrency(parseFloat(b.currentBalance))}
+                      </td>
+                      <td className="px-3 py-2 text-right text-muted-foreground">{b.lastReconciledBalance ? formatCurrency(parseFloat(b.lastReconciledBalance)) : "—"}</td>
+                      <td className="px-3 py-2 text-center text-muted-foreground">{b.updatedAt ? new Date(b.updatedAt).toLocaleDateString("id-ID") : "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Exception Lists */}
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <p className="font-semibold text-sm">Daftar Exception</p>
+          <Button size="sm" variant="outline" onClick={load} className="text-xs h-7">↻ Refresh</Button>
+        </div>
+
+        <div className="flex gap-1 flex-wrap mb-3">
+          {EXCEPTION_TABS.map(t => (
+            <button key={t.key}
+              className={`px-3 py-1 rounded-full text-xs font-semibold border transition-colors ${activeException === t.key ? "bg-primary text-primary-foreground border-primary" : "bg-background border-border hover:bg-muted"}`}
+              onClick={() => setActiveException(t.key)}
+            >
+              {t.label}
+              {t.count > 0 && <span className={`ml-1.5 ${activeException === t.key ? "" : t.color}`}>{t.count}</span>}
+            </button>
+          ))}
+        </div>
+
+        {loading ? (
+          <div className="space-y-2">{[1,2,3].map(i => <Skeleton key={i} className="h-10 rounded" />)}</div>
+        ) : !currentList.length ? (
+          <Card><CardContent className="py-8 text-center text-muted-foreground text-sm">✓ Tidak ada exception pada kategori ini</CardContent></Card>
+        ) : (
+          <Card>
+            <CardContent className="p-0 overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b bg-muted/40">
+                    <th className="px-3 py-2.5 text-left">ID</th>
+                    <th className="px-3 py-2.5 text-left">Tanggal</th>
+                    <th className="px-3 py-2.5 text-left">Keterangan</th>
+                    <th className="px-3 py-2.5 text-center">Arah</th>
+                    <th className="px-3 py-2.5 text-right">Jumlah</th>
+                    <th className="px-3 py-2.5 text-left">Rekening</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {currentList.map((m: any) => (
+                    <tr key={m.id} className="border-b hover:bg-muted/20">
+                      <td className="px-3 py-2 font-mono text-muted-foreground">#{m.id}</td>
+                      <td className="px-3 py-2">{m.transactionDate}</td>
+                      <td className="px-3 py-2 max-w-[200px] truncate">{m.description}</td>
+                      <td className="px-3 py-2 text-center">
+                        <Badge className={m.direction === "IN" ? "bg-green-100 text-green-700 text-[10px]" : "bg-red-100 text-red-700 text-[10px]"}>{m.direction}</Badge>
+                      </td>
+                      <td className={`px-3 py-2 text-right font-semibold ${m.direction === "IN" ? "text-green-700" : "text-red-700"}`}>
+                        {formatCurrency(parseFloat(m.amount))}
+                      </td>
+                      <td className="px-3 py-2 text-muted-foreground font-mono">{m.bankAccountId ?? "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </CardContent>
+          </Card>
+        )}
+      </div>
+
+      {/* Audit Section */}
+      <Card>
+        <CardContent className="p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="font-semibold text-sm">Final Audit — Production Readiness</p>
+              <p className="text-xs text-muted-foreground">Validasi integritas data: duplikat jurnal, invoice overpaid, closing dengan selisih, dll.</p>
+            </div>
+            <Button size="sm" onClick={runAudit} disabled={auditLoading}>{auditLoading ? "Mengaudit..." : "Jalankan Audit"}</Button>
+          </div>
+
+          {auditData && (
+            <div className="space-y-3 mt-2">
+              {/* Summary */}
+              <div className={`p-3 rounded-lg border ${auditData.summary.productionReady ? "bg-green-50 border-green-200" : "bg-red-50 border-red-200"}`}>
+                <div className="flex items-center gap-2">
+                  <span className="text-lg">{auditData.summary.productionReady ? "✅" : "❌"}</span>
+                  <span className={`font-bold text-sm ${auditData.summary.productionReady ? "text-green-800" : "text-red-800"}`}>
+                    {auditData.summary.productionReady ? "Production Ready" : "Ada Temuan Critical — Perlu Diperbaiki"}
+                  </span>
+                  <div className="ml-auto flex gap-2 text-xs">
+                    {auditData.summary.critical > 0 && <span className="text-red-700 font-semibold">🔴 {auditData.summary.critical} Critical</span>}
+                    {auditData.summary.warning > 0 && <span className="text-orange-700 font-semibold">🟡 {auditData.summary.warning} Warning</span>}
+                    {auditData.summary.info > 0 && <span className="text-blue-700">🔵 {auditData.summary.info} Info</span>}
+                  </div>
+                </div>
+              </div>
+
+              {/* Findings */}
+              <div className="space-y-2">
+                {auditData.findings.map((f: any, i: number) => (
+                  <div key={i} className={`p-3 rounded border text-xs ${f.severity === "critical" ? "bg-red-50 border-red-200" : f.severity === "warning" ? "bg-yellow-50 border-yellow-200" : "bg-blue-50 border-blue-200"}`}>
+                    <div className="flex items-center gap-2">
+                      <span>{f.severity === "critical" ? "🔴" : f.severity === "warning" ? "🟡" : "🔵"}</span>
+                      <span className="font-semibold">{f.category}</span>
+                      <span className={f.severity === "critical" ? "text-red-700" : f.severity === "warning" ? "text-orange-700" : "text-blue-700"}>
+                        ({f.count})
+                      </span>
+                    </div>
+                    <p className="mt-1 text-muted-foreground">{f.message}</p>
+                  </div>
+                ))}
+              </div>
+
+              <p className="text-xs text-muted-foreground">Audit dijalankan: {new Date(auditData.auditTimestamp).toLocaleString("id-ID")}</p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 // ===== Fase 4: Closing Bank Tab =====
 function ClosingBankTab() {
   const { toast } = useToast();
@@ -1618,7 +1853,7 @@ export default function AdminBankReconciliation() {
   const qc = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const [activeTab, setActiveTab] = useState<"mutasi" | "laporan" | "closing" | "coa_rules">("mutasi");
+  const [activeTab, setActiveTab] = useState<"dashboard" | "mutasi" | "laporan" | "closing" | "coa_rules">("dashboard");
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterDirection, setFilterDirection] = useState("all");
   const [search, setSearch] = useState("");
@@ -1723,16 +1958,19 @@ export default function AdminBankReconciliation() {
 
       {/* Tab switcher */}
       <div className="flex gap-1 p-1 bg-muted rounded-lg w-fit flex-wrap">
-        {(["mutasi", "laporan", "closing", "coa_rules"] as const).map((t) => (
+        {(["dashboard", "mutasi", "laporan", "closing", "coa_rules"] as const).map((t) => (
           <button
             key={t}
             className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${activeTab === t ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}
             onClick={() => setActiveTab(t)}
           >
-            {t === "mutasi" ? "Mutasi" : t === "laporan" ? "Laporan Bulanan" : t === "closing" ? "Closing Bank" : "Aturan COA"}
+            {t === "dashboard" ? "🔍 Dashboard" : t === "mutasi" ? "Mutasi" : t === "laporan" ? "Laporan" : t === "closing" ? "Closing Bank" : "Aturan COA"}
           </button>
         ))}
       </div>
+
+      {/* Dashboard tab */}
+      {activeTab === "dashboard" && <ExceptionDashboardTab />}
 
       {/* Laporan tab */}
       {activeTab === "laporan" && <ReportTab />}

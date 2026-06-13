@@ -21,8 +21,19 @@ export const reconCandidateTypeEnum = scSchema.enum("recon_candidate_type", [
   "payment", "order", "invoice", "expense",
 ]);
 
+export const bankAccountBalancesTable = scSchema.table("bank_account_balances", {
+  id: serial("id").primaryKey(),
+  bankAccountId: text("bank_account_id").notNull(),
+  companyId: integer("company_id"),
+  openingBalance: numeric("opening_balance", { precision: 14, scale: 2 }).notNull().default("0"),
+  currentBalance: numeric("current_balance", { precision: 14, scale: 2 }).notNull().default("0"),
+  lastReconciledBalance: numeric("last_reconciled_balance", { precision: 14, scale: 2 }).default("0"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const bankMutationsTable = scSchema.table("bank_mutations", {
   id: serial("id").primaryKey(),
+  companyId: integer("company_id"),
   bankAccountId: text("bank_account_id"),
   transactionDate: text("transaction_date").notNull(),
   description: text("description").notNull(),
@@ -77,6 +88,7 @@ export const bankReconciliationMatchesTable = scSchema.table("bank_reconciliatio
 
 export const bankJournalEntriesTable = scSchema.table("bank_journal_entries", {
   id: serial("id").primaryKey(),
+  companyId: integer("company_id"),
   journalId: text("journal_id").notNull().unique(),
   mutationId: integer("mutation_id").notNull().references(() => bankMutationsTable.id, { onDelete: "cascade" }),
   direction: text("direction").notNull(),
@@ -137,6 +149,7 @@ export const insertBankMutationSchema = createInsertSchema(bankMutationsTable).o
 export const insertBankReconciliationMatchSchema = createInsertSchema(bankReconciliationMatchesTable).omit({ id: true, createdAt: true });
 export const insertBankReconciliationAccountRuleSchema = createInsertSchema(bankReconciliationAccountRulesTable).omit({ id: true, createdAt: true, updatedAt: true });
 export const insertBankReconciliationClosingSchema = createInsertSchema(bankReconciliationClosingTable).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertBankAccountBalanceSchema = createInsertSchema(bankAccountBalancesTable).omit({ id: true, updatedAt: true });
 
 export type BankMutation = typeof bankMutationsTable.$inferSelect;
 export type InsertBankMutation = z.infer<typeof insertBankMutationSchema>;
@@ -145,3 +158,4 @@ export type InsertBankReconciliationMatch = z.infer<typeof insertBankReconciliat
 export type BankJournalEntry = typeof bankJournalEntriesTable.$inferSelect;
 export type BankReconciliationAccountRule = typeof bankReconciliationAccountRulesTable.$inferSelect;
 export type BankReconciliationClosing = typeof bankReconciliationClosingTable.$inferSelect;
+export type BankAccountBalance = typeof bankAccountBalancesTable.$inferSelect;
