@@ -18,6 +18,10 @@ export const SHEET_HEADERS = [
   "Tanggal Daftar",
 ];
 
+export function isGoogleSheetsConfigured(): boolean {
+  return Boolean(process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
+}
+
 function getClient() {
   const raw = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
   if (!raw) throw new Error("GOOGLE_SERVICE_ACCOUNT_JSON tidak tersedia");
@@ -320,6 +324,100 @@ export async function pullMutationsFromSheet(sheetId: string, sheetName?: string
   }
 
   return result;
+}
+
+/**
+ * Tulis status rekonsiliasi ke kolom H dari baris yang cocok di Google Sheet.
+ * Cocokkan berdasarkan tanggal (kolom yg mengandung "tanggal"/"date") dan
+ * keterangan (kolom yg mengandung "keterangan"/"description"). Jika tidak
+ * ada header yang cocok, scan semua kolom dan cari nilai yang identik.
+ * Row 1 = header → data mulai row 2.
+ */
+export async function writeApprovalToSheetRow(
+  sheetId: string,
+  sheetName: string | undefined,
+  transactionDate: string,
+  description: string,
+  statusLabel: string = "DISETUJUI",
+  extraNote: string = "",
+): Promise<{ updated: boolean; rowIndex: number | null }> {
+  const sheets = getClient();
+  const resolvedSheetName = sheetName ?? (await getFirstSheetName(sheets, sheetId));
+
+  const resp = await sheets.spreadsheets.values.get({
+    spreadsheetId: sheetId,
+    range: `${resolvedSheetName}!A:Z`,
+  });
+
+  const values = resp.data.values ?? [];
+  if (values.length < 2) return { updated: false, rowIndex: null };
+
+  const header = (values[0] as string[]).map((h) =>
+    String(h ?? "").toLowerCase().replace(/[\s\-\.]+/g, "_"),
+  );
+
+  const dateIdx = header.findIndex((h) =>
+    ["tanggal", "transaction_date", "date", "tgl"].includes(h),
+  );
+  const descIdx = header.findIndex((h) =>
+    ["keterangan", "description", "ket", "narasi", "deskripsi"].includes(h),
+  );
+
+  const normalizeDate = (raw: string) => {
+    const s = String(raw ?? "").trim();
+    if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+    const parts = s.split("/");
+    if (parts.length === 3 && parts[2]!.length === 4) {
+      const a = parseInt(parts[0]!, 10);
+      const b = parseInt(parts[1]!, 10);
+      const month = a > 12 ? b : a;
+      const day   = a > 12 ? a : b;
+      return `${parts[2]}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    }
+    const d = new Date(s);
+    return !isNaN(d.getTime()) ? d.toISOString().slice(0, 10) : s;
+  };
+
+  for (let i = 1; i < values.length; i++) {
+    const row = values[i] as string[];
+    const rowDate = dateIdx >= 0 ? normalizeDate(String(row[dateIdx] ?? "")) : "";
+    const rowDesc = descIdx >= 0 ? String(row[descIdx] ?? "").trim() : "";
+
+    const dateMatch = rowDate === transactionDate;
+    const descMatch = rowDesc.toLowerCase() === description.toLowerCase();
+
+    if (dateMatch && descMatch) {
+      const sheetRowIndex = i + 1; // 1-based
+      const cellValue = extraNote ? `${statusLabel} (${extraNote})` : statusLabel;
+      await sheets.spreadsheets.values.update({
+        spreadsheetId: sheetId,
+        range: `${resolvedSheetName}!H${sheetRowIndex}`,
+        valueInputOption: "RAW",
+        requestBody: { values: [[cellValue]] },
+      });
+      return { updated: true, rowIndex: sheetRowIndex };
+    }
+  }
+
+  // Fallback: jika header tidak dikenali, coba cari baris yang mengandung tanggal + keterangan
+  for (let i = 1; i < values.length; i++) {
+    const row = values[i] as string[];
+    const hasDate = row.some((cell) => normalizeDate(String(cell ?? "")) === transactionDate);
+    const hasDesc = row.some((cell) => String(cell ?? "").trim().toLowerCase() === description.toLowerCase());
+    if (hasDate && hasDesc) {
+      const sheetRowIndex = i + 1;
+      const cellValue = extraNote ? `${statusLabel} (${extraNote})` : statusLabel;
+      await sheets.spreadsheets.values.update({
+        spreadsheetId: sheetId,
+        range: `${resolvedSheetName}!H${sheetRowIndex}`,
+        valueInputOption: "RAW",
+        requestBody: { values: [[cellValue]] },
+      });
+      return { updated: true, rowIndex: sheetRowIndex };
+    }
+  }
+
+  return { updated: false, rowIndex: null };
 }
 
 export async function pullCustomersFromSheet(sheetId: string): Promise<SheetCustomerUpdate[]> {

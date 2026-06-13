@@ -4090,6 +4090,12 @@ components:
           type: string
         candidateId:
           type: integer
+        sheetId:
+          type: string
+          description: Google Sheet ID untuk auto-update kolom H status rekonsiliasi
+        sheetName:
+          type: string
+          description: Nama tab/sheet yang aktif
 
     RunMatchingInput:
       type: object

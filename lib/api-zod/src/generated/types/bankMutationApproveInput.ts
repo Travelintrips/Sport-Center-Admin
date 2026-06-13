@@ -10,4 +10,8 @@ export interface BankMutationApproveInput {
   matchId?: number;
   candidateType?: string;
   candidateId?: number;
+  /** Google Sheet ID untuk auto-update kolom H status rekonsiliasi */
+  sheetId?: string;
+  /** Nama tab/sheet yang aktif */
+  sheetName?: string;
 }

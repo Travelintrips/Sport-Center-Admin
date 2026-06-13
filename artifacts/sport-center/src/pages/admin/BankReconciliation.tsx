@@ -563,6 +563,19 @@ function MatchCandidateRow({
   );
 }
 
+function getSheetContext(): { sheetId?: string; sheetName?: string } {
+  try {
+    const raw = localStorage.getItem("recon_connected_sheet");
+    const sheet = raw ? JSON.parse(raw) as { id: string; title: string } : null;
+    const names = JSON.parse(localStorage.getItem("recon_sheet_names") ?? "[]") as string[];
+    const selectedTab = localStorage.getItem("recon_selected_tab") ?? "";
+    const sheetName = selectedTab || names[0] || undefined;
+    return sheet ? { sheetId: sheet.id, sheetName } : {};
+  } catch {
+    return {};
+  }
+}
+
 function MutationRow({ mutation, qc }: { mutation: any; qc: any }) {
   const [expanded, setExpanded] = useState(false);
   const [batchScanning, setBatchScanning] = useState(false);
@@ -754,9 +767,10 @@ function MutationRow({ mutation, qc }: { mutation: any; qc: any }) {
                   <MatchCandidateRow
                     key={m.id}
                     match={m}
-                    onApprove={(matchId) =>
-                      approveMutation.mutate({ mutationId: mutation.id, data: { matchId } })
-                    }
+                    onApprove={(matchId) => {
+                      const { sheetId, sheetName } = getSheetContext();
+                      approveMutation.mutate({ mutationId: mutation.id, data: { matchId, sheetId, sheetName } });
+                    }}
                     isPending={isPending}
                   />
                 ))}
@@ -773,7 +787,10 @@ function MutationRow({ mutation, qc }: { mutation: any; qc: any }) {
                   variant="outline"
                   className="gap-1.5 text-xs"
                   disabled={isPending}
-                  onClick={() => approveMutation.mutate({ mutationId: mutation.id, data: {} })}
+                  onClick={() => {
+                    const { sheetId, sheetName } = getSheetContext();
+                    approveMutation.mutate({ mutationId: mutation.id, data: { sheetId, sheetName } });
+                  }}
                 >
                   <CheckCircle2 size={13} /> Setujui Tanpa Match
                 </Button>

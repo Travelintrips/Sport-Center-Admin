@@ -18,6 +18,7 @@ import {
   buildMutationKey,
   runMatching,
 } from "../lib/bankMatcher";
+import { writeApprovalToSheetRow, isGoogleSheetsConfigured } from "../lib/googleSheets";
 import * as XLSX from "xlsx";
 import multer from "multer";
 
@@ -376,6 +377,34 @@ router.post("/bank-reconciliation/:mutationId/approve", adminMiddleware, async (
         .update(bankMutationsTable)
         .set({ status: "approved", updatedAt: new Date() })
         .where(eq(bankMutationsTable.id, mutationId));
+    }
+
+    // ── Auto-write ke Google Sheet kolom H ─────────────────────────────
+    if (isGoogleSheetsConfigured()) {
+      const { sheetId, sheetName } = req.body as { sheetId?: string; sheetName?: string };
+      if (sheetId) {
+        // Re-fetch mutation setelah update untuk mendapat data terbaru
+        const [updated] = await db
+          .select()
+          .from(bankMutationsTable)
+          .where(eq(bankMutationsTable.id, mutationId))
+          .limit(1);
+
+        if (updated) {
+          const extraNote = updated.providerOrderId
+            ? `Order: ${updated.providerOrderId}`
+            : updated.providerName ?? "";
+
+          writeApprovalToSheetRow(
+            sheetId,
+            sheetName ?? undefined,
+            updated.transactionDate,
+            updated.description,
+            "DISETUJUI",
+            extraNote,
+          ).catch((err) => req.log.warn({ err }, "Sheet write kolom H gagal (non-fatal)"));
+        }
+      }
     }
 
     res.json({ ok: true });

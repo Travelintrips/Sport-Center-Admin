@@ -2471,7 +2471,9 @@ export const ApproveBankMutationParams = zod.object({
 export const ApproveBankMutationBody = zod.object({
   "matchId": zod.number().optional(),
   "candidateType": zod.string().optional(),
-  "candidateId": zod.number().optional()
+  "candidateId": zod.number().optional(),
+  "sheetId": zod.string().optional().describe('Google Sheet ID untuk auto-update kolom H status rekonsiliasi'),
+  "sheetName": zod.string().optional().describe('Nama tab\/sheet yang aktif')
 })
 
 export const ApproveBankMutationResponse = zod.object({
