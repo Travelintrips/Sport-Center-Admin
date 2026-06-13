@@ -503,11 +503,12 @@ router.post("/wa/webhook", async (req, res) => {
       .from(usersTable).where(eq(usersTable.phone, senderPhone)).limit(1);
 
     if (!registeredUser) {
-      const registerUrl = `${APP_URL}/register?phone=${senderPhone}&source=wa`;
+      const regToken = generateRegToken(senderPhone);
+      const registerUrl = `${APP_URL}/wa/register/${regToken}`;
       await sendWAReply(senderPhone,
         `👋 Halo! Untuk booking fasilitas, kamu perlu *daftar dulu* sebagai customer.\n\n` +
-        `📝 *Daftar gratis sekarang:*\n${registerUrl}\n\n` +
-        `Setelah daftar, ketik *booking* lagi di sini dan kita langsung bantu! 🏅`
+        `📝 *Daftar gratis sekarang (hanya 1 menit):*\n${registerUrl}\n\n` +
+        `Setelah mengisi, ketik *booking* lagi di sini dan kita langsung bantu! 🏅`
       );
       return;
     }
