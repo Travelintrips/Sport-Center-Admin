@@ -197,6 +197,48 @@ function parseDuration(lower: string): number | null {
   return null;
 }
 
+// Parse "jam 4 sd jam 6 sore", "4 sore sampai 6 sore", "16:00 - 18:00", etc.
+// Returns startTime + durationMinutes derived from a start–end range expression.
+function parseTimeRange(lower: string): { startTime: string; durationMinutes: number } | null {
+  // Capture: [jam/pukul] <start>[.:]<min> [period] <separator> [jam/pukul] <end>[.:]<min> [period]
+  const rangeRe =
+    /(?:jam|pukul)?\s*(\d{1,2})(?:[.:](\d{2}))?\s*(sore|malam|pagi|siang)?\s*(?:sd|s\/d|sampai|hingga|[-–])\s*(?:jam|pukul)?\s*(\d{1,2})(?:[.:](\d{2}))?\s*(sore|malam|pagi|siang)?/;
+  const m = lower.match(rangeRe);
+  if (!m) return null;
+
+  let startH = parseInt(m[1], 10);
+  const startM = m[2] ? parseInt(m[2], 10) : 0;
+  const startPeriod = m[3];
+  let endH = parseInt(m[4], 10);
+  const endM = m[5] ? parseInt(m[5], 10) : 0;
+  const endPeriod = m[6];
+
+  // The trailing period (e.g. "sore") applies to both if neither has its own period
+  const effectivePeriod = endPeriod ?? startPeriod;
+
+  const applyPeriod = (h: number, period: string | undefined): number => {
+    if (!period) return h;
+    if ((period === "sore" || period === "malam") && h < 12) return h + 12;
+    // "siang" = daytime, hours 10-14 are already correct — only fix h=0 edge case
+    if (period === "siang" && h === 0) return 12;
+    if (period === "pagi" && h === 12) return 0;
+    return h;
+  };
+
+  startH = applyPeriod(startH, startPeriod ?? effectivePeriod);
+  endH = applyPeriod(endH, endPeriod ?? effectivePeriod);
+
+  const startTotal = startH * 60 + startM;
+  const endTotal = endH * 60 + endM;
+  const durationMinutes = endTotal - startTotal;
+  if (durationMinutes <= 0 || startH < 0 || startH > 23 || endH < 0 || endH > 23) return null;
+
+  return {
+    startTime: `${String(startH).padStart(2, "0")}:${String(startM).padStart(2, "0")}`,
+    durationMinutes,
+  };
+}
+
 const FACILITY_KEYWORDS: Record<string, string[]> = {
   serbaguna: ["serbaguna", "multiguna", "lapangan serbaguna", "lapangan multiguna", "hall", "aula", "futsal", "sepak bola", "bola", "mini soccer"],
   basket: ["basket", "basketball", "bola basket"],
@@ -220,11 +262,13 @@ export function detectFacilityKeyword(msg: string): string | null {
 
 export function parseIntent(msg: string): ParsedIntent {
   const lower = msg.toLowerCase();
+  // Try range first ("jam 4 sd jam 6 sore") — fills both startTime & durationMinutes at once
+  const timeRange = parseTimeRange(lower);
   return {
     facilityKeyword: detectFacilityKeyword(lower),
     bookingDate: parseDate(lower),
-    startTime: parseTime(lower),
-    durationMinutes: parseDuration(lower),
+    startTime: timeRange?.startTime ?? parseTime(lower),
+    durationMinutes: timeRange?.durationMinutes ?? parseDuration(lower),
   };
 }
 
