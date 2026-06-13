@@ -2,7 +2,7 @@ import { Router } from "express";
 import multer from "multer";
 import path from "path";
 import { randomUUID } from "crypto";
-import { db, bookingsTable, facilitiesTable, paymentsTable, bookingHistoryTable, waActionTokensTable, settingsTable, usersTable } from "@workspace/db";
+import { db, bookingsTable, facilitiesTable, paymentsTable, bookingHistoryTable, waActionTokensTable, settingsTable, usersTable, blockedSchedulesTable } from "@workspace/db";
 import { eq, and, desc, isNotNull, inArray } from "drizzle-orm";
 import { randomBytes } from "crypto";
 import { createWaToken, verifyWaToken, consumeWaToken, getWaTokenRow } from "../lib/waTokens";
@@ -1565,6 +1565,7 @@ async function startBookingSession(phone: string, msg: string, waName: string): 
   let facilityId: number | null = null;
   let facilityName = "";
   let pricePerHour = 0;
+  let facData: typeof facilitiesTable.$inferSelect | null = null;
 
   if (intent.facilityKeyword) {
     const fac = await getFacilityByKeyword(intent.facilityKeyword);
@@ -1572,6 +1573,24 @@ async function startBookingSession(phone: string, msg: string, waName: string): 
       facilityId = fac.id;
       facilityName = fac.name;
       pricePerHour = Number(fac.pricePerHour);
+      facData = fac;
+    }
+  }
+
+  // Jika pesan sudah mengandung fasilitas + tanggal + jam → langsung cek ketersediaan
+  let availabilityPrefix = "";
+  if (facilityId && intent.bookingDate && intent.startTime && facData && facData.bookingMode !== "walk_in") {
+    const isAvail = await checkSlotAvailable(facilityId, intent.bookingDate, intent.startTime, 1);
+    if (isAvail) {
+      availabilityPrefix = `✅ Slot jam *${intent.startTime}* tanggal *${intent.bookingDate}* untuk *${facilityName}* tersedia!\n\n`;
+    } else {
+      const availSlots = await getAvailableSlotsForDay(facilityId, intent.bookingDate, facData.openTime, facData.closeTime);
+      const slotsStr = availSlots.length > 0
+        ? `\n\n🟢 *Slot tersedia tanggal ${intent.bookingDate}:*\n${availSlots.join("  |  ")}`
+        : `\n\n⚠️ Tidak ada slot tersedia pada tanggal tersebut. Coba tanggal lain.`;
+      const reply = `❌ Slot jam *${intent.startTime}* tanggal *${intent.bookingDate}* untuk *${facilityName}* sudah terisi.${slotsStr}`;
+      await sendWAMsg(phone, reply);
+      return;
     }
   }
 
@@ -1603,7 +1622,21 @@ async function startBookingSession(phone: string, msg: string, waName: string): 
     after: { phone, step, facilityId, bookingDate: intent.bookingDate, startTime: intent.startTime },
   });
 
-  const reply = await buildStepQuestion(step, session, facilityName, pricePerHour);
+  // Tambah prefix ketersediaan jika ada
+  const baseQuestion = await buildStepQuestion(step, session, facilityName, pricePerHour);
+
+  // Jika tanggal sudah diketahui tapi jam belum (step=ask_time), tampilkan slot tersedia
+  let slotsSuffix = "";
+  if (step === "ask_time" && facilityId && intent.bookingDate && facData && facData.bookingMode !== "walk_in") {
+    const availSlots = await getAvailableSlotsForDay(facilityId, intent.bookingDate, facData.openTime, facData.closeTime);
+    if (availSlots.length > 0) {
+      slotsSuffix = `\n\n🟢 *Slot tersedia tanggal ${intent.bookingDate}:*\n${availSlots.join("  |  ")}`;
+    } else {
+      slotsSuffix = `\n\n⚠️ Semua slot tanggal *${intent.bookingDate}* sudah penuh. Ketik tanggal lain.`;
+    }
+  }
+
+  const reply = availabilityPrefix + baseQuestion + slotsSuffix;
   await appendMessage(session.id, "bot", reply);
   await sendWAMsg(phone, reply);
 }
@@ -1667,7 +1700,20 @@ async function continueSession(session: WaBookingSessionRow, phone: string, msg:
       });
       await logAudit({ action: "booking_session_updated", entity: "wa_booking_session", entityId: session.id, after: { step: "ask_date", bookingDate: parsed.bookingDate } });
       const fac = session.facilityId ? await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, session.facilityId)).limit(1).then(r => r[0]) : null;
-      const reply = await buildStepQuestion(updated.currentStep as WaStep, updated, fac?.name ?? "", Number(fac?.pricePerHour ?? 0));
+
+      // Cek dan tampilkan slot yang tersedia untuk tanggal yang dipilih
+      let slotsMsg = "";
+      if (fac && fac.bookingMode !== "walk_in") {
+        const availSlots = await getAvailableSlotsForDay(session.facilityId!, parsed.bookingDate, fac.openTime, fac.closeTime);
+        if (availSlots.length === 0) {
+          slotsMsg = `\n\n⚠️ Semua slot pada *${parsed.bookingDate}* sudah penuh. Coba pilih tanggal lain (ketik *batal* dulu).`;
+        } else {
+          slotsMsg = `\n\n🟢 *Slot tersedia tanggal ${parsed.bookingDate}:*\n${availSlots.join("  |  ")}`;
+        }
+      }
+
+      const baseQuestion = await buildStepQuestion(updated.currentStep as WaStep, updated, fac?.name ?? "", Number(fac?.pricePerHour ?? 0));
+      const reply = baseQuestion + slotsMsg;
       await appendMessage(session.id, "bot", reply);
       await sendWAMsg(phone, reply);
       break;
@@ -1681,13 +1727,54 @@ async function continueSession(session: WaBookingSessionRow, phone: string, msg:
         await sendWAMsg(phone, reply);
         return;
       }
+
+      // Cek ketersediaan slot dari DB (booking + blocked schedules)
+      if (session.facilityId && session.bookingDate) {
+        const fac = await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, session.facilityId)).limit(1).then(r => r[0]);
+        if (fac && fac.bookingMode !== "walk_in") {
+          // Cek jam operasional dulu
+          const reqMin = timeToMinutes(parsed.startTime);
+          const openMin = timeToMinutes(fac.openTime);
+          const closeMin = timeToMinutes(fac.closeTime);
+          if (reqMin < openMin || reqMin >= closeMin) {
+            const availSlots = await getAvailableSlotsForDay(session.facilityId, session.bookingDate, fac.openTime, fac.closeTime);
+            const slotsStr = availSlots.length > 0
+              ? `\n\n🟢 *Slot tersedia:*\n${availSlots.join("  |  ")}`
+              : `\n\n⚠️ Tidak ada slot tersedia di tanggal ini.`;
+            const reply = `⏰ Jam *${parsed.startTime}* di luar jam operasional *${fac.openTime}–${fac.closeTime}*.${slotsStr}\n\nPilih jam yang tersedia:`;
+            await appendMessage(session.id, "bot", reply);
+            await sendWAMsg(phone, reply);
+            return;
+          }
+
+          // Cek apakah slot tersedia di DB (1 jam sebagai pengecekan awal)
+          const isAvail = await checkSlotAvailable(session.facilityId, session.bookingDate, parsed.startTime, 1);
+          if (!isAvail) {
+            const availSlots = await getAvailableSlotsForDay(session.facilityId, session.bookingDate, fac.openTime, fac.closeTime);
+            const slotsStr = availSlots.length > 0
+              ? `\n\n🟢 *Slot tersedia tanggal ${session.bookingDate}:*\n${availSlots.join("  |  ")}`
+              : `\n\n⚠️ Tidak ada slot lain yang tersedia. Ketik *batal* dan pilih tanggal berbeda.`;
+            const reply = `❌ Slot jam *${parsed.startTime}* pada *${session.bookingDate}* sudah terisi.${slotsStr}\n\nPilih jam lain:`;
+            await appendMessage(session.id, "bot", reply);
+            await sendWAMsg(phone, reply);
+            return;
+          }
+        }
+      }
+
       const updated = await updateSession(session.id, {
         startTime: parsed.startTime,
         currentStep: getNextStep({ ...session, startTime: parsed.startTime }),
       });
       await logAudit({ action: "booking_session_updated", entity: "wa_booking_session", entityId: session.id, after: { step: "ask_time", startTime: parsed.startTime } });
-      const fac = session.facilityId ? await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, session.facilityId)).limit(1).then(r => r[0]) : null;
-      const reply = await buildStepQuestion(updated.currentStep as WaStep, updated, fac?.name ?? "", Number(fac?.pricePerHour ?? 0));
+      const fac2 = session.facilityId ? await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, session.facilityId)).limit(1).then(r => r[0]) : null;
+
+      // Konfirmasi slot tersedia ke customer
+      const availConfirm = session.facilityId && session.bookingDate
+        ? `✅ Slot jam *${parsed.startTime}* tersedia!\n\n`
+        : "";
+      const nextQ = await buildStepQuestion(updated.currentStep as WaStep, updated, fac2?.name ?? "", Number(fac2?.pricePerHour ?? 0));
+      const reply = availConfirm + nextQ;
       await appendMessage(session.id, "bot", reply);
       await sendWAMsg(phone, reply);
       break;
@@ -1866,6 +1953,72 @@ async function getAlternativeSlots(
     }
   }
   return alternatives;
+}
+
+// ─── Availability helpers (cek DB termasuk blocked schedules) ────────────────
+
+async function getAvailableSlotsForDay(
+  facilityId: number,
+  date: string,
+  openTime: string,
+  closeTime: string,
+): Promise<string[]> {
+  const bookings = await db
+    .select({ startTime: bookingsTable.startTime, endTime: bookingsTable.endTime, status: bookingsTable.status })
+    .from(bookingsTable)
+    .where(and(eq(bookingsTable.facilityId, facilityId), eq(bookingsTable.bookingDate, date)));
+  const activeBookings = bookings.filter((b) => !INACTIVE_STATUSES.includes(b.status));
+
+  const blocked = await db
+    .select({ startTime: blockedSchedulesTable.startTime, endTime: blockedSchedulesTable.endTime })
+    .from(blockedSchedulesTable)
+    .where(and(eq(blockedSchedulesTable.facilityId, facilityId), eq(blockedSchedulesTable.date, date)));
+
+  const openMin = timeToMinutes(openTime);
+  const closeMin = timeToMinutes(closeTime);
+  const available: string[] = [];
+
+  for (let t = openMin; t < closeMin; t += 60) {
+    const slotEnd = t + 60;
+    const timeStr = minutesToTimeStr(t);
+    const isBooked = activeBookings.some((b) => {
+      const bS = timeToMinutes(b.startTime);
+      const bE = timeToMinutes(b.endTime);
+      return t < bE && slotEnd > bS;
+    });
+    const isBlocked = blocked.some((b) => {
+      const bS = timeToMinutes(b.startTime);
+      const bE = timeToMinutes(b.endTime);
+      return t < bE && slotEnd > bS;
+    });
+    if (!isBooked && !isBlocked) available.push(timeStr);
+  }
+  return available;
+}
+
+async function checkSlotAvailable(
+  facilityId: number,
+  date: string,
+  startTime: string,
+  durationHours: number,
+): Promise<boolean> {
+  const startMin = timeToMinutes(startTime);
+  const endMin = startMin + durationHours * 60;
+  const endTime = minutesToTimeStr(endMin);
+
+  const conflict = await checkConflict(facilityId, date, startTime, endTime);
+  if (conflict) return false;
+
+  const blocked = await db
+    .select({ startTime: blockedSchedulesTable.startTime, endTime: blockedSchedulesTable.endTime })
+    .from(blockedSchedulesTable)
+    .where(and(eq(blockedSchedulesTable.facilityId, facilityId), eq(blockedSchedulesTable.date, date)));
+
+  return !blocked.some((b) => {
+    const bS = timeToMinutes(b.startTime);
+    const bE = timeToMinutes(b.endTime);
+    return startMin < bE && endMin > bS;
+  });
 }
 
 // ─── Auto-create customer if WA user not registered ───────────────────────────
