@@ -200,6 +200,7 @@ export default function Booking() {
     grandTotal: number;
     skipped: string[];
     firstOrder?: string;
+    groupRef?: string;
   } | null>(null);
 
   // ---- Single booking ----
@@ -233,6 +234,7 @@ export default function Booking() {
           grandTotal: data.grandTotal,
           skipped: data.skipped,
           firstOrder: data.created[0]?.orderNumber,
+          groupRef: (data as any).groupRef ?? undefined,
         });
       },
       onError: (error: any) => {
@@ -557,6 +559,14 @@ export default function Booking() {
         <p className="text-muted-foreground mb-6">
           <span className="font-semibold text-foreground">{recurringResult.totalBookings}</span> {t("booking berhasil dibuat untuk", "bookings successfully created for")} <span className="font-semibold text-foreground">{facility.name}</span>.
         </p>
+        {recurringResult.groupRef && (
+          <div className="mb-4 flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-violet-50 border border-violet-200 dark:bg-violet-900/20 dark:border-violet-700">
+            <span className="text-violet-600 dark:text-violet-400 text-sm font-semibold">
+              🔗 {t("Semua booking digabung dalam 1 grup bayar", "All bookings grouped under one payment group")}:
+            </span>
+            <span className="font-mono font-bold text-violet-700 dark:text-violet-300 text-sm">{recurringResult.groupRef}</span>
+          </div>
+        )}
         <Card className="mb-6 text-left">
           <CardContent className="p-5 space-y-3">
             <div className="flex justify-between text-sm">
@@ -567,6 +577,12 @@ export default function Booking() {
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">{t("Dilewati (konflik)", "Skipped (conflict)")}</span>
                 <span className="text-orange-600 font-semibold">{recurringResult.skipped.length} {t("booking", "bookings")}</span>
+              </div>
+            )}
+            {recurringResult.groupRef && (
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">{t("Kode Grup Bayar", "Payment Group")}</span>
+                <span className="font-mono font-bold text-violet-600">{recurringResult.groupRef}</span>
               </div>
             )}
             <div className="border-t pt-3 flex justify-between font-bold text-lg">

@@ -1,6 +1,6 @@
 import { Router } from "express";
-import { db, bookingsTable, facilitiesTable, paymentsTable, promosTable, discountSettingsTable, apMembersTable, bookingHistoryTable, usersTable, verificationLogsTable, companyUsersTable } from "@workspace/db";
-import { eq, and, sql, or, ilike, desc } from "drizzle-orm";
+import { db, bookingsTable, facilitiesTable, paymentsTable, promosTable, discountSettingsTable, apMembersTable, bookingHistoryTable, usersTable, verificationLogsTable, companyUsersTable, bookingGroupsTable } from "@workspace/db";
+import { eq, and, sql, or, ilike, desc, inArray } from "drizzle-orm";
 import { adminMiddleware, authMiddleware, verifyToken } from "../lib/auth";
 import { broadcastAvailabilityChange } from "../lib/supabase";
 import { notifyBookingCreated, notifyPaymentConfirmed, notifyBookingCancelled, notifyCompanyBookingCreated } from "../lib/notifications";
@@ -617,7 +617,39 @@ router.post("/bookings/recurring", async (req, res) => {
 
     const totalDpp = totalPrice * created.length;
     const totalPpn = accumulatedPpn;
-    res.status(201).json({ created, skipped, totalBookings: created.length, grandTotal: totalDpp + totalPpn, totalDpp, totalPpnAmount: totalPpn });
+    const grandTotalAmount = totalDpp + totalPpn;
+
+    // Auto-group: jika ada 2+ booking berhasil, gabung otomatis ke 1 grup bayar
+    let groupRef: string | null = null;
+    if (created.length >= 2) {
+      // Generate unique groupRef
+      for (let attempt = 0; attempt < 10; attempt++) {
+        const candidate = `GRP-${String(Math.floor(Math.random() * 99999) + 1).padStart(5, "0")}`;
+        const existing = await db.select({ groupRef: bookingGroupsTable.groupRef })
+          .from(bookingGroupsTable).where(eq(bookingGroupsTable.groupRef, candidate)).limit(1);
+        if (!existing.length) { groupRef = candidate; break; }
+      }
+      if (!groupRef) groupRef = `GRP-${Date.now()}`;
+
+      await db.insert(bookingGroupsTable).values({
+        groupRef,
+        customerPhone: String(customerPhone),
+        customerName: String(customerName),
+        totalPayment: String(grandTotalAmount),
+        status: "pending",
+        notes: `Auto-dibuat dari booking berulang (${created.length} sesi)`,
+      });
+
+      const orderNumbers = created.map((b: any) => b.orderNumber as string);
+      await db.update(bookingsTable)
+        .set({ groupRef })
+        .where(inArray(bookingsTable.orderNumber, orderNumbers));
+
+      // Update created array dengan groupRef
+      for (const b of created) b.groupRef = groupRef;
+    }
+
+    res.status(201).json({ created, skipped, totalBookings: created.length, grandTotal: grandTotalAmount, totalDpp, totalPpnAmount: totalPpn, groupRef });
   } catch (err) {
     req.log.error({ err }, "Create recurring booking error");
     res.status(500).json({ error: "Internal server error" });
