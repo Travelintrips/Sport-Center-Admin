@@ -466,35 +466,62 @@ export default function BookingDetail() {
                   </div>
                 )}
 
-                <div className="text-sm font-semibold text-foreground">
-                  {(booking as any).isDpPaid ? (
-                    <>
-                      {t("Bayar sisa", "Pay remaining")}{" "}
-                      <span className="text-primary text-base">
-                        Rp {Math.max(0, Number(booking.totalPrice) - Number((booking as any).downPayment || 0)).toLocaleString("id-ID")}
-                      </span>{" "}
-                      {t("via:", "via:")}
-                    </>
-                  ) : (
-                    <>
-                      {t("Bayar", "Pay")}{" "}
-                      <span className="text-primary text-base">
-                        Rp {(booking as any).groupInfo
-                          ? (booking as any).groupInfo.groupTotalPayment.toLocaleString("id-ID")
-                          : booking.totalPrice.toLocaleString("id-ID")}
-                      </span>{" "}
-                      {(booking as any).groupInfo && (
-                        <span className="text-xs text-muted-foreground font-normal">
-                          ({(booking as any).groupInfo.groupSessionCount} {t("sesi", "sessions")} × Rp {booking.totalPrice.toLocaleString("id-ID")})
-                        </span>
-                      )}{" "}
-                      {t("via:", "via:")}
-                    </>
-                  )}
-                </div>
+                {(() => {
+                  const remaining = Math.max(0, Number(booking.totalPrice) - Number((booking as any).downPayment || 0));
+                  const isDpFullyPaid = (booking as any).isDpPaid && remaining <= 0;
 
-                {/* Payment Method Selector */}
-                {!paymentMethod && (
+                  if (isDpFullyPaid) {
+                    return (
+                      <div className="flex items-start gap-3 p-4 rounded-xl border border-green-200 bg-green-50 dark:bg-green-900/20 dark:border-green-800">
+                        <div className="w-8 h-8 rounded-lg bg-green-100 dark:bg-green-900/40 flex items-center justify-center shrink-0">
+                          <FileCheck2 size={16} className="text-green-600 dark:text-green-300" />
+                        </div>
+                        <div>
+                          <div className="font-semibold text-sm text-green-800 dark:text-green-200">
+                            {t("Pembayaran Lunas via DP", "Fully Paid via Down Payment")}
+                          </div>
+                          <div className="text-xs text-green-700 dark:text-green-400 mt-0.5">
+                            {t("DP Anda sudah melunasi seluruh tagihan. Tidak perlu upload bukti lagi — menunggu konfirmasi admin.", "Your DP has covered the full amount. No further upload needed — awaiting admin confirmation.")}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <>
+                      <div className="text-sm font-semibold text-foreground">
+                        {(booking as any).isDpPaid ? (
+                          <>
+                            {t("Lunasi sisa", "Pay remaining balance")}{" "}
+                            <span className="text-primary text-base">
+                              Rp {remaining.toLocaleString("id-ID")}
+                            </span>{" "}
+                            <span className="text-xs text-muted-foreground font-normal">
+                              {t("(upload bukti pelunasan)", "(upload payment proof)")}
+                            </span>{" "}
+                            {t("via:", "via:")}
+                          </>
+                        ) : (
+                          <>
+                            {t("Bayar", "Pay")}{" "}
+                            <span className="text-primary text-base">
+                              Rp {(booking as any).groupInfo
+                                ? (booking as any).groupInfo.groupTotalPayment.toLocaleString("id-ID")
+                                : booking.totalPrice.toLocaleString("id-ID")}
+                            </span>{" "}
+                            {(booking as any).groupInfo && (
+                              <span className="text-xs text-muted-foreground font-normal">
+                                ({(booking as any).groupInfo.groupSessionCount} {t("sesi", "sessions")} × Rp {booking.totalPrice.toLocaleString("id-ID")})
+                              </span>
+                            )}{" "}
+                            {t("via:", "via:")}
+                          </>
+                        )}
+                      </div>
+
+                      {/* Payment Method Selector */}
+                      {!paymentMethod && (
                   <div className="grid grid-cols-2 gap-3">
                     {hasBankInfo && (
                       <button
@@ -631,6 +658,9 @@ export default function BookingDetail() {
                     />
                   </div>
                 )}
+                    </>
+                  );
+                })()}
               </CardContent>
             </Card>
           )}
