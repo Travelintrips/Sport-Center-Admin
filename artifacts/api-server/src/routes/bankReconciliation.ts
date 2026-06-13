@@ -438,7 +438,7 @@ router.get("/bank-reconciliation/report", adminMiddleware, async (req, res) => {
   try {
     const { rows } = await db.execute(sql`
       SELECT
-        TO_CHAR(transaction_date, 'YYYY-MM') AS month,
+        LEFT(transaction_date, 7) AS month,
         COUNT(*)::int AS total,
         COUNT(*) FILTER (WHERE direction = 'IN')::int AS total_in,
         COUNT(*) FILTER (WHERE direction = 'OUT')::int AS total_out,
@@ -452,8 +452,8 @@ router.get("/bank-reconciliation/report", adminMiddleware, async (req, res) => {
         COALESCE(SUM(amount) FILTER (WHERE direction = 'IN' AND status = 'approved'), 0)::numeric AS approved_amount_in,
         COALESCE(SUM(amount) FILTER (WHERE direction = 'IN' AND status != 'approved' AND status != 'rejected'), 0)::numeric AS pending_amount_in
       FROM sport_center.bank_mutations
-      GROUP BY TO_CHAR(transaction_date, 'YYYY-MM')
-      ORDER BY month DESC
+      GROUP BY LEFT(transaction_date, 7)
+      ORDER BY LEFT(transaction_date, 7) DESC
     `);
 
     // totals keseluruhan

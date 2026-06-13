@@ -815,14 +815,19 @@ function ReportTab() {
     setLoading(true);
     fetch(`${API_BASE}/bank-reconciliation/report`, { headers: authHeaders() })
       .then((r) => r.json())
-      .then((d) => { if (!cancelled) { setData(d); setLoading(false); } })
+      .then((d) => {
+        if (cancelled) return;
+        if (d?.error) { setError(d.error); setLoading(false); return; }
+        setData(d);
+        setLoading(false);
+      })
       .catch((e) => { if (!cancelled) { setError(e.message); setLoading(false); } });
     return () => { cancelled = true; };
   }, []);
 
   if (loading) return <div className="space-y-3">{[...Array(4)].map((_, i) => <Skeleton key={i} className="h-12 rounded-xl" />)}</div>;
-  if (error) return <p className="text-destructive text-sm">{error}</p>;
-  if (!data) return null;
+  if (error) return <p className="text-destructive text-sm">Gagal memuat laporan: {error}</p>;
+  if (!data?.totals) return null;
 
   const { rows, totals } = data;
   const pctApproved = totals.total > 0 ? Math.round((totals.approved / totals.total) * 100) : 0;
