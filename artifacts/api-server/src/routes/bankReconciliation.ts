@@ -1171,6 +1171,20 @@ router.post("/bank-reconciliation/scan-ocr", adminMiddleware, async (req, res) =
   }
 });
 
+// GET /bank-reconciliation/mutations/:id/journal — detail baris jurnal (COA debit & kredit)
+router.get("/bank-reconciliation/mutations/:id/journal", financeMiddleware, async (req, res) => {
+  try {
+    const mutationId = parseInt(req.params.id);
+    if (isNaN(mutationId)) { res.status(400).json({ error: "ID tidak valid" }); return; }
+    const entries = await db.select().from(bankJournalEntriesTable)
+      .where(eq(bankJournalEntriesTable.mutationId, mutationId))
+      .orderBy(bankJournalEntriesTable.id);
+    res.json({ entries });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message ?? "Gagal ambil jurnal" });
+  }
+});
+
 // GET /bank-reconciliation/mutations/:id/candidates
 router.get("/bank-reconciliation/mutations/:id/candidates", adminMiddleware, async (req, res) => {
   try {

@@ -839,6 +839,19 @@ function MutationRow({ mutation, qc }: { mutation: any; qc: any }) {
   });
 
   const isPending = approveMutation.isPending || rejectMutation.isPending;
+  const [journalLines, setJournalLines] = useState<any[]>([]);
+  const [journalLoading, setJournalLoading] = useState(false);
+
+  useEffect(() => {
+    if (!expanded || !mutation.accountingPosted || !mutation.journalId) return;
+    setJournalLoading(true);
+    fetch(`${API_BASE}/bank-reconciliation/mutations/${mutation.id}/journal`, { headers: authHeaders() })
+      .then((r) => r.json())
+      .then((d) => setJournalLines(d.entries ?? []))
+      .catch(() => {})
+      .finally(() => setJournalLoading(false));
+  }, [expanded, mutation.id, mutation.accountingPosted, mutation.journalId]);
+
   const [isPostingJournal, setIsPostingJournal] = useState(false);
   const handlePostJournal = async () => {
     setIsPostingJournal(true);
@@ -1056,12 +1069,49 @@ function MutationRow({ mutation, qc }: { mutation: any; qc: any }) {
 
           {/* Jurnal Akuntansi — tampil hanya saat approved */}
           {mutation.status === "approved" && (
-            <div className="flex items-center gap-3 flex-wrap border-t pt-3">
+            <div className="border-t pt-3 space-y-2">
               {mutation.accountingPosted && mutation.journalId ? (
-                <div className="flex items-center gap-1.5 text-xs text-green-700">
-                  <CheckCircle2 size={13} />
-                  <span>Jurnal diposting: <span className="font-mono font-semibold">{mutation.journalId}</span></span>
-                </div>
+                <>
+                  <div className="flex items-center gap-1.5 text-xs text-green-700 font-semibold">
+                    <CheckCircle2 size={13} />
+                    <span>Jurnal diposting:</span>
+                    <span className="font-mono bg-green-50 px-1.5 py-0.5 rounded border border-green-200">{mutation.journalId}</span>
+                  </div>
+
+                  {/* Tabel COA Debit / Kredit */}
+                  {journalLoading ? (
+                    <Skeleton className="h-16 rounded" />
+                  ) : journalLines.length > 0 ? (
+                    <div className="rounded-lg border overflow-hidden">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="bg-muted/40 border-b">
+                            <th className="px-3 py-2 text-left font-semibold text-muted-foreground">COA Debit</th>
+                            <th className="px-3 py-2 text-left font-semibold text-muted-foreground">COA Kredit</th>
+                            <th className="px-3 py-2 text-right font-semibold text-muted-foreground">Nominal</th>
+                            <th className="px-3 py-2 text-left font-semibold text-muted-foreground">Diposting oleh</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {journalLines.map((line: any) => (
+                            <tr key={line.id} className="border-b last:border-0 hover:bg-muted/10">
+                              <td className="px-3 py-2">
+                                <span className="font-mono text-blue-700 font-semibold">{line.debitAccountCode}</span>
+                                <span className="text-muted-foreground ml-1.5">{line.debitAccountName}</span>
+                              </td>
+                              <td className="px-3 py-2">
+                                <span className="font-mono text-orange-700 font-semibold">{line.creditAccountCode}</span>
+                                <span className="text-muted-foreground ml-1.5">{line.creditAccountName}</span>
+                              </td>
+                              <td className="px-3 py-2 text-right font-semibold">{formatCurrency(parseFloat(line.amount))}</td>
+                              <td className="px-3 py-2 text-muted-foreground truncate max-w-[120px]">{line.postedBy ?? "—"}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : null}
+                </>
               ) : (
                 <Button
                   size="sm"
