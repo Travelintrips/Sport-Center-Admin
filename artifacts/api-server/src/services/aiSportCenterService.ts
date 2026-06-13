@@ -452,11 +452,21 @@ Contoh 4 — Status booking:
 Customer: "udah dikonfirmasi belum pesanan saya?"
 Mina: [cek riwayat booking customer dari data] → tampilkan status terbaru dengan nomor order dan status saat ini.
 
+━━━ CARA KIRIM LINK BOOKING ━━━
+Ketika customer menanyakan ketersediaan slot DAN slot tersebut TERSEDIA (sudah kamu cek via tool), lakukan ini secara otomatis:
+1. Panggil tool [calculate_booking_price] untuk hitung harga tepat
+2. Panggil tool [generate_booking_link] untuk buat link pre-filled
+3. Tampilkan link booking di reply dengan format:
+   "✅ Slot tersedia! Berikut link booking langsung:\n🔗 [URL]\n\nLink sudah terisi otomatis dengan detail pesanan kamu. Tinggal isi nama & data diri, lalu bayar! 🎯"
+
+Jika slot TIDAK tersedia → tawarkan cari jadwal alternatif via tool [find_next_available_dates].
+
 ━━━ GUARDRAIL MUTLAK ━━━
 ❌ DILARANG: mengarang data, harga, jadwal, atau fasilitas yang tidak ada di database
 ❌ DILARANG: menyatakan slot tersedia/kosong tanpa data ketersediaan
 ❌ DILARANG: approve, konfirmasi pembayaran, cancel, atau ubah status booking
 ❌ DILARANG: memberikan estimasi harga jika data harga tidak ada
+❌ DILARANG: kirim link booking jika slot belum dikonfirmasi TERSEDIA via tool
 ✅ Jika ditanya sesuatu yang tidak ada datanya → jawab: "Info tersebut belum tersedia di sistem kami. Silakan tanya langsung ke admin ya 🙏"
 ✅ Untuk aksi admin → "Tindakan ini hanya bisa dilakukan admin. Hubungi: ${adminContact}"
 ✅ Untuk mulai booking → arahkan customer ketik: *booking [fasilitas] [tanggal] jam [waktu] [durasi] jam*
@@ -530,6 +540,23 @@ const AI_TOOLS: OpenAI.Chat.ChatCompletionTool[] = [
           days_to_check: { type: "number", description: "Jumlah hari ke depan yang dicek, maks 14" },
         },
         required: ["facility_name", "from_date"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "generate_booking_link",
+      description: "Buat link booking yang sudah terisi otomatis (facility, tanggal, jam, durasi) untuk dikirim ke customer. Gunakan HANYA setelah ketersediaan slot SUDAH dikonfirmasi tersedia via check_slot_availability.",
+      parameters: {
+        type: "object",
+        properties: {
+          facility_name: { type: "string", description: "Nama atau kategori fasilitas" },
+          date: { type: "string", description: "Tanggal booking format YYYY-MM-DD" },
+          start_time: { type: "string", description: "Jam mulai format HH:MM" },
+          duration_hours: { type: "number", description: "Durasi dalam jam" },
+        },
+        required: ["facility_name", "date", "start_time", "duration_hours"],
       },
     },
   },
@@ -641,6 +668,33 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
           results.length > 0
             ? results.map((r) => `${r.date}: ${r.available_slots.join(", ")}`).join(" | ")
             : `Tidak ada slot tersedia dalam ${daysToCheck} hari ke depan`,
+      });
+    }
+
+    if (name === "generate_booking_link") {
+      const facility = await getFacilityByName(String(args.facility_name));
+      if (!facility) return JSON.stringify({ error: `Fasilitas '${args.facility_name}' tidak ditemukan` });
+      const appUrl = (process.env.APP_URL ?? "").replace(/\/$/, "");
+      const params = new URLSearchParams({
+        facilityId: String(facility.id),
+        date: String(args.date),
+        startTime: String(args.start_time),
+        duration: String(args.duration_hours),
+      });
+      const bookingUrl = `${appUrl}/booking?${params.toString()}`;
+      const startMin =
+        parseInt(String(args.start_time).split(":")[0]) * 60 +
+        parseInt(String(args.start_time).split(":")[1] || "0");
+      const endMin = startMin + Number(args.duration_hours) * 60;
+      const endTime = `${String(Math.floor(endMin / 60) % 24).padStart(2, "0")}:${String(endMin % 60).padStart(2, "0")}`;
+      return JSON.stringify({
+        facility: facility.name,
+        date: args.date,
+        start_time: args.start_time,
+        end_time: endTime,
+        duration_hours: args.duration_hours,
+        booking_url: bookingUrl,
+        message: `Link booking sudah siap untuk ${facility.name} tanggal ${args.date} jam ${args.start_time}–${endTime}`,
       });
     }
 
