@@ -2300,6 +2300,38 @@ export default function AdminBookings() {
         )}
       </motion.div>
 
+      {/* Floating Action Bar for bulk-select */}
+      <AnimatePresence>
+        {selectedIds.size > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 24 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 24 }}
+            className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-3 rounded-2xl shadow-2xl bg-slate-900 dark:bg-slate-800 text-white border border-slate-700"
+          >
+            <span className="text-sm font-semibold">{selectedIds.size} booking dipilih</span>
+            {!canMerge && selectedIds.size >= 2 && (
+              <span className="text-xs text-amber-400">Harus dari customer/HP yang sama</span>
+            )}
+            {canMerge && (
+              <button
+                onClick={() => setShowMergeDialog(true)}
+                className="flex items-center gap-1.5 h-8 px-3 rounded-xl bg-primary text-white text-xs font-semibold hover:bg-primary/90 transition-colors"
+              >
+                <Link2 size={13} />
+                Gabung Pembayaran
+              </button>
+            )}
+            <button
+              onClick={() => setSelectedIds(new Set())}
+              className="flex items-center justify-center h-8 w-8 rounded-xl border border-slate-600 hover:bg-slate-700 transition-colors"
+            >
+              <X size={14} />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Detail Drawer */}
       {selectedBooking && (
         <BookingDetailDrawer
@@ -2318,6 +2350,17 @@ export default function AdminBookings() {
       )}
 
       <VerifyIdDialog booking={verifyBooking} onClose={() => setVerifyBooking(null)} />
+
+      <MergeGroupDialog
+        open={showMergeDialog}
+        onClose={() => setShowMergeDialog(false)}
+        selectedBookings={mergeSelectedBookings}
+        onCreated={() => {
+          setSelectedIds(new Set());
+          queryClient.invalidateQueries({ queryKey: getListBookingsQueryKey() });
+          refetchGroups();
+        }}
+      />
 
       {/* Extend Time Dialog */}
       <Dialog open={!!extendBooking} onOpenChange={(o) => !o && setExtendBooking(null)}>

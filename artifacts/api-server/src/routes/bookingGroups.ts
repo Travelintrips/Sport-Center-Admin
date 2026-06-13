@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { db, bookingsTable, bookingGroupsTable } from "@workspace/db";
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
+import type { BookingGroup } from "@workspace/db";
 import { adminMiddleware } from "../lib/auth";
 
 const router = Router();
@@ -135,22 +136,22 @@ router.post("/bookings/merge", adminMiddleware, async (req, res) => {
 // PATCH /bookings/groups/:groupRef — update group status or total
 router.patch("/bookings/groups/:groupRef", adminMiddleware, async (req, res) => {
   try {
-    const { groupRef } = req.params;
+    const groupRef = req.params.groupRef as string;
     const { status, total_payment, notes } = req.body as {
       status?: "pending" | "paid";
       total_payment?: number;
       notes?: string;
     };
 
-    const updates: Record<string, unknown> = { updatedAt: new Date() };
-    if (status) updates.status = status;
-    if (total_payment != null) updates.totalPayment = String(total_payment);
-    if (notes !== undefined) updates.notes = notes;
+    const setData: { updatedAt: Date; status?: "pending" | "paid"; totalPayment?: string; notes?: string | null } = { updatedAt: new Date() };
+    if (status) setData.status = status;
+    if (total_payment != null) setData.totalPayment = String(total_payment);
+    if (notes !== undefined) setData.notes = notes ?? null;
 
-    await db.update(bookingGroupsTable).set(updates as any).where(eq(bookingGroupsTable.groupRef, groupRef));
+    await db.update(bookingGroupsTable).set(setData).where(eq(bookingGroupsTable.groupRef, groupRef));
 
-    const [updated] = await db.select().from(bookingGroupsTable)
-      .where(eq(bookingGroupsTable.groupRef, groupRef)).limit(1);
+    const rows = await db.select().from(bookingGroupsTable).where(eq(bookingGroupsTable.groupRef, groupRef));
+    const updated = rows[0];
 
     if (!updated) { res.status(404).json({ error: "Grup tidak ditemukan" }); return; }
 
@@ -164,9 +165,9 @@ router.patch("/bookings/groups/:groupRef", adminMiddleware, async (req, res) => 
 // DELETE /bookings/groups/:groupRef — dissolve group (remove groupRef from all bookings)
 router.delete("/bookings/groups/:groupRef", adminMiddleware, async (req, res) => {
   try {
-    const { groupRef } = req.params;
+    const groupRef = req.params.groupRef as string;
 
-    await db.update(bookingsTable).set({ groupRef: null }).where(eq(bookingsTable.groupRef, groupRef));
+    await db.update(bookingsTable).set({ groupRef: sql`null` }).where(eq(bookingsTable.groupRef, groupRef));
     await db.delete(bookingGroupsTable).where(eq(bookingGroupsTable.groupRef, groupRef));
 
     res.json({ ok: true });
