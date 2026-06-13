@@ -465,11 +465,21 @@ async function computeMatchesForOutMutation(mutation: BankMutation): Promise<Mat
     bonusScore: number,
     bonusReason: string,
   ) => {
+    // Berikan bonus kecil jika mutasi terjadi di hari kerja yang wajar (bukan akhir pekan jauh)
+    // Expense tidak punya tanggal spesifik, tapi setidaknya catat dateMatch=false
+    const reasonParts = ["nominal tercatat +40", `${label}: ${bonusReason} +${bonusScore}`];
+    const mutDay = new Date(mutation.transactionDate).getDay();
+    // Bonus +3 jika hari kerja (Senin-Jumat) — biaya operasional umumnya di hari kerja
+    let dateBonus = 0;
+    if (mutDay >= 1 && mutDay <= 5) {
+      dateBonus = 3;
+      reasonParts.push("hari kerja +3");
+    }
     candidates.push({
       candidateType: "expense",
       candidateId: categoryId,
-      score: Math.min(40 + bonusScore, 100),
-      reason: ["nominal tercatat +40", `${label}: ${bonusReason} +${bonusScore}`],
+      score: Math.min(40 + bonusScore + dateBonus, 100),
+      reason: reasonParts,
       amountMatch: true,
       dateMatch: false,
       nameMatch: false,

@@ -144,6 +144,14 @@ router.post("/bank-reconciliation/import", adminMiddleware, upload.single("file"
       const sheet = wb.Sheets[wb.SheetNames[0]!]!;
       rows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
     } else if (req.body?.rows) {
+      if (!Array.isArray(req.body.rows)) {
+        res.status(400).json({ error: "rows harus berupa array" });
+        return;
+      }
+      if (req.body.rows.length > 5000) {
+        res.status(400).json({ error: "Terlalu banyak baris — maksimum 5.000 baris per import" });
+        return;
+      }
       rows = req.body.rows;
     } else {
       res.status(400).json({ error: "Upload file Excel/CSV atau kirim data rows[]" });
@@ -262,10 +270,20 @@ router.get("/bank-reconciliation/mutations", adminMiddleware, async (req, res) =
     if (conditions.length) countQuery = countQuery.where(and(...conditions)) as any;
     const [{ total }] = await countQuery;
 
-    // Status counts: kondisi sama TANPA filter status — untuk stats bar yang akurat
-    const baseConditions = conditions.filter(
-      (_c, i) => !(status && status !== "all" && i === 0)
-    );
+    // Status counts: bangun kondisi baru TANPA filter status — untuk stats bar yang akurat
+    // Sengaja dibangun terpisah (bukan filter dari conditions[]) agar tidak bergantung pada urutan array
+    const baseConditions: ReturnType<typeof gte>[] = [];
+    if (dateFrom) baseConditions.push(gte(bankMutationsTable.transactionDate, dateFrom) as any);
+    if (dateTo) baseConditions.push(lte(bankMutationsTable.transactionDate, dateTo) as any);
+    if (minAmount) baseConditions.push(sql`${bankMutationsTable.amount} >= ${Number(minAmount)}` as any);
+    if (maxAmount) baseConditions.push(sql`${bankMutationsTable.amount} <= ${Number(maxAmount)}` as any);
+    if (direction && direction !== "all") baseConditions.push(eq(bankMutationsTable.direction, direction) as any);
+    if (search) {
+      baseConditions.push(
+        sql`(${bankMutationsTable.description} ILIKE ${"%" + search + "%"} OR ${bankMutationsTable.normalizedDescription} ILIKE ${"%" + search + "%"} OR ${bankMutationsTable.providerName} ILIKE ${"%" + search + "%"})` as any
+      );
+    }
+
     const statusCountsRows = await (baseConditions.length
       ? db
           .select({ status: bankMutationsTable.status, count: sql<number>`count(*)::int` })
