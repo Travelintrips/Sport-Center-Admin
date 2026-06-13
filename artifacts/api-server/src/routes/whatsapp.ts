@@ -952,6 +952,8 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
 async function sendWAMsg(phone: string, message: string): Promise<void> {
   const FONNTE_TOKEN = process.env.FONNTE_TOKEN || "";
   if (!FONNTE_TOKEN || !phone) return;
+  // Catat teks outgoing agar Fonnte echo-back bisa diblokir di webhook
+  trackSentMessage(message);
   try {
     await fetch("https://api.fonnte.com/send", {
       method: "POST",
@@ -2295,7 +2297,26 @@ async function execCreateBookingFromSession(session: WaBookingSessionRow, phone:
 
 // ─── Per-phone message hash dedup (survives ID-less retries) ─────────────────
 const _recentMsgHashes = new Map<string, number>(); // "phone:msgHash" → timestamp
+
+// ─── Outgoing message cache — blokir Fonnte echo-back ────────────────────────
+// Setiap kali bot kirim pesan via sendWAMsg, simpan teks-nya di sini.
+// Kalau Fonnte kirim balik pesan itu ke webhook, langsung diabaikan.
+const _sentMsgTexts = new Map<string, number>(); // msgTextHash → timestamp
+function trackSentMessage(msg: string): void {
+  const key = msg.trim().toLowerCase().substring(0, 120);
+  _sentMsgTexts.set(key, Date.now());
+  setTimeout(() => _sentMsgTexts.delete(key), 60 * 1000); // hapus setelah 60 detik
+}
+function isBotEcho(msg: string): boolean {
+  const key = msg.trim().toLowerCase().substring(0, 120);
+  const ts = _sentMsgTexts.get(key);
+  return !!ts && Date.now() - ts < 60 * 1000;
+}
+
 function isDuplicateByContent(phone: string, msg: string): boolean {
+  // Blokir jika teks ini persis sama dengan yang baru saja bot kirim (Fonnte echo)
+  if (isBotEcho(msg)) return true;
+
   const hash = `${phone}:${msg.trim().toLowerCase().substring(0, 80)}`;
   const now = Date.now();
   const last = _recentMsgHashes.get(hash);
