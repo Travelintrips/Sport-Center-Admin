@@ -889,7 +889,16 @@ function MutationRow({ mutation, qc }: { mutation: any; qc: any }) {
               <Badge className="text-[10px] bg-green-50 text-green-700 border border-green-200 gap-1">📒 {mutation.journalId}</Badge>
             )}
             {mutation.status === "approved" && !mutation.accountingPosted && !mutation.journalId && (
-              <Badge className="text-[10px] bg-amber-50 text-amber-700 border border-amber-200">⚠ Belum Dijurnal</Badge>
+              <>
+                <Badge className="text-[10px] bg-amber-50 text-amber-700 border border-amber-200">⚠ Belum Dijurnal</Badge>
+                <button
+                  className="text-[10px] px-2 py-0.5 rounded border border-blue-300 bg-blue-50 text-blue-700 font-semibold hover:bg-blue-100 transition-colors"
+                  disabled={isPostingJournal}
+                  onClick={(e) => { e.stopPropagation(); handlePostJournal(); }}
+                >
+                  {isPostingJournal ? "..." : "Posting Jurnal"}
+                </button>
+              </>
             )}
           </div>
           <p className="text-sm text-muted-foreground mt-0.5 truncate">{mutation.description}</p>
@@ -1863,6 +1872,24 @@ export default function AdminBankReconciliation() {
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<any>(null);
   const [showImportDialog, setShowImportDialog] = useState(false);
+  const [bulkPosting, setBulkPosting] = useState(false);
+
+  const handleBulkPostJournal = async () => {
+    setBulkPosting(true);
+    try {
+      const r = await fetch(`${API_BASE}/bank-reconciliation/mutations/post-journal-bulk`, {
+        method: "POST", headers: authHeaders(),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? "Gagal bulk posting");
+      toast({ title: `✅ ${d.posted} jurnal diposting${d.skipped ? `, ${d.skipped} dilewati (periode terkunci)` : ""}${d.errors ? `, ${d.errors} gagal` : ""}` });
+      qc.invalidateQueries({ queryKey: getListBankMutationsQueryKey() });
+    } catch (e: any) {
+      toast({ title: e.message, variant: "destructive" });
+    } finally {
+      setBulkPosting(false);
+    }
+  };
 
   const { data, isLoading } = useListBankMutations(
     {
@@ -2044,6 +2071,16 @@ export default function AdminBankReconciliation() {
               <Input type="date" className="text-sm w-36" value={dateFrom} onChange={(e) => { setDateFrom(e.target.value); setPage(1); }} placeholder="Dari" />
               <Input type="date" className="text-sm w-36" value={dateTo} onChange={(e) => { setDateTo(e.target.value); setPage(1); }} placeholder="Sampai" />
             </div>
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-1.5 text-xs text-blue-700 border-blue-300 hover:bg-blue-50 whitespace-nowrap"
+              disabled={bulkPosting}
+              onClick={handleBulkPostJournal}
+            >
+              <CheckCircle2 size={13} />
+              {bulkPosting ? "Memproses..." : "Posting Semua Jurnal"}
+            </Button>
           </div>
         </CardContent>
       </Card>

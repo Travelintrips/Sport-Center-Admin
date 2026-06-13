@@ -1435,6 +1435,60 @@ router.post("/bank-reconciliation/mutations/:id/mark-duplicate", adminMiddleware
 });
 
 // POST /bank-reconciliation/mutations/:id/post-journal — buat jurnal untuk mutasi approved yang belum diposting
+// POST /bank-reconciliation/mutations/post-journal-bulk — posting semua jurnal yang belum diposting
+router.post("/bank-reconciliation/mutations/post-journal-bulk", financeMiddleware, async (req, res) => {
+  try {
+    const adminUser = (req as any).user;
+    const postedBy = adminUser?.email ?? (adminUser?.userId ? `user:${adminUser.userId}` : "admin");
+
+    const unposted = await db.select().from(bankMutationsTable).where(
+      and(eq(bankMutationsTable.status, "approved"), eq(bankMutationsTable.accountingPosted, false))
+    );
+
+    const results: { id: number; journalId: string | null; skipped?: boolean; error?: string }[] = [];
+
+    for (const mut of unposted) {
+      try {
+        // Skip jika periode locked
+        if (await isPeriodLocked(mut.transactionDate, mut.bankAccountId)) {
+          results.push({ id: mut.id, journalId: null, skipped: true });
+          continue;
+        }
+
+        const [approvedMatch] = await db.select().from(bankReconciliationMatchesTable).where(
+          and(eq(bankReconciliationMatchesTable.mutationId, mut.id), eq(bankReconciliationMatchesTable.status, "approved"))
+        ).limit(1);
+
+        const journalId = await postAccountingJournal(
+          mut,
+          approvedMatch?.candidateType ?? undefined,
+          approvedMatch?.candidateId ?? undefined,
+          postedBy,
+        );
+
+        await db.insert(auditLogsTable).values({
+          userId: adminUser?.userId, userRole: adminUser?.role,
+          action: "post_journal_bulk", entity: "bank_mutation", entityId: mut.id,
+          after: { journalId }, ipAddress: req.ip, userAgent: req.headers["user-agent"] as string,
+        });
+
+        results.push({ id: mut.id, journalId });
+      } catch (e: any) {
+        results.push({ id: mut.id, journalId: null, error: e?.message ?? "error" });
+      }
+    }
+
+    const posted = results.filter((r) => r.journalId && !r.skipped).length;
+    const skipped = results.filter((r) => r.skipped).length;
+    const errors = results.filter((r) => r.error).length;
+
+    res.json({ ok: true, total: unposted.length, posted, skipped, errors, results });
+  } catch (err: any) {
+    req.log.error({ err }, "Bank reconciliation post-journal-bulk error");
+    res.status(500).json({ error: err?.message ?? "Gagal bulk posting jurnal" });
+  }
+});
+
 router.post("/bank-reconciliation/mutations/:id/post-journal", financeMiddleware, async (req, res) => {
   try {
     const mutationId = parseInt(req.params.id);
