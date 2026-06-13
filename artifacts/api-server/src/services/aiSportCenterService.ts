@@ -271,6 +271,8 @@ export type AiIntent =
   | "payment_info"
   | "operating_hours"
   | "contact_info"
+  | "ask_reschedule_policy"
+  | "talk_to_admin"
   | "admin_action_attempt"
   | "general_question"
   | "out_of_scope";
@@ -281,8 +283,13 @@ export function detectIntent(msg: string): AiIntent {
   // Admin action attempts — must be caught before general
   if (ADMIN_ONLY_ACTIONS.some((a) => lower.includes(a))) return "admin_action_attempt";
 
+  // talk_to_admin — request to speak with human admin
+  if (/\b(hubungi admin|bicara admin|minta admin|butuh admin|talk to admin|admin langsung|customer service|minta tolong admin|operator|cs sport|sambungkan admin)\b/.test(lower)) return "talk_to_admin";
+
+  // ask_reschedule_policy — reschedule or change booking questions
+  if (/\b(reschedule|jadwal ulang|ganti jadwal|ubah jadwal|pindah jadwal|ganti tanggal|ubah tanggal|pindah tanggal|ubah jam|ganti jam|pindah jam|kebijakan reschedule|policy reschedule)\b/.test(lower)) return "ask_reschedule_policy";
+
   // Informational intents checked BEFORE booking_intent to avoid false positives
-  // e.g. "berapa harga sewa badminton" → price_inquiry (not booking_intent)
   if (/\b(harga|tarif|biaya|berapa|price|cost)\b/.test(lower)) return "price_inquiry";
   if (/\b(promo|diskon|voucher|kode promo|potongan|cashback)\b/.test(lower)) return "promo_inquiry";
   if (/\b(slot|kosong|tersedia|available|ada slot|jam berapa bisa|kapan bisa)\b/.test(lower)) return "availability_check";
@@ -296,7 +303,6 @@ export function detectIntent(msg: string): AiIntent {
   // Booking intent: explicit action verb required, not just facility/price question
   if (/\b(mau book|mau pesan|mau sewa|mau booking|mau reservasi|mau daftar|saya booking|reservasi|pesan lapangan|book lapangan|booking lapangan|mulai booking)\b/.test(lower)) return "booking_intent";
   if (/\bboking\b/.test(lower)) return "booking_intent";
-  // Standalone "booking" only if NOT status-related
   if (/\bbooking\b/.test(lower) && !/booking saya|status booking|cek booking/.test(lower)) return "booking_intent";
 
   return "general_question";
@@ -337,12 +343,14 @@ function buildSystemPrompt(ctx: AiContext, customerPhone: string, today: string)
     ? `Transfer ke:\n  Bank: ${ctx.settings.bankName}\n  Rekening: ${ctx.settings.bankAccount}\n  A/n: ${ctx.settings.bankAccountName}`
     : "Informasi rekening belum dikonfigurasi.";
 
+  const adminContact = ctx.settings.whatsapp || ctx.settings.phone || "Admin";
+
   return `Kamu adalah asisten AI resmi ${ctx.settings.centerName}, yang membantu customer via WhatsApp.
 
 HARI INI: ${today}
 JAM OPERASIONAL: ${ctx.settings.openHour} - ${ctx.settings.closeHour}
 ALAMAT: ${ctx.settings.address || "Belum diisi"}
-KONTAK: ${ctx.settings.phone || ctx.settings.whatsapp || "Belum diisi"}
+KONTAK ADMIN: ${adminContact}
 
 === DATA FASILITAS (DARI DATABASE) ===
 ${facilitiesText || "Belum ada data fasilitas."}
@@ -362,6 +370,9 @@ ${membershipText}
 
 === INSTRUKSI PEMBAYARAN ===
 ${paymentText}
+
+=== KEBIJAKAN RESCHEDULE ===
+Reschedule booking harus dilakukan minimal 24 jam sebelum waktu bermain dengan menghubungi admin via WhatsApp (${adminContact}). Pembatalan kurang dari 24 jam sebelum jadwal dikenakan biaya admin 50%. Pembatalan H-1 atau lebih: booking hangus tanpa pengembalian dana. Untuk reschedule, admin akan membantu carikan slot lain yang tersedia.
 
 === ATURAN WAJIB (GUARDRAIL) ===
 1. Hanya boleh menjawab berdasarkan data di atas. JANGAN mengarang jadwal, harga, promo, atau fasilitas.
@@ -434,6 +445,21 @@ export async function generateAiReply(
       after: { phone: customerPhone, message, reason: "admin_action_attempt" },
     }).catch(() => {});
     return { reply, intent, shouldHandoffToBookingFlow: false, fallbackToAdmin: true };
+  }
+
+  // talk_to_admin — return admin contact without calling OpenAI
+  if (intent === "talk_to_admin") {
+    const ctx = await loadDbContext(customerPhone);
+    const adminContact = ctx.settings.whatsapp || ctx.settings.phone || "";
+    const reply = adminContact
+      ? `👋 Baik, saya hubungkan Anda dengan admin kami.\n\n📞 *Admin WhatsApp:* ${adminContact}\n\nSilakan hubungi admin langsung untuk bantuan lebih lanjut. Jam operasional: *${ctx.settings.openHour}–${ctx.settings.closeHour}*. 🙏`
+      : `👋 Untuk berbicara langsung dengan admin, silakan hubungi kami melalui kontak yang tertera di website.\n\nJam operasional: *${ctx.settings.openHour}–${ctx.settings.closeHour}*.`;
+    await logAudit({
+      action: "ai_talk_to_admin",
+      entity: "wa_ai",
+      after: { phone: customerPhone, message },
+    }).catch(() => {});
+    return { reply, intent, shouldHandoffToBookingFlow: false, fallbackToAdmin: false };
   }
 
   // Booking intent — hand off to structured booking flow

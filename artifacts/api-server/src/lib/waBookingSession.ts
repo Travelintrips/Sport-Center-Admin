@@ -362,13 +362,14 @@ export function formatSessionSummary(params: {
   totalPrice: number;
 }): string {
   return (
-    `📋 *Ringkasan Booking:*\n\n` +
-    `🏟️ Fasilitas: *${params.facilityName}*\n` +
-    `📅 Tanggal: *${params.bookingDate}*\n` +
-    `⏰ Jam: *${params.startTime} – ${params.endTime}*\n` +
-    `⏱️ Durasi: *${params.durationHours} jam*\n` +
-    `👤 Nama: *${params.customerName}*\n` +
-    `💰 Total: *${formatIDR(params.totalPrice)}*\n\n` +
-    `Konfirmasi booking? Ketik *ya* untuk lanjut atau *batal* untuk membatalkan.`
+    `✅ Saya cek tersedia. Berikut detail booking:\n\n` +
+    `Fasilitas: *${params.facilityName}*\n` +
+    `Tanggal: *${params.bookingDate}*\n` +
+    `Jam: *${params.startTime} – ${params.endTime}*\n` +
+    `Durasi: *${params.durationHours} jam*\n` +
+    `Nama: *${params.customerName}*\n` +
+    `Total: *${formatIDR(params.totalPrice)}*\n\n` +
+    `Balas *YA* untuk lanjut dibuatkan booking.\n` +
+    `(Ketik *BATAL* untuk membatalkan)`
   );
 }

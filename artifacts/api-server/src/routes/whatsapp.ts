@@ -4,7 +4,7 @@ import path from "path";
 import fs from "fs";
 import { randomUUID } from "crypto";
 import { db, bookingsTable, facilitiesTable, paymentsTable, bookingHistoryTable, waActionTokensTable, settingsTable, usersTable } from "@workspace/db";
-import { eq, and, desc, isNotNull } from "drizzle-orm";
+import { eq, and, desc, isNotNull, inArray } from "drizzle-orm";
 import { randomBytes } from "crypto";
 import { createWaToken, verifyWaToken, consumeWaToken, getWaTokenRow } from "../lib/waTokens";
 import {
@@ -2019,7 +2019,7 @@ async function execCreateBookingFromSession(session: WaBookingSessionRow, phone:
     discountAmount: String(discountAmount),
     apDiscountAmount: "0",
     basePrice: String(basePrice),
-    source: "whatsapp_chat",
+    source: "whatsapp_ai",
     status: "waiting_admin_approval",
     ppnRate: taxCalc.taxAmount > 0 ? String(taxCalc.taxRate) : null,
     ppnAmount: taxCalc.taxAmount > 0 ? String(taxCalc.taxAmount) : null,
@@ -2031,7 +2031,7 @@ async function execCreateBookingFromSession(session: WaBookingSessionRow, phone:
     fromStatus: null,
     toStatus: "waiting_admin_approval",
     changedByName: session.customerName,
-    note: "Booking dibuat via WhatsApp Chat — menunggu persetujuan admin",
+    note: "Booking dibuat via WhatsApp AI — menunggu persetujuan admin",
   });
 
   broadcastAvailabilityChange(facility.id, session.bookingDate);
@@ -2153,6 +2153,38 @@ router.post("/wa/fonnte/webhook", async (req, res) => {
       return;
     }
 
+    // 3b. Deteksi media message (gambar/dokumen dikirim customer — kemungkinan bukti bayar)
+    const msgType = String(req.body.type ?? req.body.message_type ?? req.body.file_type ?? "").toLowerCase();
+    const isMediaMsg = ["image", "video", "document", "audio", "sticker"].includes(msgType);
+    if (isMediaMsg) {
+      const pendingBooking = await db.select({
+        id: bookingsTable.id,
+        orderNumber: bookingsTable.orderNumber,
+        status: bookingsTable.status,
+      }).from(bookingsTable)
+        .where(and(eq(bookingsTable.customerPhone, phone), eq(bookingsTable.status, "pending_payment")))
+        .orderBy(desc(bookingsTable.createdAt))
+        .limit(1);
+
+      if (pendingBooking.length > 0) {
+        const b = pendingBooking[0];
+        const tokens = await db.select().from(waActionTokensTable)
+          .where(and(eq(waActionTokensTable.bookingId, b.id), eq(waActionTokensTable.action, "upload_proof")))
+          .orderBy(desc(waActionTokensTable.createdAt))
+          .limit(1);
+        const proofToken = tokens[0]?.token;
+        const uploadUrl = proofToken ? `${APP_URL}/wa/proof/${proofToken}` : null;
+        const reply = uploadUrl
+          ? `📎 Untuk upload bukti pembayaran *${b.orderNumber}*, silakan gunakan link berikut:\n\n${uploadUrl}\n\n⚠️ Upload hanya bisa melalui link, tidak bisa via WhatsApp langsung.`
+          : `📎 Untuk upload bukti pembayaran *${b.orderNumber}*, ketik *status* untuk mendapatkan link upload.`;
+        await sendWAMsg(phone, reply);
+      } else {
+        await sendWAMsg(phone, `📎 Bukti pembayaran diunggah melalui link khusus yang dikirimkan setelah booking dikonfirmasi admin.\n\nKetik *status* untuk cek status booking, atau *booking* untuk membuat pesanan baru. 🏅`);
+      }
+      await logAudit({ action: "media_message_received", entity: "wa_session", after: { phone, msgType } });
+      return;
+    }
+
     // 4. AI Assistant (when enabled) — routes all intents:
     //    booking_intent → hand off to structured flow
     //    status_check   → answered by AI with DB data
@@ -2165,6 +2197,19 @@ router.post("/wa/fonnte/webhook", async (req, res) => {
       // booking_intent: go straight to structured booking session
       if (intent === "booking_intent") {
         await startBookingSession(phone, msg, String(name));
+        return;
+      }
+
+      // talk_to_admin: langsung kirim kontak admin, tidak perlu OpenAI
+      if (intent === "talk_to_admin") {
+        const [settingsRow] = await db.select({ whatsapp: settingsTable.whatsapp, phone: settingsTable.phone, openHour: settingsTable.openHour, closeHour: settingsTable.closeHour })
+          .from(settingsTable).limit(1);
+        const adminContact = settingsRow?.whatsapp || settingsRow?.phone || (await getAdminPhones())[0] || "";
+        const reply = adminContact
+          ? `👋 Baik, saya hubungkan Anda dengan admin kami.\n\n📞 *Admin WhatsApp:* ${adminContact}\n\nSilakan hubungi admin langsung untuk bantuan lebih lanjut. Jam operasional: *${settingsRow?.openHour ?? "06:00"}–${settingsRow?.closeHour ?? "22:00"}*. 🙏`
+          : `👋 Untuk berbicara langsung dengan admin, ketik *status* atau kunjungi ${APP_URL}/contact.\n\nKami siap membantu! 🏅`;
+        await sendWAMsg(phone, reply);
+        await logAudit({ action: "ai_talk_to_admin_handled", entity: "wa_ai", after: { phone, adminContact } });
         return;
       }
 
@@ -2184,27 +2229,44 @@ router.post("/wa/fonnte/webhook", async (req, res) => {
 
     // 5. Legacy fallback: status intent (when AI is off or errored)
     if (isStatusIntent(msg)) {
-      const bookings = await db.select().from(bookingsTable)
+      const allBookings = await db.select().from(bookingsTable)
         .where(eq(bookingsTable.customerPhone, phone))
         .orderBy(desc(bookingsTable.createdAt))
-        .limit(1);
-      if (bookings.length > 0) {
-        const b = bookings[0];
-        const [fac] = await db.select({ name: facilitiesTable.name }).from(facilitiesTable)
-          .where(eq(facilitiesTable.id, b.facilityId)).limit(1);
-        await sendWAMsg(phone,
-          `🔍 *Status Booking Terakhir*\n\n` +
-          `Order: *${b.orderNumber}*\n` +
-          `Fasilitas: *${fac?.name ?? "-"}*\n` +
-          `Tanggal: *${b.bookingDate}* pukul *${b.startTime}–${b.endTime}*\n` +
-          `Status: *${b.status.replace(/_/g, " ").toUpperCase()}*\n\n` +
-          `Detail lengkap: ${APP_URL}/wa/status/${b.orderNumber}`
-        );
-      } else {
-        await sendWAMsg(phone,
-          `Tidak ada booking terdaftar untuk nomor ini.\n\nKetik *booking* untuk membuat booking baru. 🏅`
-        );
+        .limit(8);
+
+      if (allBookings.length === 0) {
+        await sendWAMsg(phone, `Tidak ada booking terdaftar untuk nomor ini.\n\nKetik *booking* untuk membuat booking baru. 🏅`);
+        return;
       }
+
+      const facIds = [...new Set(allBookings.map(b => b.facilityId))];
+      const facRows = await db.select({ id: facilitiesTable.id, name: facilitiesTable.name })
+        .from(facilitiesTable).where(inArray(facilitiesTable.id, facIds));
+      const facMap = new Map(facRows.map(f => [f.id, f.name]));
+
+      const STATUS_ICON: Record<string, string> = {
+        waiting_admin_approval: "⏳",
+        pending_payment: "💳",
+        waiting_confirmation: "🔍",
+        confirmed: "✅",
+        checked_in: "🏃",
+        completed: "🏆",
+        cancelled: "❌",
+        rejected: "🚫",
+        expired: "⌛",
+        refunded: "💰",
+      };
+
+      let reply = `📋 *Riwayat Booking Anda*\n\n`;
+      for (const b of allBookings) {
+        const icon = STATUS_ICON[b.status] ?? "•";
+        const statusLabel = b.status.replace(/_/g, " ").toUpperCase();
+        reply += `${icon} *${b.orderNumber}*\n` +
+          `   ${facMap.get(b.facilityId) ?? "-"} — ${b.bookingDate} ${b.startTime}–${b.endTime}\n` +
+          `   Status: *${statusLabel}*\n\n`;
+      }
+      reply += `Detail: ${APP_URL}/wa/status/${allBookings[0].orderNumber}`;
+      await sendWAMsg(phone, reply);
       return;
     }
 
