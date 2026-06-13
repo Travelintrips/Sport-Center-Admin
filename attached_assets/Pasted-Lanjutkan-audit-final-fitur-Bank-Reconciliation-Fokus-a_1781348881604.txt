@@ -1,0 +1,84 @@
+Lanjutkan audit final fitur Bank Reconciliation.
+
+Fokus audit:
+1. Pastikan status flow konsisten:
+- unmatched
+- auto_matched
+- need_review
+- duplicate_need_review
+- approved
+- rejected
+
+Jangan ada status lama seperti matched yang masih dipakai di backend/frontend.
+
+2. Pastikan approve candidate selalu memanggil propagateApproval:
+- payment menjadi confirmed
+- booking menjadi confirmed
+- booking audit log tercatat
+- payment audit log tercatat
+- bank mutation audit log tercatat
+
+3. Tambahkan accounting posting setelah mutasi approved:
+Untuk IN:
+Debit Bank
+Credit Piutang / Pendapatan diterima di muka / Revenue sesuai sumber transaksi
+
+Untuk OUT:
+Debit Expense / Hutang / Refund Payable
+Credit Bank
+
+Jangan posting jurnal saat status masih auto_matched atau need_review.
+Jurnal hanya dibuat ketika admin approve atau auto-approve sudah valid dan status final approved.
+
+4. Tambahkan field:
+bank_mutations:
+- accounting_posted boolean default false
+- journal_id nullable
+- approved_by
+- approved_at
+- rejected_by
+- rejected_at
+
+5. Buat idempotency:
+Jika mutation sudah accounting_posted = true, jangan buat jurnal kedua.
+Jika approve ditekan dua kali, jangan duplicate journal.
+
+6. Rapikan OUT matching:
+- BANK_FEE → expense biaya admin bank
+- REFUND → customer refund / booking refunded
+- VENDOR_PAYMENT → vendor invoice / purchase payment
+- RENT_AP → biaya sewa / landlord payment
+- TAX_PAYMENT → pembayaran pajak
+- OTHER_OUT → need_review
+
+7. Update UI:
+Di detail mutasi tampilkan:
+- apakah sudah posting jurnal
+- journal number
+- tombol “Create Journal” hanya muncul untuk approved yang belum posted
+- warning jika duplicate_need_review
+
+8. Update laporan bulanan:
+Tambahkan:
+- total approved IN
+- total approved OUT
+- total need_review
+- total unmatched
+- total duplicate_need_review
+- total sudah posting jurnal
+- total belum posting jurnal
+
+9. Tambahkan test case:
+- approve IN booking membuat payment confirmed + booking confirmed + jurnal bank debit
+- approve OUT expense membuat jurnal bank credit
+- approve dua kali tidak duplicate journal
+- reject tidak membuat jurnal
+- need_review tidak membuat jurnal
+- duplicate_need_review tidak membuat jurnal
+- scheduler tidak expire booking yang punya mutation aktif
+
+10. Bersihkan kode:
+- hapus endpoint lama yang duplikat
+- pastikan semua route registered
+- pastikan tidak ada import duplikat
+- pastikan build/typecheck/test pass

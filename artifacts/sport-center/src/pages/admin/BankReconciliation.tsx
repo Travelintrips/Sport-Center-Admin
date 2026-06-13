@@ -737,8 +737,26 @@ function MutationRow({ mutation, qc }: { mutation: any; qc: any }) {
   });
 
   const isPending = approveMutation.isPending || rejectMutation.isPending;
+  const [isPostingJournal, setIsPostingJournal] = useState(false);
+  const handlePostJournal = async () => {
+    setIsPostingJournal(true);
+    try {
+      const resp = await fetch(`${API_BASE}/bank-reconciliation/mutations/${mutation.id}/post-journal`, {
+        method: "POST",
+        headers: authHeaders(),
+      });
+      const d = await resp.json();
+      if (!resp.ok) throw new Error(d.error ?? "Gagal buat jurnal");
+      toast({ title: `Jurnal dibuat: ${d.journalId ?? "OK"}` });
+      qc.invalidateQueries({ queryKey: getListBankMutationsQueryKey() });
+    } catch (e: any) {
+      toast({ title: e.message, variant: "destructive" });
+    } finally {
+      setIsPostingJournal(false);
+    }
+  };
   const matches = matchesQuery.data?.matches ?? [];
-  const isActionable = ["unmatched", "need_review", "auto_matched", "matched", "duplicate_need_review"].includes(mutation.status);
+  const isActionable = ["unmatched", "need_review", "auto_matched", "duplicate_need_review"].includes(mutation.status);
 
   return (
     <div className="border rounded-xl overflow-hidden">
@@ -765,6 +783,12 @@ function MutationRow({ mutation, qc }: { mutation: any; qc: any }) {
             {mutation.providerOrderId && (
               <Badge variant="outline" className="text-[10px] font-mono">{mutation.providerOrderId}</Badge>
             )}
+            {mutation.journalId && (
+              <Badge className="text-[10px] bg-green-50 text-green-700 border border-green-200 gap-1">📒 {mutation.journalId}</Badge>
+            )}
+            {mutation.status === "approved" && !mutation.accountingPosted && !mutation.journalId && (
+              <Badge className="text-[10px] bg-amber-50 text-amber-700 border border-amber-200">⚠ Belum Dijurnal</Badge>
+            )}
           </div>
           <p className="text-sm text-muted-foreground mt-0.5 truncate">{mutation.description}</p>
           <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
@@ -786,6 +810,16 @@ function MutationRow({ mutation, qc }: { mutation: any; qc: any }) {
 
       {expanded && (
         <div className="border-t p-3 bg-muted/10 space-y-3">
+          {/* Warning duplikat */}
+          {mutation.status === "duplicate_need_review" && (
+            <div className="flex items-start gap-2 p-2.5 rounded-lg bg-purple-50 border border-purple-200 text-xs">
+              <span className="text-purple-500 shrink-0 text-sm">⊕</span>
+              <div>
+                <p className="font-semibold text-purple-800">Duplikat mutation_key terdeteksi</p>
+                <p className="text-purple-700 mt-0.5">Mutasi ini memiliki tanggal, nominal, dan arah yang sama dengan mutasi lain. Periksa dan setujui atau tolak yang benar, lalu jalankan Matching ulang.</p>
+              </div>
+            </div>
+          )}
           {/* Perbandingan Nominal Mutasi vs OCR */}
           {!matchesQuery.isLoading && matches.length > 0 && (() => {
             const mutAmt = parseFloat(mutation.amount ?? "0");
@@ -903,6 +937,29 @@ function MutationRow({ mutation, qc }: { mutation: any; qc: any }) {
               </Button>
             </div>
           )}
+
+          {/* Jurnal Akuntansi — tampil hanya saat approved */}
+          {mutation.status === "approved" && (
+            <div className="flex items-center gap-3 flex-wrap border-t pt-3">
+              {mutation.accountingPosted && mutation.journalId ? (
+                <div className="flex items-center gap-1.5 text-xs text-green-700">
+                  <CheckCircle2 size={13} />
+                  <span>Jurnal diposting: <span className="font-mono font-semibold">{mutation.journalId}</span></span>
+                </div>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-1.5 text-xs text-blue-600 border-blue-200 hover:bg-blue-50"
+                  disabled={isPostingJournal}
+                  onClick={handlePostJournal}
+                >
+                  <CheckCircle2 size={13} />
+                  {isPostingJournal ? "Memproses..." : "Buat Jurnal"}
+                </Button>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -1018,10 +1075,12 @@ function ReportTab() {
                 <th className="text-right px-3 py-3 font-semibold text-xs uppercase tracking-wide text-green-700">Masuk</th>
                 <th className="text-right px-3 py-3 font-semibold text-xs uppercase tracking-wide text-red-700">Keluar</th>
                 <th className="text-right px-3 py-3 font-semibold text-xs uppercase tracking-wide text-blue-700">Approved</th>
+                <th className="text-right px-3 py-3 font-semibold text-xs uppercase tracking-wide text-rose-700">Approved Out</th>
                 <th className="text-right px-3 py-3 font-semibold text-xs uppercase tracking-wide text-teal-700">Auto</th>
                 <th className="text-right px-3 py-3 font-semibold text-xs uppercase tracking-wide text-yellow-700">Review</th>
                 <th className="text-right px-3 py-3 font-semibold text-xs uppercase tracking-wide text-orange-700">Unmatched</th>
-                <th className="text-right px-3 py-3 font-semibold text-xs uppercase tracking-wide">Duplikat</th>
+                <th className="text-right px-3 py-3 font-semibold text-xs uppercase tracking-wide text-emerald-700">Dijurnal</th>
+                <th className="text-right px-3 py-3 font-semibold text-xs uppercase tracking-wide text-amber-700">Blm Jurnal</th>
                 <th className="text-right px-4 py-3 font-semibold text-xs uppercase tracking-wide">% Selesai</th>
               </tr>
             </thead>
@@ -1043,6 +1102,11 @@ function ReportTab() {
                       </span>
                     </td>
                     <td className="px-3 py-3 text-right">
+                      {Number(r.approved_out ?? 0) > 0 ? (
+                        <span className="text-rose-700 font-semibold">{Number(r.approved_out).toLocaleString("id-ID")}</span>
+                      ) : <span className="text-muted-foreground">—</span>}
+                    </td>
+                    <td className="px-3 py-3 text-right">
                       {Number(r.auto_matched ?? 0) > 0 ? (
                         <span className="text-teal-700 font-semibold">{Number(r.auto_matched).toLocaleString("id-ID")}</span>
                       ) : <span className="text-muted-foreground">—</span>}
@@ -1061,8 +1125,13 @@ function ReportTab() {
                       ) : <span className="text-muted-foreground">—</span>}
                     </td>
                     <td className="px-3 py-3 text-right">
-                      {Number(r.duplicate) > 0 ? (
-                        <span className="text-amber-700">{Number(r.duplicate).toLocaleString("id-ID")}</span>
+                      {Number(r.posted ?? 0) > 0 ? (
+                        <span className="text-emerald-700 font-semibold">{Number(r.posted).toLocaleString("id-ID")}</span>
+                      ) : <span className="text-muted-foreground">—</span>}
+                    </td>
+                    <td className="px-3 py-3 text-right">
+                      {Number(r.unposted ?? 0) > 0 ? (
+                        <span className="text-amber-700 font-semibold">{Number(r.unposted).toLocaleString("id-ID")}</span>
                       ) : <span className="text-muted-foreground">—</span>}
                     </td>
                     <td className="px-4 py-3 text-right">
@@ -1090,10 +1159,12 @@ function ReportTab() {
                   <td className="px-3 py-3 text-right text-green-700">{formatCurrency(Number(totals.amount_in))}</td>
                   <td className="px-3 py-3 text-right text-red-700">{formatCurrency(Number(totals.amount_out))}</td>
                   <td className="px-3 py-3 text-right">{totals.approved.toLocaleString("id-ID")}</td>
+                  <td className="px-3 py-3 text-right text-rose-700">{(totals.approved_out ?? 0).toLocaleString("id-ID")}</td>
                   <td className="px-3 py-3 text-right text-teal-700">{(totals.auto_matched ?? 0).toLocaleString("id-ID")}</td>
                   <td className="px-3 py-3 text-right text-yellow-700">{(totals.need_review ?? 0).toLocaleString("id-ID")}</td>
                   <td className="px-3 py-3 text-right text-orange-700">{totals.unmatched.toLocaleString("id-ID")}</td>
-                  <td className="px-3 py-3 text-right">{(totals.duplicate ?? 0).toLocaleString("id-ID")}</td>
+                  <td className="px-3 py-3 text-right text-emerald-700">{(totals.posted ?? 0).toLocaleString("id-ID")}</td>
+                  <td className="px-3 py-3 text-right text-amber-700">{(totals.unposted ?? 0).toLocaleString("id-ID")}</td>
                   <td className="px-4 py-3 text-right text-sm">{pctApproved}%</td>
                 </tr>
               </tfoot>

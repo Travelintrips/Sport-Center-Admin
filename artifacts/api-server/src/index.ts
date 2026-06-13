@@ -52,6 +52,38 @@ async function runStartupMigrations() {
        ON sport_center.bank_reconciliation_matches (status)`,
     `CREATE INDEX IF NOT EXISTS idx_recon_matches_candidate
        ON sport_center.bank_reconciliation_matches (candidate_type, candidate_id)`,
+    // Kolom baru bank_mutations: accounting + approval tracking
+    `ALTER TABLE sport_center.bank_mutations
+       ADD COLUMN IF NOT EXISTS accounting_posted boolean NOT NULL DEFAULT false`,
+    `ALTER TABLE sport_center.bank_mutations
+       ADD COLUMN IF NOT EXISTS journal_id text`,
+    `ALTER TABLE sport_center.bank_mutations
+       ADD COLUMN IF NOT EXISTS approved_by text`,
+    `ALTER TABLE sport_center.bank_mutations
+       ADD COLUMN IF NOT EXISTS approved_at timestamptz`,
+    `ALTER TABLE sport_center.bank_mutations
+       ADD COLUMN IF NOT EXISTS rejected_by text`,
+    `ALTER TABLE sport_center.bank_mutations
+       ADD COLUMN IF NOT EXISTS rejected_at timestamptz`,
+    // Tabel jurnal akuntansi
+    `CREATE TABLE IF NOT EXISTS sport_center.bank_journal_entries (
+       id serial PRIMARY KEY,
+       journal_id text UNIQUE NOT NULL,
+       mutation_id int NOT NULL REFERENCES sport_center.bank_mutations(id) ON DELETE CASCADE,
+       direction text NOT NULL,
+       amount numeric(14,2) NOT NULL,
+       debit_account_code text NOT NULL,
+       debit_account_name text NOT NULL,
+       credit_account_code text NOT NULL,
+       credit_account_name text NOT NULL,
+       memo text,
+       candidate_type text,
+       candidate_id int,
+       posted_at timestamptz NOT NULL DEFAULT NOW(),
+       posted_by text
+     )`,
+    `CREATE INDEX IF NOT EXISTS idx_bank_journal_entries_mutation
+       ON sport_center.bank_journal_entries (mutation_id)`,
   ];
 
   for (const stmt of migrations) {

@@ -39,6 +39,14 @@ export const bankMutationsTable = scSchema.table("bank_mutations", {
   matchedPaymentId: integer("matched_payment_id"),
   matchedOrderId: integer("matched_order_id"),
   uploadedProofUrl: text("uploaded_proof_url"),
+  // Accounting
+  accountingPosted: boolean("accounting_posted").notNull().default(false),
+  journalId: text("journal_id"),
+  // Approval / rejection tracking
+  approvedBy: text("approved_by"),
+  approvedAt: timestamp("approved_at", { withTimezone: true }),
+  rejectedBy: text("rejected_by"),
+  rejectedAt: timestamp("rejected_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });
@@ -62,6 +70,23 @@ export const bankReconciliationMatchesTable = scSchema.table("bank_reconciliatio
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+export const bankJournalEntriesTable = scSchema.table("bank_journal_entries", {
+  id: serial("id").primaryKey(),
+  journalId: text("journal_id").notNull().unique(),
+  mutationId: integer("mutation_id").notNull().references(() => bankMutationsTable.id, { onDelete: "cascade" }),
+  direction: text("direction").notNull(),
+  amount: numeric("amount", { precision: 14, scale: 2 }).notNull(),
+  debitAccountCode: text("debit_account_code").notNull(),
+  debitAccountName: text("debit_account_name").notNull(),
+  creditAccountCode: text("credit_account_code").notNull(),
+  creditAccountName: text("credit_account_name").notNull(),
+  memo: text("memo"),
+  candidateType: text("candidate_type"),
+  candidateId: integer("candidate_id"),
+  postedAt: timestamp("posted_at", { withTimezone: true }).notNull().defaultNow(),
+  postedBy: text("posted_by"),
+});
+
 export const insertBankMutationSchema = createInsertSchema(bankMutationsTable).omit({ id: true, createdAt: true, updatedAt: true });
 export const insertBankReconciliationMatchSchema = createInsertSchema(bankReconciliationMatchesTable).omit({ id: true, createdAt: true });
 
@@ -69,3 +94,4 @@ export type BankMutation = typeof bankMutationsTable.$inferSelect;
 export type InsertBankMutation = z.infer<typeof insertBankMutationSchema>;
 export type BankReconciliationMatch = typeof bankReconciliationMatchesTable.$inferSelect;
 export type InsertBankReconciliationMatch = z.infer<typeof insertBankReconciliationMatchSchema>;
+export type BankJournalEntry = typeof bankJournalEntriesTable.$inferSelect;

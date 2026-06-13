@@ -9,3 +9,4 @@
 - [Admin login & SESSION_SECRET](admin-login-secret.md) — "Invalid credentials" w/ correct pw = admin hash seeded with a different SESSION_SECRET; dev & prod DBs seed admin independently, reseed the broken one.
 - [.replit merge corruption](dotreplit-merge-corruption.md) — GitHub merges from external repo duplicate `modules` keys → invalid TOML, blocks env/packager tools; agent cannot edit .replit; user must fix via GUI or rollback.
 - [PPN 11% Tax Engine](tax-engine.md) — Centralized tax calc in api-server/src/lib/tax.ts; bookings.ppnRate/ppnAmount/grandTotal nullable; old bookings untouched; tax_settings seeded with PPN_OUT_11 11%; tax_transactions ledger auto-records per booking.
+- [Bank Recon Accounting Journal](bank-recon-journal.md) — ACCOUNT_MAP + postAccountingJournal() in bankReconciliation.ts; idempotent (skips if accountingPosted=true); journalId format JRN-YYYYMMDD-000001; `matched` status deprecated, kept in enum for backward compat only.

@@ -16,14 +16,23 @@ const REFUND_PATTERN = /refund|pengembalian|retur|kembali\s*dana/i;
 const LANDLORD_PATTERN = /angkasa\s*pura|landlord|sewa\s*gedung|sewa\s*tempat|rental\s*fee|biaya\s*sewa/i;
 const VENDOR_PATTERN = /vendor|supplier|pemasok|pembayaran\s*vendor|invoice|faktur/i;
 const EXPENSE_PATTERN = /operasional|listrik|pln|air\s*pdam|internet|telkom|gaji|salary|thr|lembur/i;
+const TAX_PAYMENT_PATTERN = /pajak|pph\s*\d+|ppn|bphtb|setoran\s*pajak|tax\s*payment|ssp\b|kode\s*billing/i;
 
 // Kategori candidateId untuk OUT expense (angka > 900000 untuk hindari konflik dengan ID record nyata)
+// 900001 = BANK_FEE    → Biaya Administrasi Bank      (6001)
+// 900002 = REFUND      → Refund Payable               (2002)
+// 900003 = RENT_AP     → Beban Sewa / Rent Payable    (6003)
+// 900004 = VENDOR_PMT  → Beban Vendor / Pemasok       (6002)
+// 900005 = OPERATIONAL → Beban Operasional            (6005)
+// 900006 = TAX_PAYMENT → Hutang Pajak                 (2003)
+// 900099 = UNKNOWN_OUT → Beban Lain-lain (need_review)(6099)
 const EXPENSE_CATEGORY = {
   BANK_FEE: 900001,
   REFUND: 900002,
-  LANDLORD: 900003,
-  VENDOR: 900004,
+  RENT_AP: 900003,
+  VENDOR_PAYMENT: 900004,
   OPERATIONAL: 900005,
+  TAX_PAYMENT: 900006,
   UNKNOWN_OUT: 900099,
 };
 
@@ -498,27 +507,32 @@ async function computeMatchesForOutMutation(mutation: BankMutation): Promise<Mat
   }
 
   if (LANDLORD_PATTERN.test(mutation.description)) {
-    addCategoryCandidate(EXPENSE_CATEGORY.LANDLORD, "Pembayaran Landlord/Angkasa Pura", 30,
-      "kata 'angkasa pura/sewa gedung' ditemukan");
+    addCategoryCandidate(EXPENSE_CATEGORY.RENT_AP, "Beban Sewa / Rent Payable", 30,
+      "kata 'angkasa pura/sewa gedung/rental fee' ditemukan");
   }
 
   if (VENDOR_PATTERN.test(mutation.description)) {
-    addCategoryCandidate(EXPENSE_CATEGORY.VENDOR, "Pembayaran Vendor/Supplier", 25,
+    addCategoryCandidate(EXPENSE_CATEGORY.VENDOR_PAYMENT, "Pembayaran Vendor/Pemasok", 25,
       "kata 'vendor/supplier/invoice' ditemukan");
   }
 
   if (EXPENSE_PATTERN.test(mutation.description)) {
-    addCategoryCandidate(EXPENSE_CATEGORY.OPERATIONAL, "Biaya Operasional", 20,
+    addCategoryCandidate(EXPENSE_CATEGORY.OPERATIONAL, "Beban Operasional", 20,
       "kata 'operasional/listrik/gaji' ditemukan");
   }
 
-  // Jika tidak ada pola yang cocok, beri kandidat unknown dengan skor rendah
+  if (TAX_PAYMENT_PATTERN.test(mutation.description)) {
+    addCategoryCandidate(EXPENSE_CATEGORY.TAX_PAYMENT, "Pembayaran Pajak", 30,
+      "kata 'pajak/pph/ppn/setoran pajak' ditemukan");
+  }
+
+  // Jika tidak ada pola yang cocok, beri kandidat unknown dengan skor rendah → need_review
   if (candidates.length === 0) {
     candidates.push({
       candidateType: "expense",
       candidateId: EXPENSE_CATEGORY.UNKNOWN_OUT,
       score: 30,
-      reason: ["mutasi keluar tidak terklasifikasi +30"],
+      reason: ["mutasi keluar tidak terklasifikasi — perlu review +30"],
       amountMatch: true,
       dateMatch: false,
       nameMatch: false,

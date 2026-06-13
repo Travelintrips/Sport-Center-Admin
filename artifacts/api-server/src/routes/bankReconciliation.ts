@@ -3,6 +3,7 @@ import { db } from "@workspace/db";
 import {
   bankMutationsTable,
   bankReconciliationMatchesTable,
+  bankJournalEntriesTable,
   bookingsTable,
   paymentsTable,
   facilitiesTable,
@@ -25,23 +26,147 @@ const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
 // Module-level helper — dipanggil dari /approve DAN /approve-candidate
-async function propagateApproval(type: string | undefined, id: number | undefined) {
+// Memperbarui status payment/booking dan mencatat audit log
+async function propagateApproval(
+  type: string | undefined,
+  id: number | undefined,
+  auditCtx?: { userId?: number; userRole?: string; ipAddress?: string; userAgent?: string },
+) {
   if (!type || !id) return;
   const CONFIRMABLE = ["pending_payment", "waiting_confirmation"];
+  const ctx = auditCtx ?? {};
+
   if (type === "payment") {
     await db.update(paymentsTable).set({ status: "confirmed", updatedAt: new Date() }).where(eq(paymentsTable.id, id));
+    await db.insert(auditLogsTable).values({
+      userId: ctx.userId, userRole: ctx.userRole,
+      action: "payment_confirmed_via_recon", entity: "payment", entityId: id,
+      after: { status: "confirmed", source: "bank_reconciliation" },
+      ipAddress: ctx.ipAddress, userAgent: ctx.userAgent,
+    });
+
     const [pmt] = await db.select({ bookingId: paymentsTable.bookingId }).from(paymentsTable).where(eq(paymentsTable.id, id)).limit(1);
     if (pmt?.bookingId) {
-      await db.update(bookingsTable).set({ status: "confirmed", updatedAt: new Date() }).where(
+      const updated = await db.update(bookingsTable).set({ status: "confirmed", updatedAt: new Date() }).where(
         and(eq(bookingsTable.id, pmt.bookingId), inArray(bookingsTable.status, CONFIRMABLE as any[]))
-      );
+      ).returning({ id: bookingsTable.id });
+      if (updated.length > 0) {
+        await db.insert(auditLogsTable).values({
+          userId: ctx.userId, userRole: ctx.userRole,
+          action: "booking_confirmed_via_recon", entity: "booking", entityId: pmt.bookingId,
+          after: { status: "confirmed", source: "bank_reconciliation" },
+          ipAddress: ctx.ipAddress, userAgent: ctx.userAgent,
+        });
+      }
     }
   } else if (type === "order") {
-    await db.update(bookingsTable).set({ status: "confirmed", updatedAt: new Date() }).where(
+    const updated = await db.update(bookingsTable).set({ status: "confirmed", updatedAt: new Date() }).where(
       and(eq(bookingsTable.id, id), inArray(bookingsTable.status, CONFIRMABLE as any[]))
-    );
+    ).returning({ id: bookingsTable.id });
+    if (updated.length > 0) {
+      await db.insert(auditLogsTable).values({
+        userId: ctx.userId, userRole: ctx.userRole,
+        action: "booking_confirmed_via_recon", entity: "booking", entityId: id,
+        after: { status: "confirmed", source: "bank_reconciliation" },
+        ipAddress: ctx.ipAddress, userAgent: ctx.userAgent,
+      });
+    }
   }
   // type === 'expense': tidak ada booking/payment yang perlu di-update
+}
+
+// Peta akun akuntansi double-entry
+const ACCOUNT_MAP = {
+  BANK:        { code: "1001", name: "Kas/Bank" },
+  BOOKING_REV: { code: "4001", name: "Pendapatan Booking" },
+  ADVANCE:     { code: "2001", name: "Uang Muka Diterima" },
+  BANK_FEE:    { code: "6001", name: "Biaya Administrasi Bank" },
+  REFUND:      { code: "2002", name: "Refund Payable" },
+  VENDOR:      { code: "6002", name: "Beban Vendor/Pemasok" },
+  RENT:        { code: "6003", name: "Beban Sewa" },
+  OPERATIONAL: { code: "6005", name: "Beban Operasional" },
+  TAX:         { code: "2003", name: "Hutang Pajak" },
+  OTHER:       { code: "6099", name: "Beban Lain-lain" },
+};
+
+// Post jurnal akuntansi — hanya dipanggil saat status final = approved
+// Idempotent: jika accountingPosted sudah true, tidak ada jurnal baru
+async function postAccountingJournal(
+  mutation: { id: number; transactionDate: string; amount: string | null; direction: string; description: string; accountingPosted: boolean },
+  candidateType: string | undefined,
+  candidateId: number | undefined,
+  postedBy?: string,
+): Promise<string | null> {
+  if (mutation.accountingPosted) return null;
+
+  const amount = parseFloat(mutation.amount ?? "0");
+  if (amount <= 0) return null;
+
+  const journalId = `JRN-${mutation.transactionDate.replace(/-/g, "").slice(0, 8)}-${String(mutation.id).padStart(6, "0")}`;
+  const memo = mutation.description.slice(0, 200);
+
+  let debitCode: string, debitName: string, creditCode: string, creditName: string;
+
+  if (mutation.direction === "IN") {
+    debitCode = ACCOUNT_MAP.BANK.code;
+    debitName = ACCOUNT_MAP.BANK.name;
+    if (candidateType === "payment" || candidateType === "order") {
+      creditCode = ACCOUNT_MAP.BOOKING_REV.code;
+      creditName = ACCOUNT_MAP.BOOKING_REV.name;
+    } else {
+      creditCode = ACCOUNT_MAP.ADVANCE.code;
+      creditName = ACCOUNT_MAP.ADVANCE.name;
+    }
+  } else {
+    creditCode = ACCOUNT_MAP.BANK.code;
+    creditName = ACCOUNT_MAP.BANK.name;
+    if (candidateType === "expense" && candidateId) {
+      if (candidateId < 900000) {
+        // Actual booking ID — refund ke customer
+        debitCode = ACCOUNT_MAP.REFUND.code; debitName = ACCOUNT_MAP.REFUND.name;
+      } else if (candidateId === 900001) {
+        debitCode = ACCOUNT_MAP.BANK_FEE.code; debitName = ACCOUNT_MAP.BANK_FEE.name;
+      } else if (candidateId === 900002) {
+        debitCode = ACCOUNT_MAP.REFUND.code; debitName = ACCOUNT_MAP.REFUND.name;
+      } else if (candidateId === 900003) {
+        debitCode = ACCOUNT_MAP.RENT.code; debitName = ACCOUNT_MAP.RENT.name;
+      } else if (candidateId === 900004) {
+        debitCode = ACCOUNT_MAP.VENDOR.code; debitName = ACCOUNT_MAP.VENDOR.name;
+      } else if (candidateId === 900005) {
+        debitCode = ACCOUNT_MAP.OPERATIONAL.code; debitName = ACCOUNT_MAP.OPERATIONAL.name;
+      } else if (candidateId === 900006) {
+        debitCode = ACCOUNT_MAP.TAX.code; debitName = ACCOUNT_MAP.TAX.name;
+      } else {
+        debitCode = ACCOUNT_MAP.OTHER.code; debitName = ACCOUNT_MAP.OTHER.name;
+      }
+    } else {
+      debitCode = ACCOUNT_MAP.OTHER.code; debitName = ACCOUNT_MAP.OTHER.name;
+    }
+  }
+
+  await db.insert(bankJournalEntriesTable).values({
+    journalId,
+    mutationId: mutation.id,
+    direction: mutation.direction,
+    amount: String(amount),
+    debitAccountCode: debitCode,
+    debitAccountName: debitName,
+    creditAccountCode: creditCode,
+    creditAccountName: creditName,
+    memo,
+    candidateType: candidateType ?? null,
+    candidateId: candidateId ?? null,
+    postedAt: new Date(),
+    postedBy: postedBy ?? null,
+  });
+
+  await db.update(bankMutationsTable).set({
+    accountingPosted: true,
+    journalId,
+    updatedAt: new Date(),
+  }).where(eq(bankMutationsTable.id, mutation.id));
+
+  return journalId;
 }
 
 function parseRows(rows: any[]): Array<{
@@ -451,6 +576,11 @@ router.post("/bank-reconciliation/:mutationId/approve", adminMiddleware, async (
       // Boleh approve mutasi yang sudah rejected (admin koreksi) — lanjutkan
     }
 
+    const adminUser = (req as any).user;
+    const auditCtx = { userId: adminUser?.userId, userRole: adminUser?.role, ipAddress: req.ip, userAgent: req.headers["user-agent"] as string };
+    let approvedCandidateType: string | undefined;
+    let approvedCandidateId: number | undefined;
+
     await db
       .update(bankReconciliationMatchesTable)
       .set({ status: "rejected" })
@@ -473,6 +603,9 @@ router.post("/bank-reconciliation/:mutationId/approve", adminMiddleware, async (
         .where(eq(bankReconciliationMatchesTable.id, matchId))
         .limit(1);
 
+      approvedCandidateType = match?.candidateType ?? undefined;
+      approvedCandidateId = match?.candidateId ?? undefined;
+
       await db
         .update(bankMutationsTable)
         .set({
@@ -483,9 +616,11 @@ router.post("/bank-reconciliation/:mutationId/approve", adminMiddleware, async (
         })
         .where(eq(bankMutationsTable.id, mutationId));
 
-      // Propagate ke booking/payment
-      if (match) await propagateApproval(match.candidateType ?? undefined, match.candidateId ?? undefined);
+      if (match) await propagateApproval(match.candidateType ?? undefined, match.candidateId ?? undefined, auditCtx);
     } else if (candidateType && candidateId) {
+      approvedCandidateType = candidateType;
+      approvedCandidateId = candidateId;
+
       await db
         .insert(bankReconciliationMatchesTable)
         .values({
@@ -512,8 +647,7 @@ router.post("/bank-reconciliation/:mutationId/approve", adminMiddleware, async (
         })
         .where(eq(bankMutationsTable.id, mutationId));
 
-      // Propagate ke booking/payment
-      await propagateApproval(candidateType, candidateId);
+      await propagateApproval(candidateType, candidateId, auditCtx);
     } else {
       await db
         .update(bankMutationsTable)
@@ -521,15 +655,29 @@ router.post("/bank-reconciliation/:mutationId/approve", adminMiddleware, async (
         .where(eq(bankMutationsTable.id, mutationId));
     }
 
+    // Set approved_by + approved_at
+    const approvedByStr = adminUser?.email ?? (adminUser?.userId ? `user:${adminUser.userId}` : "admin");
+    await db.update(bankMutationsTable).set({
+      approvedBy: approvedByStr,
+      approvedAt: new Date(),
+      updatedAt: new Date(),
+    }).where(eq(bankMutationsTable.id, mutationId));
+
+    // Post jurnal akuntansi (fire-and-forget, idempotent)
+    const [freshMutation] = await db.select().from(bankMutationsTable).where(eq(bankMutationsTable.id, mutationId)).limit(1);
+    if (freshMutation) {
+      postAccountingJournal(freshMutation, approvedCandidateType, approvedCandidateId, approvedByStr)
+        .catch((err: any) => req.log.warn({ err }, "Journal posting gagal (non-fatal)"));
+    }
+
     // Audit log
-    const user = (req as any).user;
     await db.insert(auditLogsTable).values({
-      userId: user?.userId,
-      userRole: user?.role,
+      userId: adminUser?.userId,
+      userRole: adminUser?.role,
       action: "approve_mutation",
       entity: "bank_mutation",
       entityId: mutationId,
-      after: { matchId, candidateType, candidateId },
+      after: { matchId, candidateType: approvedCandidateType, candidateId: approvedCandidateId },
       ipAddress: req.ip,
       userAgent: req.headers["user-agent"] as string,
     });
@@ -588,9 +736,11 @@ router.post("/bank-reconciliation/:mutationId/reject", adminMiddleware, async (r
       return;
     }
 
+    const rejUser = (req as any).user;
+    const rejectedByStr = rejUser?.email ?? (rejUser?.userId ? `user:${rejUser.userId}` : "admin");
     await db
       .update(bankMutationsTable)
-      .set({ status: "rejected", updatedAt: new Date() })
+      .set({ status: "rejected", rejectedBy: rejectedByStr, rejectedAt: new Date(), updatedAt: new Date() })
       .where(eq(bankMutationsTable.id, mutationId));
 
     await db
@@ -694,13 +844,16 @@ router.get("/bank-reconciliation/report", adminMiddleware, async (req, res) => {
         COALESCE(SUM(amount) FILTER (WHERE direction = 'IN'), 0)::numeric AS amount_in,
         COALESCE(SUM(amount) FILTER (WHERE direction = 'OUT'), 0)::numeric AS amount_out,
         COUNT(*) FILTER (WHERE status = 'approved')::int AS approved,
+        COUNT(*) FILTER (WHERE status = 'approved' AND direction = 'OUT')::int AS approved_out,
         COUNT(*) FILTER (WHERE status = 'unmatched')::int AS unmatched,
-        COUNT(*) FILTER (WHERE status = 'matched' OR status = 'auto_matched')::int AS matched,
         COUNT(*) FILTER (WHERE status = 'auto_matched')::int AS auto_matched,
         COUNT(*) FILTER (WHERE status = 'need_review')::int AS need_review,
         COUNT(*) FILTER (WHERE status = 'duplicate_need_review')::int AS duplicate,
         COUNT(*) FILTER (WHERE status = 'rejected')::int AS rejected,
+        COUNT(*) FILTER (WHERE accounting_posted = true)::int AS posted,
+        COUNT(*) FILTER (WHERE status = 'approved' AND accounting_posted = false)::int AS unposted,
         COALESCE(SUM(amount) FILTER (WHERE direction = 'IN' AND status = 'approved'), 0)::numeric AS approved_amount_in,
+        COALESCE(SUM(amount) FILTER (WHERE direction = 'OUT' AND status = 'approved'), 0)::numeric AS approved_amount_out,
         COALESCE(SUM(amount) FILTER (WHERE direction = 'IN' AND status NOT IN ('approved','rejected')), 0)::numeric AS pending_amount_in
       FROM sport_center.bank_mutations
       WHERE mutation_key ~ '^20[0-9]{6}_'
@@ -717,21 +870,25 @@ router.get("/bank-reconciliation/report", adminMiddleware, async (req, res) => {
         amount_in: acc.amount_in + Number(r.amount_in),
         amount_out: acc.amount_out + Number(r.amount_out),
         approved: acc.approved + Number(r.approved),
+        approved_out: acc.approved_out + Number(r.approved_out ?? 0),
         unmatched: acc.unmatched + Number(r.unmatched),
-        matched: acc.matched + Number(r.matched),
         auto_matched: acc.auto_matched + Number(r.auto_matched ?? 0),
         need_review: acc.need_review + Number(r.need_review ?? 0),
         duplicate: acc.duplicate + Number(r.duplicate),
         rejected: acc.rejected + Number(r.rejected),
+        posted: acc.posted + Number(r.posted ?? 0),
+        unposted: acc.unposted + Number(r.unposted ?? 0),
         approved_amount_in: acc.approved_amount_in + Number(r.approved_amount_in),
+        approved_amount_out: acc.approved_amount_out + Number(r.approved_amount_out ?? 0),
         pending_amount_in: acc.pending_amount_in + Number(r.pending_amount_in),
       }),
       {
         total: 0, total_in: 0, total_out: 0,
         amount_in: 0, amount_out: 0,
-        approved: 0, unmatched: 0, matched: 0, auto_matched: 0, need_review: 0,
+        approved: 0, approved_out: 0, unmatched: 0, auto_matched: 0, need_review: 0,
         duplicate: 0, rejected: 0,
-        approved_amount_in: 0, pending_amount_in: 0,
+        posted: 0, unposted: 0,
+        approved_amount_in: 0, approved_amount_out: 0, pending_amount_in: 0,
       }
     );
 
@@ -973,6 +1130,9 @@ router.post("/bank-reconciliation/mutations/:id/approve-candidate", adminMiddlew
       });
     }
 
+    const adminUser2 = (req as any).user;
+    const auditCtx2 = { userId: adminUser2?.userId, userRole: adminUser2?.role, ipAddress: req.ip, userAgent: req.headers["user-agent"] as string };
+
     await db.update(bankMutationsTable).set({
       status: "approved",
       matchedPaymentId: candidateType === "payment" ? candidateId : null,
@@ -980,13 +1140,27 @@ router.post("/bank-reconciliation/mutations/:id/approve-candidate", adminMiddlew
       updatedAt: new Date(),
     }).where(eq(bankMutationsTable.id, mutationId));
 
-    // Propagate ke booking/payment — sama seperti /approve endpoint
-    await propagateApproval(candidateType, candidateId);
+    // Propagate ke booking/payment + audit log
+    await propagateApproval(candidateType, candidateId, auditCtx2);
 
-    const user = (req as any).user;
+    // Set approved_by + approved_at
+    const approvedByStr2 = adminUser2?.email ?? (adminUser2?.userId ? `user:${adminUser2.userId}` : "admin");
+    await db.update(bankMutationsTable).set({
+      approvedBy: approvedByStr2,
+      approvedAt: new Date(),
+      updatedAt: new Date(),
+    }).where(eq(bankMutationsTable.id, mutationId));
+
+    // Post jurnal akuntansi (fire-and-forget, idempotent)
+    const [freshMutation2] = await db.select().from(bankMutationsTable).where(eq(bankMutationsTable.id, mutationId)).limit(1);
+    if (freshMutation2) {
+      postAccountingJournal(freshMutation2, candidateType, candidateId, approvedByStr2)
+        .catch((err: any) => req.log.warn({ err }, "Journal posting gagal (non-fatal)"));
+    }
+
     await db.insert(auditLogsTable).values({
-      userId: user?.userId,
-      userRole: user?.role,
+      userId: adminUser2?.userId,
+      userRole: adminUser2?.role,
       action: "approve_candidate",
       entity: "bank_mutation",
       entityId: mutationId,
@@ -1063,6 +1237,52 @@ router.post("/bank-reconciliation/mutations/:id/mark-duplicate", adminMiddleware
   } catch (err: any) {
     req.log.error({ err }, "Bank reconciliation mark-duplicate error");
     res.status(500).json({ error: err?.message ?? "Gagal tandai duplikat" });
+  }
+});
+
+// POST /bank-reconciliation/mutations/:id/post-journal — buat jurnal untuk mutasi approved yang belum diposting
+router.post("/bank-reconciliation/mutations/:id/post-journal", adminMiddleware, async (req, res) => {
+  try {
+    const mutationId = parseInt(req.params.id);
+    if (isNaN(mutationId)) { res.status(400).json({ error: "ID tidak valid" }); return; }
+
+    const [mutation] = await db.select().from(bankMutationsTable).where(eq(bankMutationsTable.id, mutationId)).limit(1);
+    if (!mutation) { res.status(404).json({ error: "Mutasi tidak ditemukan" }); return; }
+
+    if (mutation.status !== "approved") {
+      res.status(400).json({ error: "Jurnal hanya bisa dibuat untuk mutasi yang sudah disetujui" }); return;
+    }
+
+    // Idempotency — sudah diposting
+    if (mutation.accountingPosted) {
+      res.json({ ok: true, skipped: true, journalId: mutation.journalId }); return;
+    }
+
+    // Ambil kandidat yang disetujui untuk menentukan akun jurnal yang tepat
+    const [approvedMatch] = await db.select().from(bankReconciliationMatchesTable).where(
+      and(eq(bankReconciliationMatchesTable.mutationId, mutationId), eq(bankReconciliationMatchesTable.status, "approved"))
+    ).limit(1);
+
+    const adminUser = (req as any).user;
+    const postedBy = adminUser?.email ?? (adminUser?.userId ? `user:${adminUser.userId}` : "admin");
+
+    const journalId = await postAccountingJournal(
+      mutation,
+      approvedMatch?.candidateType ?? undefined,
+      approvedMatch?.candidateId ?? undefined,
+      postedBy,
+    );
+
+    await db.insert(auditLogsTable).values({
+      userId: adminUser?.userId, userRole: adminUser?.role,
+      action: "post_journal", entity: "bank_mutation", entityId: mutationId,
+      after: { journalId }, ipAddress: req.ip, userAgent: req.headers["user-agent"] as string,
+    });
+
+    res.json({ ok: true, journalId });
+  } catch (err: any) {
+    req.log.error({ err }, "Bank reconciliation post-journal error");
+    res.status(500).json({ error: err?.message ?? "Gagal posting jurnal" });
   }
 });
 
