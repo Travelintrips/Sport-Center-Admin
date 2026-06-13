@@ -160,7 +160,7 @@ export default function BookingDetail() {
       submitPayment.mutate({
         data: {
           bookingId: booking.id,
-          amount: (booking as any).grandTotal ?? booking.totalPrice,
+          amount: booking.totalPrice,
           proofUrl: url ?? objectPath,
           notes: notes || undefined,
         },
@@ -284,9 +284,9 @@ export default function BookingDetail() {
             </div>
             <div className="h-px bg-border" />
             <div className="flex justify-between items-center text-xl font-black">
-              <div>{t("Grand Total (incl. PPN)", "Grand Total (incl. VAT)")}</div>
+              <div>{t("Grand Total", "Grand Total")}</div>
               <div className="text-primary">
-                Rp {((booking as any).grandTotal != null ? Number((booking as any).grandTotal) : booking.totalPrice).toLocaleString("id-ID")}
+                Rp {booking.totalPrice.toLocaleString("id-ID")}
               </div>
             </div>
           </CardContent>
@@ -358,7 +358,7 @@ export default function BookingDetail() {
                 <div className="text-sm font-semibold text-foreground">
                   {t("Bayar", "Pay")}{" "}
                   <span className="text-primary text-base">
-                    Rp {((booking as any).grandTotal ?? booking.totalPrice).toLocaleString("id-ID")}
+                    Rp {booking.totalPrice.toLocaleString("id-ID")}
                   </span>{" "}
                   {t("via:", "via:")}
                 </div>

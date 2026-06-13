@@ -1354,7 +1354,7 @@ export default function Booking() {
 
               <div className="border-t pt-4 space-y-2 text-sm">
                 <div className="flex justify-between">
-                  <span className="text-muted-foreground">{t("Harga/jam (incl. PPN)", "Price/hour (incl. VAT)")}</span>
+                  <span className="text-muted-foreground">{t("Harga/jam", "Price/hour")}</span>
                   <span>{formatCurrency(facility.pricePerHour)}</span>
                 </div>
                 <div className="flex justify-between">
@@ -1394,12 +1394,12 @@ export default function Booking() {
                   return (
                     <>
                       <div className="flex justify-between font-bold text-lg pt-2 border-t">
-                        <span>{t("Grand Total (incl. PPN)", "Grand Total (incl. VAT)")}</span>
+                        <span>{t("Grand Total", "Grand Total")}</span>
                         <span className="text-primary">{grand == null ? "..." : formatCurrency(grand)}</span>
                       </div>
                       {isRepeat && !isChecking && checkResult && effectiveCount > 0 && (
                         <div className="text-xs text-muted-foreground text-right">
-                          {effectiveCount} {t("sesi", "sessions")} × {formatCurrency(grand! / effectiveCount)} (incl. PPN)
+                          {effectiveCount} {t("sesi", "sessions")} × {formatCurrency(grand! / effectiveCount)}
                         </div>
                       )}
                     </>

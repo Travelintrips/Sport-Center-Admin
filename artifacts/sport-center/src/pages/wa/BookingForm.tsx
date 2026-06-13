@@ -190,8 +190,8 @@ export default function WaBookingForm() {
                 <span className="font-semibold">{result.startTime} – {result.endTime}</span>
               </div>
               <div className="flex justify-between border-t border-gray-200 pt-1.5">
-                <span className="font-bold text-gray-700">Grand Total (incl. PPN)</span>
-                <span className="font-black text-orange-600">Rp {((result as any).grandTotal != null ? Number((result as any).grandTotal) : result.totalPrice).toLocaleString("id-ID")}</span>
+                <span className="font-bold text-gray-700">Grand Total</span>
+                <span className="font-black text-orange-600">Rp {result.totalPrice.toLocaleString("id-ID")}</span>
               </div>
             </div>
 
@@ -350,13 +350,13 @@ export default function WaBookingForm() {
             <Card className="border-orange-200 bg-orange-50">
               <CardContent className="pt-4 pb-3 space-y-1.5">
                 <div className="flex justify-between items-center border-t border-orange-200 pt-1.5">
-                  <span className="text-gray-700 font-bold">Grand Total (incl. PPN)</span>
+                  <span className="text-gray-700 font-bold">Grand Total</span>
                   <span className="text-orange-600 font-black text-xl">
                     Rp {totalPrice.toLocaleString("id-ID")}
                   </span>
                 </div>
                 <p className="text-xs text-gray-500">
-                  {facility?.pricePerHour.toLocaleString("id-ID")}/jam × {form.durationHours} jam (incl. PPN)
+                  {facility?.pricePerHour.toLocaleString("id-ID")}/jam × {form.durationHours} jam
                 </p>
               </CardContent>
             </Card>
