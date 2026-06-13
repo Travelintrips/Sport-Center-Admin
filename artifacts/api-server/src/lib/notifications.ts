@@ -332,6 +332,114 @@ export async function notifyWaStaffCheckin(data: WaStaffCheckinData): Promise<vo
   await sendWAToAdmins(msg);
 }
 
+export interface WaBookingPendingApprovalData {
+  customerName: string;
+  customerPhone: string;
+  orderNumber: string;
+  facilityName: string;
+  bookingDate: string;
+  startTime: string;
+  endTime: string;
+  durationHours: number;
+  totalPrice: string;
+  statusUrl: string;
+}
+
+export async function notifyWaBookingPendingApproval(data: WaBookingPendingApprovalData): Promise<void> {
+  const msg =
+    `⏳ *Booking Diterima — Menunggu Persetujuan Admin*\n\n` +
+    `Halo *${data.customerName}*,\n` +
+    `Permintaan booking kamu sudah kami terima dan sedang dalam proses persetujuan admin.\n\n` +
+    `📋 *Detail Booking:*\n` +
+    `• Kode: *${data.orderNumber}*\n` +
+    `• Fasilitas: *${data.facilityName}*\n` +
+    `• Tanggal: *${data.bookingDate}*\n` +
+    `• Jam: *${data.startTime} – ${data.endTime}*\n` +
+    `• Durasi: *${data.durationHours} jam*\n` +
+    `• Total: *Rp ${data.totalPrice}*\n\n` +
+    `Status: *Menunggu approval admin* ⏳\n\n` +
+    `Kamu akan segera mendapat notifikasi jika booking disetujui. Terima kasih! 🙏\n\n` +
+    `🔍 Cek status: ${data.statusUrl}`;
+  await sendWA(data.customerPhone, msg);
+}
+
+export interface WaAdminNewBookingData {
+  orderNumber: string;
+  customerName: string;
+  customerPhone: string;
+  facilityName: string;
+  bookingDate: string;
+  startTime: string;
+  endTime: string;
+  durationHours: number;
+  totalPrice: string;
+  isWeekend: boolean;
+  appliedRules?: string;
+  statusUrl: string;
+}
+
+export async function notifyWaAdminNewBooking(data: WaAdminNewBookingData): Promise<void> {
+  const dayType = data.isWeekend ? "Weekend" : "Weekday";
+  const msg =
+    `🏅 *BOOKING BARU SPORT CENTER*\n\n` +
+    `Kode: *${data.orderNumber}*\n` +
+    `Customer: *${data.customerName}*\n` +
+    `WA: *${data.customerPhone}*\n` +
+    `Fasilitas: *${data.facilityName}*\n` +
+    `Tanggal: *${data.bookingDate}* (${dayType})\n` +
+    `Jam: *${data.startTime} – ${data.endTime}*\n` +
+    `Durasi: *${data.durationHours} jam*\n` +
+    `Total: *Rp ${data.totalPrice}*\n` +
+    (data.appliedRules ? `Harga: ${data.appliedRules}\n` : "") +
+    `Status: *Menunggu approval admin* ⏳\n\n` +
+    `Balas:\n` +
+    `✅ *APPROVE ${data.orderNumber}*\n` +
+    `❌ *REJECT ${data.orderNumber} alasan*\n\n` +
+    `🔗 ${data.statusUrl}`;
+  await sendWAToAdmins(msg);
+}
+
+export async function notifyWaBookingApproved(data: WaBookingCreatedData): Promise<void> {
+  const msg =
+    `✅ *Booking Disetujui!*\n\n` +
+    `Halo *${data.customerName}*,\n` +
+    `Booking kamu sudah *DISETUJUI* admin! 🎉\n\n` +
+    `📋 *Detail:*\n` +
+    `• Order: *${data.orderNumber}*\n` +
+    `• Fasilitas: *${data.facilityName}*\n` +
+    `• Tanggal: *${data.bookingDate}*\n` +
+    `• Jam: *${data.startTime} – ${data.endTime}*\n` +
+    `• Total: *Rp ${data.totalPrice}*\n\n` +
+    `💳 *Langkah selanjutnya — Lakukan pembayaran:*\n` +
+    `Bank: *${data.bankName}*\n` +
+    `Rekening: *${data.bankAccount}*\n` +
+    `Atas Nama: *${data.bankAccountName}*\n\n` +
+    `📎 Upload bukti transfer:\n${data.uploadProofUrl}\n\n` +
+    `⏰ Deadline bayar: *${data.paymentDeadline ?? "-"}*\n\n` +
+    `🔍 Status: ${data.statusUrl}`;
+  await sendWA(data.customerPhone, msg);
+}
+
+export async function notifyWaBookingRejectedByAdmin(params: {
+  customerPhone: string;
+  customerName: string;
+  orderNumber: string;
+  facilityName: string;
+  bookingDate: string;
+  startTime: string;
+  endTime: string;
+  reason?: string;
+}): Promise<void> {
+  const msg =
+    `❌ *Booking Ditolak Admin*\n\n` +
+    `Halo *${params.customerName}*,\n` +
+    `Maaf, permintaan booking *${params.orderNumber}* untuk *${params.facilityName}* pada *${params.bookingDate}* pukul *${params.startTime}–${params.endTime}* tidak dapat disetujui.\n\n` +
+    (params.reason ? `Alasan: _${params.reason}_\n\n` : "") +
+    `Silakan ketik *booking* untuk membuat booking baru dengan jadwal berbeda.\n` +
+    `Terima kasih atas pengertiannya. 🙏`;
+  await sendWA(params.customerPhone, msg);
+}
+
 export interface AuditNotifData {
   critical: number;
   warning: number;

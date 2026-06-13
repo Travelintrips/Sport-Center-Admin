@@ -8,6 +8,7 @@ import { scSchema } from "./_schema";
 export const bookingStatusEnum = scSchema.enum("booking_status", [
   "pending_payment",
   "waiting_confirmation",
+  "waiting_admin_approval",
   "paid",
   "confirmed",
   "completed",

@@ -29,7 +29,12 @@ import {
   notifyWaPaymentRejected,
   notifyWaStaffCheckin,
   notifyWaCustomerRegistered,
+  notifyWaBookingPendingApproval,
+  notifyWaAdminNewBooking,
+  notifyWaBookingApproved,
+  notifyWaBookingRejectedByAdmin,
 } from "../lib/notifications";
+import { calculatePrice } from "../lib/pricing";
 import { logAudit } from "../lib/auditLog";
 import { hashPassword } from "../lib/auth";
 import { syncStatusToBizportal } from "../lib/bizportalSync";
@@ -1039,14 +1044,74 @@ async function execAdminApprove(adminPhone: string, orderNumber: string) {
     await sendWAMsg(adminPhone, `❌ Order *${orderNumber}* tidak ditemukan.`);
     return;
   }
-  if (!["waiting_confirmation", "pending_payment"].includes(booking.status)) {
-    await sendWAMsg(adminPhone, `⚠️ Order *${orderNumber}* tidak bisa dikonfirmasi. Status saat ini: *${booking.status}*.`);
+
+  const [facility] = await db.select().from(facilitiesTable)
+    .where(eq(facilitiesTable.id, booking.facilityId)).limit(1);
+
+  // ── Handle waiting_admin_approval: ubah ke pending_payment + kirim instruksi bayar ──
+  if (booking.status === "waiting_admin_approval") {
+    const paymentDeadline = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 jam
+    await db.update(bookingsTable)
+      .set({ status: "pending_payment", paymentDeadline, updatedAt: new Date() })
+      .where(eq(bookingsTable.id, booking.id));
+
+    await db.insert(bookingHistoryTable).values({
+      bookingId: booking.id,
+      fromStatus: "waiting_admin_approval",
+      toStatus: "pending_payment",
+      changedByName: `admin (WA: ${adminPhone})`,
+      note: "Booking disetujui admin via WhatsApp. Customer diminta melakukan pembayaran.",
+    });
+
+    const proofToken = await createWaToken(booking.id, "upload_proof", 7);
+    const settingsRows = await db.select().from(settingsTable).limit(1);
+    const settings = settingsRows[0];
+    const amountToPay = booking.grandTotal ? Number(booking.grandTotal) : Number(booking.totalPrice);
+    const statusUrl = `${APP_URL}/wa/status/${booking.orderNumber}`;
+    const uploadProofUrl = `${APP_URL}/wa/proof/${proofToken}`;
+    const deadlineStr = paymentDeadline.toLocaleString("id-ID", { timeZone: "Asia/Jakarta", hour12: false });
+
+    notifyWaBookingApproved({
+      customerName: booking.customerName,
+      customerPhone: booking.customerPhone,
+      orderNumber: booking.orderNumber,
+      facilityName: facility?.name ?? "",
+      bookingDate: booking.bookingDate,
+      startTime: booking.startTime,
+      endTime: booking.endTime,
+      totalPrice: amountToPay.toLocaleString("id-ID"),
+      paymentDeadline: deadlineStr,
+      statusUrl,
+      uploadProofUrl,
+      bankName: settings?.bankName ?? "",
+      bankAccount: settings?.bankAccount ?? "",
+      bankAccountName: settings?.bankAccountName ?? "",
+    });
+
+    await logAudit({
+      action: "wa_admin_approve_booking",
+      entity: "booking",
+      entityId: booking.id,
+      before: { status: "waiting_admin_approval" },
+      after: { status: "pending_payment" },
+      userName: `admin (WA: ${adminPhone})`,
+    });
+
+    await sendWAMsg(adminPhone,
+      `✅ *${orderNumber}* disetujui!\n` +
+      `Customer: *${booking.customerName}*\n` +
+      `${facility?.name ?? ""} | ${booking.bookingDate} ${booking.startTime}–${booking.endTime}\n\n` +
+      `Customer diberitahu untuk melakukan pembayaran dalam 24 jam.`
+    );
     return;
   }
-  const [facility] = await db.select({ name: facilitiesTable.name })
-    .from(facilitiesTable).where(eq(facilitiesTable.id, booking.facilityId)).limit(1);
 
-  // Upsert payment jika belum ada
+  // ── Handle waiting_confirmation / pending_payment: konfirmasi pembayaran ──
+  if (!["waiting_confirmation", "pending_payment"].includes(booking.status)) {
+    await sendWAMsg(adminPhone, `⚠️ Order *${orderNumber}* tidak bisa dikonfirmasi. Status saat ini: *${booking.status.replace(/_/g, " ").toUpperCase()}*.`);
+    return;
+  }
+
   const [existingPay] = await db.select().from(paymentsTable)
     .where(eq(paymentsTable.bookingId, booking.id)).limit(1);
   if (existingPay) {
@@ -1071,14 +1136,13 @@ async function execAdminApprove(adminPhone: string, orderNumber: string) {
     fromStatus: booking.status,
     toStatus: "confirmed",
     changedByName: `admin (WA: ${adminPhone})`,
-    note: "Dikonfirmasi admin via WhatsApp command",
+    note: "Pembayaran dikonfirmasi admin via WhatsApp command",
   });
 
-  // Create checkin/finish tokens
   const checkinToken = await createWaToken(booking.id, "checkin", 30);
   const finishToken = await createWaToken(booking.id, "finish", 30);
-
   const statusUrl = `${APP_URL}/wa/status/${booking.orderNumber}`;
+
   notifyWaBookingConfirmed({
     customerName: booking.customerName,
     customerPhone: booking.customerPhone,
@@ -1127,7 +1191,7 @@ async function execAdminReject(adminPhone: string, orderNumber: string, reason: 
     return;
   }
   if (["cancelled", "rejected", "refunded", "completed"].includes(booking.status)) {
-    await sendWAMsg(adminPhone, `⚠️ Order *${orderNumber}* sudah dalam status *${booking.status}*, tidak bisa ditolak.`);
+    await sendWAMsg(adminPhone, `⚠️ Order *${orderNumber}* sudah dalam status *${booking.status.replace(/_/g, " ").toUpperCase()}*, tidak bisa ditolak.`);
     return;
   }
   const [facility] = await db.select({ name: facilitiesTable.name })
@@ -1146,20 +1210,34 @@ async function execAdminReject(adminPhone: string, orderNumber: string, reason: 
     note: reason ? `Ditolak admin via WA. Alasan: ${reason}` : "Ditolak admin via WA.",
   });
 
-  // New upload token for customer
-  const newUploadToken = await createWaToken(booking.id, "upload_proof", 7);
-  notifyWaPaymentRejected({
-    customerName: booking.customerName,
-    customerPhone: booking.customerPhone,
-    orderNumber: booking.orderNumber,
-    facilityName: facility?.name ?? "",
-    bookingDate: booking.bookingDate,
-    startTime: booking.startTime,
-    endTime: booking.endTime,
-    totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
-    uploadProofUrl: `${APP_URL}/wa/proof/${newUploadToken}`,
-    reason,
-  });
+  // Kalau dari waiting_admin_approval: kirim notif penolakan booking (bukan pembayaran)
+  if (booking.status === "waiting_admin_approval") {
+    notifyWaBookingRejectedByAdmin({
+      customerPhone: booking.customerPhone,
+      customerName: booking.customerName,
+      orderNumber: booking.orderNumber,
+      facilityName: facility?.name ?? "",
+      bookingDate: booking.bookingDate,
+      startTime: booking.startTime,
+      endTime: booking.endTime,
+      reason,
+    });
+  } else {
+    // Penolakan pembayaran — customer perlu upload ulang
+    const newUploadToken = await createWaToken(booking.id, "upload_proof", 7);
+    notifyWaPaymentRejected({
+      customerName: booking.customerName,
+      customerPhone: booking.customerPhone,
+      orderNumber: booking.orderNumber,
+      facilityName: facility?.name ?? "",
+      bookingDate: booking.bookingDate,
+      startTime: booking.startTime,
+      endTime: booking.endTime,
+      totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
+      uploadProofUrl: `${APP_URL}/wa/proof/${newUploadToken}`,
+      reason,
+    });
+  }
 
   await logAudit({
     action: "wa_admin_reject",
@@ -1457,12 +1535,108 @@ async function buildStepQuestion(
   }
 }
 
+// ─── Helper: get alternative available slots ──────────────────────────────────
+
+function minutesToTimeStr(m: number): string {
+  const h = Math.floor(m / 60) % 24;
+  const min = m % 60;
+  return `${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}`;
+}
+
+function isWeekendDate(dateStr: string): boolean {
+  const d = new Date(dateStr + "T00:00:00+07:00");
+  return d.getDay() === 0 || d.getDay() === 6;
+}
+
+async function getAlternativeSlots(
+  facilityId: number,
+  date: string,
+  requestedStartTime: string,
+  durationHours: number,
+  openTime: string,
+  closeTime: string
+): Promise<string[]> {
+  const existingBookings = await db.select({
+    startTime: bookingsTable.startTime,
+    endTime: bookingsTable.endTime,
+    status: bookingsTable.status,
+  }).from(bookingsTable)
+    .where(and(eq(bookingsTable.facilityId, facilityId), eq(bookingsTable.bookingDate, date)));
+
+  const activeBookings = existingBookings.filter(b => !INACTIVE_STATUSES.includes(b.status));
+  const openMin = timeToMinutes(openTime);
+  const closeMin = timeToMinutes(closeTime);
+  const requestedMin = timeToMinutes(requestedStartTime);
+  const durMin = durationHours * 60;
+
+  const candidates: number[] = [];
+  for (let t = openMin; t + durMin <= closeMin; t += 60) {
+    candidates.push(t);
+  }
+
+  candidates.sort((a, b) => Math.abs(a - requestedMin) - Math.abs(b - requestedMin));
+
+  const alternatives: string[] = [];
+  for (const startMin of candidates) {
+    if (startMin === requestedMin) continue;
+    const endMin = startMin + durMin;
+    const hasConflict = activeBookings.some(b => {
+      const bS = timeToMinutes(b.startTime);
+      const bE = timeToMinutes(b.endTime);
+      return startMin < bE && endMin > bS;
+    });
+    if (!hasConflict) {
+      alternatives.push(`${minutesToTimeStr(startMin)}–${minutesToTimeStr(endMin)}`);
+      if (alternatives.length >= 3) break;
+    }
+  }
+  return alternatives;
+}
+
+// ─── Auto-create customer if WA user not registered ───────────────────────────
+
+async function ensureCustomer(phone: string, name: string): Promise<{ id: number; email: string }> {
+  const [existing] = await db.select({ id: usersTable.id, email: usersTable.email })
+    .from(usersTable).where(eq(usersTable.phone, phone)).limit(1);
+  if (existing) return existing;
+
+  const customerCode = await generateCustomerCode();
+  const finalEmail = `wa_${phone}@whatsapp.local`;
+  const [emailConflict] = await db.select({ id: usersTable.id }).from(usersTable)
+    .where(eq(usersTable.email, finalEmail)).limit(1);
+
+  const email = emailConflict ? `wa_${phone}_${Date.now()}@whatsapp.local` : finalEmail;
+  const passwordHash = hashPassword(randomBytes(16).toString("hex"));
+
+  const [user] = await db.insert(usersTable).values({
+    name: name.trim(),
+    email,
+    passwordHash,
+    phone,
+    role: "customer",
+    customerCode,
+    registrationSource: "whatsapp",
+  }).returning({ id: usersTable.id, email: usersTable.email });
+
+  await logAudit({
+    action: "CUSTOMER_REGISTERED_VIA_WA_CHAT",
+    entity: "user",
+    entityId: user.id,
+    after: { customerCode, phone, name: name.trim(), registrationSource: "whatsapp" },
+  });
+
+  return user;
+}
+
+// ─── Main: create booking from session with full FASE 2 logic ─────────────────
+
 async function execCreateBookingFromSession(session: WaBookingSessionRow, phone: string): Promise<void> {
   if (!session.facilityId || !session.bookingDate || !session.startTime || !session.durationMinutes || !session.customerName) {
     await sendWAMsg(phone, `❌ Data booking tidak lengkap. Ketik *batal* dan mulai ulang.`);
     return;
   }
 
+  // ── 1. Validasi fasilitas ──────────────────────────────────────────────────
   const [facility] = await db.select().from(facilitiesTable)
     .where(and(eq(facilitiesTable.id, session.facilityId), eq(facilitiesTable.isActive, true)))
     .limit(1);
@@ -1471,10 +1645,11 @@ async function execCreateBookingFromSession(session: WaBookingSessionRow, phone:
     return;
   }
 
+  // ── 2. Hitung durasi & end time ────────────────────────────────────────────
   const durationHours = minutesToHours(session.durationMinutes);
   const endTime = addHoursToTime(session.startTime, durationHours);
 
-  // Validate operating hours
+  // ── 3. Validasi jam operasional ────────────────────────────────────────────
   const openMin = timeToMinutes(facility.openTime);
   const closeMin = timeToMinutes(facility.closeTime);
   const startMin = timeToMinutes(session.startTime);
@@ -1482,49 +1657,112 @@ async function execCreateBookingFromSession(session: WaBookingSessionRow, phone:
   if (startMin < openMin || endMin > closeMin) {
     const reply =
       `⚠️ Waktu yang dipilih di luar jam operasional *${facility.openTime}–${facility.closeTime}*.\n` +
-      `Ketik jam lain atau *batal* untuk membatalkan.`;
+      `Pilih jam lain. Ketik jam yang kamu inginkan.`;
     await updateSession(session.id, { currentStep: "ask_time" });
+    await appendMessage(session.id, "bot", reply);
     await sendWAMsg(phone, reply);
     return;
   }
 
-  // Conflict check
+  // ── 4. Validasi tanggal (tidak boleh lampau) ───────────────────────────────
+  if (session.bookingDate < todayWIB()) {
+    const reply = `⚠️ Tanggal *${session.bookingDate}* sudah lewat. Pilih tanggal yang akan datang.`;
+    await updateSession(session.id, { currentStep: "ask_date" });
+    await appendMessage(session.id, "bot", reply);
+    await sendWAMsg(phone, reply);
+    return;
+  }
+
+  // ── 5. Audit: data lengkap ─────────────────────────────────────────────────
+  await logAudit({
+    action: "booking_data_completed",
+    entity: "wa_booking_session",
+    entityId: session.id,
+    after: {
+      phone,
+      facilityId: session.facilityId,
+      facilityName: facility.name,
+      bookingDate: session.bookingDate,
+      startTime: session.startTime,
+      endTime,
+      durationHours,
+      customerName: session.customerName,
+    },
+  });
+
+  // ── 6. Cek bentrok jadwal ──────────────────────────────────────────────────
   const conflict = await checkConflict(facility.id, session.bookingDate, session.startTime, endTime);
   if (conflict) {
-    const reply =
-      `⚠️ Slot *${session.startTime}–${endTime}* pada *${session.bookingDate}* sudah terisi.\n` +
-      `Pilih jam lain. Ketik jam yang ingin kamu booking.`;
+    const alternatives = await getAlternativeSlots(
+      facility.id, session.bookingDate, session.startTime, durationHours, facility.openTime, facility.closeTime
+    );
+
+    await logAudit({
+      action: "schedule_conflict_detected",
+      entity: "wa_booking_session",
+      entityId: session.id,
+      after: { phone, facilityId: facility.id, bookingDate: session.bookingDate, startTime: session.startTime, endTime, alternatives },
+    });
+
+    let reply =
+      `⚠️ *Jadwal Tidak Tersedia*\n\n` +
+      `Slot *${session.startTime}–${endTime}* pada *${session.bookingDate}* sudah terisi untuk *${facility.name}*.`;
+
+    if (alternatives.length > 0) {
+      reply += `\n\n🕐 *Alternatif jam yang tersedia pada tanggal yang sama:*\n` +
+        alternatives.map((alt, i) => `${i + 1}. *${alt}*`).join("\n") +
+        `\n\nKetik jam pilihan kamu (contoh: *jam 10.00*) atau *batal* untuk membatalkan.`;
+    } else {
+      reply += `\n\nMaaf, tidak ada slot lain yang tersedia pada tanggal tersebut.\nKetik tanggal lain atau *batal* untuk membatalkan.`;
+    }
+
     await updateSession(session.id, { currentStep: "ask_time" });
+    await appendMessage(session.id, "bot", reply);
     await sendWAMsg(phone, reply);
     return;
   }
 
-  const totalPrice = Number(facility.pricePerHour) * durationHours;
-  const { calculateTax, recordTaxTransaction } = await import("../lib/tax");
+  // ── 7. Cari atau buat customer ─────────────────────────────────────────────
+  const customer = await ensureCustomer(phone, session.customerName);
+
+  // ── 8. Hitung harga dari pricing rules (weekday/weekend/peak) ─────────────
+  let priceCalc;
+  try {
+    priceCalc = await calculatePrice(facility.id, session.bookingDate, session.startTime, endTime, durationHours);
+  } catch {
+    priceCalc = { basePrice: Number(facility.pricePerHour) * durationHours, finalPrice: Number(facility.pricePerHour) * durationHours, appliedRules: [] };
+  }
+
+  const totalPrice = priceCalc.finalPrice;
+  const basePrice = priceCalc.basePrice;
+  const discountAmount = Math.max(0, basePrice - totalPrice);
+  const appliedRulesStr = priceCalc.appliedRules.length > 0
+    ? priceCalc.appliedRules.map(r => `${r.name} (${r.adjustment >= 0 ? "+" : ""}${formatIDR(r.adjustment)})`).join(", ")
+    : "";
+
+  // ── 9. Hitung PPN ──────────────────────────────────────────────────────────
   const taxCalc = await calculateTax(totalPrice, "sport_center_booking", session.bookingDate);
+  const grandTotal = taxCalc.taxAmount > 0 ? taxCalc.grandTotal : totalPrice;
   const orderNumber = await generateOrderNumber();
-  const paymentDeadline = new Date(Date.now() + 60 * 60 * 1000);
 
-  const customerEmail = `wa_${phone}@whatsapp.local`;
-
+  // ── 10. Buat booking dengan status waiting_admin_approval ──────────────────
   const [booking] = await db.insert(bookingsTable).values({
     orderNumber,
     customerName: session.customerName,
-    customerEmail,
+    customerEmail: customer.email,
     customerPhone: phone,
-    customerId: session.customerId ?? null,
+    customerId: customer.id,
     facilityId: facility.id,
     bookingDate: session.bookingDate,
     startTime: session.startTime,
     endTime,
     durationHours,
     totalPrice: String(totalPrice),
-    discountAmount: "0",
+    discountAmount: String(discountAmount),
     apDiscountAmount: "0",
-    basePrice: String(totalPrice),
+    basePrice: String(basePrice),
     source: "whatsapp_chat",
-    paymentDeadline,
-    status: "pending_payment",
+    status: "waiting_admin_approval",
     ppnRate: taxCalc.taxAmount > 0 ? String(taxCalc.taxRate) : null,
     ppnAmount: taxCalc.taxAmount > 0 ? String(taxCalc.taxAmount) : null,
     grandTotal: taxCalc.taxAmount > 0 ? String(taxCalc.grandTotal) : null,
@@ -1533,12 +1771,13 @@ async function execCreateBookingFromSession(session: WaBookingSessionRow, phone:
   await db.insert(bookingHistoryTable).values({
     bookingId: booking.id,
     fromStatus: null,
-    toStatus: "pending_payment",
+    toStatus: "waiting_admin_approval",
     changedByName: session.customerName,
-    note: "Booking dibuat via WhatsApp Chat (conversational flow)",
+    note: "Booking dibuat via WhatsApp Chat — menunggu persetujuan admin",
   });
 
   broadcastAvailabilityChange(facility.id, session.bookingDate);
+
   if (taxCalc.taxCode) {
     recordTaxTransaction("booking", booking.id, booking.orderNumber, taxCalc, session.bookingDate).catch(() => {});
   }
@@ -1546,16 +1785,31 @@ async function execCreateBookingFromSession(session: WaBookingSessionRow, phone:
   // Mark session done
   await updateSession(session.id, { status: "completed", currentStep: "done" });
 
-  // Proof upload token
-  const proofToken = await createWaToken(booking.id, "upload_proof", 7);
-  const settingsRows = await db.select().from(settingsTable).limit(1);
-  const settings = settingsRows[0];
-  const amountToPay = taxCalc.taxAmount > 0 ? taxCalc.grandTotal : totalPrice;
-  const statusUrl = `${APP_URL}/wa/status/${orderNumber}`;
-  const uploadProofUrl = `${APP_URL}/wa/proof/${proofToken}`;
-  const deadlineStr = paymentDeadline.toLocaleString("id-ID", { timeZone: "Asia/Jakarta", hour12: false });
+  // ── 11. Audit: booking dibuat ──────────────────────────────────────────────
+  await logAudit({
+    action: "booking_created_from_wa",
+    entity: "booking",
+    entityId: booking.id,
+    after: {
+      orderNumber,
+      source: "whatsapp_chat",
+      sessionId: session.id,
+      status: "waiting_admin_approval",
+      facilityId: facility.id,
+      bookingDate: session.bookingDate,
+      startTime: session.startTime,
+      endTime,
+      totalPrice: grandTotal,
+      customerId: customer.id,
+      appliedRules: appliedRulesStr || null,
+    },
+  });
 
-  notifyWaBookingCreated({
+  const statusUrl = `${APP_URL}/wa/status/${orderNumber}`;
+  const weekend = isWeekendDate(session.bookingDate);
+
+  // ── 12. Kirim WA ke customer ───────────────────────────────────────────────
+  notifyWaBookingPendingApproval({
     customerName: session.customerName,
     customerPhone: phone,
     orderNumber,
@@ -1563,20 +1817,33 @@ async function execCreateBookingFromSession(session: WaBookingSessionRow, phone:
     bookingDate: session.bookingDate,
     startTime: booking.startTime,
     endTime: booking.endTime,
-    totalPrice: amountToPay.toLocaleString("id-ID"),
-    paymentDeadline: deadlineStr,
+    durationHours,
+    totalPrice: grandTotal.toLocaleString("id-ID"),
     statusUrl,
-    uploadProofUrl,
-    bankName: settings?.bankName ?? "",
-    bankAccount: settings?.bankAccount ?? "",
-    bankAccountName: settings?.bankAccountName ?? "",
   });
 
+  // ── 13. Kirim WA ke semua admin ────────────────────────────────────────────
+  notifyWaAdminNewBooking({
+    orderNumber,
+    customerName: session.customerName,
+    customerPhone: phone,
+    facilityName: facility.name,
+    bookingDate: session.bookingDate,
+    startTime: booking.startTime,
+    endTime: booking.endTime,
+    durationHours,
+    totalPrice: grandTotal.toLocaleString("id-ID"),
+    isWeekend: weekend,
+    appliedRules: appliedRulesStr || undefined,
+    statusUrl,
+  });
+
+  // ── 14. Audit: notifikasi admin dikirim ────────────────────────────────────
   await logAudit({
-    action: "wa_booking_created",
+    action: "admin_approval_sent",
     entity: "booking",
     entityId: booking.id,
-    after: { orderNumber, source: "whatsapp_chat", sessionId: session.id },
+    after: { orderNumber, sentToAdmins: true, bookingDate: session.bookingDate, facilityName: facility.name },
   });
 }
 
