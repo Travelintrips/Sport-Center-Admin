@@ -5,7 +5,7 @@ import {
   bankReconciliationMatchesTable,
   type BankMutation,
 } from "@workspace/db";
-import { eq, inArray, sql } from "drizzle-orm";
+import { eq, inArray, notInArray, sql } from "drizzle-orm";
 
 const GOPAY_PATTERN = /DOMPET ANAK BANGSA|GOPAY|OVO|DANA|LINKAJA|SHOPEEPAY/i;
 const ORDER_ID_PATTERN = /\b(ID\d{15,25}[A-Z]{0,4}|TRX\d{10,}|INV-\d{8,})\b/i;
@@ -45,6 +45,17 @@ function dayDiff(a: string, b: string): number {
   return Math.abs(Math.round((da - db) / 86400000));
 }
 
+/**
+ * Cek apakah dua nilai nominal cocok.
+ * Toleransi: selisih absolut < 1 rupiah ATAU selisih relatif < 1%
+ * (menangani kasus pembulatan, biaya admin kecil, dsb.)
+ */
+function amountMatches(a: number, b: number): boolean {
+  if (a <= 0 || b <= 0) return false;
+  const diff = Math.abs(a - b);
+  return diff < 1 || diff / Math.max(a, b) < 0.01;
+}
+
 interface MatchCandidate {
   candidateType: "payment" | "order";
   candidateId: number;
@@ -62,28 +73,31 @@ interface MatchCandidate {
 export async function computeMatchesForMutation(mutation: BankMutation): Promise<MatchCandidate[]> {
   const candidates: MatchCandidate[] = [];
 
-  const amount = Number(mutation.amount);
+  const mutationAmount = Number(mutation.amount);
   const normDesc = mutation.normalizedDescription ?? normalizeDescription(mutation.description);
   const providerOrderId = mutation.providerOrderId;
 
-  // Only match IN direction to payments/bookings (money received)
+  // Hanya cocokkan arah IN (uang masuk) ke payments/bookings
   if (mutation.direction !== "IN") return [];
 
+  // Ambil booking yang aktif / pernah bayar — skip expired/cancelled yang sudah sangat lama
+  const INACTIVE = ["cancelled", "rejected", "refunded"] as const;
   const bookings = await db
     .select({
       id: bookingsTable.id,
       orderNumber: bookingsTable.orderNumber,
       customerName: bookingsTable.customerName,
-      customerEmail: bookingsTable.customerEmail,
       bookingDate: bookingsTable.bookingDate,
       totalPrice: bookingsTable.totalPrice,
       grandTotal: bookingsTable.grandTotal,
       status: bookingsTable.status,
       updatedAt: sql<string>`${bookingsTable.updatedAt}`.as("updated_at"),
     })
-    .from(bookingsTable);
+    .from(bookingsTable)
+    .where(notInArray(bookingsTable.status, INACTIVE));
 
-  const payments = await db
+  // Ambil semua payments — Map: bookingId → payments[] (diurutkan confirmed/terbaru dulu)
+  const allPayments = await db
     .select({
       id: paymentsTable.id,
       bookingId: paymentsTable.bookingId,
@@ -95,32 +109,59 @@ export async function computeMatchesForMutation(mutation: BankMutation): Promise
     })
     .from(paymentsTable);
 
-  const paymentByBookingId = new Map(payments.map((p) => [p.bookingId, p]));
+  // Group payments by bookingId; prioritas: confirmed dulu, lalu terbaru
+  const paymentsByBookingId = new Map<number, typeof allPayments>();
+  for (const p of allPayments) {
+    if (!p.bookingId) continue;
+    const existing = paymentsByBookingId.get(p.bookingId) ?? [];
+    existing.push(p);
+    paymentsByBookingId.set(p.bookingId, existing);
+  }
+
+  // Pilih payment terbaik per booking (confirmed > terbaru)
+  function bestPayment(payments: typeof allPayments) {
+    const confirmed = payments.filter((p) => p.status === "confirmed");
+    const pool = confirmed.length ? confirmed : payments;
+    return pool.reduce((best, p) => {
+      const bt = new Date(best.createdAt ?? 0).getTime();
+      const pt = new Date(p.createdAt ?? 0).getTime();
+      return pt > bt ? p : best;
+    });
+  }
 
   for (const booking of bookings) {
-    const payment = paymentByBookingId.get(booking.id);
-    // grandTotal includes PPN; use it if set, otherwise fall back to totalPrice
-    const bookingAmount = Number(booking.grandTotal ?? booking.totalPrice);
+    const payments = paymentsByBookingId.get(booking.id);
+    const payment = payments?.length ? bestPayment(payments) : undefined;
+
+    // --- Amount match (40 pts) ---
+    // Cek 3 kemungkinan: payment.amount, booking.grandTotal, booking.totalPrice
+    const bookingAmountGross = booking.grandTotal ? Number(booking.grandTotal) : null;
+    const bookingAmountNet = Number(booking.totalPrice);
+    const paymentAmount = payment ? Number(payment.amount) : null;
+
+    let amountMatch = false;
+
+    if (paymentAmount !== null && amountMatches(paymentAmount, mutationAmount)) {
+      amountMatch = true;
+    } else if (bookingAmountGross !== null && amountMatches(bookingAmountGross, mutationAmount)) {
+      amountMatch = true;
+    } else if (amountMatches(bookingAmountNet, mutationAmount)) {
+      amountMatch = true;
+    }
+
+    if (!amountMatch) continue; // wajib cocok nominal
 
     const score_parts: string[] = [];
-    let score = 0;
-    let amountMatch = false;
+    let score = 40;
+    score_parts.push("nominal cocok");
+
     let dateMatch = false;
     let nameMatch = false;
     let orderIdMatch = false;
     let proofMatch = false;
 
-    // Amount match (40 pts)
-    if (Math.abs(bookingAmount - amount) < 1) {
-      score += 40;
-      amountMatch = true;
-      score_parts.push("nominal cocok");
-    } else {
-      continue; // Must have amount match to be a candidate
-    }
-
-    // Date match — use payment.createdAt if exists, else booking.updatedAt (when admin confirmed)
-    // Never use booking.bookingDate (that's when the facility is used, not when money was paid)
+    // --- Date match (max 25 pts) ---
+    // Gunakan tanggal payment, bukan tanggal booking (booking date = tanggal pakai fasilitas)
     const toDateStr = (d: Date | string | null | undefined): string | null => {
       if (!d) return null;
       if (typeof d === "string") return d.slice(0, 10);
@@ -140,13 +181,18 @@ export async function computeMatchesForMutation(mutation: BankMutation): Promise
         dateMatch = true;
         score_parts.push("tanggal pembayaran sama");
       } else if (diff <= 3) {
-        score += 15;
+        score += 20;
+        dateMatch = true;
+        score_parts.push(`tanggal pembayaran selisih ${diff} hari`);
+      } else if (diff <= 7) {
+        score += 10;
         dateMatch = true;
         score_parts.push(`tanggal pembayaran selisih ${diff} hari`);
       }
+      // > 7 hari: tidak dapat poin tanggal
     }
 
-    // GoPay / provider order ID match (30 pts)
+    // --- Order ID match (30 pts) ---
     if (providerOrderId) {
       const orderNum = booking.orderNumber ?? "";
       if (
@@ -159,15 +205,20 @@ export async function computeMatchesForMutation(mutation: BankMutation): Promise
       }
     }
 
-    // Customer name match (15 pts)
+    // --- Customer name match (15 pts) ---
     const customerNorm = normalizeDescription(booking.customerName ?? "");
-    if (customerNorm && normDesc.includes(customerNorm.split(" ")[0]!)) {
-      score += 15;
-      nameMatch = true;
-      score_parts.push(`nama customer "${booking.customerName}" ditemukan`);
+    if (customerNorm) {
+      // Cek setiap kata nama (>= 4 huruf) agar tidak false-positive dari kata pendek
+      const words = customerNorm.split(" ").filter((w) => w.length >= 4);
+      const anyWordMatch = words.some((w) => normDesc.includes(w));
+      if (anyWordMatch) {
+        score += 15;
+        nameMatch = true;
+        score_parts.push(`nama customer "${booking.customerName}" ditemukan`);
+      }
     }
 
-    // Proof URL presence bonus (5 pts)
+    // --- Bukti transfer bonus (5 pts) ---
     if (payment?.proofUrl) {
       score += 5;
       proofMatch = true;
@@ -183,7 +234,6 @@ export async function computeMatchesForMutation(mutation: BankMutation): Promise
       score += 5;
       score_parts.push(`status booking valid (${booking.status})`);
     }
-
     const candidate: MatchCandidate = {
       candidateType: payment ? "payment" : "order",
       candidateId: payment ? payment.id : booking.id,
@@ -225,7 +275,7 @@ export async function runMatching(mutationIds?: number[]): Promise<{
       .where(inArray(bankMutationsTable.status, ["unmatched", "duplicate_need_review"]));
   }
 
-  // Detect duplicates: mutations with same mutation_key
+  // Deteksi duplikat: mutasi dengan mutation_key yang sama
   const keyCount = new Map<string, number[]>();
   for (const m of mutations) {
     const arr = keyCount.get(m.mutationKey) ?? [];
@@ -241,7 +291,7 @@ export async function runMatching(mutationIds?: number[]): Promise<{
   for (const mutation of mutations) {
     const sameKey = keyCount.get(mutation.mutationKey) ?? [];
 
-    // Mark duplicates
+    // Tandai duplikat
     if (sameKey.length > 1) {
       await db
         .update(bankMutationsTable)
@@ -251,7 +301,7 @@ export async function runMatching(mutationIds?: number[]): Promise<{
       continue;
     }
 
-    // Delete old candidates for this mutation before re-computing
+    // Hapus kandidat lama sebelum re-komputasi
     await db
       .delete(bankReconciliationMatchesTable)
       .where(eq(bankReconciliationMatchesTable.mutationId, mutation.id));
@@ -267,7 +317,7 @@ export async function runMatching(mutationIds?: number[]): Promise<{
       continue;
     }
 
-    // Insert all candidates
+    // Simpan semua kandidat
     await db.insert(bankReconciliationMatchesTable).values(
       candidates.map((c) => ({
         mutationId: mutation.id,
@@ -289,7 +339,7 @@ export async function runMatching(mutationIds?: number[]): Promise<{
     const best = candidates[0]!;
 
     if (best.score >= 80) {
-      // Auto approve
+      // Auto approve — skor sangat tinggi, cocok otomatis
       await db
         .update(bankMutationsTable)
         .set({
@@ -309,13 +359,14 @@ export async function runMatching(mutationIds?: number[]): Promise<{
 
       autoApproved++;
     } else {
-      // Candidates found but score < 95 — set to "matched" so user can review
+      // Kandidat ditemukan tapi skor tidak cukup tinggi untuk auto-approve
+      // Set status "matched" dengan kandidat terbaik agar admin bisa review
       await db
         .update(bankMutationsTable)
         .set({
           status: "matched",
-          matchedPaymentId: null,
-          matchedOrderId: null,
+          matchedPaymentId: best.candidateType === "payment" ? best.candidateId : null,
+          matchedOrderId: best.candidateType === "order" ? best.candidateId : null,
           updatedAt: new Date(),
         })
         .where(eq(bankMutationsTable.id, mutation.id));

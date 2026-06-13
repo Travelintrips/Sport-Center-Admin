@@ -472,6 +472,95 @@ function EnrichedCandidateCard({
         )}
       </div>
     </div>
+  const [lightbox, setLightbox] = useState<string | null>(null);
+
+  return (
+    <>
+      <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/50 border">
+        {/* Thumbnail bukti transfer */}
+        {match.proofUrl && (
+          <button
+            className="shrink-0 w-14 h-14 rounded-lg overflow-hidden border bg-muted hover:opacity-80 transition-opacity"
+            onClick={() => setLightbox(match.proofUrl)}
+            title="Lihat bukti transfer"
+          >
+            <img
+              src={match.proofUrl}
+              alt="Bukti transfer"
+              className="w-full h-full object-cover"
+              onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+            />
+          </button>
+        )}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <Badge variant="outline" className="text-xs capitalize">{match.candidateType}</Badge>
+            <span className="text-sm font-medium">ID #{match.candidateId}</span>
+            <ScoreBadge score={match.matchScore} />
+            {match.status === "approved" && (
+              <Badge className="bg-green-100 text-green-700 border-green-200 text-xs">Disetujui</Badge>
+            )}
+            {match.status === "rejected" && (
+              <Badge className="bg-red-100 text-red-700 border-red-200 text-xs">Ditolak</Badge>
+            )}
+          </div>
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {match.amountMatch && <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-100 text-green-700">✓ Nominal</span>}
+            {match.dateMatch && <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-100 text-green-700">✓ Tanggal</span>}
+            {match.nameMatch && <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-100 text-green-700">✓ Nama</span>}
+            {match.orderIdMatch && <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">✓ Order ID</span>}
+            {match.proofMatch && <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">✓ Bukti</span>}
+          </div>
+          {match.matchReason && (
+            <p className="text-xs text-muted-foreground mt-1 truncate">{match.matchReason}</p>
+          )}
+          {match.proofUrl && (
+            <a
+              href={match.proofUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[10px] text-blue-600 hover:underline mt-0.5 inline-block"
+              onClick={(e) => e.stopPropagation()}
+            >
+              Buka bukti ↗
+            </a>
+          )}
+        </div>
+        {match.status === "candidate" && (
+          <Button size="sm" className="shrink-0 h-7 text-xs gap-1" onClick={() => onApprove(match.id)} disabled={isPending}>
+            <CheckCircle2 size={12} /> Pilih
+          </Button>
+        )}
+      </div>
+
+      {/* Lightbox */}
+      {lightbox && (
+        <Dialog open onOpenChange={() => setLightbox(null)}>
+          <DialogContent className="max-w-2xl p-2">
+            <DialogHeader>
+              <DialogTitle className="text-sm">Bukti Transfer – Payment ID #{match.candidateId}</DialogTitle>
+            </DialogHeader>
+            <div className="flex items-center justify-center bg-muted rounded-lg overflow-hidden min-h-[300px]">
+              <img
+                src={lightbox}
+                alt="Bukti transfer"
+                className="max-w-full max-h-[70vh] object-contain"
+              />
+            </div>
+            <div className="flex justify-end pt-1">
+              <a
+                href={lightbox}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-blue-600 hover:underline"
+              >
+                Buka di tab baru ↗
+              </a>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
+    </>
   );
 }
 

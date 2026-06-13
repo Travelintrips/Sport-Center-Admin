@@ -7,6 +7,7 @@ import {
   paymentsTable,
   facilitiesTable,
   auditLogsTable,
+  paymentsTable,
 } from "@workspace/db";
 import { eq, desc, and, inArray, sql, like, gte, lte } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
@@ -255,11 +256,32 @@ router.get("/bank-reconciliation/matches/:mutationId", adminMiddleware, async (r
 
     if (!mutation) { res.status(404).json({ error: "Mutasi tidak ditemukan" }); return; }
 
-    const matches = await db
+    const matchRows = await db
       .select()
       .from(bankReconciliationMatchesTable)
       .where(eq(bankReconciliationMatchesTable.mutationId, mutationId))
       .orderBy(desc(bankReconciliationMatchesTable.matchScore));
+
+    // Ambil proofUrl dari payments untuk kandidat bertipe "payment"
+    const paymentIds = matchRows
+      .filter((m) => m.candidateType === "payment")
+      .map((m) => m.candidateId);
+
+    const proofMap = new Map<number, string | null>();
+    if (paymentIds.length > 0) {
+      const payments = await db
+        .select({ id: paymentsTable.id, proofUrl: paymentsTable.proofUrl })
+        .from(paymentsTable)
+        .where(inArray(paymentsTable.id, paymentIds));
+      for (const p of payments) {
+        proofMap.set(p.id, p.proofUrl ?? null);
+      }
+    }
+
+    const matches = matchRows.map((m) => ({
+      ...m,
+      proofUrl: m.candidateType === "payment" ? (proofMap.get(m.candidateId) ?? null) : null,
+    }));
 
     res.json({ mutation, matches });
   } catch (err: any) {
