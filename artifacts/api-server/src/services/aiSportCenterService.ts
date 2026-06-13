@@ -278,32 +278,57 @@ export type AiIntent =
   | "out_of_scope";
 
 export function detectIntent(msg: string): AiIntent {
-  const lower = msg.toLowerCase();
+  const lower = msg.toLowerCase().trim();
 
-  // Admin action attempts — must be caught before general
+  // ── Admin action attempts (highest priority) ──────────────────────────────
   if (ADMIN_ONLY_ACTIONS.some((a) => lower.includes(a))) return "admin_action_attempt";
 
-  // talk_to_admin — request to speak with human admin
-  if (/\b(hubungi admin|bicara admin|minta admin|butuh admin|talk to admin|admin langsung|customer service|minta tolong admin|operator|cs sport|sambungkan admin)\b/.test(lower)) return "talk_to_admin";
+  // ── Talk to human admin ───────────────────────────────────────────────────
+  if (/\b(hubungi admin|bicara admin|minta admin|butuh admin|talk to admin|admin langsung|customer service|cs sport|sambungkan admin|minta tolong admin|operator|tanya admin|chat admin|ke admin|sama admin|via admin|telfon admin|telp admin)\b/.test(lower)) return "talk_to_admin";
 
-  // ask_reschedule_policy — reschedule or change booking questions
-  if (/\b(reschedule|jadwal ulang|ganti jadwal|ubah jadwal|pindah jadwal|ganti tanggal|ubah tanggal|pindah tanggal|ubah jam|ganti jam|pindah jam|kebijakan reschedule|policy reschedule)\b/.test(lower)) return "ask_reschedule_policy";
+  // ── Reschedule / change booking ───────────────────────────────────────────
+  if (/\b(reschedule|jadwal ulang|ganti jadwal|ubah jadwal|pindah jadwal|ganti tanggal|ubah tanggal|pindah tanggal|ubah jam|ganti jam|pindah jam|kebijakan reschedule|policy reschedule|mau ganti|pengen ganti|ngerubah jadwal|geser jadwal|geser tanggal|geser jam|mau ubah|bisa ganti|bisa ubah|bisa pindah)\b/.test(lower)) return "ask_reschedule_policy";
 
-  // Informational intents checked BEFORE booking_intent to avoid false positives
-  if (/\b(harga|tarif|biaya|berapa|price|cost)\b/.test(lower)) return "price_inquiry";
-  if (/\b(promo|diskon|voucher|kode promo|potongan|cashback)\b/.test(lower)) return "promo_inquiry";
-  if (/\b(slot|kosong|tersedia|available|ada slot|jam berapa bisa|kapan bisa)\b/.test(lower)) return "availability_check";
-  if (/\b(cara bayar|rekening|no rek|transfer ke|bank apa|qris|cara pembayaran)\b/.test(lower)) return "payment_info";
-  if (/\b(jam buka|jam tutup|buka jam|hari apa|operasional|buka sampai|jam berapa buka)\b/.test(lower)) return "operating_hours";
-  if (/\b(alamat|lokasi|dimana|contact|kontak|nomor telepon|wa admin)\b/.test(lower)) return "contact_info";
-  if (/\b(status|order saya|pesanan saya|cek booking|sudah bayar|sudah lunas|booking saya)\b/.test(lower)) return "status_check";
-  if (/\b(member|membership|langganan|daftar member)\b/.test(lower)) return "membership_inquiry";
-  if (/\b(fasilitas apa|ada apa aja|list fasilitas|lapangan apa saja)\b/.test(lower)) return "facility_info";
+  // ── Informational — checked BEFORE booking_intent ─────────────────────────
 
-  // Booking intent: explicit action verb required, not just facility/price question
-  if (/\b(mau book|mau pesan|mau sewa|mau booking|mau reservasi|mau daftar|saya booking|reservasi|pesan lapangan|book lapangan|booking lapangan|mulai booking)\b/.test(lower)) return "booking_intent";
-  if (/\bboking\b/.test(lower)) return "booking_intent";
-  if (/\bbooking\b/.test(lower) && !/booking saya|status booking|cek booking/.test(lower)) return "booking_intent";
+  // Price inquiry
+  if (/\b(harga|tarif|biaya|berapa|price|cost|sewa berapa|bayar berapa|ongkos|rate|mahal|murah|seberapa)\b/.test(lower)) return "price_inquiry";
+
+  // Promo / discount
+  if (/\b(promo|diskon|voucher|kode promo|potongan|cashback|promo apa|ada diskon|ada promo|kupon|coupon|hemat|gratis|promo hari ini|diskon berapa)\b/.test(lower)) return "promo_inquiry";
+
+  // Availability check — "mana yang kosong", "masih ada slot", "jam berapa kosong"
+  if (/\b(slot|kosong|tersedia|available|ada slot|jam berapa bisa|kapan bisa|masih ada|masih bisa|ada yang kosong|sudah penuh|penuh gak|penuh ga|cek slot|cek ketersediaan|lihat slot|pilih jam|jam mana|hari mana)\b/.test(lower)) return "availability_check";
+
+  // Payment info
+  if (/\b(cara bayar|rekening|no rek|transfer ke|bank apa|qris|cara pembayaran|nomor rekening|rek berapa|transfer kemana|bayar lewat|metode bayar|bayar pakai|kirim bukti|upload bukti|bukti transfer|bukti bayar)\b/.test(lower)) return "payment_info";
+
+  // Operating hours
+  if (/\b(jam buka|jam tutup|buka jam|hari apa|operasional|buka sampai|jam berapa buka|buka gak|buka hari ini|tutup jam|kapan buka|kapan tutup|jam operasional|libur gak|hari libur|weekend buka|hari minggu buka)\b/.test(lower)) return "operating_hours";
+
+  // Contact / location
+  if (/\b(alamat|lokasi|dimana|di mana|contact|kontak|nomor telepon|wa admin|google maps|maps|rute|denah|petunjuk arah|jalan apa|deket mana|sekitar|koordinat|gps|pin lokasi|tempat)\b/.test(lower)) return "contact_info";
+
+  // Status check — "cek order", "udah dikonfirmasi belum", "booking aku"
+  if (/\b(status|order saya|pesanan saya|cek booking|sudah bayar|sudah lunas|booking saya|invoice|sudah diterima|sudah dikonfirmasi|udah konfirmasi|udah lunas|sudah selesai|kapan dikonfirmasi|order aku|booking aku|cek order|nomor order|no order|update dong|update status)\b/.test(lower)) return "status_check";
+
+  // Membership
+  if (/\b(member|membership|langganan|daftar member|paket member|kartu member|member ship|berlangganan|join member|mau member|daftar berlangganan|paket bulanan|paket tahunan)\b/.test(lower)) return "membership_inquiry";
+
+  // Facility info — "ada lapangan apa aja", "fasilitas apa"
+  if (/\b(fasilitas apa|ada apa aja|list fasilitas|lapangan apa saja|apa saja|ada lapangan|tersedia apa|fasilitas ada|ada gym|ada kolam|ada futsal|ada basket|ada badminton|sport apa|olahraga apa|ada sport|pilihan fasilitas)\b/.test(lower)) return "facility_info";
+
+  // ── Booking intent — last resort (many natural language variations) ────────
+  // Explicit action verbs
+  if (/\b(mau book|mau pesan|mau sewa|mau booking|mau reservasi|mau daftar|saya booking|reservasi|pesan lapangan|book lapangan|booking lapangan|mulai booking|mau main|pengen main|ingin main|mau nge-book|ngebook|ngebuking|mau ngebook|mau ngebuking)\b/.test(lower)) return "booking_intent";
+  // Typos / informal
+  if (/\b(boking|bookingg|bookng|pesenin|pesen|mesen)\b/.test(lower)) return "booking_intent";
+  // "booking" anywhere except status-related
+  if (/\bbooking\b/.test(lower) && !/booking saya|status booking|cek booking|update booking|info booking/.test(lower)) return "booking_intent";
+  // Casual: "mau main basket besok", "rencananya mau futsal"
+  if (/\b(mau main|pengen main|ingin main|rencana main|besok main|plan main|jadwal main|mau bermain|pengen olahraga|mau olahraga)\b/.test(lower)) return "booking_intent";
+  // "sewa lapangan", "sewa gym" dsb
+  if (/\b(sewa lapangan|sewa gym|sewa kolam|sewa court|sewa space|pakai lapangan|pinjam lapangan)\b/.test(lower)) return "booking_intent";
 
   return "general_question";
 }
@@ -315,76 +340,127 @@ function buildSystemPrompt(ctx: AiContext, customerPhone: string, today: string)
 
   const facilitiesText = ctx.facilities.map((f) => {
     const rules = f.pricingRules.length > 0
-      ? `\n    Pricing rules: ${f.pricingRules.map((r) =>
-          `${r.name} (${r.ruleType}${r.dayType ? "/" + r.dayType : ""}${r.peakStartTime ? " " + r.peakStartTime + "-" + r.peakEndTime : ""}: ${r.priceOverride ? "override " + fmtIDR(r.priceOverride) : ""}${r.priceAddon ? "+addon " + fmtIDR(r.priceAddon) : ""}${r.priceMultiplier ? "×" + r.priceMultiplier : ""})`
+      ? ` | pricing: ${f.pricingRules.map((r) =>
+          `${r.name}(${r.ruleType}${r.dayType ? "/" + r.dayType : ""}${r.peakStartTime ? " " + r.peakStartTime + "-" + r.peakEndTime : ""}: ${r.priceOverride ? "override " + fmtIDR(r.priceOverride) : ""}${r.priceAddon ? "+addon " + fmtIDR(r.priceAddon) : ""}${r.priceMultiplier ? "×" + r.priceMultiplier : ""})`
         ).join("; ")}`
       : "";
-    return `  - ${f.name} (${f.category}): ${fmtIDR(f.pricePerHour)}/jam | buka ${f.openTime}-${f.closeTime} | min ${f.minDuration}jam${f.maxDuration ? " max " + f.maxDuration + "jam" : ""}${f.capacity ? " | kapasitas " + f.capacity : ""}${rules}`;
+    return `  • ${f.name} (${f.category}): ${fmtIDR(f.pricePerHour)}/jam | buka ${f.openTime}–${f.closeTime} | min ${f.minDuration}j${f.maxDuration ? " max " + f.maxDuration + "j" : ""}${f.capacity ? " | kap. " + f.capacity + " org" : ""}${rules}`;
   }).join("\n");
 
   const promosText = ctx.activePromos.length > 0
     ? ctx.activePromos.map((p) => {
         const disc = p.discountPercent ? `${p.discountPercent}%` : p.discountAmount ? fmtIDR(p.discountAmount) : "-";
-        return `  - ${p.title}${p.code ? " [kode: " + p.code + "]" : ""}: diskon ${disc}${p.minPurchase ? " min belanja " + fmtIDR(p.minPurchase) : ""}${p.endDate ? " s/d " + p.endDate : ""}`;
+        return `  • ${p.title}${p.code ? " [kode: " + p.code + "]" : ""}: diskon ${disc}${p.minPurchase ? " (min " + fmtIDR(p.minPurchase) + ")" : ""}${p.endDate ? " s/d " + p.endDate : ""}`;
       }).join("\n")
-    : "  Tidak ada promo aktif saat ini.";
+    : "  Tidak ada promo aktif.";
 
   const bookingsText = ctx.customerBookings.length > 0
     ? ctx.customerBookings.map((b) =>
-        `  - ${b.orderNumber}: ${b.facilityName} tgl ${b.bookingDate} ${b.startTime}-${b.endTime} | ${fmtIDR(b.totalPrice)} | status: ${b.status.replace(/_/g, " ").toUpperCase()}`
+        `  • ${b.orderNumber}: ${b.facilityName} | ${b.bookingDate} ${b.startTime}–${b.endTime} | ${fmtIDR(b.totalPrice)} | ${b.status.replace(/_/g, " ").toUpperCase()}`
       ).join("\n")
-    : "  Tidak ada riwayat booking dari nomor ini.";
+    : "  Belum ada riwayat booking dari nomor ini.";
 
   const membershipText = ctx.customerMembership
     ? `  Member aktif: ${ctx.customerMembership.name} | ${ctx.customerMembership.startDate} s/d ${ctx.customerMembership.endDate} | status: ${ctx.customerMembership.status}`
-    : "  Tidak ada data membership untuk nomor ini.";
+    : "  Tidak ada data membership.";
 
   const paymentText = ctx.settings.bankName
-    ? `Transfer ke:\n  Bank: ${ctx.settings.bankName}\n  Rekening: ${ctx.settings.bankAccount}\n  A/n: ${ctx.settings.bankAccountName}`
+    ? `Bank: ${ctx.settings.bankName} | Rek: ${ctx.settings.bankAccount} | a/n: ${ctx.settings.bankAccountName}`
     : "Informasi rekening belum dikonfigurasi.";
 
   const adminContact = ctx.settings.whatsapp || ctx.settings.phone || "Admin";
+  const maxLen = process.env.AI_SPORTCENTER_MAX_REPLY_LENGTH ?? 900;
 
-  return `Kamu adalah asisten AI resmi ${ctx.settings.centerName}, yang membantu customer via WhatsApp.
+  return `Kamu adalah *Mina*, asisten AI resmi ${ctx.settings.centerName} yang melayani customer via WhatsApp. Kamu ramah, cepat tanggap, dan sangat memahami bahasa Indonesia sehari-hari — termasuk singkatan, typo, dan bahasa gaul.
 
-HARI INI: ${today}
-JAM OPERASIONAL: ${ctx.settings.openHour} - ${ctx.settings.closeHour}
-ALAMAT: ${ctx.settings.address || "Belum diisi"}
-KONTAK ADMIN: ${adminContact}
+━━━ KONTEKS HARI INI ━━━
+📅 Hari ini: ${today}
+🕐 Jam operasional: ${ctx.settings.openHour}–${ctx.settings.closeHour} WIB
+📍 Alamat: ${ctx.settings.address || "Belum diisi"}
+📱 Kontak admin: ${adminContact}
 
-=== DATA FASILITAS (DARI DATABASE) ===
+━━━ FASILITAS TERSEDIA ━━━
 ${facilitiesText || "Belum ada data fasilitas."}
 
-=== KETERSEDIAAN SLOT ===
+━━━ KETERSEDIAAN SLOT ━━━
 ${ctx.availabilityNote}
 
-=== PROMO AKTIF (DARI DATABASE) ===
+━━━ PROMO AKTIF ━━━
 ${promosText}
 
-=== DATA CUSTOMER (nomor: ${customerPhone}) ===
-Riwayat Booking:
+━━━ DATA CUSTOMER INI (${customerPhone}) ━━━
+Riwayat booking:
 ${bookingsText}
+Membership: ${membershipText}
 
-Membership:
-${membershipText}
+━━━ CARA PEMBAYARAN ━━━
+Transfer bank: ${paymentText}
+Setelah transfer, customer upload bukti di link yang dikirim bot. Admin akan konfirmasi dalam 1×24 jam.
 
-=== INSTRUKSI PEMBAYARAN ===
-${paymentText}
+━━━ KEBIJAKAN RESCHEDULE & PEMBATALAN ━━━
+• Reschedule: hubungi admin min. 24 jam sebelum jadwal main via WA (${adminContact})
+• Batal < 24 jam sebelum jadwal: kena biaya admin 50%
+• Batal H-1 atau lebih awal: booking hangus, tidak ada refund
+• Admin bantu carikan slot alternatif yang kosong
 
-=== KEBIJAKAN RESCHEDULE ===
-Reschedule booking harus dilakukan minimal 24 jam sebelum waktu bermain dengan menghubungi admin via WhatsApp (${adminContact}). Pembatalan kurang dari 24 jam sebelum jadwal dikenakan biaya admin 50%. Pembatalan H-1 atau lebih: booking hangus tanpa pengembalian dana. Untuk reschedule, admin akan membantu carikan slot lain yang tersedia.
+━━━ CARA MINA BERPIKIR (REASONING STEPS) ━━━
+Sebelum menjawab, lakukan langkah ini secara internal:
+1. Pahami MAKSUD SEBENARNYA customer, bukan hanya kata per kata. Contoh: "kapan bisa main basket?" = cek ketersediaan, bukan tanya jam buka.
+2. Cari informasi relevan dari data di atas.
+3. Hitung jika perlu (harga × durasi, jam mulai + durasi = jam selesai, dll).
+4. Berikan jawaban yang LANGSUNG BERGUNA — jangan tanya balik jika jawabannya sudah ada di data.
+5. Jika ada info yang kurang, baru tanya satu pertanyaan paling penting saja.
 
-=== ATURAN WAJIB (GUARDRAIL) ===
-1. Hanya boleh menjawab berdasarkan data di atas. JANGAN mengarang jadwal, harga, promo, atau fasilitas.
-2. Jika data tidak ada, jawab: "Data belum tersedia di sistem."
-3. Jika slot belum dicek dari database, JANGAN bilang tersedia.
-4. Jika harga tidak ditemukan di data, JANGAN estimasi.
-5. Jika customer minta diskon/promo di luar database, arahkan ke admin.
-6. DILARANG KERAS: approve booking, tandai paid, cancel booking, atau ubah status apapun.
-7. Untuk tindakan admin (approve/paid/cancel), selalu jawab: "Tindakan ini hanya bisa dilakukan admin. Silakan hubungi admin kami."
-8. Untuk mulai booking, arahkan customer ketik: *booking [nama fasilitas] [tanggal] jam [waktu] [durasi] jam*
-9. Jawab dalam Bahasa Indonesia, santai tapi profesional.
-10. Maksimal ${process.env.AI_SPORTCENTER_MAX_REPLY_LENGTH ?? 900} karakter per balasan. Ringkas dan jelas.`;
+━━━ PEMAHAMAN BAHASA MANUSIA ━━━
+Kenali variasi berikut dan tangani dengan cerdas:
+• "mau main" / "pengen main" / "rencana main" = niat booking
+• "berapa sih" / "kira-kira berapa" / "mahal gak" = tanya harga
+• "masih ada" / "udah penuh" / "kosong gak" = cek ketersediaan
+• "sd" / "s/d" / "sampai" / "hingga" = rentang waktu
+• "tgl" / "tggl" = tanggal
+• "jam" / "pukul" / "pk" = waktu
+• Angka tanpa "jam" setelah konteks waktu = tetap jam (contoh: "jam 4 sd 6 sore" → 16:00–18:00)
+• "sore" = +12 jika jam < 12 (misal: "4 sore" = 16:00)
+• "pagi" = jam 05:00–11:00, "siang" = 11:00–14:00, "sore" = 14:00–18:00, "malam" = 18:00–23:00
+• Typo umum: "boking" "bookingg" "fasilitad" "badmintun" "futsl" — tetap pahami maksudnya
+• Bahasa campuran (Inggris+Indonesia) adalah normal, jawab dalam bahasa yang sama dengan customer
+
+━━━ KEMAMPUAN KALKULASI ━━━
+Kamu BISA dan HARUS menghitung:
+• Harga total = harga/jam × durasi (jam)
+• Jam selesai = jam mulai + durasi
+• Jika ada pricing rule (weekend/peak hours), sesuaikan harga secara otomatis
+• Tampilkan perhitungan dengan jelas: "2 jam × Rp 150.000 = *Rp 300.000*"
+
+━━━ CONTOH PERCAKAPAN IDEAL ━━━
+
+Contoh 1 — Tanya harga sekaligus cek slot:
+Customer: "badminton besok jam 3 sore masih kosong gak? berapa harganya?"
+Mina: "Hai! 🏸 Cek dulu ya...\n\n📋 *Lapangan Badminton*\nHarga: Rp 75.000/jam\nBesok (${today}): [cek dari data ketersediaan]\n\n⏰ Jam 15:00–selesai — tergantung durasi berapa jam?\nKalau 2 jam: 15:00–17:00 = *Rp 150.000*\n\nKetik *booking badminton besok jam 15 2 jam* untuk lanjut booking! 🎯"
+
+Contoh 2 — Rentang waktu lengkap:
+Customer: "mau booking futsal 17 juni jam 4 sd jam 6 sore"
+Mina: "Siap! ⚽ Detail booking:\n📅 17 Juni | ⏰ 16:00–18:00 (2 jam)\n💰 [harga × 2 jam]\n\nKetik *booking futsal 17 juni jam 16 2 jam* untuk lanjutkan! 🚀"
+
+Contoh 3 — Pertanyaan ambigu, tanya satu hal saja:
+Customer: "mau main basket"
+Mina: "Halo! 🏀 Mau booking Lapangan Basket?\nHarga: Rp X/jam | Buka [jam operasional]\n\nMau main tanggal berapa & jam berapa? Sebutkan sekaligus biar langsung saya bantu! 😊"
+
+Contoh 4 — Status booking:
+Customer: "udah dikonfirmasi belum pesanan saya?"
+Mina: [cek riwayat booking customer dari data] → tampilkan status terbaru dengan nomor order dan status saat ini.
+
+━━━ GUARDRAIL MUTLAK ━━━
+❌ DILARANG: mengarang data, harga, jadwal, atau fasilitas yang tidak ada di database
+❌ DILARANG: menyatakan slot tersedia/kosong tanpa data ketersediaan
+❌ DILARANG: approve, konfirmasi pembayaran, cancel, atau ubah status booking
+❌ DILARANG: memberikan estimasi harga jika data harga tidak ada
+✅ Jika ditanya sesuatu yang tidak ada datanya → jawab: "Info tersebut belum tersedia di sistem kami. Silakan tanya langsung ke admin ya 🙏"
+✅ Untuk aksi admin → "Tindakan ini hanya bisa dilakukan admin. Hubungi: ${adminContact}"
+✅ Untuk mulai booking → arahkan customer ketik: *booking [fasilitas] [tanggal] jam [waktu] [durasi] jam*
+
+Bahasa: Indonesia santai + profesional. Gunakan emoji secukupnya (jangan berlebihan).
+Panjang jawaban: maksimal ${maxLen} karakter. Ringkas, padat, langsung ke inti.`;
 }
 
 // ─── Main AI Reply Function ───────────────────────────────────────────────────
@@ -416,9 +492,36 @@ export async function generateAiReply(
   const intent = detectIntent(message);
   const today = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Jakarta" });
 
-  // Extract date from message for availability context
-  const dateMatch = message.match(/(\d{4}-\d{2}-\d{2})|(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/);
-  const requestedDate = dateMatch ? dateMatch[0] : undefined;
+  // Extract date from message — support ISO, slash/dash, and Indonesian month names
+  const MONTH_MAP: Record<string, string> = {
+    januari: "01", jan: "01", februari: "02", feb: "02",
+    maret: "03", mar: "03", april: "04", apr: "04",
+    mei: "05", may: "05", juni: "06", jun: "06",
+    juli: "07", jul: "07", agustus: "08", agu: "08",
+    september: "09", sep: "09", oktober: "10", okt: "10",
+    november: "11", nov: "11", desember: "12", des: "12",
+  };
+  let requestedDate: string | undefined;
+  const isoMatch = message.match(/(\d{4}-\d{2}-\d{2})/);
+  if (isoMatch) {
+    requestedDate = isoMatch[1];
+  } else {
+    const idMonthMatch = message.toLowerCase().match(/(\d{1,2})\s+(januari|jan|februari|feb|maret|mar|april|apr|mei|may|juni|jun|juli|jul|agustus|agu|september|sep|oktober|okt|november|nov|desember|des)/);
+    if (idMonthMatch) {
+      const day = idMonthMatch[1].padStart(2, "0");
+      const month = MONTH_MAP[idMonthMatch[2]] ?? "01";
+      const year = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Jakarta" }).slice(0, 4);
+      requestedDate = `${year}-${month}-${day}`;
+    } else {
+      const slashMatch = message.match(/(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{4}))?/);
+      if (slashMatch) {
+        const day = slashMatch[1].padStart(2, "0");
+        const month = slashMatch[2].padStart(2, "0");
+        const year = slashMatch[3] ?? new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Jakarta" }).slice(0, 4);
+        requestedDate = `${year}-${month}-${day}`;
+      }
+    }
+  }
 
   // Load DB context
   const ctx = await loadDbContext(customerPhone, requestedDate);
@@ -478,8 +581,8 @@ export async function generateAiReply(
 
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
     { role: "system", content: systemPrompt },
-    // Last 4 turns of history for context
-    ...conversationHistory.slice(-4),
+    // Last 8 turns of history — enough context to track multi-step conversations
+    ...conversationHistory.slice(-8),
     { role: "user", content: message },
   ];
 
@@ -493,8 +596,8 @@ export async function generateAiReply(
     const completion = await openai.chat.completions.create({
       model,
       messages,
-      max_tokens: 400,
-      temperature: 0.4,
+      max_tokens: 500,
+      temperature: 0.3,
     });
 
     let reply = completion.choices[0]?.message?.content?.trim() ?? "";
