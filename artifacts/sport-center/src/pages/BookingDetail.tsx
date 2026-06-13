@@ -287,7 +287,7 @@ export default function BookingDetail() {
               <>
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">DPP</span>
-                  <span>Rp {booking.totalPrice.toLocaleString("id-ID")}</span>
+                  <span>Rp {(Number((booking as any).grandTotal) - Number((booking as any).ppnAmount)).toLocaleString("id-ID")}</span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">PPN 11%</span>

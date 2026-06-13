@@ -1354,7 +1354,7 @@ export default function Booking() {
 
               <div className="border-t pt-4 space-y-2 text-sm">
                 <div className="flex justify-between">
-                  <span className="text-muted-foreground">{t("Harga/jam", "Price/hour")}</span>
+                  <span className="text-muted-foreground">{t("Harga/jam (incl. PPN)", "Price/hour (incl. VAT)")}</span>
                   <span>{formatCurrency(facility.pricePerHour)}</span>
                 </div>
                 <div className="flex justify-between">
@@ -1389,11 +1389,12 @@ export default function Booking() {
                 {(() => {
                   const PPN_RATE = 0.11;
                   const disc = couponResult?.discountAmount ?? 0;
-                  const dpp = isRepeat
+                  // Harga sudah inklusif PPN — grand total = harga setelah diskon
+                  const grand = isRepeat
                     ? (isChecking ? null : Math.max(0, (checkResult ? effectiveTotalPrice : totalPrice * repeatCount) - disc))
                     : Math.max(0, totalPrice - disc);
-                  const ppn = dpp == null ? null : Math.round(dpp * PPN_RATE);
-                  const grand = dpp == null || ppn == null ? null : dpp + ppn;
+                  const dpp = grand == null ? null : Math.round(grand / (1 + PPN_RATE));
+                  const ppn = grand == null || dpp == null ? null : grand - dpp;
                   return (
                     <>
                       <div className="pt-2 border-t space-y-1.5">
@@ -1412,7 +1413,7 @@ export default function Booking() {
                       </div>
                       {isRepeat && !isChecking && checkResult && effectiveCount > 0 && (
                         <div className="text-xs text-muted-foreground text-right">
-                          {effectiveCount} {t("sesi", "sessions")} × {formatCurrency(dpp! / effectiveCount)} DPP + PPN 11%
+                          {effectiveCount} {t("sesi", "sessions")} × {formatCurrency(grand! / effectiveCount)} (incl. PPN 11%)
                         </div>
                       )}
                     </>

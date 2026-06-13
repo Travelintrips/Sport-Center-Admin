@@ -192,8 +192,8 @@ export default function WaBookingForm() {
               {(result as any).ppnAmount != null && Number((result as any).ppnAmount) > 0 ? (
                 <>
                   <div className="flex justify-between">
-                    <span className="text-gray-500">Subtotal (DPP)</span>
-                    <span className="font-semibold">Rp {result.totalPrice.toLocaleString("id-ID")}</span>
+                    <span className="text-gray-500">DPP</span>
+                    <span className="font-semibold">Rp {(Number((result as any).grandTotal) - Number((result as any).ppnAmount)).toLocaleString("id-ID")}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-500">PPN {Number((result as any).ppnRate ?? 11)}%</span>

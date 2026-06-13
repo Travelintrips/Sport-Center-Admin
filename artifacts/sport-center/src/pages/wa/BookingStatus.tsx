@@ -181,7 +181,7 @@ export default function WaBookingStatus() {
             <Row label="Jam" value={`${booking.startTime} – ${booking.endTime} (${booking.durationHours} jam)`} />
             {booking.ppnAmount != null && Number(booking.ppnAmount) > 0 ? (
               <>
-                <Row label="Subtotal (DPP)" value={`Rp ${booking.totalPrice.toLocaleString("id-ID")}`} />
+                <Row label="DPP" value={`Rp ${(Number(booking.grandTotal) - Number(booking.ppnAmount)).toLocaleString("id-ID")}`} />
                 <Row label={`PPN ${Number(booking.ppnRate ?? 11)}%`} value={`+Rp ${Number(booking.ppnAmount).toLocaleString("id-ID")}`} />
                 <Row label="Grand Total" value={`Rp ${Number(booking.grandTotal).toLocaleString("id-ID")}`} bold accent />
               </>

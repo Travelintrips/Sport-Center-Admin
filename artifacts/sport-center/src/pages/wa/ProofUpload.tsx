@@ -145,7 +145,7 @@ export default function WaProofUpload() {
               <Row label="Jam" value={`${b.startTime} – ${b.endTime}`} />
               {b.ppnAmount != null && Number(b.ppnAmount) > 0 ? (
                 <>
-                  <Row label="Subtotal (DPP)" value={`Rp ${b.totalPrice.toLocaleString("id-ID")}`} />
+                  <Row label="DPP" value={`Rp ${(Number(b.grandTotal) - Number(b.ppnAmount)).toLocaleString("id-ID")}`} />
                   <Row label={`PPN ${Number(b.ppnRate ?? 11)}%`} value={`+Rp ${Number(b.ppnAmount).toLocaleString("id-ID")}`} />
                   <Row label="Grand Total" value={`Rp ${Number(b.grandTotal).toLocaleString("id-ID")}`} accent />
                 </>

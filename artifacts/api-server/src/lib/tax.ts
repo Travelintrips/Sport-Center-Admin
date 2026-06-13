@@ -40,12 +40,14 @@ export async function calculateTax(
   }
 
   const rate = Number(setting.taxRate);
-  const taxAmount = Math.round(subtotal * rate / 100);
+  // Harga sudah termasuk PPN (inklusif): ekstrak DPP dari harga
+  const dpp = Math.round(subtotal / (1 + rate / 100));
+  const taxAmount = subtotal - dpp;
   return {
-    dpp: subtotal,
+    dpp,
     taxRate: rate,
     taxAmount,
-    grandTotal: subtotal + taxAmount,
+    grandTotal: subtotal,
     taxCode: setting.taxCode,
   };
 }
