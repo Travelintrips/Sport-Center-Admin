@@ -143,6 +143,33 @@ export async function notifyReminderH1(data: BookingNotifData): Promise<void> {
   if (tpl) await sendWA(data.customerPhone, interpolate(tpl, data as Record<string, string>));
 }
 
+export interface PaymentReminderData extends BookingNotifData {
+  uploadProofUrl: string;
+  hoursLeft: number;
+}
+
+export async function notifyPaymentReminder(data: PaymentReminderData): Promise<void> {
+  const tpl = await getTemplate("payment_reminder");
+  if (tpl) {
+    await sendWA(data.customerPhone, interpolate(tpl, { ...data, hoursLeft: String(data.hoursLeft) }));
+    return;
+  }
+  const bankInfo = await getBankInfo();
+  const msg =
+    `⏰ *Pengingat Pembayaran!*\n\n` +
+    `Halo *${data.customerName}*,\n` +
+    `Booking *${data.orderNumber}* untuk *${data.facilityName}* belum dibayar.\n\n` +
+    `📅 Jadwal: *${data.bookingDate}* pukul *${data.startTime}–${data.endTime}*\n` +
+    `💰 Total: *Rp ${data.totalPrice}*\n\n` +
+    `⚠️ Batas bayar tersisa *${data.hoursLeft} jam* lagi — jangan sampai expired!\n\n` +
+    `💳 Transfer ke:\n` +
+    `Bank: *${bankInfo.bankName}*\n` +
+    `Rekening: *${bankInfo.bankAccount}*\n` +
+    `Atas Nama: *${bankInfo.bankAccountName}*\n\n` +
+    `📎 Upload bukti transfer:\n${data.uploadProofUrl}`;
+  await sendWA(data.customerPhone, msg);
+}
+
 export interface RescheduleNotifData {
   customerName: string;
   customerPhone: string;

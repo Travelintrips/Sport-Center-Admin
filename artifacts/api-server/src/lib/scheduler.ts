@@ -1,6 +1,6 @@
-import { db, bookingsTable, facilitiesTable, bankReconciliationMatchesTable } from "@workspace/db";
+import { db, bookingsTable, facilitiesTable, bankReconciliationMatchesTable, waActionTokensTable } from "@workspace/db";
 import { eq, and, lt, lte, isNotNull, isNull, inArray, sql } from "drizzle-orm";
-import { notifyBookingExpired, notifyReminderH1, notifyWaDayReminder, notifyWaStaffCheckin, notifyAuditCritical } from "./notifications";
+import { notifyBookingExpired, notifyReminderH1, notifyWaDayReminder, notifyWaStaffCheckin, notifyAuditCritical, notifyPaymentReminder } from "./notifications";
 import { createWaToken } from "./waTokens";
 import { reverseTaxTransaction } from "./tax";
 import { reverseJournalEntry } from "./accounting";
@@ -223,6 +223,76 @@ async function sendDayOfReminder(): Promise<void> {
   }
 }
 
+// Payment reminder: kirim 2 jam sebelum deadline (sekali saja per booking)
+async function sendPaymentReminder(): Promise<void> {
+  try {
+    const now = new Date();
+    const twoHoursLater = new Date(now.getTime() + 2 * 60 * 60 * 1000);
+
+    // Booking pending_payment yang deadline-nya dalam 2 jam ke depan, belum dikirim reminder
+    const pending = await db
+      .select()
+      .from(bookingsTable)
+      .where(
+        and(
+          eq(bookingsTable.status, "pending_payment"),
+          isNotNull(bookingsTable.paymentDeadline),
+          lt(bookingsTable.paymentDeadline, twoHoursLater),
+          isNull(bookingsTable.paymentReminderSentAt)
+        )
+      );
+
+    if (!pending.length) return;
+
+    const facilities = await db.select({ id: facilitiesTable.id, name: facilitiesTable.name }).from(facilitiesTable);
+    const facilityMap: Record<number, string> = {};
+    for (const f of facilities) facilityMap[f.id] = f.name;
+
+    for (const booking of pending) {
+      if (!booking.paymentDeadline) continue;
+
+      const msLeft = booking.paymentDeadline.getTime() - now.getTime();
+      if (msLeft <= 0) continue; // sudah expired, biarkan expireOverdueBookings yang handle
+
+      const hoursLeft = Math.max(1, Math.floor(msLeft / (60 * 60 * 1000)));
+
+      // Mark dulu sebelum kirim WA — cegah double-send
+      await db
+        .update(bookingsTable)
+        .set({ paymentReminderSentAt: new Date() })
+        .where(eq(bookingsTable.id, booking.id));
+
+      // Ambil token upload proof (reuse jika ada, buat baru jika tidak)
+      const [tokenRow] = await db
+        .select()
+        .from(waActionTokensTable)
+        .where(and(eq(waActionTokensTable.bookingId, booking.id), eq(waActionTokensTable.action, "upload_proof")))
+        .limit(1);
+
+      const proofToken = tokenRow?.token ?? (await createWaToken(booking.id, "upload_proof", 7));
+      const uploadProofUrl = `${APP_URL}/wa/proof/${proofToken}`;
+
+      await notifyPaymentReminder({
+        customerName: booking.customerName,
+        customerPhone: booking.customerPhone,
+        orderNumber: booking.orderNumber,
+        facilityName: facilityMap[booking.facilityId] ?? "",
+        bookingDate: booking.bookingDate,
+        startTime: booking.startTime,
+        endTime: booking.endTime,
+        totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
+        paymentDeadline: booking.paymentDeadline.toLocaleString("id-ID", { timeZone: "Asia/Jakarta" }),
+        uploadProofUrl,
+        hoursLeft,
+      });
+
+      console.log(`[scheduler] Payment reminder sent for ${booking.orderNumber} (${hoursLeft}h left)`);
+    }
+  } catch (err) {
+    console.error("[scheduler] sendPaymentReminder error:", err);
+  }
+}
+
 async function autoCompleteBookings(): Promise<void> {
   try {
     const wibNow = getWIBNow();
@@ -294,6 +364,7 @@ export function startScheduler(): void {
   setInterval(async () => {
     await expireOverdueBookings();
     await autoCompleteBookings();
+    await sendPaymentReminder();
     await sendReminderH1();
     await sendDayOfReminder();
     await runNightlyBankAudit();

@@ -269,7 +269,8 @@ ALTER TABLE sport_center.users
 -- ============================================================
 ALTER TABLE sport_center.bookings
   ADD COLUMN IF NOT EXISTS reminder_h1_sent_at timestamptz,
-  ADD COLUMN IF NOT EXISTS reminder_day_sent_at timestamptz;
+  ADD COLUMN IF NOT EXISTS reminder_day_sent_at timestamptz,
+  ADD COLUMN IF NOT EXISTS payment_reminder_sent_at timestamptz;
 
 -- ============================================================
 -- 18. company_invoices table (idempotent) + bookings linkage

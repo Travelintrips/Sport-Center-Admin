@@ -74,6 +74,7 @@ export const bookingsTable = scSchema.table("bookings", {
   completedAt: timestamp("completed_at", { withTimezone: true }),
   reminderH1SentAt: timestamp("reminder_h1_sent_at", { withTimezone: true }),
   reminderDaySentAt: timestamp("reminder_day_sent_at", { withTimezone: true }),
+  paymentReminderSentAt: timestamp("payment_reminder_sent_at", { withTimezone: true }),
   // Company billing fields
   payerType: payerTypeEnum("payer_type").default("personal"),
   companyCustomerId: integer("company_customer_id").references(() => usersTable.id, { onDelete: "set null" }),
