@@ -1106,16 +1106,46 @@ async function handleAdminCommand(adminPhone: string, msg: string): Promise<bool
     return true;
   }
 
+  // BLOCK [phone] [alasan] — blokir nomor manual
+  const blockMatch = msg.trim().match(/^BLOCK\s+(\d+)(?:\s+(.+))?/i);
+  if (blockMatch) {
+    const targetPhone = cleanPhone(blockMatch[1]);
+    const reason = blockMatch[2]?.trim() || "Diblokir oleh admin";
+    await db.execute(
+      sql`INSERT INTO sport_center.wa_blocked_phones (phone, reason, blocked_by)
+          VALUES (${targetPhone}, ${reason}, ${adminPhone})
+          ON CONFLICT (phone) DO UPDATE
+            SET is_active = true, reason = EXCLUDED.reason, blocked_by = EXCLUDED.blocked_by, updated_at = NOW()`
+    );
+    await logAudit({ action: "phone_blocked_by_admin", entity: "wa_session", after: { targetPhone, reason, adminPhone } });
+    await sendWAMsg(adminPhone, `🚫 Nomor *${targetPhone}* berhasil diblokir.\nAlasan: _${reason}_`);
+    return true;
+  }
+
+  // UNBLOCK [phone] — buka blokir nomor
+  const unblockMatch = msg.trim().match(/^UNBLOCK\s+(\d+)/i);
+  if (unblockMatch) {
+    const targetPhone = cleanPhone(unblockMatch[1]);
+    await db.execute(
+      sql`UPDATE sport_center.wa_blocked_phones SET is_active = false, updated_at = NOW() WHERE phone = ${targetPhone}`
+    );
+    await logAudit({ action: "phone_unblocked_by_admin", entity: "wa_session", after: { targetPhone, adminPhone } });
+    await sendWAMsg(adminPhone, `✅ Nomor *${targetPhone}* berhasil dibuka blokirnya.`);
+    return true;
+  }
+
   // HELP — tampilkan daftar perintah admin
   if (/^HELP$/i.test(upper)) {
     await sendWAMsg(adminPhone,
       `🏅 *Perintah Admin Sport Center*\n\n` +
-      `📋 *APPROVE SC-xxxx*\n   Setujui booking, kirim instruksi bayar ke customer\n\n` +
-      `🚫 *REJECT SC-xxxx [alasan]*\n   Tolak booking dengan alasan\n\n` +
-      `✅ *PAID SC-xxxx*\n   Konfirmasi pembayaran diterima\n\n` +
+      `📋 *APPROVE SC-xxxx*\n   Setujui booking\n\n` +
+      `🚫 *REJECT SC-xxxx [alasan]*\n   Tolak booking\n\n` +
+      `✅ *PAID SC-xxxx*\n   Konfirmasi pembayaran\n\n` +
       `❌ *CANCEL SC-xxxx [alasan]*\n   Batalkan booking\n\n` +
       `🔁 *RESEND SC-xxxx*\n   Kirim ulang notifikasi WA\n\n` +
       `🔍 *STATUS SC-xxxx*\n   Cek detail booking\n\n` +
+      `🚫 *BLOCK 628xxx [alasan]*\n   Blokir nomor HP\n\n` +
+      `✅ *UNBLOCK 628xxx*\n   Buka blokir nomor HP\n\n` +
       `ℹ️ *HELP*\n   Tampilkan menu ini\n\n` +
       `_Contoh: APPROVE SC-0012_`
     );
@@ -1637,6 +1667,7 @@ async function startBookingSession(phone: string, msg: string, waName: string): 
     bookingDate: intent.bookingDate,
     startTime: intent.startTime,
     durationMinutes: intent.durationMinutes,
+    bookerName: waName || null,
     customerName: resolvedName,
     currentStep: step,
   });
@@ -2278,6 +2309,7 @@ async function execCreateBookingFromSession(session: WaBookingSessionRow, phone:
     basePrice: String(basePrice),
     source: "whatsapp_ai",
     status: "waiting_admin_approval",
+    bookerName: session.bookerName || null,
     notes: session.notes || null,
     ppnRate: taxCalc.taxAmount > 0 ? String(taxCalc.taxRate) : null,
     ppnAmount: taxCalc.taxAmount > 0 ? String(taxCalc.taxAmount) : null,
@@ -2300,6 +2332,32 @@ async function execCreateBookingFromSession(session: WaBookingSessionRow, phone:
 
   // Mark session done
   await updateSession(session.id, { status: "completed", currentStep: "done" });
+
+  // Spam check: jika 3+ booking dalam 24 jam → auto-block nomor
+  try {
+    const spamResult = await db.execute<{ cnt: string }>(
+      sql`SELECT COUNT(*) AS cnt FROM sport_center.bookings
+          WHERE customer_phone = ${phone}
+            AND created_at > NOW() - INTERVAL '24 hours'
+            AND status NOT IN ('cancelled','expired','rejected','refunded')`
+    );
+    const spamCount = parseInt(spamResult.rows[0]?.cnt ?? "0", 10);
+    if (spamCount >= 3) {
+      await db.execute(
+        sql`INSERT INTO sport_center.wa_blocked_phones (phone, reason, blocked_by)
+            VALUES (${phone}, ${"Auto-blocked: " + spamCount + " booking dalam 24 jam"}, 'system')
+            ON CONFLICT (phone) DO UPDATE
+              SET is_active = true,
+                  reason = EXCLUDED.reason,
+                  updated_at = NOW()`
+      );
+      await logAudit({ action: "phone_auto_blocked_spam", entity: "wa_session", after: { phone, spamCount } });
+      const adminPhoneList = await getAdminPhones();
+      for (const ap of adminPhoneList) {
+        await sendWAMsg(ap, `🚫 *Auto-block*: Nomor *${phone}* telah diblokir otomatis karena membuat *${spamCount} booking* dalam 24 jam.\n\nKetik *UNBLOCK ${phone}* untuk membuka blokir.`).catch(() => {});
+      }
+    }
+  } catch { /* non-fatal */ }
 
   // ── 11. Audit: booking dibuat ──────────────────────────────────────────────
   await logAudit({
@@ -2454,6 +2512,18 @@ router.post("/wa/fonnte/webhook", async (req, res) => {
       const handled = await handleAdminCommand(phone, msg);
       if (handled) return;
       // If admin sends non-command, still allow normal flow
+    }
+
+    // 2b. Cek apakah nomor diblokir (spam protection) — skip untuk admin
+    if (!adminPhones.includes(phone)) {
+      const blockedResult = await db.execute<{ phone: string }>(
+        sql`SELECT phone FROM sport_center.wa_blocked_phones WHERE phone = ${phone} AND is_active = true AND (expires_at IS NULL OR expires_at > NOW()) LIMIT 1`
+      );
+      if (blockedResult.rows.length > 0) {
+        await sendWAMsg(phone, `⛔ Nomor Anda telah diblokir dari layanan booking WhatsApp kami.\n\nHubungi admin untuk informasi lebih lanjut.`);
+        await logAudit({ action: "blocked_phone_attempted", entity: "wa_session", after: { phone, msg } });
+        return;
+      }
     }
 
     // 3. Active session — continue conversation (always takes priority)

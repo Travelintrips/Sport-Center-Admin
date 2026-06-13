@@ -301,6 +301,21 @@ async function runStartupMigrations() {
      )`,
     `ALTER TABLE sport_center.wa_booking_sessions
        ADD COLUMN IF NOT EXISTS notes text`,
+    `ALTER TABLE sport_center.wa_booking_sessions
+       ADD COLUMN IF NOT EXISTS booker_name text`,
+    `ALTER TABLE sport_center.bookings
+       ADD COLUMN IF NOT EXISTS booker_name text`,
+    // wa_blocked_phones — spam protection
+    `CREATE TABLE IF NOT EXISTS sport_center.wa_blocked_phones (
+       id serial PRIMARY KEY,
+       phone text NOT NULL UNIQUE,
+       reason text,
+       blocked_by text,
+       is_active boolean NOT NULL DEFAULT true,
+       expires_at timestamptz,
+       created_at timestamptz NOT NULL DEFAULT NOW(),
+       updated_at timestamptz NOT NULL DEFAULT NOW()
+     )`,
     // wa_action_tokens
     `CREATE TABLE IF NOT EXISTS sport_center.wa_action_tokens (
        id serial PRIMARY KEY,

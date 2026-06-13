@@ -11,6 +11,7 @@ export const waBookingSessionsTable = scSchema.table("wa_booking_sessions", {
   bookingDate: text("booking_date"),
   startTime: text("start_time"),
   durationMinutes: integer("duration_minutes"),
+  bookerName: text("booker_name"),
   customerName: text("customer_name"),
   notes: text("notes"),
   status: text("status").notNull().default("active"),

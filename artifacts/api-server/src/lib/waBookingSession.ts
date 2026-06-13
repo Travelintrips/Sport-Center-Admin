@@ -515,6 +515,7 @@ export async function createSession(params: {
   bookingDate?: string | null;
   startTime?: string | null;
   durationMinutes?: number | null;
+  bookerName?: string | null;
   customerName?: string | null;
   currentStep: WaStep;
 }): Promise<WaBookingSessionRow> {
@@ -528,6 +529,7 @@ export async function createSession(params: {
       bookingDate: params.bookingDate ?? null,
       startTime: params.startTime ?? null,
       durationMinutes: params.durationMinutes ?? null,
+      bookerName: params.bookerName ?? null,
       customerName: params.customerName ?? null,
       status: "active",
       rawMessages: [],

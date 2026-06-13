@@ -66,6 +66,7 @@ export const bookingsTable = scSchema.table("bookings", {
   numberOfPeople: integer("number_of_people"),
   resourceName: text("resource_name"),
   source: text("source").default("web"),
+  bookerName: text("booker_name"),
   notes: text("notes"),
   adminNotes: text("admin_notes"),
   paymentDeadline: timestamp("payment_deadline", { withTimezone: true }),
