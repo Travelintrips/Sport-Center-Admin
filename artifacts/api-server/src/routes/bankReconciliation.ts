@@ -24,6 +24,26 @@ import multer from "multer";
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
+// Module-level helper — dipanggil dari /approve DAN /approve-candidate
+async function propagateApproval(type: string | undefined, id: number | undefined) {
+  if (!type || !id) return;
+  const CONFIRMABLE = ["pending_payment", "waiting_confirmation"];
+  if (type === "payment") {
+    await db.update(paymentsTable).set({ status: "confirmed", updatedAt: new Date() }).where(eq(paymentsTable.id, id));
+    const [pmt] = await db.select({ bookingId: paymentsTable.bookingId }).from(paymentsTable).where(eq(paymentsTable.id, id)).limit(1);
+    if (pmt?.bookingId) {
+      await db.update(bookingsTable).set({ status: "confirmed", updatedAt: new Date() }).where(
+        and(eq(bookingsTable.id, pmt.bookingId), inArray(bookingsTable.status, CONFIRMABLE as any[]))
+      );
+    }
+  } else if (type === "order") {
+    await db.update(bookingsTable).set({ status: "confirmed", updatedAt: new Date() }).where(
+      and(eq(bookingsTable.id, id), inArray(bookingsTable.status, CONFIRMABLE as any[]))
+    );
+  }
+  // type === 'expense': tidak ada booking/payment yang perlu di-update
+}
+
 function parseRows(rows: any[]): Array<{
   transactionDate: string;
   description: string;
@@ -435,48 +455,6 @@ router.post("/bank-reconciliation/:mutationId/approve", adminMiddleware, async (
       .update(bankReconciliationMatchesTable)
       .set({ status: "rejected" })
       .where(eq(bankReconciliationMatchesTable.mutationId, mutationId));
-
-    // Helper: propagate approval ke booking/payment yang terkait
-    const propagateApproval = async (type: string | undefined, id: number | undefined) => {
-      if (!type || !id) return;
-      const CONFIRMABLE = ["pending_payment", "waiting_confirmation"];
-      if (type === "payment") {
-        // Update payment → confirmed
-        await db
-          .update(paymentsTable)
-          .set({ status: "confirmed", updatedAt: new Date() })
-          .where(eq(paymentsTable.id, id));
-        // Update booking → confirmed (hanya jika masih dalam status yang bisa dikonfirmasi)
-        const [pmt] = await db
-          .select({ bookingId: paymentsTable.bookingId })
-          .from(paymentsTable)
-          .where(eq(paymentsTable.id, id))
-          .limit(1);
-        if (pmt?.bookingId) {
-          await db
-            .update(bookingsTable)
-            .set({ status: "confirmed", updatedAt: new Date() })
-            .where(
-              and(
-                eq(bookingsTable.id, pmt.bookingId),
-                inArray(bookingsTable.status, CONFIRMABLE as any[])
-              )
-            );
-        }
-      } else if (type === "order") {
-        // Update booking → confirmed langsung
-        await db
-          .update(bookingsTable)
-          .set({ status: "confirmed", updatedAt: new Date() })
-          .where(
-            and(
-              eq(bookingsTable.id, id),
-              inArray(bookingsTable.status, CONFIRMABLE as any[])
-            )
-          );
-      }
-      // type === 'expense': tidak ada booking/payment yang perlu di-update
-    };
 
     if (matchId) {
       await db
@@ -1001,6 +979,9 @@ router.post("/bank-reconciliation/mutations/:id/approve-candidate", adminMiddlew
       matchedOrderId: candidateType === "order" ? candidateId : null,
       updatedAt: new Date(),
     }).where(eq(bankMutationsTable.id, mutationId));
+
+    // Propagate ke booking/payment — sama seperti /approve endpoint
+    await propagateApproval(candidateType, candidateId);
 
     const user = (req as any).user;
     await db.insert(auditLogsTable).values({
