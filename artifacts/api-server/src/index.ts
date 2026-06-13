@@ -37,6 +37,21 @@ async function runStartupMigrations() {
     `DO $$ BEGIN
        ALTER TYPE sport_center.bank_mutation_status ADD VALUE IF NOT EXISTS 'need_review';
      EXCEPTION WHEN duplicate_object THEN null; END $$`,
+    // Indexes untuk performa query filter, duplicate detection, dan scheduler guard
+    `CREATE INDEX IF NOT EXISTS idx_bank_mutations_status
+       ON sport_center.bank_mutations (status)`,
+    `CREATE INDEX IF NOT EXISTS idx_bank_mutations_transaction_date
+       ON sport_center.bank_mutations (transaction_date)`,
+    `CREATE INDEX IF NOT EXISTS idx_bank_mutations_mutation_key
+       ON sport_center.bank_mutations (mutation_key)`,
+    `CREATE INDEX IF NOT EXISTS idx_bank_mutations_status_date
+       ON sport_center.bank_mutations (status, transaction_date DESC)`,
+    `CREATE INDEX IF NOT EXISTS idx_recon_matches_mutation_id
+       ON sport_center.bank_reconciliation_matches (mutation_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_recon_matches_status
+       ON sport_center.bank_reconciliation_matches (status)`,
+    `CREATE INDEX IF NOT EXISTS idx_recon_matches_candidate
+       ON sport_center.bank_reconciliation_matches (candidate_type, candidate_id)`,
   ];
 
   for (const stmt of migrations) {
