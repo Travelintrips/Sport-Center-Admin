@@ -36,6 +36,7 @@ import companyInvoicesRouter from "./companyInvoices";
 import companyVerificationsRouter from "./companyVerifications";
 
 import taxConfigRouter from "./taxConfig";
+import taxReportRouter from "./taxReport";
 import sportCenterBookingsRouter from "./sportCenterBookings";
 import operatorAccountsRouter from "./operatorAccounts";
 import companyBookingsRouter from "./companyBookings";
@@ -81,6 +82,7 @@ router.use(verificationLogsRouter);
 router.use(companyInvoicesRouter);
 router.use(companyVerificationsRouter);
 router.use(taxConfigRouter);
+router.use(taxReportRouter);
 router.use(sportCenterBookingsRouter);
 router.use(operatorAccountsRouter);
 router.use(companyBookingsRouter);
