@@ -49,6 +49,9 @@ import {
   ShieldCheck,
   RefreshCw,
   LogIn,
+  Link2,
+  Unlink,
+  Layers,
 } from "lucide-react";
 import { getToken } from "@/lib/auth";
 import VerifyIdDialog from "@/components/admin/VerifyIdDialog";
@@ -1538,6 +1541,114 @@ function ExtendDialogBody({
   );
 }
 
+/* ─── Merge Group Dialog ─────────────────────────────────────────── */
+
+function MergeGroupDialog({
+  open,
+  onClose,
+  selectedBookings,
+  onCreated,
+}: {
+  open: boolean;
+  onClose: () => void;
+  selectedBookings: any[];
+  onCreated: () => void;
+}) {
+  const { toast } = useToast();
+  const autoTotal = selectedBookings.reduce((s, b) => s + Number(b.grandTotal ?? b.totalPrice), 0);
+  const [totalInput, setTotalInput] = useState(String(autoTotal));
+  const [notes, setNotes] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    setTotalInput(String(selectedBookings.reduce((s, b) => s + Number(b.grandTotal ?? b.totalPrice), 0)));
+    setNotes("");
+  }, [selectedBookings]);
+
+  const handleSubmit = async () => {
+    if (!selectedBookings.length) return;
+    setSubmitting(true);
+    try {
+      const res = await fetch("/api/bookings/merge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` },
+        body: JSON.stringify({
+          customer_phone: selectedBookings[0].customerPhone,
+          booking_ids: selectedBookings.map((b) => b.orderNumber),
+          total_payment: Number(totalInput),
+          notes,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Gagal membuat grup");
+      toast({ title: `Grup ${data.groupRef} berhasil dibuat`, description: `${selectedBookings.length} booking digabung` });
+      onCreated();
+      onClose();
+    } catch (err: any) {
+      toast({ title: "Gagal", description: err.message, variant: "destructive" });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Layers size={18} className="text-primary" /> Gabung Pembayaran
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="rounded-xl border border-slate-200 dark:border-slate-700 divide-y divide-slate-100 dark:divide-slate-800">
+            {selectedBookings.map((b) => (
+              <div key={b.id} className="flex items-center justify-between px-3 py-2.5">
+                <div>
+                  <div className="font-mono text-xs font-bold text-slate-600 dark:text-slate-400">{b.orderNumber}</div>
+                  <div className="text-xs text-slate-500">{b.facilityName} · {b.bookingDate} {b.startTime?.slice(0,5)}–{b.endTime?.slice(0,5)}</div>
+                </div>
+                <div className="text-xs font-semibold text-slate-800 dark:text-slate-200">
+                  {formatCurrency(Number(b.grandTotal ?? b.totalPrice))}
+                </div>
+              </div>
+            ))}
+            <div className="flex items-center justify-between px-3 py-2.5 bg-slate-50 dark:bg-slate-800/50">
+              <span className="text-xs font-semibold text-slate-600 dark:text-slate-400">Subtotal otomatis</span>
+              <span className="text-xs font-bold text-slate-800 dark:text-slate-200">{formatCurrency(autoTotal)}</span>
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs font-semibold">Total Pembayaran (bisa diubah)</Label>
+            <Input
+              type="number"
+              value={totalInput}
+              onChange={(e) => setTotalInput(e.target.value)}
+              className="text-sm"
+              placeholder="Total yang harus dibayar customer"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs font-semibold">Catatan (opsional)</Label>
+            <Textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              className="text-xs resize-none"
+              rows={2}
+              placeholder="Misal: Bayar sekalian untuk 2 sesi..."
+            />
+          </div>
+          <div className="flex gap-2 pt-1">
+            <Button variant="outline" className="flex-1" onClick={onClose} disabled={submitting}>Batal</Button>
+            <Button className="flex-1 bg-primary" onClick={handleSubmit} disabled={submitting}>
+              {submitting ? "Memproses..." : "Buat Grup Bayar"}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 /* ─── Main Component ────────────────────────────────────────────── */
 
 export default function AdminBookings() {
@@ -1554,9 +1665,55 @@ export default function AdminBookings() {
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
   const [extendBooking, setExtendBooking] = useState<any>(null);
   const [extendHours, setExtendHours] = useState("1");
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [showMergeDialog, setShowMergeDialog] = useState(false);
+  const [dissolvingRef, setDissolvingRef] = useState<string | null>(null);
 
   const { data: rawBookings, isLoading } = useListBookings();
   const bookings = rawBookings ?? [];
+
+  const { data: groupsData, refetch: refetchGroups } = useQuery({
+    queryKey: ["booking-groups"],
+    queryFn: () =>
+      fetch("/api/bookings/groups", { headers: { Authorization: `Bearer ${getToken()}` } }).then((r) => r.json()),
+    staleTime: 30_000,
+  });
+  const groups: any[] = groupsData ?? [];
+
+  const groupsByRef = useMemo(() => {
+    const m: Record<string, any> = {};
+    for (const g of groups) m[g.groupRef] = g;
+    return m;
+  }, [groups]);
+
+  const dissolveGroup = async (groupRef: string) => {
+    setDissolvingRef(groupRef);
+    try {
+      const res = await fetch(`/api/bookings/groups/${groupRef}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      if (!res.ok) throw new Error("Gagal membubarkan grup");
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: getListBookingsQueryKey() }),
+        refetchGroups(),
+      ]);
+      toast({ title: `Grup ${groupRef} dibubarkan` });
+    } catch (err: any) {
+      toast({ title: "Gagal", description: err.message, variant: "destructive" });
+    } finally {
+      setDissolvingRef(null);
+    }
+  };
+
+  const toggleSelect = (id: number) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
 
   const updateBookingMutation = useUpdateBooking({
     mutation: {
@@ -1714,6 +1871,17 @@ export default function AdminBookings() {
   const isUpdating = updateBookingMutation.isPending || updatePaymentMutation.isPending || deletingId !== null;
   const pendingVerification = bookings.filter((b: any) => b.status === "paid").length;
 
+  const mergeSelectedBookings = useMemo(
+    () => filtered.filter((b: any) => selectedIds.has(b.id)),
+    [filtered, selectedIds],
+  );
+
+  const canMerge = useMemo(() => {
+    if (mergeSelectedBookings.length < 2) return false;
+    const phones = new Set(mergeSelectedBookings.map((b: any) => b.customerPhone));
+    return phones.size === 1;
+  }, [mergeSelectedBookings]);
+
   return (
     <div className="space-y-5 pb-10">
       {/* Header */}
@@ -1845,6 +2013,17 @@ export default function AdminBookings() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-100 dark:border-slate-800">
+                  <th className="px-3 py-3 w-8">
+                    <input
+                      type="checkbox"
+                      className="rounded border-slate-300 dark:border-slate-600 accent-primary w-3.5 h-3.5 cursor-pointer"
+                      checked={filtered.length > 0 && filtered.every((b: any) => selectedIds.has(b.id))}
+                      onChange={(e) => {
+                        if (e.target.checked) setSelectedIds(new Set(filtered.map((b: any) => b.id)));
+                        else setSelectedIds(new Set());
+                      }}
+                    />
+                  </th>
                   {["Order", "Customer", "Fasilitas", "Tanggal & Waktu", "Durasi", "Metode", "Tgl Bayar", "Total", "Pembayaran", "Status", ""].map((h) => (
                     <th
                       key={h}
@@ -1864,8 +2043,16 @@ export default function AdminBookings() {
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0 }}
                       transition={{ delay: i * 0.03, duration: 0.2 }}
-                      className="border-b border-slate-50 dark:border-slate-800/50 hover:bg-slate-50/70 dark:hover:bg-slate-800/30 transition-colors group"
+                      className={`border-b border-slate-50 dark:border-slate-800/50 hover:bg-slate-50/70 dark:hover:bg-slate-800/30 transition-colors group ${selectedIds.has(b.id) ? "bg-primary/5 dark:bg-primary/10" : ""}`}
                     >
+                      <td className="px-3 py-3">
+                        <input
+                          type="checkbox"
+                          className="rounded border-slate-300 dark:border-slate-600 accent-primary w-3.5 h-3.5 cursor-pointer"
+                          checked={selectedIds.has(b.id)}
+                          onChange={() => toggleSelect(b.id)}
+                        />
+                      </td>
                       <td className="px-4 py-3">
                         <span className="font-mono text-xs font-bold text-slate-600 dark:text-slate-400">
                           {b.orderNumber}
@@ -1946,9 +2133,23 @@ export default function AdminBookings() {
                         )}
                       </td>
                       <td className="px-4 py-3">
-                        <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                          {formatCurrency(b.totalPrice)}
-                        </span>
+                        <div className="space-y-0.5">
+                          <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                            {formatCurrency(b.grandTotal ?? b.totalPrice)}
+                          </span>
+                          {b.groupRef && (
+                            <div className="flex items-center gap-1">
+                              <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-700">
+                                <Link2 size={9} /> {b.groupRef}
+                              </span>
+                              {groupsByRef[b.groupRef] && (
+                                <span className="text-[10px] text-violet-600 dark:text-violet-400 font-semibold">
+                                  ∑{formatCurrency(groupsByRef[b.groupRef].totalPayment)}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </div>
                       </td>
                       <td className="px-4 py-3">
                         <InlineStatusSelect
@@ -2031,6 +2232,23 @@ export default function AdminBookings() {
                               Verifikasi ID
                             </motion.button>
                           )}
+                          {b.groupRef && (
+                            <motion.button
+                              whileHover={{ scale: 1.04 }}
+                              whileTap={{ scale: 0.96 }}
+                              onClick={() => dissolveGroup(b.groupRef!)}
+                              disabled={dissolvingRef === b.groupRef}
+                              title="Bubarkan grup bayar"
+                              className="flex items-center gap-1 h-7 px-2 rounded-lg text-xs font-semibold text-violet-600 border border-violet-300 hover:bg-violet-50 dark:border-violet-700 dark:hover:bg-violet-900/20 transition-colors opacity-0 group-hover:opacity-100 whitespace-nowrap disabled:opacity-50"
+                            >
+                              {dissolvingRef === b.groupRef ? (
+                                <span className="w-3 h-3 border border-violet-400 border-t-transparent rounded-full animate-spin" />
+                              ) : (
+                                <Unlink size={12} />
+                              )}
+                              Pisah
+                            </motion.button>
+                          )}
                           {deleteConfirmId === b.id ? (
                             <div className="flex items-center gap-1">
                               <button
@@ -2070,7 +2288,7 @@ export default function AdminBookings() {
                 </AnimatePresence>
                 {filtered.length === 0 && (
                   <tr>
-                    <td colSpan={12} className="py-16 text-center text-slate-400 text-sm">
+                    <td colSpan={13} className="py-16 text-center text-slate-400 text-sm">
                       <CalendarCheck size={32} className="mx-auto mb-3 opacity-30" />
                       Tidak ada booking yang ditemukan
                     </td>

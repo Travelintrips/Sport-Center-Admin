@@ -43,6 +43,7 @@ import companyBookingsRouter from "./companyBookings";
 import customerSheetsRouter from "./customerSheets";
 import bankReconciliationRouter from "./bankReconciliation";
 import bankReconciliationSheetsRouter from "./bankReconciliationSheets";
+import bookingGroupsRouter from "./bookingGroups";
 
 const router: IRouter = Router();
 
@@ -89,5 +90,6 @@ router.use(companyBookingsRouter);
 router.use(customerSheetsRouter);
 router.use(bankReconciliationRouter);
 router.use(bankReconciliationSheetsRouter);
+router.use(bookingGroupsRouter);
 
 export default router;

@@ -506,6 +506,30 @@ CREATE TABLE IF NOT EXISTS sport_center.bank_reconciliation_matches (
 );
 
 CREATE INDEX IF NOT EXISTS bank_recon_matches_mutation_id_idx ON sport_center.bank_reconciliation_matches(mutation_id);
+
+-- ============================================================
+-- Booking Groups (Gabung Pembayaran)
+-- ============================================================
+DO $$ BEGIN
+  CREATE TYPE sport_center.booking_group_status AS ENUM ('pending', 'paid');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+CREATE TABLE IF NOT EXISTS sport_center.booking_groups (
+  id             SERIAL PRIMARY KEY,
+  group_ref      TEXT NOT NULL UNIQUE,
+  customer_phone TEXT NOT NULL,
+  customer_name  TEXT NOT NULL,
+  total_payment  NUMERIC(12,2) NOT NULL,
+  status         sport_center.booking_group_status NOT NULL DEFAULT 'pending',
+  notes          TEXT,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE sport_center.bookings
+  ADD COLUMN IF NOT EXISTS group_ref TEXT REFERENCES sport_center.booking_groups(group_ref) ON DELETE SET NULL;
+
+CREATE INDEX IF NOT EXISTS bookings_group_ref_idx ON sport_center.bookings(group_ref);
 `;
 
 async function main() {
