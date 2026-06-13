@@ -417,8 +417,8 @@ export default function Booking() {
     }
 
     // ─── Mode Umum & Angkasa Pura ────────────────────────────────────────────
-    if (isAdminBooking && !selectedCustomerId) {
-      toast({ title: t("Pilih nama pelanggan", "Select customer name"), description: t("Harap pilih nama dari daftar pelanggan.", "Please select a name from the customer list."), variant: "destructive" });
+    if (isAdminBooking && !selectedCustomerId && !name.trim()) {
+      toast({ title: t("Pilih nama pelanggan", "Select customer name"), description: t("Harap pilih nama dari daftar pelanggan atau ketik nama baru.", "Please select a customer or type a new name."), variant: "destructive" });
       return;
     }
     e.preventDefault();
