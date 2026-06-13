@@ -90,8 +90,6 @@ ADMIN_EMAIL = "admcst001@gmail.com"
 ADMIN_EMAIL_DOMAINS = "example.com"
 ADMIN_EMAILS = "divatranssoetta@gmail.com,admcst001@gmail.com,almanosetiawan@gmail.com,divarestorxr@gmail.com,wangsamasindo@gmail.com"
 ADMIN_WA_PHONES = "085121073537,087882639826"
-AI_INTEGRATIONS_OPENAI_API_KEY = "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"
-AI_INTEGRATIONS_OPENAI_BASE_URL = "https://platform.openai.com/api-keys"
 APP_URL = "https://sport-center-admin-111569.replit.app"
 CASHIER_TOKEN_SECRET = "239a1a73ea517bf5430a357fb7a39aa0deef38cecaf4d8135310a7cf3f2e11a19466d603c1dfd5bc0c735e92d58b135d"
 DEFAULT_OBJECT_STORAGE_BUCKET_ID = "replit-objstore-e357cc66-19c3-4d73-9ca9-3069d78355d1"
@@ -115,6 +113,8 @@ VITE_GOOGLE_CLIENT_ID = "751551151000-fqrgt8si0pgnchqkn3pfo6nmqienv38f.apps.goog
 OPENAI_MODEL = "gpt-4o-mini"
 AI_SPORTCENTER_ENABLED = "true"
 AI_SPORTCENTER_MAX_REPLY_LENGTH = "900"
+OPENAI_API_KEY = "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"
+OPENAI_BASE_URL = "https://platform.openai.com/api-keys"
 
 [userenv.development]
 SUPABASE_DATABASE_URL = "postgresql://postgres.xssrfshdrtdfupgqwfdw:admcst0012026@aws-1-ap-southeast-2.pooler.supabase.com:6543/postgres"
