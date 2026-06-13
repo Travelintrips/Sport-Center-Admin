@@ -377,6 +377,8 @@ export const ListBookingsResponseItem = zod.object({
   "ppnRate": zod.number().nullish(),
   "ppnAmount": zod.number().nullish(),
   "grandTotal": zod.number().nullish(),
+  "downPayment": zod.number().optional(),
+  "isDpPaid": zod.boolean().optional(),
   "payment": zod.object({
   "id": zod.number(),
   "bookingId": zod.number(),
@@ -497,6 +499,8 @@ export const GetBookingResponse = zod.object({
   "ppnRate": zod.number().nullish(),
   "ppnAmount": zod.number().nullish(),
   "grandTotal": zod.number().nullish(),
+  "downPayment": zod.number().optional(),
+  "isDpPaid": zod.boolean().optional(),
   "payment": zod.object({
   "id": zod.number(),
   "bookingId": zod.number(),
@@ -557,6 +561,73 @@ export const UpdateBookingResponse = zod.object({
   "ppnRate": zod.number().nullish(),
   "ppnAmount": zod.number().nullish(),
   "grandTotal": zod.number().nullish(),
+  "downPayment": zod.number().optional(),
+  "isDpPaid": zod.boolean().optional(),
+  "payment": zod.object({
+  "id": zod.number(),
+  "bookingId": zod.number(),
+  "amount": zod.number(),
+  "proofUrl": zod.string().nullish(),
+  "paymentMethod": zod.string().nullish(),
+  "status": zod.enum(['pending', 'confirmed', 'rejected']),
+  "confirmedAt": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "createdAt": zod.string().optional(),
+  "updatedAt": zod.string().optional()
+}).nullish(),
+  "createdAt": zod.string().optional()
+})
+
+
+/**
+ * @summary Set down payment for a booking
+ */
+export const PayBookingDpParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const payBookingDpBodyDownPaymentAmountMin = 0;
+
+
+
+export const PayBookingDpBody = zod.object({
+  "downPaymentAmount": zod.number().min(payBookingDpBodyDownPaymentAmountMin)
+})
+
+export const PayBookingDpResponse = zod.object({
+  "id": zod.number(),
+  "orderNumber": zod.string(),
+  "customerId": zod.number().nullish(),
+  "customerName": zod.string(),
+  "customerEmail": zod.string(),
+  "customerPhone": zod.string(),
+  "facilityId": zod.number(),
+  "facilityName": zod.string(),
+  "facilityCategory": zod.string().optional(),
+  "bookingDate": zod.string(),
+  "startTime": zod.string(),
+  "endTime": zod.string(),
+  "durationHours": zod.number(),
+  "totalPrice": zod.number(),
+  "status": zod.enum(['pending_payment', 'waiting_confirmation', 'paid', 'confirmed', 'completed', 'cancelled', 'rejected', 'expired', 'refunded']),
+  "customerType": zod.enum(['umum', 'angkasa_pura']).optional(),
+  "idCardNumber": zod.string().nullish(),
+  "verificationStatus": zod.enum(['not_required', 'pending', 'verified', 'rejected']).optional(),
+  "basePrice": zod.number().nullish(),
+  "apDiscountAmount": zod.number().optional(),
+  "activityType": zod.string().nullish(),
+  "numberOfPeople": zod.number().nullish(),
+  "notes": zod.string().nullish(),
+  "adminNotes": zod.string().nullish(),
+  "whatsappMessage": zod.string().nullish(),
+  "checkedInAt": zod.string().nullish(),
+  "completedAt": zod.string().nullish(),
+  "paymentDeadline": zod.string().nullish(),
+  "ppnRate": zod.number().nullish(),
+  "ppnAmount": zod.number().nullish(),
+  "grandTotal": zod.number().nullish(),
+  "downPayment": zod.number().optional(),
+  "isDpPaid": zod.boolean().optional(),
   "payment": zod.object({
   "id": zod.number(),
   "bookingId": zod.number(),
@@ -612,6 +683,8 @@ export const GetBookingByOrderResponse = zod.object({
   "ppnRate": zod.number().nullish(),
   "ppnAmount": zod.number().nullish(),
   "grandTotal": zod.number().nullish(),
+  "downPayment": zod.number().optional(),
+  "isDpPaid": zod.boolean().optional(),
   "payment": zod.object({
   "id": zod.number(),
   "bookingId": zod.number(),
@@ -1190,6 +1263,8 @@ export const ListCompanyInvoicesResponseItem = zod.object({
   "ppnRate": zod.number().nullish(),
   "ppnAmount": zod.number().nullish(),
   "grandTotal": zod.number().nullish(),
+  "downPayment": zod.number().optional(),
+  "isDpPaid": zod.boolean().optional(),
   "payment": zod.object({
   "id": zod.number(),
   "bookingId": zod.number(),
@@ -1282,6 +1357,8 @@ export const GetCompanyInvoiceResponse = zod.object({
   "ppnRate": zod.number().nullish(),
   "ppnAmount": zod.number().nullish(),
   "grandTotal": zod.number().nullish(),
+  "downPayment": zod.number().optional(),
+  "isDpPaid": zod.boolean().optional(),
   "payment": zod.object({
   "id": zod.number(),
   "bookingId": zod.number(),
@@ -1356,6 +1433,8 @@ export const UpdateCompanyInvoiceResponse = zod.object({
   "ppnRate": zod.number().nullish(),
   "ppnAmount": zod.number().nullish(),
   "grandTotal": zod.number().nullish(),
+  "downPayment": zod.number().optional(),
+  "isDpPaid": zod.boolean().optional(),
   "payment": zod.object({
   "id": zod.number(),
   "bookingId": zod.number(),
@@ -1459,6 +1538,8 @@ export const GetDashboardResponse = zod.object({
   "ppnRate": zod.number().nullish(),
   "ppnAmount": zod.number().nullish(),
   "grandTotal": zod.number().nullish(),
+  "downPayment": zod.number().optional(),
+  "isDpPaid": zod.boolean().optional(),
   "payment": zod.object({
   "id": zod.number(),
   "bookingId": zod.number(),
@@ -1905,6 +1986,8 @@ export const CheckInBookingResponse = zod.object({
   "ppnRate": zod.number().nullish(),
   "ppnAmount": zod.number().nullish(),
   "grandTotal": zod.number().nullish(),
+  "downPayment": zod.number().optional(),
+  "isDpPaid": zod.boolean().optional(),
   "payment": zod.object({
   "id": zod.number(),
   "bookingId": zod.number(),
@@ -1973,6 +2056,8 @@ export const VerifyBookingResponse = zod.object({
   "ppnRate": zod.number().nullish(),
   "ppnAmount": zod.number().nullish(),
   "grandTotal": zod.number().nullish(),
+  "downPayment": zod.number().optional(),
+  "isDpPaid": zod.boolean().optional(),
   "payment": zod.object({
   "id": zod.number(),
   "bookingId": zod.number(),
@@ -2039,6 +2124,8 @@ export const VerifyBookingByOrderResponse = zod.object({
   "ppnRate": zod.number().nullish(),
   "ppnAmount": zod.number().nullish(),
   "grandTotal": zod.number().nullish(),
+  "downPayment": zod.number().optional(),
+  "isDpPaid": zod.boolean().optional(),
   "payment": zod.object({
   "id": zod.number(),
   "bookingId": zod.number(),

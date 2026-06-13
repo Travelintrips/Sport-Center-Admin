@@ -59,6 +59,7 @@ export * from './customerUpdateAccountType';
 export * from './dashboardStats';
 export * from './discountSetting';
 export * from './discountSettingUpdate';
+export * from './dpPaymentInput';
 export * from './enrichedBankCandidate';
 export * from './enrichedBankCandidateCandidateType';
 export * from './enrichedBankCandidateStatus';

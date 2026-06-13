@@ -309,6 +309,41 @@ export async function notifyWaCustomerRegistered(data: WaCustomerRegisteredData)
   await sendWA(data.customerPhone, msg);
 }
 
+export interface DpNotifData {
+  customerName: string;
+  customerPhone: string;
+  orderNumber: string;
+  facilityName: string;
+  bookingDate: string;
+  startTime: string;
+  endTime: string;
+  dpAmount: string;
+  remainingAmount: string;
+  paymentDeadline?: string;
+}
+
+export async function notifyDpPaid(data: DpNotifData): Promise<void> {
+  const msg =
+    `💳 *Pembayaran DP Diterima!*\n\n` +
+    `Halo *${data.customerName}*,\n` +
+    `Booking *${data.orderNumber}* sudah kami terima dengan pembayaran DP.\n\n` +
+    `🏟️ *Fasilitas:* ${data.facilityName}\n` +
+    `📅 *Tanggal:* ${data.bookingDate}\n` +
+    `⏰ *Jam:* ${data.startTime} – ${data.endTime}\n\n` +
+    `💰 *DP Dibayar:* Rp ${data.dpAmount}\n` +
+    `⚠️ *Sisa yang harus dilunasi:* Rp ${data.remainingAmount}\n` +
+    (data.paymentDeadline ? `📆 *Batas Pelunasan:* ${data.paymentDeadline}\n\n` : "\n") +
+    `Harap segera lunasi sebelum batas waktu agar booking dikonfirmasi. Terima kasih! 🙏`;
+  await sendWA(data.customerPhone, msg);
+
+  const adminMsg =
+    `💳 *DP Diterima — ${data.orderNumber}*\n` +
+    `Customer: *${data.customerName}*\n` +
+    `Fasilitas: ${data.facilityName} (${data.bookingDate} ${data.startTime}–${data.endTime})\n` +
+    `DP: Rp ${data.dpAmount} | Sisa: Rp ${data.remainingAmount}`;
+  await sendWAToAdmins(adminMsg);
+}
+
 export interface WaStaffCheckinData {
   orderNumber: string;
   customerName: string;

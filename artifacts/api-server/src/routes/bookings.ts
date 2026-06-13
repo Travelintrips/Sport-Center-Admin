@@ -3,7 +3,7 @@ import { db, bookingsTable, facilitiesTable, paymentsTable, promosTable, discoun
 import { eq, and, sql, or, ilike, desc, inArray } from "drizzle-orm";
 import { adminMiddleware, authMiddleware, verifyToken } from "../lib/auth";
 import { broadcastAvailabilityChange } from "../lib/supabase";
-import { notifyBookingCreated, notifyPaymentConfirmed, notifyBookingCancelled, notifyCompanyBookingCreated } from "../lib/notifications";
+import { notifyBookingCreated, notifyPaymentConfirmed, notifyBookingCancelled, notifyCompanyBookingCreated, notifyDpPaid } from "../lib/notifications";
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
 import { syncBookingToBizportal, syncStatusToBizportal } from "../lib/bizportalSync";
 import { calculateTax, recordTaxTransaction, reverseTaxTransaction } from "../lib/tax";
@@ -56,6 +56,8 @@ async function getBookingWithPayment(id: number) {
     ppnRate: booking.ppnRate == null ? null : Number(booking.ppnRate),
     ppnAmount: booking.ppnAmount == null ? null : Number(booking.ppnAmount),
     grandTotal: booking.grandTotal == null ? null : Number(booking.grandTotal),
+    downPayment: Number(booking.downPayment ?? 0),
+    isDpPaid: booking.isDpPaid ?? false,
     payment: payment ? { ...payment, amount: Number(payment.amount) } : null,
   };
 }
@@ -91,6 +93,8 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
         ppnRate: b.ppnRate == null ? null : Number(b.ppnRate),
         ppnAmount: b.ppnAmount == null ? null : Number(b.ppnAmount),
         grandTotal: b.grandTotal == null ? null : Number(b.grandTotal),
+        downPayment: Number(b.downPayment ?? 0),
+        isDpPaid: b.isDpPaid ?? false,
         facilityName: facility?.name ?? "",
         facilityCategory: facility?.category ?? "",
         payment: payment ? { ...payment, amount: Number(payment.amount) } : null,
@@ -777,6 +781,57 @@ router.delete("/bookings/:id", adminMiddleware, async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     req.log.error({ err }, "Delete booking error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// PATCH /bookings/:id/dp — customer/admin mencatat pembayaran DP
+router.patch("/bookings/:id/dp", async (req, res) => {
+  try {
+    const id = parseInt(String(req.params.id));
+    const { downPaymentAmount } = req.body;
+
+    if (downPaymentAmount == null || isNaN(Number(downPaymentAmount)) || Number(downPaymentAmount) < 0) {
+      res.status(400).json({ error: "Jumlah DP tidak valid" });
+      return;
+    }
+
+    const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, id)).limit(1);
+    if (!booking) { res.status(404).json({ error: "Booking tidak ditemukan" }); return; }
+
+    const grandTotal = Number(booking.grandTotal ?? booking.totalPrice);
+    const dp = Number(downPaymentAmount);
+
+    if (dp > grandTotal) {
+      res.status(400).json({ error: `DP (${dp}) tidak boleh melebihi Grand Total (${grandTotal})` });
+      return;
+    }
+
+    await db.update(bookingsTable)
+      .set({ downPayment: String(dp), isDpPaid: true })
+      .where(eq(bookingsTable.id, id));
+
+    const [facility] = await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, booking.facilityId)).limit(1);
+    const remaining = grandTotal - dp;
+
+    // Kirim notifikasi WA ke customer dan admin
+    notifyDpPaid({
+      customerName: booking.customerName,
+      customerPhone: booking.customerPhone,
+      orderNumber: booking.orderNumber,
+      facilityName: facility?.name ?? "",
+      bookingDate: booking.bookingDate,
+      startTime: booking.startTime,
+      endTime: booking.endTime,
+      dpAmount: dp.toLocaleString("id-ID"),
+      remainingAmount: remaining.toLocaleString("id-ID"),
+      paymentDeadline: booking.paymentDeadline ? new Date(booking.paymentDeadline).toLocaleDateString("id-ID") : undefined,
+    }).catch(() => {});
+
+    const result = await getBookingWithPayment(id);
+    res.json(result);
+  } catch (err) {
+    req.log.error({ err }, "Pay DP error");
     res.status(500).json({ error: "Internal server error" });
   }
 });

@@ -513,6 +513,35 @@ paths:
               schema:
                 $ref: "#/components/schemas/Booking"
 
+  /bookings/{id}/dp:
+    patch:
+      operationId: payBookingDp
+      tags: [bookings]
+      summary: Set down payment for a booking
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DpPaymentInput"
+      responses:
+        "200":
+          description: DP recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Booking"
+        "400":
+          description: Invalid DP amount
+        "404":
+          description: Not found
+
   /bookings/order/{orderNumber}:
     get:
       operationId: getBookingByOrder
@@ -2539,11 +2568,23 @@ components:
           type: ["number", "null"]
         grandTotal:
           type: ["number", "null"]
+        downPayment:
+          type: number
+        isDpPaid:
+          type: boolean
         payment:
           $ref: "#/components/schemas/Payment"
           nullable: true
         createdAt:
           type: string
+
+    DpPaymentInput:
+      type: object
+      required: [downPaymentAmount]
+      properties:
+        downPaymentAmount:
+          type: number
+          minimum: 0
 
     RecurringBookingCheckInput:
       type: object

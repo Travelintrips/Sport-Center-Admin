@@ -84,6 +84,8 @@ export const bookingsTable = scSchema.table("bookings", {
   ppnRate: numeric("ppn_rate", { precision: 5, scale: 2 }),
   ppnAmount: numeric("ppn_amount", { precision: 12, scale: 2 }),
   grandTotal: numeric("grand_total", { precision: 12, scale: 2 }),
+  downPayment: numeric("down_payment", { precision: 12, scale: 2 }).notNull().default("0"),
+  isDpPaid: boolean("is_dp_paid").notNull().default(false),
   bookedByUserId: integer("booked_by_user_id").references(() => usersTable.id, { onDelete: "set null" }),
   groupRef: text("group_ref"),
   approvedByAdminPhone: text("approved_by_admin_phone"),

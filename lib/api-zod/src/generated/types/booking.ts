@@ -56,6 +56,8 @@ export interface Booking {
   ppnAmount?: number | null;
   /** @nullable */
   grandTotal?: number | null;
+  downPayment?: number;
+  isDpPaid?: boolean;
   payment?: Payment | null;
   createdAt?: string;
 }

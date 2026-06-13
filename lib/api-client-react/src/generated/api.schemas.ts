@@ -250,8 +250,15 @@ export interface Booking {
   ppnAmount?: number | null;
   /** @nullable */
   grandTotal?: number | null;
+  downPayment?: number;
+  isDpPaid?: boolean;
   payment?: Payment | null;
   createdAt?: string;
+}
+
+export interface DpPaymentInput {
+  /** @minimum 0 */
+  downPaymentAmount: number;
 }
 
 export type RecurringBookingCheckInputRepeatType = typeof RecurringBookingCheckInputRepeatType[keyof typeof RecurringBookingCheckInputRepeatType];

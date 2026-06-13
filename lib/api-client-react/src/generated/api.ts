@@ -55,6 +55,7 @@ import type {
   DashboardStats,
   DiscountSetting,
   DiscountSettingUpdate,
+  DpPaymentInput,
   ErrorEnvelope,
   ExportBookingsParams,
   Facility,
@@ -1847,6 +1848,78 @@ export const useUpdateBooking = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getUpdateBookingMutationOptions(options));
+    }
+
+export const getPayBookingDpUrl = (id: number,) => {
+
+
+
+
+  return `/api/bookings/${id}/dp`
+}
+
+/**
+ * @summary Set down payment for a booking
+ */
+export const payBookingDp = async (id: number,
+    dpPaymentInput: DpPaymentInput, options?: RequestInit): Promise<Booking> => {
+
+  return customFetch<Booking>(getPayBookingDpUrl(id),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      dpPaymentInput,)
+  }
+);}
+
+
+
+
+export const getPayBookingDpMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof payBookingDp>>, TError,{id: number;data: BodyType<DpPaymentInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof payBookingDp>>, TError,{id: number;data: BodyType<DpPaymentInput>}, TContext> => {
+
+const mutationKey = ['payBookingDp'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof payBookingDp>>, {id: number;data: BodyType<DpPaymentInput>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  payBookingDp(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PayBookingDpMutationResult = NonNullable<Awaited<ReturnType<typeof payBookingDp>>>
+    export type PayBookingDpMutationBody = BodyType<DpPaymentInput>
+    export type PayBookingDpMutationError = ErrorType<void>
+
+    /**
+ * @summary Set down payment for a booking
+ */
+export const usePayBookingDp = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof payBookingDp>>, TError,{id: number;data: BodyType<DpPaymentInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof payBookingDp>>,
+        TError,
+        {id: number;data: BodyType<DpPaymentInput>},
+        TContext
+      > => {
+      return useMutation(getPayBookingDpMutationOptions(options));
     }
 
 export const getGetBookingByOrderUrl = (orderNumber: string,) => {
