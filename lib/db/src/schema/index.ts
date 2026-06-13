@@ -29,3 +29,4 @@ export * from "./taxTransactions";
 export * from "./accountingJournals";
 export * from "./bankReconciliation";
 export * from "./bookingGroups";
+export * from "./waBookingSessions";

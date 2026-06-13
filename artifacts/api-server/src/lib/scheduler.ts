@@ -1,9 +1,10 @@
-import { db, bookingsTable, facilitiesTable } from "@workspace/db";
-import { eq, and, lt, lte, isNotNull, isNull } from "drizzle-orm";
-import { notifyBookingExpired, notifyReminderH1, notifyWaDayReminder, notifyWaStaffCheckin } from "./notifications";
+import { db, bookingsTable, facilitiesTable, bankReconciliationMatchesTable } from "@workspace/db";
+import { eq, and, lt, lte, isNotNull, isNull, inArray, sql } from "drizzle-orm";
+import { notifyBookingExpired, notifyReminderH1, notifyWaDayReminder, notifyWaStaffCheckin, notifyAuditCritical } from "./notifications";
 import { createWaToken } from "./waTokens";
 import { reverseTaxTransaction } from "./tax";
 import { reverseJournalEntry } from "./accounting";
+import { runBankAudit } from "./bankAudit";
 
 const APP_URL = process.env.APP_URL ?? "";
 
@@ -35,7 +36,35 @@ async function expireOverdueBookings(): Promise<void> {
         )
       );
 
+    if (!overdue.length) return;
+
+    // Jangan expire booking yang sedang dalam proses rekonsiliasi bank
+    // Cari booking IDs yang terhubung ke mutasi dengan status aktif (bank_mutation_status enum)
+    const overdueIds = overdue.map((b) => b.id);
+    const { rows: reconRows } = await db.execute(sql`
+      SELECT DISTINCT bp.booking_id
+      FROM sport_center.bank_mutations bm
+      JOIN sport_center.bank_reconciliation_matches brm ON brm.mutation_id = bm.id
+      JOIN sport_center.payments bp ON bp.id = brm.candidate_id AND brm.candidate_type = 'payment'
+      WHERE bm.status IN ('auto_matched','need_review','duplicate_need_review')
+        AND bp.booking_id = ANY(${overdueIds}::int[])
+      UNION
+      SELECT DISTINCT brm.candidate_id AS booking_id
+      FROM sport_center.bank_mutations bm
+      JOIN sport_center.bank_reconciliation_matches brm ON brm.mutation_id = bm.id
+      WHERE bm.status IN ('auto_matched','need_review','duplicate_need_review')
+        AND brm.candidate_type = 'order'
+        AND brm.candidate_id = ANY(${overdueIds}::int[])
+    `);
+    const reconProtectedIds = new Set((reconRows as any[]).map((r) => Number(r.booking_id)));
+
     for (const booking of overdue) {
+      // Skip booking yang ada kandidat rekonsiliasi aktif — biarkan admin konfirmasi dulu
+      if (reconProtectedIds.has(booking.id)) {
+        console.log(`[scheduler] Booking ${booking.orderNumber} overdue tapi punya kandidat rekon aktif — dilewati`);
+        continue;
+      }
+
       await db
         .update(bookingsTable)
         .set({ status: "expired", updatedAt: new Date() })
@@ -224,6 +253,35 @@ async function autoCompleteBookings(): Promise<void> {
   }
 }
 
+// Nightly bank audit — 23:00 WIB (16:00 UTC), kirim WA jika ada temuan critical/warning
+async function runNightlyBankAudit(): Promise<void> {
+  const now = getWIBNow();
+  const hourUTC = now.getUTCHours();
+  // 23:00 WIB = 16:00 UTC (WIB = UTC+7)
+  if (hourUTC !== 16) return;
+
+  try {
+    const result = await runBankAudit();
+    const hasCritical = result.summary.critical > 0;
+    const hasWarning = result.summary.warning > 0;
+
+    if (hasCritical || hasWarning) {
+      await notifyAuditCritical({
+        critical: result.summary.critical,
+        warning: result.summary.warning,
+        info: result.summary.info,
+        findings: result.findings,
+        auditTimestamp: result.auditTimestamp,
+      });
+      console.log(`[scheduler] Nightly bank audit: ${result.summary.critical} critical, ${result.summary.warning} warning — WA notif sent`);
+    } else {
+      console.log("[scheduler] Nightly bank audit: ✅ production ready, no issues");
+    }
+  } catch (err) {
+    console.error("[scheduler] runNightlyBankAudit error:", err);
+  }
+}
+
 export function startScheduler(): void {
   console.log("[scheduler] Starting background scheduler...");
 
@@ -231,11 +289,12 @@ export function startScheduler(): void {
   expireOverdueBookings();
   autoCompleteBookings();
 
-  // Every 5 minutes: expire overdue bookings + auto-complete + reminders
+  // Every 5 minutes: expire overdue bookings + auto-complete + reminders + nightly audit
   setInterval(async () => {
     await expireOverdueBookings();
     await autoCompleteBookings();
     await sendReminderH1();
     await sendDayOfReminder();
+    await runNightlyBankAudit();
   }, 5 * 60 * 1000);
 }

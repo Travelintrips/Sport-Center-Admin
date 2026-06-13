@@ -8,13 +8,33 @@ import { eq, and, desc, isNotNull } from "drizzle-orm";
 import { randomBytes } from "crypto";
 import { createWaToken, verifyWaToken, consumeWaToken, getWaTokenRow } from "../lib/waTokens";
 import {
+  parseIntent,
+  detectFacilityKeyword,
+  getNextStep,
+  getActiveSession,
+  createSession,
+  updateSession,
+  appendMessage,
+  getRegisteredCustomer,
+  formatSessionSummary,
+  formatIDR,
+  todayWIB,
+  type WaStep,
+  type WaBookingSessionRow,
+} from "../lib/waBookingSession";
+import {
   notifyWaBookingCreated,
   notifyWaProofUploaded,
   notifyWaBookingConfirmed,
   notifyWaPaymentRejected,
   notifyWaStaffCheckin,
   notifyWaCustomerRegistered,
+  notifyWaBookingPendingApproval,
+  notifyWaAdminNewBooking,
+  notifyWaBookingApproved,
+  notifyWaBookingRejectedByAdmin,
 } from "../lib/notifications";
+import { calculatePrice } from "../lib/pricing";
 import { logAudit } from "../lib/auditLog";
 import { hashPassword } from "../lib/auth";
 import { syncStatusToBizportal } from "../lib/bizportalSync";
@@ -890,6 +910,1271 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
   } catch (err) {
     console.error("[wa/proof] error:", err);
     res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ─── Helpers for Fonnte webhook ───────────────────────────────────────────────
+
+async function sendWAMsg(phone: string, message: string): Promise<void> {
+  const FONNTE_TOKEN = process.env.FONNTE_TOKEN || "";
+  if (!FONNTE_TOKEN || !phone) return;
+  try {
+    await fetch("https://api.fonnte.com/send", {
+      method: "POST",
+      headers: { Authorization: FONNTE_TOKEN, "Content-Type": "application/json" },
+      body: JSON.stringify({ target: phone, message }),
+    });
+  } catch { /* non-critical */ }
+}
+
+async function getAdminPhones(): Promise<string[]> {
+  try {
+    const [s] = await db.select().from(settingsTable).limit(1);
+    const raw = s?.adminWaPhones || process.env.ADMIN_WA_PHONES || process.env.FONNTE_ADMIN_WA || "";
+    return raw.split(",").map((p: string) => cleanPhone(p)).filter(Boolean);
+  } catch {
+    const raw = process.env.ADMIN_WA_PHONES || process.env.FONNTE_ADMIN_WA || "";
+    return raw.split(",").map((p: string) => cleanPhone(p)).filter(Boolean);
+  }
+}
+
+async function buildFacilityList(): Promise<string> {
+  const facilities = await db.select({
+    name: facilitiesTable.name,
+    category: facilitiesTable.category,
+    pricePerHour: facilitiesTable.pricePerHour,
+  }).from(facilitiesTable).where(eq(facilitiesTable.isActive, true));
+  const lines = facilities.map((f, i) =>
+    `${i + 1}. *${f.name}* — ${formatIDR(Number(f.pricePerHour))}/jam`
+  ).join("\n");
+  return `🏟️ *Fasilitas tersedia:*\n${lines}\n\nSebutkan nama fasilitas yang ingin kamu booking.`;
+}
+
+async function getFacilityByKeyword(keyword: string) {
+  const facilities = await db.select().from(facilitiesTable).where(eq(facilitiesTable.isActive, true));
+  const FACILITY_KEYWORDS: Record<string, string[]> = {
+    basket: ["basket", "basketball"],
+    futsal: ["futsal", "sepak bola", "mini soccer"],
+    badminton: ["badminton", "bulutangkis", "shuttle"],
+    tennis: ["tennis", "tenis"],
+    gym: ["gym", "fitness", "fitnes"],
+    voli: ["voli", "volley", "volleyball"],
+    renang: ["renang", "kolam", "swimming"],
+    squash: ["squash"],
+    golf: ["golf"],
+    serbaguna: ["serbaguna", "multiguna", "hall", "aula"],
+    billiard: ["billiard", "biliar", "bilyard"],
+  };
+  const kws = FACILITY_KEYWORDS[keyword] ?? [keyword];
+  return (
+    facilities.find((f) => kws.some((kw) => f.name.toLowerCase().includes(kw) || f.category.toLowerCase().includes(kw))) ??
+    facilities.find((f) => f.category.toLowerCase() === keyword.toLowerCase()) ??
+    facilities.find((f) => f.name.toLowerCase().includes(keyword.toLowerCase())) ??
+    null
+  );
+}
+
+// Parse facility from raw message text (search by name or keyword)
+async function resolveFacilityFromMsg(msg: string) {
+  const kw = detectFacilityKeyword(msg);
+  if (kw) return getFacilityByKeyword(kw);
+  // Direct name search
+  const facilities = await db.select().from(facilitiesTable).where(eq(facilitiesTable.isActive, true));
+  const lower = msg.toLowerCase();
+  return facilities.find((f) => f.name.toLowerCase().includes(lower)) ?? null;
+}
+
+function addHoursToTime(time: string, hours: number): string {
+  const [h, m] = time.split(":").map(Number);
+  const totalMin = h * 60 + (m || 0) + hours * 60;
+  const rh = Math.floor(totalMin / 60) % 24;
+  const rm = totalMin % 60;
+  return `${String(rh).padStart(2, "0")}:${String(rm).padStart(2, "0")}`;
+}
+
+function minutesToHours(min: number): number {
+  return Math.max(1, Math.round(min / 60));
+}
+
+function isYes(msg: string): boolean {
+  return /^(ya|iya|ok|oke|yes|lanjut|betul|benar|confirm|konfirm)/i.test(msg.trim());
+}
+
+function isNo(msg: string): boolean {
+  return /^(tidak|tidak|batal|cancel|hapus|no|ga|gak|nggak|ngga)/i.test(msg.trim());
+}
+
+// ─── Admin command handler ─────────────────────────────────────────────────────
+
+async function handleAdminCommand(adminPhone: string, msg: string): Promise<boolean> {
+  const upper = msg.trim().toUpperCase();
+
+  // APPROVE SC-XXXX / KONFIRMASI SC-XXXX
+  const approveMatch = upper.match(/^(APPROVE|KONFIRMASI|SETUJU)\s+(SC-\d+)/);
+  if (approveMatch) {
+    const orderNumber = approveMatch[2].toUpperCase();
+    await execAdminApprove(adminPhone, orderNumber);
+    return true;
+  }
+
+  // REJECT SC-XXXX [reason]
+  const rejectMatch = msg.trim().match(/^(?:REJECT|TOLAK|BATALKAN)\s+(SC-\d+)(?:\s+(.+))?/i);
+  if (rejectMatch) {
+    const orderNumber = rejectMatch[1].toUpperCase();
+    const reason = rejectMatch[2]?.trim() ?? "";
+    await execAdminReject(adminPhone, orderNumber, reason);
+    return true;
+  }
+
+  // STATUS SC-XXXX — admin checking a booking
+  const statusMatch = msg.trim().match(/^STATUS\s+(SC-\d+)/i);
+  if (statusMatch) {
+    const orderNumber = statusMatch[1].toUpperCase();
+    await execAdminStatus(adminPhone, orderNumber);
+    return true;
+  }
+
+  // PAID SC-XXXX — konfirmasi pembayaran manual
+  const paidMatch = upper.match(/^(PAID|LUNAS|BAYAR)\s+(SC-\d+)/);
+  if (paidMatch) {
+    const orderNumber = paidMatch[2].toUpperCase();
+    await execAdminPaid(adminPhone, orderNumber);
+    return true;
+  }
+
+  // CANCEL SC-XXXX [reason]
+  const cancelMatch = msg.trim().match(/^(CANCEL|BATALKAN)\s+(SC-\d+)(?:\s+(.+))?/i);
+  if (cancelMatch) {
+    const orderNumber = cancelMatch[2].toUpperCase();
+    const reason = cancelMatch[3]?.trim() ?? "";
+    await execAdminCancel(adminPhone, orderNumber, reason);
+    return true;
+  }
+
+  // RESEND SC-XXXX — kirim ulang notifikasi WA
+  const resendMatch = msg.trim().match(/^RESEND\s+(SC-\d+)/i);
+  if (resendMatch) {
+    const orderNumber = resendMatch[1].toUpperCase();
+    await execAdminResend(adminPhone, orderNumber);
+    return true;
+  }
+
+  return false;
+}
+
+async function execAdminApprove(adminPhone: string, orderNumber: string) {
+  const [booking] = await db.select().from(bookingsTable)
+    .where(eq(bookingsTable.orderNumber, orderNumber)).limit(1);
+  if (!booking) {
+    await sendWAMsg(adminPhone, `❌ Order *${orderNumber}* tidak ditemukan.`);
+    return;
+  }
+
+  const [facility] = await db.select().from(facilitiesTable)
+    .where(eq(facilitiesTable.id, booking.facilityId)).limit(1);
+
+  // ── Handle waiting_admin_approval: ubah ke pending_payment + kirim instruksi bayar ──
+  if (booking.status === "waiting_admin_approval") {
+    const paymentDeadline = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 jam
+    await db.update(bookingsTable)
+      .set({ status: "pending_payment", paymentDeadline, approvedByAdminPhone: adminPhone, approvedAt: new Date(), updatedAt: new Date() })
+      .where(eq(bookingsTable.id, booking.id));
+
+    await db.insert(bookingHistoryTable).values({
+      bookingId: booking.id,
+      fromStatus: "waiting_admin_approval",
+      toStatus: "pending_payment",
+      changedByName: `admin (WA: ${adminPhone})`,
+      note: "Booking disetujui admin via WhatsApp. Customer diminta melakukan pembayaran.",
+    });
+
+    const proofToken = await createWaToken(booking.id, "upload_proof", 7);
+    const settingsRows = await db.select().from(settingsTable).limit(1);
+    const settings = settingsRows[0];
+    const amountToPay = booking.grandTotal ? Number(booking.grandTotal) : Number(booking.totalPrice);
+    const statusUrl = `${APP_URL}/wa/status/${booking.orderNumber}`;
+    const uploadProofUrl = `${APP_URL}/wa/proof/${proofToken}`;
+    const deadlineStr = paymentDeadline.toLocaleString("id-ID", { timeZone: "Asia/Jakarta", hour12: false });
+
+    notifyWaBookingApproved({
+      customerName: booking.customerName,
+      customerPhone: booking.customerPhone,
+      orderNumber: booking.orderNumber,
+      facilityName: facility?.name ?? "",
+      bookingDate: booking.bookingDate,
+      startTime: booking.startTime,
+      endTime: booking.endTime,
+      totalPrice: amountToPay.toLocaleString("id-ID"),
+      paymentDeadline: deadlineStr,
+      statusUrl,
+      uploadProofUrl,
+      bankName: settings?.bankName ?? "",
+      bankAccount: settings?.bankAccount ?? "",
+      bankAccountName: settings?.bankAccountName ?? "",
+    });
+
+    await logAudit({
+      action: "wa_admin_approve_booking",
+      entity: "booking",
+      entityId: booking.id,
+      before: { status: "waiting_admin_approval" },
+      after: { status: "pending_payment" },
+      userName: `admin (WA: ${adminPhone})`,
+    });
+
+    await sendWAMsg(adminPhone,
+      `✅ *${orderNumber}* disetujui!\n` +
+      `Customer: *${booking.customerName}*\n` +
+      `${facility?.name ?? ""} | ${booking.bookingDate} ${booking.startTime}–${booking.endTime}\n\n` +
+      `Customer diberitahu untuk melakukan pembayaran dalam 24 jam.`
+    );
+    return;
+  }
+
+  // ── Handle waiting_confirmation / pending_payment: konfirmasi pembayaran ──
+  if (!["waiting_confirmation", "pending_payment"].includes(booking.status)) {
+    await sendWAMsg(adminPhone, `⚠️ Order *${orderNumber}* tidak bisa dikonfirmasi. Status saat ini: *${booking.status.replace(/_/g, " ").toUpperCase()}*.`);
+    return;
+  }
+
+  const [existingPay] = await db.select().from(paymentsTable)
+    .where(eq(paymentsTable.bookingId, booking.id)).limit(1);
+  if (existingPay) {
+    await db.update(paymentsTable).set({ status: "confirmed", confirmedAt: new Date() })
+      .where(eq(paymentsTable.bookingId, booking.id));
+  } else {
+    await db.insert(paymentsTable).values({
+      bookingId: booking.id,
+      amount: String(Number(booking.grandTotal ?? booking.totalPrice)),
+      paymentMethod: "Manual (Admin WA)",
+      status: "confirmed",
+      confirmedAt: new Date(),
+    });
+  }
+
+  await db.update(bookingsTable)
+    .set({ status: "confirmed", updatedAt: new Date() })
+    .where(eq(bookingsTable.id, booking.id));
+
+  await db.insert(bookingHistoryTable).values({
+    bookingId: booking.id,
+    fromStatus: booking.status,
+    toStatus: "confirmed",
+    changedByName: `admin (WA: ${adminPhone})`,
+    note: "Pembayaran dikonfirmasi admin via WhatsApp command",
+  });
+
+  const checkinToken = await createWaToken(booking.id, "checkin", 30);
+  const finishToken = await createWaToken(booking.id, "finish", 30);
+  const statusUrl = `${APP_URL}/wa/status/${booking.orderNumber}`;
+
+  notifyWaBookingConfirmed({
+    customerName: booking.customerName,
+    customerPhone: booking.customerPhone,
+    orderNumber: booking.orderNumber,
+    facilityName: facility?.name ?? "",
+    bookingDate: booking.bookingDate,
+    startTime: booking.startTime,
+    endTime: booking.endTime,
+    totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
+    statusUrl,
+  });
+
+  notifyWaStaffCheckin({
+    orderNumber: booking.orderNumber,
+    customerName: booking.customerName,
+    facilityName: facility?.name ?? "",
+    bookingDate: booking.bookingDate,
+    startTime: booking.startTime,
+    endTime: booking.endTime,
+    checkinUrl: `${APP_URL}/wa/action/${checkinToken}`,
+    finishUrl: `${APP_URL}/wa/action/${finishToken}`,
+  });
+
+  await logAudit({
+    action: "wa_admin_approve",
+    entity: "booking",
+    entityId: booking.id,
+    before: { status: booking.status },
+    after: { status: "confirmed" },
+    userName: `admin (WA: ${adminPhone})`,
+  });
+
+  await sendWAMsg(adminPhone,
+    `✅ *${orderNumber}* berhasil dikonfirmasi!\n` +
+    `Customer: *${booking.customerName}*\n` +
+    `${facility?.name ?? ""} | ${booking.bookingDate} ${booking.startTime}–${booking.endTime}\n\n` +
+    `Customer sudah diberitahu via WA.`
+  );
+}
+
+async function execAdminReject(adminPhone: string, orderNumber: string, reason: string) {
+  const [booking] = await db.select().from(bookingsTable)
+    .where(eq(bookingsTable.orderNumber, orderNumber)).limit(1);
+  if (!booking) {
+    await sendWAMsg(adminPhone, `❌ Order *${orderNumber}* tidak ditemukan.`);
+    return;
+  }
+  if (["cancelled", "rejected", "refunded", "completed"].includes(booking.status)) {
+    await sendWAMsg(adminPhone, `⚠️ Order *${orderNumber}* sudah dalam status *${booking.status.replace(/_/g, " ").toUpperCase()}*, tidak bisa ditolak.`);
+    return;
+  }
+  const [facility] = await db.select({ name: facilitiesTable.name })
+    .from(facilitiesTable).where(eq(facilitiesTable.id, booking.facilityId)).limit(1);
+
+  await db.update(paymentsTable).set({ status: "rejected" })
+    .where(eq(paymentsTable.bookingId, booking.id));
+  await db.update(bookingsTable)
+    .set({ status: "rejected", adminNotes: reason || null, rejectedReason: reason || null, updatedAt: new Date() })
+    .where(eq(bookingsTable.id, booking.id));
+  await db.insert(bookingHistoryTable).values({
+    bookingId: booking.id,
+    fromStatus: booking.status,
+    toStatus: "rejected",
+    changedByName: `admin (WA: ${adminPhone})`,
+    note: reason ? `Ditolak admin via WA. Alasan: ${reason}` : "Ditolak admin via WA.",
+  });
+
+  // Kalau dari waiting_admin_approval: kirim notif penolakan booking (bukan pembayaran)
+  if (booking.status === "waiting_admin_approval") {
+    notifyWaBookingRejectedByAdmin({
+      customerPhone: booking.customerPhone,
+      customerName: booking.customerName,
+      orderNumber: booking.orderNumber,
+      facilityName: facility?.name ?? "",
+      bookingDate: booking.bookingDate,
+      startTime: booking.startTime,
+      endTime: booking.endTime,
+      reason,
+    });
+  } else {
+    // Penolakan pembayaran — customer perlu upload ulang
+    const newUploadToken = await createWaToken(booking.id, "upload_proof", 7);
+    notifyWaPaymentRejected({
+      customerName: booking.customerName,
+      customerPhone: booking.customerPhone,
+      orderNumber: booking.orderNumber,
+      facilityName: facility?.name ?? "",
+      bookingDate: booking.bookingDate,
+      startTime: booking.startTime,
+      endTime: booking.endTime,
+      totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
+      uploadProofUrl: `${APP_URL}/wa/proof/${newUploadToken}`,
+      reason,
+    });
+  }
+
+  await logAudit({
+    action: "wa_admin_reject",
+    entity: "booking",
+    entityId: booking.id,
+    before: { status: booking.status },
+    after: { status: "rejected", reason },
+    userName: `admin (WA: ${adminPhone})`,
+  });
+
+  await sendWAMsg(adminPhone,
+    `🚫 *${orderNumber}* berhasil ditolak.\n` +
+    `Customer: *${booking.customerName}*\n` +
+    (reason ? `Alasan: _${reason}_\n` : "") +
+    `\nCustomer sudah diberitahu via WA.`
+  );
+}
+
+async function execAdminStatus(adminPhone: string, orderNumber: string) {
+  const [booking] = await db.select().from(bookingsTable)
+    .where(eq(bookingsTable.orderNumber, orderNumber)).limit(1);
+  if (!booking) {
+    await sendWAMsg(adminPhone, `❌ Order *${orderNumber}* tidak ditemukan.`);
+    return;
+  }
+  const [facility] = await db.select({ name: facilitiesTable.name })
+    .from(facilitiesTable).where(eq(facilitiesTable.id, booking.facilityId)).limit(1);
+  const [payment] = await db.select().from(paymentsTable)
+    .where(eq(paymentsTable.bookingId, booking.id)).limit(1);
+
+  await sendWAMsg(adminPhone,
+    `📋 *Detail Booking ${orderNumber}*\n\n` +
+    `Customer: *${booking.customerName}*\n` +
+    `Telp: *${booking.customerPhone}*\n` +
+    `Fasilitas: *${facility?.name ?? "-"}*\n` +
+    `Tanggal: *${booking.bookingDate}* | *${booking.startTime}–${booking.endTime}*\n` +
+    `Total: *${formatIDR(Number(booking.grandTotal ?? booking.totalPrice))}*\n` +
+    `Status: *${booking.status.replace(/_/g, " ").toUpperCase()}*\n` +
+    (payment ? `Bukti: ${payment.proofUrl ?? "-"}\n` : "") +
+    `\n🔗 ${APP_URL}/wa/status/${orderNumber}`
+  );
+}
+
+async function execAdminPaid(adminPhone: string, orderNumber: string) {
+  const [booking] = await db.select().from(bookingsTable)
+    .where(eq(bookingsTable.orderNumber, orderNumber)).limit(1);
+  if (!booking) {
+    await sendWAMsg(adminPhone, `❌ Order *${orderNumber}* tidak ditemukan.`);
+    return;
+  }
+  if (!["pending_payment", "waiting_confirmation", "waiting_admin_approval"].includes(booking.status)) {
+    await sendWAMsg(adminPhone, `⚠️ Order *${orderNumber}* tidak bisa dikonfirmasi pembayaran. Status: *${booking.status.replace(/_/g, " ").toUpperCase()}*.`);
+    return;
+  }
+  const [facility] = await db.select().from(facilitiesTable)
+    .where(eq(facilitiesTable.id, booking.facilityId)).limit(1);
+
+  const [existingPay] = await db.select().from(paymentsTable)
+    .where(eq(paymentsTable.bookingId, booking.id)).limit(1);
+  if (existingPay) {
+    await db.update(paymentsTable).set({ status: "confirmed", confirmedAt: new Date() })
+      .where(eq(paymentsTable.bookingId, booking.id));
+  } else {
+    await db.insert(paymentsTable).values({
+      bookingId: booking.id,
+      amount: String(Number(booking.grandTotal ?? booking.totalPrice)),
+      paymentMethod: "Manual (Admin WA)",
+      status: "confirmed",
+      confirmedAt: new Date(),
+    });
+  }
+
+  await db.update(bookingsTable)
+    .set({ status: "confirmed", paidAt: new Date(), updatedAt: new Date() })
+    .where(eq(bookingsTable.id, booking.id));
+
+  await db.insert(bookingHistoryTable).values({
+    bookingId: booking.id,
+    fromStatus: booking.status,
+    toStatus: "confirmed",
+    changedByName: `admin (WA: ${adminPhone})`,
+    note: "Pembayaran dikonfirmasi admin via WhatsApp — PAID command",
+  });
+
+  const checkinToken = await createWaToken(booking.id, "checkin", 30);
+  const finishToken = await createWaToken(booking.id, "finish", 30);
+
+  notifyWaBookingConfirmed({
+    customerName: booking.customerName,
+    customerPhone: booking.customerPhone,
+    orderNumber: booking.orderNumber,
+    facilityName: facility?.name ?? "",
+    bookingDate: booking.bookingDate,
+    startTime: booking.startTime,
+    endTime: booking.endTime,
+    totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
+    statusUrl: `${APP_URL}/wa/status/${booking.orderNumber}`,
+  });
+
+  notifyWaStaffCheckin({
+    orderNumber: booking.orderNumber,
+    customerName: booking.customerName,
+    facilityName: facility?.name ?? "",
+    bookingDate: booking.bookingDate,
+    startTime: booking.startTime,
+    endTime: booking.endTime,
+    checkinUrl: `${APP_URL}/wa/action/${checkinToken}`,
+    finishUrl: `${APP_URL}/wa/action/${finishToken}`,
+  });
+
+  await logAudit({
+    action: "admin_paid_via_wa",
+    entity: "booking",
+    entityId: booking.id,
+    before: { status: booking.status },
+    after: { status: "confirmed", paidAt: new Date() },
+    userName: `admin (WA: ${adminPhone})`,
+  });
+
+  await sendWAMsg(adminPhone,
+    `💰 *${orderNumber}* berhasil dikonfirmasi LUNAS!\n` +
+    `Customer: *${booking.customerName}*\n` +
+    `${facility?.name ?? ""} | ${booking.bookingDate} ${booking.startTime}–${booking.endTime}\n\n` +
+    `Customer sudah diberitahu via WA.`
+  );
+}
+
+async function execAdminCancel(adminPhone: string, orderNumber: string, reason: string) {
+  const [booking] = await db.select().from(bookingsTable)
+    .where(eq(bookingsTable.orderNumber, orderNumber)).limit(1);
+  if (!booking) {
+    await sendWAMsg(adminPhone, `❌ Order *${orderNumber}* tidak ditemukan.`);
+    return;
+  }
+  if (["confirmed", "completed", "cancelled", "rejected", "refunded"].includes(booking.status)) {
+    await sendWAMsg(adminPhone, `⚠️ Order *${orderNumber}* tidak bisa dibatalkan. Status: *${booking.status.replace(/_/g, " ").toUpperCase()}*.`);
+    return;
+  }
+  const [facility] = await db.select({ name: facilitiesTable.name })
+    .from(facilitiesTable).where(eq(facilitiesTable.id, booking.facilityId)).limit(1);
+
+  await db.update(bookingsTable)
+    .set({ status: "cancelled", adminNotes: reason || null, updatedAt: new Date() })
+    .where(eq(bookingsTable.id, booking.id));
+
+  await db.insert(bookingHistoryTable).values({
+    bookingId: booking.id,
+    fromStatus: booking.status,
+    toStatus: "cancelled",
+    changedByName: `admin (WA: ${adminPhone})`,
+    note: reason ? `Dibatalkan admin via WA. Alasan: ${reason}` : "Dibatalkan admin via WA.",
+  });
+
+  await sendWAMsg(booking.customerPhone,
+    `❌ *Booking Dibatalkan*\n\n` +
+    `Order: *${booking.orderNumber}*\n` +
+    `Fasilitas: *${facility?.name ?? ""}*\n` +
+    `Tanggal: *${booking.bookingDate}* pukul *${booking.startTime}–${booking.endTime}*\n\n` +
+    (reason ? `Alasan: _${reason}_\n\n` : "") +
+    `Hubungi kami untuk info lebih lanjut.`
+  );
+
+  await logAudit({
+    action: "booking_cancelled_via_wa",
+    entity: "booking",
+    entityId: booking.id,
+    before: { status: booking.status },
+    after: { status: "cancelled", reason },
+    userName: `admin (WA: ${adminPhone})`,
+  });
+
+  await sendWAMsg(adminPhone,
+    `🚫 *${orderNumber}* berhasil dibatalkan.\n` +
+    `Customer: *${booking.customerName}*\n` +
+    (reason ? `Alasan: _${reason}_` : "")
+  );
+}
+
+async function execAdminResend(adminPhone: string, orderNumber: string) {
+  const [booking] = await db.select().from(bookingsTable)
+    .where(eq(bookingsTable.orderNumber, orderNumber)).limit(1);
+  if (!booking) {
+    await sendWAMsg(adminPhone, `❌ Order *${orderNumber}* tidak ditemukan.`);
+    return;
+  }
+  const [facility] = await db.select().from(facilitiesTable)
+    .where(eq(facilitiesTable.id, booking.facilityId)).limit(1);
+  const [settings] = await db.select().from(settingsTable).limit(1);
+  const amountToPay = Number(booking.grandTotal ?? booking.totalPrice);
+
+  if (booking.status === "waiting_admin_approval") {
+    const adminPhonesList = await getAdminPhones();
+    const msg =
+      `🏅 *Booking WA Menunggu Persetujuan (Resend)*\n\n` +
+      `Order: *${booking.orderNumber}*\n` +
+      `Customer: *${booking.customerName}* (${booking.customerPhone})\n` +
+      `Fasilitas: *${facility?.name ?? ""}*\n` +
+      `Tanggal: *${booking.bookingDate}* pukul *${booking.startTime}–${booking.endTime}*\n` +
+      `Total: *${formatIDR(amountToPay)}*\n\n` +
+      `Ketik *APPROVE ${booking.orderNumber}* untuk menyetujui\n` +
+      `Ketik *REJECT ${booking.orderNumber} [alasan]* untuk menolak`;
+    for (const p of adminPhonesList) await sendWAMsg(p, msg);
+    await sendWAMsg(adminPhone, `✅ Notifikasi approval dikirim ulang ke ${adminPhonesList.length} admin.`);
+  } else if (booking.status === "pending_payment") {
+    const proofToken = await createWaToken(booking.id, "upload_proof", 7);
+    const deadline = booking.paymentDeadline
+      ? new Date(booking.paymentDeadline).toLocaleString("id-ID", { timeZone: "Asia/Jakarta", hour12: false })
+      : "-";
+    notifyWaBookingApproved({
+      customerName: booking.customerName,
+      customerPhone: booking.customerPhone,
+      orderNumber: booking.orderNumber,
+      facilityName: facility?.name ?? "",
+      bookingDate: booking.bookingDate,
+      startTime: booking.startTime,
+      endTime: booking.endTime,
+      totalPrice: amountToPay.toLocaleString("id-ID"),
+      paymentDeadline: deadline,
+      statusUrl: `${APP_URL}/wa/status/${booking.orderNumber}`,
+      uploadProofUrl: `${APP_URL}/wa/proof/${proofToken}`,
+      bankName: settings?.bankName ?? "",
+      bankAccount: settings?.bankAccount ?? "",
+      bankAccountName: settings?.bankAccountName ?? "",
+    });
+    await sendWAMsg(adminPhone, `✅ Instruksi pembayaran dikirim ulang ke customer *${booking.customerName}*.`);
+  } else if (booking.status === "confirmed") {
+    notifyWaBookingConfirmed({
+      customerName: booking.customerName,
+      customerPhone: booking.customerPhone,
+      orderNumber: booking.orderNumber,
+      facilityName: facility?.name ?? "",
+      bookingDate: booking.bookingDate,
+      startTime: booking.startTime,
+      endTime: booking.endTime,
+      totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
+      statusUrl: `${APP_URL}/wa/status/${booking.orderNumber}`,
+    });
+    await sendWAMsg(adminPhone, `✅ Konfirmasi booking dikirim ulang ke customer *${booking.customerName}*.`);
+  } else {
+    await sendWAMsg(adminPhone, `⚠️ Tidak bisa resend untuk status *${booking.status.replace(/_/g, " ").toUpperCase()}*.`);
+    return;
+  }
+
+  await logAudit({
+    action: "payment_link_sent",
+    entity: "booking",
+    entityId: booking.id,
+    after: { orderNumber, resendBy: adminPhone, status: booking.status },
+    userName: `admin (WA: ${adminPhone})`,
+  });
+}
+
+// ─── Session conversation handlers ────────────────────────────────────────────
+
+async function startBookingSession(phone: string, msg: string, waName: string): Promise<void> {
+  const intent = parseIntent(msg);
+  const customer = await getRegisteredCustomer(phone);
+
+  let facilityId: number | null = null;
+  let facilityName = "";
+  let pricePerHour = 0;
+
+  if (intent.facilityKeyword) {
+    const fac = await getFacilityByKeyword(intent.facilityKeyword);
+    if (fac) {
+      facilityId = fac.id;
+      facilityName = fac.name;
+      pricePerHour = Number(fac.pricePerHour);
+    }
+  }
+
+  const step = getNextStep({
+    facilityId,
+    bookingDate: intent.bookingDate,
+    startTime: intent.startTime,
+    durationMinutes: intent.durationMinutes,
+    customerName: customer?.name ?? null,
+  });
+
+  const session = await createSession({
+    phone,
+    customerId: customer?.id ?? null,
+    facilityId,
+    bookingDate: intent.bookingDate,
+    startTime: intent.startTime,
+    durationMinutes: intent.durationMinutes,
+    customerName: customer?.name ?? null,
+    currentStep: step,
+  });
+
+  await appendMessage(session.id, "customer", msg);
+
+  await logAudit({
+    action: "booking_session_started",
+    entity: "wa_booking_session",
+    entityId: session.id,
+    after: { phone, step, facilityId, bookingDate: intent.bookingDate, startTime: intent.startTime },
+  });
+
+  const reply = await buildStepQuestion(step, session, facilityName, pricePerHour);
+  await appendMessage(session.id, "bot", reply);
+  await sendWAMsg(phone, reply);
+}
+
+async function continueSession(session: WaBookingSessionRow, phone: string, msg: string): Promise<void> {
+  await appendMessage(session.id, "customer", msg);
+
+  const step = session.currentStep as WaStep;
+  const lower = msg.toLowerCase().trim();
+
+  // Allow cancelling at any step
+  if (isNo(lower) && step !== "confirm") {
+    await updateSession(session.id, { status: "cancelled" });
+    await sendWAMsg(phone, `❌ Booking dibatalkan. Ketik *booking* kapan saja untuk memulai lagi. 🏅`);
+    return;
+  }
+
+  switch (step) {
+    case "ask_facility": {
+      const fac = await resolveFacilityFromMsg(msg);
+      if (!fac) {
+        const reply = `Fasilitas tidak ditemukan. ${await buildFacilityList()}`;
+        await appendMessage(session.id, "bot", reply);
+        await sendWAMsg(phone, reply);
+        return;
+      }
+      const updated = await updateSession(session.id, {
+        facilityId: fac.id,
+        currentStep: getNextStep({
+          facilityId: fac.id,
+          bookingDate: session.bookingDate,
+          startTime: session.startTime,
+          durationMinutes: session.durationMinutes,
+          customerName: session.customerName,
+        }),
+      });
+      await logAudit({ action: "booking_session_updated", entity: "wa_booking_session", entityId: session.id, after: { step: "ask_facility", facilityId: fac.id } });
+      const reply = await buildStepQuestion(updated.currentStep as WaStep, updated, fac.name, Number(fac.pricePerHour));
+      await appendMessage(session.id, "bot", reply);
+      await sendWAMsg(phone, reply);
+      break;
+    }
+
+    case "ask_date": {
+      const parsed = parseIntent(msg);
+      if (!parsed.bookingDate) {
+        const reply = `📅 Tidak bisa mengenali tanggal. Coba format:\n• *besok*\n• *15 Juni*\n• *Senin*\n• *tanggal 20*`;
+        await appendMessage(session.id, "bot", reply);
+        await sendWAMsg(phone, reply);
+        return;
+      }
+      if (parsed.bookingDate < todayWIB()) {
+        const reply = `📅 Tanggal *${parsed.bookingDate}* sudah lewat. Pilih tanggal hari ini atau yang akan datang.`;
+        await appendMessage(session.id, "bot", reply);
+        await sendWAMsg(phone, reply);
+        return;
+      }
+      const updated = await updateSession(session.id, {
+        bookingDate: parsed.bookingDate,
+        currentStep: getNextStep({ ...session, bookingDate: parsed.bookingDate }),
+      });
+      await logAudit({ action: "booking_session_updated", entity: "wa_booking_session", entityId: session.id, after: { step: "ask_date", bookingDate: parsed.bookingDate } });
+      const fac = session.facilityId ? await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, session.facilityId)).limit(1).then(r => r[0]) : null;
+      const reply = await buildStepQuestion(updated.currentStep as WaStep, updated, fac?.name ?? "", Number(fac?.pricePerHour ?? 0));
+      await appendMessage(session.id, "bot", reply);
+      await sendWAMsg(phone, reply);
+      break;
+    }
+
+    case "ask_time": {
+      const parsed = parseIntent(msg);
+      if (!parsed.startTime) {
+        const reply = `⏰ Tidak bisa mengenali jam. Coba format:\n• *jam 8 pagi*\n• *jam 20.00*\n• *19:00*\n• *jam 7 malam*`;
+        await appendMessage(session.id, "bot", reply);
+        await sendWAMsg(phone, reply);
+        return;
+      }
+      const updated = await updateSession(session.id, {
+        startTime: parsed.startTime,
+        currentStep: getNextStep({ ...session, startTime: parsed.startTime }),
+      });
+      await logAudit({ action: "booking_session_updated", entity: "wa_booking_session", entityId: session.id, after: { step: "ask_time", startTime: parsed.startTime } });
+      const fac = session.facilityId ? await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, session.facilityId)).limit(1).then(r => r[0]) : null;
+      const reply = await buildStepQuestion(updated.currentStep as WaStep, updated, fac?.name ?? "", Number(fac?.pricePerHour ?? 0));
+      await appendMessage(session.id, "bot", reply);
+      await sendWAMsg(phone, reply);
+      break;
+    }
+
+    case "ask_duration": {
+      const parsed = parseIntent(msg);
+      // Also handle simple number input like "2" (hours)
+      const directNum = lower.match(/^(\d+(?:[.,]\d+)?)$/);
+      let durationMinutes = parsed.durationMinutes;
+      if (!durationMinutes && directNum) {
+        durationMinutes = Math.round(parseFloat(directNum[1].replace(",", ".")) * 60);
+      }
+      if (!durationMinutes) {
+        const reply = `⏱️ Tidak bisa mengenali durasi. Coba:\n• *2 jam*\n• *1 jam 30 menit*\n• *90 menit*`;
+        await appendMessage(session.id, "bot", reply);
+        await sendWAMsg(phone, reply);
+        return;
+      }
+      const updated = await updateSession(session.id, {
+        durationMinutes,
+        currentStep: getNextStep({ ...session, durationMinutes }),
+      });
+      await logAudit({ action: "booking_session_updated", entity: "wa_booking_session", entityId: session.id, after: { step: "ask_duration", durationMinutes } });
+      const fac = session.facilityId ? await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, session.facilityId)).limit(1).then(r => r[0]) : null;
+      const reply = await buildStepQuestion(updated.currentStep as WaStep, updated, fac?.name ?? "", Number(fac?.pricePerHour ?? 0));
+      await appendMessage(session.id, "bot", reply);
+      await sendWAMsg(phone, reply);
+      break;
+    }
+
+    case "ask_name": {
+      const name = msg.trim();
+      if (name.length < 2 || name.length > 100) {
+        const reply = `👤 Masukkan nama lengkap yang valid (minimal 2 karakter).`;
+        await appendMessage(session.id, "bot", reply);
+        await sendWAMsg(phone, reply);
+        return;
+      }
+      const updated = await updateSession(session.id, {
+        customerName: name,
+        currentStep: "confirm",
+      });
+      await logAudit({ action: "booking_session_updated", entity: "wa_booking_session", entityId: session.id, after: { step: "ask_name", customerName: name } });
+      const fac = session.facilityId ? await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, session.facilityId)).limit(1).then(r => r[0]) : null;
+      const reply = await buildStepQuestion("confirm", updated, fac?.name ?? "", Number(fac?.pricePerHour ?? 0));
+      await appendMessage(session.id, "bot", reply);
+      await sendWAMsg(phone, reply);
+      break;
+    }
+
+    case "confirm": {
+      if (isYes(lower)) {
+        await execCreateBookingFromSession(session, phone);
+      } else if (isNo(lower)) {
+        await updateSession(session.id, { status: "cancelled" });
+        await sendWAMsg(phone, `❌ Booking dibatalkan. Ketik *booking* untuk memulai lagi. 🏅`);
+      } else {
+        const fac = session.facilityId ? await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, session.facilityId)).limit(1).then(r => r[0]) : null;
+        const reply = await buildStepQuestion("confirm", session, fac?.name ?? "", Number(fac?.pricePerHour ?? 0));
+        await sendWAMsg(phone, `Ketik *ya* untuk konfirmasi atau *batal* untuk membatalkan.\n\n${reply}`);
+      }
+      break;
+    }
+
+    default: {
+      await sendWAMsg(phone, `Ketik *booking* untuk membuat booking baru atau *status* untuk cek pesanan. 🏅`);
+    }
+  }
+}
+
+async function buildStepQuestion(
+  step: WaStep,
+  session: WaBookingSessionRow,
+  facilityName: string,
+  pricePerHour: number
+): Promise<string> {
+  switch (step) {
+    case "ask_facility":
+      return await buildFacilityList();
+
+    case "ask_date":
+      return `📅 Tanggal berapa mau booking${facilityName ? ` *${facilityName}*` : ""}?\nContoh: *besok*, *15 Juni*, *Sabtu*, *tanggal 20*`;
+
+    case "ask_time": {
+      const fac = session.facilityId
+        ? await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, session.facilityId)).limit(1).then(r => r[0])
+        : null;
+      const hours = fac ? ` (jam operasional: *${fac.openTime}–${fac.closeTime}*)` : "";
+      return `⏰ Jam berapa mau mulai?${hours}\nContoh: *jam 8 pagi*, *jam 20.00*, *19:00*`;
+    }
+
+    case "ask_duration":
+      return `⏱️ Berapa lama? (min 1 jam)\nContoh: *1 jam*, *2 jam*, *90 menit*`;
+
+    case "ask_name":
+      return `👤 Atas nama siapa booking ini?`;
+
+    case "confirm": {
+      if (!session.facilityId || !session.bookingDate || !session.startTime || !session.durationMinutes || !session.customerName) {
+        return `Ada data yang belum lengkap. Ketik *batal* dan mulai ulang.`;
+      }
+      const durationHours = minutesToHours(session.durationMinutes);
+      const endTime = addHoursToTime(session.startTime, durationHours);
+      const totalPrice = pricePerHour * durationHours;
+      return formatSessionSummary({
+        facilityName,
+        bookingDate: session.bookingDate,
+        startTime: session.startTime,
+        endTime,
+        durationHours,
+        customerName: session.customerName,
+        pricePerHour,
+        totalPrice,
+      });
+    }
+
+    default:
+      return `Ketik *booking* untuk membuat booking baru. 🏅`;
+  }
+}
+
+// ─── Helper: get alternative available slots ──────────────────────────────────
+
+function minutesToTimeStr(m: number): string {
+  const h = Math.floor(m / 60) % 24;
+  const min = m % 60;
+  return `${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}`;
+}
+
+function isWeekendDate(dateStr: string): boolean {
+  const d = new Date(dateStr + "T00:00:00+07:00");
+  return d.getDay() === 0 || d.getDay() === 6;
+}
+
+async function getAlternativeSlots(
+  facilityId: number,
+  date: string,
+  requestedStartTime: string,
+  durationHours: number,
+  openTime: string,
+  closeTime: string
+): Promise<string[]> {
+  const existingBookings = await db.select({
+    startTime: bookingsTable.startTime,
+    endTime: bookingsTable.endTime,
+    status: bookingsTable.status,
+  }).from(bookingsTable)
+    .where(and(eq(bookingsTable.facilityId, facilityId), eq(bookingsTable.bookingDate, date)));
+
+  const activeBookings = existingBookings.filter(b => !INACTIVE_STATUSES.includes(b.status));
+  const openMin = timeToMinutes(openTime);
+  const closeMin = timeToMinutes(closeTime);
+  const requestedMin = timeToMinutes(requestedStartTime);
+  const durMin = durationHours * 60;
+
+  const candidates: number[] = [];
+  for (let t = openMin; t + durMin <= closeMin; t += 60) {
+    candidates.push(t);
+  }
+
+  candidates.sort((a, b) => Math.abs(a - requestedMin) - Math.abs(b - requestedMin));
+
+  const alternatives: string[] = [];
+  for (const startMin of candidates) {
+    if (startMin === requestedMin) continue;
+    const endMin = startMin + durMin;
+    const hasConflict = activeBookings.some(b => {
+      const bS = timeToMinutes(b.startTime);
+      const bE = timeToMinutes(b.endTime);
+      return startMin < bE && endMin > bS;
+    });
+    if (!hasConflict) {
+      alternatives.push(`${minutesToTimeStr(startMin)}–${minutesToTimeStr(endMin)}`);
+      if (alternatives.length >= 3) break;
+    }
+  }
+  return alternatives;
+}
+
+// ─── Auto-create customer if WA user not registered ───────────────────────────
+
+async function ensureCustomer(phone: string, name: string): Promise<{ id: number; email: string }> {
+  const [existing] = await db.select({ id: usersTable.id, email: usersTable.email })
+    .from(usersTable).where(eq(usersTable.phone, phone)).limit(1);
+  if (existing) return existing;
+
+  const customerCode = await generateCustomerCode();
+  const finalEmail = `wa_${phone}@whatsapp.local`;
+  const [emailConflict] = await db.select({ id: usersTable.id }).from(usersTable)
+    .where(eq(usersTable.email, finalEmail)).limit(1);
+
+  const email = emailConflict ? `wa_${phone}_${Date.now()}@whatsapp.local` : finalEmail;
+  const passwordHash = hashPassword(randomBytes(16).toString("hex"));
+
+  const [user] = await db.insert(usersTable).values({
+    name: name.trim(),
+    email,
+    passwordHash,
+    phone,
+    role: "customer",
+    customerCode,
+    registrationSource: "whatsapp",
+  }).returning({ id: usersTable.id, email: usersTable.email });
+
+  await logAudit({
+    action: "CUSTOMER_REGISTERED_VIA_WA_CHAT",
+    entity: "user",
+    entityId: user.id,
+    after: { customerCode, phone, name: name.trim(), registrationSource: "whatsapp" },
+  });
+
+  return user;
+}
+
+// ─── Main: create booking from session with full FASE 2 logic ─────────────────
+
+async function execCreateBookingFromSession(session: WaBookingSessionRow, phone: string): Promise<void> {
+  if (!session.facilityId || !session.bookingDate || !session.startTime || !session.durationMinutes || !session.customerName) {
+    await sendWAMsg(phone, `❌ Data booking tidak lengkap. Ketik *batal* dan mulai ulang.`);
+    return;
+  }
+
+  // ── 1. Validasi fasilitas ──────────────────────────────────────────────────
+  const [facility] = await db.select().from(facilitiesTable)
+    .where(and(eq(facilitiesTable.id, session.facilityId), eq(facilitiesTable.isActive, true)))
+    .limit(1);
+  if (!facility) {
+    await sendWAMsg(phone, `❌ Fasilitas tidak ditemukan atau sudah tidak aktif. Ketik *batal* dan mulai ulang.`);
+    return;
+  }
+
+  // ── 2. Hitung durasi & end time ────────────────────────────────────────────
+  const durationHours = minutesToHours(session.durationMinutes);
+  const endTime = addHoursToTime(session.startTime, durationHours);
+
+  // ── 3. Validasi jam operasional ────────────────────────────────────────────
+  const openMin = timeToMinutes(facility.openTime);
+  const closeMin = timeToMinutes(facility.closeTime);
+  const startMin = timeToMinutes(session.startTime);
+  const endMin = timeToMinutes(endTime);
+  if (startMin < openMin || endMin > closeMin) {
+    const reply =
+      `⚠️ Waktu yang dipilih di luar jam operasional *${facility.openTime}–${facility.closeTime}*.\n` +
+      `Pilih jam lain. Ketik jam yang kamu inginkan.`;
+    await updateSession(session.id, { currentStep: "ask_time" });
+    await appendMessage(session.id, "bot", reply);
+    await sendWAMsg(phone, reply);
+    return;
+  }
+
+  // ── 4. Validasi tanggal (tidak boleh lampau) ───────────────────────────────
+  if (session.bookingDate < todayWIB()) {
+    const reply = `⚠️ Tanggal *${session.bookingDate}* sudah lewat. Pilih tanggal yang akan datang.`;
+    await updateSession(session.id, { currentStep: "ask_date" });
+    await appendMessage(session.id, "bot", reply);
+    await sendWAMsg(phone, reply);
+    return;
+  }
+
+  // ── 5. Audit: data lengkap ─────────────────────────────────────────────────
+  await logAudit({
+    action: "booking_data_completed",
+    entity: "wa_booking_session",
+    entityId: session.id,
+    after: {
+      phone,
+      facilityId: session.facilityId,
+      facilityName: facility.name,
+      bookingDate: session.bookingDate,
+      startTime: session.startTime,
+      endTime,
+      durationHours,
+      customerName: session.customerName,
+    },
+  });
+
+  // ── 6. Cek bentrok jadwal ──────────────────────────────────────────────────
+  const conflict = await checkConflict(facility.id, session.bookingDate, session.startTime, endTime);
+  if (conflict) {
+    const alternatives = await getAlternativeSlots(
+      facility.id, session.bookingDate, session.startTime, durationHours, facility.openTime, facility.closeTime
+    );
+
+    await logAudit({
+      action: "schedule_conflict_detected",
+      entity: "wa_booking_session",
+      entityId: session.id,
+      after: { phone, facilityId: facility.id, bookingDate: session.bookingDate, startTime: session.startTime, endTime, alternatives },
+    });
+
+    let reply =
+      `⚠️ *Jadwal Tidak Tersedia*\n\n` +
+      `Slot *${session.startTime}–${endTime}* pada *${session.bookingDate}* sudah terisi untuk *${facility.name}*.`;
+
+    if (alternatives.length > 0) {
+      reply += `\n\n🕐 *Alternatif jam yang tersedia pada tanggal yang sama:*\n` +
+        alternatives.map((alt, i) => `${i + 1}. *${alt}*`).join("\n") +
+        `\n\nKetik jam pilihan kamu (contoh: *jam 10.00*) atau *batal* untuk membatalkan.`;
+    } else {
+      reply += `\n\nMaaf, tidak ada slot lain yang tersedia pada tanggal tersebut.\nKetik tanggal lain atau *batal* untuk membatalkan.`;
+    }
+
+    await updateSession(session.id, { currentStep: "ask_time" });
+    await appendMessage(session.id, "bot", reply);
+    await sendWAMsg(phone, reply);
+    return;
+  }
+
+  // ── 7. Cari atau buat customer ─────────────────────────────────────────────
+  const customer = await ensureCustomer(phone, session.customerName);
+
+  // ── 8. Hitung harga dari pricing rules (weekday/weekend/peak) ─────────────
+  let priceCalc;
+  try {
+    priceCalc = await calculatePrice(facility.id, session.bookingDate, session.startTime, endTime, durationHours);
+  } catch {
+    priceCalc = { basePrice: Number(facility.pricePerHour) * durationHours, finalPrice: Number(facility.pricePerHour) * durationHours, appliedRules: [] };
+  }
+
+  const totalPrice = priceCalc.finalPrice;
+  const basePrice = priceCalc.basePrice;
+  const discountAmount = Math.max(0, basePrice - totalPrice);
+  const appliedRulesStr = priceCalc.appliedRules.length > 0
+    ? priceCalc.appliedRules.map(r => `${r.name} (${r.adjustment >= 0 ? "+" : ""}${formatIDR(r.adjustment)})`).join(", ")
+    : "";
+
+  // ── 9. Hitung PPN ──────────────────────────────────────────────────────────
+  const taxCalc = await calculateTax(totalPrice, "sport_center_booking", session.bookingDate);
+  const grandTotal = taxCalc.taxAmount > 0 ? taxCalc.grandTotal : totalPrice;
+  const orderNumber = await generateOrderNumber();
+
+  // ── 10. Buat booking dengan status waiting_admin_approval ──────────────────
+  const [booking] = await db.insert(bookingsTable).values({
+    orderNumber,
+    customerName: session.customerName,
+    customerEmail: customer.email,
+    customerPhone: phone,
+    customerId: customer.id,
+    facilityId: facility.id,
+    bookingDate: session.bookingDate,
+    startTime: session.startTime,
+    endTime,
+    durationHours,
+    totalPrice: String(totalPrice),
+    discountAmount: String(discountAmount),
+    apDiscountAmount: "0",
+    basePrice: String(basePrice),
+    source: "whatsapp_chat",
+    status: "waiting_admin_approval",
+    ppnRate: taxCalc.taxAmount > 0 ? String(taxCalc.taxRate) : null,
+    ppnAmount: taxCalc.taxAmount > 0 ? String(taxCalc.taxAmount) : null,
+    grandTotal: taxCalc.taxAmount > 0 ? String(taxCalc.grandTotal) : null,
+  }).returning();
+
+  await db.insert(bookingHistoryTable).values({
+    bookingId: booking.id,
+    fromStatus: null,
+    toStatus: "waiting_admin_approval",
+    changedByName: session.customerName,
+    note: "Booking dibuat via WhatsApp Chat — menunggu persetujuan admin",
+  });
+
+  broadcastAvailabilityChange(facility.id, session.bookingDate);
+
+  if (taxCalc.taxCode) {
+    recordTaxTransaction("booking", booking.id, booking.orderNumber, taxCalc, session.bookingDate).catch(() => {});
+  }
+
+  // Mark session done
+  await updateSession(session.id, { status: "completed", currentStep: "done" });
+
+  // ── 11. Audit: booking dibuat ──────────────────────────────────────────────
+  await logAudit({
+    action: "booking_created_from_wa",
+    entity: "booking",
+    entityId: booking.id,
+    after: {
+      orderNumber,
+      source: "whatsapp_chat",
+      sessionId: session.id,
+      status: "waiting_admin_approval",
+      facilityId: facility.id,
+      bookingDate: session.bookingDate,
+      startTime: session.startTime,
+      endTime,
+      totalPrice: grandTotal,
+      customerId: customer.id,
+      appliedRules: appliedRulesStr || null,
+    },
+  });
+
+  const statusUrl = `${APP_URL}/wa/status/${orderNumber}`;
+  const weekend = isWeekendDate(session.bookingDate);
+
+  // ── 12. Kirim WA ke customer ───────────────────────────────────────────────
+  notifyWaBookingPendingApproval({
+    customerName: session.customerName,
+    customerPhone: phone,
+    orderNumber,
+    facilityName: facility.name,
+    bookingDate: session.bookingDate,
+    startTime: booking.startTime,
+    endTime: booking.endTime,
+    durationHours,
+    totalPrice: grandTotal.toLocaleString("id-ID"),
+    statusUrl,
+  });
+
+  // ── 13. Kirim WA ke semua admin ────────────────────────────────────────────
+  notifyWaAdminNewBooking({
+    orderNumber,
+    customerName: session.customerName,
+    customerPhone: phone,
+    facilityName: facility.name,
+    bookingDate: session.bookingDate,
+    startTime: booking.startTime,
+    endTime: booking.endTime,
+    durationHours,
+    totalPrice: grandTotal.toLocaleString("id-ID"),
+    isWeekend: weekend,
+    appliedRules: appliedRulesStr || undefined,
+    statusUrl,
+  });
+
+  // ── 14. Audit: notifikasi admin dikirim ────────────────────────────────────
+  await logAudit({
+    action: "admin_approval_sent",
+    entity: "booking",
+    entityId: booking.id,
+    after: { orderNumber, sentToAdmins: true, bookingDate: session.bookingDate, facilityName: facility.name },
+  });
+}
+
+// ─── POST /api/wa/fonnte/webhook — Fonnte inbound message handler ─────────────
+
+router.post("/wa/fonnte/webhook", async (req, res) => {
+  // Respond immediately to avoid Fonnte timeout
+  res.status(200).json({ status: "ok" });
+
+  try {
+    const { sender, message = "", name = "" } = req.body;
+    if (!sender) return;
+
+    const phone = cleanPhone(String(sender));
+    const msg = String(message).trim();
+    if (!msg || !phone) return;
+
+    // 1. Audit log — every inbound message
+    await logAudit({
+      action: "customer_chat_received",
+      entity: "wa_session",
+      after: { phone, message: msg, waName: String(name) },
+    });
+
+    // 2. Admin command check + unauthorized guard
+    const adminPhones = await getAdminPhones();
+    const looksLikeAdminCmd = /^(APPROVE|KONFIRMASI|SETUJU|REJECT|TOLAK|PAID|LUNAS|BAYAR|CANCEL|BATALKAN|RESEND|STATUS)\s+SC-\d+/i.test(msg);
+    if (!adminPhones.includes(phone) && looksLikeAdminCmd) {
+      await logAudit({
+        action: "unauthorized_admin_command",
+        entity: "booking",
+        after: { phone, message: msg },
+      });
+      await sendWAMsg(phone, "⚠️ Maaf, Anda tidak memiliki akses untuk perintah admin ini.");
+      return;
+    }
+    if (adminPhones.includes(phone)) {
+      const handled = await handleAdminCommand(phone, msg);
+      if (handled) return;
+      // If admin sends non-command, still allow normal flow
+    }
+
+    // 3. Active session — continue conversation
+    const session = await getActiveSession(phone);
+    if (session) {
+      await continueSession(session, phone, msg);
+      return;
+    }
+
+    // 4. Status intent
+    if (isStatusIntent(msg)) {
+      const bookings = await db.select().from(bookingsTable)
+        .where(eq(bookingsTable.customerPhone, phone))
+        .orderBy(desc(bookingsTable.createdAt))
+        .limit(1);
+      if (bookings.length > 0) {
+        const b = bookings[0];
+        const [fac] = await db.select({ name: facilitiesTable.name }).from(facilitiesTable)
+          .where(eq(facilitiesTable.id, b.facilityId)).limit(1);
+        await sendWAMsg(phone,
+          `🔍 *Status Booking Terakhir*\n\n` +
+          `Order: *${b.orderNumber}*\n` +
+          `Fasilitas: *${fac?.name ?? "-"}*\n` +
+          `Tanggal: *${b.bookingDate}* pukul *${b.startTime}–${b.endTime}*\n` +
+          `Status: *${b.status.replace(/_/g, " ").toUpperCase()}*\n\n` +
+          `Detail lengkap: ${APP_URL}/wa/status/${b.orderNumber}`
+        );
+      } else {
+        await sendWAMsg(phone,
+          `Tidak ada booking terdaftar untuk nomor ini.\n\nKetik *booking* untuk membuat booking baru. 🏅`
+        );
+      }
+      return;
+    }
+
+    // 5. Booking intent — start new session
+    if (isBookingIntent(msg)) {
+      await startBookingSession(phone, msg, String(name));
+      return;
+    }
+
+    // 6. Unknown message
+    await logAudit({
+      action: "unknown_message_received",
+      entity: "wa_session",
+      after: { phone, message: msg },
+    });
+
+    await sendWAMsg(phone,
+      `Halo! 👋 Saya asisten booking Sport Center.\n\n` +
+      `Ketik:\n` +
+      `• *booking* — pesan fasilitas olahraga\n` +
+      `• *status* — cek status pesanan\n\n` +
+      `Atau kunjungi: ${APP_URL}/facilities`
+    );
+  } catch (err) {
+    console.error("[wa/fonnte/webhook] error:", err);
   }
 });
 

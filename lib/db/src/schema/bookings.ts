@@ -8,6 +8,7 @@ import { scSchema } from "./_schema";
 export const bookingStatusEnum = scSchema.enum("booking_status", [
   "pending_payment",
   "waiting_confirmation",
+  "waiting_admin_approval",
   "paid",
   "confirmed",
   "completed",
@@ -85,6 +86,10 @@ export const bookingsTable = scSchema.table("bookings", {
   grandTotal: numeric("grand_total", { precision: 12, scale: 2 }),
   bookedByUserId: integer("booked_by_user_id").references(() => usersTable.id, { onDelete: "set null" }),
   groupRef: text("group_ref"),
+  approvedByAdminPhone: text("approved_by_admin_phone"),
+  approvedAt: timestamp("approved_at", { withTimezone: true }),
+  rejectedReason: text("rejected_reason"),
+  paidAt: timestamp("paid_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });

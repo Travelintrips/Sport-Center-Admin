@@ -44,6 +44,7 @@ import customerSheetsRouter from "./customerSheets";
 import bankReconciliationRouter from "./bankReconciliation";
 import bankReconciliationSheetsRouter from "./bankReconciliationSheets";
 import bookingGroupsRouter from "./bookingGroups";
+import waBookingsAdminRouter from "./waBookingsAdmin";
 
 const router: IRouter = Router();
 
@@ -91,5 +92,6 @@ router.use(companyBookingsRouter);
 router.use(customerSheetsRouter);
 router.use(bankReconciliationRouter);
 router.use(bankReconciliationSheetsRouter);
+router.use(waBookingsAdminRouter);
 
 export default router;

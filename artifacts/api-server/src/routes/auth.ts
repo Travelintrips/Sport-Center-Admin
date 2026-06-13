@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db, usersTable, bookingsTable, facilitiesTable } from "@workspace/db";
-import { eq, isNotNull, or } from "drizzle-orm";
+import { eq, isNotNull, ilike, or } from "drizzle-orm";
 import { createToken, hashPassword, authMiddleware } from "../lib/auth";
 
 async function generateCustomerCode(): Promise<string> {
@@ -163,12 +163,12 @@ router.get("/my-bookings", authMiddleware, async (req, res) => {
     const [user] = await db.select().from(usersTable).where(eq(usersTable.id, userId)).limit(1);
     if (!user) { res.status(401).json({ error: "User not found" }); return; }
 
-    // Tampilkan booking jika customerId cocok (booker = user ini, meski booking atas nama lain)
-    // ATAU customerEmail cocok (backward compat booking lama tanpa customerId)
+    // Cocokkan via customerId ATAU bookedByUserId ATAU customerEmail (case-insensitive)
     const bookings = await db.select().from(bookingsTable).where(
       or(
         eq(bookingsTable.customerId, userId),
-        eq(bookingsTable.customerEmail, user.email)
+        eq(bookingsTable.bookedByUserId, userId),
+        user.email ? ilike(bookingsTable.customerEmail, user.email) : undefined,
       )
     );
     const facilities = await db.select().from(facilitiesTable);

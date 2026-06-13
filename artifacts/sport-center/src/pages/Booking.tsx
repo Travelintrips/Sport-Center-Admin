@@ -419,8 +419,8 @@ export default function Booking() {
     }
 
     // ─── Mode Umum & Angkasa Pura ────────────────────────────────────────────
-    if (isAdminBooking && !selectedCustomerId) {
-      toast({ title: t("Pilih nama pelanggan", "Select customer name"), description: t("Harap pilih nama dari daftar pelanggan.", "Please select a name from the customer list."), variant: "destructive" });
+    if (isAdminBooking && !selectedCustomerId && !name.trim()) {
+      toast({ title: t("Pilih nama pelanggan", "Select customer name"), description: t("Harap pilih nama dari daftar pelanggan atau ketik nama baru.", "Please select a customer or type a new name."), variant: "destructive" });
       return;
     }
     e.preventDefault();
@@ -1403,32 +1403,19 @@ export default function Booking() {
                   </div>
                 )}
                 {(() => {
-                  const PPN_RATE = 0.11;
                   const disc = couponResult?.discountAmount ?? 0;
-                  const dpp = isRepeat
+                  const grand = isRepeat
                     ? (isChecking ? null : Math.max(0, (checkResult ? effectiveTotalPrice : totalPrice * repeatCount) - disc))
                     : Math.max(0, totalPrice - disc);
-                  const ppn = dpp == null ? null : Math.round(dpp * PPN_RATE);
-                  const grand = dpp == null || ppn == null ? null : dpp + ppn;
                   return (
                     <>
-                      <div className="pt-2 border-t space-y-1.5">
-                        <div className="flex justify-between text-muted-foreground">
-                          <span>DPP</span>
-                          <span>{dpp == null ? "..." : formatCurrency(dpp)}</span>
-                        </div>
-                        <div className="flex justify-between text-orange-600">
-                          <span>PPN 11%</span>
-                          <span>{ppn == null ? "..." : `+${formatCurrency(ppn)}`}</span>
-                        </div>
-                      </div>
                       <div className="flex justify-between font-bold text-lg pt-2 border-t">
                         <span>{t("Grand Total", "Grand Total")}</span>
                         <span className="text-primary">{grand == null ? "..." : formatCurrency(grand)}</span>
                       </div>
                       {isRepeat && !isChecking && checkResult && effectiveCount > 0 && (
                         <div className="text-xs text-muted-foreground text-right">
-                          {effectiveCount} {t("sesi", "sessions")} × {formatCurrency(dpp! / effectiveCount)} DPP + PPN 11%
+                          {effectiveCount} {t("sesi", "sessions")} × {formatCurrency(grand! / effectiveCount)}
                         </div>
                       )}
                     </>
