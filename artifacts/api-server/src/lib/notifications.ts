@@ -331,3 +331,33 @@ export async function notifyWaStaffCheckin(data: WaStaffCheckinData): Promise<vo
     `🏁 Selesai main:\n${data.finishUrl}`;
   await sendWAToAdmins(msg);
 }
+
+export interface AuditNotifData {
+  critical: number;
+  warning: number;
+  info: number;
+  findings: Array<{ severity: string; category: string; message: string; count: number }>;
+  auditTimestamp: string;
+}
+
+export async function notifyAuditCritical(data: AuditNotifData): Promise<void> {
+  const criticalLines = data.findings
+    .filter((f) => f.severity === "critical")
+    .map((f) => `🔴 *${f.category}* — ${f.message}`)
+    .join("\n");
+  const warningLines = data.findings
+    .filter((f) => f.severity === "warning")
+    .map((f) => `🟡 *${f.category}* — ${f.message}`)
+    .join("\n");
+
+  const ts = new Date(data.auditTimestamp).toLocaleString("id-ID", { timeZone: "Asia/Jakarta" });
+
+  const msg =
+    `🚨 *[Bank Recon Audit Malam]* ${ts} WIB\n\n` +
+    `❌ *${data.critical} Critical* | ⚠️ ${data.warning} Warning | ℹ️ ${data.info} Info\n\n` +
+    (criticalLines ? `*Temuan Critical:*\n${criticalLines}\n\n` : "") +
+    (warningLines ? `*Temuan Warning:*\n${warningLines}\n\n` : "") +
+    `Buka Admin → Bank Rekonsiliasi → Dashboard → Jalankan Audit untuk detail lengkap.`;
+
+  await sendWAToAdmins(msg);
+}

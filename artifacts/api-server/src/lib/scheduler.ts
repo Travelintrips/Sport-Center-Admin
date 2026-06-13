@@ -1,9 +1,10 @@
 import { db, bookingsTable, facilitiesTable, bankReconciliationMatchesTable } from "@workspace/db";
 import { eq, and, lt, lte, isNotNull, isNull, inArray, sql } from "drizzle-orm";
-import { notifyBookingExpired, notifyReminderH1, notifyWaDayReminder, notifyWaStaffCheckin } from "./notifications";
+import { notifyBookingExpired, notifyReminderH1, notifyWaDayReminder, notifyWaStaffCheckin, notifyAuditCritical } from "./notifications";
 import { createWaToken } from "./waTokens";
 import { reverseTaxTransaction } from "./tax";
 import { reverseJournalEntry } from "./accounting";
+import { runBankAudit } from "./bankAudit";
 
 const APP_URL = process.env.APP_URL ?? "";
 
@@ -252,6 +253,35 @@ async function autoCompleteBookings(): Promise<void> {
   }
 }
 
+// Nightly bank audit — 23:00 WIB (16:00 UTC), kirim WA jika ada temuan critical/warning
+async function runNightlyBankAudit(): Promise<void> {
+  const now = getWIBNow();
+  const hourUTC = now.getUTCHours();
+  // 23:00 WIB = 16:00 UTC (WIB = UTC+7)
+  if (hourUTC !== 16) return;
+
+  try {
+    const result = await runBankAudit();
+    const hasCritical = result.summary.critical > 0;
+    const hasWarning = result.summary.warning > 0;
+
+    if (hasCritical || hasWarning) {
+      await notifyAuditCritical({
+        critical: result.summary.critical,
+        warning: result.summary.warning,
+        info: result.summary.info,
+        findings: result.findings,
+        auditTimestamp: result.auditTimestamp,
+      });
+      console.log(`[scheduler] Nightly bank audit: ${result.summary.critical} critical, ${result.summary.warning} warning — WA notif sent`);
+    } else {
+      console.log("[scheduler] Nightly bank audit: ✅ production ready, no issues");
+    }
+  } catch (err) {
+    console.error("[scheduler] runNightlyBankAudit error:", err);
+  }
+}
+
 export function startScheduler(): void {
   console.log("[scheduler] Starting background scheduler...");
 
@@ -259,11 +289,12 @@ export function startScheduler(): void {
   expireOverdueBookings();
   autoCompleteBookings();
 
-  // Every 5 minutes: expire overdue bookings + auto-complete + reminders
+  // Every 5 minutes: expire overdue bookings + auto-complete + reminders + nightly audit
   setInterval(async () => {
     await expireOverdueBookings();
     await autoCompleteBookings();
     await sendReminderH1();
     await sendDayOfReminder();
+    await runNightlyBankAudit();
   }, 5 * 60 * 1000);
 }
