@@ -283,32 +283,12 @@ export default function BookingDetail() {
               </div>
             </div>
             <div className="h-px bg-border" />
-            {(booking as any).ppnAmount != null && (booking as any).ppnAmount > 0 ? (
-              <>
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">DPP</span>
-                  <span>Rp {(Number((booking as any).grandTotal) - Number((booking as any).ppnAmount)).toLocaleString("id-ID")}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">PPN 11%</span>
-                  <span>+Rp {Number((booking as any).ppnAmount).toLocaleString("id-ID")}</span>
-                </div>
-                <div className="h-px bg-border" />
-                <div className="flex justify-between items-center text-xl font-black">
-                  <div>{t("Grand Total (incl. PPN)", "Grand Total (incl. VAT)")}</div>
-                  <div className="text-primary">
-                    Rp {Number((booking as any).grandTotal).toLocaleString("id-ID")}
-                  </div>
-                </div>
-              </>
-            ) : (
-              <div className="flex justify-between items-center text-xl font-black">
-                <div>{t("Total", "Total")}</div>
-                <div className="text-primary">
-                  Rp {booking.totalPrice.toLocaleString("id-ID")}
-                </div>
+            <div className="flex justify-between items-center text-xl font-black">
+              <div>{t("Grand Total (incl. PPN)", "Grand Total (incl. VAT)")}</div>
+              <div className="text-primary">
+                Rp {((booking as any).grandTotal != null ? Number((booking as any).grandTotal) : booking.totalPrice).toLocaleString("id-ID")}
               </div>
-            )}
+            </div>
           </CardContent>
         </Card>
 

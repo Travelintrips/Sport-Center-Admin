@@ -143,15 +143,7 @@ export default function WaProofUpload() {
               <Row label="Fasilitas" value={b.facilityName} />
               <Row label="Tanggal" value={b.bookingDate} />
               <Row label="Jam" value={`${b.startTime} – ${b.endTime}`} />
-              {b.ppnAmount != null && Number(b.ppnAmount) > 0 ? (
-                <>
-                  <Row label="DPP" value={`Rp ${(Number(b.grandTotal) - Number(b.ppnAmount)).toLocaleString("id-ID")}`} />
-                  <Row label={`PPN ${Number(b.ppnRate ?? 11)}%`} value={`+Rp ${Number(b.ppnAmount).toLocaleString("id-ID")}`} />
-                  <Row label="Grand Total" value={`Rp ${Number(b.grandTotal).toLocaleString("id-ID")}`} accent />
-                </>
-              ) : (
-                <Row label="Total" value={`Rp ${b.totalPrice.toLocaleString("id-ID")}`} accent />
-              )}
+              <Row label="Grand Total (incl. PPN)" value={`Rp ${(b.grandTotal != null ? Number(b.grandTotal) : b.totalPrice).toLocaleString("id-ID")}`} accent />
             </CardContent>
           </Card>
         )}

@@ -179,15 +179,7 @@ export default function WaBookingStatus() {
             <Row label="Fasilitas" value={`${booking.facilityName} (${booking.facilityCategory})`} />
             <Row label="Tanggal" value={formatDate(booking.bookingDate)} />
             <Row label="Jam" value={`${booking.startTime} – ${booking.endTime} (${booking.durationHours} jam)`} />
-            {booking.ppnAmount != null && Number(booking.ppnAmount) > 0 ? (
-              <>
-                <Row label="DPP" value={`Rp ${(Number(booking.grandTotal) - Number(booking.ppnAmount)).toLocaleString("id-ID")}`} />
-                <Row label={`PPN ${Number(booking.ppnRate ?? 11)}%`} value={`+Rp ${Number(booking.ppnAmount).toLocaleString("id-ID")}`} />
-                <Row label="Grand Total" value={`Rp ${Number(booking.grandTotal).toLocaleString("id-ID")}`} bold accent />
-              </>
-            ) : (
-              <Row label="Total Bayar" value={`Rp ${booking.totalPrice.toLocaleString("id-ID")}`} bold accent />
-            )}
+            <Row label="Grand Total (incl. PPN)" value={`Rp ${(booking.grandTotal != null ? Number(booking.grandTotal) : booking.totalPrice).toLocaleString("id-ID")}`} bold accent />
             {booking.notes && <Row label="Catatan" value={booking.notes} />}
           </CardContent>
         </Card>

@@ -1387,33 +1387,19 @@ export default function Booking() {
                   </div>
                 )}
                 {(() => {
-                  const PPN_RATE = 0.11;
                   const disc = couponResult?.discountAmount ?? 0;
-                  // Harga sudah inklusif PPN — grand total = harga setelah diskon
                   const grand = isRepeat
                     ? (isChecking ? null : Math.max(0, (checkResult ? effectiveTotalPrice : totalPrice * repeatCount) - disc))
                     : Math.max(0, totalPrice - disc);
-                  const dpp = grand == null ? null : Math.round(grand / (1 + PPN_RATE));
-                  const ppn = grand == null || dpp == null ? null : grand - dpp;
                   return (
                     <>
-                      <div className="pt-2 border-t space-y-1.5">
-                        <div className="flex justify-between text-muted-foreground">
-                          <span>DPP</span>
-                          <span>{dpp == null ? "..." : formatCurrency(dpp)}</span>
-                        </div>
-                        <div className="flex justify-between text-orange-600">
-                          <span>PPN 11%</span>
-                          <span>{ppn == null ? "..." : `+${formatCurrency(ppn)}`}</span>
-                        </div>
-                      </div>
                       <div className="flex justify-between font-bold text-lg pt-2 border-t">
-                        <span>{t("Grand Total", "Grand Total")}</span>
+                        <span>{t("Grand Total (incl. PPN)", "Grand Total (incl. VAT)")}</span>
                         <span className="text-primary">{grand == null ? "..." : formatCurrency(grand)}</span>
                       </div>
                       {isRepeat && !isChecking && checkResult && effectiveCount > 0 && (
                         <div className="text-xs text-muted-foreground text-right">
-                          {effectiveCount} {t("sesi", "sessions")} × {formatCurrency(grand! / effectiveCount)} (incl. PPN 11%)
+                          {effectiveCount} {t("sesi", "sessions")} × {formatCurrency(grand! / effectiveCount)} (incl. PPN)
                         </div>
                       )}
                     </>
