@@ -483,11 +483,15 @@ export async function generateAiReply(
     { role: "user", content: message },
   ];
 
-  const openai = new OpenAI({ apiKey });
+  const baseURL = process.env.OPENAI_BASE_URL || undefined;
+  const openai = new OpenAI({ apiKey, ...(baseURL ? { baseURL } : {}) });
+
+  // Model: OpenRouter pakai format "openai/gpt-4o-mini", direct OpenAI pakai "gpt-4o-mini"
+  const model = process.env.OPENAI_MODEL ?? (baseURL?.includes("openrouter") ? "openai/gpt-4o-mini" : "gpt-4o-mini");
 
   try {
     const completion = await openai.chat.completions.create({
-      model: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
+      model,
       messages,
       max_tokens: 400,
       temperature: 0.4,
