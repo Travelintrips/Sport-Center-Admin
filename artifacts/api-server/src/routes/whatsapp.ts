@@ -1,7 +1,6 @@
 import { Router } from "express";
 import multer from "multer";
 import path from "path";
-import fs from "fs";
 import { randomUUID } from "crypto";
 import { db, bookingsTable, facilitiesTable, paymentsTable, bookingHistoryTable, waActionTokensTable, settingsTable, usersTable } from "@workspace/db";
 import { eq, and, desc, isNotNull, inArray } from "drizzle-orm";
@@ -40,6 +39,7 @@ import { hashPassword } from "../lib/auth";
 import { syncStatusToBizportal } from "../lib/bizportalSync";
 import { calculateTax, recordTaxTransaction } from "../lib/tax";
 import { broadcastAvailabilityChange } from "../lib/supabase";
+import { uploadToStorage, BUCKETS } from "../lib/supabaseStorage";
 import {
   generateAiReply,
   logAiMessageReceived,
@@ -68,19 +68,9 @@ function isDuplicateWebhook(body: Record<string, unknown>): boolean {
   return false;
 }
 
-// ─── Multer for proof upload ──────────────────────────────────────────────────
-const PROOFS_DIR = path.resolve(process.cwd(), "uploads", "proofs");
-if (!fs.existsSync(PROOFS_DIR)) fs.mkdirSync(PROOFS_DIR, { recursive: true });
-
-const proofStorage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, PROOFS_DIR),
-  filename: (_req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase() || ".jpg";
-    cb(null, `wa-proof-${randomUUID()}${ext}`);
-  },
-});
+// ─── Multer for proof upload (memory → Supabase Storage) ─────────────────────
 const uploadProof = multer({
-  storage: proofStorage,
+  storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     const ok = /image\/(jpeg|png|webp)|application\/pdf/.test(file.mimetype);
@@ -848,8 +838,10 @@ router.post("/wa/action/:token", async (req, res) => {
 router.post("/wa/proof/upload", uploadProof.single("proof"), async (req, res) => {
   try {
     if (!req.file) { res.status(400).json({ error: "Tidak ada file" }); return; }
-    const objectPath = `/api/uploads/proofs/${req.file.filename}`;
-    res.json({ objectPath });
+    const ext = path.extname(req.file.originalname).toLowerCase() || ".jpg";
+    const objectPath = `wa-proof-${randomUUID()}${ext}`;
+    const publicUrl = await uploadToStorage(BUCKETS.proof, objectPath, req.file.buffer, req.file.mimetype);
+    res.json({ url: publicUrl });
   } catch (err) {
     res.status(500).json({ error: "Upload gagal" });
   }
@@ -867,7 +859,11 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
     }
 
     let proofUrl: string | undefined = req.body?.proofUrl;
-    if (req.file) proofUrl = `/api/uploads/proofs/${req.file.filename}`;
+    if (req.file) {
+      const ext = path.extname(req.file.originalname).toLowerCase() || ".jpg";
+      const objectPath = `wa-proof-${randomUUID()}${ext}`;
+      proofUrl = await uploadToStorage(BUCKETS.proof, objectPath, req.file.buffer, req.file.mimetype);
+    }
     if (!proofUrl) { res.status(400).json({ error: "Tidak ada bukti yang diupload" }); return; }
 
     const bookingId = tokenRow.bookingId;
@@ -907,9 +903,7 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
     const approveToken = await createWaToken(bookingId, "approve_payment", 7);
     const rejectToken = await createWaToken(bookingId, "reject_payment", 7);
 
-    const fullProofUrl = proofUrl.startsWith("/")
-      ? `${APP_URL}${proofUrl}`
-      : proofUrl;
+    const fullProofUrl = proofUrl;
 
     notifyWaProofUploaded({
       customerName: booking.customerName, customerPhone: booking.customerPhone,
