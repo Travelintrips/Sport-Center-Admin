@@ -20,6 +20,9 @@ export interface BankReconciliationMatch {
   nameMatch?: boolean;
   orderIdMatch?: boolean;
   proofMatch?: boolean;
+  statusValidMatch?: boolean;
+  toleranceUsed?: boolean;
+  note?: string | null;
   status: BankReconciliationMatchStatus;
   createdAt: string;
 }

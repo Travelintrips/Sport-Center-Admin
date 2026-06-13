@@ -2114,6 +2114,83 @@ paths:
               schema:
                 $ref: "#/components/schemas/RunMatchingResult"
 
+  /bank-reconciliation/mutations/{id}/candidates:
+    get:
+      operationId: getBankMutationCandidates
+      tags: [bank-reconciliation]
+      summary: Get enriched match candidates for a mutation
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Mutation with enriched candidates
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BankMutationCandidatesResult"
+
+  /bank-reconciliation/mutations/{id}/approve-candidate:
+    post:
+      operationId: approveBankMutationCandidate
+      tags: [bank-reconciliation]
+      summary: Approve a specific match candidate for a mutation
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApproveCandidateInput"
+      responses:
+        "200":
+          description: Approved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResult"
+
+  /bank-reconciliation/mutations/{id}/mark-unmatched:
+    post:
+      operationId: markBankMutationUnmatched
+      tags: [bank-reconciliation]
+      summary: Mark a mutation as unmatched
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Marked unmatched
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResult"
+
+  /bank-reconciliation/mutations/{id}/mark-duplicate:
+    post:
+      operationId: markBankMutationDuplicate
+      tags: [bank-reconciliation]
+      summary: Mark a mutation as duplicate needing review
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Marked duplicate
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResult"
+
   /bank-reconciliation/sheets/connect:
     post:
       operationId: connectBankReconSheet
@@ -3847,10 +3924,114 @@ components:
           type: boolean
         proofMatch:
           type: boolean
+        statusValidMatch:
+          type: boolean
+        toleranceUsed:
+          type: boolean
+        note:
+          type: string
+          nullable: true
         status:
           type: string
           enum: [candidate, approved, rejected]
         createdAt:
+          type: string
+
+    EnrichedBankCandidate:
+      type: object
+      required: [id, mutationId, candidateType, candidateId, matchScore, status, amountMatch, dateMatch, nameMatch, orderIdMatch, proofMatch, statusValidMatch, toleranceUsed, createdAt]
+      properties:
+        id:
+          type: integer
+        mutationId:
+          type: integer
+        candidateType:
+          type: string
+          enum: [payment, order, invoice, expense]
+        candidateId:
+          type: integer
+        matchScore:
+          type: integer
+        matchReason:
+          type: string
+          nullable: true
+        amountMatch:
+          type: boolean
+        dateMatch:
+          type: boolean
+        nameMatch:
+          type: boolean
+        orderIdMatch:
+          type: boolean
+        proofMatch:
+          type: boolean
+        statusValidMatch:
+          type: boolean
+        toleranceUsed:
+          type: boolean
+        note:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [candidate, approved, rejected]
+        createdAt:
+          type: string
+        customerName:
+          type: string
+          nullable: true
+        customerPhone:
+          type: string
+          nullable: true
+        customerEmail:
+          type: string
+          nullable: true
+        bookingOrderNumber:
+          type: string
+          nullable: true
+        bookingDate:
+          type: string
+          nullable: true
+        bookingStatus:
+          type: string
+          nullable: true
+        bookingAmount:
+          type: string
+          nullable: true
+        paymentProofUrl:
+          type: string
+          nullable: true
+        paymentStatus:
+          type: string
+          nullable: true
+        paymentDate:
+          type: string
+          nullable: true
+        facilityName:
+          type: string
+          nullable: true
+
+    BankMutationCandidatesResult:
+      type: object
+      required: [mutation, candidates]
+      properties:
+        mutation:
+          $ref: "#/components/schemas/BankMutation"
+        candidates:
+          type: array
+          items:
+            $ref: "#/components/schemas/EnrichedBankCandidate"
+
+    ApproveCandidateInput:
+      type: object
+      required: [candidateType, candidateId]
+      properties:
+        candidateType:
+          type: string
+          enum: [payment, order, invoice, expense]
+        candidateId:
+          type: integer
+        note:
           type: string
 
     BankMutationImportResult:

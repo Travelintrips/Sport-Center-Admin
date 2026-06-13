@@ -49,6 +49,9 @@ export const bankReconciliationMatchesTable = scSchema.table("bank_reconciliatio
   nameMatch: boolean("name_match").notNull().default(false),
   orderIdMatch: boolean("order_id_match").notNull().default(false),
   proofMatch: boolean("proof_match").notNull().default(false),
+  statusValidMatch: boolean("status_valid_match").notNull().default(false),
+  toleranceUsed: boolean("tolerance_used").notNull().default(false),
+  note: text("note"),
   status: reconMatchStatusEnum("status").notNull().default("candidate"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });

@@ -3,6 +3,10 @@ import { db } from "@workspace/db";
 import {
   bankMutationsTable,
   bankReconciliationMatchesTable,
+  bookingsTable,
+  paymentsTable,
+  facilitiesTable,
+  auditLogsTable,
   paymentsTable,
 } from "@workspace/db";
 import { eq, desc, and, inArray, sql, like, gte, lte } from "drizzle-orm";
@@ -575,6 +579,176 @@ router.post("/bank-reconciliation/scan-ocr", adminMiddleware, async (req, res) =
   } catch (err: any) {
     req.log.error({ err }, "OCR scan error");
     res.status(500).json({ error: err?.message ?? "Gagal scan OCR" });
+// GET /bank-reconciliation/mutations/:id/candidates — enriched candidates with booking/payment details
+router.get("/bank-reconciliation/mutations/:id/candidates", adminMiddleware, async (req, res) => {
+  try {
+    const mutationId = parseInt(req.params.id);
+    if (isNaN(mutationId)) { res.status(400).json({ error: "ID tidak valid" }); return; }
+
+    const [mutation] = await db.select().from(bankMutationsTable).where(eq(bankMutationsTable.id, mutationId)).limit(1);
+    if (!mutation) { res.status(404).json({ error: "Mutasi tidak ditemukan" }); return; }
+
+    const candidates = await db
+      .select()
+      .from(bankReconciliationMatchesTable)
+      .where(eq(bankReconciliationMatchesTable.mutationId, mutationId))
+      .orderBy(desc(bankReconciliationMatchesTable.matchScore));
+
+    // Batch-load related records
+    const paymentIds = candidates.filter((c) => c.candidateType === "payment").map((c) => c.candidateId);
+    const orderIds = candidates.filter((c) => c.candidateType === "order").map((c) => c.candidateId);
+
+    const payments = paymentIds.length
+      ? await db.select({ id: paymentsTable.id, bookingId: paymentsTable.bookingId, amount: paymentsTable.amount, proofUrl: paymentsTable.proofUrl, status: paymentsTable.status, createdAt: paymentsTable.createdAt }).from(paymentsTable).where(inArray(paymentsTable.id, paymentIds))
+      : [];
+    const paymentMap = new Map(payments.map((p) => [p.id, p]));
+
+    const allBookingIds = [...new Set([...payments.map((p) => p.bookingId).filter((x): x is number => x != null), ...orderIds])];
+    const bookings = allBookingIds.length
+      ? await db.select({ id: bookingsTable.id, orderNumber: bookingsTable.orderNumber, customerName: bookingsTable.customerName, customerPhone: bookingsTable.customerPhone, customerEmail: bookingsTable.customerEmail, bookingDate: bookingsTable.bookingDate, totalPrice: bookingsTable.totalPrice, grandTotal: bookingsTable.grandTotal, status: bookingsTable.status, facilityId: bookingsTable.facilityId }).from(bookingsTable).where(inArray(bookingsTable.id, allBookingIds))
+      : [];
+    const bookingMap = new Map(bookings.map((b) => [b.id, b]));
+
+    const facilityIds = [...new Set(bookings.map((b) => b.facilityId).filter((x): x is number => x != null))];
+    const facilities = facilityIds.length
+      ? await db.select({ id: facilitiesTable.id, name: facilitiesTable.name }).from(facilitiesTable).where(inArray(facilitiesTable.id, facilityIds))
+      : [];
+    const facilityMap = new Map(facilities.map((f) => [f.id, f]));
+
+    const enriched = candidates.map((c) => {
+      const payment = c.candidateType === "payment" ? paymentMap.get(c.candidateId) ?? null : null;
+      const bookingId = payment ? payment.bookingId : (c.candidateType === "order" ? c.candidateId : null);
+      const booking = bookingId ? bookingMap.get(bookingId) ?? null : null;
+      const facility = booking?.facilityId ? facilityMap.get(booking.facilityId) ?? null : null;
+      const paymentDate = payment?.createdAt ? String(payment.createdAt).slice(0, 10) : null;
+
+      return {
+        ...c,
+        customerName: booking?.customerName ?? null,
+        customerPhone: booking?.customerPhone ?? null,
+        customerEmail: booking?.customerEmail ?? null,
+        bookingOrderNumber: booking?.orderNumber ?? null,
+        bookingDate: booking?.bookingDate ?? null,
+        bookingStatus: booking?.status ?? null,
+        bookingAmount: String(booking?.grandTotal ?? booking?.totalPrice ?? 0),
+        paymentProofUrl: payment?.proofUrl ?? null,
+        paymentStatus: payment?.status ?? null,
+        paymentDate,
+        facilityName: facility?.name ?? null,
+      };
+    });
+
+    // Audit log
+    const user = (req as any).user;
+    await db.insert(auditLogsTable).values({ userId: user?.userId, userRole: user?.role, action: "view_candidates", entity: "bank_mutation", entityId: mutationId, ipAddress: req.ip, userAgent: req.headers["user-agent"] as string });
+
+    res.json({ mutation, candidates: enriched });
+  } catch (err: any) {
+    req.log.error({ err }, "Bank reconciliation get-candidates error");
+    res.status(500).json({ error: err?.message ?? "Gagal memuat kandidat" });
+  }
+});
+
+// POST /bank-reconciliation/mutations/:id/approve-candidate
+router.post("/bank-reconciliation/mutations/:id/approve-candidate", adminMiddleware, async (req, res) => {
+  try {
+    const mutationId = parseInt(req.params.id);
+    if (isNaN(mutationId)) { res.status(400).json({ error: "ID tidak valid" }); return; }
+    const { candidateType, candidateId, note } = req.body as { candidateType: "payment" | "order"; candidateId: number; note?: string };
+    if (!candidateType || !candidateId) { res.status(400).json({ error: "candidateType dan candidateId diperlukan" }); return; }
+
+    const [mutation] = await db.select().from(bankMutationsTable).where(eq(bankMutationsTable.id, mutationId)).limit(1);
+    if (!mutation) { res.status(404).json({ error: "Mutasi tidak ditemukan" }); return; }
+
+    // Reject all existing candidates for this mutation
+    await db.update(bankReconciliationMatchesTable).set({ status: "rejected" }).where(eq(bankReconciliationMatchesTable.mutationId, mutationId));
+
+    // Find and approve the selected candidate, or create new if manual
+    const [existing] = await db.select().from(bankReconciliationMatchesTable).where(and(
+      eq(bankReconciliationMatchesTable.mutationId, mutationId),
+      eq(bankReconciliationMatchesTable.candidateId, candidateId),
+    )).limit(1);
+
+    if (existing) {
+      await db.update(bankReconciliationMatchesTable).set({ status: "approved", note: note ?? null }).where(eq(bankReconciliationMatchesTable.id, existing.id));
+    } else {
+      await db.insert(bankReconciliationMatchesTable).values({
+        mutationId,
+        candidateType,
+        candidateId,
+        matchScore: 100,
+        matchReason: note ?? "Disetujui manual oleh admin",
+        amountMatch: true,
+        dateMatch: false,
+        nameMatch: false,
+        orderIdMatch: false,
+        proofMatch: false,
+        statusValidMatch: false,
+        toleranceUsed: false,
+        note: note ?? null,
+        status: "approved",
+      });
+    }
+
+    // Update mutation status to approved
+    await db.update(bankMutationsTable).set({
+      status: "approved",
+      matchedPaymentId: candidateType === "payment" ? candidateId : null,
+      matchedOrderId: candidateType === "order" ? candidateId : null,
+      updatedAt: new Date(),
+    }).where(eq(bankMutationsTable.id, mutationId));
+
+    // Audit log
+    const user = (req as any).user;
+    await db.insert(auditLogsTable).values({ userId: user?.userId, userRole: user?.role, action: "approve_candidate", entity: "bank_mutation", entityId: mutationId, after: { candidateType, candidateId, note }, ipAddress: req.ip, userAgent: req.headers["user-agent"] as string });
+
+    res.json({ ok: true });
+  } catch (err: any) {
+    req.log.error({ err }, "Bank reconciliation approve-candidate error");
+    res.status(500).json({ error: err?.message ?? "Gagal approve kandidat" });
+  }
+});
+
+// POST /bank-reconciliation/mutations/:id/mark-unmatched
+router.post("/bank-reconciliation/mutations/:id/mark-unmatched", adminMiddleware, async (req, res) => {
+  try {
+    const mutationId = parseInt(req.params.id);
+    if (isNaN(mutationId)) { res.status(400).json({ error: "ID tidak valid" }); return; }
+
+    const [mutation] = await db.select().from(bankMutationsTable).where(eq(bankMutationsTable.id, mutationId)).limit(1);
+    if (!mutation) { res.status(404).json({ error: "Mutasi tidak ditemukan" }); return; }
+
+    await db.update(bankMutationsTable).set({ status: "unmatched", matchedPaymentId: null, matchedOrderId: null, updatedAt: new Date() }).where(eq(bankMutationsTable.id, mutationId));
+    await db.update(bankReconciliationMatchesTable).set({ status: "rejected" }).where(eq(bankReconciliationMatchesTable.mutationId, mutationId));
+
+    const user = (req as any).user;
+    await db.insert(auditLogsTable).values({ userId: user?.userId, userRole: user?.role, action: "mark_unmatched", entity: "bank_mutation", entityId: mutationId, ipAddress: req.ip, userAgent: req.headers["user-agent"] as string });
+
+    res.json({ ok: true });
+  } catch (err: any) {
+    req.log.error({ err }, "Bank reconciliation mark-unmatched error");
+    res.status(500).json({ error: err?.message ?? "Gagal tandai unmatched" });
+  }
+});
+
+// POST /bank-reconciliation/mutations/:id/mark-duplicate
+router.post("/bank-reconciliation/mutations/:id/mark-duplicate", adminMiddleware, async (req, res) => {
+  try {
+    const mutationId = parseInt(req.params.id);
+    if (isNaN(mutationId)) { res.status(400).json({ error: "ID tidak valid" }); return; }
+
+    const [mutation] = await db.select().from(bankMutationsTable).where(eq(bankMutationsTable.id, mutationId)).limit(1);
+    if (!mutation) { res.status(404).json({ error: "Mutasi tidak ditemukan" }); return; }
+
+    await db.update(bankMutationsTable).set({ status: "duplicate_need_review", updatedAt: new Date() }).where(eq(bankMutationsTable.id, mutationId));
+
+    const user = (req as any).user;
+    await db.insert(auditLogsTable).values({ userId: user?.userId, userRole: user?.role, action: "mark_duplicate", entity: "bank_mutation", entityId: mutationId, ipAddress: req.ip, userAgent: req.headers["user-agent"] as string });
+
+    res.json({ ok: true });
+  } catch (err: any) {
+    req.log.error({ err }, "Bank reconciliation mark-duplicate error");
+    res.status(500).json({ error: err?.message ?? "Gagal tandai duplikat" });
   }
 });
 

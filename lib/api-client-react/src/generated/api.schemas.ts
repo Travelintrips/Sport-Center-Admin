@@ -1279,8 +1279,81 @@ export interface BankReconciliationMatch {
   nameMatch?: boolean;
   orderIdMatch?: boolean;
   proofMatch?: boolean;
+  statusValidMatch?: boolean;
+  toleranceUsed?: boolean;
+  note?: string | null;
   status: BankReconciliationMatchStatus;
   createdAt: string;
+}
+
+export type EnrichedBankCandidateCandidateType = typeof EnrichedBankCandidateCandidateType[keyof typeof EnrichedBankCandidateCandidateType];
+
+
+export const EnrichedBankCandidateCandidateType = {
+  payment: 'payment',
+  order: 'order',
+  invoice: 'invoice',
+  expense: 'expense',
+} as const;
+
+export type EnrichedBankCandidateStatus = typeof EnrichedBankCandidateStatus[keyof typeof EnrichedBankCandidateStatus];
+
+
+export const EnrichedBankCandidateStatus = {
+  candidate: 'candidate',
+  approved: 'approved',
+  rejected: 'rejected',
+} as const;
+
+export interface EnrichedBankCandidate {
+  id: number;
+  mutationId: number;
+  candidateType: EnrichedBankCandidateCandidateType;
+  candidateId: number;
+  matchScore: number;
+  matchReason?: string | null;
+  amountMatch: boolean;
+  dateMatch: boolean;
+  nameMatch: boolean;
+  orderIdMatch: boolean;
+  proofMatch: boolean;
+  statusValidMatch: boolean;
+  toleranceUsed: boolean;
+  note?: string | null;
+  status: EnrichedBankCandidateStatus;
+  createdAt: string;
+  customerName?: string | null;
+  customerPhone?: string | null;
+  customerEmail?: string | null;
+  bookingOrderNumber?: string | null;
+  bookingDate?: string | null;
+  bookingStatus?: string | null;
+  bookingAmount?: string | null;
+  paymentProofUrl?: string | null;
+  paymentStatus?: string | null;
+  paymentDate?: string | null;
+  facilityName?: string | null;
+}
+
+export interface BankMutationCandidatesResult {
+  mutation: BankMutation;
+  candidates: EnrichedBankCandidate[];
+}
+
+export type ApproveCandidateInputCandidateType = typeof ApproveCandidateInputCandidateType[keyof typeof ApproveCandidateInputCandidateType];
+
+
+export const ApproveCandidateInputCandidateType = {
+  payment: 'payment',
+  order: 'order',
+  invoice: 'invoice',
+  expense: 'expense',
+} as const;
+
+export interface ApproveCandidateInput {
+  candidateType: ApproveCandidateInputCandidateType;
+  candidateId: number;
+  note?: string;
 }
 
 export type BankMutationImportResultMatching = {

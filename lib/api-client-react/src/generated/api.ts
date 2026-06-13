@@ -23,8 +23,10 @@ import type {
   ApMember,
   ApMemberInput,
   ApMemberUpdate,
+  ApproveCandidateInput,
   AuthResponse,
   BankMutationApproveInput,
+  BankMutationCandidatesResult,
   BankMutationImportResult,
   BankMutationListResult,
   BankMutationWithMatches,
@@ -7758,6 +7760,295 @@ export const useRunBankMatching = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getRunBankMatchingMutationOptions(options));
+    }
+
+export const getGetBankMutationCandidatesUrl = (id: number,) => {
+
+
+
+
+  return `/api/bank-reconciliation/mutations/${id}/candidates`
+}
+
+/**
+ * @summary Get enriched match candidates for a mutation
+ */
+export const getBankMutationCandidates = async (id: number, options?: RequestInit): Promise<BankMutationCandidatesResult> => {
+
+  return customFetch<BankMutationCandidatesResult>(getGetBankMutationCandidatesUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetBankMutationCandidatesQueryKey = (id: number,) => {
+    return [
+    `/api/bank-reconciliation/mutations/${id}/candidates`
+    ] as const;
+    }
+
+
+export const getGetBankMutationCandidatesQueryOptions = <TData = Awaited<ReturnType<typeof getBankMutationCandidates>>, TError = ErrorType<unknown>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getBankMutationCandidates>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetBankMutationCandidatesQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getBankMutationCandidates>>> = ({ signal }) => getBankMutationCandidates(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getBankMutationCandidates>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetBankMutationCandidatesQueryResult = NonNullable<Awaited<ReturnType<typeof getBankMutationCandidates>>>
+export type GetBankMutationCandidatesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get enriched match candidates for a mutation
+ */
+
+export function useGetBankMutationCandidates<TData = Awaited<ReturnType<typeof getBankMutationCandidates>>, TError = ErrorType<unknown>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getBankMutationCandidates>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetBankMutationCandidatesQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getApproveBankMutationCandidateUrl = (id: number,) => {
+
+
+
+
+  return `/api/bank-reconciliation/mutations/${id}/approve-candidate`
+}
+
+/**
+ * @summary Approve a specific match candidate for a mutation
+ */
+export const approveBankMutationCandidate = async (id: number,
+    approveCandidateInput?: ApproveCandidateInput, options?: RequestInit): Promise<OkResult> => {
+
+  return customFetch<OkResult>(getApproveBankMutationCandidateUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      approveCandidateInput,)
+  }
+);}
+
+
+
+
+export const getApproveBankMutationCandidateMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof approveBankMutationCandidate>>, TError,{id: number;data?: BodyType<ApproveCandidateInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof approveBankMutationCandidate>>, TError,{id: number;data?: BodyType<ApproveCandidateInput>}, TContext> => {
+
+const mutationKey = ['approveBankMutationCandidate'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof approveBankMutationCandidate>>, {id: number;data?: BodyType<ApproveCandidateInput>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  approveBankMutationCandidate(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ApproveBankMutationCandidateMutationResult = NonNullable<Awaited<ReturnType<typeof approveBankMutationCandidate>>>
+    export type ApproveBankMutationCandidateMutationBody = BodyType<ApproveCandidateInput> | undefined
+    export type ApproveBankMutationCandidateMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Approve a specific match candidate for a mutation
+ */
+export const useApproveBankMutationCandidate = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof approveBankMutationCandidate>>, TError,{id: number;data?: BodyType<ApproveCandidateInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof approveBankMutationCandidate>>,
+        TError,
+        {id: number;data?: BodyType<ApproveCandidateInput>},
+        TContext
+      > => {
+      return useMutation(getApproveBankMutationCandidateMutationOptions(options));
+    }
+
+export const getMarkBankMutationUnmatchedUrl = (id: number,) => {
+
+
+
+
+  return `/api/bank-reconciliation/mutations/${id}/mark-unmatched`
+}
+
+/**
+ * @summary Mark a mutation as unmatched
+ */
+export const markBankMutationUnmatched = async (id: number, options?: RequestInit): Promise<OkResult> => {
+
+  return customFetch<OkResult>(getMarkBankMutationUnmatchedUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getMarkBankMutationUnmatchedMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof markBankMutationUnmatched>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof markBankMutationUnmatched>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['markBankMutationUnmatched'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof markBankMutationUnmatched>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  markBankMutationUnmatched(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type MarkBankMutationUnmatchedMutationResult = NonNullable<Awaited<ReturnType<typeof markBankMutationUnmatched>>>
+
+    export type MarkBankMutationUnmatchedMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Mark a mutation as unmatched
+ */
+export const useMarkBankMutationUnmatched = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof markBankMutationUnmatched>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof markBankMutationUnmatched>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getMarkBankMutationUnmatchedMutationOptions(options));
+    }
+
+export const getMarkBankMutationDuplicateUrl = (id: number,) => {
+
+
+
+
+  return `/api/bank-reconciliation/mutations/${id}/mark-duplicate`
+}
+
+/**
+ * @summary Mark a mutation as duplicate needing review
+ */
+export const markBankMutationDuplicate = async (id: number, options?: RequestInit): Promise<OkResult> => {
+
+  return customFetch<OkResult>(getMarkBankMutationDuplicateUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getMarkBankMutationDuplicateMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof markBankMutationDuplicate>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof markBankMutationDuplicate>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['markBankMutationDuplicate'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof markBankMutationDuplicate>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  markBankMutationDuplicate(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type MarkBankMutationDuplicateMutationResult = NonNullable<Awaited<ReturnType<typeof markBankMutationDuplicate>>>
+
+    export type MarkBankMutationDuplicateMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Mark a mutation as duplicate needing review
+ */
+export const useMarkBankMutationDuplicate = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof markBankMutationDuplicate>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof markBankMutationDuplicate>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getMarkBankMutationDuplicateMutationOptions(options));
     }
 
 export const getConnectBankReconSheetUrl = () => {
