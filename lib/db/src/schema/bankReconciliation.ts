@@ -4,7 +4,13 @@ import { z } from "zod/v4";
 import { scSchema } from "./_schema";
 
 export const bankMutationStatusEnum = scSchema.enum("bank_mutation_status", [
-  "unmatched", "matched", "duplicate_need_review", "approved", "rejected",
+  "unmatched",
+  "need_review",
+  "auto_matched",
+  "matched",
+  "duplicate_need_review",
+  "approved",
+  "rejected",
 ]);
 
 export const reconMatchStatusEnum = scSchema.enum("recon_match_status", [

@@ -257,10 +257,11 @@ function SheetSyncPanel({ onImported }: { onImported: () => void }) {
                       onChange={(e) => setPushStatusFilter(e.target.value)}
                       disabled={isBusy}
                     >
-                      <option value="all">Semua status</option>
+                                      <option value="all">Semua status</option>
                       <option value="approved">Hanya Disetujui</option>
+                      <option value="auto_matched">Hanya Auto Matched</option>
+                      <option value="need_review">Hanya Perlu Review</option>
                       <option value="unmatched">Hanya Belum Match</option>
-                      <option value="matched">Hanya Matched</option>
                       <option value="rejected">Hanya Ditolak</option>
                     </select>
                     <button
@@ -323,19 +324,33 @@ function SheetSyncPanel({ onImported }: { onImported: () => void }) {
 }
 
 const STATUS_COLORS: Record<string, string> = {
-  unmatched: "bg-yellow-100 text-yellow-800 border-yellow-200",
+  unmatched: "bg-orange-100 text-orange-800 border-orange-200",
+  need_review: "bg-yellow-100 text-yellow-800 border-yellow-200",
+  auto_matched: "bg-teal-100 text-teal-800 border-teal-200",
   matched: "bg-blue-100 text-blue-800 border-blue-200",
-  duplicate_need_review: "bg-orange-100 text-orange-800 border-orange-200",
+  duplicate_need_review: "bg-purple-100 text-purple-800 border-purple-200",
   approved: "bg-green-100 text-green-800 border-green-200",
   rejected: "bg-red-100 text-red-800 border-red-200",
 };
 
 const STATUS_LABELS: Record<string, string> = {
   unmatched: "Belum Match",
+  need_review: "Perlu Review",
+  auto_matched: "Auto Matched",
   matched: "Matched",
-  duplicate_need_review: "Duplikat – Review",
+  duplicate_need_review: "Duplikat",
   approved: "Disetujui",
   rejected: "Ditolak",
+};
+
+const STATUS_ICONS: Record<string, string> = {
+  unmatched: "○",
+  need_review: "◔",
+  auto_matched: "◉",
+  matched: "◉",
+  duplicate_need_review: "⊕",
+  approved: "✓",
+  rejected: "✗",
 };
 
 function formatCurrency(n: string | number) {
@@ -343,11 +358,64 @@ function formatCurrency(n: string | number) {
 }
 
 function ScoreBadge({ score }: { score: number }) {
-  const color = score >= 95 ? "bg-green-500" : score >= 80 ? "bg-yellow-500" : "bg-gray-400";
+  const color =
+    score >= 80 ? "bg-teal-600" :
+    score >= 50 ? "bg-yellow-500" :
+    "bg-gray-400";
+  const label =
+    score >= 80 ? "Auto" :
+    score >= 50 ? "Review" :
+    "Rendah";
   return (
-    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-white text-xs font-bold ${color}`}>
-      {score}
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-white text-xs font-bold ${color}`}
+      title={`Skor: ${score}/100`}>
+      {score} <span className="opacity-80 font-normal">{label}</span>
     </span>
+  );
+}
+
+/**
+ * Parse matchReason string menjadi array baris dengan poin.
+ * Format yang diharapkan: "deskripsi +N; deskripsi2 +N2"
+ */
+function parseScoreBreakdown(reason: string | null | undefined): Array<{ label: string; pts: number | null }> {
+  if (!reason) return [];
+  return reason.split(";").map((part) => {
+    const trimmed = part.trim();
+    const ptMatch = trimmed.match(/\+(\d+)$/);
+    if (ptMatch) {
+      return { label: trimmed.replace(/\+\d+$/, "").trim(), pts: parseInt(ptMatch[1]!) };
+    }
+    return { label: trimmed, pts: null };
+  }).filter((x) => x.label.length > 0);
+}
+
+function ScoreBreakdown({ reason, totalScore }: { reason: string | null | undefined; totalScore: number }) {
+  const parts = parseScoreBreakdown(reason);
+  if (!parts.length) {
+    return <p className="text-xs text-muted-foreground">{reason}</p>;
+  }
+  return (
+    <div className="mt-2 rounded-lg border bg-muted/30 overflow-hidden">
+      <div className="px-3 py-1.5 bg-muted/50 border-b flex items-center justify-between">
+        <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Rincian Skor</span>
+        <ScoreBadge score={totalScore} />
+      </div>
+      <div className="divide-y">
+        {parts.map((p, i) => (
+          <div key={i} className="flex items-center justify-between px-3 py-1">
+            <span className="text-xs text-muted-foreground">{p.label}</span>
+            {p.pts !== null && (
+              <span className="text-xs font-bold text-teal-700 ml-2 shrink-0">+{p.pts}</span>
+            )}
+          </div>
+        ))}
+      </div>
+      <div className="flex items-center justify-between px-3 py-1.5 bg-muted/50 border-t">
+        <span className="text-xs font-semibold">Total Skor</span>
+        <span className="text-sm font-black text-teal-700">{totalScore}</span>
+      </div>
+    </div>
   );
 }
 
@@ -450,9 +518,7 @@ function MatchCandidateRow({
             {match.orderIdMatch && <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">✓ Order ID</span>}
             {match.proofMatch && <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">✓ Bukti</span>}
           </div>
-          {match.matchReason && (
-            <p className="text-xs text-muted-foreground mt-1">{match.matchReason}</p>
-          )}
+          <ScoreBreakdown reason={match.matchReason} totalScore={match.matchScore} />
 
           {/* OCR Results */}
           {ocr && (ocr.name || ocr.amount || ocr.date) && (
@@ -644,7 +710,7 @@ function MutationRow({ mutation, qc }: { mutation: any; qc: any }) {
 
   const isPending = approveMutation.isPending || rejectMutation.isPending;
   const matches = matchesQuery.data?.matches ?? [];
-  const isActionable = ["unmatched", "matched", "duplicate_need_review"].includes(mutation.status);
+  const isActionable = ["unmatched", "need_review", "auto_matched", "matched", "duplicate_need_review"].includes(mutation.status);
 
   return (
     <div className="border rounded-xl overflow-hidden">
@@ -856,7 +922,7 @@ function ReportTab() {
   return (
     <div className="space-y-6">
       {/* Summary cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
         <Card>
           <CardContent className="p-4">
             <p className="text-xs text-muted-foreground font-medium">Total Mutasi</p>
@@ -877,14 +943,23 @@ function ReportTab() {
         </Card>
         <Card>
           <CardContent className="p-4">
-            <p className="text-xs text-muted-foreground font-medium">Disetujui</p>
+            <p className="text-xs text-muted-foreground font-medium">✓ Disetujui</p>
             <p className="text-2xl font-black mt-1 text-blue-600">{totals.approved.toLocaleString("id-ID")}</p>
             <p className="text-xs text-muted-foreground mt-0.5">{pctApproved}% dari total</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4">
-            <p className="text-xs text-muted-foreground font-medium">Belum Match</p>
+            <p className="text-xs text-muted-foreground font-medium">◉ Auto Matched</p>
+            <p className="text-2xl font-black mt-1 text-teal-600">{(totals.auto_matched ?? 0).toLocaleString("id-ID")}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              ◔ Review: {(totals.need_review ?? 0).toLocaleString("id-ID")}
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <p className="text-xs text-muted-foreground font-medium">○ Belum Match</p>
             <p className="text-2xl font-black mt-1 text-orange-600">{totals.unmatched.toLocaleString("id-ID")}</p>
             <p className="text-xs text-muted-foreground mt-0.5">{pctUnmatched}% perlu tindakan</p>
           </CardContent>
@@ -898,7 +973,7 @@ function ReportTab() {
           <div>
             <p className="text-sm font-semibold text-amber-800">Dana Masuk Belum Disetujui</p>
             <p className="text-xs text-amber-700 mt-0.5">
-              {formatCurrency(Number(totals.pending_amount_in))} masih dalam status unmatched/matched/duplikat — perlu review admin.
+              {formatCurrency(Number(totals.pending_amount_in))} masih dalam status unmatched/need_review/auto_matched/duplikat — perlu konfirmasi admin.
             </p>
           </div>
         </div>
@@ -915,15 +990,16 @@ function ReportTab() {
                 <th className="text-right px-3 py-3 font-semibold text-xs uppercase tracking-wide text-green-700">Masuk</th>
                 <th className="text-right px-3 py-3 font-semibold text-xs uppercase tracking-wide text-red-700">Keluar</th>
                 <th className="text-right px-3 py-3 font-semibold text-xs uppercase tracking-wide text-blue-700">Approved</th>
+                <th className="text-right px-3 py-3 font-semibold text-xs uppercase tracking-wide text-teal-700">Auto</th>
+                <th className="text-right px-3 py-3 font-semibold text-xs uppercase tracking-wide text-yellow-700">Review</th>
                 <th className="text-right px-3 py-3 font-semibold text-xs uppercase tracking-wide text-orange-700">Unmatched</th>
-                <th className="text-right px-3 py-3 font-semibold text-xs uppercase tracking-wide text-yellow-700">Matched</th>
                 <th className="text-right px-3 py-3 font-semibold text-xs uppercase tracking-wide">Duplikat</th>
                 <th className="text-right px-4 py-3 font-semibold text-xs uppercase tracking-wide">% Selesai</th>
               </tr>
             </thead>
             <tbody>
               {rows.length === 0 ? (
-                <tr><td colSpan={9} className="text-center py-10 text-muted-foreground">Belum ada data mutasi</td></tr>
+                <tr><td colSpan={10} className="text-center py-10 text-muted-foreground">Belum ada data mutasi</td></tr>
               ) : rows.map((r: any) => {
                 const pct = Number(r.total) > 0 ? Math.round((Number(r.approved) / Number(r.total)) * 100) : 0;
                 return (
@@ -939,16 +1015,21 @@ function ReportTab() {
                       </span>
                     </td>
                     <td className="px-3 py-3 text-right">
+                      {Number(r.auto_matched ?? 0) > 0 ? (
+                        <span className="text-teal-700 font-semibold">{Number(r.auto_matched).toLocaleString("id-ID")}</span>
+                      ) : <span className="text-muted-foreground">—</span>}
+                    </td>
+                    <td className="px-3 py-3 text-right">
+                      {Number(r.need_review ?? 0) > 0 ? (
+                        <span className="text-yellow-700 font-semibold">{Number(r.need_review).toLocaleString("id-ID")}</span>
+                      ) : <span className="text-muted-foreground">—</span>}
+                    </td>
+                    <td className="px-3 py-3 text-right">
                       {Number(r.unmatched) > 0 ? (
                         <span className="inline-flex items-center gap-1 text-orange-700 font-semibold">
                           <span className="w-2 h-2 rounded-full bg-orange-400 shrink-0" />
                           {Number(r.unmatched).toLocaleString("id-ID")}
                         </span>
-                      ) : <span className="text-muted-foreground">—</span>}
-                    </td>
-                    <td className="px-3 py-3 text-right">
-                      {Number(r.matched) > 0 ? (
-                        <span className="text-yellow-700">{Number(r.matched).toLocaleString("id-ID")}</span>
                       ) : <span className="text-muted-foreground">—</span>}
                     </td>
                     <td className="px-3 py-3 text-right">
@@ -981,8 +1062,9 @@ function ReportTab() {
                   <td className="px-3 py-3 text-right text-green-700">{formatCurrency(Number(totals.amount_in))}</td>
                   <td className="px-3 py-3 text-right text-red-700">{formatCurrency(Number(totals.amount_out))}</td>
                   <td className="px-3 py-3 text-right">{totals.approved.toLocaleString("id-ID")}</td>
+                  <td className="px-3 py-3 text-right text-teal-700">{(totals.auto_matched ?? 0).toLocaleString("id-ID")}</td>
+                  <td className="px-3 py-3 text-right text-yellow-700">{(totals.need_review ?? 0).toLocaleString("id-ID")}</td>
                   <td className="px-3 py-3 text-right text-orange-700">{totals.unmatched.toLocaleString("id-ID")}</td>
-                  <td className="px-3 py-3 text-right">{(totals.matched ?? 0).toLocaleString("id-ID")}</td>
                   <td className="px-3 py-3 text-right">{(totals.duplicate ?? 0).toLocaleString("id-ID")}</td>
                   <td className="px-4 py-3 text-right text-sm">{pctApproved}%</td>
                 </tr>
@@ -1026,10 +1108,10 @@ export default function AdminBankReconciliation() {
 
   const runMatchingMutation = useRunBankMatching({
     mutation: {
-      onSuccess: (result) => {
+      onSuccess: (result: any) => {
         toast({
           title: "Matching selesai",
-          description: `${result.autoApproved} auto-approve · ${result.needsReview} perlu review · ${result.unmatched} unmatched · ${result.duplicates} duplikat`,
+          description: `${result.autoMatched ?? result.autoApproved ?? 0} auto matched · ${result.needsReview ?? 0} perlu review · ${result.unmatched} unmatched · ${result.duplicates} duplikat`,
         });
         qc.invalidateQueries({ queryKey: getListBankMutationsQueryKey() });
       },
@@ -1070,7 +1152,7 @@ export default function AdminBankReconciliation() {
   const totalPages = Math.ceil(total / 30);
 
   const stats = mutations.reduce(
-    (acc, m: any) => {
+    (acc: Record<string, number>, m: any) => {
       acc[m.status] = (acc[m.status] ?? 0) + 1;
       return acc;
     },
@@ -1131,17 +1213,26 @@ export default function AdminBankReconciliation() {
       <div className={activeTab === "mutasi" ? "space-y-6" : "hidden"}>
 
       {/* Stats bar */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-        {(["unmatched", "matched", "duplicate_need_review", "approved", "rejected"] as const).map((s) => (
+      <div className="grid grid-cols-3 sm:grid-cols-7 gap-2">
+        {(["unmatched", "need_review", "auto_matched", "duplicate_need_review", "approved", "rejected"] as const).map((s) => (
           <button
             key={s}
-            className={`p-3 rounded-xl border text-left transition-colors ${filterStatus === s ? "ring-2 ring-primary" : "hover:bg-muted/40"}`}
+            className={`p-2.5 rounded-xl border text-left transition-colors ${filterStatus === s ? "ring-2 ring-primary bg-muted/40" : "hover:bg-muted/30"}`}
             onClick={() => { setFilterStatus(filterStatus === s ? "all" : s); setPage(1); }}
           >
-            <div className="text-xl font-black">{stats[s] ?? 0}</div>
-            <div className="text-xs text-muted-foreground mt-0.5">{STATUS_LABELS[s]}</div>
+            <div className="text-lg font-black">{stats[s] ?? 0}</div>
+            <div className={`text-[10px] font-semibold mt-0.5 ${STATUS_COLORS[s]?.includes("green") ? "text-green-700" : STATUS_COLORS[s]?.includes("teal") ? "text-teal-700" : STATUS_COLORS[s]?.includes("yellow") ? "text-yellow-700" : STATUS_COLORS[s]?.includes("orange") ? "text-orange-700" : STATUS_COLORS[s]?.includes("purple") ? "text-purple-700" : STATUS_COLORS[s]?.includes("red") ? "text-red-700" : "text-muted-foreground"}`}>
+              {STATUS_ICONS[s]} {STATUS_LABELS[s]}
+            </div>
           </button>
         ))}
+        <button
+          className={`p-2.5 rounded-xl border text-left transition-colors ${filterStatus === "all" ? "ring-2 ring-primary bg-muted/40" : "hover:bg-muted/30"}`}
+          onClick={() => { setFilterStatus("all"); setPage(1); }}
+        >
+          <div className="text-lg font-black">{(Object.values(stats) as number[]).reduce((a, b) => a + b, 0)}</div>
+          <div className="text-[10px] text-muted-foreground mt-0.5">☰ Semua</div>
+        </button>
       </div>
 
       {/* Google Sheets Sync */}
@@ -1161,11 +1252,12 @@ export default function AdminBankReconciliation() {
               onChange={(e) => { setFilterStatus(e.target.value); setPage(1); }}
             >
               <option value="all">Semua Status</option>
-              <option value="unmatched">Belum Match</option>
-              <option value="matched">Matched</option>
-              <option value="duplicate_need_review">Duplikat</option>
-              <option value="approved">Disetujui</option>
-              <option value="rejected">Ditolak</option>
+              <option value="unmatched">○ Belum Match</option>
+              <option value="need_review">◔ Perlu Review</option>
+              <option value="auto_matched">◉ Auto Matched</option>
+              <option value="duplicate_need_review">⊕ Duplikat</option>
+              <option value="approved">✓ Disetujui</option>
+              <option value="rejected">✗ Ditolak</option>
             </select>
             <select
               className="border rounded-md px-3 py-2 text-sm bg-background"

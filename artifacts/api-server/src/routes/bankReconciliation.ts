@@ -7,9 +7,8 @@ import {
   paymentsTable,
   facilitiesTable,
   auditLogsTable,
-  paymentsTable,
 } from "@workspace/db";
-import { eq, desc, and, inArray, sql, like, gte, lte } from "drizzle-orm";
+import { eq, desc, and, inArray, sql, gte, lte } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
 import {
   normalizeDescription,
@@ -34,7 +33,6 @@ function parseRows(rows: any[]): Array<{
 }> {
   return rows
     .map((row) => {
-      // Normalize keys to lowercase with underscores
       const normalized: Record<string, any> = {};
       for (const [k, v] of Object.entries(row)) {
         normalized[k.toLowerCase().replace(/[\s\-\.]+/g, "_")] = v;
@@ -79,11 +77,9 @@ function parseRows(rows: any[]): Array<{
       const credit = parseFloat(String(creditRaw).replace(/[^0-9.]/g, "")) || 0;
       const debit = parseFloat(String(debitRaw).replace(/[^0-9.]/g, "")) || 0;
 
-      // Parse date
       let transactionDate = "";
       if (dateRaw) {
         const raw = String(dateRaw).trim();
-        // Try ISO
         if (/^\d{4}-\d{2}-\d{2}/.test(raw)) {
           transactionDate = raw.slice(0, 10);
         } else if (/^\d{2}\/\d{2}\/\d{4}/.test(raw)) {
@@ -93,7 +89,6 @@ function parseRows(rows: any[]): Array<{
           const [d, m, y] = raw.split("-");
           transactionDate = `${y}-${m!.padStart(2, "0")}-${d!.padStart(2, "0")}`;
         } else {
-          // Excel serial date number
           const n = Number(raw);
           if (!isNaN(n) && n > 40000) {
             const date = XLSX.SSF.parse_date_code(n);
@@ -183,8 +178,7 @@ router.post("/bank-reconciliation/import", adminMiddleware, upload.single("file"
       if (rec) { insertedIds.push(rec.id); inserted++; }
     }
 
-    // Auto-run matching for newly inserted
-    let matchResult = { processed: 0, autoApproved: 0, needsReview: 0, unmatched: 0, duplicates: 0 };
+    let matchResult = { processed: 0, autoMatched: 0, needsReview: 0, unmatched: 0, duplicates: 0 };
     if (insertedIds.length) {
       matchResult = await runMatching(insertedIds);
     }
@@ -257,7 +251,6 @@ router.get("/bank-reconciliation/matches/:mutationId", adminMiddleware, async (r
 
     if (!mutation) { res.status(404).json({ error: "Mutasi tidak ditemukan" }); return; }
 
-    // Use raw SQL with LEFT JOIN to get proofUrl and OCR data directly
     const { rows } = await db.execute(sql`
       SELECT
         m.id,
@@ -311,13 +304,11 @@ router.post("/bank-reconciliation/:mutationId/approve", adminMiddleware, async (
 
     if (!mutation) { res.status(404).json({ error: "Mutasi tidak ditemukan" }); return; }
 
-    // Reject all other matches for this mutation
     await db
       .update(bankReconciliationMatchesTable)
       .set({ status: "rejected" })
       .where(eq(bankReconciliationMatchesTable.mutationId, mutationId));
 
-    // Approve selected match
     if (matchId) {
       await db
         .update(bankReconciliationMatchesTable)
@@ -345,7 +336,6 @@ router.post("/bank-reconciliation/:mutationId/approve", adminMiddleware, async (
         })
         .where(eq(bankMutationsTable.id, mutationId));
     } else if (candidateType && candidateId) {
-      // Manual approve without existing match record
       await db
         .insert(bankReconciliationMatchesTable)
         .values({
@@ -353,7 +343,7 @@ router.post("/bank-reconciliation/:mutationId/approve", adminMiddleware, async (
           candidateType: candidateType as any,
           candidateId,
           matchScore: 100,
-          matchReason: "Manual approval oleh admin",
+          matchReason: "Manual approval oleh admin +100",
           amountMatch: true,
           dateMatch: true,
           nameMatch: false,
@@ -372,18 +362,29 @@ router.post("/bank-reconciliation/:mutationId/approve", adminMiddleware, async (
         })
         .where(eq(bankMutationsTable.id, mutationId));
     } else {
-      // Approve as-is (no match required)
       await db
         .update(bankMutationsTable)
         .set({ status: "approved", updatedAt: new Date() })
         .where(eq(bankMutationsTable.id, mutationId));
     }
 
-    // ── Auto-write ke Google Sheet kolom H ─────────────────────────────
+    // Audit log
+    const user = (req as any).user;
+    await db.insert(auditLogsTable).values({
+      userId: user?.userId,
+      userRole: user?.role,
+      action: "approve_mutation",
+      entity: "bank_mutation",
+      entityId: mutationId,
+      after: { matchId, candidateType, candidateId },
+      ipAddress: req.ip,
+      userAgent: req.headers["user-agent"] as string,
+    });
+
+    // Auto-write ke Google Sheet kolom H
     if (isGoogleSheetsConfigured()) {
       const { sheetId, sheetName } = req.body as { sheetId?: string; sheetName?: string };
       if (sheetId) {
-        // Re-fetch mutation setelah update untuk mendapat data terbaru
         const [updated] = await db
           .select()
           .from(bankMutationsTable)
@@ -430,7 +431,18 @@ router.post("/bank-reconciliation/:mutationId/reject", adminMiddleware, async (r
       .set({ status: "rejected" })
       .where(eq(bankReconciliationMatchesTable.mutationId, mutationId));
 
-    // ── Auto-write ke Google Sheet kolom H ─────────────────────────────
+    // Audit log
+    const user = (req as any).user;
+    await db.insert(auditLogsTable).values({
+      userId: user?.userId,
+      userRole: user?.role,
+      action: "reject_mutation",
+      entity: "bank_mutation",
+      entityId: mutationId,
+      ipAddress: req.ip,
+      userAgent: req.headers["user-agent"] as string,
+    });
+
     if (isGoogleSheetsConfigured()) {
       const { sheetId, sheetName } = req.body as { sheetId?: string; sheetName?: string };
       if (sheetId) {
@@ -459,7 +471,7 @@ router.post("/bank-reconciliation/:mutationId/reject", adminMiddleware, async (r
   }
 });
 
-// DELETE /bank-reconciliation/mutations — hapus semua atau berdasarkan status
+// DELETE /bank-reconciliation/mutations
 router.delete("/bank-reconciliation/mutations", adminMiddleware, async (req, res) => {
   try {
     const { statusFilter } = req.body as { statusFilter?: string[] };
@@ -471,13 +483,11 @@ router.delete("/bank-reconciliation/mutations", adminMiddleware, async (req, res
         .where(inArray(bankMutationsTable.status, statusFilter as any));
       const ids = rows.map((r) => r.id);
       if (ids.length > 0) {
-        // Hapus matches dulu (foreign key)
         await db.delete(bankReconciliationMatchesTable).where(inArray(bankReconciliationMatchesTable.mutationId, ids));
         await db.delete(bankMutationsTable).where(inArray(bankMutationsTable.id, ids));
         deletedCount = ids.length;
       }
     } else {
-      // Hapus semua
       await db.delete(bankReconciliationMatchesTable);
       const rows = await db.delete(bankMutationsTable).returning({ id: bankMutationsTable.id });
       deletedCount = rows.length;
@@ -492,7 +502,6 @@ router.delete("/bank-reconciliation/mutations", adminMiddleware, async (req, res
 // GET /bank-reconciliation/report — laporan bulanan rekonsiliasi
 router.get("/bank-reconciliation/report", adminMiddleware, async (req, res) => {
   try {
-    // mutation_key format: YYYYMMDD_amount_direction — reliable date source
     const { rows } = await db.execute(sql`
       SELECT
         TO_CHAR(TO_DATE(LEFT(mutation_key, 8), 'YYYYMMDD'), 'YYYY-MM') AS month,
@@ -503,32 +512,43 @@ router.get("/bank-reconciliation/report", adminMiddleware, async (req, res) => {
         COALESCE(SUM(amount) FILTER (WHERE direction = 'OUT'), 0)::numeric AS amount_out,
         COUNT(*) FILTER (WHERE status = 'approved')::int AS approved,
         COUNT(*) FILTER (WHERE status = 'unmatched')::int AS unmatched,
-        COUNT(*) FILTER (WHERE status = 'matched')::int AS matched,
+        COUNT(*) FILTER (WHERE status = 'matched' OR status = 'auto_matched')::int AS matched,
+        COUNT(*) FILTER (WHERE status = 'auto_matched')::int AS auto_matched,
+        COUNT(*) FILTER (WHERE status = 'need_review')::int AS need_review,
         COUNT(*) FILTER (WHERE status = 'duplicate_need_review')::int AS duplicate,
         COUNT(*) FILTER (WHERE status = 'rejected')::int AS rejected,
         COALESCE(SUM(amount) FILTER (WHERE direction = 'IN' AND status = 'approved'), 0)::numeric AS approved_amount_in,
-        COALESCE(SUM(amount) FILTER (WHERE direction = 'IN' AND status != 'approved' AND status != 'rejected'), 0)::numeric AS pending_amount_in
+        COALESCE(SUM(amount) FILTER (WHERE direction = 'IN' AND status NOT IN ('approved','rejected')), 0)::numeric AS pending_amount_in
       FROM sport_center.bank_mutations
       WHERE mutation_key ~ '^20[0-9]{6}_'
       GROUP BY TO_CHAR(TO_DATE(LEFT(mutation_key, 8), 'YYYYMMDD'), 'YYYY-MM')
       ORDER BY TO_CHAR(TO_DATE(LEFT(mutation_key, 8), 'YYYYMMDD'), 'YYYY-MM') DESC
     `);
 
-    // totals keseluruhan
     const totals = rows.reduce(
       (acc: any, r: any) => ({
         total: acc.total + Number(r.total),
+        total_in: acc.total_in + Number(r.total_in ?? 0),
+        total_out: acc.total_out + Number(r.total_out ?? 0),
         amount_in: acc.amount_in + Number(r.amount_in),
         amount_out: acc.amount_out + Number(r.amount_out),
         approved: acc.approved + Number(r.approved),
         unmatched: acc.unmatched + Number(r.unmatched),
         matched: acc.matched + Number(r.matched),
+        auto_matched: acc.auto_matched + Number(r.auto_matched ?? 0),
+        need_review: acc.need_review + Number(r.need_review ?? 0),
         duplicate: acc.duplicate + Number(r.duplicate),
         rejected: acc.rejected + Number(r.rejected),
         approved_amount_in: acc.approved_amount_in + Number(r.approved_amount_in),
         pending_amount_in: acc.pending_amount_in + Number(r.pending_amount_in),
       }),
-      { total: 0, amount_in: 0, amount_out: 0, approved: 0, unmatched: 0, matched: 0, duplicate: 0, rejected: 0, approved_amount_in: 0, pending_amount_in: 0 }
+      {
+        total: 0, total_in: 0, total_out: 0,
+        amount_in: 0, amount_out: 0,
+        approved: 0, unmatched: 0, matched: 0, auto_matched: 0, need_review: 0,
+        duplicate: 0, rejected: 0,
+        approved_amount_in: 0, pending_amount_in: 0,
+      }
     );
 
     res.json({ rows, totals });
@@ -550,7 +570,7 @@ router.post("/bank-reconciliation/run-matching", adminMiddleware, async (req, re
   }
 });
 
-// POST /bank-reconciliation/scan-ocr — OCR bukti transfer dari payment
+// POST /bank-reconciliation/scan-ocr
 router.post("/bank-reconciliation/scan-ocr", adminMiddleware, async (req, res) => {
   try {
     const { paymentId, proofUrl } = req.body as { paymentId: number; proofUrl: string };
@@ -559,7 +579,6 @@ router.post("/bank-reconciliation/scan-ocr", adminMiddleware, async (req, res) =
       return;
     }
 
-    // Download image
     const { default: fetch } = await import("node-fetch");
     const imgRes = await fetch(proofUrl);
     if (!imgRes.ok) {
@@ -568,7 +587,6 @@ router.post("/bank-reconciliation/scan-ocr", adminMiddleware, async (req, res) =
     }
     const imgBuffer = Buffer.from(await imgRes.arrayBuffer());
 
-    // Run Tesseract OCR
     const { createWorker } = await import("tesseract.js");
     const worker = await createWorker("ind+eng", 1, {
       cachePath: "/tmp/tesseract-cache",
@@ -578,21 +596,17 @@ router.post("/bank-reconciliation/scan-ocr", adminMiddleware, async (req, res) =
     await worker.terminate();
 
     const rawText = data.text || "";
-
-    // Extract nama (cari baris dengan huruf besar/nama)
     const lines = rawText.split("\n").map((l: string) => l.trim()).filter(Boolean);
     let ocrName: string | null = null;
     let ocrAmount: number | null = null;
     let ocrDate: string | null = null;
 
-    // Cari nominal (angka dengan titik/koma, biasanya didahului Rp)
     const amountMatch = rawText.match(/(?:Rp\.?\s*|IDR\s*)?([\d]{1,3}(?:[.,]\d{3})+(?:[.,]\d{1,2})?)/i);
     if (amountMatch) {
       const cleaned = amountMatch[1]!.replace(/\./g, "").replace(",", ".");
       ocrAmount = parseFloat(cleaned) || null;
     }
 
-    // Cari tanggal (dd/mm/yyyy atau dd-mm-yyyy atau yyyy-mm-dd)
     const dateMatch = rawText.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})|(\d{4})[\/\-](\d{2})[\/\-](\d{2})/);
     if (dateMatch) {
       if (dateMatch[4]) {
@@ -605,7 +619,6 @@ router.post("/bank-reconciliation/scan-ocr", adminMiddleware, async (req, res) =
       }
     }
 
-    // Cari nama: baris yang berisi huruf dan panjang > 3, bukan angka murni, bukan kata kunci umum
     const skipWords = /^(transfer|bank|rekening|tanggal|nominal|total|biaya|fee|dari|ke|kode|ref|no|rp|idr|berhasil|sukses|debet|kredit|saldo|date|amount|beneficiary|sender)/i;
     for (const line of lines) {
       if (line.length > 3 && /[a-zA-Z]{3,}/.test(line) && !skipWords.test(line) && !/^\d+$/.test(line)) {
@@ -614,7 +627,6 @@ router.post("/bank-reconciliation/scan-ocr", adminMiddleware, async (req, res) =
       }
     }
 
-    // Simpan ke DB jika ada paymentId
     if (paymentId) {
       await db.execute(sql`
         UPDATE sport_center.payments
@@ -636,7 +648,7 @@ router.post("/bank-reconciliation/scan-ocr", adminMiddleware, async (req, res) =
   }
 });
 
-// GET /bank-reconciliation/mutations/:id/candidates — enriched candidates with booking/payment details
+// GET /bank-reconciliation/mutations/:id/candidates
 router.get("/bank-reconciliation/mutations/:id/candidates", adminMiddleware, async (req, res) => {
   try {
     const mutationId = parseInt(req.params.id);
@@ -651,24 +663,47 @@ router.get("/bank-reconciliation/mutations/:id/candidates", adminMiddleware, asy
       .where(eq(bankReconciliationMatchesTable.mutationId, mutationId))
       .orderBy(desc(bankReconciliationMatchesTable.matchScore));
 
-    // Batch-load related records
     const paymentIds = candidates.filter((c) => c.candidateType === "payment").map((c) => c.candidateId);
     const orderIds = candidates.filter((c) => c.candidateType === "order").map((c) => c.candidateId);
 
     const payments = paymentIds.length
-      ? await db.select({ id: paymentsTable.id, bookingId: paymentsTable.bookingId, amount: paymentsTable.amount, proofUrl: paymentsTable.proofUrl, status: paymentsTable.status, createdAt: paymentsTable.createdAt }).from(paymentsTable).where(inArray(paymentsTable.id, paymentIds))
+      ? await db.select({
+          id: paymentsTable.id,
+          bookingId: paymentsTable.bookingId,
+          amount: paymentsTable.amount,
+          proofUrl: paymentsTable.proofUrl,
+          status: paymentsTable.status,
+          createdAt: paymentsTable.createdAt,
+        }).from(paymentsTable).where(inArray(paymentsTable.id, paymentIds))
       : [];
     const paymentMap = new Map(payments.map((p) => [p.id, p]));
 
-    const allBookingIds = [...new Set([...payments.map((p) => p.bookingId).filter((x): x is number => x != null), ...orderIds])];
+    const allBookingIds = [
+      ...new Set([
+        ...payments.map((p) => p.bookingId).filter((x): x is number => x != null),
+        ...orderIds,
+      ]),
+    ];
     const bookings = allBookingIds.length
-      ? await db.select({ id: bookingsTable.id, orderNumber: bookingsTable.orderNumber, customerName: bookingsTable.customerName, customerPhone: bookingsTable.customerPhone, customerEmail: bookingsTable.customerEmail, bookingDate: bookingsTable.bookingDate, totalPrice: bookingsTable.totalPrice, grandTotal: bookingsTable.grandTotal, status: bookingsTable.status, facilityId: bookingsTable.facilityId }).from(bookingsTable).where(inArray(bookingsTable.id, allBookingIds))
+      ? await db.select({
+          id: bookingsTable.id,
+          orderNumber: bookingsTable.orderNumber,
+          customerName: bookingsTable.customerName,
+          customerPhone: bookingsTable.customerPhone,
+          customerEmail: bookingsTable.customerEmail,
+          bookingDate: bookingsTable.bookingDate,
+          totalPrice: bookingsTable.totalPrice,
+          grandTotal: bookingsTable.grandTotal,
+          status: bookingsTable.status,
+          facilityId: bookingsTable.facilityId,
+        }).from(bookingsTable).where(inArray(bookingsTable.id, allBookingIds))
       : [];
     const bookingMap = new Map(bookings.map((b) => [b.id, b]));
 
     const facilityIds = [...new Set(bookings.map((b) => b.facilityId).filter((x): x is number => x != null))];
     const facilities = facilityIds.length
-      ? await db.select({ id: facilitiesTable.id, name: facilitiesTable.name }).from(facilitiesTable).where(inArray(facilitiesTable.id, facilityIds))
+      ? await db.select({ id: facilitiesTable.id, name: facilitiesTable.name })
+          .from(facilitiesTable).where(inArray(facilitiesTable.id, facilityIds))
       : [];
     const facilityMap = new Map(facilities.map((f) => [f.id, f]));
 
@@ -695,9 +730,16 @@ router.get("/bank-reconciliation/mutations/:id/candidates", adminMiddleware, asy
       };
     });
 
-    // Audit log
     const user = (req as any).user;
-    await db.insert(auditLogsTable).values({ userId: user?.userId, userRole: user?.role, action: "view_candidates", entity: "bank_mutation", entityId: mutationId, ipAddress: req.ip, userAgent: req.headers["user-agent"] as string });
+    await db.insert(auditLogsTable).values({
+      userId: user?.userId,
+      userRole: user?.role,
+      action: "view_candidates",
+      entity: "bank_mutation",
+      entityId: mutationId,
+      ipAddress: req.ip,
+      userAgent: req.headers["user-agent"] as string,
+    });
 
     res.json({ mutation, candidates: enriched });
   } catch (err: any) {
@@ -711,30 +753,30 @@ router.post("/bank-reconciliation/mutations/:id/approve-candidate", adminMiddlew
   try {
     const mutationId = parseInt(req.params.id);
     if (isNaN(mutationId)) { res.status(400).json({ error: "ID tidak valid" }); return; }
-    const { candidateType, candidateId, note } = req.body as { candidateType: "payment" | "order"; candidateId: number; note?: string };
+    const { candidateType, candidateId, note } = req.body as { candidateType: "payment" | "order" | "expense"; candidateId: number; note?: string };
     if (!candidateType || !candidateId) { res.status(400).json({ error: "candidateType dan candidateId diperlukan" }); return; }
 
     const [mutation] = await db.select().from(bankMutationsTable).where(eq(bankMutationsTable.id, mutationId)).limit(1);
     if (!mutation) { res.status(404).json({ error: "Mutasi tidak ditemukan" }); return; }
 
-    // Reject all existing candidates for this mutation
     await db.update(bankReconciliationMatchesTable).set({ status: "rejected" }).where(eq(bankReconciliationMatchesTable.mutationId, mutationId));
 
-    // Find and approve the selected candidate, or create new if manual
     const [existing] = await db.select().from(bankReconciliationMatchesTable).where(and(
       eq(bankReconciliationMatchesTable.mutationId, mutationId),
       eq(bankReconciliationMatchesTable.candidateId, candidateId),
     )).limit(1);
 
     if (existing) {
-      await db.update(bankReconciliationMatchesTable).set({ status: "approved", note: note ?? null }).where(eq(bankReconciliationMatchesTable.id, existing.id));
+      await db.update(bankReconciliationMatchesTable)
+        .set({ status: "approved", note: note ?? null })
+        .where(eq(bankReconciliationMatchesTable.id, existing.id));
     } else {
       await db.insert(bankReconciliationMatchesTable).values({
         mutationId,
-        candidateType,
+        candidateType: candidateType as any,
         candidateId,
         matchScore: 100,
-        matchReason: note ?? "Disetujui manual oleh admin",
+        matchReason: note ?? "Disetujui manual oleh admin +100",
         amountMatch: true,
         dateMatch: false,
         nameMatch: false,
@@ -747,7 +789,6 @@ router.post("/bank-reconciliation/mutations/:id/approve-candidate", adminMiddlew
       });
     }
 
-    // Update mutation status to approved
     await db.update(bankMutationsTable).set({
       status: "approved",
       matchedPaymentId: candidateType === "payment" ? candidateId : null,
@@ -755,9 +796,17 @@ router.post("/bank-reconciliation/mutations/:id/approve-candidate", adminMiddlew
       updatedAt: new Date(),
     }).where(eq(bankMutationsTable.id, mutationId));
 
-    // Audit log
     const user = (req as any).user;
-    await db.insert(auditLogsTable).values({ userId: user?.userId, userRole: user?.role, action: "approve_candidate", entity: "bank_mutation", entityId: mutationId, after: { candidateType, candidateId, note }, ipAddress: req.ip, userAgent: req.headers["user-agent"] as string });
+    await db.insert(auditLogsTable).values({
+      userId: user?.userId,
+      userRole: user?.role,
+      action: "approve_candidate",
+      entity: "bank_mutation",
+      entityId: mutationId,
+      after: { candidateType, candidateId, note },
+      ipAddress: req.ip,
+      userAgent: req.headers["user-agent"] as string,
+    });
 
     res.json({ ok: true });
   } catch (err: any) {
@@ -775,11 +824,24 @@ router.post("/bank-reconciliation/mutations/:id/mark-unmatched", adminMiddleware
     const [mutation] = await db.select().from(bankMutationsTable).where(eq(bankMutationsTable.id, mutationId)).limit(1);
     if (!mutation) { res.status(404).json({ error: "Mutasi tidak ditemukan" }); return; }
 
-    await db.update(bankMutationsTable).set({ status: "unmatched", matchedPaymentId: null, matchedOrderId: null, updatedAt: new Date() }).where(eq(bankMutationsTable.id, mutationId));
+    await db.update(bankMutationsTable).set({
+      status: "unmatched",
+      matchedPaymentId: null,
+      matchedOrderId: null,
+      updatedAt: new Date(),
+    }).where(eq(bankMutationsTable.id, mutationId));
     await db.update(bankReconciliationMatchesTable).set({ status: "rejected" }).where(eq(bankReconciliationMatchesTable.mutationId, mutationId));
 
     const user = (req as any).user;
-    await db.insert(auditLogsTable).values({ userId: user?.userId, userRole: user?.role, action: "mark_unmatched", entity: "bank_mutation", entityId: mutationId, ipAddress: req.ip, userAgent: req.headers["user-agent"] as string });
+    await db.insert(auditLogsTable).values({
+      userId: user?.userId,
+      userRole: user?.role,
+      action: "mark_unmatched",
+      entity: "bank_mutation",
+      entityId: mutationId,
+      ipAddress: req.ip,
+      userAgent: req.headers["user-agent"] as string,
+    });
 
     res.json({ ok: true });
   } catch (err: any) {
@@ -800,7 +862,15 @@ router.post("/bank-reconciliation/mutations/:id/mark-duplicate", adminMiddleware
     await db.update(bankMutationsTable).set({ status: "duplicate_need_review", updatedAt: new Date() }).where(eq(bankMutationsTable.id, mutationId));
 
     const user = (req as any).user;
-    await db.insert(auditLogsTable).values({ userId: user?.userId, userRole: user?.role, action: "mark_duplicate", entity: "bank_mutation", entityId: mutationId, ipAddress: req.ip, userAgent: req.headers["user-agent"] as string });
+    await db.insert(auditLogsTable).values({
+      userId: user?.userId,
+      userRole: user?.role,
+      action: "mark_duplicate",
+      entity: "bank_mutation",
+      entityId: mutationId,
+      ipAddress: req.ip,
+      userAgent: req.headers["user-agent"] as string,
+    });
 
     res.json({ ok: true });
   } catch (err: any) {

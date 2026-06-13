@@ -20,17 +20,33 @@ if (Number.isNaN(port) || port <= 0) {
 }
 
 async function runStartupMigrations() {
-  try {
-    await db.execute(sql`
-      ALTER TABLE sport_center.bank_reconciliation_matches
-        ADD COLUMN IF NOT EXISTS status_valid_match boolean NOT NULL DEFAULT false,
-        ADD COLUMN IF NOT EXISTS tolerance_used boolean NOT NULL DEFAULT false,
-        ADD COLUMN IF NOT EXISTS note text
-    `);
-    logger.info("Startup migrations OK");
-  } catch (err) {
-    logger.warn({ err }, "Startup migration warning (non-fatal)");
+  // Jalankan setiap migration secara terpisah — ADD VALUE harus di luar transaksi
+  const migrations = [
+    // Kolom lama (idempotent)
+    `ALTER TABLE sport_center.bank_reconciliation_matches
+       ADD COLUMN IF NOT EXISTS status_valid_match boolean NOT NULL DEFAULT false`,
+    `ALTER TABLE sport_center.bank_reconciliation_matches
+       ADD COLUMN IF NOT EXISTS tolerance_used boolean NOT NULL DEFAULT false`,
+    `ALTER TABLE sport_center.bank_reconciliation_matches
+       ADD COLUMN IF NOT EXISTS note text`,
+    // Tambah nilai enum baru — ALTER TYPE ADD VALUE tidak bisa di dalam transaksi eksplisit
+    // IF NOT EXISTS mencegah error jika sudah ada
+    `DO $$ BEGIN
+       ALTER TYPE sport_center.bank_mutation_status ADD VALUE IF NOT EXISTS 'auto_matched';
+     EXCEPTION WHEN duplicate_object THEN null; END $$`,
+    `DO $$ BEGIN
+       ALTER TYPE sport_center.bank_mutation_status ADD VALUE IF NOT EXISTS 'need_review';
+     EXCEPTION WHEN duplicate_object THEN null; END $$`,
+  ];
+
+  for (const stmt of migrations) {
+    try {
+      await db.execute(sql.raw(stmt));
+    } catch (err) {
+      logger.warn({ err, stmt: stmt.slice(0, 80) }, "Startup migration warning (non-fatal)");
+    }
   }
+  logger.info("Startup migrations OK");
 }
 
 app.listen(port, (err) => {
