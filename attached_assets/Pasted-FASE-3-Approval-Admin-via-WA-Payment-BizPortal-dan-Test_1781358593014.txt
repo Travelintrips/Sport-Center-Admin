@@ -1,0 +1,96 @@
+FASE 3 — Approval Admin via WA, Payment, BizPortal, dan Testing
+
+1. Webhook harus membaca command dari nomor admin:
+   - STATUS BK-xxxx
+   - APPROVE BK-xxxx
+   - REJECT BK-xxxx alasan
+   - PAID BK-xxxx
+   - CANCEL BK-xxxx alasan
+   - RESEND BK-xxxx
+
+2. Validasi keamanan:
+   - hanya nomor di FONNTE_ADMIN_PHONES yang boleh approve/reject/paid/cancel
+   - jika nomor bukan admin, tolak dan log unauthorized_admin_command
+   - booking paid/cancelled/rejected tidak boleh di-approve ulang
+
+3. Jika admin balas:
+   APPROVE BK-xxxx
+
+   Maka sistem:
+   - update booking status = pending_payment
+   - update payment_status = waiting_payment
+   - isi approved_by_admin_phone
+   - isi approved_at
+   - kirim WA ke customer berisi booking disetujui + link pembayaran/manual transfer
+   - kirim WA ke admin bahwa booking berhasil di-approve
+
+4. Jika admin balas:
+   REJECT BK-xxxx alasan
+
+   Maka sistem:
+   - update booking status = rejected
+   - simpan rejected_reason
+   - kirim WA ke customer bahwa booking ditolak + alasan
+   - kirim WA ke admin bahwa booking berhasil ditolak
+
+5. Jika admin balas:
+   PAID BK-xxxx
+
+   Maka sistem:
+   - update booking status = confirmed
+   - update payment_status = paid
+   - isi paid_at
+   - buat sport_payments
+   - kirim WA konfirmasi ke customer
+   - kirim WA notifikasi paid ke admin
+
+6. Jika payment gateway success:
+   - update booking status = confirmed
+   - payment_status = paid
+   - paid_at terisi
+   - buat sport_payments
+   - kirim WA konfirmasi ke customer dan admin
+
+7. Tambahkan menu BizPortal:
+   Sport Center > WA Booking Approval
+
+   Isi halaman:
+   - daftar booking dari WA
+   - filter waiting_admin_approval, pending_payment, confirmed, rejected, cancelled
+   - tombol approve/reject
+   - histori chat WA
+   - admin yang approve
+   - waktu approve
+   - alasan reject
+   - tombol resend WA
+
+8. Semua aktivitas wajib masuk audit log:
+   - admin_approved_via_wa
+   - admin_rejected_via_wa
+   - admin_paid_via_wa
+   - payment_link_sent
+   - payment_confirmed
+   - booking_cancelled_via_wa
+   - unauthorized_admin_command
+
+9. Testing wajib:
+   - customer chat booking lengkap
+   - customer chat booking tidak lengkap
+   - customer lama dikenali otomatis
+   - customer baru dibuat otomatis
+   - jadwal bentrok ditolak
+   - booking masuk waiting_admin_approval
+   - admin menerima WA approval
+   - admin approve via WA
+   - admin reject via WA
+   - admin paid via WA
+   - nomor bukan admin mencoba approve dan ditolak
+   - audit log lengkap
+   - fitur booking lama tetap jalan
+
+10. Setelah selesai, laporkan:
+   - file yang diubah
+   - endpoint baru
+   - tabel baru
+   - ENV baru
+   - hasil testing

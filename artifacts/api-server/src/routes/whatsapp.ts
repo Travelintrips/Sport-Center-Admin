@@ -1034,6 +1034,31 @@ async function handleAdminCommand(adminPhone: string, msg: string): Promise<bool
     return true;
   }
 
+  // PAID SC-XXXX — konfirmasi pembayaran manual
+  const paidMatch = upper.match(/^(PAID|LUNAS|BAYAR)\s+(SC-\d+)/);
+  if (paidMatch) {
+    const orderNumber = paidMatch[2].toUpperCase();
+    await execAdminPaid(adminPhone, orderNumber);
+    return true;
+  }
+
+  // CANCEL SC-XXXX [reason]
+  const cancelMatch = msg.trim().match(/^(CANCEL|BATALKAN)\s+(SC-\d+)(?:\s+(.+))?/i);
+  if (cancelMatch) {
+    const orderNumber = cancelMatch[2].toUpperCase();
+    const reason = cancelMatch[3]?.trim() ?? "";
+    await execAdminCancel(adminPhone, orderNumber, reason);
+    return true;
+  }
+
+  // RESEND SC-XXXX — kirim ulang notifikasi WA
+  const resendMatch = msg.trim().match(/^RESEND\s+(SC-\d+)/i);
+  if (resendMatch) {
+    const orderNumber = resendMatch[1].toUpperCase();
+    await execAdminResend(adminPhone, orderNumber);
+    return true;
+  }
+
   return false;
 }
 
@@ -1052,7 +1077,7 @@ async function execAdminApprove(adminPhone: string, orderNumber: string) {
   if (booking.status === "waiting_admin_approval") {
     const paymentDeadline = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 jam
     await db.update(bookingsTable)
-      .set({ status: "pending_payment", paymentDeadline, updatedAt: new Date() })
+      .set({ status: "pending_payment", paymentDeadline, approvedByAdminPhone: adminPhone, approvedAt: new Date(), updatedAt: new Date() })
       .where(eq(bookingsTable.id, booking.id));
 
     await db.insert(bookingHistoryTable).values({
@@ -1200,7 +1225,7 @@ async function execAdminReject(adminPhone: string, orderNumber: string, reason: 
   await db.update(paymentsTable).set({ status: "rejected" })
     .where(eq(paymentsTable.bookingId, booking.id));
   await db.update(bookingsTable)
-    .set({ status: "rejected", adminNotes: reason || null, updatedAt: new Date() })
+    .set({ status: "rejected", adminNotes: reason || null, rejectedReason: reason || null, updatedAt: new Date() })
     .where(eq(bookingsTable.id, booking.id));
   await db.insert(bookingHistoryTable).values({
     bookingId: booking.id,
@@ -1279,6 +1304,215 @@ async function execAdminStatus(adminPhone: string, orderNumber: string) {
     (payment ? `Bukti: ${payment.proofUrl ?? "-"}\n` : "") +
     `\n🔗 ${APP_URL}/wa/status/${orderNumber}`
   );
+}
+
+async function execAdminPaid(adminPhone: string, orderNumber: string) {
+  const [booking] = await db.select().from(bookingsTable)
+    .where(eq(bookingsTable.orderNumber, orderNumber)).limit(1);
+  if (!booking) {
+    await sendWAMsg(adminPhone, `❌ Order *${orderNumber}* tidak ditemukan.`);
+    return;
+  }
+  if (!["pending_payment", "waiting_confirmation", "waiting_admin_approval"].includes(booking.status)) {
+    await sendWAMsg(adminPhone, `⚠️ Order *${orderNumber}* tidak bisa dikonfirmasi pembayaran. Status: *${booking.status.replace(/_/g, " ").toUpperCase()}*.`);
+    return;
+  }
+  const [facility] = await db.select().from(facilitiesTable)
+    .where(eq(facilitiesTable.id, booking.facilityId)).limit(1);
+
+  const [existingPay] = await db.select().from(paymentsTable)
+    .where(eq(paymentsTable.bookingId, booking.id)).limit(1);
+  if (existingPay) {
+    await db.update(paymentsTable).set({ status: "confirmed", confirmedAt: new Date() })
+      .where(eq(paymentsTable.bookingId, booking.id));
+  } else {
+    await db.insert(paymentsTable).values({
+      bookingId: booking.id,
+      amount: String(Number(booking.grandTotal ?? booking.totalPrice)),
+      paymentMethod: "Manual (Admin WA)",
+      status: "confirmed",
+      confirmedAt: new Date(),
+    });
+  }
+
+  await db.update(bookingsTable)
+    .set({ status: "confirmed", paidAt: new Date(), updatedAt: new Date() })
+    .where(eq(bookingsTable.id, booking.id));
+
+  await db.insert(bookingHistoryTable).values({
+    bookingId: booking.id,
+    fromStatus: booking.status,
+    toStatus: "confirmed",
+    changedByName: `admin (WA: ${adminPhone})`,
+    note: "Pembayaran dikonfirmasi admin via WhatsApp — PAID command",
+  });
+
+  const checkinToken = await createWaToken(booking.id, "checkin", 30);
+  const finishToken = await createWaToken(booking.id, "finish", 30);
+
+  notifyWaBookingConfirmed({
+    customerName: booking.customerName,
+    customerPhone: booking.customerPhone,
+    orderNumber: booking.orderNumber,
+    facilityName: facility?.name ?? "",
+    bookingDate: booking.bookingDate,
+    startTime: booking.startTime,
+    endTime: booking.endTime,
+    totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
+    statusUrl: `${APP_URL}/wa/status/${booking.orderNumber}`,
+  });
+
+  notifyWaStaffCheckin({
+    orderNumber: booking.orderNumber,
+    customerName: booking.customerName,
+    facilityName: facility?.name ?? "",
+    bookingDate: booking.bookingDate,
+    startTime: booking.startTime,
+    endTime: booking.endTime,
+    checkinUrl: `${APP_URL}/wa/action/${checkinToken}`,
+    finishUrl: `${APP_URL}/wa/action/${finishToken}`,
+  });
+
+  await logAudit({
+    action: "admin_paid_via_wa",
+    entity: "booking",
+    entityId: booking.id,
+    before: { status: booking.status },
+    after: { status: "confirmed", paidAt: new Date() },
+    userName: `admin (WA: ${adminPhone})`,
+  });
+
+  await sendWAMsg(adminPhone,
+    `💰 *${orderNumber}* berhasil dikonfirmasi LUNAS!\n` +
+    `Customer: *${booking.customerName}*\n` +
+    `${facility?.name ?? ""} | ${booking.bookingDate} ${booking.startTime}–${booking.endTime}\n\n` +
+    `Customer sudah diberitahu via WA.`
+  );
+}
+
+async function execAdminCancel(adminPhone: string, orderNumber: string, reason: string) {
+  const [booking] = await db.select().from(bookingsTable)
+    .where(eq(bookingsTable.orderNumber, orderNumber)).limit(1);
+  if (!booking) {
+    await sendWAMsg(adminPhone, `❌ Order *${orderNumber}* tidak ditemukan.`);
+    return;
+  }
+  if (["confirmed", "completed", "cancelled", "rejected", "refunded"].includes(booking.status)) {
+    await sendWAMsg(adminPhone, `⚠️ Order *${orderNumber}* tidak bisa dibatalkan. Status: *${booking.status.replace(/_/g, " ").toUpperCase()}*.`);
+    return;
+  }
+  const [facility] = await db.select({ name: facilitiesTable.name })
+    .from(facilitiesTable).where(eq(facilitiesTable.id, booking.facilityId)).limit(1);
+
+  await db.update(bookingsTable)
+    .set({ status: "cancelled", adminNotes: reason || null, updatedAt: new Date() })
+    .where(eq(bookingsTable.id, booking.id));
+
+  await db.insert(bookingHistoryTable).values({
+    bookingId: booking.id,
+    fromStatus: booking.status,
+    toStatus: "cancelled",
+    changedByName: `admin (WA: ${adminPhone})`,
+    note: reason ? `Dibatalkan admin via WA. Alasan: ${reason}` : "Dibatalkan admin via WA.",
+  });
+
+  await sendWAMsg(booking.customerPhone,
+    `❌ *Booking Dibatalkan*\n\n` +
+    `Order: *${booking.orderNumber}*\n` +
+    `Fasilitas: *${facility?.name ?? ""}*\n` +
+    `Tanggal: *${booking.bookingDate}* pukul *${booking.startTime}–${booking.endTime}*\n\n` +
+    (reason ? `Alasan: _${reason}_\n\n` : "") +
+    `Hubungi kami untuk info lebih lanjut.`
+  );
+
+  await logAudit({
+    action: "booking_cancelled_via_wa",
+    entity: "booking",
+    entityId: booking.id,
+    before: { status: booking.status },
+    after: { status: "cancelled", reason },
+    userName: `admin (WA: ${adminPhone})`,
+  });
+
+  await sendWAMsg(adminPhone,
+    `🚫 *${orderNumber}* berhasil dibatalkan.\n` +
+    `Customer: *${booking.customerName}*\n` +
+    (reason ? `Alasan: _${reason}_` : "")
+  );
+}
+
+async function execAdminResend(adminPhone: string, orderNumber: string) {
+  const [booking] = await db.select().from(bookingsTable)
+    .where(eq(bookingsTable.orderNumber, orderNumber)).limit(1);
+  if (!booking) {
+    await sendWAMsg(adminPhone, `❌ Order *${orderNumber}* tidak ditemukan.`);
+    return;
+  }
+  const [facility] = await db.select().from(facilitiesTable)
+    .where(eq(facilitiesTable.id, booking.facilityId)).limit(1);
+  const [settings] = await db.select().from(settingsTable).limit(1);
+  const amountToPay = Number(booking.grandTotal ?? booking.totalPrice);
+
+  if (booking.status === "waiting_admin_approval") {
+    const adminPhonesList = await getAdminPhones();
+    const msg =
+      `🏅 *Booking WA Menunggu Persetujuan (Resend)*\n\n` +
+      `Order: *${booking.orderNumber}*\n` +
+      `Customer: *${booking.customerName}* (${booking.customerPhone})\n` +
+      `Fasilitas: *${facility?.name ?? ""}*\n` +
+      `Tanggal: *${booking.bookingDate}* pukul *${booking.startTime}–${booking.endTime}*\n` +
+      `Total: *${formatIDR(amountToPay)}*\n\n` +
+      `Ketik *APPROVE ${booking.orderNumber}* untuk menyetujui\n` +
+      `Ketik *REJECT ${booking.orderNumber} [alasan]* untuk menolak`;
+    for (const p of adminPhonesList) await sendWAMsg(p, msg);
+    await sendWAMsg(adminPhone, `✅ Notifikasi approval dikirim ulang ke ${adminPhonesList.length} admin.`);
+  } else if (booking.status === "pending_payment") {
+    const proofToken = await createWaToken(booking.id, "upload_proof", 7);
+    const deadline = booking.paymentDeadline
+      ? new Date(booking.paymentDeadline).toLocaleString("id-ID", { timeZone: "Asia/Jakarta", hour12: false })
+      : "-";
+    notifyWaBookingApproved({
+      customerName: booking.customerName,
+      customerPhone: booking.customerPhone,
+      orderNumber: booking.orderNumber,
+      facilityName: facility?.name ?? "",
+      bookingDate: booking.bookingDate,
+      startTime: booking.startTime,
+      endTime: booking.endTime,
+      totalPrice: amountToPay.toLocaleString("id-ID"),
+      paymentDeadline: deadline,
+      statusUrl: `${APP_URL}/wa/status/${booking.orderNumber}`,
+      uploadProofUrl: `${APP_URL}/wa/proof/${proofToken}`,
+      bankName: settings?.bankName ?? "",
+      bankAccount: settings?.bankAccount ?? "",
+      bankAccountName: settings?.bankAccountName ?? "",
+    });
+    await sendWAMsg(adminPhone, `✅ Instruksi pembayaran dikirim ulang ke customer *${booking.customerName}*.`);
+  } else if (booking.status === "confirmed") {
+    notifyWaBookingConfirmed({
+      customerName: booking.customerName,
+      customerPhone: booking.customerPhone,
+      orderNumber: booking.orderNumber,
+      facilityName: facility?.name ?? "",
+      bookingDate: booking.bookingDate,
+      startTime: booking.startTime,
+      endTime: booking.endTime,
+      totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
+      statusUrl: `${APP_URL}/wa/status/${booking.orderNumber}`,
+    });
+    await sendWAMsg(adminPhone, `✅ Konfirmasi booking dikirim ulang ke customer *${booking.customerName}*.`);
+  } else {
+    await sendWAMsg(adminPhone, `⚠️ Tidak bisa resend untuk status *${booking.status.replace(/_/g, " ").toUpperCase()}*.`);
+    return;
+  }
+
+  await logAudit({
+    action: "payment_link_sent",
+    entity: "booking",
+    entityId: booking.id,
+    after: { orderNumber, resendBy: adminPhone, status: booking.status },
+    userName: `admin (WA: ${adminPhone})`,
+  });
 }
 
 // ─── Session conversation handlers ────────────────────────────────────────────
@@ -1868,8 +2102,18 @@ router.post("/wa/fonnte/webhook", async (req, res) => {
       after: { phone, message: msg, waName: String(name) },
     });
 
-    // 2. Admin command check
+    // 2. Admin command check + unauthorized guard
     const adminPhones = await getAdminPhones();
+    const looksLikeAdminCmd = /^(APPROVE|KONFIRMASI|SETUJU|REJECT|TOLAK|PAID|LUNAS|BAYAR|CANCEL|BATALKAN|RESEND|STATUS)\s+SC-\d+/i.test(msg);
+    if (!adminPhones.includes(phone) && looksLikeAdminCmd) {
+      await logAudit({
+        action: "unauthorized_admin_command",
+        entity: "booking",
+        after: { phone, message: msg },
+      });
+      await sendWAMsg(phone, "⚠️ Maaf, Anda tidak memiliki akses untuk perintah admin ini.");
+      return;
+    }
     if (adminPhones.includes(phone)) {
       const handled = await handleAdminCommand(phone, msg);
       if (handled) return;
