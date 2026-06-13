@@ -152,8 +152,8 @@ async function getBookingFull(id: number) {
 
 // ─── Keyword detection ────────────────────────────────────────────────────────
 const FACILITY_KEYWORDS: Record<string, string[]> = {
+  serbaguna: ["serbaguna", "multiguna", "hall", "aula", "futsal", "sepak bola", "bola", "mini soccer"],
   basket: ["basket", "basketball", "bola basket"],
-  futsal: ["futsal", "sepak bola", "bola", "mini soccer"],
   badminton: ["badminton", "bulutangkis", "bulu tangkis", "shuttle"],
   tennis: ["tennis", "tenis"],
   gym: ["gym", "fitness", "fitnes"],
@@ -161,6 +161,7 @@ const FACILITY_KEYWORDS: Record<string, string[]> = {
   renang: ["renang", "kolam", "swimming"],
   squash: ["squash"],
   golf: ["golf", "driving range"],
+  billiard: ["billiard", "biliar", "bilyard"],
 };
 
 function detectFacilityKeyword(msg: string): string | null {
@@ -987,7 +988,7 @@ async function getFacilityByKeyword(keyword: string) {
     renang: ["renang", "kolam", "swimming"],
     squash: ["squash"],
     golf: ["golf"],
-    serbaguna: ["serbaguna", "multiguna", "hall", "aula"],
+    serbaguna: ["serbaguna", "multiguna", "hall", "aula", "futsal", "sepak bola", "bola", "mini soccer"],
     billiard: ["billiard", "biliar", "bilyard"],
   };
   const kws = FACILITY_KEYWORDS[keyword] ?? [keyword];

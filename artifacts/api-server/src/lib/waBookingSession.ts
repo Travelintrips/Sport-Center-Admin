@@ -198,8 +198,8 @@ function parseDuration(lower: string): number | null {
 }
 
 const FACILITY_KEYWORDS: Record<string, string[]> = {
+  serbaguna: ["serbaguna", "multiguna", "lapangan serbaguna", "lapangan multiguna", "hall", "aula", "futsal", "sepak bola", "bola", "mini soccer"],
   basket: ["basket", "basketball", "bola basket"],
-  futsal: ["futsal", "sepak bola", "mini soccer"],
   badminton: ["badminton", "bulutangkis", "bulu tangkis", "shuttle", "cock"],
   tennis: ["tennis", "tenis"],
   gym: ["gym", "fitness", "fitnes"],
@@ -207,7 +207,6 @@ const FACILITY_KEYWORDS: Record<string, string[]> = {
   renang: ["renang", "kolam", "swimming"],
   squash: ["squash"],
   golf: ["golf"],
-  serbaguna: ["serbaguna", "multiguna", "lapangan serbaguna", "lapangan multiguna", "hall", "aula"],
   billiard: ["billiard", "biliar", "bilyard"],
 };
 
