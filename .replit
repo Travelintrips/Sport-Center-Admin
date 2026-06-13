@@ -114,7 +114,7 @@ OPENAI_MODEL = "gpt-4o-mini"
 AI_SPORTCENTER_ENABLED = "true"
 AI_SPORTCENTER_MAX_REPLY_LENGTH = "900"
 OPENAI_API_KEY = "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"
-OPENAI_BASE_URL = "https://platform.openai.com/api-keys"
+OPENAI_BASE_URL = "https://api.openai.com/v1"
 
 [userenv.development]
 SUPABASE_DATABASE_URL = "postgresql://postgres.xssrfshdrtdfupgqwfdw:admcst0012026@aws-1-ap-southeast-2.pooler.supabase.com:6543/postgres"
