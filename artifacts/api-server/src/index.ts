@@ -228,6 +228,43 @@ async function runStartupMigrations() {
        ADD COLUMN IF NOT EXISTS ocr_raw text`,
     `ALTER TABLE sport_center.payments
        ADD COLUMN IF NOT EXISTS ocr_data jsonb`,
+    // Enum billing_status untuk bookings
+    `DO $$ BEGIN
+       CREATE TYPE sport_center.billing_status AS ENUM ('unbilled','billed','paid');
+     EXCEPTION WHEN duplicate_object THEN null; END $$`,
+    // Kolom-kolom baru pada bookings (idempotent)
+    `ALTER TABLE sport_center.bookings
+       ADD COLUMN IF NOT EXISTS booked_for_name text`,
+    `ALTER TABLE sport_center.bookings
+       ADD COLUMN IF NOT EXISTS booked_for_phone text`,
+    `ALTER TABLE sport_center.bookings
+       ADD COLUMN IF NOT EXISTS payment_required_now boolean DEFAULT true`,
+    `ALTER TABLE sport_center.bookings
+       ADD COLUMN IF NOT EXISTS billing_status sport_center.billing_status`,
+    `ALTER TABLE sport_center.bookings
+       ADD COLUMN IF NOT EXISTS company_invoice_id int`,
+    `ALTER TABLE sport_center.bookings
+       ADD COLUMN IF NOT EXISTS ppn_rate numeric(5,2)`,
+    `ALTER TABLE sport_center.bookings
+       ADD COLUMN IF NOT EXISTS ppn_amount numeric(12,2)`,
+    `ALTER TABLE sport_center.bookings
+       ADD COLUMN IF NOT EXISTS grand_total numeric(12,2)`,
+    `ALTER TABLE sport_center.bookings
+       ADD COLUMN IF NOT EXISTS down_payment numeric(12,2) NOT NULL DEFAULT 0`,
+    `ALTER TABLE sport_center.bookings
+       ADD COLUMN IF NOT EXISTS is_dp_paid boolean NOT NULL DEFAULT false`,
+    `ALTER TABLE sport_center.bookings
+       ADD COLUMN IF NOT EXISTS booked_by_user_id int`,
+    `ALTER TABLE sport_center.bookings
+       ADD COLUMN IF NOT EXISTS group_ref text`,
+    `ALTER TABLE sport_center.bookings
+       ADD COLUMN IF NOT EXISTS approved_by_admin_phone text`,
+    `ALTER TABLE sport_center.bookings
+       ADD COLUMN IF NOT EXISTS approved_at timestamptz`,
+    `ALTER TABLE sport_center.bookings
+       ADD COLUMN IF NOT EXISTS rejected_reason text`,
+    `ALTER TABLE sport_center.bookings
+       ADD COLUMN IF NOT EXISTS paid_at timestamptz`,
   ];
 
   for (const stmt of migrations) {
