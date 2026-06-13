@@ -541,7 +541,12 @@ router.get("/bank-reconciliation/mutations", adminMiddleware, async (req, res) =
     const conditions = [];
 
     if (status && status !== "all") {
-      conditions.push(inArray(bankMutationsTable.status, [status as any]));
+      if (status === "approved_unposted") {
+        conditions.push(eq(bankMutationsTable.status, "approved"));
+        conditions.push(eq(bankMutationsTable.accountingPosted, false));
+      } else {
+        conditions.push(inArray(bankMutationsTable.status, [status as any]));
+      }
     }
     if (dateFrom) conditions.push(gte(bankMutationsTable.transactionDate, dateFrom));
     if (dateTo) conditions.push(lte(bankMutationsTable.transactionDate, dateTo));

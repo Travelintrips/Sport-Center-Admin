@@ -2056,6 +2056,7 @@ export default function AdminBankReconciliation() {
               <option value="auto_matched">◉ Auto Matched</option>
               <option value="duplicate_need_review">⊕ Duplikat</option>
               <option value="approved">✓ Disetujui</option>
+              <option value="approved_unposted">⚠ Belum Dijurnal</option>
               <option value="rejected">✗ Ditolak</option>
             </select>
             <select
