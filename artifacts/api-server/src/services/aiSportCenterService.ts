@@ -680,6 +680,7 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
         date: String(args.date),
         startTime: String(args.start_time),
         duration: String(args.duration_hours),
+        source: "mina",
       });
       const bookingUrl = `${appUrl}/booking?${params.toString()}`;
       const startMin =

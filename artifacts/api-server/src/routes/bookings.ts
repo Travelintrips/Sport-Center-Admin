@@ -3,7 +3,7 @@ import { db, bookingsTable, facilitiesTable, paymentsTable, promosTable, discoun
 import { eq, and, sql, or, ilike, desc, inArray } from "drizzle-orm";
 import { adminMiddleware, authMiddleware, verifyToken } from "../lib/auth";
 import { broadcastAvailabilityChange } from "../lib/supabase";
-import { notifyBookingCreated, notifyPaymentConfirmed, notifyBookingCancelled, notifyCompanyBookingCreated, notifyDpPaid } from "../lib/notifications";
+import { notifyBookingCreated, notifyPaymentConfirmed, notifyBookingCancelled, notifyCompanyBookingCreated, notifyDpPaid, notifyWaAdminNewBooking } from "../lib/notifications";
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
 import { syncBookingToBizportal, syncStatusToBizportal } from "../lib/bizportalSync";
 import { calculateTax, recordTaxTransaction, reverseTaxTransaction } from "../lib/tax";
@@ -163,6 +163,7 @@ function getNowMinutesWIB(): number {
 router.post("/bookings", async (req, res) => {
   try {
     const { customerName, customerEmail, customerPhone, facilityId, bookingDate, notes, promoCode, discountAmount, customerType } = req.body;
+    const bookingSource: string = req.body.source || "";
     let { startTime, durationHours } = req.body;
 
     // Deteksi user yang sedang login (opsional — tidak wajib)
@@ -465,6 +466,27 @@ router.post("/bookings", async (req, res) => {
         totalPrice: totalPrice.toLocaleString("id-ID"),
         paymentDeadline: deadlineStr,
       });
+
+      // Notifikasi admin jika booking berasal dari link Mina AI
+      if (bookingSource === "mina") {
+        const bookingDow = new Date(bookingDate + "T00:00:00+07:00").getDay();
+        const isWeekend = bookingDow === 0 || bookingDow === 6;
+        const appUrl = (process.env.APP_URL ?? "").replace(/\/$/, "");
+        notifyWaAdminNewBooking({
+          orderNumber: booking.orderNumber,
+          customerName,
+          customerPhone,
+          facilityName: facility.name,
+          bookingDate,
+          startTime: booking.startTime,
+          endTime: booking.endTime,
+          durationHours: Number(durationHours),
+          totalPrice: totalPrice.toLocaleString("id-ID"),
+          isWeekend,
+          appliedRules: "🤖 Booking dari Mina AI",
+          statusUrl: `${appUrl}/wa/status/${booking.orderNumber}`,
+        }).catch(() => {});
+      }
     }
 
     res.status(201).json({

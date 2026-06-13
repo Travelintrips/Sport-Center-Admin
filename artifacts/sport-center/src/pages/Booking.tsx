@@ -67,6 +67,7 @@ export default function Booking() {
   const mode = queryParams.get("mode") || "time_slot";
   const isWalkIn = mode === "walk_in";
   const urlActivityType = queryParams.get("activityType") || "";
+  const bookingSource = queryParams.get("source") || "";
 
   const { data: facility, isLoading: isLoadingFacility } = useGetFacility(facilityId, {
     query: { enabled: !!facilityId, queryKey: getGetFacilityQueryKey(facilityId) },
@@ -510,6 +511,7 @@ export default function Booking() {
           payerType: isCompanyBilling ? "company" : "personal",
           companyCustomerId: isCompanyBilling && billingStatus?.companyId ? billingStatus.companyId : undefined,
           ...(existingCustomerId ? { customerId: existingCustomerId } : {}),
+          ...(bookingSource ? { source: bookingSource } : {}),
         } as any,
       });
     }
