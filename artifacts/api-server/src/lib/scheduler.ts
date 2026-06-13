@@ -41,20 +41,21 @@ async function expireOverdueBookings(): Promise<void> {
     // Jangan expire booking yang sedang dalam proses rekonsiliasi bank
     // Cari booking IDs yang terhubung ke mutasi dengan status aktif (bank_mutation_status enum)
     const overdueIds = overdue.map((b) => b.id);
+    const idsLiteral = sql.raw(`ARRAY[${overdueIds.join(",")}]::int[]`);
     const { rows: reconRows } = await db.execute(sql`
       SELECT DISTINCT bp.booking_id
       FROM sport_center.bank_mutations bm
       JOIN sport_center.bank_reconciliation_matches brm ON brm.mutation_id = bm.id
       JOIN sport_center.payments bp ON bp.id = brm.candidate_id AND brm.candidate_type = 'payment'
       WHERE bm.status IN ('auto_matched','need_review','duplicate_need_review')
-        AND bp.booking_id = ANY(${overdueIds}::int[])
+        AND bp.booking_id = ANY(${idsLiteral})
       UNION
       SELECT DISTINCT brm.candidate_id AS booking_id
       FROM sport_center.bank_mutations bm
       JOIN sport_center.bank_reconciliation_matches brm ON brm.mutation_id = bm.id
       WHERE bm.status IN ('auto_matched','need_review','duplicate_need_review')
         AND brm.candidate_type = 'order'
-        AND brm.candidate_id = ANY(${overdueIds}::int[])
+        AND brm.candidate_id = ANY(${idsLiteral})
     `);
     const reconProtectedIds = new Set((reconRows as any[]).map((r) => Number(r.booking_id)));
 
