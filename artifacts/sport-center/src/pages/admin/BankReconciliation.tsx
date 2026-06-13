@@ -565,7 +565,40 @@ function MatchCandidateRow({
 
 function MutationRow({ mutation, qc }: { mutation: any; qc: any }) {
   const [expanded, setExpanded] = useState(false);
+  const [batchScanning, setBatchScanning] = useState(false);
+  const [batchProgress, setBatchProgress] = useState<{ done: number; total: number } | null>(null);
   const { toast } = useToast();
+
+  const handleBatchScanOcr = async (matches: any[]) => {
+    const targets = matches.filter(
+      (m: any) => m.candidateType === "payment" && m.proofUrl && !m.ocrAmount
+    );
+    if (!targets.length) {
+      toast({ title: "Semua bukti transfer sudah di-scan OCR" });
+      return;
+    }
+    setBatchScanning(true);
+    setBatchProgress({ done: 0, total: targets.length });
+    let successCount = 0;
+    for (let i = 0; i < targets.length; i++) {
+      const m = targets[i];
+      try {
+        const resp = await fetch(`${API_BASE}/bank-reconciliation/scan-ocr`, {
+          method: "POST",
+          headers: authHeaders(),
+          body: JSON.stringify({ paymentId: m.candidateId, proofUrl: m.proofUrl }),
+        });
+        if (resp.ok) successCount++;
+      } catch {
+        // lanjut ke berikutnya
+      }
+      setBatchProgress({ done: i + 1, total: targets.length });
+    }
+    setBatchScanning(false);
+    setBatchProgress(null);
+    toast({ title: `Scan OCR selesai: ${successCount}/${targets.length} berhasil` });
+    matchesQuery.refetch();
+  };
 
   const matchesQuery = useGetBankMutationMatches(mutation.id, {
     query: { enabled: expanded, staleTime: 30000 },
@@ -692,7 +725,25 @@ function MutationRow({ mutation, qc }: { mutation: any; qc: any }) {
 
           {/* Candidates */}
           <div>
-            <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Kandidat Match</div>
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Kandidat Match</div>
+              {matches.length > 0 && matches.some((m: any) => m.candidateType === "payment" && m.proofUrl) && (
+                <button
+                  className="text-[10px] text-amber-600 hover:text-amber-700 font-medium flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                  onClick={() => handleBatchScanOcr(matches)}
+                  disabled={batchScanning}
+                >
+                  {batchScanning && batchProgress ? (
+                    <>
+                      <span className="inline-block w-3 h-3 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
+                      Scanning {batchProgress.done}/{batchProgress.total}...
+                    </>
+                  ) : (
+                    <>🔍 Scan OCR Semua</>
+                  )}
+                </button>
+              )}
+            </div>
             {matchesQuery.isLoading ? (
               <div className="space-y-2">{[1, 2].map((i) => <Skeleton key={i} className="h-14" />)}</div>
             ) : !matches.length ? (
