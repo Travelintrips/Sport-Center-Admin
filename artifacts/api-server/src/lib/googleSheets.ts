@@ -146,7 +146,7 @@ export type SheetCustomerUpdate = {
 
 export const RECON_SHEET_HEADERS = [
   "ID", "Tanggal", "Keterangan", "Kredit", "Debit", "Nominal", "Arah",
-  "Status", "Order ID Cocok", "Nama Provider", "Rekening", "Diunggah",
+  "Status Rekonsiliasi", "Order ID Cocok", "Nama Provider", "Rekening", "Diunggah",
 ];
 
 export type ReconMutationRow = {
@@ -352,9 +352,29 @@ export async function writeApprovalToSheetRow(
   const values = resp.data.values ?? [];
   if (values.length < 2) return { updated: false, rowIndex: null };
 
-  const header = (values[0] as string[]).map((h) =>
+  // Konversi index kolom (0-based) ke huruf kolom sheet (A, B, ..., Z, AA, ...)
+  const colLetter = (idx: number): string => {
+    let s = "";
+    let n = idx;
+    do {
+      s = String.fromCharCode(65 + (n % 26)) + s;
+      n = Math.floor(n / 26) - 1;
+    } while (n >= 0);
+    return s;
+  };
+
+  const rawHeader = values[0] as string[];
+  const header = rawHeader.map((h) =>
     String(h ?? "").toLowerCase().replace(/[\s\-\.]+/g, "_"),
   );
+
+  // Cari kolom status: "Status Rekonsiliasi" atau "Status" di header sheet kita
+  const STATUS_KEYS = ["status_rekonsiliasi", "status"];
+  let statusColIdx = header.findIndex((h) => STATUS_KEYS.includes(h));
+  // Jika tidak ditemukan → fallback ke kolom H (index 7)
+  if (statusColIdx < 0) statusColIdx = 7;
+
+  const statusColRef = colLetter(statusColIdx);
 
   const dateIdx = header.findIndex((h) =>
     ["tanggal", "transaction_date", "date", "tgl"].includes(h),
@@ -378,28 +398,38 @@ export async function writeApprovalToSheetRow(
     return !isNaN(d.getTime()) ? d.toISOString().slice(0, 10) : s;
   };
 
+  const writeStatus = async (sheetRowIndex: number, cellValue: string) => {
+    // Jika kolom status tidak ada di header → tambahkan header dulu di row 1
+    if (statusColIdx >= rawHeader.length) {
+      await sheets.spreadsheets.values.update({
+        spreadsheetId: sheetId,
+        range: `${resolvedSheetName}!${statusColRef}1`,
+        valueInputOption: "RAW",
+        requestBody: { values: [["Status Rekonsiliasi"]] },
+      });
+    }
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: sheetId,
+      range: `${resolvedSheetName}!${statusColRef}${sheetRowIndex}`,
+      valueInputOption: "RAW",
+      requestBody: { values: [[cellValue]] },
+    });
+  };
+
   for (let i = 1; i < values.length; i++) {
     const row = values[i] as string[];
     const rowDate = dateIdx >= 0 ? normalizeDate(String(row[dateIdx] ?? "")) : "";
     const rowDesc = descIdx >= 0 ? String(row[descIdx] ?? "").trim() : "";
 
-    const dateMatch = rowDate === transactionDate;
-    const descMatch = rowDesc.toLowerCase() === description.toLowerCase();
-
-    if (dateMatch && descMatch) {
-      const sheetRowIndex = i + 1; // 1-based
+    if (rowDate === transactionDate && rowDesc.toLowerCase() === description.toLowerCase()) {
+      const sheetRowIndex = i + 1;
       const cellValue = extraNote ? `${statusLabel} (${extraNote})` : statusLabel;
-      await sheets.spreadsheets.values.update({
-        spreadsheetId: sheetId,
-        range: `${resolvedSheetName}!H${sheetRowIndex}`,
-        valueInputOption: "RAW",
-        requestBody: { values: [[cellValue]] },
-      });
+      await writeStatus(sheetRowIndex, cellValue);
       return { updated: true, rowIndex: sheetRowIndex };
     }
   }
 
-  // Fallback: jika header tidak dikenali, coba cari baris yang mengandung tanggal + keterangan
+  // Fallback: scan semua kolom jika header tidak dikenali
   for (let i = 1; i < values.length; i++) {
     const row = values[i] as string[];
     const hasDate = row.some((cell) => normalizeDate(String(cell ?? "")) === transactionDate);
@@ -407,12 +437,7 @@ export async function writeApprovalToSheetRow(
     if (hasDate && hasDesc) {
       const sheetRowIndex = i + 1;
       const cellValue = extraNote ? `${statusLabel} (${extraNote})` : statusLabel;
-      await sheets.spreadsheets.values.update({
-        spreadsheetId: sheetId,
-        range: `${resolvedSheetName}!H${sheetRowIndex}`,
-        valueInputOption: "RAW",
-        requestBody: { values: [[cellValue]] },
-      });
+      await writeStatus(sheetRowIndex, cellValue);
       return { updated: true, rowIndex: sheetRowIndex };
     }
   }
