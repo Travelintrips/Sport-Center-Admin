@@ -8,6 +8,7 @@ import {
   useGetReviews,
   useGetReviewsSummary,
   useGetSettings,
+  useGetMe,
 } from "@workspace/api-client-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -48,7 +49,10 @@ export default function FacilityDetail() {
   const [, params] = useRoute("/facilities/:id");
   const [, setLocation] = useLocation();
   const facilityId = params?.id ? parseInt(params.id) : 0;
-  
+
+  const { data: meData } = useGetMe({ query: { retry: false } });
+  const isAdminOrOperator = !!meData && (meData as { role?: string }).role !== "customer";
+
   const [date, setDate] = useState<Date | undefined>(new Date());
   const [selectedTime, setSelectedTime] = useState<string>("");
   const [duration, setDuration] = useState<string>("1");
@@ -338,7 +342,7 @@ export default function FacilityDetail() {
                         mode="single"
                         selected={date}
                         onSelect={setDate}
-                        disabled={(d) => d < new Date(new Date().setHours(0,0,0,0))}
+                        disabled={isAdminOrOperator ? undefined : (d) => d < new Date(new Date().setHours(0,0,0,0))}
                         className="rounded-xl bg-transparent"
                         locale={lang === "en" ? enUS : id}
                       />

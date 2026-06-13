@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { db, facilitiesTable, bookingsTable, blockedSchedulesTable } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
+import { verifyToken } from "../lib/auth";
 
 const router = Router();
 
@@ -37,6 +38,16 @@ router.get("/availability", async (req, res) => {
       return;
     }
 
+    // Cek apakah request dari admin/operator — boleh lihat/booking slot lewat
+    let isAdminOverride = false;
+    const authHeader = req.headers.authorization;
+    if (authHeader?.startsWith("Bearer ")) {
+      const payload = verifyToken(authHeader.slice(7));
+      if (payload?.role && payload.role !== "customer") {
+        isAdminOverride = true;
+      }
+    }
+
     const [facility] = await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, facilityId)).limit(1);
     if (!facility) {
       res.status(404).json({ error: "Facility not found" });
@@ -69,8 +80,8 @@ router.get("/availability", async (req, res) => {
       const timeStr = minutesToTime(t);
       const slotEnd = t + 60;
 
-      // Hide/disable slots that have already passed today
-      if (isToday && t <= nowMinutes) {
+      // Hide/disable slots that have already passed today (dilewati untuk admin/operator)
+      if (!isAdminOverride && isToday && t <= nowMinutes) {
         slots.push({ time: timeStr, available: false, reason: "Slot sudah lewat" });
         continue;
       }

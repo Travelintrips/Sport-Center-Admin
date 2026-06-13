@@ -247,14 +247,20 @@ router.post("/bookings", async (req, res) => {
         return;
       }
 
-      // Validate slot is not in the past
-      const todayWIB = getTodayWIB();
-      if (bookingDate === todayWIB) {
-        const slotMinutes = timeToMinutesLocal(startTime);
-        const nowMinutes = getNowMinutesWIB();
-        if (slotMinutes <= nowMinutes) {
-          res.status(400).json({ error: "Tidak dapat booking slot yang sudah lewat" });
+      // Validate slot is not in the past (dilewati untuk admin/operator)
+      if (!isAdminRequest) {
+        const todayWIB = getTodayWIB();
+        if (bookingDate < todayWIB) {
+          res.status(400).json({ error: "Tidak dapat booking tanggal yang sudah lewat" });
           return;
+        }
+        if (bookingDate === todayWIB) {
+          const slotMinutes = timeToMinutesLocal(startTime);
+          const nowMinutes = getNowMinutesWIB();
+          if (slotMinutes <= nowMinutes) {
+            res.status(400).json({ error: "Tidak dapat booking slot yang sudah lewat" });
+            return;
+          }
         }
       }
 
