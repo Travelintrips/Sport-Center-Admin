@@ -24,7 +24,8 @@ async function runStartupMigrations() {
     await db.execute(sql`
       ALTER TABLE sport_center.bank_reconciliation_matches
         ADD COLUMN IF NOT EXISTS status_valid_match boolean NOT NULL DEFAULT false,
-        ADD COLUMN IF NOT EXISTS tolerance_used boolean NOT NULL DEFAULT false
+        ADD COLUMN IF NOT EXISTS tolerance_used boolean NOT NULL DEFAULT false,
+        ADD COLUMN IF NOT EXISTS note text
     `);
     logger.info("Startup migrations OK");
   } catch (err) {
