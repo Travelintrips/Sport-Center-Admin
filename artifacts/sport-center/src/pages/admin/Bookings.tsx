@@ -1678,7 +1678,7 @@ export default function AdminBookings() {
       fetch("/api/bookings/groups", { headers: { Authorization: `Bearer ${getToken()}` } }).then((r) => r.json()),
     staleTime: 30_000,
   });
-  const groups: any[] = groupsData ?? [];
+  const groups: any[] = Array.isArray(groupsData) ? groupsData : [];
 
   const groupsByRef = useMemo(() => {
     const m: Record<string, any> = {};

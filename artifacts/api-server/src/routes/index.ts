@@ -54,6 +54,7 @@ router.use(authRouter);
 router.use(authSocialRouter);
 router.use(facilitiesRouter);
 router.use(availabilityRouter);
+router.use(bookingGroupsRouter);
 router.use(bookingsRouter);
 router.use(paymentsRouter);
 router.use(promosRouter);
@@ -90,6 +91,5 @@ router.use(companyBookingsRouter);
 router.use(customerSheetsRouter);
 router.use(bankReconciliationRouter);
 router.use(bankReconciliationSheetsRouter);
-router.use(bookingGroupsRouter);
 
 export default router;
