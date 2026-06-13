@@ -351,6 +351,16 @@ function ScoreBadge({ score }: { score: number }) {
   );
 }
 
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "/api";
+const authHeaders = () => ({ Authorization: `Bearer ${getToken()}`, "Content-Type": "application/json" });
+
+function resolveProofUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  if (url.startsWith("http")) return url;
+  if (url.startsWith("/api/")) return url;
+  return `${API_BASE}${url}`;
+}
+
 function MatchCandidateRow({
   match,
   onApprove,
@@ -361,25 +371,66 @@ function MatchCandidateRow({
   isPending: boolean;
 }) {
   const [lightbox, setLightbox] = useState<string | null>(null);
+  const [ocr, setOcr] = useState<{ name?: string; amount?: number; date?: string; raw?: string } | null>(
+    match.ocrName || match.ocrAmount || match.ocrDate
+      ? { name: match.ocrName, amount: match.ocrAmount, date: match.ocrDate, raw: match.ocrRaw }
+      : null
+  );
+  const [ocrLoading, setOcrLoading] = useState(false);
+  const [ocrError, setOcrError] = useState<string | null>(null);
+  const { toast } = useToast();
+
+  const proofUrl = resolveProofUrl(match.proofUrl);
+
+  const handleScanOcr = async () => {
+    if (!proofUrl) return;
+    setOcrLoading(true);
+    setOcrError(null);
+    try {
+      const resp = await fetch(`${API_BASE}/bank-reconciliation/scan-ocr`, {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ paymentId: match.candidateId, proofUrl }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error ?? "Gagal scan OCR");
+      setOcr({ name: data.ocrName, amount: data.ocrAmount, date: data.ocrDate, raw: data.ocrRaw });
+      toast({ title: "Scan OCR selesai" });
+    } catch (e: any) {
+      setOcrError(e.message);
+    } finally {
+      setOcrLoading(false);
+    }
+  };
 
   return (
     <>
       <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/50 border">
         {/* Thumbnail bukti transfer */}
-        {match.proofUrl && (
+        {proofUrl ? (
           <button
-            className="shrink-0 w-14 h-14 rounded-lg overflow-hidden border bg-muted hover:opacity-80 transition-opacity"
-            onClick={() => setLightbox(match.proofUrl)}
+            className="shrink-0 w-16 h-16 rounded-lg overflow-hidden border-2 border-blue-200 bg-muted hover:opacity-80 hover:border-blue-400 transition-all"
+            onClick={() => setLightbox(proofUrl)}
             title="Lihat bukti transfer"
           >
             <img
-              src={match.proofUrl}
+              src={proofUrl}
               alt="Bukti transfer"
               className="w-full h-full object-cover"
-              onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+              onError={(e) => {
+                const el = e.currentTarget as HTMLImageElement;
+                el.style.display = "none";
+                const parent = el.parentElement;
+                if (parent) parent.innerHTML = '<div class="w-full h-full flex items-center justify-center text-[9px] text-muted-foreground text-center p-1">Gambar<br/>tidak dapat<br/>dimuat</div>';
+              }}
             />
           </button>
-        )}
+        ) : match.proofMatch ? (
+          <div className="shrink-0 w-16 h-16 rounded-lg border-2 border-dashed border-muted-foreground/30 bg-muted flex items-center justify-center">
+            <FileText size={16} className="text-muted-foreground/50" />
+          </div>
+        ) : null}
+
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <Badge variant="outline" className="text-xs capitalize">{match.candidateType}</Badge>
@@ -400,18 +451,58 @@ function MatchCandidateRow({
             {match.proofMatch && <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">✓ Bukti</span>}
           </div>
           {match.matchReason && (
-            <p className="text-xs text-muted-foreground mt-1 truncate">{match.matchReason}</p>
+            <p className="text-xs text-muted-foreground mt-1">{match.matchReason}</p>
           )}
-          {match.proofUrl && (
-            <a
-              href={match.proofUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-[10px] text-blue-600 hover:underline mt-0.5 inline-block"
-              onClick={(e) => e.stopPropagation()}
-            >
-              Buka bukti ↗
-            </a>
+
+          {/* OCR Results */}
+          {ocr && (ocr.name || ocr.amount || ocr.date) && (
+            <div className="mt-2 p-2 rounded-md bg-amber-50 border border-amber-200 space-y-0.5">
+              <p className="text-[10px] font-semibold text-amber-700 uppercase tracking-wide mb-1">Hasil OCR Bukti Transfer</p>
+              {ocr.name && (
+                <div className="flex gap-1.5 items-center">
+                  <span className="text-[10px] font-medium text-amber-600 w-12 shrink-0">Nama:</span>
+                  <span className="text-[10px] text-amber-800 font-semibold">{ocr.name}</span>
+                </div>
+              )}
+              {ocr.amount && (
+                <div className="flex gap-1.5 items-center">
+                  <span className="text-[10px] font-medium text-amber-600 w-12 shrink-0">Nominal:</span>
+                  <span className="text-[10px] text-amber-800 font-semibold">
+                    {new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(Number(ocr.amount))}
+                  </span>
+                </div>
+              )}
+              {ocr.date && (
+                <div className="flex gap-1.5 items-center">
+                  <span className="text-[10px] font-medium text-amber-600 w-12 shrink-0">Tanggal:</span>
+                  <span className="text-[10px] text-amber-800 font-semibold">{ocr.date}</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {proofUrl && (
+            <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+              <a
+                href={proofUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[10px] text-blue-600 hover:underline"
+                onClick={(e) => e.stopPropagation()}
+              >
+                Buka bukti ↗
+              </a>
+              {match.candidateType === "payment" && (
+                <button
+                  className="text-[10px] text-amber-600 hover:underline disabled:opacity-50 flex items-center gap-1"
+                  onClick={handleScanOcr}
+                  disabled={ocrLoading}
+                >
+                  {ocrLoading ? "Scanning..." : "🔍 Scan OCR"}
+                </button>
+              )}
+              {ocrError && <span className="text-[10px] text-red-500">{ocrError}</span>}
+            </div>
           )}
         </div>
         {match.status === "candidate" && (
@@ -435,12 +526,32 @@ function MatchCandidateRow({
                 className="max-w-full max-h-[70vh] object-contain"
               />
             </div>
-            <div className="flex justify-end pt-1">
+            {/* OCR Results in Lightbox */}
+            {ocr && (ocr.name || ocr.amount || ocr.date) && (
+              <div className="px-2 py-2 rounded-md bg-amber-50 border border-amber-200 mt-2">
+                <p className="text-xs font-semibold text-amber-700 mb-1">Hasil OCR</p>
+                <div className="grid grid-cols-3 gap-2 text-xs">
+                  {ocr.name && <div><span className="text-amber-600 font-medium">Nama: </span><span className="text-amber-900">{ocr.name}</span></div>}
+                  {ocr.amount && <div><span className="text-amber-600 font-medium">Nominal: </span><span className="text-amber-900">Rp {Number(ocr.amount).toLocaleString("id-ID")}</span></div>}
+                  {ocr.date && <div><span className="text-amber-600 font-medium">Tanggal: </span><span className="text-amber-900">{ocr.date}</span></div>}
+                </div>
+              </div>
+            )}
+            <div className="flex items-center justify-between pt-1">
+              {match.candidateType === "payment" && !ocr && (
+                <button
+                  className="text-xs text-amber-600 hover:underline disabled:opacity-50"
+                  onClick={() => { handleScanOcr(); }}
+                  disabled={ocrLoading}
+                >
+                  {ocrLoading ? "Scanning OCR..." : "🔍 Scan OCR dari gambar ini"}
+                </button>
+              )}
               <a
                 href={lightbox}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-xs text-blue-600 hover:underline"
+                className="text-xs text-blue-600 hover:underline ml-auto"
               >
                 Buka di tab baru ↗
               </a>

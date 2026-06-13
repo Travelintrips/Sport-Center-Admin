@@ -252,34 +252,35 @@ router.get("/bank-reconciliation/matches/:mutationId", adminMiddleware, async (r
 
     if (!mutation) { res.status(404).json({ error: "Mutasi tidak ditemukan" }); return; }
 
-    const matchRows = await db
-      .select()
-      .from(bankReconciliationMatchesTable)
-      .where(eq(bankReconciliationMatchesTable.mutationId, mutationId))
-      .orderBy(desc(bankReconciliationMatchesTable.matchScore));
+    // Use raw SQL with LEFT JOIN to get proofUrl and OCR data directly
+    const { rows } = await db.execute(sql`
+      SELECT
+        m.id,
+        m.mutation_id AS "mutationId",
+        m.candidate_type AS "candidateType",
+        m.candidate_id AS "candidateId",
+        m.match_score AS "matchScore",
+        m.match_reason AS "matchReason",
+        m.amount_match AS "amountMatch",
+        m.date_match AS "dateMatch",
+        m.name_match AS "nameMatch",
+        m.order_id_match AS "orderIdMatch",
+        m.proof_match AS "proofMatch",
+        m.status,
+        m.created_at AS "createdAt",
+        p.proof_url AS "proofUrl",
+        p.ocr_name AS "ocrName",
+        p.ocr_amount AS "ocrAmount",
+        p.ocr_date AS "ocrDate",
+        p.ocr_raw AS "ocrRaw"
+      FROM sport_center.bank_reconciliation_matches m
+      LEFT JOIN sport_center.payments p
+        ON p.id = m.candidate_id AND m.candidate_type = 'payment'
+      WHERE m.mutation_id = ${mutationId}
+      ORDER BY m.match_score DESC
+    `);
 
-    // Ambil proofUrl dari payments untuk kandidat bertipe "payment"
-    const paymentIds = matchRows
-      .filter((m) => m.candidateType === "payment")
-      .map((m) => m.candidateId);
-
-    const proofMap = new Map<number, string | null>();
-    if (paymentIds.length > 0) {
-      const payments = await db
-        .select({ id: paymentsTable.id, proofUrl: paymentsTable.proofUrl })
-        .from(paymentsTable)
-        .where(inArray(paymentsTable.id, paymentIds));
-      for (const p of payments) {
-        proofMap.set(p.id, p.proofUrl ?? null);
-      }
-    }
-
-    const matches = matchRows.map((m) => ({
-      ...m,
-      proofUrl: m.candidateType === "payment" ? (proofMap.get(m.candidateId) ?? null) : null,
-    }));
-
-    res.json({ mutation, matches });
+    res.json({ mutation, matches: rows });
   } catch (err: any) {
     res.status(500).json({ error: err?.message ?? "Gagal memuat kandidat" });
   }
@@ -441,6 +442,92 @@ router.post("/bank-reconciliation/run-matching", adminMiddleware, async (req, re
   } catch (err: any) {
     req.log.error({ err }, "Bank reconciliation run-matching error");
     res.status(500).json({ error: err?.message ?? "Gagal jalankan matching" });
+  }
+});
+
+// POST /bank-reconciliation/scan-ocr — OCR bukti transfer dari payment
+router.post("/bank-reconciliation/scan-ocr", adminMiddleware, async (req, res) => {
+  try {
+    const { paymentId, proofUrl } = req.body as { paymentId: number; proofUrl: string };
+    if (!proofUrl) {
+      res.status(400).json({ error: "proofUrl wajib diisi" });
+      return;
+    }
+
+    // Download image
+    const { default: fetch } = await import("node-fetch");
+    const imgRes = await fetch(proofUrl);
+    if (!imgRes.ok) {
+      res.status(400).json({ error: `Gagal mengunduh gambar: ${imgRes.statusText}` });
+      return;
+    }
+    const imgBuffer = Buffer.from(await imgRes.arrayBuffer());
+
+    // Run Tesseract OCR
+    const { createWorker } = await import("tesseract.js");
+    const worker = await createWorker("ind+eng", 1, {
+      cachePath: "/tmp/tesseract-cache",
+      logger: () => {},
+    });
+    const { data } = await worker.recognize(imgBuffer);
+    await worker.terminate();
+
+    const rawText = data.text || "";
+
+    // Extract nama (cari baris dengan huruf besar/nama)
+    const lines = rawText.split("\n").map((l: string) => l.trim()).filter(Boolean);
+    let ocrName: string | null = null;
+    let ocrAmount: number | null = null;
+    let ocrDate: string | null = null;
+
+    // Cari nominal (angka dengan titik/koma, biasanya didahului Rp)
+    const amountMatch = rawText.match(/(?:Rp\.?\s*|IDR\s*)?([\d]{1,3}(?:[.,]\d{3})+(?:[.,]\d{1,2})?)/i);
+    if (amountMatch) {
+      const cleaned = amountMatch[1]!.replace(/\./g, "").replace(",", ".");
+      ocrAmount = parseFloat(cleaned) || null;
+    }
+
+    // Cari tanggal (dd/mm/yyyy atau dd-mm-yyyy atau yyyy-mm-dd)
+    const dateMatch = rawText.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})|(\d{4})[\/\-](\d{2})[\/\-](\d{2})/);
+    if (dateMatch) {
+      if (dateMatch[4]) {
+        ocrDate = `${dateMatch[4]}-${dateMatch[5]}-${dateMatch[6]}`;
+      } else {
+        const d = dateMatch[1]!.padStart(2, "0");
+        const m = dateMatch[2]!.padStart(2, "0");
+        const y = dateMatch[3]!.length === 2 ? `20${dateMatch[3]}` : dateMatch[3]!;
+        ocrDate = `${y}-${m}-${d}`;
+      }
+    }
+
+    // Cari nama: baris yang berisi huruf dan panjang > 3, bukan angka murni, bukan kata kunci umum
+    const skipWords = /^(transfer|bank|rekening|tanggal|nominal|total|biaya|fee|dari|ke|kode|ref|no|rp|idr|berhasil|sukses|debet|kredit|saldo|date|amount|beneficiary|sender)/i;
+    for (const line of lines) {
+      if (line.length > 3 && /[a-zA-Z]{3,}/.test(line) && !skipWords.test(line) && !/^\d+$/.test(line)) {
+        ocrName = line.slice(0, 100);
+        break;
+      }
+    }
+
+    // Simpan ke DB jika ada paymentId
+    if (paymentId) {
+      await db.execute(sql`
+        UPDATE sport_center.payments
+        SET ocr_name = ${ocrName}, ocr_amount = ${ocrAmount}, ocr_date = ${ocrDate}, ocr_raw = ${rawText.slice(0, 2000)}
+        WHERE id = ${paymentId}
+      `);
+    }
+
+    res.json({
+      ok: true,
+      ocrName,
+      ocrAmount,
+      ocrDate,
+      ocrRaw: rawText.slice(0, 500),
+    });
+  } catch (err: any) {
+    req.log.error({ err }, "OCR scan error");
+    res.status(500).json({ error: err?.message ?? "Gagal scan OCR" });
   }
 });
 

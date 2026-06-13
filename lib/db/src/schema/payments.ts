@@ -1,4 +1,4 @@
-import { text, serial, timestamp, numeric, integer } from "drizzle-orm/pg-core";
+import { text, serial, timestamp, numeric, integer, jsonb } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { bookingsTable } from "./bookings";
@@ -15,6 +15,11 @@ export const paymentsTable = scSchema.table("payments", {
   status: paymentStatusEnum("status").notNull().default("pending"),
   confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
   notes: text("notes"),
+  ocrName: text("ocr_name"),
+  ocrAmount: numeric("ocr_amount", { precision: 14, scale: 2 }),
+  ocrDate: text("ocr_date"),
+  ocrRaw: text("ocr_raw"),
+  ocrData: jsonb("ocr_data"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });
