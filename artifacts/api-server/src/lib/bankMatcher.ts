@@ -5,7 +5,7 @@ import {
   bankReconciliationMatchesTable,
   type BankMutation,
 } from "@workspace/db";
-import { eq, inArray, notInArray, sql } from "drizzle-orm";
+import { eq, inArray, notInArray, sql, and, gte, lte } from "drizzle-orm";
 
 const GOPAY_PATTERN = /DOMPET ANAK BANGSA|GOPAY|OVO|DANA|LINKAJA|SHOPEEPAY/i;
 const ORDER_ID_PATTERN = /\b(ID\d{15,25}[A-Z]{0,4}|TRX\d{10,}|INV-\d{8,})\b/i;
@@ -159,6 +159,14 @@ export async function computeMatchesForMutation(mutation: BankMutation): Promise
   const providerOrderId = mutation.providerOrderId;
 
   const INACTIVE = ["cancelled", "rejected", "refunded"] as const;
+
+  // Filter booking dalam ±45 hari dari tanggal mutasi untuk performa
+  const mutDate = new Date(mutation.transactionDate);
+  const dateMin = new Date(mutDate); dateMin.setDate(dateMin.getDate() - 45);
+  const dateMax = new Date(mutDate); dateMax.setDate(dateMax.getDate() + 45);
+  const dateMinStr = dateMin.toISOString().slice(0, 10);
+  const dateMaxStr = dateMax.toISOString().slice(0, 10);
+
   const bookings = await db
     .select({
       id: bookingsTable.id,
@@ -171,7 +179,13 @@ export async function computeMatchesForMutation(mutation: BankMutation): Promise
       updatedAt: sql<string>`${bookingsTable.updatedAt}`.as("updated_at"),
     })
     .from(bookingsTable)
-    .where(notInArray(bookingsTable.status, INACTIVE));
+    .where(
+      and(
+        notInArray(bookingsTable.status, INACTIVE),
+        gte(bookingsTable.bookingDate, dateMinStr),
+        lte(bookingsTable.bookingDate, dateMaxStr)
+      )
+    );
 
   // Ambil semua payments dengan data OCR
   const allPayments = await db.execute(sql`
@@ -519,14 +533,39 @@ export async function runMatching(mutationIds?: number[]): Promise<{
     mutations = await db
       .select()
       .from(bankMutationsTable)
-      .where(inArray(bankMutationsTable.status, ["unmatched", "need_review", "duplicate_need_review"] as any[]));
+      .where(
+        // Global run: proses semua pending termasuk auto_matched agar bisa refresh jika booking berubah
+        // TIDAK proses approved/rejected — status final
+        notInArray(bankMutationsTable.status, ["approved", "rejected"] as any[])
+      );
   }
 
-  // Deteksi duplikat
+  // Deteksi duplikat — gabungkan batch saat ini + record DB yang sudah ada dengan key yang sama
+  const batchKeys = [...new Set(mutations.map((m) => m.mutationKey))];
+  const existingWithSameKey = batchKeys.length
+    ? await db
+        .select({ id: bankMutationsTable.id, mutationKey: bankMutationsTable.mutationKey })
+        .from(bankMutationsTable)
+        .where(
+          and(
+            inArray(bankMutationsTable.mutationKey, batchKeys),
+            // Sertakan semua status kecuali rejected (rejected sudah dikonfirmasi tidak valid)
+            notInArray(bankMutationsTable.status, ["rejected"] as any[])
+          )
+        )
+    : [];
+
+  // keyCount: per mutation_key → daftar semua ID (batch + existing DB)
   const keyCount = new Map<string, number[]>();
+  for (const m of existingWithSameKey) {
+    const arr = keyCount.get(m.mutationKey) ?? [];
+    if (!arr.includes(m.id)) arr.push(m.id);
+    keyCount.set(m.mutationKey, arr);
+  }
+  // Pastikan mutasi dalam batch juga masuk
   for (const m of mutations) {
     const arr = keyCount.get(m.mutationKey) ?? [];
-    arr.push(m.id);
+    if (!arr.includes(m.id)) arr.push(m.id);
     keyCount.set(m.mutationKey, arr);
   }
 

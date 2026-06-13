@@ -228,7 +228,9 @@ router.get("/bank-reconciliation/mutations", adminMiddleware, async (req, res) =
       .limit(limit)
       .offset(offset);
 
-    const [{ total }] = await db.select({ total: sql<number>`count(*)::int` }).from(bankMutationsTable);
+    let countQuery = db.select({ total: sql<number>`count(*)::int` }).from(bankMutationsTable).$dynamic();
+    if (conditions.length) countQuery = countQuery.where(and(...conditions)) as any;
+    const [{ total }] = await countQuery;
 
     res.json({ mutations, total, page: Number(page), pageSize: limit });
   } catch (err: any) {
@@ -254,31 +256,79 @@ router.get("/bank-reconciliation/matches/:mutationId", adminMiddleware, async (r
     const { rows } = await db.execute(sql`
       SELECT
         m.id,
-        m.mutation_id AS "mutationId",
-        m.candidate_type AS "candidateType",
-        m.candidate_id AS "candidateId",
-        m.match_score AS "matchScore",
-        m.match_reason AS "matchReason",
-        m.amount_match AS "amountMatch",
-        m.date_match AS "dateMatch",
-        m.name_match AS "nameMatch",
-        m.order_id_match AS "orderIdMatch",
-        m.proof_match AS "proofMatch",
+        m.mutation_id        AS "mutationId",
+        m.candidate_type     AS "candidateType",
+        m.candidate_id       AS "candidateId",
+        m.match_score        AS "matchScore",
+        m.match_reason       AS "matchReason",
+        m.amount_match       AS "amountMatch",
+        m.date_match         AS "dateMatch",
+        m.name_match         AS "nameMatch",
+        m.order_id_match     AS "orderIdMatch",
+        m.proof_match        AS "proofMatch",
+        m.note,
         m.status,
-        m.created_at AS "createdAt",
-        p.proof_url AS "proofUrl",
-        p.ocr_name AS "ocrName",
-        p.ocr_amount AS "ocrAmount",
-        p.ocr_date AS "ocrDate",
-        p.ocr_raw AS "ocrRaw"
+        m.created_at         AS "createdAt",
+        -- Payment enrichment (candidateType = 'payment')
+        p.proof_url          AS "proofUrl",
+        p.ocr_name           AS "ocrName",
+        p.ocr_amount         AS "ocrAmount",
+        p.ocr_date           AS "ocrDate",
+        p.ocr_raw            AS "ocrRaw",
+        p.status             AS "paymentStatus",
+        p.booking_id         AS "paymentBookingId",
+        -- Booking enrichment via payment (candidateType = 'payment')
+        bp.order_number      AS "bookingOrderNumber",
+        bp.customer_name     AS "customerName",
+        bp.customer_phone    AS "customerPhone",
+        bp.booking_date      AS "bookingDate",
+        bp.status            AS "bookingStatus",
+        COALESCE(bp.grand_total, bp.total_price)::text AS "bookingAmount",
+        fp.name              AS "facilityName",
+        -- Order booking enrichment (candidateType = 'order')
+        bo.order_number      AS "orderOrderNumber",
+        bo.customer_name     AS "orderCustomerName",
+        bo.customer_phone    AS "orderCustomerPhone",
+        bo.booking_date      AS "orderBookingDate",
+        bo.status            AS "orderBookingStatus",
+        COALESCE(bo.grand_total, bo.total_price)::text AS "orderBookingAmount",
+        fo.name              AS "orderFacilityName"
       FROM sport_center.bank_reconciliation_matches m
+      -- Payment join
       LEFT JOIN sport_center.payments p
         ON p.id = m.candidate_id AND m.candidate_type = 'payment'
+      -- Booking via payment
+      LEFT JOIN sport_center.bookings bp
+        ON bp.id = p.booking_id AND m.candidate_type = 'payment'
+      LEFT JOIN sport_center.facilities fp
+        ON fp.id = bp.facility_id AND m.candidate_type = 'payment'
+      -- Direct order/booking join
+      LEFT JOIN sport_center.bookings bo
+        ON bo.id = m.candidate_id AND m.candidate_type = 'order'
+      LEFT JOIN sport_center.facilities fo
+        ON fo.id = bo.facility_id AND m.candidate_type = 'order'
       WHERE m.mutation_id = ${mutationId}
       ORDER BY m.match_score DESC
     `);
 
-    res.json({ mutation, matches: rows });
+    // Normalise: untuk candidateType='order' salin field order* ke field utama agar UI konsisten
+    const matches = (rows as any[]).map((r) => {
+      if (r.candidateType === "order") {
+        return {
+          ...r,
+          bookingOrderNumber: r.orderOrderNumber ?? r.bookingOrderNumber,
+          customerName: r.orderCustomerName ?? r.customerName,
+          customerPhone: r.orderCustomerPhone ?? r.customerPhone,
+          bookingDate: r.orderBookingDate ?? r.bookingDate,
+          bookingStatus: r.orderBookingStatus ?? r.bookingStatus,
+          bookingAmount: r.orderBookingAmount ?? r.bookingAmount,
+          facilityName: r.orderFacilityName ?? r.facilityName,
+        };
+      }
+      return r;
+    });
+
+    res.json({ mutation, matches });
   } catch (err: any) {
     res.status(500).json({ error: err?.message ?? "Gagal memuat kandidat" });
   }

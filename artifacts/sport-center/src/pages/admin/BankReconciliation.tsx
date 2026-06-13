@@ -502,7 +502,14 @@ function MatchCandidateRow({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <Badge variant="outline" className="text-xs capitalize">{match.candidateType}</Badge>
-            <span className="text-sm font-medium">ID #{match.candidateId}</span>
+            {match.customerName ? (
+              <span className="text-sm font-semibold truncate max-w-[180px]" title={match.customerName}>{match.customerName}</span>
+            ) : (
+              <span className="text-sm font-medium text-muted-foreground">ID #{match.candidateId}</span>
+            )}
+            {match.facilityName && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-100">{match.facilityName}</span>
+            )}
             <ScoreBadge score={match.matchScore} />
             {match.status === "approved" && (
               <Badge className="bg-green-100 text-green-700 border-green-200 text-xs">Disetujui</Badge>
@@ -511,7 +518,28 @@ function MatchCandidateRow({
               <Badge className="bg-red-100 text-red-700 border-red-200 text-xs">Ditolak</Badge>
             )}
           </div>
-          <div className="mt-1.5 flex flex-wrap gap-1.5">
+          {/* Booking detail row */}
+          {(match.bookingOrderNumber || match.bookingDate || match.bookingAmount || match.bookingStatus) && (
+            <div className="mt-1 flex flex-wrap gap-2 text-[10px] text-muted-foreground">
+              {match.bookingOrderNumber && (
+                <span className="font-mono">{match.bookingOrderNumber}</span>
+              )}
+              {match.bookingDate && (
+                <span>📅 {match.bookingDate}</span>
+              )}
+              {match.bookingAmount && Number(match.bookingAmount) > 0 && (
+                <span className="font-semibold text-foreground">
+                  {new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(Number(match.bookingAmount))}
+                </span>
+              )}
+              {match.bookingStatus && (
+                <span className={`px-1 py-0.5 rounded ${match.bookingStatus === "confirmed" ? "bg-green-50 text-green-700" : match.bookingStatus === "waiting_confirmation" ? "bg-yellow-50 text-yellow-700" : "bg-muted text-muted-foreground"}`}>
+                  {match.bookingStatus}
+                </span>
+              )}
+            </div>
+          )}
+          <div className="mt-1 flex flex-wrap gap-1.5">
             {match.amountMatch && <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-100 text-green-700">✓ Nominal</span>}
             {match.dateMatch && <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-100 text-green-700">✓ Tanggal</span>}
             {match.nameMatch && <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-100 text-green-700">✓ Nama</span>}
