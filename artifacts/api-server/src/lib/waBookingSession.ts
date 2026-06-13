@@ -2,6 +2,7 @@ import { db, waBookingSessionsTable, usersTable } from "@workspace/db";
 import { eq, and, gt } from "drizzle-orm";
 
 export type WaStep =
+  | "wait_registration"
   | "ask_facility"
   | "ask_date"
   | "ask_time"

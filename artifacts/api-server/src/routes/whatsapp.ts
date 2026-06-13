@@ -1,10 +1,9 @@
 import { Router } from "express";
 import multer from "multer";
 import path from "path";
-import { randomUUID } from "crypto";
-import { db, bookingsTable, facilitiesTable, paymentsTable, bookingHistoryTable, waActionTokensTable, settingsTable, usersTable, blockedSchedulesTable } from "@workspace/db";
-import { eq, and, desc, isNotNull, inArray } from "drizzle-orm";
-import { randomBytes } from "crypto";
+import { randomUUID, randomBytes, createHmac, timingSafeEqual } from "crypto";
+import { db, bookingsTable, facilitiesTable, paymentsTable, bookingHistoryTable, waActionTokensTable, settingsTable, usersTable, blockedSchedulesTable, waBookingSessionsTable } from "@workspace/db";
+import { eq, and, desc, isNotNull, inArray, or, lt, gt } from "drizzle-orm";
 import { createWaToken, verifyWaToken, consumeWaToken, getWaTokenRow } from "../lib/waTokens";
 import {
   parseIntent,
@@ -53,6 +52,28 @@ import { trackSentMessage, isBotEcho } from "../lib/waSentTracker";
 const router = Router();
 const APP_URL = process.env.APP_URL ?? "";
 const INACTIVE_STATUSES = ["cancelled", "expired", "rejected", "refunded"];
+
+// ─── Registration token helpers (HMAC-signed, 1 hour TTL) ─────────────────────
+function generateRegToken(phone: string): string {
+  const ts = Date.now();
+  const data = `${phone}|${ts}`;
+  const sig = createHmac("sha256", process.env.SESSION_SECRET ?? "secret").update(data).digest("hex");
+  return Buffer.from(JSON.stringify({ p: phone, t: ts, s: sig })).toString("base64url");
+}
+
+function verifyRegToken(raw: string): { phone: string } | null {
+  try {
+    const { p, t, s } = JSON.parse(Buffer.from(raw, "base64url").toString());
+    if (!p || !t || !s) return null;
+    if (Date.now() - Number(t) > 3_600_000) return null; // 1 jam
+    const expected = createHmac("sha256", process.env.SESSION_SECRET ?? "secret")
+      .update(`${p}|${t}`).digest("hex");
+    const eBuf = Buffer.from(expected, "hex");
+    const sBuf = Buffer.from(s, "hex");
+    if (eBuf.length !== sBuf.length || !timingSafeEqual(eBuf, sBuf)) return null;
+    return { phone: p };
+  } catch { return null; }
+}
 
 // ─── Webhook deduplication — cegah Fonnte retry/outgoing loop ─────────────────
 const _processedMsgIds = new Set<string>();
@@ -347,6 +368,88 @@ router.post("/wa/customer/register", async (req, res) => {
   } catch (err) {
     console.error("[wa/customer/register] error:", err);
     res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// GET /api/wa/register/:token — verifikasi token pendaftaran first-time
+router.get("/wa/register/:token", async (req, res) => {
+  const payload = verifyRegToken(req.params.token);
+  if (!payload) {
+    return res.status(200).json({ valid: false, message: "Link sudah kedaluwarsa atau tidak valid. Ketik 'booking' di WhatsApp untuk mendapatkan link baru." });
+  }
+  // Masking nomor HP: hanya tampilkan 4 digit terakhir
+  const masked = payload.phone.replace(/(\d{4,})(\d{4})$/, (_, prefix, last) => "*".repeat(prefix.length) + last);
+  return res.json({ valid: true, phone: masked });
+});
+
+// POST /api/wa/register/:token — simpan data member, kirim konfirmasi WA
+router.post("/wa/register/:token", async (req, res) => {
+  const payload = verifyRegToken(req.params.token);
+  if (!payload) {
+    return res.status(400).json({ error: "Link sudah kedaluwarsa. Ketik 'booking' di WhatsApp untuk mendapatkan link baru." });
+  }
+
+  const { name, email } = req.body as { name?: string; email?: string };
+  if (!name?.trim()) {
+    return res.status(400).json({ error: "Nama lengkap wajib diisi." });
+  }
+
+  const phone = payload.phone;
+  try {
+    // Cek apakah sudah terdaftar (idempotent)
+    const [existing] = await db.select({ id: usersTable.id, name: usersTable.name })
+      .from(usersTable).where(eq(usersTable.phone, phone)).limit(1);
+
+    let customerCode: string | undefined;
+    let userId: number;
+    if (existing) {
+      userId = existing.id;
+    } else {
+      // Buat akun baru
+      customerCode = await generateCustomerCode();
+
+      const baseEmail = email?.trim() || `wa_${phone}@whatsapp.local`;
+      const [emailConflict] = await db.select({ id: usersTable.id }).from(usersTable)
+        .where(eq(usersTable.email, baseEmail)).limit(1);
+      const finalEmail = emailConflict ? `wa_${phone}_${Date.now()}@whatsapp.local` : baseEmail;
+      const passwordHash = hashPassword(randomBytes(16).toString("hex"));
+
+      const [user] = await db.insert(usersTable).values({
+        name: name.trim(),
+        email: finalEmail,
+        passwordHash,
+        phone,
+        role: "customer",
+        customerCode,
+        registrationSource: "whatsapp",
+      }).returning({ id: usersTable.id });
+      userId = user.id;
+
+      await logAudit({
+        action: "CUSTOMER_REGISTERED_VIA_WA_FORM",
+        entity: "user",
+        entityId: userId,
+        after: { customerCode, phone, name: name.trim(), email: finalEmail, registrationSource: "whatsapp_reg_form" },
+      });
+    }
+
+    // Expire session wait_registration yang masih aktif
+    await db.update(waBookingSessionsTable)
+      .set({ status: "completed", updatedAt: new Date() })
+      .where(and(
+        eq(waBookingSessionsTable.phone, phone),
+        eq(waBookingSessionsTable.currentStep, "wait_registration"),
+        eq(waBookingSessionsTable.status, "active"),
+      ));
+
+    // Kirim konfirmasi via WhatsApp
+    const firstName = name.trim().split(" ")[0];
+    await sendWAMsg(phone, `✅ Pendaftaran berhasil, *${firstName}*! 🎉\n\nData Anda sudah tersimpan. Sekarang ketik *booking* untuk mulai membuat pesanan. 🏅`);
+
+    return res.json({ success: true, name: name.trim() });
+  } catch (err) {
+    console.error("[wa/register] error:", err);
+    return res.status(500).json({ error: "Terjadi kesalahan. Silakan coba lagi." });
   }
 });
 
@@ -1614,6 +1717,43 @@ async function startBookingSession(phone: string, msg: string, waName: string): 
   const intent = parseIntent(msg);
   const customer = await getRegisteredCustomer(phone);
 
+  // ── Deteksi first-time booker ──────────────────────────────────────────────
+  if (!customer) {
+    const [prevBooking] = await db.select({ id: bookingsTable.id })
+      .from(bookingsTable)
+      .where(eq(bookingsTable.customerPhone, phone))
+      .limit(1);
+    const isFirstTime = !prevBooking;
+
+    if (isFirstTime) {
+      const regToken = generateRegToken(phone);
+      const regUrl = `${APP_URL}/wa/register/${regToken}`;
+
+      const session = await createSession({
+        phone,
+        currentStep: "wait_registration",
+        bookerName: waName || null,
+      });
+
+      const reply = [
+        `👋 Halo${waName ? `, *${waName}*` : ""}! Selamat datang di *Sport Center Jakarta*! 🏅`,
+        ``,
+        `Karena ini pertama kali Anda booking, kami butuh sedikit data Anda. Isi formulir singkat berikut (hanya 1 menit):`,
+        ``,
+        `📋 ${regUrl}`,
+        ``,
+        `Setelah mengisi, ketik *booking* lagi untuk mulai memesan. Terima kasih! 😊`,
+      ].join("\n");
+
+      await appendMessage(session.id, "customer", msg);
+      await appendMessage(session.id, "bot", reply);
+      await sendWAMsg(phone, reply);
+      await logAudit({ action: "WA_FIRST_TIME_REG_SENT", entity: "wa_booking_session", entityId: session.id, after: { phone, waName } });
+      return;
+    }
+  }
+  // ──────────────────────────────────────────────────────────────────────────
+
   let facilityId: number | null = null;
   let facilityName = "";
   let pricePerHour = 0;
@@ -1714,6 +1854,22 @@ async function continueSession(session: WaBookingSessionRow, phone: string, msg:
   }
 
   switch (step) {
+    case "wait_registration": {
+      // Kirim ulang link registrasi — belum selesai mengisi form
+      const regToken = generateRegToken(phone);
+      const regUrl = `${APP_URL}/wa/register/${regToken}`;
+      const reply = [
+        `📋 Silakan isi formulir pendaftaran terlebih dahulu:`,
+        ``,
+        regUrl,
+        ``,
+        `Setelah mengisi, ketik *booking* untuk mulai memesan. 🏅`,
+      ].join("\n");
+      await appendMessage(session.id, "bot", reply);
+      await sendWAMsg(phone, reply);
+      break;
+    }
+
     case "ask_facility": {
       const fac = await resolveFacilityFromMsg(msg);
       if (!fac) {
