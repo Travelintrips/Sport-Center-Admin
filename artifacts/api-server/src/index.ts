@@ -292,12 +292,15 @@ async function runStartupMigrations() {
        start_time text,
        duration_minutes int,
        customer_name text,
+       notes text,
        status text NOT NULL DEFAULT 'active',
        raw_messages jsonb NOT NULL DEFAULT '[]',
        expired_at timestamptz NOT NULL,
        created_at timestamptz NOT NULL DEFAULT NOW(),
        updated_at timestamptz NOT NULL DEFAULT NOW()
      )`,
+    `ALTER TABLE sport_center.wa_booking_sessions
+       ADD COLUMN IF NOT EXISTS notes text`,
     // wa_action_tokens
     `CREATE TABLE IF NOT EXISTS sport_center.wa_action_tokens (
        id serial PRIMARY KEY,

@@ -12,6 +12,7 @@ export const waBookingSessionsTable = scSchema.table("wa_booking_sessions", {
   startTime: text("start_time"),
   durationMinutes: integer("duration_minutes"),
   customerName: text("customer_name"),
+  notes: text("notes"),
   status: text("status").notNull().default("active"),
   rawMessages: jsonb("raw_messages")
     .$type<Array<{ role: string; text: string; at: string }>>()

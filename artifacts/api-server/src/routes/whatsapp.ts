@@ -1857,7 +1857,8 @@ async function continueSession(session: WaBookingSessionRow, phone: string, msg:
 
       const updated = await updateSession(session.id, {
         customerName: rawName,
-        currentStep: "confirm",
+        notes: null,            // null = not yet asked → triggers ask_notes step
+        currentStep: "ask_notes",
       });
       await logAudit({ action: "booking_session_updated", entity: "wa_booking_session", entityId: session.id, after: { step: "ask_name", customerName: rawName, bookingContext: ctx } });
       const fac = session.facilityId ? await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, session.facilityId)).limit(1).then(r => r[0]) : null;
@@ -1869,8 +1870,28 @@ async function continueSession(session: WaBookingSessionRow, phone: string, msg:
         ctx === "friend"    ? "👥 Booking atas nama teman" :
         "✅ Booking atas nama";
       const nameConfirm = extracted ? `${ctxLabel} *${rawName}*\n\n` : "";
+      const notesQ = await buildStepQuestion("ask_notes", updated, fac?.name ?? "", Number(fac?.pricePerHour ?? 0));
+      const reply = nameConfirm + notesQ;
+      await appendMessage(session.id, "bot", reply);
+      await sendWAMsg(phone, reply);
+      break;
+    }
+
+    case "ask_notes": {
+      const SKIP_WORDS = /^(tidak|nggak|ngga|ga|gak|skip|lewat|no|tidak ada|kosong|-|\.+|x)$/i;
+      const isSkip = SKIP_WORDS.test(msg.trim());
+      const noteText = isSkip ? "" : msg.trim().slice(0, 300); // max 300 chars
+
+      const updated = await updateSession(session.id, {
+        notes: noteText,        // "" = skipped, "text" = has note
+        currentStep: "confirm",
+      });
+      await logAudit({ action: "booking_session_updated", entity: "wa_booking_session", entityId: session.id, after: { step: "ask_notes", notes: noteText || null } });
+      const fac = session.facilityId ? await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, session.facilityId)).limit(1).then(r => r[0]) : null;
+
+      const noteAck = noteText ? `📝 Catatan dicatat: *${noteText}*\n\n` : "";
       const confirmQ = await buildStepQuestion("confirm", updated, fac?.name ?? "", Number(fac?.pricePerHour ?? 0));
-      const reply = nameConfirm + confirmQ;
+      const reply = noteAck + confirmQ;
       await appendMessage(session.id, "bot", reply);
       await sendWAMsg(phone, reply);
       break;
@@ -1929,6 +1950,15 @@ async function buildStepQuestion(
         `• Untuk teman: *untuk teman Andi*`,
         `• Member: *member Sinta Dewi*`,
         `• Perusahaan/instansi: *PT Maju Jaya* atau *a/n CV Berkah*`,
+      ].join("\n");
+
+    case "ask_notes":
+      return [
+        `📝 *Ada catatan tambahan untuk booking ini?* (opsional)`,
+        ``,
+        `Contoh: _untuk turnamen_, _butuh net ekstra_, _3 tim_, _pemula_`,
+        ``,
+        `Atau ketik *tidak* jika tidak ada catatan.`,
       ].join("\n");
 
     case "confirm": {
@@ -2249,6 +2279,7 @@ async function execCreateBookingFromSession(session: WaBookingSessionRow, phone:
     basePrice: String(basePrice),
     source: "whatsapp_ai",
     status: "waiting_admin_approval",
+    notes: session.notes || null,
     ppnRate: taxCalc.taxAmount > 0 ? String(taxCalc.taxRate) : null,
     ppnAmount: taxCalc.taxAmount > 0 ? String(taxCalc.taxAmount) : null,
     grandTotal: taxCalc.taxAmount > 0 ? String(taxCalc.grandTotal) : null,

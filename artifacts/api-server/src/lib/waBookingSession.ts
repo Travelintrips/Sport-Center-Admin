@@ -7,6 +7,7 @@ export type WaStep =
   | "ask_time"
   | "ask_duration"
   | "ask_name"
+  | "ask_notes"
   | "confirm"
   | "done";
 
@@ -468,12 +469,15 @@ export function getNextStep(data: {
   startTime?: string | null;
   durationMinutes?: number | null;
   customerName?: string | null;
+  /** null = not yet asked; "" = skipped; "text" = has note */
+  notes?: string | null;
 }): WaStep {
   if (!data.facilityId) return "ask_facility";
   if (!data.bookingDate) return "ask_date";
   if (!data.startTime) return "ask_time";
   if (!data.durationMinutes) return "ask_duration";
   if (!data.customerName) return "ask_name";
+  if ("notes" in data && data.notes === null) return "ask_notes";
   return "confirm";
 }
 
@@ -542,6 +546,7 @@ export async function updateSession(
     startTime?: string | null;
     durationMinutes?: number | null;
     customerName?: string | null;
+    notes?: string | null;
     status?: WaSessionStatus;
   }
 ): Promise<WaBookingSessionRow> {
@@ -593,7 +598,9 @@ export function formatSessionSummary(params: {
   customerName: string;
   pricePerHour: number;
   totalPrice: number;
+  notes?: string | null;
 }): string {
+  const notesLine = params.notes ? `Catatan: *${params.notes}*\n` : "";
   return (
     `✅ Saya cek tersedia. Berikut detail booking:\n\n` +
     `Fasilitas: *${params.facilityName}*\n` +
@@ -601,6 +608,7 @@ export function formatSessionSummary(params: {
     `Jam: *${params.startTime} – ${params.endTime}*\n` +
     `Durasi: *${params.durationHours} jam*\n` +
     `Nama: *${params.customerName}*\n` +
+    notesLine +
     `Total: *${formatIDR(params.totalPrice)}*\n\n` +
     `Balas *YA* untuk lanjut dibuatkan booking.\n` +
     `(Ketik *BATAL* untuk membatalkan)`
