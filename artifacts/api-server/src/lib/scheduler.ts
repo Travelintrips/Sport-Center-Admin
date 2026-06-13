@@ -1,5 +1,5 @@
-import { db, bookingsTable, facilitiesTable } from "@workspace/db";
-import { eq, and, lt, lte, isNotNull, isNull } from "drizzle-orm";
+import { db, bookingsTable, facilitiesTable, bankReconciliationMatchesTable } from "@workspace/db";
+import { eq, and, lt, lte, isNotNull, isNull, inArray, sql } from "drizzle-orm";
 import { notifyBookingExpired, notifyReminderH1, notifyWaDayReminder, notifyWaStaffCheckin } from "./notifications";
 import { createWaToken } from "./waTokens";
 import { reverseTaxTransaction } from "./tax";
@@ -35,7 +35,32 @@ async function expireOverdueBookings(): Promise<void> {
         )
       );
 
+    if (!overdue.length) return;
+
+    // Jangan expire booking yang sedang dalam proses rekonsiliasi bank
+    // (ada mutasi dengan status auto_matched / need_review / duplicate_need_review yang terhubung)
+    const { rows: reconRows } = await db.execute(sql`
+      SELECT DISTINCT bp.booking_id
+      FROM sport_center.bank_reconciliation_matches brm
+      JOIN sport_center.payments bp ON bp.id = brm.candidate_id AND brm.candidate_type = 'payment'
+      WHERE brm.status IN ('auto_matched','need_review','duplicate_need_review')
+        AND bp.booking_id = ANY(ARRAY[${sql.join(overdue.map((b) => sql`${b.id}`), sql`, `)}]::int[])
+      UNION
+      SELECT DISTINCT brm.candidate_id AS booking_id
+      FROM sport_center.bank_reconciliation_matches brm
+      WHERE brm.candidate_type = 'order'
+        AND brm.status IN ('auto_matched','need_review','duplicate_need_review')
+        AND brm.candidate_id = ANY(ARRAY[${sql.join(overdue.map((b) => sql`${b.id}`), sql`, `)}]::int[])
+    `);
+    const reconProtectedIds = new Set((reconRows as any[]).map((r) => Number(r.booking_id)));
+
     for (const booking of overdue) {
+      // Skip booking yang ada kandidat rekonsiliasi aktif — biarkan admin konfirmasi dulu
+      if (reconProtectedIds.has(booking.id)) {
+        console.log(`[scheduler] Booking ${booking.orderNumber} overdue tapi punya kandidat rekon aktif — dilewati`);
+        continue;
+      }
+
       await db
         .update(bookingsTable)
         .set({ status: "expired", updatedAt: new Date() })

@@ -1179,13 +1179,8 @@ export default function AdminBankReconciliation() {
   const total = data?.total ?? 0;
   const totalPages = Math.ceil(total / 30);
 
-  const stats = mutations.reduce(
-    (acc: Record<string, number>, m: any) => {
-      acc[m.status] = (acc[m.status] ?? 0) + 1;
-      return acc;
-    },
-    {} as Record<string, number>
-  );
+  // Gunakan statusCounts dari API (seluruh dataset, bukan hanya halaman saat ini)
+  const stats: Record<string, number> = data?.statusCounts ?? {};
 
   return (
     <div className="space-y-6">

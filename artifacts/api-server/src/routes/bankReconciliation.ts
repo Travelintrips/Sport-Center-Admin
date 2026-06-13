@@ -95,7 +95,13 @@ function parseRows(rows: any[]): Array<{
         if (s.includes(",") && !s.includes(".")) {
           return parseFloat(s.replace(",", ".")) || 0;
         }
-        // Only dot or clean number
+        // Only dot: heuristik — jika dot diikuti tepat 3 digit di akhir = pemisah ribuan Indonesia
+        // Contoh: "1.250" → 1250, "1.250.000" → 1250000, "1.25" → 1.25 (desimal)
+        const dotParts = s.split(".");
+        if (dotParts.length > 1 && dotParts.slice(1).every((p) => p.length === 3)) {
+          // Semua bagian setelah titik punya tepat 3 digit → format ribuan
+          return parseFloat(s.replace(/\./g, "")) || 0;
+        }
         return parseFloat(s.replace(/[^0-9.]/g, "")) || 0;
       };
       const credit = parseIndonesianNumber(creditRaw);
@@ -256,7 +262,27 @@ router.get("/bank-reconciliation/mutations", adminMiddleware, async (req, res) =
     if (conditions.length) countQuery = countQuery.where(and(...conditions)) as any;
     const [{ total }] = await countQuery;
 
-    res.json({ mutations, total, page: Number(page), pageSize: limit });
+    // Status counts: kondisi sama TANPA filter status — untuk stats bar yang akurat
+    const baseConditions = conditions.filter(
+      (_c, i) => !(status && status !== "all" && i === 0)
+    );
+    const statusCountsRows = await (baseConditions.length
+      ? db
+          .select({ status: bankMutationsTable.status, count: sql<number>`count(*)::int` })
+          .from(bankMutationsTable)
+          .where(and(...baseConditions))
+          .groupBy(bankMutationsTable.status)
+      : db
+          .select({ status: bankMutationsTable.status, count: sql<number>`count(*)::int` })
+          .from(bankMutationsTable)
+          .groupBy(bankMutationsTable.status)
+    );
+    const statusCounts: Record<string, number> = {};
+    for (const r of statusCountsRows) {
+      if (r.status) statusCounts[r.status] = r.count;
+    }
+
+    res.json({ mutations, total, page: Number(page), pageSize: limit, statusCounts });
   } catch (err: any) {
     req.log.error({ err }, "Bank reconciliation list error");
     res.status(500).json({ error: err?.message ?? "Gagal memuat mutasi" });
@@ -620,6 +646,7 @@ router.get("/bank-reconciliation/report", adminMiddleware, async (req, res) => {
       WHERE mutation_key ~ '^20[0-9]{6}_'
       GROUP BY TO_CHAR(TO_DATE(LEFT(mutation_key, 8), 'YYYYMMDD'), 'YYYY-MM')
       ORDER BY TO_CHAR(TO_DATE(LEFT(mutation_key, 8), 'YYYYMMDD'), 'YYYY-MM') DESC
+      LIMIT 36
     `);
 
     const totals = rows.reduce(
