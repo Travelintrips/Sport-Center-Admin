@@ -279,6 +279,9 @@ export default function AdminWaBookings() {
                 <td className="px-4 py-3 font-mono font-semibold text-primary">{b.orderNumber}</td>
                 <td className="px-4 py-3">
                   <div className="font-medium">{b.customerName}</div>
+                  {b.bookerName && b.bookerName !== b.customerName && (
+                    <div className="text-xs text-muted-foreground">Pemesan: {b.bookerName}</div>
+                  )}
                   <div className="text-xs text-muted-foreground flex items-center gap-1">
                     <Phone className="w-3 h-3" />{b.customerPhone}
                   </div>
@@ -367,7 +370,14 @@ export default function AdminWaBookings() {
                   {statusBadge(detail.booking.status)}
                 </div>
                 <div className="grid grid-cols-2 gap-2 text-sm">
-                  <div><span className="text-muted-foreground">Customer:</span> <span className="font-medium">{detail.booking.customerName}</span></div>
+                  {detail.booking.bookerName && detail.booking.bookerName !== detail.booking.customerName ? (
+                    <>
+                      <div><span className="text-muted-foreground">Pemesan:</span> <span className="font-medium">{detail.booking.bookerName}</span></div>
+                      <div><span className="text-muted-foreground">Yang Main:</span> <span className="font-medium">{detail.booking.customerName}</span></div>
+                    </>
+                  ) : (
+                    <div><span className="text-muted-foreground">Customer:</span> <span className="font-medium">{detail.booking.customerName}</span></div>
+                  )}
                   <div><span className="text-muted-foreground">HP:</span> <span className="font-medium">{detail.booking.customerPhone}</span></div>
                   <div><span className="text-muted-foreground">Fasilitas:</span> <span className="font-medium">{detail.facility?.name ?? "-"}</span></div>
                   <div><span className="text-muted-foreground">Tanggal:</span> <span className="font-medium">{detail.booking.bookingDate}</span></div>

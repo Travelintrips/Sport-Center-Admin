@@ -37,6 +37,7 @@ import {
   ExternalLink,
   X,
   User,
+  Users,
   Building2,
   Hash,
   CalendarDays,
@@ -235,7 +236,7 @@ function printInvoice(booking: any, settings?: any) {
   <div class="section">
     <div class="section-title">Informasi Customer</div>
     <div class="info-grid">
-      <div class="info-item"><label>Nama</label><span>${booking.customerName}</span></div>
+      ${booking.bookerName && booking.bookerName !== booking.customerName ? `<div class="info-item"><label>Pemesan</label><span>${booking.bookerName}</span></div><div class="info-item"><label>Yang Akan Main</label><span>${booking.customerName}</span></div>` : `<div class="info-item"><label>Nama</label><span>${booking.customerName}</span></div>`}
       <div class="info-item"><label>No. HP</label><span>${booking.customerPhone || "-"}</span></div>
       <div class="info-item"><label>Email</label><span>${booking.customerEmail || "-"}</span></div>
       <div class="info-item"><label>Status</label><span class="status-badge ${
@@ -411,8 +412,8 @@ function printKwitansi(booking: any, settings?: any) {
   <div class="section-title">Informasi Customer</div>
   <div class="info-grid">
     <div class="info-cell">
-      <div class="info-label">Nama</div>
-      <div class="info-value">${booking.customerName}</div>
+      <div class="info-label">${booking.bookerName && booking.bookerName !== booking.customerName ? "Yang Akan Main" : "Nama"}</div>
+      <div class="info-value">${booking.customerName}${booking.bookerName && booking.bookerName !== booking.customerName ? ` <span style="font-size:10px;color:#666;">(dipesan oleh ${booking.bookerName})</span>` : ""}</div>
     </div>
     <div class="info-cell">
       <div class="info-label">No. HP</div>
@@ -786,7 +787,14 @@ function BookingDetailDrawer({
               <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Informasi Customer</span>
             </div>
             <div className="p-4 grid grid-cols-2 gap-3 text-sm">
-              <InfoRow icon={User} label="Nama" value={booking.customerName} span />
+              {booking.bookerName && booking.bookerName !== booking.customerName ? (
+                <>
+                  <InfoRow icon={User} label="Pemesan (WA)" value={booking.bookerName} span />
+                  <InfoRow icon={Users} label="Yang Akan Main" value={booking.customerName} span />
+                </>
+              ) : (
+                <InfoRow icon={User} label="Nama" value={booking.customerName} span />
+              )}
               <InfoRow icon={Building2} label="Fasilitas" value={booking.facilityName} span />
               <InfoRow icon={CalendarDays} label="Tanggal" value={formatDate(booking.bookingDate)} />
               <InfoRow icon={Clock} label="Waktu" value={`${booking.startTime?.slice(0, 5)} – ${booking.endTime?.slice(0, 5)}`} />
