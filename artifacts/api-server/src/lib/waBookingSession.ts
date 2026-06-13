@@ -12,13 +12,15 @@ export type WaStep =
 
 export type WaSessionStatus = "active" | "completed" | "expired" | "cancelled";
 
+export type BookingContext = "friend" | "member" | "corporate" | null;
+
 export interface ParsedIntent {
   facilityKeyword: string | null;
   bookingDate: string | null;
   startTime: string | null;
   durationMinutes: number | null;
   personName: string | null;
-  bookingForFriend: boolean;
+  bookingContext: BookingContext;
 }
 
 // ─── Date Helpers (WIB = UTC+7) ──────────────────────────────────────────────
@@ -263,17 +265,22 @@ export function detectFacilityKeyword(msg: string): string | null {
 }
 
 // ─── Name Parser ─────────────────────────────────────────────────────────────
-// Detects if booking is for a friend and extracts their name.
-// Examples: "untuk teman saya Budi", "atas nama Sinta", "namanya Joko"
+// Supports: personal name, member name, company/institution name
+// Examples:
+//   "untuk teman saya Budi"    → "Budi"         context=friend
+//   "atas nama PT Maju Jaya"   → "PT Maju Jaya" context=corporate
+//   "member Sinta Dewi"        → "Sinta Dewi"   context=member
+//   "a/n CV Berkah Abadi"      → "CV Berkah Abadi" context=corporate
 
-// Words that must stop name extraction — they're not part of a person's name
+// Stop words — extraction halts when one of these is encountered
 const NAME_STOP_WORDS = new Set([
   // Pronouns / self-reference
-  "saya", "aku", "gue", "gw", "gua", "kamu", "anda", "dia", "mereka", "kita", "sendiri",
-  // Relationship words used without a name following
+  "saya", "aku", "gue", "gw", "gua", "kamu", "anda", "dia", "mereka",
+  "kita", "kami", "kalian", "sendiri",
+  // Relationship words without a name after
   "adik", "kakak", "abang", "bang", "mas", "mbak", "pak", "bu", "om", "tante",
   "saudara", "ayah", "ibu", "bapak", "mama", "papa", "ortu",
-  // Booking/time keywords
+  // Booking / time keywords
   "mau", "bisa", "akan", "sudah", "lagi", "ingin", "pengen", "pengin",
   "main", "maen", "bermain", "olahraga", "booking", "boking", "pesan", "sewa",
   "jam", "pukul", "pk", "tanggal", "tgl", "hari", "besok", "lusa", "sekarang",
@@ -283,20 +290,43 @@ const NAME_STOP_WORDS = new Set([
   "dong", "ya", "nih", "deh", "sih", "yg", "yang", "aja", "juga", "sama",
 ]);
 
+// Company/institution prefixes that trigger company-name extraction mode
+const COMPANY_PREFIX_RE = /^(pt|cv|ud|pd|fa|koperasi|yayasan|lembaga|dinas|badan|balai|komite|perkumpulan|organisasi|komunitas)\b/i;
+
 function extractNameWords(raw: string): string | null {
   const words = raw.trim().split(/\s+/);
   const result: string[] = [];
   for (const w of words) {
     const wl = w.toLowerCase().replace(/[^a-z]/g, "");
-    if (!wl || NAME_STOP_WORDS.has(wl)) break;       // hit a stop word → stop
-    if (!/^[A-Za-z]+$/.test(w)) break;               // non-alphabetic character → stop
+    if (!wl || NAME_STOP_WORDS.has(wl)) break;
+    if (!/^[A-Za-z]+$/.test(w)) break;               // non-alphabetic char → stop
     result.push(w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
-    if (result.length >= 4) break;                    // cap at 4 name words
+    if (result.length >= 4) break;                    // max 4 name words
   }
   if (result.length === 0) return null;
   const name = result.join(" ");
-  if (name.length < 2) return null;
-  return name;
+  return name.length >= 2 ? name : null;
+}
+
+/**
+ * Extract a company/institution name from a raw string.
+ * Company names can contain numbers and punctuation, so extraction is more permissive.
+ * Returns null if `raw` doesn't start with a known company prefix.
+ */
+function extractCompanyName(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!COMPANY_PREFIX_RE.test(trimmed)) return null;
+  // Strip trailing filler ONLY when preceded by whitespace (avoids cutting "Jaya" → "Ja")
+  const cleaned = trimmed
+    .replace(/\s+(?:ya|dong|nih|deh|sih)$/i, "")         // trailing filler words
+    .replace(/,?\s*(?:mau|bisa|besok|jam\s+\d|tanggal\s|\d{2}\s).*$/i, "") // inline keywords
+    .trim();
+  if (cleaned.length < 3) return null;
+  // Title-case each word in the company name
+  return cleaned
+    .split(/\s+/)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
 }
 
 export function parseName(msg: string): string | null {
@@ -305,12 +335,60 @@ export function parseName(msg: string): string | null {
   // Bail out immediately for self-booking phrases
   if (/\b(?:untuk|atas nama|buat)\s+(?:saya|aku|gue|gw|gua)\s*(?:sendiri)?\b/.test(lower)) return null;
 
-  // "atas nama Budi Santoso" / "a/n Hendra"
-  const atasNama = lower.match(/(?:atas\s+nama|a\/n)\s+(.+)/);
-  if (atasNama) {
-    const n = extractNameWords(atasNama[1]);
+  // ── Company/institution patterns ──────────────────────────────────────────
+
+  // "atas nama PT Maju Jaya" / "a/n CV Berkah" / "atas nama Koperasi ABC"
+  const atasNamaRaw = lower.match(/(?:atas\s+nama|a\/n)\s+(.+)/);
+  if (atasNamaRaw) {
+    const company = extractCompanyName(atasNamaRaw[1]);
+    if (company) return company;
+    const n = extractNameWords(atasNamaRaw[1]);
     if (n) return n;
   }
+
+  // "untuk perusahaan PT Indo Sport" / "buat instansi CV Jaya"
+  const untukPerusahaan = lower.match(/(?:untuk|buat)\s+(?:perusahaan|instansi|organisasi|komunitas|lembaga)\s+(.+)/);
+  if (untukPerusahaan) {
+    const company = extractCompanyName(untukPerusahaan[1]);
+    if (company) return company;
+    const n = extractNameWords(untukPerusahaan[1]);
+    if (n) return n;
+  }
+
+  // "nama perusahaan: PT ABC" / "nama instansi Yayasan XYZ"
+  const namaPerusahaan = lower.match(/nama\s+(?:perusahaan|instansi|organisasi|komunitas|lembaga)\s*[:\-]?\s+(.+)/);
+  if (namaPerusahaan) {
+    const company = extractCompanyName(namaPerusahaan[1]);
+    if (company) return company;
+    // Non-prefixed institution name (e.g. "nama instansi Sekolah Harapan")
+    const n = extractNameWords(namaPerusahaan[1]);
+    if (n) return n;
+  }
+
+  // Direct company prefix at start of message: "PT Maju Jaya mau booking ..."
+  const directCompanyStart = lower.match(/^((?:pt|cv|ud|pd|fa|koperasi|yayasan|lembaga|dinas|badan|balai|komite|perkumpulan|organisasi|komunitas)\s+.+)/i);
+  if (directCompanyStart) {
+    const company = extractCompanyName(directCompanyStart[1]);
+    if (company) return company;
+  }
+
+  // ── Member patterns ───────────────────────────────────────────────────────
+
+  // "untuk/buat member Budi" / "anggota kami Ahmad"
+  const untukMember = lower.match(/(?:untuk|buat)\s+(?:member|anggota)\s+([A-Za-z].+)/);
+  if (untukMember) {
+    const n = extractNameWords(untukMember[1]);
+    if (n) return n;
+  }
+  // "member Sinta Dewi" / "anggota Rudi Hartono"
+  // Skip possessives like "kami/kita" — those are already in NAME_STOP_WORDS
+  const memberLangsung = lower.match(/\b(?:member|anggota)\s+(?:(?:kami|kita|saya|ku)\s+)?([A-Za-z][A-Za-z\s]{1,40})/);
+  if (memberLangsung) {
+    const n = extractNameWords(memberLangsung[1]);
+    if (n) return n;
+  }
+
+  // ── Personal name patterns ────────────────────────────────────────────────
 
   // "namanya Joko" / "nama teman saya Rina" / "nama: Ahmad"
   const namaX = lower.match(/nama(?:nya|[\s\-]+(?:teman(?:\s+(?:saya|ku))?|dia|nya))?\s*[:\-]?\s+([A-Za-z].+)/);
@@ -319,15 +397,14 @@ export function parseName(msg: string): string | null {
     if (n) return n;
   }
 
-  // "untuk teman (saya/ku) Budi" / "buat teman Ahmad" — needs "teman/kawan" keyword
+  // "untuk teman (saya/ku) Budi" / "buat teman Ahmad"
   const untukTeman = lower.match(/(?:untuk|buat)\s+(?:teman(?:\s+(?:saya|ku))?\s+|kawan(?:\s+(?:saya|ku))?\s+)([A-Za-z].+)/);
   if (untukTeman) {
     const n = extractNameWords(untukTeman[1]);
     if (n) return n;
   }
 
-  // "teman saya Deni Setiawan" / "temanku Budi" / "kawanku Ahmad"
-  // Handle compound "temanku"/"kawanku" AND "teman saya/ku + name"
+  // "temanku Ahmad Fauzi" / "kawanku Sinta" / "teman saya Deni"
   const temanSaya = lower.match(/(?:temanku|kawanku|teman\s+(?:saya|ku))\s+([A-Za-z].+)/);
   if (temanSaya) {
     const n = extractNameWords(temanSaya[1]);
@@ -350,24 +427,38 @@ export function parseName(msg: string): string | null {
   return null;
 }
 
-export function isBookingForFriend(msg: string): boolean {
+/**
+ * Detect what kind of booking context is described in the message.
+ * Corporate is checked first (most specific), then member, then friend.
+ */
+export function detectBookingContext(msg: string): BookingContext {
   const lower = msg.toLowerCase();
-  return /\b(teman|temanku|kawan|kawanku|rekan|saudara|adik|kakak|suami|istri|pacar|orang lain|buat orang)\b/.test(lower);
+  // Corporate / institution
+  if (/\b(?:pt|cv|ud|pd|koperasi|yayasan|perusahaan|instansi|lembaga|dinas|organisasi|komunitas|perkumpulan|badan)\b/.test(lower)) return "corporate";
+  // Member / registered member
+  if (/\b(?:member|membership|anggota|pelanggan\s+tetap)\b/.test(lower)) return "member";
+  // Friend / family / someone else
+  if (/\b(?:teman|temanku|kawan|kawanku|rekan|saudara|adik|kakak|suami|istri|pacar|orang\s+lain)\b/.test(lower)) return "friend";
+  return null;
+}
+
+/** @deprecated use detectBookingContext instead */
+export function isBookingForFriend(msg: string): boolean {
+  return detectBookingContext(msg) === "friend";
 }
 
 export function parseIntent(msg: string): ParsedIntent {
   const lower = msg.toLowerCase();
-  // Try range first ("jam 4 sd jam 6 sore") — fills both startTime & durationMinutes at once
   const timeRange = parseTimeRange(lower);
   const personName = parseName(msg);
-  const bookingForFriend = isBookingForFriend(lower);
+  const bookingContext = detectBookingContext(lower);
   return {
     facilityKeyword: detectFacilityKeyword(lower),
     bookingDate: parseDate(lower),
     startTime: timeRange?.startTime ?? parseTime(lower),
     durationMinutes: timeRange?.durationMinutes ?? parseDuration(lower),
     personName,
-    bookingForFriend,
+    bookingContext,
   };
 }
 
