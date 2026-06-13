@@ -12,6 +12,8 @@ import {
 } from "@workspace/db";
 import { eq, and, gte, lte, desc, not, inArray } from "drizzle-orm";
 import { logAudit } from "../lib/auditLog";
+import { getAvailableSlotsForDay, checkSlotAvailable, getFacilityByName } from "../lib/availability";
+import { calculatePrice } from "../lib/pricing";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -463,6 +465,191 @@ Bahasa: Indonesia santai + profesional. Gunakan emoji secukupnya (jangan berlebi
 Panjang jawaban: maksimal ${maxLen} karakter. Ringkas, padat, langsung ke inti.`;
 }
 
+// ─── OpenAI Tool Definitions ──────────────────────────────────────────────────
+
+const AI_TOOLS: OpenAI.Chat.ChatCompletionTool[] = [
+  {
+    type: "function",
+    function: {
+      name: "check_slot_availability",
+      description: "Cek apakah slot waktu tertentu tersedia untuk booking di fasilitas tertentu pada tanggal tertentu.",
+      parameters: {
+        type: "object",
+        properties: {
+          facility_name: { type: "string", description: "Nama atau kategori fasilitas, misal 'futsal', 'basket', 'badminton'" },
+          date: { type: "string", description: "Tanggal dalam format YYYY-MM-DD" },
+          start_time: { type: "string", description: "Jam mulai dalam format HH:MM, misal '14:00'" },
+          duration_hours: { type: "number", description: "Durasi booking dalam jam, misal 2" },
+        },
+        required: ["facility_name", "date", "start_time", "duration_hours"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_available_slots",
+      description: "Ambil semua slot jam yang tersedia (kosong) untuk fasilitas tertentu pada tanggal tertentu.",
+      parameters: {
+        type: "object",
+        properties: {
+          facility_name: { type: "string", description: "Nama atau kategori fasilitas" },
+          date: { type: "string", description: "Tanggal dalam format YYYY-MM-DD" },
+        },
+        required: ["facility_name", "date"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "calculate_booking_price",
+      description: "Hitung harga booking yang tepat termasuk pricing rules (weekend, peak hour, dll).",
+      parameters: {
+        type: "object",
+        properties: {
+          facility_name: { type: "string", description: "Nama atau kategori fasilitas" },
+          date: { type: "string", description: "Tanggal booking format YYYY-MM-DD (untuk deteksi weekend)" },
+          start_time: { type: "string", description: "Jam mulai format HH:MM" },
+          duration_hours: { type: "number", description: "Durasi dalam jam" },
+        },
+        required: ["facility_name", "date", "start_time", "duration_hours"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "find_next_available_dates",
+      description: "Cari tanggal-tanggal ke depan yang masih punya slot kosong untuk fasilitas tertentu.",
+      parameters: {
+        type: "object",
+        properties: {
+          facility_name: { type: "string", description: "Nama atau kategori fasilitas" },
+          from_date: { type: "string", description: "Mulai cari dari tanggal ini (YYYY-MM-DD)" },
+          days_to_check: { type: "number", description: "Jumlah hari ke depan yang dicek, maks 14" },
+        },
+        required: ["facility_name", "from_date"],
+      },
+    },
+  },
+];
+
+// ─── Tool Executor ────────────────────────────────────────────────────────────
+
+async function executeTool(name: string, args: Record<string, unknown>): Promise<string> {
+  try {
+    if (name === "check_slot_availability") {
+      const facility = await getFacilityByName(String(args.facility_name));
+      if (!facility) return JSON.stringify({ error: `Fasilitas '${args.facility_name}' tidak ditemukan` });
+      const available = await checkSlotAvailable(
+        facility.id,
+        String(args.date),
+        String(args.start_time),
+        Number(args.duration_hours)
+      );
+      const endMin =
+        parseInt(String(args.start_time).split(":")[0]) * 60 +
+        parseInt(String(args.start_time).split(":")[1] || "0") +
+        Number(args.duration_hours) * 60;
+      const endTime = `${String(Math.floor(endMin / 60) % 24).padStart(2, "0")}:${String(endMin % 60).padStart(2, "0")}`;
+      return JSON.stringify({
+        facility: facility.name,
+        date: args.date,
+        start_time: args.start_time,
+        end_time: endTime,
+        duration_hours: args.duration_hours,
+        available,
+        message: available
+          ? `Slot ${args.start_time}–${endTime} TERSEDIA untuk ${facility.name}`
+          : `Slot ${args.start_time}–${endTime} TIDAK TERSEDIA (sudah dipesan atau diblokir)`,
+      });
+    }
+
+    if (name === "get_available_slots") {
+      const facility = await getFacilityByName(String(args.facility_name));
+      if (!facility) return JSON.stringify({ error: `Fasilitas '${args.facility_name}' tidak ditemukan` });
+      const slots = await getAvailableSlotsForDay(
+        facility.id,
+        String(args.date),
+        facility.openTime,
+        facility.closeTime
+      );
+      return JSON.stringify({
+        facility: facility.name,
+        date: args.date,
+        open_time: facility.openTime,
+        close_time: facility.closeTime,
+        available_slots: slots,
+        total_available: slots.length,
+        message:
+          slots.length > 0
+            ? `Slot tersedia: ${slots.join(", ")}`
+            : `Tidak ada slot yang tersedia pada tanggal ini`,
+      });
+    }
+
+    if (name === "calculate_booking_price") {
+      const facility = await getFacilityByName(String(args.facility_name));
+      if (!facility) return JSON.stringify({ error: `Fasilitas '${args.facility_name}' tidak ditemukan` });
+      const startMin =
+        parseInt(String(args.start_time).split(":")[0]) * 60 +
+        parseInt(String(args.start_time).split(":")[1] || "0");
+      const endMin = startMin + Number(args.duration_hours) * 60;
+      const endTime = `${String(Math.floor(endMin / 60) % 24).padStart(2, "0")}:${String(endMin % 60).padStart(2, "0")}`;
+      const price = await calculatePrice(
+        facility.id,
+        String(args.date),
+        String(args.start_time),
+        endTime,
+        Number(args.duration_hours)
+      );
+      const fmtIDR = (n: number) => `Rp ${n.toLocaleString("id-ID")}`;
+      return JSON.stringify({
+        facility: facility.name,
+        date: args.date,
+        start_time: args.start_time,
+        end_time: endTime,
+        duration_hours: args.duration_hours,
+        base_price: price.basePrice,
+        final_price: price.finalPrice,
+        base_price_formatted: fmtIDR(price.basePrice),
+        final_price_formatted: fmtIDR(price.finalPrice),
+        applied_rules: price.appliedRules,
+        calculation: `${args.duration_hours} jam × ${fmtIDR(Number(facility.pricePerHour))}/jam = ${fmtIDR(price.basePrice)}${price.appliedRules.length > 0 ? ` → setelah pricing rules: ${fmtIDR(price.finalPrice)}` : ""}`,
+      });
+    }
+
+    if (name === "find_next_available_dates") {
+      const facility = await getFacilityByName(String(args.facility_name));
+      if (!facility) return JSON.stringify({ error: `Fasilitas '${args.facility_name}' tidak ditemukan` });
+      const daysToCheck = Math.min(Number(args.days_to_check ?? 7), 14);
+      const results: Array<{ date: string; available_slots: string[] }> = [];
+      const fromDate = new Date(String(args.from_date) + "T00:00:00+07:00");
+      for (let i = 0; i < daysToCheck; i++) {
+        const d = new Date(fromDate);
+        d.setDate(d.getDate() + i);
+        const dateStr = d.toISOString().split("T")[0];
+        const slots = await getAvailableSlotsForDay(facility.id, dateStr, facility.openTime, facility.closeTime);
+        if (slots.length > 0) results.push({ date: dateStr, available_slots: slots });
+        if (results.length >= 5) break; // Cukup 5 hari yang ada slot
+      }
+      return JSON.stringify({
+        facility: facility.name,
+        dates_with_availability: results,
+        summary:
+          results.length > 0
+            ? results.map((r) => `${r.date}: ${r.available_slots.join(", ")}`).join(" | ")
+            : `Tidak ada slot tersedia dalam ${daysToCheck} hari ke depan`,
+      });
+    }
+
+    return JSON.stringify({ error: `Tool '${name}' tidak dikenal` });
+  } catch (err: any) {
+    return JSON.stringify({ error: err?.message ?? "Tool execution error" });
+  }
+}
+
 // ─── Main AI Reply Function ───────────────────────────────────────────────────
 
 export interface AiReplyResult {
@@ -481,169 +668,126 @@ export async function generateAiReply(
   const apiKey = process.env.OPENAI_API_KEY;
 
   if (!enabled || !apiKey) {
-    return {
-      reply: "",
-      intent: "general_question",
-      shouldHandoffToBookingFlow: false,
-      fallbackToAdmin: true,
-    };
+    return { reply: "", intent: "general_question", shouldHandoffToBookingFlow: false, fallbackToAdmin: true };
   }
 
   const intent = detectIntent(message);
   const today = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Jakarta" });
 
-  // Extract date from message — support ISO, slash/dash, and Indonesian month names
-  const MONTH_MAP: Record<string, string> = {
-    januari: "01", jan: "01", februari: "02", feb: "02",
-    maret: "03", mar: "03", april: "04", apr: "04",
-    mei: "05", may: "05", juni: "06", jun: "06",
-    juli: "07", jul: "07", agustus: "08", agu: "08",
-    september: "09", sep: "09", oktober: "10", okt: "10",
-    november: "11", nov: "11", desember: "12", des: "12",
-  };
-  let requestedDate: string | undefined;
-  const isoMatch = message.match(/(\d{4}-\d{2}-\d{2})/);
-  if (isoMatch) {
-    requestedDate = isoMatch[1];
-  } else {
-    const idMonthMatch = message.toLowerCase().match(/(\d{1,2})\s+(januari|jan|februari|feb|maret|mar|april|apr|mei|may|juni|jun|juli|jul|agustus|agu|september|sep|oktober|okt|november|nov|desember|des)/);
-    if (idMonthMatch) {
-      const day = idMonthMatch[1].padStart(2, "0");
-      const month = MONTH_MAP[idMonthMatch[2]] ?? "01";
-      const year = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Jakarta" }).slice(0, 4);
-      requestedDate = `${year}-${month}-${day}`;
-    } else {
-      const slashMatch = message.match(/(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{4}))?/);
-      if (slashMatch) {
-        const day = slashMatch[1].padStart(2, "0");
-        const month = slashMatch[2].padStart(2, "0");
-        const year = slashMatch[3] ?? new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Jakarta" }).slice(0, 4);
-        requestedDate = `${year}-${month}-${day}`;
-      }
-    }
-  }
+  // Load DB context (static snapshot — tools will supplement with real-time data)
+  const ctx = await loadDbContext(customerPhone);
 
-  // Load DB context
-  const ctx = await loadDbContext(customerPhone, requestedDate);
-
-  // Log: context loaded
   await logAudit({
     action: "ai_db_context_loaded",
     entity: "wa_ai",
-    after: {
-      phone: customerPhone,
-      intent,
-      facilitiesCount: ctx.facilities.length,
-      promosCount: ctx.activePromos.length,
-      customerBookingsCount: ctx.customerBookings.length,
-    },
+    after: { phone: customerPhone, intent, facilitiesCount: ctx.facilities.length },
   }).catch(() => {});
 
-  // Admin action attempt guardrail
+  // ── Guardrail shortcuts (no OpenAI needed) ────────────────────────────────
   if (intent === "admin_action_attempt") {
-    const reply = "Tindakan tersebut hanya bisa dilakukan oleh admin. Silakan hubungi admin kami untuk bantuan lebih lanjut. 🙏";
-    await logAudit({
-      action: "ai_fallback_to_admin",
-      entity: "wa_ai",
-      after: { phone: customerPhone, message, reason: "admin_action_attempt" },
-    }).catch(() => {});
-    return { reply, intent, shouldHandoffToBookingFlow: false, fallbackToAdmin: true };
-  }
-
-  // talk_to_admin — return admin contact without calling OpenAI
-  if (intent === "talk_to_admin") {
-    const ctx = await loadDbContext(customerPhone);
-    const adminContact = ctx.settings.whatsapp || ctx.settings.phone || "";
-    const reply = adminContact
-      ? `👋 Baik, saya hubungkan Anda dengan admin kami.\n\n📞 *Admin WhatsApp:* ${adminContact}\n\nSilakan hubungi admin langsung untuk bantuan lebih lanjut. Jam operasional: *${ctx.settings.openHour}–${ctx.settings.closeHour}*. 🙏`
-      : `👋 Untuk berbicara langsung dengan admin, silakan hubungi kami melalui kontak yang tertera di website.\n\nJam operasional: *${ctx.settings.openHour}–${ctx.settings.closeHour}*.`;
-    await logAudit({
-      action: "ai_talk_to_admin",
-      entity: "wa_ai",
-      after: { phone: customerPhone, message },
-    }).catch(() => {});
-    return { reply, intent, shouldHandoffToBookingFlow: false, fallbackToAdmin: false };
-  }
-
-  // Booking intent — hand off to structured booking flow
-  if (intent === "booking_intent") {
+    await logAudit({ action: "ai_fallback_to_admin", entity: "wa_ai", after: { phone: customerPhone, reason: "admin_action_attempt" } }).catch(() => {});
     return {
-      reply: "",
-      intent,
-      shouldHandoffToBookingFlow: true,
-      fallbackToAdmin: false,
+      reply: "Tindakan tersebut hanya bisa dilakukan oleh admin. Silakan hubungi admin kami untuk bantuan lebih lanjut. 🙏",
+      intent, shouldHandoffToBookingFlow: false, fallbackToAdmin: true,
     };
   }
 
-  // Build messages for OpenAI
+  if (intent === "talk_to_admin") {
+    const adminContact = ctx.settings.whatsapp || ctx.settings.phone || "";
+    const reply = adminContact
+      ? `👋 Baik, saya hubungkan Anda dengan admin kami.\n\n📞 *Admin WhatsApp:* ${adminContact}\n\nJam operasional: *${ctx.settings.openHour}–${ctx.settings.closeHour}*. 🙏`
+      : `👋 Untuk berbicara langsung dengan admin, silakan hubungi kami melalui kontak di website.\n\nJam operasional: *${ctx.settings.openHour}–${ctx.settings.closeHour}*.`;
+    await logAudit({ action: "ai_talk_to_admin", entity: "wa_ai", after: { phone: customerPhone } }).catch(() => {});
+    return { reply, intent, shouldHandoffToBookingFlow: false, fallbackToAdmin: false };
+  }
+
+  if (intent === "booking_intent") {
+    return { reply: "", intent, shouldHandoffToBookingFlow: true, fallbackToAdmin: false };
+  }
+
+  // ── Build OpenAI messages ─────────────────────────────────────────────────
   const systemPrompt = buildSystemPrompt(ctx, customerPhone, today);
   const maxLen = parseInt(process.env.AI_SPORTCENTER_MAX_REPLY_LENGTH ?? "900", 10);
+  const baseURL = process.env.OPENAI_BASE_URL || undefined;
+  const openai = new OpenAI({ apiKey, ...(baseURL ? { baseURL } : {}) });
+  const model = process.env.OPENAI_MODEL ?? (baseURL?.includes("openrouter") ? "openai/gpt-4o-mini" : "gpt-4o-mini");
 
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
     { role: "system", content: systemPrompt },
-    // Last 8 turns of history — enough context to track multi-step conversations
     ...conversationHistory.slice(-8),
     { role: "user", content: message },
   ];
 
-  const baseURL = process.env.OPENAI_BASE_URL || undefined;
-  const openai = new OpenAI({ apiKey, ...(baseURL ? { baseURL } : {}) });
-
-  // Model: OpenRouter pakai format "openai/gpt-4o-mini", direct OpenAI pakai "gpt-4o-mini"
-  const model = process.env.OPENAI_MODEL ?? (baseURL?.includes("openrouter") ? "openai/gpt-4o-mini" : "gpt-4o-mini");
-
   try {
-    const completion = await openai.chat.completions.create({
-      model,
-      messages,
-      max_tokens: 500,
-      temperature: 0.3,
+    // ── Tool-calling loop (max 4 rounds) ──────────────────────────────────
+    let toolCallsUsed = 0;
+    const MAX_TOOL_ROUNDS = 4;
+
+    while (toolCallsUsed < MAX_TOOL_ROUNDS) {
+      const completion = await openai.chat.completions.create({
+        model,
+        messages,
+        max_tokens: 600,
+        temperature: 0.3,
+        tools: AI_TOOLS,
+        tool_choice: "auto",
+      });
+
+      const choice = completion.choices[0];
+      const assistantMsg = choice.message;
+
+      // No tool calls → final answer
+      if (!assistantMsg.tool_calls || assistantMsg.tool_calls.length === 0) {
+        let reply = assistantMsg.content?.trim() ?? "";
+        if (reply.length > maxLen) reply = reply.slice(0, maxLen - 3) + "...";
+
+        // Admin-action safety net
+        if (["saya setujui", "saya konfirmasi", "saya tandai lunas", "saya cancel"].some((kw) => reply.toLowerCase().includes(kw))) {
+          reply = "Tindakan tersebut hanya bisa dilakukan admin. Silakan hubungi admin kami. 🙏";
+        }
+
+        await logAudit({
+          action: "ai_reply_sent",
+          entity: "wa_ai",
+          after: { phone: customerPhone, intent, replyLength: reply.length, toolCallsUsed, model },
+        }).catch(() => {});
+
+        return { reply, intent, shouldHandoffToBookingFlow: false, fallbackToAdmin: false };
+      }
+
+      // Has tool calls → execute each, push results, loop
+      messages.push(assistantMsg as OpenAI.Chat.ChatCompletionMessageParam);
+
+      for (const tc of assistantMsg.tool_calls) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const tcAny = tc as any;
+        const fnName: string = tcAny.function?.name ?? "";
+        const fnArgs: string = tcAny.function?.arguments ?? "{}";
+        let toolArgs: Record<string, unknown> = {};
+        try { toolArgs = JSON.parse(fnArgs); } catch { /* ignore */ }
+        const result = await executeTool(fnName, toolArgs);
+        messages.push({ role: "tool", tool_call_id: tc.id, content: result });
+      }
+
+      toolCallsUsed++;
+    }
+
+    // Exceeded max rounds — ask for final answer without tools
+    const fallbackCompletion = await openai.chat.completions.create({
+      model, messages, max_tokens: 500, temperature: 0.3,
     });
-
-    let reply = completion.choices[0]?.message?.content?.trim() ?? "";
-
-    // Enforce length limit
-    if (reply.length > maxLen) {
-      reply = reply.slice(0, maxLen - 3) + "...";
-    }
-
-    // Safety check: if reply mentions approving/confirming/paying despite guardrails
-    const lowerReply = reply.toLowerCase();
-    const hasAdminAction = ["saya setujui", "saya konfirmasi", "saya tandai lunas", "sudah dikonfirmasi", "saya cancel"].some(
-      (kw) => lowerReply.includes(kw)
-    );
-    if (hasAdminAction) {
-      reply = "Tindakan tersebut hanya bisa dilakukan admin. Silakan hubungi admin kami. 🙏";
-    }
-
-    // Log: reply sent
-    await logAudit({
-      action: "ai_reply_sent",
-      entity: "wa_ai",
-      after: {
-        phone: customerPhone,
-        intent,
-        replyLength: reply.length,
-        model: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
-      },
-    }).catch(() => {});
-
+    let reply = fallbackCompletion.choices[0]?.message?.content?.trim() ?? "";
+    if (reply.length > maxLen) reply = reply.slice(0, maxLen - 3) + "...";
     return { reply, intent, shouldHandoffToBookingFlow: false, fallbackToAdmin: false };
+
   } catch (err: any) {
     console.error("[aiSportCenter] OpenAI error:", err?.message);
-
     await logAudit({
       action: "ai_fallback_to_admin",
       entity: "wa_ai",
       after: { phone: customerPhone, reason: "openai_error", error: err?.message },
     }).catch(() => {});
-
-    return {
-      reply: "",
-      intent,
-      shouldHandoffToBookingFlow: false,
-      fallbackToAdmin: true,
-    };
+    return { reply: "", intent, shouldHandoffToBookingFlow: false, fallbackToAdmin: true };
   }
 }
 
