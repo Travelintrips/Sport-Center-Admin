@@ -40,6 +40,12 @@ import { hashPassword } from "../lib/auth";
 import { syncStatusToBizportal } from "../lib/bizportalSync";
 import { calculateTax, recordTaxTransaction } from "../lib/tax";
 import { broadcastAvailabilityChange } from "../lib/supabase";
+import {
+  generateAiReply,
+  logAiMessageReceived,
+  logAiIntentDetected,
+  detectIntent,
+} from "../services/aiSportCenterService";
 
 const router = Router();
 const APP_URL = process.env.APP_URL ?? "";
@@ -2115,6 +2121,7 @@ router.post("/wa/fonnte/webhook", async (req, res) => {
     if (!msg || !phone) return;
 
     // 1. Audit log — every inbound message
+    await logAiMessageReceived(phone, msg, String(name));
     await logAudit({
       action: "customer_chat_received",
       entity: "wa_session",
@@ -2139,14 +2146,43 @@ router.post("/wa/fonnte/webhook", async (req, res) => {
       // If admin sends non-command, still allow normal flow
     }
 
-    // 3. Active session — continue conversation
+    // 3. Active session — continue conversation (always takes priority)
     const session = await getActiveSession(phone);
     if (session) {
       await continueSession(session, phone, msg);
       return;
     }
 
-    // 4. Status intent
+    // 4. AI Assistant (when enabled) — routes all intents:
+    //    booking_intent → hand off to structured flow
+    //    status_check   → answered by AI with DB data
+    //    everything else→ answered by AI grounded in DB
+    const aiEnabled = process.env.AI_SPORTCENTER_ENABLED !== "false" && !!process.env.OPENAI_API_KEY;
+    if (aiEnabled) {
+      const intent = detectIntent(msg);
+      await logAiIntentDetected(phone, msg, intent);
+
+      // booking_intent: go straight to structured booking session
+      if (intent === "booking_intent") {
+        await startBookingSession(phone, msg, String(name));
+        return;
+      }
+
+      const aiResult = await generateAiReply(phone, msg, []);
+
+      if (aiResult.shouldHandoffToBookingFlow) {
+        await startBookingSession(phone, msg, String(name));
+        return;
+      }
+
+      if (!aiResult.fallbackToAdmin && aiResult.reply) {
+        await sendWAMsg(phone, aiResult.reply);
+        return;
+      }
+      // if AI failed/disabled, fall through to legacy handlers
+    }
+
+    // 5. Legacy fallback: status intent (when AI is off or errored)
     if (isStatusIntent(msg)) {
       const bookings = await db.select().from(bookingsTable)
         .where(eq(bookingsTable.customerPhone, phone))
@@ -2172,13 +2208,13 @@ router.post("/wa/fonnte/webhook", async (req, res) => {
       return;
     }
 
-    // 5. Booking intent — start new session
+    // 6. Legacy fallback: explicit booking keyword (when AI is off or errored)
     if (isBookingIntent(msg)) {
       await startBookingSession(phone, msg, String(name));
       return;
     }
 
-    // 6. Unknown message
+    // 7. Final fallback — unknown message
     await logAudit({
       action: "unknown_message_received",
       entity: "wa_session",
