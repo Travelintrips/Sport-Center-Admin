@@ -18,6 +18,7 @@ export * from './bankMutationCandidatesResult';
 export * from './bankMutationImportResult';
 export * from './bankMutationImportResultMatching';
 export * from './bankMutationListResult';
+export * from './bankMutationRejectInput';
 export * from './bankMutationStatus';
 export * from './bankMutationWithMatches';
 export * from './bankReconciliationMatch';

@@ -29,6 +29,7 @@ import type {
   BankMutationCandidatesResult,
   BankMutationImportResult,
   BankMutationListResult,
+  BankMutationRejectInput,
   BankMutationWithMatches,
   BankSheetPullResult,
   BankSheetPushInput,
@@ -7632,14 +7633,16 @@ export const getRejectBankMutationUrl = (mutationId: number,) => {
 /**
  * @summary Reject a bank mutation
  */
-export const rejectBankMutation = async (mutationId: number, options?: RequestInit): Promise<OkResult> => {
+export const rejectBankMutation = async (mutationId: number,
+    bankMutationRejectInput?: BankMutationRejectInput, options?: RequestInit): Promise<OkResult> => {
 
   return customFetch<OkResult>(getRejectBankMutationUrl(mutationId),
   {
     ...options,
-    method: 'POST'
-
-
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      bankMutationRejectInput,)
   }
 );}
 
@@ -7647,8 +7650,8 @@ export const rejectBankMutation = async (mutationId: number, options?: RequestIn
 
 
 export const getRejectBankMutationMutationOptions = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rejectBankMutation>>, TError,{mutationId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof rejectBankMutation>>, TError,{mutationId: number}, TContext> => {
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rejectBankMutation>>, TError,{mutationId: number;data?: BodyType<BankMutationRejectInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof rejectBankMutation>>, TError,{mutationId: number;data?: BodyType<BankMutationRejectInput>}, TContext> => {
 
 const mutationKey = ['rejectBankMutation'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
@@ -7660,10 +7663,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof rejectBankMutation>>, {mutationId: number}> = (props) => {
-          const {mutationId} = props ?? {};
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof rejectBankMutation>>, {mutationId: number;data?: BodyType<BankMutationRejectInput>}> = (props) => {
+          const {mutationId,data} = props ?? {};
 
-          return  rejectBankMutation(mutationId,requestOptions)
+          return  rejectBankMutation(mutationId,data,requestOptions)
         }
 
 
@@ -7674,18 +7677,18 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
   return  { mutationFn, ...mutationOptions }}
 
     export type RejectBankMutationMutationResult = NonNullable<Awaited<ReturnType<typeof rejectBankMutation>>>
-
+    export type RejectBankMutationMutationBody = BodyType<BankMutationRejectInput> | undefined
     export type RejectBankMutationMutationError = ErrorType<unknown>
 
     /**
  * @summary Reject a bank mutation
  */
 export const useRejectBankMutation = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rejectBankMutation>>, TError,{mutationId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rejectBankMutation>>, TError,{mutationId: number;data?: BodyType<BankMutationRejectInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof rejectBankMutation>>,
         TError,
-        {mutationId: number},
+        {mutationId: number;data?: BodyType<BankMutationRejectInput>},
         TContext
       > => {
       return useMutation(getRejectBankMutationMutationOptions(options));

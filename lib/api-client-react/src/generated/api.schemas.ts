@@ -1394,6 +1394,13 @@ export interface BankMutationApproveInput {
   sheetName?: string;
 }
 
+export interface BankMutationRejectInput {
+  /** Google Sheet ID untuk auto-update kolom H status rekonsiliasi */
+  sheetId?: string;
+  /** Nama tab/sheet yang aktif */
+  sheetName?: string;
+}
+
 export interface RunMatchingInput {
   mutationIds?: number[];
 }

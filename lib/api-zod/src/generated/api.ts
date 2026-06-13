@@ -2488,6 +2488,11 @@ export const RejectBankMutationParams = zod.object({
   "mutationId": zod.coerce.number()
 })
 
+export const RejectBankMutationBody = zod.object({
+  "sheetId": zod.string().optional().describe('Google Sheet ID untuk auto-update kolom H status rekonsiliasi'),
+  "sheetName": zod.string().optional().describe('Nama tab\/sheet yang aktif')
+})
+
 export const RejectBankMutationResponse = zod.object({
   "ok": zod.boolean()
 })

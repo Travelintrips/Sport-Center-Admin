@@ -800,7 +800,10 @@ function MutationRow({ mutation, qc }: { mutation: any; qc: any }) {
                 variant="outline"
                 className="gap-1.5 text-xs text-red-600 border-red-200 hover:bg-red-50"
                 disabled={isPending}
-                onClick={() => rejectMutation.mutate({ mutationId: mutation.id })}
+                onClick={() => {
+                    const { sheetId, sheetName } = getSheetContext();
+                    rejectMutation.mutate({ mutationId: mutation.id, data: { sheetId, sheetName } });
+                  }}
               >
                 <XCircle size={13} /> Tolak
               </Button>

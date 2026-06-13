@@ -2088,6 +2088,11 @@ paths:
           name: mutationId
           required: true
           schema: { type: integer }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BankMutationRejectInput"
       responses:
         "200":
           description: Rejected
@@ -4090,6 +4095,16 @@ components:
           type: string
         candidateId:
           type: integer
+        sheetId:
+          type: string
+          description: Google Sheet ID untuk auto-update kolom H status rekonsiliasi
+        sheetName:
+          type: string
+          description: Nama tab/sheet yang aktif
+
+    BankMutationRejectInput:
+      type: object
+      properties:
         sheetId:
           type: string
           description: Google Sheet ID untuk auto-update kolom H status rekonsiliasi

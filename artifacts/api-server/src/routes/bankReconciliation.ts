@@ -430,6 +430,29 @@ router.post("/bank-reconciliation/:mutationId/reject", adminMiddleware, async (r
       .set({ status: "rejected" })
       .where(eq(bankReconciliationMatchesTable.mutationId, mutationId));
 
+    // ── Auto-write ke Google Sheet kolom H ─────────────────────────────
+    if (isGoogleSheetsConfigured()) {
+      const { sheetId, sheetName } = req.body as { sheetId?: string; sheetName?: string };
+      if (sheetId) {
+        const [updated] = await db
+          .select()
+          .from(bankMutationsTable)
+          .where(eq(bankMutationsTable.id, mutationId))
+          .limit(1);
+
+        if (updated) {
+          writeApprovalToSheetRow(
+            sheetId,
+            sheetName ?? undefined,
+            updated.transactionDate,
+            updated.description,
+            "DITOLAK",
+            "",
+          ).catch((err) => req.log.warn({ err }, "Sheet write kolom H (reject) gagal (non-fatal)"));
+        }
+      }
+    }
+
     res.json({ ok: true });
   } catch (err: any) {
     res.status(500).json({ error: err?.message ?? "Gagal reject" });
