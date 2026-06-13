@@ -1185,6 +1185,52 @@ router.get("/bank-reconciliation/mutations/:id/journal", financeMiddleware, asyn
   }
 });
 
+// PATCH /bank-reconciliation/mutations/:id/journal — koreksi COA tanpa void & repost
+router.patch("/bank-reconciliation/mutations/:id/journal", superAdminMiddleware, async (req, res) => {
+  try {
+    const mutationId = parseInt(req.params.id);
+    if (isNaN(mutationId)) { res.status(400).json({ error: "ID tidak valid" }); return; }
+
+    const { debitAccountCode, debitAccountName, creditAccountCode, creditAccountName, correctionNote } = req.body as {
+      debitAccountCode: string; debitAccountName: string;
+      creditAccountCode: string; creditAccountName: string;
+      correctionNote?: string;
+    };
+    if (!debitAccountCode || !debitAccountName || !creditAccountCode || !creditAccountName) {
+      res.status(400).json({ error: "Kode dan nama akun debit & kredit wajib diisi" }); return;
+    }
+
+    const [mut] = await db.select({ transactionDate: bankMutationsTable.transactionDate, bankAccountId: bankMutationsTable.bankAccountId, status: bankMutationsTable.status })
+      .from(bankMutationsTable).where(eq(bankMutationsTable.id, mutationId)).limit(1);
+    if (!mut) { res.status(404).json({ error: "Mutasi tidak ditemukan" }); return; }
+    if (mut.status !== "approved") { res.status(400).json({ error: "Hanya jurnal dari mutasi approved yang bisa dikoreksi" }); return; }
+    if (await isPeriodLocked(mut.transactionDate, mut.bankAccountId)) {
+      res.status(423).json({ error: "Periode sudah ditutup. Koreksi COA tidak dapat dilakukan." }); return;
+    }
+
+    const [entry] = await db.select({ id: bankJournalEntriesTable.id }).from(bankJournalEntriesTable)
+      .where(eq(bankJournalEntriesTable.mutationId, mutationId)).limit(1);
+    if (!entry) { res.status(404).json({ error: "Jurnal belum diposting untuk mutasi ini" }); return; }
+
+    const adminUser = (req as any).user;
+    await db.update(bankJournalEntriesTable)
+      .set({ debitAccountCode, debitAccountName, creditAccountCode, creditAccountName })
+      .where(eq(bankJournalEntriesTable.mutationId, mutationId));
+
+    await db.insert(auditLogsTable).values({
+      userId: adminUser?.userId, userRole: adminUser?.role,
+      action: "edit_journal_coa", entity: "bank_mutation", entityId: mutationId,
+      after: { debitAccountCode, debitAccountName, creditAccountCode, creditAccountName, correctionNote: correctionNote ?? null },
+      ipAddress: req.ip, userAgent: req.headers["user-agent"] as string,
+    });
+
+    res.json({ ok: true });
+  } catch (err: any) {
+    req.log.error({ err }, "Bank reconciliation journal COA patch error");
+    res.status(500).json({ error: err?.message ?? "Gagal koreksi COA jurnal" });
+  }
+});
+
 // GET /bank-reconciliation/mutations/:id/candidates
 router.get("/bank-reconciliation/mutations/:id/candidates", adminMiddleware, async (req, res) => {
   try {

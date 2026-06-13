@@ -841,16 +841,61 @@ function MutationRow({ mutation, qc }: { mutation: any; qc: any }) {
   const isPending = approveMutation.isPending || rejectMutation.isPending;
   const [journalLines, setJournalLines] = useState<any[]>([]);
   const [journalLoading, setJournalLoading] = useState(false);
+  const [editingCOA, setEditingCOA] = useState(false);
+  const [savingCOA, setSavingCOA] = useState(false);
+  const [coaForm, setCoaForm] = useState({ debitAccountCode: "", debitAccountName: "", creditAccountCode: "", creditAccountName: "", correctionNote: "" });
 
-  useEffect(() => {
-    if (!expanded || !mutation.accountingPosted || !mutation.journalId) return;
+  const COA_OPTIONS = [
+    { code: "1001", name: "Kas/Bank" },
+    { code: "2001", name: "Uang Muka Diterima" },
+    { code: "2002", name: "Refund Payable" },
+    { code: "2003", name: "Hutang Pajak" },
+    { code: "4001", name: "Pendapatan Booking" },
+    { code: "6001", name: "Biaya Administrasi Bank" },
+    { code: "6002", name: "Beban Vendor/Pemasok" },
+    { code: "6003", name: "Beban Sewa" },
+    { code: "6005", name: "Beban Operasional" },
+    { code: "6099", name: "Beban Lain-lain" },
+  ];
+
+  const reloadJournal = () => {
     setJournalLoading(true);
     fetch(`${API_BASE}/bank-reconciliation/mutations/${mutation.id}/journal`, { headers: authHeaders() })
       .then((r) => r.json())
       .then((d) => setJournalLines(d.entries ?? []))
       .catch(() => {})
       .finally(() => setJournalLoading(false));
+  };
+
+  useEffect(() => {
+    if (!expanded || !mutation.accountingPosted || !mutation.journalId) return;
+    reloadJournal();
   }, [expanded, mutation.id, mutation.accountingPosted, mutation.journalId]);
+
+  const startEditCOA = (line: any) => {
+    setCoaForm({ debitAccountCode: line.debitAccountCode, debitAccountName: line.debitAccountName, creditAccountCode: line.creditAccountCode, creditAccountName: line.creditAccountName, correctionNote: "" });
+    setEditingCOA(true);
+  };
+
+  const handleSaveCOA = async () => {
+    setSavingCOA(true);
+    try {
+      const r = await fetch(`${API_BASE}/bank-reconciliation/mutations/${mutation.id}/journal`, {
+        method: "PATCH",
+        headers: { ...authHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify(coaForm),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? "Gagal simpan");
+      toast({ title: "✅ COA jurnal berhasil dikoreksi" });
+      setEditingCOA(false);
+      reloadJournal();
+    } catch (e: any) {
+      toast({ title: e.message, variant: "destructive" });
+    } finally {
+      setSavingCOA(false);
+    }
+  };
 
   const [isPostingJournal, setIsPostingJournal] = useState(false);
   const handlePostJournal = async () => {
@@ -1090,6 +1135,7 @@ function MutationRow({ mutation, qc }: { mutation: any; qc: any }) {
                             <th className="px-3 py-2 text-left font-semibold text-muted-foreground">COA Kredit</th>
                             <th className="px-3 py-2 text-right font-semibold text-muted-foreground">Nominal</th>
                             <th className="px-3 py-2 text-left font-semibold text-muted-foreground">Diposting oleh</th>
+                            <th className="px-2 py-2" />
                           </tr>
                         </thead>
                         <tbody>
@@ -1104,11 +1150,91 @@ function MutationRow({ mutation, qc }: { mutation: any; qc: any }) {
                                 <span className="text-muted-foreground ml-1.5">{line.creditAccountName}</span>
                               </td>
                               <td className="px-3 py-2 text-right font-semibold">{formatCurrency(parseFloat(line.amount))}</td>
-                              <td className="px-3 py-2 text-muted-foreground truncate max-w-[120px]">{line.postedBy ?? "—"}</td>
+                              <td className="px-3 py-2 text-muted-foreground truncate max-w-[100px]">{line.postedBy ?? "—"}</td>
+                              <td className="px-2 py-2 text-right">
+                                {!editingCOA && (
+                                  <button
+                                    className="text-[10px] px-2 py-0.5 rounded border border-purple-300 bg-purple-50 text-purple-700 font-semibold hover:bg-purple-100 transition-colors"
+                                    onClick={() => startEditCOA(line)}
+                                  >
+                                    Edit COA
+                                  </button>
+                                )}
+                              </td>
                             </tr>
                           ))}
                         </tbody>
                       </table>
+
+                      {/* Inline Edit Form */}
+                      {editingCOA && (
+                        <div className="border-t bg-purple-50/60 p-3 space-y-3">
+                          <p className="text-xs font-semibold text-purple-800">Koreksi COA Jurnal</p>
+                          <datalist id="coa-list">
+                            {COA_OPTIONS.map((c) => <option key={c.code} value={c.code}>{c.name}</option>)}
+                          </datalist>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            <div className="space-y-1">
+                              <label className="text-[10px] font-semibold text-blue-700 uppercase tracking-wide">Akun Debit</label>
+                              <div className="flex gap-1">
+                                <input
+                                  list="coa-list"
+                                  className="border rounded px-2 py-1 text-xs w-20 font-mono bg-white"
+                                  placeholder="Kode"
+                                  value={coaForm.debitAccountCode}
+                                  onChange={(e) => {
+                                    const found = COA_OPTIONS.find((c) => c.code === e.target.value);
+                                    setCoaForm((f) => ({ ...f, debitAccountCode: e.target.value, debitAccountName: found?.name ?? f.debitAccountName }));
+                                  }}
+                                />
+                                <input
+                                  className="border rounded px-2 py-1 text-xs flex-1 bg-white"
+                                  placeholder="Nama akun"
+                                  value={coaForm.debitAccountName}
+                                  onChange={(e) => setCoaForm((f) => ({ ...f, debitAccountName: e.target.value }))}
+                                />
+                              </div>
+                            </div>
+                            <div className="space-y-1">
+                              <label className="text-[10px] font-semibold text-orange-700 uppercase tracking-wide">Akun Kredit</label>
+                              <div className="flex gap-1">
+                                <input
+                                  list="coa-list"
+                                  className="border rounded px-2 py-1 text-xs w-20 font-mono bg-white"
+                                  placeholder="Kode"
+                                  value={coaForm.creditAccountCode}
+                                  onChange={(e) => {
+                                    const found = COA_OPTIONS.find((c) => c.code === e.target.value);
+                                    setCoaForm((f) => ({ ...f, creditAccountCode: e.target.value, creditAccountName: found?.name ?? f.creditAccountName }));
+                                  }}
+                                />
+                                <input
+                                  className="border rounded px-2 py-1 text-xs flex-1 bg-white"
+                                  placeholder="Nama akun"
+                                  value={coaForm.creditAccountName}
+                                  onChange={(e) => setCoaForm((f) => ({ ...f, creditAccountName: e.target.value }))}
+                                />
+                              </div>
+                            </div>
+                          </div>
+
+                          <input
+                            className="border rounded px-2 py-1 text-xs w-full bg-white"
+                            placeholder="Catatan koreksi (opsional)"
+                            value={coaForm.correctionNote}
+                            onChange={(e) => setCoaForm((f) => ({ ...f, correctionNote: e.target.value }))}
+                          />
+
+                          <div className="flex gap-2">
+                            <Button size="sm" className="text-xs h-7 gap-1 bg-purple-600 hover:bg-purple-700" disabled={savingCOA} onClick={handleSaveCOA}>
+                              {savingCOA ? "Menyimpan..." : "Simpan Koreksi"}
+                            </Button>
+                            <Button size="sm" variant="outline" className="text-xs h-7" onClick={() => setEditingCOA(false)}>Batal</Button>
+                          </div>
+                          <p className="text-[10px] text-purple-600">⚠ Koreksi COA dicatat di audit log. Nominal tidak berubah.</p>
+                        </div>
+                      )}
                     </div>
                   ) : null}
                 </>
