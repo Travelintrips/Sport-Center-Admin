@@ -1,5 +1,6 @@
 import { db, notificationTemplatesTable, settingsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
+import { trackSentMessage } from "./waSentTracker";
 
 const ENV_FONNTE_TOKEN = process.env.FONNTE_TOKEN || "";
 const ENV_FONNTE_ADMIN_WA = process.env.FONNTE_ADMIN_WA || "";
@@ -32,8 +33,11 @@ async function getWaConfig(): Promise<{ token: string; adminPhones: string[] }> 
 }
 
 async function sendWA(phone: string, message: string): Promise<void> {
+  if (!phone) return;
+  // Catat SEGERA sebelum await apapun — Fonnte echo bisa datang saat getWaConfig() pending
+  trackSentMessage(message);
   const { token } = await getWaConfig();
-  if (!token || !phone) return;
+  if (!token) return;
   try {
     const cleanPhone = phone.replace(/^0/, "62").replace(/\D/g, "");
     await fetch("https://api.fonnte.com/send", {

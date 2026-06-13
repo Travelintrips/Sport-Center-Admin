@@ -46,6 +46,7 @@ import {
   logAiIntentDetected,
   detectIntent,
 } from "../services/aiSportCenterService";
+import { trackSentMessage, isBotEcho } from "../lib/waSentTracker";
 
 const router = Router();
 const APP_URL = process.env.APP_URL ?? "";
@@ -950,10 +951,11 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
 // ─── Helpers for Fonnte webhook ───────────────────────────────────────────────
 
 async function sendWAMsg(phone: string, message: string): Promise<void> {
-  const FONNTE_TOKEN = process.env.FONNTE_TOKEN || "";
-  if (!FONNTE_TOKEN || !phone) return;
-  // Catat teks outgoing agar Fonnte echo-back bisa diblokir di webhook
+  if (!phone) return;
+  // Catat SEGERA sebelum pengecekan token — race-condition: Fonnte bisa echo sebelum kita track
   trackSentMessage(message);
+  const FONNTE_TOKEN = process.env.FONNTE_TOKEN || "";
+  if (!FONNTE_TOKEN) return;
   try {
     await fetch("https://api.fonnte.com/send", {
       method: "POST",
@@ -2299,23 +2301,38 @@ async function execCreateBookingFromSession(session: WaBookingSessionRow, phone:
 const _recentMsgHashes = new Map<string, number>(); // "phone:msgHash" → timestamp
 
 // ─── Outgoing message cache — blokir Fonnte echo-back ────────────────────────
-// Setiap kali bot kirim pesan via sendWAMsg, simpan teks-nya di sini.
-// Kalau Fonnte kirim balik pesan itu ke webhook, langsung diabaikan.
-const _sentMsgTexts = new Map<string, number>(); // msgTextHash → timestamp
-function trackSentMessage(msg: string): void {
-  const key = msg.trim().toLowerCase().substring(0, 120);
-  _sentMsgTexts.set(key, Date.now());
-  setTimeout(() => _sentMsgTexts.delete(key), 60 * 1000); // hapus setelah 60 detik
-}
-function isBotEcho(msg: string): boolean {
-  const key = msg.trim().toLowerCase().substring(0, 120);
-  const ts = _sentMsgTexts.get(key);
-  return !!ts && Date.now() - ts < 60 * 1000;
+// trackSentMessage & isBotEcho diimpor dari ../lib/waSentTracker (shared dengan notifications.ts)
+
+// Pola pesan yang HANYA bisa berasal dari bot — blokir tanpa perlu timing cache
+const BOT_MESSAGE_PATTERNS = [
+  /^🏅 \*BOOKING BARU SPORT CENTER\*/,
+  /^⏳ \*Booking Diterima — Menunggu Persetujuan Admin\*/,
+  /^✅ \*Booking Disetujui!\*/,
+  /^❌ \*Booking Ditolak\*/,
+  /^💳 \*Pembayaran Dikonfirmasi\*/,
+  /^⏰ \*Booking Expired\*/,
+  /^📎 Untuk upload bukti pembayaran/,
+  /^⚠️ \*Jadwal Tidak Tersedia\*/,
+  /^✅ Slot jam \*\d{2}:\d{2}\* tersedia!/,
+  /^🏟️ \*Fasilitas tersedia:\*/,
+  /^📅 Tanggal berapa mau booking/,
+  /^⏰ Jam berapa mau mulai\?/,
+  /^⏱️ Berapa lama\? \(min 1 jam\)/,
+  /^👤 Atas nama siapa booking ini\?/,
+  /^📋 Berikut ringkasan booking/,
+  /^✅ Saya cek tersedia\. Berikut detail booking:/,
+];
+
+function isBotGeneratedMessage(msg: string): boolean {
+  return BOT_MESSAGE_PATTERNS.some((p) => p.test(msg.trimStart()));
 }
 
 function isDuplicateByContent(phone: string, msg: string): boolean {
-  // Blokir jika teks ini persis sama dengan yang baru saja bot kirim (Fonnte echo)
+  // Layer 1: timing-based cache (semua pesan outgoing yang sudah di-track)
   if (isBotEcho(msg)) return true;
+
+  // Layer 2: pattern-based — pesan yang jelas dari bot, blokir tanpa cache
+  if (isBotGeneratedMessage(msg)) return true;
 
   const hash = `${phone}:${msg.trim().toLowerCase().substring(0, 80)}`;
   const now = Date.now();
