@@ -646,6 +646,50 @@ function MutationRow({ mutation, qc }: { mutation: any; qc: any }) {
 
       {expanded && (
         <div className="border-t p-3 bg-muted/10 space-y-3">
+          {/* Perbandingan Nominal Mutasi vs OCR */}
+          {!matchesQuery.isLoading && matches.length > 0 && (() => {
+            const mutAmt = parseFloat(mutation.amount ?? "0");
+            // Ambil OCR amount terbaik dari kandidat payment yang sudah di-scan
+            const ocrCandidates = matches.filter((m: any) => m.ocrAmount != null);
+            if (!ocrCandidates.length) return null;
+            const best = ocrCandidates.reduce((a: any, b: any) =>
+              Math.abs(parseFloat(a.ocrAmount) - mutAmt) <= Math.abs(parseFloat(b.ocrAmount) - mutAmt) ? a : b
+            );
+            const ocrAmt = parseFloat(best.ocrAmount);
+            const selisih = Math.abs(mutAmt - ocrAmt);
+            const pct = mutAmt > 0 ? (selisih / mutAmt) * 100 : 100;
+            const isMatch = pct <= 1;
+            const isClose = pct <= 5;
+            return (
+              <div className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-xs ${
+                isMatch ? "bg-green-50 border-green-200" : isClose ? "bg-yellow-50 border-yellow-200" : "bg-red-50 border-red-200"
+              }`}>
+                <div className="flex-1 grid grid-cols-3 gap-2">
+                  <div>
+                    <p className="text-muted-foreground font-medium mb-0.5">Nominal Mutasi</p>
+                    <p className={`font-bold ${mutation.direction === "IN" ? "text-green-700" : "text-red-700"}`}>
+                      {formatCurrency(mutAmt)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground font-medium mb-0.5">Nominal OCR</p>
+                    <p className="font-bold text-amber-700">{formatCurrency(ocrAmt)}</p>
+                    <p className="text-[10px] text-muted-foreground">Payment #{best.candidateId}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground font-medium mb-0.5">Selisih</p>
+                    <p className={`font-bold ${isMatch ? "text-green-700" : isClose ? "text-yellow-700" : "text-red-700"}`}>
+                      {selisih === 0 ? "✓ Sama persis" : `${formatCurrency(selisih)} (${pct.toFixed(1)}%)`}
+                    </p>
+                  </div>
+                </div>
+                <div className={`shrink-0 text-lg ${isMatch ? "text-green-500" : isClose ? "text-yellow-500" : "text-red-500"}`}>
+                  {isMatch ? "✓" : isClose ? "≈" : "✗"}
+                </div>
+              </div>
+            );
+          })()}
+
           {/* Candidates */}
           <div>
             <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Kandidat Match</div>
