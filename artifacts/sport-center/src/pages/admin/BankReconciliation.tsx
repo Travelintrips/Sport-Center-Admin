@@ -1468,6 +1468,208 @@ function ReportTab() {
   );
 }
 
+// ===== Audit Trail Tab =====
+const ACTION_LABELS: Record<string, { label: string; color: string }> = {
+  approve:             { label: "Approve", color: "bg-green-100 text-green-800" },
+  reject:              { label: "Reject", color: "bg-red-100 text-red-800" },
+  approve_candidate:   { label: "Approve Kandidat", color: "bg-emerald-100 text-emerald-800" },
+  reject_candidate:    { label: "Reject Kandidat", color: "bg-orange-100 text-orange-800" },
+  post_journal:        { label: "Posting Jurnal", color: "bg-blue-100 text-blue-800" },
+  post_journal_bulk:   { label: "Bulk Posting", color: "bg-blue-100 text-blue-800" },
+  edit_journal_coa:    { label: "Koreksi COA", color: "bg-purple-100 text-purple-800" },
+  mark_unmatched:      { label: "Tandai Unmatched", color: "bg-yellow-100 text-yellow-800" },
+  mark_duplicate:      { label: "Tandai Duplikat", color: "bg-yellow-100 text-yellow-800" },
+  delete_mutations:    { label: "Hapus Mutasi", color: "bg-red-100 text-red-800" },
+  close_period:        { label: "Close Periode", color: "bg-gray-100 text-gray-800" },
+  reopen_period:       { label: "Reopen Periode", color: "bg-indigo-100 text-indigo-800" },
+};
+
+function AuditTrailTab() {
+  const [rows, setRows] = useState<any[]>([]);
+  const [total, setTotal] = useState(0);
+  const [actionCounts, setActionCounts] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
+  const [filterAction, setFilterAction] = useState("all");
+  const [search, setSearch] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [expandedRow, setExpandedRow] = useState<number | null>(null);
+  const PAGE_SIZE = 50;
+
+  const load = async (pg = page) => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams({ page: String(pg), pageSize: String(PAGE_SIZE) });
+      if (filterAction !== "all") params.set("action", filterAction);
+      if (search) params.set("search", search);
+      if (dateFrom) params.set("dateFrom", dateFrom);
+      if (dateTo) params.set("dateTo", dateTo);
+      const r = await fetch(`${API_BASE}/bank-reconciliation/audit-trail?${params}`, { headers: authHeaders() });
+      const d = await r.json();
+      setRows(d.rows ?? []);
+      setTotal(d.total ?? 0);
+      setActionCounts(d.actionCounts ?? []);
+    } catch { /* ignore */ }
+    setLoading(false);
+  };
+
+  useEffect(() => { load(1); setPage(1); }, [filterAction, search, dateFrom, dateTo]);
+  useEffect(() => { load(page); }, [page]);
+
+  const totalPages = Math.ceil(total / PAGE_SIZE);
+
+  const fmtTime = (ts: string) =>
+    new Date(ts).toLocaleString("id-ID", { timeZone: "Asia/Jakarta", day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="font-bold text-lg">Audit Trail Bank Rekonsiliasi</h2>
+          <p className="text-xs text-muted-foreground">Semua aksi admin: approve, reject, posting jurnal, koreksi COA, closing, dll.</p>
+        </div>
+        <Button size="sm" variant="outline" className="text-xs h-7 gap-1" onClick={() => load(page)}>↻ Refresh</Button>
+      </div>
+
+      {/* Action summary chips */}
+      {actionCounts.length > 0 && (
+        <div className="flex gap-1.5 flex-wrap">
+          {actionCounts.slice(0, 8).map((ac) => {
+            const lbl = ACTION_LABELS[ac.action];
+            return (
+              <button
+                key={ac.action}
+                className={`px-2.5 py-1 rounded-full text-xs font-semibold border transition-colors ${filterAction === ac.action ? "ring-2 ring-primary" : ""} ${lbl?.color ?? "bg-muted text-muted-foreground"}`}
+                onClick={() => setFilterAction(filterAction === ac.action ? "all" : ac.action)}
+              >
+                {lbl?.label ?? ac.action} <span className="opacity-70">({ac.count})</span>
+              </button>
+            );
+          })}
+          {filterAction !== "all" && (
+            <button className="px-2.5 py-1 rounded-full text-xs border bg-background" onClick={() => setFilterAction("all")}>✕ Reset filter</button>
+          )}
+        </div>
+      )}
+
+      {/* Filter bar */}
+      <Card>
+        <CardContent className="p-3">
+          <div className="flex flex-col sm:flex-row gap-2 flex-wrap">
+            <div className="relative flex-1 min-w-[160px]">
+              <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <Input className="pl-8 text-xs h-8" placeholder="Cari aksi, IP, role..." value={search} onChange={(e) => setSearch(e.target.value)} />
+            </div>
+            <select className="border rounded-md px-2 py-1.5 text-xs bg-background" value={filterAction} onChange={(e) => setFilterAction(e.target.value)}>
+              <option value="all">Semua Aksi</option>
+              {Object.entries(ACTION_LABELS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+            </select>
+            <Input type="date" className="text-xs h-8 w-32" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+            <Input type="date" className="text-xs h-8 w-32" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Table */}
+      <Card>
+        <CardContent className="p-0 overflow-x-auto">
+          {loading ? (
+            <div className="space-y-2 p-4">{[1,2,3,4,5].map(i => <Skeleton key={i} className="h-10 rounded" />)}</div>
+          ) : rows.length === 0 ? (
+            <div className="py-12 text-center text-muted-foreground text-sm">Tidak ada riwayat aksi ditemukan</div>
+          ) : (
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b bg-muted/40">
+                  <th className="px-3 py-2.5 text-left font-semibold">Waktu (WIB)</th>
+                  <th className="px-3 py-2.5 text-left font-semibold">Aksi</th>
+                  <th className="px-3 py-2.5 text-left font-semibold">User / Role</th>
+                  <th className="px-3 py-2.5 text-left font-semibold">Entity ID</th>
+                  <th className="px-3 py-2.5 text-left font-semibold">IP</th>
+                  <th className="px-3 py-2.5 text-center font-semibold">Detail</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row) => {
+                  const lbl = ACTION_LABELS[row.action];
+                  const isExpanded = expandedRow === row.id;
+                  return (
+                    <>
+                      <tr key={row.id} className={`border-b hover:bg-muted/20 transition-colors ${isExpanded ? "bg-muted/10" : ""}`}>
+                        <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">{fmtTime(row.createdAt)}</td>
+                        <td className="px-3 py-2">
+                          <Badge className={`text-[10px] font-semibold ${lbl?.color ?? "bg-muted text-muted-foreground"}`}>
+                            {lbl?.label ?? row.action}
+                          </Badge>
+                        </td>
+                        <td className="px-3 py-2">
+                          <span className="font-medium">{row.userName ?? `User #${row.userId ?? "?"}`}</span>
+                          {row.userRole && <span className="ml-1 text-muted-foreground">({row.userRole})</span>}
+                        </td>
+                        <td className="px-3 py-2 font-mono text-muted-foreground">
+                          {row.entityId ? `#${row.entityId}` : "—"}
+                        </td>
+                        <td className="px-3 py-2 text-muted-foreground font-mono">{row.ipAddress ?? "—"}</td>
+                        <td className="px-3 py-2 text-center">
+                          {(row.before || row.after) && (
+                            <button
+                              className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${isExpanded ? "bg-primary text-primary-foreground border-primary" : "border-border hover:bg-muted"}`}
+                              onClick={() => setExpandedRow(isExpanded ? null : row.id)}
+                            >
+                              {isExpanded ? "Tutup" : "Lihat"}
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                      {isExpanded && (row.before || row.after) && (
+                        <tr key={`${row.id}-detail`} className="bg-slate-50 border-b">
+                          <td colSpan={6} className="px-4 py-3">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                              {row.before && (
+                                <div>
+                                  <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">Before</p>
+                                  <pre className="text-[10px] bg-red-50 border border-red-100 rounded p-2 overflow-x-auto whitespace-pre-wrap">
+                                    {JSON.stringify(row.before, null, 2)}
+                                  </pre>
+                                </div>
+                              )}
+                              {row.after && (
+                                <div>
+                                  <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">After</p>
+                                  <pre className="text-[10px] bg-green-50 border border-green-100 rounded p-2 overflow-x-auto whitespace-pre-wrap">
+                                    {JSON.stringify(row.after, null, 2)}
+                                  </pre>
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between text-xs text-muted-foreground">
+          <span>{total.toLocaleString("id-ID")} total aksi</span>
+          <div className="flex gap-1">
+            <Button size="sm" variant="outline" className="h-7 text-xs" disabled={page <= 1} onClick={() => setPage(p => p - 1)}>← Prev</Button>
+            <span className="px-3 py-1 border rounded text-xs">{page} / {totalPages}</span>
+            <Button size="sm" variant="outline" className="h-7 text-xs" disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>Next →</Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ===== Fase 5: Exception Dashboard Tab =====
 function ExceptionDashboardTab() {
   const { toast } = useToast();
@@ -2038,7 +2240,7 @@ export default function AdminBankReconciliation() {
   const qc = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const [activeTab, setActiveTab] = useState<"dashboard" | "mutasi" | "laporan" | "closing" | "coa_rules">("dashboard");
+  const [activeTab, setActiveTab] = useState<"dashboard" | "audit_trail" | "mutasi" | "laporan" | "closing" | "coa_rules">("dashboard");
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterDirection, setFilterDirection] = useState("all");
   const [search, setSearch] = useState("");
@@ -2161,19 +2363,22 @@ export default function AdminBankReconciliation() {
 
       {/* Tab switcher */}
       <div className="flex gap-1 p-1 bg-muted rounded-lg w-fit flex-wrap">
-        {(["dashboard", "mutasi", "laporan", "closing", "coa_rules"] as const).map((t) => (
+        {(["dashboard", "audit_trail", "mutasi", "laporan", "closing", "coa_rules"] as const).map((t) => (
           <button
             key={t}
             className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${activeTab === t ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}
             onClick={() => setActiveTab(t)}
           >
-            {t === "dashboard" ? "🔍 Dashboard" : t === "mutasi" ? "Mutasi" : t === "laporan" ? "Laporan" : t === "closing" ? "Closing Bank" : "Aturan COA"}
+            {t === "dashboard" ? "🔍 Dashboard" : t === "audit_trail" ? "📋 Audit Trail" : t === "mutasi" ? "Mutasi" : t === "laporan" ? "Laporan" : t === "closing" ? "Closing Bank" : "Aturan COA"}
           </button>
         ))}
       </div>
 
       {/* Dashboard tab */}
       {activeTab === "dashboard" && <ExceptionDashboardTab />}
+
+      {/* Audit Trail tab */}
+      {activeTab === "audit_trail" && <AuditTrailTab />}
 
       {/* Laporan tab */}
       {activeTab === "laporan" && <ReportTab />}

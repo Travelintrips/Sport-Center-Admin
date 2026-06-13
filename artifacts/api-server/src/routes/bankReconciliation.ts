@@ -2004,6 +2004,38 @@ router.get("/bank-reconciliation/balances", adminMiddleware, async (req, res) =>
 // FASE 6: Final Validation / Audit
 // ================================================================
 
+// GET /bank-reconciliation/audit-trail — riwayat aksi bank rekonsiliasi dari audit_logs
+router.get("/bank-reconciliation/audit-trail", financeMiddleware, async (req, res) => {
+  try {
+    const { action, search, dateFrom, dateTo, page = "1", pageSize = "50" } = req.query as Record<string, string>;
+    const limit = Math.min(Number(pageSize) || 50, 200);
+    const offset = (Math.max(Number(page) || 1, 1) - 1) * limit;
+
+    const conditions: any[] = [
+      sql`${auditLogsTable.entity} IN ('bank_mutation', 'bank_journal', 'bank_reconciliation')`,
+    ];
+    if (action && action !== "all") conditions.push(eq(auditLogsTable.action, action));
+    if (dateFrom) conditions.push(sql`DATE(${auditLogsTable.createdAt}) >= ${dateFrom}::date`);
+    if (dateTo) conditions.push(sql`DATE(${auditLogsTable.createdAt}) <= ${dateTo}::date`);
+    if (search) conditions.push(sql`(${auditLogsTable.userRole} ILIKE ${"%" + search + "%"} OR ${auditLogsTable.action} ILIKE ${"%" + search + "%"} OR ${auditLogsTable.ipAddress} ILIKE ${"%" + search + "%"})`);
+
+    const [{ total }] = await db.select({ total: sql<number>`count(*)::int` }).from(auditLogsTable).where(and(...conditions));
+    const rows = await db.select().from(auditLogsTable).where(and(...conditions))
+      .orderBy(desc(auditLogsTable.createdAt)).limit(limit).offset(offset);
+
+    const actionCounts = await db.select({
+      action: auditLogsTable.action, count: sql<number>`count(*)::int`,
+    }).from(auditLogsTable)
+      .where(sql`${auditLogsTable.entity} IN ('bank_mutation', 'bank_journal', 'bank_reconciliation')`)
+      .groupBy(auditLogsTable.action).orderBy(desc(sql`count(*)`));
+
+    res.json({ total, page: Number(page), pageSize: limit, rows, actionCounts });
+  } catch (err: any) {
+    req.log.error({ err }, "Bank audit-trail error");
+    res.status(500).json({ error: err?.message ?? "Gagal ambil audit trail" });
+  }
+});
+
 // GET /bank-reconciliation/audit — validasi integritas data produksi
 router.get("/bank-reconciliation/audit", financeMiddleware, async (req, res) => {
   try {
