@@ -181,8 +181,8 @@ function PpnSettingsCard() {
           Pengaturan PPN (Pajak Pertambahan Nilai)
         </CardTitle>
         <p className="text-xs text-muted-foreground mt-1">
-          PPN 11% wajib dikenakan pada booking Sport Center. Data lama tidak diubah otomatis — hanya booking
-          pada/setelah tanggal berlaku yang dikenai PPN.
+          Harga lapangan bersifat <strong>inklusif PPN</strong> — artinya PPN sudah termasuk dalam harga yang tertera.
+          Grand Total = harga yang diinput. DPP diekstrak otomatis dari harga.
         </p>
       </CardHeader>
       <CardContent className="space-y-5">
