@@ -40,6 +40,23 @@ async function getBookingWithPayment(id: number) {
   if (!booking) return null;
   const [facility] = await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, booking.facilityId)).limit(1);
   const [payment] = await db.select().from(paymentsTable).where(eq(paymentsTable.bookingId, id)).limit(1);
+
+  // Jika booking bagian dari grup recurring, ambil info grup
+  let groupInfo: { groupTotalPayment: number; groupSessionCount: number; groupRef: string } | null = null;
+  if (booking.groupRef) {
+    const [group] = await db.select().from(bookingGroupsTable)
+      .where(eq(bookingGroupsTable.groupRef, booking.groupRef)).limit(1);
+    const groupBookings = await db.select({ id: bookingsTable.id })
+      .from(bookingsTable).where(eq(bookingsTable.groupRef, booking.groupRef));
+    if (group) {
+      groupInfo = {
+        groupRef: booking.groupRef,
+        groupTotalPayment: Number(group.totalPayment),
+        groupSessionCount: groupBookings.length,
+      };
+    }
+  }
+
   // idCardNumber adalah PII — jangan ekspos di endpoint publik (customer invoice).
   const { idCardNumber: _redacted, ...rest } = booking;
   return {
@@ -59,6 +76,7 @@ async function getBookingWithPayment(id: number) {
     downPayment: Number(booking.downPayment ?? 0),
     isDpPaid: booking.isDpPaid ?? false,
     payment: payment ? { ...payment, amount: Number(payment.amount) } : null,
+    groupInfo,
   };
 }
 

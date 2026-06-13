@@ -300,12 +300,37 @@ export default function BookingDetail() {
               </div>
             </div>
             <div className="h-px bg-border" />
-            <div className="flex justify-between items-center text-xl font-black">
-              <div>{t("Grand Total", "Grand Total")}</div>
-              <div className="text-primary">
-                Rp {booking.totalPrice.toLocaleString("id-ID")}
+            {(booking as any).groupInfo ? (
+              <div className="space-y-2">
+                <div className="flex justify-between items-center text-sm text-muted-foreground">
+                  <div>{t("Harga sesi ini", "This session price")}</div>
+                  <div>Rp {booking.totalPrice.toLocaleString("id-ID")}</div>
+                </div>
+                <div className="flex justify-between items-center text-sm text-muted-foreground">
+                  <div>{t("Jumlah sesi", "Total sessions")}</div>
+                  <div>{(booking as any).groupInfo.groupSessionCount} {t("sesi", "sessions")}</div>
+                </div>
+                <div className="h-px bg-border" />
+                <div className="flex justify-between items-center text-xl font-black">
+                  <div className="flex flex-col gap-0.5">
+                    <span>{t("Total Semua Sesi", "All Sessions Total")}</span>
+                    <span className="text-xs font-normal text-muted-foreground">
+                      Ref: {(booking as any).groupInfo.groupRef}
+                    </span>
+                  </div>
+                  <div className="text-primary">
+                    Rp {(booking as any).groupInfo.groupTotalPayment.toLocaleString("id-ID")}
+                  </div>
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="flex justify-between items-center text-xl font-black">
+                <div>{t("Grand Total", "Grand Total")}</div>
+                <div className="text-primary">
+                  Rp {booking.totalPrice.toLocaleString("id-ID")}
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
 
