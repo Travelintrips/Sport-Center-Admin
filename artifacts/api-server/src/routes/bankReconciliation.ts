@@ -74,8 +74,32 @@ function parseRows(rows: any[]): Array<{
         ""
       ).trim() || undefined;
 
-      const credit = parseFloat(String(creditRaw).replace(/[^0-9.]/g, "")) || 0;
-      const debit = parseFloat(String(debitRaw).replace(/[^0-9.]/g, "")) || 0;
+      const parseIndonesianNumber = (raw: any): number => {
+        const s = String(raw ?? "").trim();
+        if (!s || s === "-") return 0;
+        // Indonesian format: "1.250.000,50" → dot=thousands, comma=decimal
+        // International format: "1,250,000.50" → comma=thousands, dot=decimal
+        const hasDotAndComma = s.includes(".") && s.includes(",");
+        if (hasDotAndComma) {
+          const lastDot = s.lastIndexOf(".");
+          const lastComma = s.lastIndexOf(",");
+          if (lastComma > lastDot) {
+            // Indonesian: "1.250,50" → remove dots, replace comma with dot
+            return parseFloat(s.replace(/\./g, "").replace(",", ".")) || 0;
+          } else {
+            // International: "1,250.50" → remove commas
+            return parseFloat(s.replace(/,/g, "")) || 0;
+          }
+        }
+        // Only comma: "1250,50" → likely Indonesian decimal
+        if (s.includes(",") && !s.includes(".")) {
+          return parseFloat(s.replace(",", ".")) || 0;
+        }
+        // Only dot or clean number
+        return parseFloat(s.replace(/[^0-9.]/g, "")) || 0;
+      };
+      const credit = parseIndonesianNumber(creditRaw);
+      const debit = parseIndonesianNumber(debitRaw);
 
       let transactionDate = "";
       if (dateRaw) {
@@ -354,6 +378,15 @@ router.post("/bank-reconciliation/:mutationId/approve", adminMiddleware, async (
 
     if (!mutation) { res.status(404).json({ error: "Mutasi tidak ditemukan" }); return; }
 
+    // Idempotency guard — jangan proses ulang yang sudah approved/rejected
+    if (mutation.status === "approved") {
+      res.json({ ok: true, skipped: true, reason: "already_approved" });
+      return;
+    }
+    if (mutation.status === "rejected") {
+      // Boleh approve mutasi yang sudah rejected (admin koreksi) — lanjutkan
+    }
+
     await db
       .update(bankReconciliationMatchesTable)
       .set({ status: "rejected" })
@@ -470,6 +503,20 @@ router.post("/bank-reconciliation/:mutationId/reject", adminMiddleware, async (r
   try {
     const mutationId = Number(req.params["mutationId"]);
     if (isNaN(mutationId)) { res.status(400).json({ error: "Invalid mutation ID" }); return; }
+
+    const [mutation] = await db
+      .select({ status: bankMutationsTable.status })
+      .from(bankMutationsTable)
+      .where(eq(bankMutationsTable.id, mutationId))
+      .limit(1);
+
+    if (!mutation) { res.status(404).json({ error: "Mutasi tidak ditemukan" }); return; }
+
+    // Idempotency guard
+    if (mutation.status === "rejected") {
+      res.json({ ok: true, skipped: true, reason: "already_rejected" });
+      return;
+    }
 
     await db
       .update(bankMutationsTable)

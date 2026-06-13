@@ -875,20 +875,20 @@ function MutationRow({ mutation, qc }: { mutation: any; qc: any }) {
           {/* Actions */}
           {isActionable && (
             <div className="flex gap-2 flex-wrap border-t pt-3">
-              {!matches.length && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="gap-1.5 text-xs"
-                  disabled={isPending}
-                  onClick={() => {
-                    const { sheetId, sheetName } = getSheetContext();
-                    approveMutation.mutate({ mutationId: mutation.id, data: { sheetId, sheetName } });
-                  }}
-                >
-                  <CheckCircle2 size={13} /> Setujui Tanpa Match
-                </Button>
-              )}
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1.5 text-xs"
+                disabled={isPending}
+                title={matches.length ? "Setujui tanpa memilih kandidat manapun (override)" : undefined}
+                onClick={() => {
+                  const { sheetId, sheetName } = getSheetContext();
+                  approveMutation.mutate({ mutationId: mutation.id, data: { sheetId, sheetName } });
+                }}
+              >
+                <CheckCircle2 size={13} />
+                {matches.length ? "Setujui (Abaikan Kandidat)" : "Setujui Tanpa Match"}
+              </Button>
               <Button
                 size="sm"
                 variant="outline"

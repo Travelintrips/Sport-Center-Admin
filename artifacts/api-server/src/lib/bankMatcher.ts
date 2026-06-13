@@ -123,10 +123,15 @@ function scoreOcr(
   }
 
   if (ocrName) {
+    const OCR_STOPWORDS = new Set([
+      "bank", "transfer", "dari", "untuk", "kepada", "oleh", "dengan",
+      "payment", "bayar", "pembayaran", "dana", "mandiri", "bca", "bni", "bri",
+      "gopay", "ovo", "transaksi", "setor", "tarik", "debit", "kredit",
+    ]);
     const normDesc = normalizeDescription(mutationDesc);
     const normName = normalizeDescription(ocrName);
-    const words = normName.split(" ").filter((w) => w.length >= 4);
-    if (words.some((w) => normDesc.includes(w))) {
+    const words = normName.split(" ").filter((w) => w.length >= 4 && !OCR_STOPWORDS.has(w));
+    if (words.length > 0 && words.some((w) => normDesc.includes(w))) {
       added += 15;
       ocrMatch = true;
       reasons.push(`OCR nama "${ocrName}" ditemukan di deskripsi +15`);
@@ -528,7 +533,13 @@ export async function runMatching(mutationIds?: number[]): Promise<{
     mutations = await db
       .select()
       .from(bankMutationsTable)
-      .where(inArray(bankMutationsTable.id, mutationIds));
+      .where(
+        and(
+          inArray(bankMutationsTable.id, mutationIds),
+          // Jangan proses ulang approved/rejected meskipun ID disuplai secara eksplisit
+          notInArray(bankMutationsTable.status, ["approved", "rejected"] as any[])
+        )
+      );
   } else {
     mutations = await db
       .select()
