@@ -84,6 +84,17 @@ async function runStartupMigrations() {
      )`,
     `CREATE INDEX IF NOT EXISTS idx_bank_journal_entries_mutation
        ON sport_center.bank_journal_entries (mutation_id)`,
+    // Kolom OCR pada payments
+    `ALTER TABLE sport_center.payments
+       ADD COLUMN IF NOT EXISTS ocr_name text`,
+    `ALTER TABLE sport_center.payments
+       ADD COLUMN IF NOT EXISTS ocr_amount numeric(14,2)`,
+    `ALTER TABLE sport_center.payments
+       ADD COLUMN IF NOT EXISTS ocr_date text`,
+    `ALTER TABLE sport_center.payments
+       ADD COLUMN IF NOT EXISTS ocr_raw text`,
+    `ALTER TABLE sport_center.payments
+       ADD COLUMN IF NOT EXISTS ocr_data jsonb`,
   ];
 
   for (const stmt of migrations) {
