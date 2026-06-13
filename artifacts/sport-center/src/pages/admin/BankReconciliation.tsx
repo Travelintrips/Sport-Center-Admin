@@ -1,9 +1,10 @@
 import { useState, useRef } from "react";
 import {
-  useListBankMutations, useGetBankMutationMatches, useApproveBankMutation,
-  useRejectBankMutation, useRunBankMatching,
+  useListBankMutations, useRunBankMatching,
   useConnectBankReconSheet, usePullBankMutationsFromSheet, usePushBankReconToSheet,
   useClearBankMutations,
+  useGetBankMutationCandidates, useApproveBankMutationCandidate,
+  useMarkBankMutationUnmatched, useMarkBankMutationDuplicate,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { getListBankMutationsQueryKey } from "@workspace/api-client-react";
@@ -13,13 +14,15 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetFooter } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { getToken } from "@/lib/auth";
 import {
   Upload, RefreshCw, CheckCircle2, XCircle, AlertTriangle, Search,
   ChevronDown, ChevronUp, Banknote, ArrowDownCircle, ArrowUpCircle,
-  Filter, FileText, Zap, Sheet, Download, Link, Save, Trash2,
+  FileText, Zap, Sheet as SheetIcon, Download, Link, Save, Trash2,
+  User, Building2, CreditCard, ExternalLink, Hash, Calendar,
 } from "lucide-react";
 
 function extractSheetId(input: string): string {
@@ -155,7 +158,7 @@ function SheetSyncPanel({ onImported }: { onImported: () => void }) {
         >
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center shrink-0">
-              <Sheet size={16} className="text-blue-700" />
+              <SheetIcon size={16} className="text-blue-700" />
             </div>
             <div>
               <div className="font-semibold text-sm">Sinkronisasi Google Sheets</div>
@@ -228,7 +231,7 @@ function SheetSyncPanel({ onImported }: { onImported: () => void }) {
                   <button
                     className="flex flex-col items-center gap-2 p-4 rounded-xl border-2 border-blue-200 bg-blue-50 hover:bg-blue-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     disabled={isBusy}
-                    onClick={() => pullMutation.mutate({ data: { sheetId: connectedSheet.id, sheetName: activeTab || undefined } })}
+                    onClick={() => pullMutation.mutate({ data: { sheetId: connectedSheet.id } })}
                   >
                     <div className="w-9 h-9 rounded-full bg-blue-500 flex items-center justify-center">
                       <Download size={16} className="text-white" />
@@ -343,190 +346,343 @@ function formatCurrency(n: string | number) {
 }
 
 function ScoreBadge({ score }: { score: number }) {
-  const color = score >= 95 ? "bg-green-500" : score >= 80 ? "bg-yellow-500" : "bg-gray-400";
+  const color = score >= 95 ? "bg-green-500" : score >= 80 ? "bg-yellow-500" : score >= 60 ? "bg-orange-400" : "bg-gray-400";
   return (
-    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-white text-xs font-bold ${color}`}>
-      {score}
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-white text-xs font-bold ${color}`}>
+      {score}pt
     </span>
   );
 }
 
-function MatchCandidateRow({
-  match,
-  onApprove,
+function EnrichedCandidateCard({
+  candidate,
   isPending,
+  onApprove,
 }: {
-  match: any;
-  onApprove: (matchId: number) => void;
+  candidate: any;
   isPending: boolean;
+  onApprove: (candidateId: number, candidateType: string) => void;
 }) {
+  const isApproved = candidate.status === "approved";
+  const isRejected = candidate.status === "rejected";
+
+  const BREAKDOWN = [
+    { key: "amountMatch", label: "Nominal", active: candidate.amountMatch, color: "green" },
+    { key: "dateMatch", label: "Tanggal", active: candidate.dateMatch, color: "green" },
+    { key: "nameMatch", label: "Nama", active: candidate.nameMatch, color: "green" },
+    { key: "orderIdMatch", label: "Order ID", active: candidate.orderIdMatch, color: "blue" },
+    { key: "proofMatch", label: "Bukti", active: candidate.proofMatch, color: "purple" },
+    { key: "statusValidMatch", label: "Status Valid", active: candidate.statusValidMatch, color: "teal" },
+    { key: "toleranceUsed", label: "Toleransi", active: candidate.toleranceUsed, color: "orange" },
+  ];
+
   return (
-    <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/50 border">
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 flex-wrap">
-          <Badge variant="outline" className="text-xs capitalize">{match.candidateType}</Badge>
-          <span className="text-sm font-medium">ID #{match.candidateId}</span>
-          <ScoreBadge score={match.matchScore} />
-          {match.status === "approved" && (
-            <Badge className="bg-green-100 text-green-700 border-green-200 text-xs">Disetujui</Badge>
-          )}
-          {match.status === "rejected" && (
-            <Badge className="bg-red-100 text-red-700 border-red-200 text-xs">Ditolak</Badge>
-          )}
+    <div className={`border rounded-xl overflow-hidden transition-all ${isApproved ? "border-green-300 bg-green-50/40" : isRejected ? "border-dashed opacity-60" : "hover:shadow-sm"}`}>
+      {/* Card header */}
+      <div className="flex items-center justify-between gap-3 p-3">
+        <div className="flex items-center gap-2 flex-wrap min-w-0">
+          <Badge variant="outline" className="text-[10px] capitalize shrink-0">{candidate.candidateType}</Badge>
+          <ScoreBadge score={candidate.matchScore} />
+          {isApproved && <Badge className="bg-green-100 text-green-700 border-green-200 text-[10px]">✓ Disetujui</Badge>}
+          {isRejected && <Badge className="bg-red-100 text-red-700 border-red-200 text-[10px]">Ditolak</Badge>}
+          {!isApproved && !isRejected && <span className="text-[10px] text-muted-foreground">Kandidat #{candidate.candidateId}</span>}
         </div>
-        <div className="mt-1.5 flex flex-wrap gap-1.5">
-          {match.amountMatch && <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-100 text-green-700">✓ Nominal</span>}
-          {match.dateMatch && <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-100 text-green-700">✓ Tanggal</span>}
-          {match.nameMatch && <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-100 text-green-700">✓ Nama</span>}
-          {match.orderIdMatch && <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">✓ Order ID</span>}
-          {match.proofMatch && <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">✓ Bukti</span>}
-        </div>
-        {match.matchReason && (
-          <p className="text-xs text-muted-foreground mt-1 truncate">{match.matchReason}</p>
+        {!isApproved && !isRejected && (
+          <Button
+            size="sm"
+            className="h-7 text-xs gap-1 shrink-0 bg-green-600 hover:bg-green-700 text-white"
+            onClick={() => onApprove(candidate.candidateId, candidate.candidateType)}
+            disabled={isPending}
+          >
+            <CheckCircle2 size={12} /> Setujui
+          </Button>
         )}
       </div>
-      {match.status === "candidate" && (
-        <Button size="sm" className="shrink-0 h-7 text-xs gap-1" onClick={() => onApprove(match.id)} disabled={isPending}>
-          <CheckCircle2 size={12} /> Pilih
-        </Button>
-      )}
+
+      {/* Enriched details */}
+      <div className="px-3 pb-3 space-y-2">
+        <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
+          {candidate.customerName && (
+            <div className="flex items-center gap-1.5 min-w-0">
+              <User size={11} className="text-muted-foreground shrink-0" />
+              <span className="font-semibold truncate">{candidate.customerName}</span>
+            </div>
+          )}
+          {candidate.facilityName && (
+            <div className="flex items-center gap-1.5 min-w-0">
+              <Building2 size={11} className="text-muted-foreground shrink-0" />
+              <span className="truncate text-muted-foreground">{candidate.facilityName}</span>
+            </div>
+          )}
+          {candidate.bookingOrderNumber && (
+            <div className="flex items-center gap-1.5">
+              <Hash size={11} className="text-muted-foreground shrink-0" />
+              <span className="font-mono text-[11px]">{candidate.bookingOrderNumber}</span>
+            </div>
+          )}
+          {candidate.bookingDate && (
+            <div className="flex items-center gap-1.5 text-muted-foreground">
+              <Calendar size={11} className="shrink-0" />
+              <span>{candidate.bookingDate}</span>
+            </div>
+          )}
+          {candidate.bookingAmount && (
+            <div className="flex items-center gap-1.5">
+              <CreditCard size={11} className="text-muted-foreground shrink-0" />
+              <span className="font-bold text-foreground">{formatCurrency(candidate.bookingAmount)}</span>
+            </div>
+          )}
+          {candidate.bookingStatus && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted font-medium">{candidate.bookingStatus}</span>
+            </div>
+          )}
+          {candidate.paymentDate && (
+            <div className="flex items-center gap-1.5 text-muted-foreground">
+              <span className="text-[10px]">Tgl bayar: {candidate.paymentDate}</span>
+            </div>
+          )}
+          {candidate.paymentProofUrl && (
+            <div className="flex items-center gap-1.5 col-span-2">
+              <a href={candidate.paymentProofUrl} target="_blank" rel="noreferrer" className="text-[10px] text-blue-600 hover:underline flex items-center gap-0.5">
+                <ExternalLink size={10} /> Lihat bukti transfer
+              </a>
+            </div>
+          )}
+        </div>
+
+        {/* Score breakdown */}
+        <div className="flex flex-wrap gap-1 pt-1.5 border-t border-dashed">
+          {BREAKDOWN.map(({ key, label, active }) => (
+            <span
+              key={key}
+              className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
+                active
+                  ? "bg-green-100 text-green-700"
+                  : "bg-muted/60 text-muted-foreground"
+              }`}
+            >
+              {active ? "✓" : "✗"} {label}
+            </span>
+          ))}
+        </div>
+
+        {candidate.matchReason && (
+          <p className="text-[10px] text-muted-foreground italic leading-relaxed">{candidate.matchReason}</p>
+        )}
+      </div>
     </div>
   );
 }
 
-function MutationRow({ mutation, qc }: { mutation: any; qc: any }) {
-  const [expanded, setExpanded] = useState(false);
+function MutationDetailSheet({
+  mutationId,
+  onClose,
+  qc,
+}: {
+  mutationId: number | null;
+  onClose: () => void;
+  qc: any;
+}) {
   const { toast } = useToast();
 
-  const matchesQuery = useGetBankMutationMatches(mutation.id, {
-    query: { enabled: expanded, staleTime: 30000 },
-  });
+  const candidatesQuery = useGetBankMutationCandidates(mutationId ?? 0);
 
-  const approveMutation = useApproveBankMutation({
+  const mutation = (candidatesQuery.data as any)?.mutation ?? null;
+  const candidates: any[] = (candidatesQuery.data as any)?.candidates ?? [];
+
+  const approveCandidate = useApproveBankMutationCandidate({
     mutation: {
       onSuccess: () => {
-        toast({ title: "Mutasi disetujui" });
+        toast({ title: "✅ Kandidat disetujui" });
         qc.invalidateQueries({ queryKey: getListBankMutationsQueryKey() });
-        matchesQuery.refetch();
+        candidatesQuery.refetch();
       },
       onError: (err: any) => {
-        toast({ title: err?.response?.data?.error ?? "Gagal approve", variant: "destructive" });
+        toast({ title: err?.response?.data?.error ?? "Gagal menyetujui", variant: "destructive" });
       },
     },
   });
 
-  const rejectMutation = useRejectBankMutation({
+  const markUnmatched = useMarkBankMutationUnmatched({
     mutation: {
       onSuccess: () => {
-        toast({ title: "Mutasi ditolak" });
+        toast({ title: "Ditandai sebagai unmatched" });
         qc.invalidateQueries({ queryKey: getListBankMutationsQueryKey() });
+        onClose();
       },
       onError: (err: any) => {
-        toast({ title: err?.response?.data?.error ?? "Gagal reject", variant: "destructive" });
+        toast({ title: err?.response?.data?.error ?? "Gagal", variant: "destructive" });
       },
     },
   });
 
-  const isPending = approveMutation.isPending || rejectMutation.isPending;
-  const matches = matchesQuery.data?.matches ?? [];
-  const isActionable = ["unmatched", "matched", "duplicate_need_review"].includes(mutation.status);
+  const markDuplicate = useMarkBankMutationDuplicate({
+    mutation: {
+      onSuccess: () => {
+        toast({ title: "Ditandai sebagai duplikat" });
+        qc.invalidateQueries({ queryKey: getListBankMutationsQueryKey() });
+        onClose();
+      },
+      onError: (err: any) => {
+        toast({ title: err?.response?.data?.error ?? "Gagal", variant: "destructive" });
+      },
+    },
+  });
+
+  const isPending = approveCandidate.isPending || markUnmatched.isPending || markDuplicate.isPending;
+  const isLoading = candidatesQuery.isLoading;
+  const isActionable = mutation ? ["unmatched", "matched", "duplicate_need_review"].includes(mutation.status) : false;
 
   return (
-    <div className="border rounded-xl overflow-hidden">
-      <div
-        className="flex items-start gap-3 p-3 cursor-pointer hover:bg-muted/30 transition-colors"
-        onClick={() => setExpanded((v) => !v)}
-      >
-        <div className="mt-0.5 shrink-0">
-          {mutation.direction === "IN" ? (
-            <ArrowDownCircle size={18} className="text-green-500" />
-          ) : (
-            <ArrowUpCircle size={18} className="text-red-500" />
-          )}
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-semibold text-sm">{mutation.transactionDate}</span>
-            <Badge className={`text-[10px] border ${STATUS_COLORS[mutation.status] ?? ""}`}>
-              {STATUS_LABELS[mutation.status] ?? mutation.status}
-            </Badge>
-            {mutation.providerName && (
-              <Badge variant="outline" className="text-[10px]">{mutation.providerName}</Badge>
-            )}
-            {mutation.providerOrderId && (
-              <Badge variant="outline" className="text-[10px] font-mono">{mutation.providerOrderId}</Badge>
-            )}
+    <Sheet open={mutationId !== null} onOpenChange={(open) => { if (!open) onClose(); }}>
+      <SheetContent className="w-full sm:max-w-2xl flex flex-col p-0 gap-0" side="right">
+        {isLoading ? (
+          <div className="p-6 space-y-4">
+            <Skeleton className="h-8 w-2/3" />
+            <Skeleton className="h-4 w-full" />
+            {[1, 2, 3].map((i) => <Skeleton key={i} className="h-32" />)}
           </div>
-          <p className="text-sm text-muted-foreground mt-0.5 truncate">{mutation.description}</p>
-          <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
-            <span className="font-mono text-xs">{mutation.mutationKey}</span>
-          </div>
-        </div>
-        <div className="text-right shrink-0">
-          <div className={`font-bold text-sm ${mutation.direction === "IN" ? "text-green-600" : "text-red-600"}`}>
-            {mutation.direction === "IN" ? "+" : "-"}{formatCurrency(mutation.amount)}
-          </div>
-          <div className="text-[10px] text-muted-foreground mt-0.5">
-            {mutation.direction === "IN" ? "Masuk" : "Keluar"}
-          </div>
-        </div>
-        <div className="shrink-0 ml-1">
-          {expanded ? <ChevronUp size={14} className="text-muted-foreground" /> : <ChevronDown size={14} className="text-muted-foreground" />}
-        </div>
-      </div>
-
-      {expanded && (
-        <div className="border-t p-3 bg-muted/10 space-y-3">
-          {/* Candidates */}
-          <div>
-            <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Kandidat Match</div>
-            {matchesQuery.isLoading ? (
-              <div className="space-y-2">{[1, 2].map((i) => <Skeleton key={i} className="h-14" />)}</div>
-            ) : !matches.length ? (
-              <p className="text-sm text-muted-foreground">Tidak ada kandidat match ditemukan.</p>
-            ) : (
-              <div className="space-y-2">
-                {matches.map((m: any) => (
-                  <MatchCandidateRow
-                    key={m.id}
-                    match={m}
-                    onApprove={(matchId) =>
-                      approveMutation.mutate({ mutationId: mutation.id, data: { matchId } })
-                    }
-                    isPending={isPending}
-                  />
-                ))}
+        ) : mutation ? (
+          <>
+            {/* Header */}
+            <SheetHeader className="px-5 py-4 border-b bg-muted/20 shrink-0">
+              <SheetTitle className="flex items-center gap-2.5">
+                {mutation.direction === "IN"
+                  ? <ArrowDownCircle size={20} className="text-green-500 shrink-0" />
+                  : <ArrowUpCircle size={20} className="text-red-500 shrink-0" />
+                }
+                <span className={`text-xl font-black ${mutation.direction === "IN" ? "text-green-600" : "text-red-600"}`}>
+                  {mutation.direction === "IN" ? "+" : "-"}{formatCurrency(mutation.amount)}
+                </span>
+                <span className="text-sm font-normal text-muted-foreground">{mutation.direction === "IN" ? "Masuk" : "Keluar"}</span>
+              </SheetTitle>
+              <div className="flex flex-wrap gap-2 items-center mt-0.5">
+                <Badge className={`text-[10px] border ${STATUS_COLORS[mutation.status] ?? ""}`}>
+                  {STATUS_LABELS[mutation.status] ?? mutation.status}
+                </Badge>
+                <span className="text-xs text-muted-foreground font-medium">{mutation.transactionDate}</span>
+                {mutation.providerName && (
+                  <Badge variant="outline" className="text-[10px]">{mutation.providerName}</Badge>
+                )}
+                {mutation.providerOrderId && (
+                  <Badge variant="outline" className="text-[10px] font-mono">{mutation.providerOrderId}</Badge>
+                )}
               </div>
-            )}
-          </div>
+              <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{mutation.description}</p>
+              {mutation.mutationKey && (
+                <p className="text-[10px] text-muted-foreground/60 font-mono mt-0.5">{mutation.mutationKey}</p>
+              )}
+            </SheetHeader>
 
-          {/* Actions */}
-          {isActionable && (
-            <div className="flex gap-2 flex-wrap border-t pt-3">
-              {!matches.length && (
+            {/* Scrollable body */}
+            <div className="flex-1 overflow-y-auto p-5 space-y-4 min-h-0">
+              <div className="flex items-center justify-between">
+                <h3 className="font-bold text-sm uppercase tracking-wide text-muted-foreground">
+                  Kandidat Match{candidates.length > 0 && ` (${candidates.length})`}
+                </h3>
+                {candidatesQuery.isRefetching && (
+                  <RefreshCw size={12} className="animate-spin text-muted-foreground" />
+                )}
+              </div>
+
+              {!candidates.length ? (
+                <div className="text-center py-10 border rounded-xl border-dashed text-muted-foreground">
+                  <Search size={32} className="mx-auto mb-2 opacity-25" />
+                  <p className="text-sm font-medium">Tidak ada kandidat match</p>
+                  <p className="text-xs mt-1">Jalankan matching ulang atau tandai manual di bawah</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {candidates.map((c: any) => (
+                    <EnrichedCandidateCard
+                      key={c.id}
+                      candidate={c}
+                      isPending={isPending}
+                      onApprove={(candidateId, candidateType) =>
+                        approveCandidate.mutate({
+                          id: mutationId as number,
+                          data: { candidateType: candidateType as any, candidateId },
+                        })
+                      }
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Footer global actions */}
+            {isActionable && (
+              <SheetFooter className="px-5 py-3.5 border-t bg-muted/10 shrink-0 flex-row gap-2 flex-wrap justify-start">
+                <p className="w-full text-[10px] text-muted-foreground mb-1 font-medium uppercase tracking-wide">Aksi Global</p>
                 <Button
-                  size="sm"
                   variant="outline"
+                  size="sm"
                   className="gap-1.5 text-xs"
                   disabled={isPending}
-                  onClick={() => approveMutation.mutate({ mutationId: mutation.id, data: {} })}
+                  onClick={() => markUnmatched.mutate({ id: mutationId as number })}
                 >
-                  <CheckCircle2 size={13} /> Setujui Tanpa Match
+                  <AlertTriangle size={13} className="text-yellow-500" />
+                  Tandai Unmatched
                 </Button>
-              )}
-              <Button
-                size="sm"
-                variant="outline"
-                className="gap-1.5 text-xs text-red-600 border-red-200 hover:bg-red-50"
-                disabled={isPending}
-                onClick={() => rejectMutation.mutate({ mutationId: mutation.id })}
-              >
-                <XCircle size={13} /> Tolak
-              </Button>
-            </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5 text-xs"
+                  disabled={isPending}
+                  onClick={() => markDuplicate.mutate({ id: mutationId as number })}
+                >
+                  <XCircle size={13} className="text-orange-500" />
+                  Tandai Duplikat
+                </Button>
+              </SheetFooter>
+            )}
+          </>
+        ) : (
+          <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+            Mutasi tidak ditemukan
+          </div>
+        )}
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+function MutationRow({ mutation, onOpenDetail }: { mutation: any; onOpenDetail: (id: number) => void }) {
+  return (
+    <div
+      className="border rounded-xl flex items-start gap-3 p-3 cursor-pointer hover:bg-muted/30 hover:shadow-sm transition-all"
+      onClick={() => onOpenDetail(mutation.id)}
+    >
+      <div className="mt-0.5 shrink-0">
+        {mutation.direction === "IN"
+          ? <ArrowDownCircle size={18} className="text-green-500" />
+          : <ArrowUpCircle size={18} className="text-red-500" />
+        }
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="font-semibold text-sm">{mutation.transactionDate}</span>
+          <Badge className={`text-[10px] border ${STATUS_COLORS[mutation.status] ?? ""}`}>
+            {STATUS_LABELS[mutation.status] ?? mutation.status}
+          </Badge>
+          {mutation.providerName && (
+            <Badge variant="outline" className="text-[10px]">{mutation.providerName}</Badge>
+          )}
+          {mutation.providerOrderId && (
+            <Badge variant="outline" className="text-[10px] font-mono">{mutation.providerOrderId}</Badge>
           )}
         </div>
-      )}
+        <p className="text-sm text-muted-foreground mt-0.5 truncate">{mutation.description}</p>
+        <p className="text-[10px] text-muted-foreground/50 font-mono mt-0.5 truncate">{mutation.mutationKey}</p>
+      </div>
+      <div className="text-right shrink-0 ml-1">
+        <div className={`font-bold text-sm ${mutation.direction === "IN" ? "text-green-600" : "text-red-600"}`}>
+          {mutation.direction === "IN" ? "+" : "-"}{formatCurrency(mutation.amount)}
+        </div>
+        <div className="text-[10px] text-muted-foreground">{mutation.direction === "IN" ? "Masuk" : "Keluar"}</div>
+      </div>
+      <ChevronDown size={14} className="text-muted-foreground mt-1 shrink-0" />
     </div>
   );
 }
@@ -545,6 +701,7 @@ export default function AdminBankReconciliation() {
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<any>(null);
   const [showImportDialog, setShowImportDialog] = useState(false);
+  const [selectedMutationId, setSelectedMutationId] = useState<number | null>(null);
 
   const { data, isLoading } = useListBankMutations(
     {
@@ -556,7 +713,6 @@ export default function AdminBankReconciliation() {
       page,
       pageSize: 30,
     },
-    { query: { staleTime: 10000 } }
   );
 
   const runMatchingMutation = useRunBankMatching({
@@ -708,7 +864,7 @@ export default function AdminBankReconciliation() {
             </CardContent>
           </Card>
         ) : (
-          mutations.map((m: any) => <MutationRow key={m.id} mutation={m} qc={qc} />)
+          mutations.map((m: any) => <MutationRow key={m.id} mutation={m} onOpenDetail={setSelectedMutationId} />)
         )}
       </div>
 
@@ -723,6 +879,13 @@ export default function AdminBankReconciliation() {
           </div>
         </div>
       )}
+
+      {/* Mutation Detail Sheet */}
+      <MutationDetailSheet
+        mutationId={selectedMutationId}
+        onClose={() => setSelectedMutationId(null)}
+        qc={qc}
+      />
 
       {/* Import result dialog */}
       <Dialog open={showImportDialog} onOpenChange={setShowImportDialog}>

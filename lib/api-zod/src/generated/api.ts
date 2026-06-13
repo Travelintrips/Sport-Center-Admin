@@ -2452,6 +2452,9 @@ export const GetBankMutationMatchesResponse = zod.object({
   "nameMatch": zod.boolean().optional(),
   "orderIdMatch": zod.boolean().optional(),
   "proofMatch": zod.boolean().optional(),
+  "statusValidMatch": zod.boolean().optional(),
+  "toleranceUsed": zod.boolean().optional(),
+  "note": zod.string().nullish(),
   "status": zod.enum(['candidate', 'approved', 'rejected']),
   "createdAt": zod.string()
 }))
@@ -2502,6 +2505,108 @@ export const RunBankMatchingResponse = zod.object({
   "needsReview": zod.number(),
   "unmatched": zod.number(),
   "duplicates": zod.number()
+})
+
+
+/**
+ * @summary Get enriched match candidates for a mutation
+ */
+export const GetBankMutationCandidatesParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetBankMutationCandidatesResponse = zod.object({
+  "mutation": zod.object({
+  "id": zod.number(),
+  "bankAccountId": zod.string().nullish(),
+  "transactionDate": zod.string(),
+  "description": zod.string(),
+  "creditAmount": zod.string().nullish(),
+  "debitAmount": zod.string().nullish(),
+  "amount": zod.string(),
+  "direction": zod.string(),
+  "mutationKey": zod.string(),
+  "normalizedDescription": zod.string().nullish(),
+  "providerName": zod.string().nullish(),
+  "providerOrderId": zod.string().nullish(),
+  "status": zod.enum(['unmatched', 'matched', 'duplicate_need_review', 'approved', 'rejected']),
+  "matchedPaymentId": zod.number().nullish(),
+  "matchedOrderId": zod.number().nullish(),
+  "uploadedProofUrl": zod.string().nullish(),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
+}),
+  "candidates": zod.array(zod.object({
+  "id": zod.number(),
+  "mutationId": zod.number(),
+  "candidateType": zod.enum(['payment', 'order', 'invoice', 'expense']),
+  "candidateId": zod.number(),
+  "matchScore": zod.number(),
+  "matchReason": zod.string().nullish(),
+  "amountMatch": zod.boolean(),
+  "dateMatch": zod.boolean(),
+  "nameMatch": zod.boolean(),
+  "orderIdMatch": zod.boolean(),
+  "proofMatch": zod.boolean(),
+  "statusValidMatch": zod.boolean(),
+  "toleranceUsed": zod.boolean(),
+  "note": zod.string().nullish(),
+  "status": zod.enum(['candidate', 'approved', 'rejected']),
+  "createdAt": zod.string(),
+  "customerName": zod.string().nullish(),
+  "customerPhone": zod.string().nullish(),
+  "customerEmail": zod.string().nullish(),
+  "bookingOrderNumber": zod.string().nullish(),
+  "bookingDate": zod.string().nullish(),
+  "bookingStatus": zod.string().nullish(),
+  "bookingAmount": zod.string().nullish(),
+  "paymentProofUrl": zod.string().nullish(),
+  "paymentStatus": zod.string().nullish(),
+  "paymentDate": zod.string().nullish(),
+  "facilityName": zod.string().nullish()
+}))
+})
+
+
+/**
+ * @summary Approve a specific match candidate for a mutation
+ */
+export const ApproveBankMutationCandidateParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const ApproveBankMutationCandidateBody = zod.object({
+  "candidateType": zod.enum(['payment', 'order', 'invoice', 'expense']),
+  "candidateId": zod.number(),
+  "note": zod.string().optional()
+})
+
+export const ApproveBankMutationCandidateResponse = zod.object({
+  "ok": zod.boolean()
+})
+
+
+/**
+ * @summary Mark a mutation as unmatched
+ */
+export const MarkBankMutationUnmatchedParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const MarkBankMutationUnmatchedResponse = zod.object({
+  "ok": zod.boolean()
+})
+
+
+/**
+ * @summary Mark a mutation as duplicate needing review
+ */
+export const MarkBankMutationDuplicateParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const MarkBankMutationDuplicateResponse = zod.object({
+  "ok": zod.boolean()
 })
 
 

@@ -1,0 +1,84 @@
+Lanjut tambahkan panel detail per mutasi untuk Bank Reconciliation.
+
+Tujuan:
+Saat mutasi status needsReview / duplicate / unmatched, admin bisa klik satu baris mutasi dan melihat semua kandidat matching beserta score dan alasan match.
+
+Tambahkan UI detail drawer/modal:
+1. Data mutasi:
+   - tanggal
+   - keterangan asli
+   - amount
+   - direction
+   - mutation_key
+   - provider_order_id jika ada
+   - status
+
+2. List semua kandidat:
+   - tipe kandidat: booking/payment/invoice/expense
+   - nama customer/vendor/tenant
+   - nomor booking/invoice/payment
+   - nominal kandidat
+   - tanggal kandidat
+   - status kandidat
+   - match_score
+   - match_reason detail
+
+3. Breakdown score:
+   - amount_match
+   - date_match
+   - name_match
+   - order_id_match
+   - proof_match
+   - status_valid
+   - tolerance_used
+
+4. Action admin:
+   - Approve kandidat ini
+   - Reject kandidat
+   - Manual match
+   - Mark as unmatched
+   - Mark as duplicate
+
+Backend:
+Tambahkan endpoint:
+GET /api/bank-reconciliation/mutations/:id/candidates
+
+Response harus berisi semua kandidat, bukan hanya kandidat terbaik.
+
+Tambahkan endpoint:
+POST /api/bank-reconciliation/mutations/:id/approve-candidate
+
+Body:
+{
+  candidateType,
+  candidateId,
+  note
+}
+
+Saat approve:
+- update mutation status = matched/approved
+- set matchedPaymentId / matchedBookingId / matchedInvoiceId sesuai kandidat
+- update payment/order jika diperlukan menjadi reconciled
+- simpan audit log
+
+Tambahkan audit log untuk:
+- admin open detail
+- approve candidate
+- reject candidate
+- manual match
+- mark unmatched
+- duplicate resolution
+
+Pastikan:
+- candidate dengan score tertinggi tampil paling atas
+- autoApproved tetap bisa dilihat alasan match-nya
+- needsReview tetap menyimpan kandidat terbaik
+- jangan overwrite kandidat lama
+- semua kandidat tersimpan di bank_reconciliation_matches
+
+Tambahkan test:
+1. satu mutasi punya 3 kandidat nominal sama
+2. kandidat score tertinggi muncul paling atas
+3. admin approve kandidat kedua
+4. status mutasi berubah approved
+5. payment terkait berubah reconciled

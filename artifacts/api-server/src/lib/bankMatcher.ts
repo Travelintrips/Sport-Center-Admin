@@ -55,6 +55,8 @@ interface MatchCandidate {
   nameMatch: boolean;
   orderIdMatch: boolean;
   proofMatch: boolean;
+  statusValidMatch: boolean;
+  toleranceUsed: boolean;
 }
 
 export async function computeMatchesForMutation(mutation: BankMutation): Promise<MatchCandidate[]> {
@@ -174,6 +176,14 @@ export async function computeMatchesForMutation(mutation: BankMutation): Promise
 
     if (score < 40) continue; // Must at least match amount
 
+    // Status valid: booking is in an expected payment state
+    const VALID_STATUSES = ["pending_payment", "waiting_confirmation", "confirmed", "completed", "paid"];
+    const statusValidMatch = VALID_STATUSES.includes(booking.status ?? "");
+    if (statusValidMatch) {
+      score += 5;
+      score_parts.push(`status booking valid (${booking.status})`);
+    }
+
     const candidate: MatchCandidate = {
       candidateType: payment ? "payment" : "order",
       candidateId: payment ? payment.id : booking.id,
@@ -184,6 +194,8 @@ export async function computeMatchesForMutation(mutation: BankMutation): Promise
       nameMatch,
       orderIdMatch,
       proofMatch,
+      statusValidMatch,
+      toleranceUsed: false,
     };
 
     candidates.push(candidate);
@@ -268,6 +280,8 @@ export async function runMatching(mutationIds?: number[]): Promise<{
         nameMatch: c.nameMatch,
         orderIdMatch: c.orderIdMatch,
         proofMatch: c.proofMatch,
+        statusValidMatch: c.statusValidMatch,
+        toleranceUsed: c.toleranceUsed,
         status: "candidate" as const,
       }))
     );
