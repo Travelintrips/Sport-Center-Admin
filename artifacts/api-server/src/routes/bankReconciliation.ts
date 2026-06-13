@@ -1102,7 +1102,6 @@ router.post("/bank-reconciliation/scan-ocr", adminMiddleware, async (req, res) =
       return;
     }
 
-    const { default: fetch } = await import("node-fetch");
     const imgRes = await fetch(proofUrl);
     if (!imgRes.ok) {
       res.status(400).json({ error: `Gagal mengunduh gambar: ${imgRes.statusText}` });
