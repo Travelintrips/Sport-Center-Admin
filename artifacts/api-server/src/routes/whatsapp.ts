@@ -48,6 +48,7 @@ import {
   detectIntent,
 } from "../services/aiSportCenterService";
 import { trackSentMessage, isBotEcho } from "../lib/waSentTracker";
+import { getHistory, appendTurn, clearHistory } from "../lib/aiConversationMemory";
 
 const router = Router();
 const APP_URL = process.env.APP_URL ?? "";
@@ -2750,14 +2751,18 @@ router.post("/wa/fonnte/webhook", async (req, res) => {
         return;
       }
 
-      const aiResult = await generateAiReply(phone, msg, []);
+      const history = getHistory(phone);
+      appendTurn(phone, "user", msg);
+      const aiResult = await generateAiReply(phone, msg, history);
 
       if (aiResult.shouldHandoffToBookingFlow) {
+        clearHistory(phone);
         await startBookingSession(phone, msg, String(name));
         return;
       }
 
       if (!aiResult.fallbackToAdmin && aiResult.reply) {
+        appendTurn(phone, "assistant", aiResult.reply);
         await sendWAMsg(phone, aiResult.reply);
         return;
       }
