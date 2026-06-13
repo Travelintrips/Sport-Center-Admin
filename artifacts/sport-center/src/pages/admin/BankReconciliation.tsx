@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import {
   useListBankMutations, useGetBankMutationMatches, useApproveBankMutation,
   useRejectBankMutation, useRunBankMatching,
@@ -795,11 +795,187 @@ function MutationRow({ mutation, qc }: { mutation: any; qc: any }) {
   );
 }
 
+const MONTH_NAMES: Record<string, string> = {
+  "01": "Jan", "02": "Feb", "03": "Mar", "04": "Apr",
+  "05": "Mei", "06": "Jun", "07": "Jul", "08": "Agu",
+  "09": "Sep", "10": "Okt", "11": "Nov", "12": "Des",
+};
+function fmtMonth(m: string) {
+  const [y, mo] = m.split("-");
+  return `${MONTH_NAMES[mo!] ?? mo} ${y}`;
+}
+
+function ReportTab() {
+  const [data, setData] = useState<{ rows: any[]; totals: any } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    fetch(`${API_BASE}/bank-reconciliation/report`, { headers: authHeaders() })
+      .then((r) => r.json())
+      .then((d) => { if (!cancelled) { setData(d); setLoading(false); } })
+      .catch((e) => { if (!cancelled) { setError(e.message); setLoading(false); } });
+    return () => { cancelled = true; };
+  }, []);
+
+  if (loading) return <div className="space-y-3">{[...Array(4)].map((_, i) => <Skeleton key={i} className="h-12 rounded-xl" />)}</div>;
+  if (error) return <p className="text-destructive text-sm">{error}</p>;
+  if (!data) return null;
+
+  const { rows, totals } = data;
+  const pctApproved = totals.total > 0 ? Math.round((totals.approved / totals.total) * 100) : 0;
+  const pctUnmatched = totals.total > 0 ? Math.round((totals.unmatched / totals.total) * 100) : 0;
+
+  return (
+    <div className="space-y-6">
+      {/* Summary cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <Card>
+          <CardContent className="p-4">
+            <p className="text-xs text-muted-foreground font-medium">Total Mutasi</p>
+            <p className="text-2xl font-black mt-1">{totals.total.toLocaleString("id-ID")}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              ↑ {totals.total_in ?? 0} masuk · ↓ {totals.total_out ?? 0} keluar
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <p className="text-xs text-muted-foreground font-medium">Dana Masuk</p>
+            <p className="text-2xl font-black mt-1 text-green-600">{formatCurrency(Number(totals.amount_in))}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Approved: {formatCurrency(Number(totals.approved_amount_in))}
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <p className="text-xs text-muted-foreground font-medium">Disetujui</p>
+            <p className="text-2xl font-black mt-1 text-blue-600">{totals.approved.toLocaleString("id-ID")}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">{pctApproved}% dari total</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <p className="text-xs text-muted-foreground font-medium">Belum Match</p>
+            <p className="text-2xl font-black mt-1 text-orange-600">{totals.unmatched.toLocaleString("id-ID")}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">{pctUnmatched}% perlu tindakan</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Pending amount alert */}
+      {Number(totals.pending_amount_in) > 0 && (
+        <div className="flex items-start gap-3 p-3 rounded-xl bg-amber-50 border border-amber-200">
+          <span className="text-amber-500 text-lg">⚠️</span>
+          <div>
+            <p className="text-sm font-semibold text-amber-800">Dana Masuk Belum Disetujui</p>
+            <p className="text-xs text-amber-700 mt-0.5">
+              {formatCurrency(Number(totals.pending_amount_in))} masih dalam status unmatched/matched/duplikat — perlu review admin.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Monthly table */}
+      <Card>
+        <CardContent className="p-0 overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b bg-muted/40">
+                <th className="text-left px-4 py-3 font-semibold text-xs uppercase tracking-wide">Bulan</th>
+                <th className="text-right px-3 py-3 font-semibold text-xs uppercase tracking-wide">Total</th>
+                <th className="text-right px-3 py-3 font-semibold text-xs uppercase tracking-wide text-green-700">Masuk</th>
+                <th className="text-right px-3 py-3 font-semibold text-xs uppercase tracking-wide text-red-700">Keluar</th>
+                <th className="text-right px-3 py-3 font-semibold text-xs uppercase tracking-wide text-blue-700">Approved</th>
+                <th className="text-right px-3 py-3 font-semibold text-xs uppercase tracking-wide text-orange-700">Unmatched</th>
+                <th className="text-right px-3 py-3 font-semibold text-xs uppercase tracking-wide text-yellow-700">Matched</th>
+                <th className="text-right px-3 py-3 font-semibold text-xs uppercase tracking-wide">Duplikat</th>
+                <th className="text-right px-4 py-3 font-semibold text-xs uppercase tracking-wide">% Selesai</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.length === 0 ? (
+                <tr><td colSpan={9} className="text-center py-10 text-muted-foreground">Belum ada data mutasi</td></tr>
+              ) : rows.map((r: any) => {
+                const pct = Number(r.total) > 0 ? Math.round((Number(r.approved) / Number(r.total)) * 100) : 0;
+                return (
+                  <tr key={r.month} className="border-b hover:bg-muted/20 transition-colors">
+                    <td className="px-4 py-3 font-semibold">{fmtMonth(r.month)}</td>
+                    <td className="px-3 py-3 text-right font-mono">{Number(r.total).toLocaleString("id-ID")}</td>
+                    <td className="px-3 py-3 text-right text-green-700 font-medium">{formatCurrency(Number(r.amount_in))}</td>
+                    <td className="px-3 py-3 text-right text-red-700 font-medium">{formatCurrency(Number(r.amount_out))}</td>
+                    <td className="px-3 py-3 text-right">
+                      <span className="inline-flex items-center gap-1">
+                        <span className="w-2 h-2 rounded-full bg-blue-400 shrink-0" />
+                        {Number(r.approved).toLocaleString("id-ID")}
+                      </span>
+                    </td>
+                    <td className="px-3 py-3 text-right">
+                      {Number(r.unmatched) > 0 ? (
+                        <span className="inline-flex items-center gap-1 text-orange-700 font-semibold">
+                          <span className="w-2 h-2 rounded-full bg-orange-400 shrink-0" />
+                          {Number(r.unmatched).toLocaleString("id-ID")}
+                        </span>
+                      ) : <span className="text-muted-foreground">—</span>}
+                    </td>
+                    <td className="px-3 py-3 text-right">
+                      {Number(r.matched) > 0 ? (
+                        <span className="text-yellow-700">{Number(r.matched).toLocaleString("id-ID")}</span>
+                      ) : <span className="text-muted-foreground">—</span>}
+                    </td>
+                    <td className="px-3 py-3 text-right">
+                      {Number(r.duplicate) > 0 ? (
+                        <span className="text-amber-700">{Number(r.duplicate).toLocaleString("id-ID")}</span>
+                      ) : <span className="text-muted-foreground">—</span>}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <div className="flex items-center gap-2 justify-end">
+                        <div className="w-16 h-1.5 rounded-full bg-muted overflow-hidden">
+                          <div
+                            className={`h-full rounded-full transition-all ${pct >= 80 ? "bg-green-500" : pct >= 50 ? "bg-yellow-500" : "bg-orange-500"}`}
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
+                        <span className={`text-xs font-semibold w-8 text-right ${pct >= 80 ? "text-green-700" : pct >= 50 ? "text-yellow-700" : "text-orange-700"}`}>
+                          {pct}%
+                        </span>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+            {rows.length > 1 && (
+              <tfoot>
+                <tr className="border-t-2 bg-muted/30 font-semibold">
+                  <td className="px-4 py-3 text-xs uppercase tracking-wide">Total</td>
+                  <td className="px-3 py-3 text-right font-mono">{totals.total.toLocaleString("id-ID")}</td>
+                  <td className="px-3 py-3 text-right text-green-700">{formatCurrency(Number(totals.amount_in))}</td>
+                  <td className="px-3 py-3 text-right text-red-700">{formatCurrency(Number(totals.amount_out))}</td>
+                  <td className="px-3 py-3 text-right">{totals.approved.toLocaleString("id-ID")}</td>
+                  <td className="px-3 py-3 text-right text-orange-700">{totals.unmatched.toLocaleString("id-ID")}</td>
+                  <td className="px-3 py-3 text-right">{(totals.matched ?? 0).toLocaleString("id-ID")}</td>
+                  <td className="px-3 py-3 text-right">{(totals.duplicate ?? 0).toLocaleString("id-ID")}</td>
+                  <td className="px-4 py-3 text-right text-sm">{pctApproved}%</td>
+                </tr>
+              </tfoot>
+            )}
+          </table>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 export default function AdminBankReconciliation() {
   const { toast } = useToast();
   const qc = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
 
+  const [activeTab, setActiveTab] = useState<"mutasi" | "laporan">("mutasi");
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterDirection, setFilterDirection] = useState("all");
   const [search, setSearch] = useState("");
@@ -887,23 +1063,47 @@ export default function AdminBankReconciliation() {
           <p className="text-muted-foreground">Cocokkan mutasi rekening dengan transaksi di sistem</p>
         </div>
         <div className="flex gap-2 flex-wrap">
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-2"
-            onClick={() => runMatchingMutation.mutate({ data: {} })}
-            disabled={runMatchingMutation.isPending}
-          >
-            <Zap size={14} />
-            {runMatchingMutation.isPending ? "Memproses..." : "Jalankan Matching"}
-          </Button>
-          <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleFileImport} />
-          <Button size="sm" className="gap-2" onClick={() => fileRef.current?.click()} disabled={importing}>
-            <Upload size={14} />
-            {importing ? "Mengimpor..." : "Import Excel / CSV"}
-          </Button>
+          {activeTab === "mutasi" && (<>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2"
+              onClick={() => runMatchingMutation.mutate({ data: {} })}
+              disabled={runMatchingMutation.isPending}
+            >
+              <Zap size={14} />
+              {runMatchingMutation.isPending ? "Memproses..." : "Jalankan Matching"}
+            </Button>
+            <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleFileImport} />
+            <Button size="sm" className="gap-2" onClick={() => fileRef.current?.click()} disabled={importing}>
+              <Upload size={14} />
+              {importing ? "Mengimpor..." : "Import Excel / CSV"}
+            </Button>
+          </>)}
         </div>
       </div>
+
+      {/* Tab switcher */}
+      <div className="flex gap-1 p-1 bg-muted rounded-lg w-fit">
+        <button
+          className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${activeTab === "mutasi" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+          onClick={() => setActiveTab("mutasi")}
+        >
+          Mutasi
+        </button>
+        <button
+          className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${activeTab === "laporan" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+          onClick={() => setActiveTab("laporan")}
+        >
+          Laporan Bulanan
+        </button>
+      </div>
+
+      {/* Laporan tab */}
+      {activeTab === "laporan" && <ReportTab />}
+
+      {/* Mutasi tab content */}
+      <div className={activeTab === "mutasi" ? "space-y-6" : "hidden"}>
 
       {/* Stats bar */}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
@@ -1024,6 +1224,7 @@ export default function AdminBankReconciliation() {
           <Button onClick={() => setShowImportDialog(false)}>Tutup</Button>
         </DialogContent>
       </Dialog>
+      </div>
     </div>
   );
 }

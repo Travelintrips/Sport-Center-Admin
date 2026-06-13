@@ -433,6 +433,53 @@ router.delete("/bank-reconciliation/mutations", adminMiddleware, async (req, res
   }
 });
 
+// GET /bank-reconciliation/report — laporan bulanan rekonsiliasi
+router.get("/bank-reconciliation/report", adminMiddleware, async (req, res) => {
+  try {
+    const { rows } = await db.execute(sql`
+      SELECT
+        TO_CHAR(transaction_date, 'YYYY-MM') AS month,
+        COUNT(*)::int AS total,
+        COUNT(*) FILTER (WHERE direction = 'IN')::int AS total_in,
+        COUNT(*) FILTER (WHERE direction = 'OUT')::int AS total_out,
+        COALESCE(SUM(amount) FILTER (WHERE direction = 'IN'), 0)::numeric AS amount_in,
+        COALESCE(SUM(amount) FILTER (WHERE direction = 'OUT'), 0)::numeric AS amount_out,
+        COUNT(*) FILTER (WHERE status = 'approved')::int AS approved,
+        COUNT(*) FILTER (WHERE status = 'unmatched')::int AS unmatched,
+        COUNT(*) FILTER (WHERE status = 'matched')::int AS matched,
+        COUNT(*) FILTER (WHERE status = 'duplicate_need_review')::int AS duplicate,
+        COUNT(*) FILTER (WHERE status = 'rejected')::int AS rejected,
+        COALESCE(SUM(amount) FILTER (WHERE direction = 'IN' AND status = 'approved'), 0)::numeric AS approved_amount_in,
+        COALESCE(SUM(amount) FILTER (WHERE direction = 'IN' AND status != 'approved' AND status != 'rejected'), 0)::numeric AS pending_amount_in
+      FROM sport_center.bank_mutations
+      GROUP BY TO_CHAR(transaction_date, 'YYYY-MM')
+      ORDER BY month DESC
+    `);
+
+    // totals keseluruhan
+    const totals = rows.reduce(
+      (acc: any, r: any) => ({
+        total: acc.total + Number(r.total),
+        amount_in: acc.amount_in + Number(r.amount_in),
+        amount_out: acc.amount_out + Number(r.amount_out),
+        approved: acc.approved + Number(r.approved),
+        unmatched: acc.unmatched + Number(r.unmatched),
+        matched: acc.matched + Number(r.matched),
+        duplicate: acc.duplicate + Number(r.duplicate),
+        rejected: acc.rejected + Number(r.rejected),
+        approved_amount_in: acc.approved_amount_in + Number(r.approved_amount_in),
+        pending_amount_in: acc.pending_amount_in + Number(r.pending_amount_in),
+      }),
+      { total: 0, amount_in: 0, amount_out: 0, approved: 0, unmatched: 0, matched: 0, duplicate: 0, rejected: 0, approved_amount_in: 0, pending_amount_in: 0 }
+    );
+
+    res.json({ rows, totals });
+  } catch (err: any) {
+    req.log.error({ err }, "Bank reconciliation report error");
+    res.status(500).json({ error: err?.message ?? "Gagal memuat laporan" });
+  }
+});
+
 // POST /bank-reconciliation/run-matching
 router.post("/bank-reconciliation/run-matching", adminMiddleware, async (req, res) => {
   try {
