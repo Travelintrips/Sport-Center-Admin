@@ -670,6 +670,108 @@ function getSheetContext(): { sheetId?: string; sheetName?: string } {
   }
 }
 
+// ===== Fase 3: Tax Fields Section =====
+const TAX_TYPE_OPTIONS = [
+  { v: "TAX_PPN", l: "PPN" }, { v: "TAX_PPH21", l: "PPh 21" }, { v: "TAX_PPH23", l: "PPh 23" },
+  { v: "TAX_PPH_FINAL", l: "PPh Final" }, { v: "TAX_PPH_BADAN", l: "PPh Badan" },
+];
+
+const TRANSACTION_TYPE_OUT_OPTIONS = [
+  { v: "BANK_FEE", l: "Biaya Admin Bank" }, { v: "REFUND", l: "Refund" },
+  { v: "RENT_AP", l: "Beban Sewa" }, { v: "VENDOR_PAYMENT", l: "Pembayaran Vendor" },
+  { v: "OPERATIONAL", l: "Beban Operasional" }, { v: "TAX_PAYMENT", l: "Pembayaran Pajak" },
+  { v: "OTHER", l: "Lainnya" },
+];
+
+function TaxFieldsSection({ mutation, onUpdated }: { mutation: any; onUpdated: () => void }) {
+  const { toast } = useToast();
+  const [open, setOpen] = useState(!!(mutation.transactionType || mutation.taxType));
+  const [form, setForm] = useState({
+    transactionType: mutation.transactionType ?? "",
+    taxType: mutation.taxType ?? "",
+    taxPeriod: mutation.taxPeriod ?? "",
+    taxPaymentReference: mutation.taxPaymentReference ?? "",
+  });
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const r = await fetch(`${API_BASE}/bank-reconciliation/mutations/${mutation.id}/tax-fields`, {
+        method: "PATCH", headers: authHeaders(),
+        body: JSON.stringify({
+          transactionType: form.transactionType || null,
+          taxType: form.taxType || null,
+          taxPeriod: form.taxPeriod || null,
+          taxPaymentReference: form.taxPaymentReference || null,
+        }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? "Gagal simpan");
+      toast({ title: "Klasifikasi disimpan" });
+      onUpdated();
+    } catch (e: any) { toast({ title: e.message, variant: "destructive" }); }
+    setSaving(false);
+  };
+
+  const isTaxPayment = form.transactionType === "TAX_PAYMENT";
+
+  return (
+    <div className="border-t pt-3">
+      <button
+        className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground font-medium"
+        onClick={() => setOpen(v => !v)}
+      >
+        {open ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+        Klasifikasi Pengeluaran
+        {(mutation.transactionType || mutation.taxType) && (
+          <span className="ml-1 px-1.5 py-0.5 rounded bg-orange-100 text-orange-700 text-[10px] font-semibold">
+            {mutation.transactionType ?? mutation.taxType}
+          </span>
+        )}
+      </button>
+      {open && (
+        <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+          <div>
+            <label className="text-muted-foreground">Jenis Transaksi</label>
+            <select className="w-full border rounded px-2 py-1.5 text-xs bg-background mt-0.5"
+              value={form.transactionType} onChange={e => setForm(f => ({ ...f, transactionType: e.target.value, taxType: e.target.value !== "TAX_PAYMENT" ? "" : f.taxType }))}>
+              <option value="">-- pilih --</option>
+              {TRANSACTION_TYPE_OUT_OPTIONS.map(o => <option key={o.v} value={o.v}>{o.l}</option>)}
+            </select>
+          </div>
+          {isTaxPayment && (
+            <>
+              <div>
+                <label className="text-muted-foreground">Jenis Pajak</label>
+                <select className="w-full border rounded px-2 py-1.5 text-xs bg-background mt-0.5"
+                  value={form.taxType} onChange={e => setForm(f => ({ ...f, taxType: e.target.value }))}>
+                  <option value="">-- pilih --</option>
+                  {TAX_TYPE_OPTIONS.map(o => <option key={o.v} value={o.v}>{o.l}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-muted-foreground">Periode Pajak (YYYY-MM)</label>
+                <Input className="text-xs h-8 mt-0.5" placeholder="2025-01" value={form.taxPeriod} onChange={e => setForm(f => ({ ...f, taxPeriod: e.target.value }))} />
+              </div>
+              <div>
+                <label className="text-muted-foreground">No. Referensi</label>
+                <Input className="text-xs h-8 mt-0.5" placeholder="NTPN / SSP no." value={form.taxPaymentReference} onChange={e => setForm(f => ({ ...f, taxPaymentReference: e.target.value }))} />
+              </div>
+            </>
+          )}
+          <div className={isTaxPayment ? "sm:col-span-4" : "sm:col-span-3"}>
+            <label className="text-muted-foreground invisible block">.</label>
+            <Button size="sm" className="h-8 text-xs mt-0.5" onClick={handleSave} disabled={saving}>
+              {saving ? "Menyimpan..." : "Simpan"}
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function MutationRow({ mutation, qc }: { mutation: any; qc: any }) {
   const [expanded, setExpanded] = useState(false);
   const [batchScanning, setBatchScanning] = useState(false);
@@ -938,6 +1040,11 @@ function MutationRow({ mutation, qc }: { mutation: any; qc: any }) {
             </div>
           )}
 
+          {/* Tax Fields — untuk transaksi OUT */}
+          {mutation.direction === "OUT" && (
+            <TaxFieldsSection mutation={mutation} onUpdated={() => qc.invalidateQueries({ queryKey: getListBankMutationsQueryKey() })} />
+          )}
+
           {/* Jurnal Akuntansi — tampil hanya saat approved */}
           {mutation.status === "approved" && (
             <div className="flex items-center gap-3 flex-wrap border-t pt-3">
@@ -1176,12 +1283,342 @@ function ReportTab() {
   );
 }
 
+// ===== Fase 4: Closing Bank Tab =====
+function ClosingBankTab() {
+  const { toast } = useToast();
+  const [closings, setClosings] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [formData, setFormData] = useState({ periodYear: new Date().getFullYear(), periodMonth: new Date().getMonth() + 1, bankAccountId: "", openingBalance: 0, statementEndingBalance: 0, notes: "" });
+  const [submitting, setSubmitting] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const r = await fetch(`${API_BASE}/bank-reconciliation/closing`, { headers: authHeaders() });
+      const d = await r.json();
+      setClosings(d.closings ?? []);
+    } catch { /* ignore */ }
+    setLoading(false);
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const handleCompute = async () => {
+    setSubmitting(true);
+    try {
+      const r = await fetch(`${API_BASE}/bank-reconciliation/closing/compute`, {
+        method: "POST", headers: authHeaders(),
+        body: JSON.stringify({ ...formData, openingBalance: Number(formData.openingBalance), statementEndingBalance: Number(formData.statementEndingBalance) }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? "Gagal compute closing");
+      toast({ title: "Closing dihitung" });
+      setShowForm(false);
+      load();
+    } catch (e: any) { toast({ title: e.message, variant: "destructive" }); }
+    setSubmitting(false);
+  };
+
+  const handleClose = async (id: number) => {
+    try {
+      const r = await fetch(`${API_BASE}/bank-reconciliation/closing/${id}/close`, { method: "POST", headers: authHeaders() });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? "Gagal tutup");
+      toast({ title: "Periode berhasil ditutup" });
+      load();
+    } catch (e: any) { toast({ title: e.message, variant: "destructive" }); }
+  };
+
+  const handleReopen = async (id: number) => {
+    try {
+      const r = await fetch(`${API_BASE}/bank-reconciliation/closing/${id}/reopen`, { method: "POST", headers: authHeaders() });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? "Gagal buka kembali");
+      toast({ title: "Periode dibuka kembali" });
+      load();
+    } catch (e: any) { toast({ title: e.message, variant: "destructive" }); }
+  };
+
+  const MONTH_ID = ["", "Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="font-bold text-lg">Closing Bank Bulanan</h2>
+        <Button size="sm" onClick={() => setShowForm(true)}>+ Hitung Closing Baru</Button>
+      </div>
+
+      {showForm && (
+        <Card>
+          <CardContent className="p-4 space-y-3">
+            <p className="font-semibold text-sm">Hitung Closing Periode</p>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
+              <div><label className="text-xs text-muted-foreground">Tahun</label>
+                <Input type="number" value={formData.periodYear} onChange={e => setFormData(f => ({ ...f, periodYear: Number(e.target.value) }))} /></div>
+              <div><label className="text-xs text-muted-foreground">Bulan (1–12)</label>
+                <Input type="number" min={1} max={12} value={formData.periodMonth} onChange={e => setFormData(f => ({ ...f, periodMonth: Number(e.target.value) }))} /></div>
+              <div><label className="text-xs text-muted-foreground">No. Rekening (opsional)</label>
+                <Input value={formData.bankAccountId} onChange={e => setFormData(f => ({ ...f, bankAccountId: e.target.value }))} placeholder="semua rekening" /></div>
+              <div><label className="text-xs text-muted-foreground">Saldo Awal</label>
+                <Input type="number" value={formData.openingBalance} onChange={e => setFormData(f => ({ ...f, openingBalance: Number(e.target.value) }))} /></div>
+              <div><label className="text-xs text-muted-foreground">Saldo Akhir (Statement)</label>
+                <Input type="number" value={formData.statementEndingBalance} onChange={e => setFormData(f => ({ ...f, statementEndingBalance: Number(e.target.value) }))} /></div>
+              <div><label className="text-xs text-muted-foreground">Catatan</label>
+                <Input value={formData.notes} onChange={e => setFormData(f => ({ ...f, notes: e.target.value }))} /></div>
+            </div>
+            <div className="flex gap-2">
+              <Button size="sm" onClick={handleCompute} disabled={submitting}>{submitting ? "Menghitung..." : "Hitung"}</Button>
+              <Button size="sm" variant="outline" onClick={() => setShowForm(false)}>Batal</Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {loading ? (
+        <div className="space-y-2">{[1,2,3].map(i => <Skeleton key={i} className="h-14 rounded-xl" />)}</div>
+      ) : !closings.length ? (
+        <Card><CardContent className="py-10 text-center text-muted-foreground text-sm">Belum ada closing. Klik "+ Hitung Closing Baru" untuk memulai.</CardContent></Card>
+      ) : (
+        <Card>
+          <CardContent className="p-0 overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b bg-muted/40">
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase">Periode</th>
+                  <th className="px-3 py-3 text-right text-xs font-semibold uppercase">Saldo Awal</th>
+                  <th className="px-3 py-3 text-right text-xs font-semibold uppercase text-green-700">Total Masuk</th>
+                  <th className="px-3 py-3 text-right text-xs font-semibold uppercase text-red-700">Total Keluar</th>
+                  <th className="px-3 py-3 text-right text-xs font-semibold uppercase">Saldo Sistem</th>
+                  <th className="px-3 py-3 text-right text-xs font-semibold uppercase">Saldo Statement</th>
+                  <th className="px-3 py-3 text-right text-xs font-semibold uppercase">Selisih</th>
+                  <th className="px-3 py-3 text-center text-xs font-semibold uppercase">Status</th>
+                  <th className="px-3 py-3 text-center text-xs font-semibold uppercase">Aksi</th>
+                </tr>
+              </thead>
+              <tbody>
+                {closings.map((c: any) => {
+                  const diff = parseFloat(c.difference ?? "0");
+                  const isBalanced = Math.abs(diff) <= 0.01;
+                  return (
+                    <tr key={c.id} className="border-b hover:bg-muted/20">
+                      <td className="px-4 py-3 font-semibold">{MONTH_ID[c.periodMonth]} {c.periodYear}</td>
+                      <td className="px-3 py-3 text-right font-mono text-xs">{formatCurrency(c.openingBalance)}</td>
+                      <td className="px-3 py-3 text-right text-green-700 font-medium">{formatCurrency(c.totalIn)}</td>
+                      <td className="px-3 py-3 text-right text-red-700 font-medium">{formatCurrency(c.totalOut)}</td>
+                      <td className="px-3 py-3 text-right font-mono text-xs">{formatCurrency(c.systemEndingBalance)}</td>
+                      <td className="px-3 py-3 text-right font-mono text-xs">{formatCurrency(c.statementEndingBalance)}</td>
+                      <td className={`px-3 py-3 text-right font-bold text-xs ${isBalanced ? "text-green-700" : "text-red-600"}`}>
+                        {isBalanced ? "✓ 0" : formatCurrency(diff)}
+                      </td>
+                      <td className="px-3 py-3 text-center">
+                        <Badge className={c.status === "closed" ? "bg-green-100 text-green-700 border-green-200" : isBalanced ? "bg-blue-100 text-blue-700 border-blue-200" : "bg-orange-100 text-orange-700 border-orange-200"}>
+                          {c.status === "closed" ? "✓ Ditutup" : isBalanced ? "Seimbang" : "Belum Seimbang"}
+                        </Badge>
+                      </td>
+                      <td className="px-3 py-3 text-center">
+                        {c.status !== "closed" ? (
+                          <Button size="sm" className="text-xs h-7" disabled={!isBalanced} onClick={() => handleClose(c.id)}>Tutup</Button>
+                        ) : (
+                          <Button size="sm" variant="outline" className="text-xs h-7 text-amber-600 border-amber-200" onClick={() => handleReopen(c.id)}>Buka</Button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+// ===== Fase 2: Aturan COA Tab =====
+function AturanCOATab() {
+  const { toast } = useToast();
+  const [rules, setRules] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [form, setForm] = useState({ transactionType: "", direction: "IN", debitCoaId: "", debitCoaName: "", creditCoaId: "", creditCoaName: "", bankAccountId: "" });
+  const [submitting, setSubmitting] = useState(false);
+
+  const TRANSACTION_TYPES = [
+    { v: "payment", l: "Payment (booking masuk)" }, { v: "order", l: "Order (booking masuk)" },
+    { v: "invoice", l: "Invoice / Piutang" }, { v: "other_in", l: "Lainnya (Masuk)" },
+    { v: "BANK_FEE", l: "Biaya Admin Bank" }, { v: "REFUND", l: "Refund ke Customer" },
+    { v: "RENT_AP", l: "Beban Sewa" }, { v: "VENDOR_PAYMENT", l: "Pembayaran Vendor" },
+    { v: "OPERATIONAL", l: "Beban Operasional" },
+    { v: "TAX_PPN", l: "Pajak PPN" }, { v: "TAX_PPH21", l: "Pajak PPh 21" },
+    { v: "TAX_PPH23", l: "Pajak PPh 23" }, { v: "TAX_PPH_FINAL", l: "Pajak PPh Final" },
+    { v: "TAX_PPH_BADAN", l: "Pajak PPh Badan" }, { v: "TAX_PAYMENT", l: "Pembayaran Pajak (Umum)" },
+    { v: "OTHER", l: "Lainnya (Keluar)" },
+  ];
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const r = await fetch(`${API_BASE}/bank-reconciliation/account-rules`, { headers: authHeaders() });
+      const d = await r.json();
+      setRules(d.rules ?? []);
+    } catch { /* ignore */ }
+    setLoading(false);
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const resetForm = () => setForm({ transactionType: "", direction: "IN", debitCoaId: "", debitCoaName: "", creditCoaId: "", creditCoaName: "", bankAccountId: "" });
+
+  const handleSubmit = async () => {
+    if (!form.transactionType || !form.debitCoaId || !form.creditCoaId) {
+      toast({ title: "Isi semua field wajib", variant: "destructive" }); return;
+    }
+    setSubmitting(true);
+    try {
+      const url = editingId ? `${API_BASE}/bank-reconciliation/account-rules/${editingId}` : `${API_BASE}/bank-reconciliation/account-rules`;
+      const method = editingId ? "PUT" : "POST";
+      const r = await fetch(url, { method, headers: authHeaders(), body: JSON.stringify(form) });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? "Gagal simpan aturan");
+      toast({ title: editingId ? "Aturan diperbarui" : "Aturan ditambahkan" });
+      setShowForm(false); setEditingId(null); resetForm(); load();
+    } catch (e: any) { toast({ title: e.message, variant: "destructive" }); }
+    setSubmitting(false);
+  };
+
+  const handleEdit = (rule: any) => {
+    setForm({ transactionType: rule.transactionType, direction: rule.direction, debitCoaId: rule.debitCoaId, debitCoaName: rule.debitCoaName, creditCoaId: rule.creditCoaId, creditCoaName: rule.creditCoaName, bankAccountId: rule.bankAccountId ?? "" });
+    setEditingId(rule.id);
+    setShowForm(true);
+  };
+
+  const handleToggleActive = async (rule: any) => {
+    try {
+      const r = await fetch(`${API_BASE}/bank-reconciliation/account-rules/${rule.id}`, {
+        method: "PUT", headers: authHeaders(),
+        body: JSON.stringify({ ...rule, isActive: !rule.isActive }),
+      });
+      if (!r.ok) throw new Error("Gagal update");
+      load();
+    } catch (e: any) { toast({ title: (e as any).message, variant: "destructive" }); }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="font-bold text-lg">Aturan COA (Chart of Accounts)</h2>
+          <p className="text-xs text-muted-foreground">Mapping akun jurnal per jenis transaksi. Digunakan saat posting jurnal; fallback ke ACCOUNT_MAP default jika tidak ada aturan.</p>
+        </div>
+        <Button size="sm" onClick={() => { resetForm(); setEditingId(null); setShowForm(true); }}>+ Tambah Aturan</Button>
+      </div>
+
+      {showForm && (
+        <Card>
+          <CardContent className="p-4 space-y-3">
+            <p className="font-semibold text-sm">{editingId ? "Edit Aturan" : "Tambah Aturan COA"}</p>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
+              <div className="sm:col-span-2">
+                <label className="text-xs text-muted-foreground">Jenis Transaksi *</label>
+                <select className="w-full border rounded px-2 py-2 text-sm bg-background" value={form.transactionType} onChange={e => setForm(f => ({ ...f, transactionType: e.target.value }))}>
+                  <option value="">-- pilih --</option>
+                  {TRANSACTION_TYPES.map(t => <option key={t.v} value={t.v}>{t.l}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground">Arah *</label>
+                <select className="w-full border rounded px-2 py-2 text-sm bg-background" value={form.direction} onChange={e => setForm(f => ({ ...f, direction: e.target.value }))}>
+                  <option value="IN">IN (Masuk)</option>
+                  <option value="OUT">OUT (Keluar)</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground">Kode Akun Debit *</label>
+                <Input placeholder="e.g. 1001" value={form.debitCoaId} onChange={e => setForm(f => ({ ...f, debitCoaId: e.target.value }))} />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground">Nama Akun Debit *</label>
+                <Input placeholder="e.g. Kas/Bank" value={form.debitCoaName} onChange={e => setForm(f => ({ ...f, debitCoaName: e.target.value }))} />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground">No. Rekening (opsional)</label>
+                <Input placeholder="spesifik rekening bank" value={form.bankAccountId} onChange={e => setForm(f => ({ ...f, bankAccountId: e.target.value }))} />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground">Kode Akun Kredit *</label>
+                <Input placeholder="e.g. 4001" value={form.creditCoaId} onChange={e => setForm(f => ({ ...f, creditCoaId: e.target.value }))} />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground">Nama Akun Kredit *</label>
+                <Input placeholder="e.g. Pendapatan Booking" value={form.creditCoaName} onChange={e => setForm(f => ({ ...f, creditCoaName: e.target.value }))} />
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <Button size="sm" onClick={handleSubmit} disabled={submitting}>{submitting ? "Menyimpan..." : editingId ? "Perbarui" : "Simpan"}</Button>
+              <Button size="sm" variant="outline" onClick={() => { setShowForm(false); setEditingId(null); resetForm(); }}>Batal</Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {loading ? (
+        <div className="space-y-2">{[1,2,3].map(i => <Skeleton key={i} className="h-10 rounded" />)}</div>
+      ) : !rules.length ? (
+        <Card><CardContent className="py-10 text-center text-muted-foreground text-sm">Belum ada aturan COA. Aturan default ACCOUNT_MAP akan digunakan.</CardContent></Card>
+      ) : (
+        <Card>
+          <CardContent className="p-0 overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b bg-muted/40">
+                  <th className="px-3 py-2.5 text-left font-semibold">Jenis Transaksi</th>
+                  <th className="px-3 py-2.5 text-left font-semibold">Arah</th>
+                  <th className="px-3 py-2.5 text-left font-semibold">Debit</th>
+                  <th className="px-3 py-2.5 text-left font-semibold">Kredit</th>
+                  <th className="px-3 py-2.5 text-left font-semibold">Rekening</th>
+                  <th className="px-3 py-2.5 text-center font-semibold">Aktif</th>
+                  <th className="px-3 py-2.5 text-center font-semibold">Aksi</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rules.map((r: any) => (
+                  <tr key={r.id} className={`border-b hover:bg-muted/20 ${!r.isActive ? "opacity-50" : ""}`}>
+                    <td className="px-3 py-2 font-mono">{r.transactionType}</td>
+                    <td className="px-3 py-2">
+                      <Badge className={r.direction === "IN" ? "bg-green-100 text-green-700 border-green-200" : "bg-red-100 text-red-700 border-red-200"}>
+                        {r.direction}
+                      </Badge>
+                    </td>
+                    <td className="px-3 py-2"><span className="font-mono">{r.debitCoaId}</span> — {r.debitCoaName}</td>
+                    <td className="px-3 py-2"><span className="font-mono">{r.creditCoaId}</span> — {r.creditCoaName}</td>
+                    <td className="px-3 py-2 text-muted-foreground">{r.bankAccountId ?? "—"}</td>
+                    <td className="px-3 py-2 text-center">
+                      <button onClick={() => handleToggleActive(r)} className={`text-xs font-semibold ${r.isActive ? "text-green-600" : "text-muted-foreground"}`}>
+                        {r.isActive ? "✓" : "✗"}
+                      </button>
+                    </td>
+                    <td className="px-3 py-2 text-center">
+                      <Button size="sm" variant="outline" className="h-6 text-xs px-2 mr-1" onClick={() => handleEdit(r)}>Edit</Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
 export default function AdminBankReconciliation() {
   const { toast } = useToast();
   const qc = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const [activeTab, setActiveTab] = useState<"mutasi" | "laporan">("mutasi");
+  const [activeTab, setActiveTab] = useState<"mutasi" | "laporan" | "closing" | "coa_rules">("mutasi");
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterDirection, setFilterDirection] = useState("all");
   const [search, setSearch] = useState("");
@@ -1285,23 +1722,26 @@ export default function AdminBankReconciliation() {
       </div>
 
       {/* Tab switcher */}
-      <div className="flex gap-1 p-1 bg-muted rounded-lg w-fit">
-        <button
-          className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${activeTab === "mutasi" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}
-          onClick={() => setActiveTab("mutasi")}
-        >
-          Mutasi
-        </button>
-        <button
-          className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${activeTab === "laporan" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}
-          onClick={() => setActiveTab("laporan")}
-        >
-          Laporan Bulanan
-        </button>
+      <div className="flex gap-1 p-1 bg-muted rounded-lg w-fit flex-wrap">
+        {(["mutasi", "laporan", "closing", "coa_rules"] as const).map((t) => (
+          <button
+            key={t}
+            className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${activeTab === t ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+            onClick={() => setActiveTab(t)}
+          >
+            {t === "mutasi" ? "Mutasi" : t === "laporan" ? "Laporan Bulanan" : t === "closing" ? "Closing Bank" : "Aturan COA"}
+          </button>
+        ))}
       </div>
 
       {/* Laporan tab */}
       {activeTab === "laporan" && <ReportTab />}
+
+      {/* Closing Bank tab */}
+      {activeTab === "closing" && <ClosingBankTab />}
+
+      {/* Aturan COA tab */}
+      {activeTab === "coa_rules" && <AturanCOATab />}
 
       {/* Mutasi tab content */}
       <div className={activeTab === "mutasi" ? "space-y-6" : "hidden"}>

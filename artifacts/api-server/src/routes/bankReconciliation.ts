@@ -4,13 +4,17 @@ import {
   bankMutationsTable,
   bankReconciliationMatchesTable,
   bankJournalEntriesTable,
+  bankReconciliationAccountRulesTable,
+  bankReconciliationClosingTable,
   bookingsTable,
   paymentsTable,
   facilitiesTable,
   auditLogsTable,
+  companyInvoicesTable,
+  companyInvoiceItemsTable,
 } from "@workspace/db";
-import { eq, desc, and, inArray, sql, gte, lte } from "drizzle-orm";
-import { adminMiddleware } from "../lib/auth";
+import { eq, desc, and, inArray, sql, gte, lte, isNull } from "drizzle-orm";
+import { adminMiddleware, financeMiddleware, superAdminMiddleware } from "../lib/auth";
 import {
   normalizeDescription,
   extractOrderId,
@@ -26,7 +30,7 @@ const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
 // Module-level helper — dipanggil dari /approve DAN /approve-candidate
-// Memperbarui status payment/booking dan mencatat audit log
+// Memperbarui status payment/booking + settlement invoice perusahaan
 async function propagateApproval(
   type: string | undefined,
   id: number | undefined,
@@ -37,6 +41,11 @@ async function propagateApproval(
   const ctx = auditCtx ?? {};
 
   if (type === "payment") {
+    const [pmt] = await db.select({
+      bookingId: paymentsTable.bookingId,
+      amount: paymentsTable.amount,
+    }).from(paymentsTable).where(eq(paymentsTable.id, id)).limit(1);
+
     await db.update(paymentsTable).set({ status: "confirmed", updatedAt: new Date() }).where(eq(paymentsTable.id, id));
     await db.insert(auditLogsTable).values({
       userId: ctx.userId, userRole: ctx.userRole,
@@ -45,7 +54,6 @@ async function propagateApproval(
       ipAddress: ctx.ipAddress, userAgent: ctx.userAgent,
     });
 
-    const [pmt] = await db.select({ bookingId: paymentsTable.bookingId }).from(paymentsTable).where(eq(paymentsTable.id, id)).limit(1);
     if (pmt?.bookingId) {
       const updated = await db.update(bookingsTable).set({ status: "confirmed", updatedAt: new Date() }).where(
         and(eq(bookingsTable.id, pmt.bookingId), inArray(bookingsTable.status, CONFIRMABLE as any[]))
@@ -57,6 +65,15 @@ async function propagateApproval(
           after: { status: "confirmed", source: "bank_reconciliation" },
           ipAddress: ctx.ipAddress, userAgent: ctx.userAgent,
         });
+      }
+
+      // Invoice partial payment settlement
+      const [invoiceItem] = await db.select({ invoiceId: companyInvoiceItemsTable.invoiceId })
+        .from(companyInvoiceItemsTable)
+        .where(eq(companyInvoiceItemsTable.bookingId, pmt.bookingId))
+        .limit(1);
+      if (invoiceItem) {
+        await settleInvoice(invoiceItem.invoiceId!, parseFloat(pmt.amount ?? "0"), ctx);
       }
     }
   } else if (type === "order") {
@@ -70,9 +87,49 @@ async function propagateApproval(
         after: { status: "confirmed", source: "bank_reconciliation" },
         ipAddress: ctx.ipAddress, userAgent: ctx.userAgent,
       });
+
+      // Invoice partial payment settlement via order booking total
+      const [invoiceItem] = await db.select({
+        invoiceId: companyInvoiceItemsTable.invoiceId,
+        totalAmount: companyInvoiceItemsTable.totalAmount,
+      }).from(companyInvoiceItemsTable).where(eq(companyInvoiceItemsTable.bookingId, id)).limit(1);
+      if (invoiceItem) {
+        await settleInvoice(invoiceItem.invoiceId!, parseFloat(invoiceItem.totalAmount ?? "0"), ctx);
+      }
     }
   }
-  // type === 'expense': tidak ada booking/payment yang perlu di-update
+  // type === 'expense': tidak ada booking/payment/invoice yang perlu di-update
+}
+
+async function settleInvoice(
+  invoiceId: number,
+  paymentAmount: number,
+  ctx: { userId?: number; userRole?: string; ipAddress?: string; userAgent?: string },
+) {
+  if (!invoiceId || paymentAmount <= 0) return;
+  const [invoice] = await db.select().from(companyInvoicesTable).where(eq(companyInvoicesTable.id, invoiceId)).limit(1);
+  if (!invoice || invoice.status === "paid") return;
+
+  const currentPaid = parseFloat(invoice.paidAmount ?? "0");
+  const grandTotal = parseFloat(invoice.grandTotal ?? "0");
+  const newPaid = currentPaid + paymentAmount;
+  const newRemaining = Math.max(0, grandTotal - newPaid);
+  const newStatus: "paid" | "partial_paid" | "unpaid" =
+    newPaid >= grandTotal ? "paid" : newPaid > 0 ? "partial_paid" : "unpaid";
+
+  await db.update(companyInvoicesTable).set({
+    paidAmount: String(newPaid),
+    remainingAmount: String(newRemaining),
+    status: newStatus,
+    paidAt: newStatus === "paid" ? new Date() : null,
+  }).where(eq(companyInvoicesTable.id, invoiceId));
+
+  await db.insert(auditLogsTable).values({
+    userId: ctx.userId, userRole: ctx.userRole,
+    action: "invoice_partial_payment", entity: "company_invoice", entityId: invoiceId,
+    after: { paidAmount: newPaid, remainingAmount: newRemaining, status: newStatus, source: "bank_reconciliation" },
+    ipAddress: ctx.ipAddress, userAgent: ctx.userAgent,
+  });
 }
 
 // Peta akun akuntansi double-entry
@@ -91,8 +148,13 @@ const ACCOUNT_MAP = {
 
 // Post jurnal akuntansi — hanya dipanggil saat status final = approved
 // Idempotent: jika accountingPosted sudah true, tidak ada jurnal baru
+// Phase 2: coba dynamic COA lookup, fallback ke ACCOUNT_MAP
 async function postAccountingJournal(
-  mutation: { id: number; transactionDate: string; amount: string | null; direction: string; description: string; accountingPosted: boolean },
+  mutation: {
+    id: number; transactionDate: string; amount: string | null; direction: string;
+    description: string; accountingPosted: boolean;
+    bankAccountId?: string | null; taxType?: string | null; transactionType?: string | null;
+  },
   candidateType: string | undefined,
   candidateId: number | undefined,
   postedBy?: string,
@@ -107,22 +169,51 @@ async function postAccountingJournal(
 
   let debitCode: string, debitName: string, creditCode: string, creditName: string;
 
-  if (mutation.direction === "IN") {
-    debitCode = ACCOUNT_MAP.BANK.code;
-    debitName = ACCOUNT_MAP.BANK.name;
+  // --- Dynamic COA lookup (Phase 2) ---
+  const lookupType =
+    (mutation.direction === "OUT" && mutation.taxType) ? mutation.taxType :
+    mutation.transactionType ??
+    (candidateType ?? (mutation.direction === "IN" ? "payment" : "OTHER"));
+
+  const ruleConditions: any[] = [
+    eq(bankReconciliationAccountRulesTable.direction, mutation.direction),
+    eq(bankReconciliationAccountRulesTable.transactionType, lookupType),
+    eq(bankReconciliationAccountRulesTable.isActive, true),
+  ];
+  if (mutation.bankAccountId) {
+    ruleConditions.push(eq(bankReconciliationAccountRulesTable.bankAccountId, mutation.bankAccountId));
+  }
+  const [specificRule] = await db.select().from(bankReconciliationAccountRulesTable)
+    .where(and(...ruleConditions)).orderBy(desc(bankReconciliationAccountRulesTable.id)).limit(1);
+
+  let rule = specificRule;
+  if (!rule && mutation.bankAccountId) {
+    const [generalRule] = await db.select().from(bankReconciliationAccountRulesTable)
+      .where(and(
+        eq(bankReconciliationAccountRulesTable.direction, mutation.direction),
+        eq(bankReconciliationAccountRulesTable.transactionType, lookupType),
+        eq(bankReconciliationAccountRulesTable.isActive, true),
+        isNull(bankReconciliationAccountRulesTable.bankAccountId),
+      )).orderBy(desc(bankReconciliationAccountRulesTable.id)).limit(1);
+    rule = generalRule;
+  }
+
+  if (rule) {
+    debitCode = rule.debitCoaId; debitName = rule.debitCoaName;
+    creditCode = rule.creditCoaId; creditName = rule.creditCoaName;
+  } else if (mutation.direction === "IN") {
+    // Fallback ACCOUNT_MAP IN
+    debitCode = ACCOUNT_MAP.BANK.code; debitName = ACCOUNT_MAP.BANK.name;
     if (candidateType === "payment" || candidateType === "order") {
-      creditCode = ACCOUNT_MAP.BOOKING_REV.code;
-      creditName = ACCOUNT_MAP.BOOKING_REV.name;
+      creditCode = ACCOUNT_MAP.BOOKING_REV.code; creditName = ACCOUNT_MAP.BOOKING_REV.name;
     } else {
-      creditCode = ACCOUNT_MAP.ADVANCE.code;
-      creditName = ACCOUNT_MAP.ADVANCE.name;
+      creditCode = ACCOUNT_MAP.ADVANCE.code; creditName = ACCOUNT_MAP.ADVANCE.name;
     }
   } else {
-    creditCode = ACCOUNT_MAP.BANK.code;
-    creditName = ACCOUNT_MAP.BANK.name;
+    // Fallback ACCOUNT_MAP OUT
+    creditCode = ACCOUNT_MAP.BANK.code; creditName = ACCOUNT_MAP.BANK.name;
     if (candidateType === "expense" && candidateId) {
       if (candidateId < 900000) {
-        // Actual booking ID — refund ke customer
         debitCode = ACCOUNT_MAP.REFUND.code; debitName = ACCOUNT_MAP.REFUND.name;
       } else if (candidateId === 900001) {
         debitCode = ACCOUNT_MAP.BANK_FEE.code; debitName = ACCOUNT_MAP.BANK_FEE.name;
@@ -1241,7 +1332,7 @@ router.post("/bank-reconciliation/mutations/:id/mark-duplicate", adminMiddleware
 });
 
 // POST /bank-reconciliation/mutations/:id/post-journal — buat jurnal untuk mutasi approved yang belum diposting
-router.post("/bank-reconciliation/mutations/:id/post-journal", adminMiddleware, async (req, res) => {
+router.post("/bank-reconciliation/mutations/:id/post-journal", financeMiddleware, async (req, res) => {
   try {
     const mutationId = parseInt(req.params.id);
     if (isNaN(mutationId)) { res.status(400).json({ error: "ID tidak valid" }); return; }
@@ -1283,6 +1374,263 @@ router.post("/bank-reconciliation/mutations/:id/post-journal", adminMiddleware, 
   } catch (err: any) {
     req.log.error({ err }, "Bank reconciliation post-journal error");
     res.status(500).json({ error: err?.message ?? "Gagal posting jurnal" });
+  }
+});
+
+// PATCH /bank-reconciliation/mutations/:id/tax-fields — set transaction_type, tax_type, tax_period, tax_payment_reference
+router.patch("/bank-reconciliation/mutations/:id/tax-fields", financeMiddleware, async (req, res) => {
+  try {
+    const mutationId = parseInt(req.params.id);
+    if (isNaN(mutationId)) { res.status(400).json({ error: "ID tidak valid" }); return; }
+    const { transactionType, taxType, taxPeriod, taxPaymentReference } = req.body as {
+      transactionType?: string; taxType?: string; taxPeriod?: string; taxPaymentReference?: string;
+    };
+    await db.update(bankMutationsTable).set({
+      transactionType: transactionType ?? null,
+      taxType: taxType ?? null,
+      taxPeriod: taxPeriod ?? null,
+      taxPaymentReference: taxPaymentReference ?? null,
+      updatedAt: new Date(),
+    }).where(eq(bankMutationsTable.id, mutationId));
+    const user = (req as any).user;
+    await db.insert(auditLogsTable).values({
+      userId: user?.userId, userRole: user?.role,
+      action: "update_tax_fields", entity: "bank_mutation", entityId: mutationId,
+      after: { transactionType, taxType, taxPeriod, taxPaymentReference },
+      ipAddress: req.ip, userAgent: req.headers["user-agent"] as string,
+    });
+    res.json({ ok: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message ?? "Gagal update tax fields" });
+  }
+});
+
+// ================================================================
+// FASE 2: Aturan COA (Account Rules) CRUD
+// ================================================================
+
+// GET /bank-reconciliation/account-rules
+router.get("/bank-reconciliation/account-rules", adminMiddleware, async (req, res) => {
+  try {
+    const rules = await db.select().from(bankReconciliationAccountRulesTable)
+      .orderBy(bankReconciliationAccountRulesTable.direction, bankReconciliationAccountRulesTable.transactionType);
+    res.json({ rules });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message ?? "Gagal memuat aturan COA" });
+  }
+});
+
+// POST /bank-reconciliation/account-rules
+router.post("/bank-reconciliation/account-rules", financeMiddleware, async (req, res) => {
+  try {
+    const user = (req as any).user;
+    const { transactionType, direction, debitCoaId, debitCoaName, creditCoaId, creditCoaName, bankAccountId, companyId } =
+      req.body as {
+        transactionType: string; direction: string;
+        debitCoaId: string; debitCoaName: string; creditCoaId: string; creditCoaName: string;
+        bankAccountId?: string; companyId?: number;
+      };
+    if (!transactionType || !direction || !debitCoaId || !creditCoaId) {
+      res.status(400).json({ error: "transactionType, direction, debitCoaId, creditCoaId wajib diisi" }); return;
+    }
+    const [rule] = await db.insert(bankReconciliationAccountRulesTable).values({
+      transactionType, direction, debitCoaId, debitCoaName, creditCoaId, creditCoaName,
+      bankAccountId: bankAccountId ?? null, companyId: companyId ?? null,
+      createdBy: user?.email ?? `user:${user?.userId}`,
+      updatedBy: user?.email ?? `user:${user?.userId}`,
+    }).returning();
+    await db.insert(auditLogsTable).values({
+      userId: user?.userId, userRole: user?.role,
+      action: "create_account_rule", entity: "bank_reconciliation_account_rule", entityId: rule!.id,
+      after: rule, ipAddress: req.ip, userAgent: req.headers["user-agent"] as string,
+    });
+    res.json({ ok: true, rule });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message ?? "Gagal buat aturan COA" });
+  }
+});
+
+// PUT /bank-reconciliation/account-rules/:id
+router.put("/bank-reconciliation/account-rules/:id", financeMiddleware, async (req, res) => {
+  try {
+    const ruleId = parseInt(req.params.id);
+    if (isNaN(ruleId)) { res.status(400).json({ error: "ID tidak valid" }); return; }
+    const user = (req as any).user;
+    const { transactionType, direction, debitCoaId, debitCoaName, creditCoaId, creditCoaName, bankAccountId, isActive } = req.body as any;
+    const [updated] = await db.update(bankReconciliationAccountRulesTable).set({
+      transactionType, direction, debitCoaId, debitCoaName, creditCoaId, creditCoaName,
+      bankAccountId: bankAccountId ?? null, isActive: isActive ?? true,
+      updatedBy: user?.email ?? `user:${user?.userId}`,
+      updatedAt: new Date(),
+    }).where(eq(bankReconciliationAccountRulesTable.id, ruleId)).returning();
+    if (!updated) { res.status(404).json({ error: "Aturan tidak ditemukan" }); return; }
+    res.json({ ok: true, rule: updated });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message ?? "Gagal update aturan COA" });
+  }
+});
+
+// DELETE /bank-reconciliation/account-rules/:id
+router.delete("/bank-reconciliation/account-rules/:id", superAdminMiddleware, async (req, res) => {
+  try {
+    const ruleId = parseInt(req.params.id);
+    if (isNaN(ruleId)) { res.status(400).json({ error: "ID tidak valid" }); return; }
+    await db.delete(bankReconciliationAccountRulesTable).where(eq(bankReconciliationAccountRulesTable.id, ruleId));
+    res.json({ ok: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message ?? "Gagal hapus aturan COA" });
+  }
+});
+
+// ================================================================
+// FASE 4: Monthly Bank Closing
+// ================================================================
+
+// GET /bank-reconciliation/closing
+router.get("/bank-reconciliation/closing", financeMiddleware, async (req, res) => {
+  try {
+    const { bankAccountId } = req.query as { bankAccountId?: string };
+    const conditions: any[] = [];
+    if (bankAccountId) conditions.push(eq(bankReconciliationClosingTable.bankAccountId, bankAccountId));
+    const closings = await db.select().from(bankReconciliationClosingTable)
+      .where(conditions.length ? and(...conditions) : undefined)
+      .orderBy(desc(bankReconciliationClosingTable.periodYear), desc(bankReconciliationClosingTable.periodMonth));
+    res.json({ closings });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message ?? "Gagal memuat closing" });
+  }
+});
+
+// POST /bank-reconciliation/closing/compute — hitung & buat closing baru
+router.post("/bank-reconciliation/closing/compute", financeMiddleware, async (req, res) => {
+  try {
+    const { periodYear, periodMonth, bankAccountId, openingBalance, statementEndingBalance, notes } = req.body as {
+      periodYear: number; periodMonth: number;
+      bankAccountId?: string; openingBalance?: number; statementEndingBalance?: number; notes?: string;
+    };
+    if (!periodYear || !periodMonth) { res.status(400).json({ error: "periodYear dan periodMonth wajib" }); return; }
+
+    // Hitung total IN/OUT approved untuk periode ini
+    const monthStr = `${periodYear}-${String(periodMonth).padStart(2, "0")}`;
+    const { rows: statsRows } = await db.execute(sql`
+      SELECT
+        COALESCE(SUM(amount) FILTER (WHERE direction = 'IN' AND status = 'approved'), 0) AS total_in,
+        COALESCE(SUM(amount) FILTER (WHERE direction = 'OUT' AND status = 'approved'), 0) AS total_out
+      FROM sport_center.bank_mutations
+      WHERE TO_CHAR(TO_DATE(transaction_date, 'YYYY-MM-DD'), 'YYYY-MM') = ${monthStr}
+        ${bankAccountId ? sql`AND bank_account_id = ${bankAccountId}` : sql``}
+    `);
+    const stats = (statsRows as any[])[0] ?? {};
+    const totalIn = parseFloat(stats.total_in ?? "0");
+    const totalOut = parseFloat(stats.total_out ?? "0");
+    const opening = openingBalance ?? 0;
+    const systemEnding = opening + totalIn - totalOut;
+    const stmtEnding = statementEndingBalance ?? systemEnding;
+    const difference = systemEnding - stmtEnding;
+
+    // Upsert closing
+    const existingConditions: any[] = [
+      eq(bankReconciliationClosingTable.periodYear, periodYear),
+      eq(bankReconciliationClosingTable.periodMonth, periodMonth),
+    ];
+    if (bankAccountId) existingConditions.push(eq(bankReconciliationClosingTable.bankAccountId, bankAccountId));
+
+    const [existing] = await db.select().from(bankReconciliationClosingTable)
+      .where(and(...existingConditions)).limit(1);
+
+    const user = (req as any).user;
+    let closing;
+    if (existing) {
+      if (existing.status === "closed") { res.status(400).json({ error: "Periode sudah ditutup. Hubungi Super Admin untuk membuka kembali." }); return; }
+      [closing] = await db.update(bankReconciliationClosingTable).set({
+        openingBalance: String(opening), totalIn: String(totalIn), totalOut: String(totalOut),
+        systemEndingBalance: String(systemEnding), statementEndingBalance: String(stmtEnding),
+        difference: String(difference), notes: notes ?? existing.notes, updatedAt: new Date(),
+      }).where(eq(bankReconciliationClosingTable.id, existing.id)).returning();
+    } else {
+      [closing] = await db.insert(bankReconciliationClosingTable).values({
+        periodYear, periodMonth, bankAccountId: bankAccountId ?? null, companyId: null,
+        openingBalance: String(opening), totalIn: String(totalIn), totalOut: String(totalOut),
+        systemEndingBalance: String(systemEnding), statementEndingBalance: String(stmtEnding),
+        difference: String(difference), status: "unreconciled", notes: notes ?? null,
+      }).returning();
+    }
+    res.json({ ok: true, closing });
+  } catch (err: any) {
+    req.log.error({ err }, "Bank reconciliation closing compute error");
+    res.status(500).json({ error: err?.message ?? "Gagal compute closing" });
+  }
+});
+
+// POST /bank-reconciliation/closing/:id/close — finalize
+router.post("/bank-reconciliation/closing/:id/close", financeMiddleware, async (req, res) => {
+  try {
+    const closingId = parseInt(req.params.id);
+    if (isNaN(closingId)) { res.status(400).json({ error: "ID tidak valid" }); return; }
+    const [closing] = await db.select().from(bankReconciliationClosingTable).where(eq(bankReconciliationClosingTable.id, closingId)).limit(1);
+    if (!closing) { res.status(404).json({ error: "Closing tidak ditemukan" }); return; }
+    if (closing.status === "closed") { res.json({ ok: true, skipped: true, reason: "already_closed" }); return; }
+    if (Math.abs(parseFloat(closing.difference ?? "0")) > 0.01) {
+      res.status(400).json({ error: `Selisih (${closing.difference}) harus 0 sebelum menutup periode.` }); return;
+    }
+    const user = (req as any).user;
+    const closedBy = user?.email ?? `user:${user?.userId}`;
+    const [updated] = await db.update(bankReconciliationClosingTable).set({
+      status: "closed", closedBy, closedAt: new Date(), updatedAt: new Date(),
+    }).where(eq(bankReconciliationClosingTable.id, closingId)).returning();
+    await db.insert(auditLogsTable).values({
+      userId: user?.userId, userRole: user?.role,
+      action: "close_bank_period", entity: "bank_reconciliation_closing", entityId: closingId,
+      after: { status: "closed", closedBy }, ipAddress: req.ip, userAgent: req.headers["user-agent"] as string,
+    });
+    res.json({ ok: true, closing: updated });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message ?? "Gagal tutup periode" });
+  }
+});
+
+// POST /bank-reconciliation/closing/:id/reopen — reopen (superAdmin only)
+router.post("/bank-reconciliation/closing/:id/reopen", superAdminMiddleware, async (req, res) => {
+  try {
+    const closingId = parseInt(req.params.id);
+    if (isNaN(closingId)) { res.status(400).json({ error: "ID tidak valid" }); return; }
+    const user = (req as any).user;
+    const reopenedBy = user?.email ?? `user:${user?.userId}`;
+    const [updated] = await db.update(bankReconciliationClosingTable).set({
+      status: "unreconciled", reopenedBy, reopenedAt: new Date(), updatedAt: new Date(),
+    }).where(eq(bankReconciliationClosingTable.id, closingId)).returning();
+    if (!updated) { res.status(404).json({ error: "Closing tidak ditemukan" }); return; }
+    await db.insert(auditLogsTable).values({
+      userId: user?.userId, userRole: user?.role,
+      action: "reopen_bank_period", entity: "bank_reconciliation_closing", entityId: closingId,
+      after: { status: "unreconciled", reopenedBy }, ipAddress: req.ip, userAgent: req.headers["user-agent"] as string,
+    });
+    res.json({ ok: true, closing: updated });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message ?? "Gagal buka kembali periode" });
+  }
+});
+
+// PATCH /bank-reconciliation/closing/:id — update statement balance / notes
+router.patch("/bank-reconciliation/closing/:id", financeMiddleware, async (req, res) => {
+  try {
+    const closingId = parseInt(req.params.id);
+    if (isNaN(closingId)) { res.status(400).json({ error: "ID tidak valid" }); return; }
+    const [closing] = await db.select().from(bankReconciliationClosingTable).where(eq(bankReconciliationClosingTable.id, closingId)).limit(1);
+    if (!closing) { res.status(404).json({ error: "Closing tidak ditemukan" }); return; }
+    if (closing.status === "closed") { res.status(400).json({ error: "Periode sudah ditutup." }); return; }
+    const { statementEndingBalance, notes } = req.body as { statementEndingBalance?: number; notes?: string };
+    const stmtEnding = statementEndingBalance ?? parseFloat(closing.statementEndingBalance ?? "0");
+    const difference = parseFloat(closing.systemEndingBalance ?? "0") - stmtEnding;
+    const [updated] = await db.update(bankReconciliationClosingTable).set({
+      statementEndingBalance: String(stmtEnding),
+      difference: String(difference),
+      notes: notes ?? closing.notes,
+      updatedAt: new Date(),
+    }).where(eq(bankReconciliationClosingTable.id, closingId)).returning();
+    res.json({ ok: true, closing: updated });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message ?? "Gagal update closing" });
   }
 });
 

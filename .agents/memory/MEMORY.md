@@ -10,3 +10,4 @@
 - [.replit merge corruption](dotreplit-merge-corruption.md) — GitHub merges from external repo duplicate `modules` keys → invalid TOML, blocks env/packager tools; agent cannot edit .replit; user must fix via GUI or rollback.
 - [PPN 11% Tax Engine](tax-engine.md) — Centralized tax calc in api-server/src/lib/tax.ts; bookings.ppnRate/ppnAmount/grandTotal nullable; old bookings untouched; tax_settings seeded with PPN_OUT_11 11%; tax_transactions ledger auto-records per booking.
 - [Bank Recon Accounting Journal](bank-recon-journal.md) — ACCOUNT_MAP + postAccountingJournal() in bankReconciliation.ts; idempotent (skips if accountingPosted=true); journalId format JRN-YYYYMMDD-000001; `matched` status deprecated, kept in enum for backward compat only.
+- [Bank Recon Hardening](bank-recon-hardening.md) — 6-phase hardening: partial invoice settlement, dynamic COA rules table, tax fields on mutations, monthly closing, approval matrix (financeMiddleware/superAdminMiddleware).
