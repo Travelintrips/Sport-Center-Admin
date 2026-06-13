@@ -8,6 +8,8 @@ import { randomBytes } from "crypto";
 import { createWaToken, verifyWaToken, consumeWaToken, getWaTokenRow } from "../lib/waTokens";
 import {
   parseIntent,
+  parseName,
+  isBookingForFriend,
   detectFacilityKeyword,
   getNextStep,
   getActiveSession,
@@ -1614,12 +1616,19 @@ async function startBookingSession(phone: string, msg: string, waName: string): 
     }
   }
 
+  // Determine the booking name:
+  // 1. If message explicitly names a friend → use that
+  // 2. Else if registered customer → use their name (can be overridden later)
+  // 3. Else null (will be asked at ask_name step)
+  const friendName = intent.personName;
+  const resolvedName = friendName ?? (customer?.name ?? null);
+
   const step = getNextStep({
     facilityId,
     bookingDate: intent.bookingDate,
     startTime: intent.startTime,
     durationMinutes: intent.durationMinutes,
-    customerName: customer?.name ?? null,
+    customerName: resolvedName,
   });
 
   const session = await createSession({
@@ -1629,7 +1638,7 @@ async function startBookingSession(phone: string, msg: string, waName: string): 
     bookingDate: intent.bookingDate,
     startTime: intent.startTime,
     durationMinutes: intent.durationMinutes,
-    customerName: customer?.name ?? null,
+    customerName: resolvedName,
     currentStep: step,
   });
 
@@ -1827,20 +1836,31 @@ async function continueSession(session: WaBookingSessionRow, phone: string, msg:
     }
 
     case "ask_name": {
-      const name = msg.trim();
-      if (name.length < 2 || name.length > 100) {
-        const reply = `👤 Masukkan nama lengkap yang valid (minimal 2 karakter).`;
-        await appendMessage(session.id, "bot", reply);
-        await sendWAMsg(phone, reply);
+      // Try smart extraction first: "atas nama Budi", "namanya Sinta", "untuk teman Joko"
+      const extracted = parseName(msg);
+      const rawName = extracted ?? msg.trim();
+
+      if (rawName.length < 2 || rawName.length > 100) {
+        const forFriend = isBookingForFriend(msg);
+        const hint = forFriend
+          ? `👤 Siapa nama teman yang akan bermain? Ketik nama lengkapnya, contoh: *Budi Santoso*`
+          : `👤 Masukkan nama lengkap yang valid, contoh: *Budi Santoso*`;
+        await appendMessage(session.id, "bot", hint);
+        await sendWAMsg(phone, hint);
         return;
       }
+
       const updated = await updateSession(session.id, {
-        customerName: name,
+        customerName: rawName,
         currentStep: "confirm",
       });
-      await logAudit({ action: "booking_session_updated", entity: "wa_booking_session", entityId: session.id, after: { step: "ask_name", customerName: name } });
+      await logAudit({ action: "booking_session_updated", entity: "wa_booking_session", entityId: session.id, after: { step: "ask_name", customerName: rawName } });
       const fac = session.facilityId ? await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, session.facilityId)).limit(1).then(r => r[0]) : null;
-      const reply = await buildStepQuestion("confirm", updated, fac?.name ?? "", Number(fac?.pricePerHour ?? 0));
+
+      // Confirm who the booking is for
+      const forFriendMsg = extracted ? `\n✅ Booking atas nama *${rawName}*\n` : "";
+      const confirmQ = await buildStepQuestion("confirm", updated, fac?.name ?? "", Number(fac?.pricePerHour ?? 0));
+      const reply = forFriendMsg + confirmQ;
       await appendMessage(session.id, "bot", reply);
       await sendWAMsg(phone, reply);
       break;
@@ -1891,7 +1911,7 @@ async function buildStepQuestion(
       return `⏱️ Berapa lama? (min 1 jam)\nContoh: *1 jam*, *2 jam*, *90 menit*`;
 
     case "ask_name":
-      return `👤 Atas nama siapa booking ini?`;
+      return `👤 *Atas nama siapa booking ini?*\n_(Boleh nama kamu sendiri atau nama teman yang akan bermain)_\n\nContoh: *Budi Santoso* atau *untuk teman, Andi*`;
 
     case "confirm": {
       if (!session.facilityId || !session.bookingDate || !session.startTime || !session.durationMinutes || !session.customerName) {

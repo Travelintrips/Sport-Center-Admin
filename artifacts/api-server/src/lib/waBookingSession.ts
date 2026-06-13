@@ -17,6 +17,8 @@ export interface ParsedIntent {
   bookingDate: string | null;
   startTime: string | null;
   durationMinutes: number | null;
+  personName: string | null;
+  bookingForFriend: boolean;
 }
 
 // ─── Date Helpers (WIB = UTC+7) ──────────────────────────────────────────────
@@ -260,15 +262,112 @@ export function detectFacilityKeyword(msg: string): string | null {
   return null;
 }
 
+// ─── Name Parser ─────────────────────────────────────────────────────────────
+// Detects if booking is for a friend and extracts their name.
+// Examples: "untuk teman saya Budi", "atas nama Sinta", "namanya Joko"
+
+// Words that must stop name extraction — they're not part of a person's name
+const NAME_STOP_WORDS = new Set([
+  // Pronouns / self-reference
+  "saya", "aku", "gue", "gw", "gua", "kamu", "anda", "dia", "mereka", "kita", "sendiri",
+  // Relationship words used without a name following
+  "adik", "kakak", "abang", "bang", "mas", "mbak", "pak", "bu", "om", "tante",
+  "saudara", "ayah", "ibu", "bapak", "mama", "papa", "ortu",
+  // Booking/time keywords
+  "mau", "bisa", "akan", "sudah", "lagi", "ingin", "pengen", "pengin",
+  "main", "maen", "bermain", "olahraga", "booking", "boking", "pesan", "sewa",
+  "jam", "pukul", "pk", "tanggal", "tgl", "hari", "besok", "lusa", "sekarang",
+  "lapangan", "fasilitas", "futsal", "basket", "badminton", "gym", "voli",
+  "tennis", "tenis", "renang", "golf", "squash", "billiard",
+  // Filler
+  "dong", "ya", "nih", "deh", "sih", "yg", "yang", "aja", "juga", "sama",
+]);
+
+function extractNameWords(raw: string): string | null {
+  const words = raw.trim().split(/\s+/);
+  const result: string[] = [];
+  for (const w of words) {
+    const wl = w.toLowerCase().replace(/[^a-z]/g, "");
+    if (!wl || NAME_STOP_WORDS.has(wl)) break;       // hit a stop word → stop
+    if (!/^[A-Za-z]+$/.test(w)) break;               // non-alphabetic character → stop
+    result.push(w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
+    if (result.length >= 4) break;                    // cap at 4 name words
+  }
+  if (result.length === 0) return null;
+  const name = result.join(" ");
+  if (name.length < 2) return null;
+  return name;
+}
+
+export function parseName(msg: string): string | null {
+  const lower = msg.toLowerCase().trim();
+
+  // Bail out immediately for self-booking phrases
+  if (/\b(?:untuk|atas nama|buat)\s+(?:saya|aku|gue|gw|gua)\s*(?:sendiri)?\b/.test(lower)) return null;
+
+  // "atas nama Budi Santoso" / "a/n Hendra"
+  const atasNama = lower.match(/(?:atas\s+nama|a\/n)\s+(.+)/);
+  if (atasNama) {
+    const n = extractNameWords(atasNama[1]);
+    if (n) return n;
+  }
+
+  // "namanya Joko" / "nama teman saya Rina" / "nama: Ahmad"
+  const namaX = lower.match(/nama(?:nya|[\s\-]+(?:teman(?:\s+(?:saya|ku))?|dia|nya))?\s*[:\-]?\s+([A-Za-z].+)/);
+  if (namaX) {
+    const n = extractNameWords(namaX[1]);
+    if (n) return n;
+  }
+
+  // "untuk teman (saya/ku) Budi" / "buat teman Ahmad" — needs "teman/kawan" keyword
+  const untukTeman = lower.match(/(?:untuk|buat)\s+(?:teman(?:\s+(?:saya|ku))?\s+|kawan(?:\s+(?:saya|ku))?\s+)([A-Za-z].+)/);
+  if (untukTeman) {
+    const n = extractNameWords(untukTeman[1]);
+    if (n) return n;
+  }
+
+  // "teman saya Deni Setiawan" / "temanku Budi" / "kawanku Ahmad"
+  // Handle compound "temanku"/"kawanku" AND "teman saya/ku + name"
+  const temanSaya = lower.match(/(?:temanku|kawanku|teman\s+(?:saya|ku))\s+([A-Za-z].+)/);
+  if (temanSaya) {
+    const n = extractNameWords(temanSaya[1]);
+    if (n) return n;
+  }
+  // "teman [name]" without possessive
+  const temanSaja = lower.match(/\bteman\s+([A-Za-z].+)/);
+  if (temanSaja) {
+    const n = extractNameWords(temanSaja[1]);
+    if (n) return n;
+  }
+
+  // "untuk Budi" — only if message ends with the name (avoids false positives mid-sentence)
+  const untukEnd = lower.match(/\buntuk\s+([A-Za-z][A-Za-z\s]{1,25})$/);
+  if (untukEnd) {
+    const n = extractNameWords(untukEnd[1]);
+    if (n) return n;
+  }
+
+  return null;
+}
+
+export function isBookingForFriend(msg: string): boolean {
+  const lower = msg.toLowerCase();
+  return /\b(teman|temanku|kawan|kawanku|rekan|saudara|adik|kakak|suami|istri|pacar|orang lain|buat orang)\b/.test(lower);
+}
+
 export function parseIntent(msg: string): ParsedIntent {
   const lower = msg.toLowerCase();
   // Try range first ("jam 4 sd jam 6 sore") — fills both startTime & durationMinutes at once
   const timeRange = parseTimeRange(lower);
+  const personName = parseName(msg);
+  const bookingForFriend = isBookingForFriend(lower);
   return {
     facilityKeyword: detectFacilityKeyword(lower),
     bookingDate: parseDate(lower),
     startTime: timeRange?.startTime ?? parseTime(lower),
     durationMinutes: timeRange?.durationMinutes ?? parseDuration(lower),
+    personName,
+    bookingForFriend,
   };
 }
 
