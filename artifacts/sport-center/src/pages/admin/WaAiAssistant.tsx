@@ -192,7 +192,11 @@ export default function AdminWaAiAssistant() {
   const [selectedSession, setSelectedSession] = useState<number | null>(null);
   const [rejectDialog, setRejectDialog] = useState<{ orderNumber: string; open: boolean }>({ orderNumber: "", open: false });
   const [rejectReason, setRejectReason] = useState("");
-  const [takeoverDialog, setTakeoverDialog] = useState<{ sessionId: number; phone: string; open: boolean }>({ sessionId: 0, phone: "", open: false });
+  const [takeoverDialog, setTakeoverDialog] = useState<{
+    sessionId: number; phone: string; open: boolean;
+    customerName?: string; facilityName?: string;
+    bookingDate?: string; startTime?: string; orderNumber?: string;
+  }>({ sessionId: 0, phone: "", open: false });
   const [takeoverMsg, setTakeoverMsg] = useState("");
 
   /* ── Stats ── */
@@ -546,7 +550,13 @@ export default function AdminWaAiAssistant() {
                             <MessageSquare className="w-3 h-3 mr-1" /> Chat
                           </Button>
                           <Button size="sm" variant="outline" className="h-7 text-xs border-primary text-primary hover:bg-primary hover:text-white"
-                            onClick={() => setTakeoverDialog({ sessionId: s.id, phone: s.phone, open: true })}>
+                            onClick={() => setTakeoverDialog({
+                              sessionId: s.id, phone: s.phone, open: true,
+                              customerName: s.customerName ?? undefined,
+                              facilityName: s.facilityName ?? undefined,
+                              bookingDate: s.bookingDate ?? undefined,
+                              startTime: s.startTime ?? undefined,
+                            })}>
                             <Send className="w-3 h-3 mr-1" /> Ambil Alih
                           </Button>
                         </div>
@@ -777,7 +787,16 @@ export default function AdminWaAiAssistant() {
 
               {/* Takeover button */}
               <Button variant="outline" className="w-full border-primary text-primary hover:bg-primary hover:text-white"
-                onClick={() => setTakeoverDialog({ sessionId: sessionDetail.session.id, phone: sessionDetail.session.phone, open: true })}>
+                onClick={() => setTakeoverDialog({
+                  sessionId: sessionDetail.session.id,
+                  phone: sessionDetail.session.phone,
+                  open: true,
+                  customerName: sessionDetail.session.customerName ?? undefined,
+                  facilityName: sessionDetail.facility?.name ?? undefined,
+                  bookingDate: sessionDetail.session.bookingDate ?? undefined,
+                  startTime: sessionDetail.session.startTime ?? undefined,
+                  orderNumber: sessionDetail.latestBooking?.orderNumber ?? undefined,
+                })}>
                 <Send className="w-4 h-4 mr-2" /> Ambil Alih Chat
               </Button>
 
@@ -855,30 +874,91 @@ export default function AdminWaAiAssistant() {
       </Dialog>
 
       {/* ── Takeover Dialog ──────────────────────────────────────────────────── */}
-      <Dialog open={takeoverDialog.open} onOpenChange={(o) => setTakeoverDialog((d) => ({ ...d, open: o }))}>
-        <DialogContent>
+      <Dialog open={takeoverDialog.open} onOpenChange={(o) => { setTakeoverDialog((d) => ({ ...d, open: o })); if (!o) setTakeoverMsg(""); }}>
+        <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Send className="w-5 h-5 text-primary" /> Ambil Alih Chat
             </DialogTitle>
           </DialogHeader>
-          <div className="space-y-3 py-2">
+          <div className="space-y-4 py-1">
             <p className="text-sm text-muted-foreground">
-              Kirim pesan ke <span className="font-mono font-bold text-primary">{takeoverDialog.phone}</span> sebagai Admin Sport Center:
+              Kirim ke <span className="font-mono font-bold text-primary">{takeoverDialog.phone}</span>
+              {takeoverDialog.customerName && <> — <span className="font-semibold text-foreground">{takeoverDialog.customerName}</span></>}
             </p>
-            <Textarea
-              placeholder="Halo! Saya admin Sport Center, ada yang bisa saya bantu?"
-              value={takeoverMsg}
-              onChange={(e) => setTakeoverMsg(e.target.value)}
-              rows={4}
-            />
+
+            {/* ── Template Buttons ── */}
+            <div>
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Balasan Cepat</p>
+              <div className="flex flex-wrap gap-1.5">
+                {[
+                  {
+                    label: "👋 Salam",
+                    text: `Halo${takeoverDialog.customerName ? ` *${takeoverDialog.customerName}*` : ""}! Saya admin Sport Center Jakarta. Ada yang bisa saya bantu? 😊`,
+                  },
+                  {
+                    label: "⏳ Ditindaklanjuti",
+                    text: `Halo${takeoverDialog.customerName ? ` *${takeoverDialog.customerName}*` : ""}! Pesan Anda sudah kami terima. Kami sedang memprosesnya, mohon tunggu sebentar ya. 🙏`,
+                  },
+                  {
+                    label: "💳 Instruksi Bayar",
+                    text: `Halo${takeoverDialog.customerName ? ` *${takeoverDialog.customerName}*` : ""}! Berikut instruksi pembayaran booking Anda:\n\n🏦 *Transfer Bank*\nBNI – 1234567890 a/n Sport Center Jakarta\nMandiri – 0987654321 a/n Sport Center Jakarta\n\nSetelah transfer, kirim bukti bayar ke WhatsApp ini. Tim kami akan konfirmasi dalam 1×24 jam. 🙏`,
+                  },
+                  {
+                    label: "✅ Booking Dikonfirmasi",
+                    text: `Halo${takeoverDialog.customerName ? ` *${takeoverDialog.customerName}*` : ""}! Booking Anda telah *DIKONFIRMASI* ✅\n\n${takeoverDialog.orderNumber ? `📋 Order: *${takeoverDialog.orderNumber}*\n` : ""}${takeoverDialog.facilityName ? `🏟️ Fasilitas: *${takeoverDialog.facilityName}*\n` : ""}${takeoverDialog.bookingDate ? `📅 Tanggal: *${takeoverDialog.bookingDate}*\n` : ""}${takeoverDialog.startTime ? `⏰ Jam: *${takeoverDialog.startTime}*\n` : ""}\nSampai jumpa! 🎉`,
+                  },
+                  {
+                    label: "❌ Booking Ditolak",
+                    text: `Halo${takeoverDialog.customerName ? ` *${takeoverDialog.customerName}*` : ""}! Mohon maaf, booking Anda${takeoverDialog.orderNumber ? ` (*${takeoverDialog.orderNumber}*)` : ""} tidak dapat kami proses saat ini.\n\nAlasan: [isi alasan]\n\nSilakan hubungi kami untuk informasi lebih lanjut. 🙏`,
+                  },
+                  {
+                    label: "🕐 Info Jam Buka",
+                    text: `Sport Center Jakarta buka setiap hari *Senin–Minggu pukul 06:00–22:00*.\n\nUntuk info lebih lanjut atau booking, balas pesan ini atau kunjungi website kami. 😊`,
+                  },
+                  {
+                    label: "📍 Info Lokasi",
+                    text: `Sport Center Jakarta berlokasi di:\n📍 *[Alamat lengkap]*\n\nMudah dijangkau dengan kendaraan umum maupun pribadi. Parkir tersedia. 🚗`,
+                  },
+                  {
+                    label: "🔁 Reschedule",
+                    text: `Halo${takeoverDialog.customerName ? ` *${takeoverDialog.customerName}*` : ""}! Untuk reschedule booking, silakan informasikan:\n1. Nomor booking Anda\n2. Tanggal & jam baru yang diinginkan\n\nKami akan cek ketersediaan dan konfirmasi. 🙏`,
+                  },
+                ].map((t) => (
+                  <Button
+                    key={t.label}
+                    type="button"
+                    size="sm"
+                    variant={takeoverMsg === t.text ? "default" : "outline"}
+                    className="h-7 text-xs"
+                    onClick={() => setTakeoverMsg(t.text)}>
+                    {t.label}
+                  </Button>
+                ))}
+              </div>
+            </div>
+
+            {/* ── Message Textarea ── */}
+            <div>
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Pesan</p>
+              <Textarea
+                placeholder="Ketik pesan manual atau pilih template di atas..."
+                value={takeoverMsg}
+                onChange={(e) => setTakeoverMsg(e.target.value)}
+                rows={5}
+                className="text-sm"
+              />
+              {takeoverMsg && (
+                <p className="text-[11px] text-muted-foreground mt-1 text-right">{takeoverMsg.length} karakter</p>
+              )}
+            </div>
           </div>
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setTakeoverDialog((d) => ({ ...d, open: false }))}>Batal</Button>
+            <Button variant="ghost" onClick={() => { setTakeoverDialog((d) => ({ ...d, open: false })); setTakeoverMsg(""); }}>Batal</Button>
             <Button
               onClick={() => takeoverMutation.mutate({ sessionId: takeoverDialog.sessionId, message: takeoverMsg })}
               disabled={takeoverMutation.isPending || !takeoverMsg.trim()}>
-              <Send className="w-4 h-4 mr-2" /> Kirim Pesan
+              <Send className="w-4 h-4 mr-2" /> {takeoverMutation.isPending ? "Mengirim..." : "Kirim Pesan"}
             </Button>
           </DialogFooter>
         </DialogContent>
