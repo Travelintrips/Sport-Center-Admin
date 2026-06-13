@@ -45,6 +45,23 @@ const router = Router();
 const APP_URL = process.env.APP_URL ?? "";
 const INACTIVE_STATUSES = ["cancelled", "expired", "rejected", "refunded"];
 
+// ─── Webhook deduplication — cegah Fonnte retry/outgoing loop ─────────────────
+const _processedMsgIds = new Set<string>();
+function isDuplicateWebhook(body: Record<string, unknown>): boolean {
+  // Fonnte kirim me=true untuk pesan outgoing (balasan bot sendiri) → skip
+  if (body.me === true || body.me === "true" || body.is_me === true) return true;
+  // Cek message ID unik — Fonnte kadang retry dengan id yang sama
+  const id = body.id ?? body.message_id;
+  if (id) {
+    const key = String(id);
+    if (_processedMsgIds.has(key)) return true;
+    _processedMsgIds.add(key);
+    // Bersihkan setelah 5 menit agar tidak memory leak
+    setTimeout(() => _processedMsgIds.delete(key), 5 * 60 * 1000);
+  }
+  return false;
+}
+
 // ─── Multer for proof upload ──────────────────────────────────────────────────
 const PROOFS_DIR = path.resolve(process.cwd(), "uploads", "proofs");
 if (!fs.existsSync(PROOFS_DIR)) fs.mkdirSync(PROOFS_DIR, { recursive: true });
@@ -323,6 +340,7 @@ router.post("/wa/webhook", async (req, res) => {
   res.status(200).json({ status: "ok" });
 
   try {
+    if (isDuplicateWebhook(req.body)) return;
     const { sender, message = "", name = "" } = req.body;
     if (!sender || !message) return;
 
@@ -2088,6 +2106,7 @@ router.post("/wa/fonnte/webhook", async (req, res) => {
   res.status(200).json({ status: "ok" });
 
   try {
+    if (isDuplicateWebhook(req.body)) return;
     const { sender, message = "", name = "" } = req.body;
     if (!sender) return;
 
