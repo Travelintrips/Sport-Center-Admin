@@ -247,8 +247,8 @@ router.get("/bank-reconciliation/mutations", adminMiddleware, async (req, res) =
     }
     if (dateFrom) conditions.push(gte(bankMutationsTable.transactionDate, dateFrom));
     if (dateTo) conditions.push(lte(bankMutationsTable.transactionDate, dateTo));
-    if (minAmount) conditions.push(sql`${bankMutationsTable.amount} >= ${Number(minAmount)}`);
-    if (maxAmount) conditions.push(sql`${bankMutationsTable.amount} <= ${Number(maxAmount)}`);
+    const minAmt = Number(minAmount); if (minAmount && !isNaN(minAmt)) conditions.push(sql`${bankMutationsTable.amount} >= ${minAmt}`);
+    const maxAmt = Number(maxAmount); if (maxAmount && !isNaN(maxAmt)) conditions.push(sql`${bankMutationsTable.amount} <= ${maxAmt}`);
     if (direction && direction !== "all") conditions.push(eq(bankMutationsTable.direction, direction));
     if (search) {
       conditions.push(
@@ -436,6 +436,48 @@ router.post("/bank-reconciliation/:mutationId/approve", adminMiddleware, async (
       .set({ status: "rejected" })
       .where(eq(bankReconciliationMatchesTable.mutationId, mutationId));
 
+    // Helper: propagate approval ke booking/payment yang terkait
+    const propagateApproval = async (type: string | undefined, id: number | undefined) => {
+      if (!type || !id) return;
+      const CONFIRMABLE = ["pending_payment", "waiting_confirmation"];
+      if (type === "payment") {
+        // Update payment → confirmed
+        await db
+          .update(paymentsTable)
+          .set({ status: "confirmed", updatedAt: new Date() })
+          .where(eq(paymentsTable.id, id));
+        // Update booking → confirmed (hanya jika masih dalam status yang bisa dikonfirmasi)
+        const [pmt] = await db
+          .select({ bookingId: paymentsTable.bookingId })
+          .from(paymentsTable)
+          .where(eq(paymentsTable.id, id))
+          .limit(1);
+        if (pmt?.bookingId) {
+          await db
+            .update(bookingsTable)
+            .set({ status: "confirmed", updatedAt: new Date() })
+            .where(
+              and(
+                eq(bookingsTable.id, pmt.bookingId),
+                inArray(bookingsTable.status, CONFIRMABLE as any[])
+              )
+            );
+        }
+      } else if (type === "order") {
+        // Update booking → confirmed langsung
+        await db
+          .update(bookingsTable)
+          .set({ status: "confirmed", updatedAt: new Date() })
+          .where(
+            and(
+              eq(bookingsTable.id, id),
+              inArray(bookingsTable.status, CONFIRMABLE as any[])
+            )
+          );
+      }
+      // type === 'expense': tidak ada booking/payment yang perlu di-update
+    };
+
     if (matchId) {
       await db
         .update(bankReconciliationMatchesTable)
@@ -462,6 +504,9 @@ router.post("/bank-reconciliation/:mutationId/approve", adminMiddleware, async (
           updatedAt: new Date(),
         })
         .where(eq(bankMutationsTable.id, mutationId));
+
+      // Propagate ke booking/payment
+      if (match) await propagateApproval(match.candidateType ?? undefined, match.candidateId ?? undefined);
     } else if (candidateType && candidateId) {
       await db
         .insert(bankReconciliationMatchesTable)
@@ -488,6 +533,9 @@ router.post("/bank-reconciliation/:mutationId/approve", adminMiddleware, async (
           updatedAt: new Date(),
         })
         .where(eq(bankMutationsTable.id, mutationId));
+
+      // Propagate ke booking/payment
+      await propagateApproval(candidateType, candidateId);
     } else {
       await db
         .update(bankMutationsTable)
@@ -616,22 +664,38 @@ router.post("/bank-reconciliation/:mutationId/reject", adminMiddleware, async (r
 router.delete("/bank-reconciliation/mutations", adminMiddleware, async (req, res) => {
   try {
     const { statusFilter } = req.body as { statusFilter?: string[] };
+
+    // Mutasi approved tidak boleh dihapus — sudah bagian dari rekonsiliasi final
+    const safeFilter = (statusFilter ?? []).filter((s) => s !== "approved");
+    if (statusFilter?.includes("approved")) {
+      res.status(400).json({ error: "Mutasi dengan status 'approved' tidak dapat dihapus" });
+      return;
+    }
+
     let deletedCount = 0;
-    if (statusFilter && statusFilter.length > 0) {
+    if (safeFilter.length > 0) {
       const rows = await db
         .select({ id: bankMutationsTable.id })
         .from(bankMutationsTable)
-        .where(inArray(bankMutationsTable.status, statusFilter as any));
+        .where(inArray(bankMutationsTable.status, safeFilter as any));
       const ids = rows.map((r) => r.id);
       if (ids.length > 0) {
         await db.delete(bankReconciliationMatchesTable).where(inArray(bankReconciliationMatchesTable.mutationId, ids));
         await db.delete(bankMutationsTable).where(inArray(bankMutationsTable.id, ids));
         deletedCount = ids.length;
       }
-    } else {
-      await db.delete(bankReconciliationMatchesTable);
-      const rows = await db.delete(bankMutationsTable).returning({ id: bankMutationsTable.id });
-      deletedCount = rows.length;
+    } else if (!statusFilter || statusFilter.length === 0) {
+      // Hapus semua KECUALI approved
+      const notApproved = await db
+        .select({ id: bankMutationsTable.id })
+        .from(bankMutationsTable)
+        .where(sql`${bankMutationsTable.status} != 'approved'`);
+      const ids = notApproved.map((r) => r.id);
+      if (ids.length > 0) {
+        await db.delete(bankReconciliationMatchesTable).where(inArray(bankReconciliationMatchesTable.mutationId, ids));
+        await db.delete(bankMutationsTable).where(inArray(bankMutationsTable.id, ids));
+      }
+      deletedCount = ids.length;
     }
     res.json({ ok: true, deletedCount });
   } catch (err: any) {

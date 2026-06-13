@@ -166,11 +166,13 @@ export async function computeMatchesForMutation(mutation: BankMutation): Promise
   const INACTIVE = ["cancelled", "rejected", "refunded"] as const;
 
   // Filter booking dalam ±45 hari dari tanggal mutasi untuk performa
-  const mutDate = new Date(mutation.transactionDate);
-  const dateMin = new Date(mutDate); dateMin.setDate(dateMin.getDate() - 45);
-  const dateMax = new Date(mutDate); dateMax.setDate(dateMax.getDate() + 45);
-  const dateMinStr = dateMin.toISOString().slice(0, 10);
-  const dateMaxStr = dateMax.toISOString().slice(0, 10);
+  const mutDate = mutation.transactionDate ? new Date(mutation.transactionDate) : null;
+  const dateMinStr = mutDate && !isNaN(mutDate.getTime())
+    ? new Date(mutDate.getTime() - 45 * 86400000).toISOString().slice(0, 10)
+    : null;
+  const dateMaxStr = mutDate && !isNaN(mutDate.getTime())
+    ? new Date(mutDate.getTime() + 45 * 86400000).toISOString().slice(0, 10)
+    : null;
 
   const bookings = await db
     .select({
@@ -187,8 +189,8 @@ export async function computeMatchesForMutation(mutation: BankMutation): Promise
     .where(
       and(
         notInArray(bookingsTable.status, INACTIVE),
-        gte(bookingsTable.bookingDate, dateMinStr),
-        lte(bookingsTable.bookingDate, dateMaxStr)
+        ...(dateMinStr ? [gte(bookingsTable.bookingDate, dateMinStr)] : []),
+        ...(dateMaxStr ? [lte(bookingsTable.bookingDate, dateMaxStr)] : [])
       )
     );
 
@@ -530,7 +532,28 @@ async function computeMatchesForOutMutation(mutation: BankMutation): Promise<Mat
   return candidates.sort((a, b) => b.score - a.score);
 }
 
+// Concurrency lock — cegah dua admin menjalankan matching secara bersamaan
+let _matchingInProgress = false;
+
 export async function runMatching(mutationIds?: number[]): Promise<{
+  processed: number;
+  autoMatched: number;
+  needsReview: number;
+  unmatched: number;
+  duplicates: number;
+}> {
+  if (_matchingInProgress) {
+    throw new Error("Proses matching sedang berjalan, coba lagi dalam beberapa detik");
+  }
+  _matchingInProgress = true;
+  try {
+    return await _runMatchingImpl(mutationIds);
+  } finally {
+    _matchingInProgress = false;
+  }
+}
+
+async function _runMatchingImpl(mutationIds?: number[]): Promise<{
   processed: number;
   autoMatched: number;
   needsReview: number;
