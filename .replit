@@ -117,7 +117,6 @@ OPENAI_API_KEY = "sk-proj-bft8FOm4XZCO3t5kgmMPpZCTnN3BBEEo50WDzwfkhYZXy6sBT_Z4_L
 OPENAI_BASE_URL = "https://api.openai.com/v1"
 
 [userenv.development]
-SUPABASE_DATABASE_URL = "postgresql://postgres.xssrfshdrtdfupgqwfdw:admcst0012026@aws-1-ap-southeast-2.pooler.supabase.com:6543/postgres"
 SUPABASE_SERVICE_ROLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhzc3Jmc2hkcnRkZnVwZ3F3ZmR3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3ODg5NjcyOCwiZXhwIjoyMDk0NDcyNzI4fQ.VFPcBxsVJkYwNo3ojy3uOHglqUA9zILhjw4_0JAhZYI"
 SUPABASE_URL = "https://xssrfshdrtdfupgqwfdw.supabase.co"
 VITE_SUPABASE_URL = "https://xssrfshdrtdfupgqwfdw.supabase.co"
@@ -125,6 +124,7 @@ SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS
 VITE_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhzc3Jmc2hkcnRkZnVwZ3F3ZmR3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg4OTY3MjgsImV4cCI6MjA5NDQ3MjcyOH0.czKzR9GjEL6UK8AhPAX6OYyF74fz1YtImYQSXiiG69U"
 SUPABASE_STORAGE_BUCKET = "https://xssrfshdrtdfupgqwfdw.storage.supabase.co/storage/v1/s3"
 SUPABASE_PG_URL = "postgresql://postgres.xssrfshdrtdfupgqwfdw:%24%23Admin12345%40%24@aws-1-ap-southeast-2.pooler.supabase.com:6543/postgres"
+SUPABASE_DATABASE_URL = "postgresql://postgres.xssrfshdrtdfupgqwfdw:utYaUzK6KzJN4vx4@aws-1-ap-southeast-2.pooler.supabase.com:6543/postgres"
 
 [userenv.production]
 SUPABASE_DATABASE_URL = "postgresql://postgres.nzdweipzckfszczzqtuw:%24%23Admin12345%40%24@aws-1-ap-southeast-2.pooler.supabase.com:6543/postgres"
