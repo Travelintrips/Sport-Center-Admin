@@ -1,48 +1,53 @@
 ---
 name: Local DB setup & env var scoping
-description: Workflow uses local heliumdb (DATABASE_URL), not Supabase; drizzle-kit push fails on enum conflicts; correct migration approach for local PG.
+description: Dev workflow uses Helium DATABASE_URL (not Supabase); SUPABASE_DATABASE_URL in dev env vars causes auth failure circuit-breaker; correct migration approach when Helium DB is empty.
 ---
 
 ## The Rule
-The API server workflow does NOT have access to `SUPABASE_DATABASE_URL_DEV` or `SUPABASE_DATABASE_URL` from `.replit` userenv.shared — it always falls back to `DATABASE_URL` (Replit's local heliumdb). Shell/bash commands also cannot read those env vars.
+The API server workflow should use `DATABASE_URL` (Replit Helium DB) in development. If `SUPABASE_DATABASE_URL` is set as a Replit **env var** (development scope), it takes priority in `lib/db/src/index.ts` and will fail if credentials are wrong → pg-pool circuit-breaker trips → ALL DB queries fail → WA bot breaks.
 
-**Why:** Replit's userenv.shared variables from `.replit` are only available to workflows via the Replit UI secrets system, NOT exported to shell or sub-processes in the same way. In practice, the Node.js process started by the workflow only receives `DATABASE_URL` from Replit's built-in DB provisioning.
+**Why:** `lib/db/src/index.ts` priority: `SUPABASE_DATABASE_URL || PROD_DATABASE_URL || DATABASE_URL || SUPABASE_DATABASE_URL_DEV`. If SUPABASE_DATABASE_URL is set in Replit development env vars with expired/wrong credentials, circuit-breaker message is: `(ECIRCUITBREAKER) too many authentication failures, new connections are temporarily blocked`.
 
-**How to apply:** When the local PG is empty/missing tables, apply migrations manually — do NOT rely on drizzle-kit push.
+**How to apply:**
+1. Check Replit dev env vars with `viewEnvVars({ type: "env", environment: "development" })`
+2. If `SUPABASE_DATABASE_URL` is present in dev env: `deleteEnvVars({ keys: ["SUPABASE_DATABASE_URL"], environment: "development" })`
+3. Restart API server — it will now use `DATABASE_URL` (Helium)
 
-## Correct local PG migration approach
+## When Helium DB is empty (no sport_center schema)
 
-1. If enum types exist but tables don't (push will fail with "type X already exists"):
-   ```
-   DROP SCHEMA IF EXISTS sport_center CASCADE;
-   CREATE SCHEMA sport_center;
-   -- Note: this drops enums only if they're in sport_center schema
-   -- If enums are in public schema, also run: DROP TYPE IF EXISTS user_role CASCADE; etc.
-   ```
+1. Create schema: `node -e "require('/home/runner/workspace/node_modules/.pnpm/pg@8.20.0/node_modules/pg').Pool...CREATE SCHEMA IF NOT EXISTS sport_center"`
 
-2. Apply all migration files in order:
-   ```js
-   const files = ['lib/db/drizzle/0000_*.sql', '0001_*.sql', '0002_*.sql', ...];
-   // split each file on "--> statement-breakpoint" and execute each statement
-   // catch 42710 (type exists), 42P07 (table exists), 42701 (column exists) and skip
-   ```
+2. Apply migration files in order (split on "--> statement-breakpoint", skip "already exists" errors):
+   - `lib/db/drizzle/0000_fearless_adam_warlock.sql`
+   - `lib/db/drizzle/0001_huge_plazm.sql`
+   - `lib/db/drizzle/0002_init.sql`
+   - `lib/db/drizzle/add_tax_effective_date.sql`
 
-3. Seed demo data:
-   ```bash
-   cd scripts && node_modules/.bin/tsx src/seed-all.ts
-   ```
+3. Run `drizzle-kit push` (will pick up remaining columns): `pnpm --filter @workspace/db exec drizzle-kit push --config=drizzle.config.ts`
 
-## drizzle.config.ts vs lib/db/src/index.ts priority difference
-- `drizzle.config.ts`: `DATABASE_URL` first, then Supabase URLs — used by drizzle-kit CLI
-- `lib/db/src/index.ts`: `SUPABASE_DATABASE_URL_DEV` first, then `DATABASE_URL` — used by API runtime
+4. Add columns that migrations missed (add more as Drizzle schema evolves):
+   - `ALTER TABLE sport_center.settings ADD COLUMN IF NOT EXISTS fonnte_token text`
+   - `ALTER TABLE sport_center.settings ADD COLUMN IF NOT EXISTS fonnte_admin_wa text`
+   - `ALTER TABLE sport_center.settings ADD COLUMN IF NOT EXISTS admin_wa_phones text`
+   - `ALTER TABLE sport_center.settings ADD COLUMN IF NOT EXISTS app_url text`
+   - `ALTER TABLE sport_center.facilities ADD COLUMN IF NOT EXISTS image_url text`
+   - `ALTER TABLE sport_center.bookings ADD COLUMN IF NOT EXISTS payment_reminder_sent_at timestamptz`
+   - `ALTER TABLE sport_center.bookings ADD COLUMN IF NOT EXISTS payer_type text`
+   - `ALTER TABLE sport_center.bookings ADD COLUMN IF NOT EXISTS company_customer_id int`
 
-In practice both resolve to `DATABASE_URL` in the dev workflow since Supabase vars aren't available.
+5. Seed demo data (using Helium pg directly):
+   - Admin user with HMAC-SHA256(SESSION_SECRET, 'admin123') hash
+   - 1 settings row
+   - 6 facilities
+   - Notification templates (columns: key, name, channel, body, is_active)
+   - Promo (columns: title, description, type, discount_percent, start_date, end_date, is_active)
 
-## Reading Supabase URLs from shell
-To run SQL against Supabase from a shell script, parse the URL from the `.replit` file:
-```js
-const content = fs.readFileSync('.replit', 'utf8');
-const match = content.match(/SUPABASE_DATABASE_URL_DEV\s*=\s*"([^"]+)"/);
-const url = match[1].replace('pooler.supabase.com:6543', 'pooler.supabase.com:5432');
-```
-Use port 5432 (session pooler) for DDL; port 6543 (transaction pooler) is for runtime queries.
+## pg module path for Node.js scripts
+`require('/home/runner/workspace/node_modules/.pnpm/pg@8.20.0/node_modules/pg')` — NOT plain `require('pg')` from workspace root.
+
+## drizzle.config.ts vs lib/db/src/index.ts priority
+- `drizzle.config.ts`: `DATABASE_URL` first → always uses Helium in dev
+- `lib/db/src/index.ts`: `SUPABASE_DATABASE_URL` first → uses Supabase if that env var is present
+
+## Scheduler race condition at startup
+Scheduler runs before startup migrations complete → first tick shows "column X does not exist". This is cosmetic — after startup migrations OK, subsequent scheduler ticks work fine.
