@@ -765,7 +765,41 @@ export async function generateAiReply(
   const maxLen = parseInt(process.env.AI_SPORTCENTER_MAX_REPLY_LENGTH ?? "900", 10);
   const baseURL = process.env.OPENAI_BASE_URL || undefined;
   const openai = new OpenAI({ apiKey, ...(baseURL ? { baseURL } : {}) });
-  const model = process.env.OPENAI_MODEL ?? (baseURL?.includes("openrouter") ? "openai/gpt-4o-mini" : "gpt-4o-mini");
+
+  // ── Hybrid model routing ──────────────────────────────────────────────────
+  // Intent sederhana (jawaban pendek, tidak butuh tool/kalkulasi) → gpt-4o-mini (hemat)
+  // Intent kompleks (butuh tool call, kalkulasi harga, reasoning) → gpt-4o (akurat)
+  const SIMPLE_INTENTS: AiIntent[] = [
+    "operating_hours",
+    "contact_info",
+    "payment_info",
+    "ask_reschedule_policy",
+    "promo_inquiry",
+    "facility_info",
+  ];
+  const COMPLEX_INTENTS: AiIntent[] = [
+    "price_inquiry",
+    "availability_check",
+    "status_check",
+    "membership_inquiry",
+    "general_question",
+  ];
+
+  const envModel = process.env.OPENAI_MODEL;
+  const miniModel = baseURL?.includes("openrouter") ? "openai/gpt-4o-mini" : "gpt-4o-mini";
+  const fullModel = baseURL?.includes("openrouter") ? "openai/gpt-4o" : "gpt-4o";
+
+  let model: string;
+  if (envModel) {
+    // Jika env OPENAI_MODEL di-set manual, selalu pakai itu (override)
+    model = envModel;
+  } else if (SIMPLE_INTENTS.includes(intent)) {
+    model = miniModel;
+  } else if (COMPLEX_INTENTS.includes(intent)) {
+    model = fullModel;
+  } else {
+    model = miniModel; // default fallback
+  }
 
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
     { role: "system", content: systemPrompt },
