@@ -497,7 +497,17 @@ router.post("/wa/webhook", async (req, res) => {
       return;
     }
 
-    if (!isBookingIntent(msg)) return;
+    if (!isBookingIntent(msg)) {
+      // Fallback: balas semua pesan dengan menu utama
+      await sendWAReply(senderPhone,
+        `👋 Halo! Selamat datang di *Sport Center Jakarta*.\n\n` +
+        `Ketik salah satu perintah berikut:\n` +
+        `🏅 *booking* — Buat booking fasilitas\n` +
+        `🔍 *status* — Cek status booking\n\n` +
+        `Atau ketik nama fasilitas (badminton, futsal, gym, dll.)`
+      );
+      return;
+    }
 
     // Cek apakah nomor sudah terdaftar sebagai customer
     const [registeredUser] = await db.select({ id: usersTable.id, name: usersTable.name, customerCode: usersTable.customerCode })
@@ -561,14 +571,25 @@ router.post("/wa/webhook", async (req, res) => {
 
 async function sendWAReply(phone: string, message: string): Promise<void> {
   const FONNTE_TOKEN = process.env.FONNTE_TOKEN || "";
-  if (!FONNTE_TOKEN || !phone) return;
+  if (!FONNTE_TOKEN || !phone) {
+    console.warn("[wa] sendWAReply: FONNTE_TOKEN kosong atau phone kosong", { phone, hasToken: !!FONNTE_TOKEN });
+    return;
+  }
   try {
-    await fetch("https://api.fonnte.com/send", {
+    const resp = await fetch("https://api.fonnte.com/send", {
       method: "POST",
       headers: { Authorization: FONNTE_TOKEN, "Content-Type": "application/json" },
       body: JSON.stringify({ target: phone, message }),
     });
-  } catch { /* non-critical */ }
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || (data as any).status === false) {
+      console.error("[wa] sendWAReply Fonnte error:", resp.status, JSON.stringify(data));
+    } else {
+      console.log("[wa] sendWAReply OK →", phone, "status:", resp.status);
+    }
+  } catch (err: any) {
+    console.error("[wa] sendWAReply exception:", err?.message);
+  }
 }
 
 // POST /api/wa/booking — create booking from mini form
