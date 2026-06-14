@@ -1912,8 +1912,8 @@ async function continueSession(session: WaBookingSessionRow, phone: string, msg:
   const step = session.currentStep as WaStep;
   const lower = msg.toLowerCase().trim();
 
-  // Allow cancelling at any step
-  if (isNo(lower) && step !== "confirm") {
+  // Allow cancelling at any step (except confirm and ask_notes — those handle "tidak" themselves)
+  if (isNo(lower) && step !== "confirm" && step !== "ask_notes") {
     await updateSession(session.id, { status: "cancelled" });
     await sendWAMsg(phone, `❌ Booking dibatalkan. Ketik *booking* kapan saja untuk memulai lagi. 🏅`);
     return;
@@ -2130,8 +2130,10 @@ async function continueSession(session: WaBookingSessionRow, phone: string, msg:
     }
 
     case "ask_notes": {
+      // Match exact skip words OR phrases meaning "no notes" / "nothing to add"
       const SKIP_WORDS = /^(tidak|nggak|ngga|ga|gak|skip|lewat|no|tidak ada|kosong|-|\.+|x)$/i;
-      const isSkip = SKIP_WORDS.test(msg.trim());
+      const SKIP_PHRASES = /^(tidak ada catatan|tidak ada tambahan|tidak ada|gak ada catatan|ga ada catatan|nggak ada catatan|no catatan|gak ada|ga ada|nggak ada|tidak perlu|gak perlu|ga perlu|tidak|nggak)[\s.,!]*$/i;
+      const isSkip = SKIP_WORDS.test(msg.trim()) || SKIP_PHRASES.test(msg.trim());
       const noteText = isSkip ? "" : msg.trim().slice(0, 300); // max 300 chars
 
       const updated = await updateSession(session.id, {
