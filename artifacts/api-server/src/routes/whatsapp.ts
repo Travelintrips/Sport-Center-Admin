@@ -454,7 +454,7 @@ router.post("/wa/register/:token", async (req, res) => {
   }
 });
 
-// POST /api/wa/webhook — Fonnte incoming message handler
+// POST /api/wa/webhook — Fonnte incoming message handler (AI-powered, semua pesan dibalas)
 router.post("/wa/webhook", async (req, res) => {
   res.status(200).json({ status: "ok" });
 
@@ -466,9 +466,8 @@ router.post("/wa/webhook", async (req, res) => {
     const senderPhone = cleanPhone(String(sender));
     const msg = String(message).trim();
 
-    // Status check intent
+    // ── Fast-path: cek status booking terakhir ────────────────────────────────
     if (isStatusIntent(msg)) {
-      // Try to find last booking by phone
       const bookings = await db.select().from(bookingsTable)
         .where(eq(bookingsTable.customerPhone, senderPhone))
         .orderBy(desc(bookingsTable.createdAt))
@@ -479,7 +478,6 @@ router.post("/wa/webhook", async (req, res) => {
         const [fac] = await db.select({ name: facilitiesTable.name }).from(facilitiesTable)
           .where(eq(facilitiesTable.id, b.facilityId)).limit(1);
         const statusUrl = `${APP_URL}/wa/status/${b.orderNumber}`;
-        // Use Fonnte API directly to reply
         await sendWAReply(senderPhone,
           `🔍 *Status Booking Terakhir*\n\n` +
           `Order: *${b.orderNumber}*\n` +
@@ -490,70 +488,97 @@ router.post("/wa/webhook", async (req, res) => {
         );
       } else {
         await sendWAReply(senderPhone,
-          `Tidak ada booking yang terdaftar untuk nomor ini.\n\n` +
-          `Ketik *booking* untuk membuat booking baru. 🏅`
+          `Tidak ada booking yang terdaftar untuk nomor ini.\n\nKetik *booking* untuk membuat booking baru. 🏅`
         );
       }
+      appendTurn(senderPhone, "user", msg);
       return;
     }
 
-    if (!isBookingIntent(msg)) return;
+    // ── Fast-path: booking intent → cek registrasi dulu ──────────────────────
+    if (isBookingIntent(msg)) {
+      const [registeredUser] = await db.select({ id: usersTable.id, name: usersTable.name, customerCode: usersTable.customerCode })
+        .from(usersTable).where(eq(usersTable.phone, senderPhone)).limit(1);
 
-    // Cek apakah nomor sudah terdaftar sebagai customer
-    const [registeredUser] = await db.select({ id: usersTable.id, name: usersTable.name, customerCode: usersTable.customerCode })
-      .from(usersTable).where(eq(usersTable.phone, senderPhone)).limit(1);
-
-    if (!registeredUser) {
-      const regToken = generateRegToken(senderPhone);
-      const registerUrl = `${APP_URL}/wa/register/${regToken}`;
-      await sendWAReply(senderPhone,
-        `👋 Halo! Untuk booking fasilitas, kamu perlu *daftar dulu* sebagai customer.\n\n` +
-        `📝 *Daftar gratis sekarang (hanya 1 menit):*\n${registerUrl}\n\n` +
-        `Setelah mengisi, ketik *booking* lagi di sini dan kita langsung bantu! 🏅`
-      );
-      return;
-    }
-
-    // Detect facility keyword
-    const keyword = detectFacilityKeyword(msg);
-    const facilities = await db.select().from(facilitiesTable).where(eq(facilitiesTable.isActive, true));
-
-    if (keyword) {
-      // Find matching facility
-      const matched = facilities.find((f) =>
-        f.name.toLowerCase().includes(keyword) ||
-        f.category.toLowerCase().includes(keyword) ||
-        keyword === f.category.toLowerCase()
-      ) ?? facilities.find((f) =>
-        Object.entries(FACILITY_KEYWORDS).some(([k, kws]) =>
-          k === keyword && (kws.some((kw) => f.name.toLowerCase().includes(kw)) || kws.some((kw) => f.category.toLowerCase().includes(kw)))
-        )
-      );
-
-      if (matched) {
-        const formUrl = `${APP_URL}/wa/booking/${matched.id}?phone=${senderPhone}`;
+      if (!registeredUser) {
+        const regToken = generateRegToken(senderPhone);
+        const registerUrl = `${APP_URL}/wa/register/${regToken}`;
         await sendWAReply(senderPhone,
-          `🏅 *Booking ${matched.name}*\n\n` +
-          `Harga: *Rp ${Number(matched.pricePerHour).toLocaleString("id-ID")}/jam*\n` +
-          `Jam operasional: *${matched.openTime} – ${matched.closeTime}*\n\n` +
-          `Silakan isi form booking di sini:\n${formUrl}\n\n` +
-          `Form hanya berlaku 30 menit setelah dibuka. ⏰`
+          `👋 Halo! Untuk booking fasilitas, kamu perlu *daftar dulu* sebagai customer.\n\n` +
+          `📝 *Daftar gratis sekarang (hanya 1 menit):*\n${registerUrl}\n\n` +
+          `Setelah mengisi, ketik *booking* lagi di sini dan kita langsung bantu! 🏅`
         );
+        appendTurn(senderPhone, "user", msg);
         return;
       }
+
+      const keyword = detectFacilityKeyword(msg);
+      const facilities = await db.select().from(facilitiesTable).where(eq(facilitiesTable.isActive, true));
+
+      if (keyword) {
+        const matched = facilities.find((f) =>
+          f.name.toLowerCase().includes(keyword) ||
+          f.category.toLowerCase().includes(keyword) ||
+          keyword === f.category.toLowerCase()
+        ) ?? facilities.find((f) =>
+          Object.entries(FACILITY_KEYWORDS).some(([k, kws]) =>
+            k === keyword && (kws.some((kw) => f.name.toLowerCase().includes(kw)) || kws.some((kw) => f.category.toLowerCase().includes(kw)))
+          )
+        );
+
+        if (matched) {
+          const formUrl = `${APP_URL}/wa/booking/${matched.id}?phone=${senderPhone}`;
+          const reply =
+            `🏅 *Booking ${matched.name}*\n\n` +
+            `Harga: *Rp ${Number(matched.pricePerHour).toLocaleString("id-ID")}/jam*\n` +
+            `Jam operasional: *${matched.openTime} – ${matched.closeTime}*\n\n` +
+            `Silakan isi form booking di sini:\n${formUrl}\n\n` +
+            `Form hanya berlaku 30 menit setelah dibuka. ⏰`;
+          await sendWAReply(senderPhone, reply);
+          appendTurn(senderPhone, "user", msg);
+          appendTurn(senderPhone, "assistant", reply);
+          return;
+        }
+      }
+
+      const list = facilities.map((f, i) =>
+        `${i + 1}. *${f.name}* — Rp ${Number(f.pricePerHour).toLocaleString("id-ID")}/jam`
+      ).join("\n");
+      const reply =
+        `🏟️ *Fasilitas Sport Center*\n\n${list}\n\n` +
+        `Sebutkan fasilitas yang ingin kamu booking, contoh:\n` +
+        `_"mau booking lapangan basket"_\n_"booking futsal"_`;
+      await sendWAReply(senderPhone, reply);
+      appendTurn(senderPhone, "user", msg);
+      appendTurn(senderPhone, "assistant", reply);
+      return;
     }
 
-    // No specific facility — show all options
-    const list = facilities.map((f, i) =>
-      `${i + 1}. *${f.name}* — Rp ${Number(f.pricePerHour).toLocaleString("id-ID")}/jam`
-    ).join("\n");
+    // ── AI reply untuk semua pesan lainnya ───────────────────────────────────
+    const history = getHistory(senderPhone);
+    appendTurn(senderPhone, "user", msg);
 
-    await sendWAReply(senderPhone,
-      `🏟️ *Fasilitas Sport Center*\n\n` +
-      `${list}\n\n` +
-      `Sebutkan fasilitas yang ingin kamu booking, contoh:\n` +
-      `_"mau booking lapangan basket"_\n_"booking futsal"_`
-    );
+    const aiResult = await generateAiReply(senderPhone, msg, history);
+
+    // Jika AI minta handoff ke booking flow
+    if (aiResult.shouldHandoffToBookingFlow) {
+      const facilities = await db.select().from(facilitiesTable).where(eq(facilitiesTable.isActive, true));
+      const list = facilities.map((f, i) =>
+        `${i + 1}. *${f.name}* — Rp ${Number(f.pricePerHour).toLocaleString("id-ID")}/jam`
+      ).join("\n");
+      const reply =
+        `🏟️ *Fasilitas Sport Center*\n\n${list}\n\n` +
+        `Sebutkan fasilitas yang ingin kamu booking, contoh:\n` +
+        `_"mau booking lapangan basket"_\n_"booking futsal"_`;
+      await sendWAReply(senderPhone, reply);
+      appendTurn(senderPhone, "assistant", reply);
+      return;
+    }
+
+    if (aiResult.reply) {
+      await sendWAReply(senderPhone, aiResult.reply);
+      appendTurn(senderPhone, "assistant", aiResult.reply);
+    }
   } catch (err) {
     console.error("[wa/webhook] error:", err);
   }
