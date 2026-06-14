@@ -1217,7 +1217,14 @@ function isYes(msg: string): boolean {
 }
 
 function isNo(msg: string): boolean {
-  return /^(tidak|tidak|batal|cancel|hapus|no|ga|gak|nggak|ngga)/i.test(msg.trim());
+  // Require end-of-string ($) so "tidak ada catatan", "gak bisa jam 10", dll. tidak ikut cancel
+  return /^(tidak|batal|cancel|hapus|no|ga|gak|nggak|ngga)$/i.test(msg.trim());
+}
+
+// Kata yang PASTI bermaksud batalkan — lebih ketat dari isNo
+// Dipakai di global cancel agar tidak salah cancel di step awal
+function isExplicitCancel(msg: string): boolean {
+  return /^(batal|cancel|hapus|batalkan|stop|keluar|quit|abort)$/i.test(msg.trim());
 }
 
 // ─── Admin command handler ─────────────────────────────────────────────────────
@@ -1912,8 +1919,10 @@ async function continueSession(session: WaBookingSessionRow, phone: string, msg:
   const step = session.currentStep as WaStep;
   const lower = msg.toLowerCase().trim();
 
-  // Allow cancelling at any step
-  if (isNo(lower) && step !== "confirm") {
+  // Hanya kata eksplisit batal/cancel yang boleh cancel di semua step
+  // "tidak"/"no"/"ga" saja tidak cukup — terlalu ambigu (bisa jawaban dari pertanyaan opsional)
+  if (isExplicitCancel(lower)) {
+    console.log(`[continueSession] explicit cancel — phone=${phone} step=${step} msg="${msg}"`);
     await updateSession(session.id, { status: "cancelled" });
     await sendWAMsg(phone, `❌ Booking dibatalkan. Ketik *booking* kapan saja untuk memulai lagi. 🏅`);
     return;
@@ -2130,8 +2139,10 @@ async function continueSession(session: WaBookingSessionRow, phone: string, msg:
     }
 
     case "ask_notes": {
+      // Match exact skip words OR phrases meaning "no notes" / "nothing to add"
       const SKIP_WORDS = /^(tidak|nggak|ngga|ga|gak|skip|lewat|no|tidak ada|kosong|-|\.+|x)$/i;
-      const isSkip = SKIP_WORDS.test(msg.trim());
+      const SKIP_PHRASES = /^(tidak ada catatan|tidak ada tambahan|tidak ada|gak ada catatan|ga ada catatan|nggak ada catatan|no catatan|gak ada|ga ada|nggak ada|tidak perlu|gak perlu|ga perlu|tidak|nggak)[\s.,!]*$/i;
+      const isSkip = SKIP_WORDS.test(msg.trim()) || SKIP_PHRASES.test(msg.trim());
       const noteText = isSkip ? "" : msg.trim().slice(0, 300); // max 300 chars
 
       const updated = await updateSession(session.id, {
