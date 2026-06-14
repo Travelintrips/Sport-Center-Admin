@@ -94,7 +94,7 @@ APP_URL = "https://sport-center-admin-111569.replit.app"
 CASHIER_TOKEN_SECRET = "239a1a73ea517bf5430a357fb7a39aa0deef38cecaf4d8135310a7cf3f2e11a19466d603c1dfd5bc0c735e92d58b135d"
 DEFAULT_OBJECT_STORAGE_BUCKET_ID = "replit-objstore-e357cc66-19c3-4d73-9ca9-3069d78355d1"
 FONNTE_ADMIN_WA = "085121073537"
-FONNTE_TOKEN = "jEz4NKMr17NBTFv7PZgr"
+FONNTE_TOKEN = "XnEnfXdKb6DrWPrmVSSZ"
 GOOGLE_CLIENT_ID = "751551151000-fqrgt8si0pgnchqkn3pfo6nmqienv38f.apps.googleusercontent.com"
 PORTAL_ADMIN_EMAILS = "admcst001@gmail.com,wangsamasindo@gmail.com"
 PRIVATE_OBJECT_DIR = "/replit-objstore-e357cc66-19c3-4d73-9ca9-3069d78355d1/private"
@@ -117,6 +117,10 @@ OPENAI_API_KEY = "sk-proj-bft8FOm4XZCO3t5kgmMPpZCTnN3BBEEo50WDzwfkhYZXy6sBT_Z4_L
 OPENAI_BASE_URL = "https://api.openai.com/v1"
 
 [userenv.development]
+<<<<<<< HEAD
+=======
+SUPABASE_DATABASE_URL = "postgresql://postgres.nzdweipzckfszczzqtuw:%2524%2523Admin12345%2540%2524@aws-1-ap-southeast-2.pooler.supabase.com:6543/postgres"
+>>>>>>> 3624f2c196447d6c85654fda797661f4df67d638
 SUPABASE_SERVICE_ROLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhzc3Jmc2hkcnRkZnVwZ3F3ZmR3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3ODg5NjcyOCwiZXhwIjoyMDk0NDcyNzI4fQ.VFPcBxsVJkYwNo3ojy3uOHglqUA9zILhjw4_0JAhZYI"
 SUPABASE_URL = "https://xssrfshdrtdfupgqwfdw.supabase.co"
 VITE_SUPABASE_URL = "https://xssrfshdrtdfupgqwfdw.supabase.co"
