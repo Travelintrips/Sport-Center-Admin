@@ -90,14 +90,34 @@ export async function checkSlotAvailable(
   });
 }
 
+// Alias olahraga → nama/kategori fasilitas di DB
+// Lapangan Multiguna melayani Basket, Futsal, dan Voli dalam satu lapangan fisik
+const FACILITY_ALIASES: Record<string, string> = {
+  basket:    "multiguna",
+  basketball: "multiguna",
+  futsal:    "multiguna",
+  voli:      "multiguna",
+  volley:    "multiguna",
+  volleyball: "multiguna",
+  "bola voli": "multiguna",
+  "bola basket": "multiguna",
+};
+
 export async function getFacilityByName(
   name: string
 ): Promise<typeof facilitiesTable.$inferSelect | null> {
   const all = await db.select().from(facilitiesTable).where(eq(facilitiesTable.isActive, true));
   const lower = name.toLowerCase().trim();
+  // Resolusi alias dulu (basket/futsal/volley → multiguna)
+  const resolved = FACILITY_ALIASES[lower] ?? lower;
   return (
     all.find(
       (f) =>
+        f.name.toLowerCase() === resolved ||
+        f.name.toLowerCase().includes(resolved) ||
+        f.category.toLowerCase() === resolved ||
+        f.category.toLowerCase().includes(resolved) ||
+        // Fallback ke nama asli jika alias tidak cocok
         f.name.toLowerCase() === lower ||
         f.name.toLowerCase().includes(lower) ||
         f.category.toLowerCase() === lower ||
