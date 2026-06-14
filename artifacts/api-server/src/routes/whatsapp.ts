@@ -558,26 +558,43 @@ router.post("/wa/webhook", async (req, res) => {
     const history = getHistory(senderPhone);
     appendTurn(senderPhone, "user", msg);
 
-    const aiResult = await generateAiReply(senderPhone, msg, history);
+    try {
+      const aiResult = await generateAiReply(senderPhone, msg, history);
 
-    // Jika AI minta handoff ke booking flow
-    if (aiResult.shouldHandoffToBookingFlow) {
-      const facilities = await db.select().from(facilitiesTable).where(eq(facilitiesTable.isActive, true));
-      const list = facilities.map((f, i) =>
-        `${i + 1}. *${f.name}* — Rp ${Number(f.pricePerHour).toLocaleString("id-ID")}/jam`
-      ).join("\n");
-      const reply =
-        `🏟️ *Fasilitas Sport Center*\n\n${list}\n\n` +
-        `Sebutkan fasilitas yang ingin kamu booking, contoh:\n` +
-        `_"mau booking lapangan basket"_\n_"booking futsal"_`;
-      await sendWAReply(senderPhone, reply);
-      appendTurn(senderPhone, "assistant", reply);
-      return;
-    }
+      // Jika AI minta handoff ke booking flow
+      if (aiResult.shouldHandoffToBookingFlow) {
+        const facilities = await db.select().from(facilitiesTable).where(eq(facilitiesTable.isActive, true));
+        const list = facilities.map((f, i) =>
+          `${i + 1}. *${f.name}* — Rp ${Number(f.pricePerHour).toLocaleString("id-ID")}/jam`
+        ).join("\n");
+        const reply =
+          `🏟️ *Fasilitas Sport Center*\n\n${list}\n\n` +
+          `Sebutkan fasilitas yang ingin kamu booking, contoh:\n` +
+          `_"mau booking lapangan basket"_\n_"booking futsal"_`;
+        await sendWAReply(senderPhone, reply);
+        appendTurn(senderPhone, "assistant", reply);
+        return;
+      }
 
-    if (aiResult.reply) {
-      await sendWAReply(senderPhone, aiResult.reply);
-      appendTurn(senderPhone, "assistant", aiResult.reply);
+      if (aiResult.reply) {
+        await sendWAReply(senderPhone, aiResult.reply);
+        appendTurn(senderPhone, "assistant", aiResult.reply);
+      }
+    } catch (aiErr) {
+      // ── Fallback statis jika DB / AI sedang gangguan ──────────────────────
+      console.error("[wa/webhook] AI error, using static fallback:", aiErr);
+      const fallback =
+        `Halo! 👋 Terima kasih sudah menghubungi *Sport Center Soekarno-Hatta*.\n\n` +
+        `🕐 *Jam Operasional:* 06:00 – 22:00 WIB\n` +
+        `📍 *Lokasi:* Kawasan Bandara Soekarno-Hatta\n\n` +
+        `Untuk info fasilitas & booking, kunjungi:\n` +
+        `🔗 ${APP_URL}/facilities\n\n` +
+        `Atau ketik:\n` +
+        `• *booking* — untuk pesan lapangan\n` +
+        `• *status* — untuk cek status pesanan\n\n` +
+        `Admin kami akan segera membantu. 🙏`;
+      await sendWAReply(senderPhone, fallback);
+      appendTurn(senderPhone, "assistant", fallback);
     }
   } catch (err) {
     console.error("[wa/webhook] error:", err);
