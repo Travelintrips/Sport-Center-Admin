@@ -1217,7 +1217,8 @@ function isYes(msg: string): boolean {
 }
 
 function isNo(msg: string): boolean {
-  return /^(tidak|tidak|batal|cancel|hapus|no|ga|gak|nggak|ngga)/i.test(msg.trim());
+  // Require end-of-string ($) so "tidak ada catatan", "gak bisa jam 10", dll. tidak ikut cancel
+  return /^(tidak|batal|cancel|hapus|no|ga|gak|nggak|ngga)$/i.test(msg.trim());
 }
 
 // ─── Admin command handler ─────────────────────────────────────────────────────
