@@ -3,7 +3,7 @@ import multer from "multer";
 import path from "path";
 import { randomUUID, randomBytes, createHmac, timingSafeEqual } from "crypto";
 import { db, bookingsTable, facilitiesTable, paymentsTable, bookingHistoryTable, waActionTokensTable, settingsTable, usersTable, blockedSchedulesTable, waBookingSessionsTable } from "@workspace/db";
-import { eq, and, desc, isNotNull, inArray, or, lt, gt } from "drizzle-orm";
+import { eq, and, desc, isNotNull, inArray, or, lt, gt, sql } from "drizzle-orm";
 import { createWaToken, verifyWaToken, consumeWaToken, getWaTokenRow } from "../lib/waTokens";
 import {
   parseIntent,
