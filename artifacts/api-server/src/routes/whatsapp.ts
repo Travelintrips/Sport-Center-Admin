@@ -1221,6 +1221,12 @@ function isNo(msg: string): boolean {
   return /^(tidak|batal|cancel|hapus|no|ga|gak|nggak|ngga)$/i.test(msg.trim());
 }
 
+// Kata yang PASTI bermaksud batalkan — lebih ketat dari isNo
+// Dipakai di global cancel agar tidak salah cancel di step awal
+function isExplicitCancel(msg: string): boolean {
+  return /^(batal|cancel|hapus|batalkan|stop|keluar|quit|abort)$/i.test(msg.trim());
+}
+
 // ─── Admin command handler ─────────────────────────────────────────────────────
 
 async function handleAdminCommand(adminPhone: string, msg: string): Promise<boolean> {
@@ -1913,8 +1919,10 @@ async function continueSession(session: WaBookingSessionRow, phone: string, msg:
   const step = session.currentStep as WaStep;
   const lower = msg.toLowerCase().trim();
 
-  // Allow cancelling at any step (except confirm and ask_notes — those handle "tidak" themselves)
-  if (isNo(lower) && step !== "confirm" && step !== "ask_notes") {
+  // Hanya kata eksplisit batal/cancel yang boleh cancel di semua step
+  // "tidak"/"no"/"ga" saja tidak cukup — terlalu ambigu (bisa jawaban dari pertanyaan opsional)
+  if (isExplicitCancel(lower)) {
+    console.log(`[continueSession] explicit cancel — phone=${phone} step=${step} msg="${msg}"`);
     await updateSession(session.id, { status: "cancelled" });
     await sendWAMsg(phone, `❌ Booking dibatalkan. Ketik *booking* kapan saja untuk memulai lagi. 🏅`);
     return;
