@@ -37,8 +37,17 @@ if (IS_DEV) {
 } else {
   SUPABASE_URL = process.env.SUPABASE_URL ?? "";
   SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY ?? "";
-  const ref = SUPABASE_URL.match(/\/\/([^.]+)/)?.[1] ?? "unknown";
-  realtimeProjectSource = `SUPABASE_URL (production, ref=${ref})`;
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+    console.warn(
+      "[Realtime] SUPABASE_URL or SUPABASE_ANON_KEY not set in production. " +
+      "Availability broadcasts will be no-ops. Set both vars to enable realtime."
+    );
+    isRealtimeNoop = true;
+    realtimeProjectSource = "no-op (SUPABASE_URL or SUPABASE_ANON_KEY missing in production)";
+  } else {
+    // Do NOT log project ref in production — keep it out of logs
+    realtimeProjectSource = "SUPABASE_URL (production)";
+  }
 }
 
 export const realtimeEnabled = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);

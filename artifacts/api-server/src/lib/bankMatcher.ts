@@ -172,7 +172,7 @@ export async function computeMatchesForMutation(mutation: BankMutation): Promise
   const normDesc = mutation.normalizedDescription ?? normalizeDescription(mutation.description);
   const providerOrderId = mutation.providerOrderId;
 
-  const INACTIVE = ["cancelled", "rejected", "refunded"] as const;
+  const INACTIVE: ("pending_payment" | "waiting_confirmation" | "waiting_admin_approval" | "paid" | "confirmed" | "completed" | "cancelled" | "rejected" | "expired" | "refunded")[] = ["cancelled", "rejected", "refunded"];
 
   // Filter booking dalam ±45 hari dari tanggal mutasi untuk performa
   const mutDate = mutation.transactionDate ? new Date(mutation.transactionDate) : null;

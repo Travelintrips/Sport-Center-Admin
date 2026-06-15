@@ -60,6 +60,11 @@ router.post("/sport-center/bookings", adminMiddleware, async (req, res) => {
     const totalPrice = Number(facility.pricePerHour) * durationHours;
     const orderNumber = await generateOrderNumber();
 
+    const endDt = new Date(dt.getTime() + durationHours * 60 * 60 * 1000);
+    const endHH = String(endDt.getHours()).padStart(2, "0");
+    const endMM = String(endDt.getMinutes()).padStart(2, "0");
+    const endTimeFormatted = `${endHH}:${endMM}`;
+
     const [booking] = await db
       .insert(bookingsTable)
       .values({
@@ -71,12 +76,12 @@ router.post("/sport-center/bookings", adminMiddleware, async (req, res) => {
         facilityId: facility.id,
         bookingDate,
         startTime: startTimeFormatted,
+        endTime: endTimeFormatted,
         durationHours,
         totalPrice: String(totalPrice),
         discountAmount: "0",
         apDiscountAmount: "0",
         status: "pending_payment",
-        paymentMethod: paymentMethod ?? "bank_transfer",
         notes: req.body.notes ?? null,
       })
       .returning();

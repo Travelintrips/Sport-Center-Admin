@@ -145,7 +145,7 @@ router.get("/company-invoices/preview", adminMiddleware, async (req, res) => {
       durationHours: b.durationHours,
       customerName: b.customerName,
       customerPhone: b.customerPhone,
-      pricePerHour: Number(b.pricePerHour ?? 0),
+      pricePerHour: 0,
       totalPrice: Number(b.totalPrice ?? 0),
       ppnAmount: b.ppnAmount == null ? null : Number(b.ppnAmount),
       grandTotal: b.grandTotal == null ? null : Number(b.grandTotal),

@@ -144,8 +144,7 @@ router.post("/tenant/bookings", tenantMiddleware, async (req, res) => {
         orderNumber,
         tenantId,
         userId,
-        bookingType,
-        paymentPeriodType: paymentPeriodType ?? "monthly",
+        bookingType: bookingType as "booth" | "event_space" | "advertising_space" | "renewal",
         periodStartMonth: Number(periodStartMonth),
         periodStartYear: Number(periodStartYear),
         periodEndMonth: Number(periodEndMonth),
@@ -174,8 +173,7 @@ router.post("/tenant/bookings", tenantMiddleware, async (req, res) => {
       orderNumber,
       tenantId,
       userId,
-      bookingType,
-      paymentPeriodType: paymentPeriodType ?? "monthly",
+      bookingType: bookingType as "booth" | "event_space" | "advertising_space" | "renewal",
       startDate,
       endDate,
       durationMonths: durationMonths ?? null,
@@ -196,7 +194,7 @@ router.get("/tenant/bookings/:orderNumber", tenantMiddleware, async (req, res) =
   try {
     const tenantId = (req as any).user.tenantId;
     const [booking] = await db.select().from(tenantBookingsTable)
-      .where(eq(tenantBookingsTable.orderNumber, req.params.orderNumber)).limit(1);
+      .where(eq(tenantBookingsTable.orderNumber, String(req.params.orderNumber))).limit(1);
     if (!booking) { res.status(404).json({ error: "Booking not found" }); return; }
     if (booking.tenantId !== tenantId) { res.status(403).json({ error: "Forbidden" }); return; }
     const payments = await db.select().from(tenantPaymentsTable)

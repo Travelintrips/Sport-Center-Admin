@@ -19,17 +19,19 @@ let isDevUsingProdDb = false;
 
 // ── Production ────────────────────────────────────────────────────────────────
 if (isProd) {
-  connectionString = SUPABASE_PROD_URL || FALLBACK_URL;
-  dbSource = SUPABASE_PROD_URL
-    ? "SUPABASE_DATABASE_URL (prod)"
-    : "DATABASE_URL (fallback — SUPABASE_DATABASE_URL not set in prod)";
-
   if (!SUPABASE_PROD_URL) {
-    console.warn(
-      "[DB] ⚠️  WARNING: SUPABASE_DATABASE_URL is not set in production. " +
-      "Falling back to DATABASE_URL — this may be an empty Replit Postgres instance."
+    console.error(
+      "\n╔══════════════════════════════════════════════════════════════════╗\n" +
+      "║  FATAL: SUPABASE_DATABASE_URL is not set in production.         ║\n" +
+      "║                                                                  ║\n" +
+      "║  Production MUST use the dedicated Supabase Postgres database.  ║\n" +
+      "║  Set SUPABASE_DATABASE_URL in the production environment.       ║\n" +
+      "╚══════════════════════════════════════════════════════════════════╝\n"
     );
+    process.exit(1);
   }
+  connectionString = SUPABASE_PROD_URL;
+  dbSource = "SUPABASE_DATABASE_URL (prod)";
 
 // ── Development ───────────────────────────────────────────────────────────────
 } else {

@@ -145,10 +145,10 @@ router.get("/sync/bookings", apiKeyMiddleware, async (req, res) => {
           ? {
               id: payment.id,
               amount: Number(payment.amount),
-              method: payment.method,
+              method: payment.paymentMethod,
               status: payment.status,
               proofUrl: payment.proofUrl,
-              paidAt: payment.paidAt,
+              paidAt: payment.confirmedAt,
               confirmedAt: payment.confirmedAt,
             }
           : null,

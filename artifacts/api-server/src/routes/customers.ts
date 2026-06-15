@@ -1,11 +1,18 @@
 import { Router } from "express";
 import { db, usersTable, bookingsTable } from "@workspace/db";
-import { eq, or, ilike, isNull, desc } from "drizzle-orm";
+import { eq, or, ilike, isNull, isNotNull, desc } from "drizzle-orm";
 import { adminMiddleware, authMiddleware } from "../lib/auth";
 import { createHmac } from "crypto";
 import { normalizePhone } from "./bookings";
 
 const router = Router();
+
+async function generateCustomerCode(): Promise<string> {
+  const [last] = await db.select({ code: usersTable.customerCode }).from(usersTable)
+    .where(isNotNull(usersTable.customerCode)).orderBy(desc(usersTable.customerCode)).limit(1);
+  const lastNum = last?.code ? parseInt(last.code.replace("C", "")) || 0 : 0;
+  return "C" + String(lastNum + 1).padStart(4, "0");
+}
 
 function mapUser(u: typeof usersTable.$inferSelect, userBookings: (typeof bookingsTable.$inferSelect)[]) {
   const totalSpent = userBookings

@@ -204,13 +204,6 @@ const FACILITY_KEYWORDS: Record<string, string[]> = {
   billiard: ["billiard", "biliar", "bilyard"],
 };
 
-function detectFacilityKeyword(msg: string): string | null {
-  const lower = msg.toLowerCase();
-  for (const [key, kws] of Object.entries(FACILITY_KEYWORDS)) {
-    if (kws.some((kw) => lower.includes(kw))) return key;
-  }
-  return null;
-}
 
 function isBookingIntent(msg: string): boolean {
   const lower = msg.toLowerCase();
@@ -527,11 +520,12 @@ router.post("/wa/webhook", async (req, res) => {
       const facilities = await db.select().from(facilitiesTable).where(eq(facilitiesTable.isActive, true));
 
       if (keyword) {
-        const matched = facilities.find((f) =>
+        type FacilityRow = typeof facilities[number];
+        const matched = facilities.find((f: FacilityRow) =>
           f.name.toLowerCase().includes(keyword) ||
           f.category.toLowerCase().includes(keyword) ||
           keyword === f.category.toLowerCase()
-        ) ?? facilities.find((f) =>
+        ) ?? facilities.find((f: FacilityRow) =>
           Object.entries(FACILITY_KEYWORDS).some(([k, kws]) =>
             k === keyword && (kws.some((kw) => f.name.toLowerCase().includes(kw)) || kws.some((kw) => f.category.toLowerCase().includes(kw)))
           )
@@ -552,7 +546,7 @@ router.post("/wa/webhook", async (req, res) => {
         }
       }
 
-      const list = facilities.map((f, i) =>
+      const list = facilities.map((f: typeof facilities[number], i: number) =>
         `${i + 1}. *${f.name}* — Rp ${Number(f.pricePerHour).toLocaleString("id-ID")}/jam`
       ).join("\n");
       const reply =
@@ -575,7 +569,7 @@ router.post("/wa/webhook", async (req, res) => {
       // Jika AI minta handoff ke booking flow
       if (aiResult.shouldHandoffToBookingFlow) {
         const facilities = await db.select().from(facilitiesTable).where(eq(facilitiesTable.isActive, true));
-        const list = facilities.map((f, i) =>
+        const list = facilities.map((f: typeof facilities[number], i: number) =>
           `${i + 1}. *${f.name}* — Rp ${Number(f.pricePerHour).toLocaleString("id-ID")}/jam`
         ).join("\n");
         const reply =
@@ -819,7 +813,7 @@ router.get("/wa/status/:orderNumber", async (req, res) => {
 // GET /api/wa/action/:token — get action details (no auth)
 router.get("/wa/action/:token", async (req, res) => {
   try {
-    const tokenRow = await getWaTokenRow(req.params.token);
+    const tokenRow = await getWaTokenRow(Array.isArray(req.params.token) ? req.params.token[0] : req.params.token);
     if (!tokenRow) { res.status(404).json({ error: "Link tidak valid" }); return; }
     if (tokenRow.expiresAt && tokenRow.expiresAt < new Date()) {
       res.status(410).json({ error: "Link sudah kedaluwarsa" }); return;
@@ -844,7 +838,7 @@ router.get("/wa/action/:token", async (req, res) => {
 // POST /api/wa/action/:token — execute action
 router.post("/wa/action/:token", async (req, res) => {
   try {
-    const tokenRow = await getWaTokenRow(req.params.token);
+    const tokenRow = await getWaTokenRow(Array.isArray(req.params.token) ? req.params.token[0] : req.params.token);
     if (!tokenRow) { res.status(404).json({ error: "Link tidak valid" }); return; }
     if (tokenRow.expiresAt && tokenRow.expiresAt < new Date()) {
       res.status(410).json({ error: "Link sudah kedaluwarsa" }); return;
@@ -1038,7 +1032,7 @@ router.post("/wa/proof/upload", uploadProof.single("proof"), async (req, res) =>
 // POST /api/wa/proof/:token — submit proof (tokenized, no login)
 router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) => {
   try {
-    const tokenRow = await getWaTokenRow(req.params.token);
+    const tokenRow = await getWaTokenRow(Array.isArray(req.params.token) ? req.params.token[0] : req.params.token);
     if (!tokenRow || tokenRow.action !== "upload_proof") {
       res.status(404).json({ error: "Link tidak valid" }); return;
     }
@@ -1160,7 +1154,7 @@ async function buildFacilityList(): Promise<string> {
     category: facilitiesTable.category,
     pricePerHour: facilitiesTable.pricePerHour,
   }).from(facilitiesTable).where(eq(facilitiesTable.isActive, true));
-  const lines = facilities.map((f, i) =>
+  const lines = facilities.map((f: typeof facilities[number], i: number) =>
     `${i + 1}. *${f.name}* — ${formatIDR(Number(f.pricePerHour))}/jam`
   ).join("\n");
   return `🏟️ *Fasilitas tersedia:*\n${lines}\n\nSebutkan nama fasilitas yang ingin kamu booking.`;
@@ -1182,10 +1176,11 @@ async function getFacilityByKeyword(keyword: string) {
     billiard: ["billiard", "biliar", "bilyard"],
   };
   const kws = FACILITY_KEYWORDS[keyword] ?? [keyword];
+  type FRow = typeof facilities[number];
   return (
-    facilities.find((f) => kws.some((kw) => f.name.toLowerCase().includes(kw) || f.category.toLowerCase().includes(kw))) ??
-    facilities.find((f) => f.category.toLowerCase() === keyword.toLowerCase()) ??
-    facilities.find((f) => f.name.toLowerCase().includes(keyword.toLowerCase())) ??
+    facilities.find((f: FRow) => kws.some((kw) => f.name.toLowerCase().includes(kw) || f.category.toLowerCase().includes(kw))) ??
+    facilities.find((f: FRow) => f.category.toLowerCase() === keyword.toLowerCase()) ??
+    facilities.find((f: FRow) => f.name.toLowerCase().includes(keyword.toLowerCase())) ??
     null
   );
 }
@@ -1197,7 +1192,7 @@ async function resolveFacilityFromMsg(msg: string) {
   // Direct name search
   const facilities = await db.select().from(facilitiesTable).where(eq(facilitiesTable.isActive, true));
   const lower = msg.toLowerCase();
-  return facilities.find((f) => f.name.toLowerCase().includes(lower)) ?? null;
+  return facilities.find((f: typeof facilities[number]) => f.name.toLowerCase().includes(lower)) ?? null;
 }
 
 function addHoursToTime(time: string, hours: number): string {
@@ -1989,7 +1984,7 @@ async function continueSession(session: WaBookingSessionRow, phone: string, msg:
         currentStep: getNextStep({ ...session, bookingDate: parsed.bookingDate }),
       });
       await logAudit({ action: "booking_session_updated", entity: "wa_booking_session", entityId: session.id, after: { step: "ask_date", bookingDate: parsed.bookingDate } });
-      const fac = session.facilityId ? await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, session.facilityId)).limit(1).then(r => r[0]) : null;
+      const fac = session.facilityId ? (await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, session.facilityId)).limit(1))[0] ?? null : null;
 
       // Cek dan tampilkan slot yang tersedia untuk tanggal yang dipilih
       let slotsMsg = "";
@@ -2020,7 +2015,7 @@ async function continueSession(session: WaBookingSessionRow, phone: string, msg:
 
       // Cek ketersediaan slot dari DB (booking + blocked schedules)
       if (session.facilityId && session.bookingDate) {
-        const fac = await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, session.facilityId)).limit(1).then(r => r[0]);
+        const fac = (await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, session.facilityId)).limit(1))[0] ?? null;
         if (fac && fac.bookingMode !== "walk_in") {
           // Cek jam operasional dulu
           const reqMin = timeToMinutes(parsed.startTime);
@@ -2057,7 +2052,7 @@ async function continueSession(session: WaBookingSessionRow, phone: string, msg:
         currentStep: getNextStep({ ...session, startTime: parsed.startTime }),
       });
       await logAudit({ action: "booking_session_updated", entity: "wa_booking_session", entityId: session.id, after: { step: "ask_time", startTime: parsed.startTime } });
-      const fac2 = session.facilityId ? await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, session.facilityId)).limit(1).then(r => r[0]) : null;
+      const fac2 = session.facilityId ? (await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, session.facilityId)).limit(1))[0] ?? null : null;
 
       // Konfirmasi slot tersedia ke customer
       const availConfirm = session.facilityId && session.bookingDate
@@ -2089,7 +2084,7 @@ async function continueSession(session: WaBookingSessionRow, phone: string, msg:
         currentStep: getNextStep({ ...session, durationMinutes }),
       });
       await logAudit({ action: "booking_session_updated", entity: "wa_booking_session", entityId: session.id, after: { step: "ask_duration", durationMinutes } });
-      const fac = session.facilityId ? await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, session.facilityId)).limit(1).then(r => r[0]) : null;
+      const fac = session.facilityId ? (await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, session.facilityId)).limit(1))[0] ?? null : null;
       const reply = await buildStepQuestion(updated.currentStep as WaStep, updated, fac?.name ?? "", Number(fac?.pricePerHour ?? 0));
       await appendMessage(session.id, "bot", reply);
       await sendWAMsg(phone, reply);
@@ -2122,7 +2117,7 @@ async function continueSession(session: WaBookingSessionRow, phone: string, msg:
         currentStep: "ask_notes",
       });
       await logAudit({ action: "booking_session_updated", entity: "wa_booking_session", entityId: session.id, after: { step: "ask_name", customerName: rawName, bookingContext: ctx } });
-      const fac = session.facilityId ? await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, session.facilityId)).limit(1).then(r => r[0]) : null;
+      const fac = session.facilityId ? (await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, session.facilityId)).limit(1))[0] ?? null : null;
 
       // Confirm who the booking is for with context-specific label
       const ctxLabel =
@@ -2150,7 +2145,7 @@ async function continueSession(session: WaBookingSessionRow, phone: string, msg:
         currentStep: "confirm",
       });
       await logAudit({ action: "booking_session_updated", entity: "wa_booking_session", entityId: session.id, after: { step: "ask_notes", notes: noteText || null } });
-      const fac = session.facilityId ? await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, session.facilityId)).limit(1).then(r => r[0]) : null;
+      const fac = session.facilityId ? (await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, session.facilityId)).limit(1))[0] ?? null : null;
 
       const noteAck = noteText ? `📝 Catatan dicatat: *${noteText}*\n\n` : "";
       const confirmQ = await buildStepQuestion("confirm", updated, fac?.name ?? "", Number(fac?.pricePerHour ?? 0));
@@ -2167,7 +2162,7 @@ async function continueSession(session: WaBookingSessionRow, phone: string, msg:
         await updateSession(session.id, { status: "cancelled" });
         await sendWAMsg(phone, `❌ Booking dibatalkan. Ketik *booking* untuk memulai lagi. 🏅`);
       } else {
-        const fac = session.facilityId ? await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, session.facilityId)).limit(1).then(r => r[0]) : null;
+        const fac = session.facilityId ? (await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, session.facilityId)).limit(1))[0] ?? null : null;
         const reply = await buildStepQuestion("confirm", session, fac?.name ?? "", Number(fac?.pricePerHour ?? 0));
         await sendWAMsg(phone, `Ketik *ya* untuk konfirmasi atau *batal* untuk membatalkan.\n\n${reply}`);
       }
@@ -2195,7 +2190,7 @@ async function buildStepQuestion(
 
     case "ask_time": {
       const fac = session.facilityId
-        ? await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, session.facilityId)).limit(1).then(r => r[0])
+        ? (await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, session.facilityId)).limit(1))[0] ?? null
         : null;
       const hours = fac ? ` (jam operasional: *${fac.openTime}–${fac.closeTime}*)` : "";
       return `⏰ Jam berapa mau mulai?${hours}\nContoh: *jam 8 pagi*, *jam 20.00*, *19:00*`;
@@ -2276,7 +2271,7 @@ async function getAlternativeSlots(
   }).from(bookingsTable)
     .where(and(eq(bookingsTable.facilityId, facilityId), eq(bookingsTable.bookingDate, date)));
 
-  const activeBookings = existingBookings.filter(b => !INACTIVE_STATUSES.includes(b.status));
+  const activeBookings = existingBookings.filter((b: typeof existingBookings[number]) => !INACTIVE_STATUSES.includes(b.status));
   const openMin = timeToMinutes(openTime);
   const closeMin = timeToMinutes(closeTime);
   const requestedMin = timeToMinutes(requestedStartTime);
@@ -2293,7 +2288,7 @@ async function getAlternativeSlots(
   for (const startMin of candidates) {
     if (startMin === requestedMin) continue;
     const endMin = startMin + durMin;
-    const hasConflict = activeBookings.some(b => {
+    const hasConflict = activeBookings.some((b: typeof activeBookings[number]) => {
       const bS = timeToMinutes(b.startTime);
       const bE = timeToMinutes(b.endTime);
       return startMin < bE && endMin > bS;
@@ -2318,7 +2313,7 @@ async function getAvailableSlotsForDay(
     .select({ startTime: bookingsTable.startTime, endTime: bookingsTable.endTime, status: bookingsTable.status })
     .from(bookingsTable)
     .where(and(eq(bookingsTable.facilityId, facilityId), eq(bookingsTable.bookingDate, date)));
-  const activeBookings = bookings.filter((b) => !INACTIVE_STATUSES.includes(b.status));
+  const activeBookings = bookings.filter((b: typeof bookings[number]) => !INACTIVE_STATUSES.includes(b.status));
 
   const blocked = await db
     .select({ startTime: blockedSchedulesTable.startTime, endTime: blockedSchedulesTable.endTime })
@@ -2332,12 +2327,12 @@ async function getAvailableSlotsForDay(
   for (let t = openMin; t < closeMin; t += 60) {
     const slotEnd = t + 60;
     const timeStr = minutesToTimeStr(t);
-    const isBooked = activeBookings.some((b) => {
+    const isBooked = activeBookings.some((b: typeof activeBookings[number]) => {
       const bS = timeToMinutes(b.startTime);
       const bE = timeToMinutes(b.endTime);
       return t < bE && slotEnd > bS;
     });
-    const isBlocked = blocked.some((b) => {
+    const isBlocked = blocked.some((b: typeof blocked[number]) => {
       const bS = timeToMinutes(b.startTime);
       const bE = timeToMinutes(b.endTime);
       return t < bE && slotEnd > bS;
@@ -2365,7 +2360,7 @@ async function checkSlotAvailable(
     .from(blockedSchedulesTable)
     .where(and(eq(blockedSchedulesTable.facilityId, facilityId), eq(blockedSchedulesTable.date, date)));
 
-  return !blocked.some((b) => {
+  return !blocked.some((b: typeof blocked[number]) => {
     const bS = timeToMinutes(b.startTime);
     const bE = timeToMinutes(b.endTime);
     return startMin < bE && endMin > bS;
@@ -2377,7 +2372,7 @@ async function checkSlotAvailable(
 async function ensureCustomer(phone: string, name: string): Promise<{ id: number; email: string }> {
   const [existing] = await db.select({ id: usersTable.id, email: usersTable.email })
     .from(usersTable).where(eq(usersTable.phone, phone)).limit(1);
-  if (existing) return existing;
+  if (existing) return { id: existing.id, email: existing.email ?? `wa_${phone}@whatsapp.local` };
 
   const customerCode = await generateCustomerCode();
   const finalEmail = `wa_${phone}@whatsapp.local`;
@@ -2404,7 +2399,7 @@ async function ensureCustomer(phone: string, name: string): Promise<{ id: number
     after: { customerCode, phone, name: name.trim(), registrationSource: "whatsapp" },
   });
 
-  return user;
+  return { id: user.id, email: user.email ?? email };
 }
 
 // ─── Main: create booking from session with full FASE 2 logic ─────────────────
@@ -2856,10 +2851,10 @@ router.post("/wa/fonnte/webhook", async (req, res) => {
         return;
       }
 
-      const facIds = [...new Set(allBookings.map(b => b.facilityId))];
+      const facIds = [...new Set(allBookings.map((b: typeof allBookings[number]) => b.facilityId))];
       const facRows = await db.select({ id: facilitiesTable.id, name: facilitiesTable.name })
         .from(facilitiesTable).where(inArray(facilitiesTable.id, facIds));
-      const facMap = new Map(facRows.map(f => [f.id, f.name]));
+      const facMap = new Map(facRows.map((f: typeof facRows[number]) => [f.id, f.name]));
 
       const STATUS_ICON: Record<string, string> = {
         waiting_admin_approval: "⏳",

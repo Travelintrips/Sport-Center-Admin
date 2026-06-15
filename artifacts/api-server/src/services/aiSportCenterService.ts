@@ -150,7 +150,7 @@ export async function loadDbContext(
   };
 
   // Build facility info with pricing rules
-  const facilities: FacilityInfo[] = facilitiesRaw.map((f) => ({
+  const facilities: FacilityInfo[] = facilitiesRaw.map((f: typeof facilitiesRaw[number]) => ({
     id: f.id,
     name: f.name,
     category: f.category,
@@ -161,8 +161,8 @@ export async function loadDbContext(
     maxDuration: f.maxDuration,
     capacity: f.capacity,
     pricingRules: pricingRaw
-      .filter((p) => p.facilityId === f.id)
-      .map((p) => ({
+      .filter((p: typeof pricingRaw[number]) => p.facilityId === f.id)
+      .map((p: typeof pricingRaw[number]) => ({
         name: p.name,
         ruleType: p.ruleType,
         dayType: p.dayType,
@@ -184,7 +184,7 @@ export async function loadDbContext(
     .where(
       and(
         eq(bookingsTable.bookingDate, targetDate),
-        not(inArray(bookingsTable.status, INACTIVE_STATUSES))
+        not(inArray(bookingsTable.status, INACTIVE_STATUSES as ("pending_payment" | "waiting_confirmation" | "waiting_admin_approval" | "paid" | "confirmed" | "completed" | "cancelled" | "rejected" | "expired" | "refunded")[]))
       )
     );
 
@@ -199,11 +199,11 @@ export async function loadDbContext(
   // Build availability summary per facility
   const availabilityLines: string[] = [];
   for (const f of facilities) {
-    const busy = dateBookings.filter((b) => b.facilityId === f.id);
-    const blocked = blockedSlots.filter((b) => b.facilityId === f.id);
+    const busy = dateBookings.filter((b: typeof dateBookings[number]) => b.facilityId === f.id);
+    const blocked = blockedSlots.filter((b: typeof blockedSlots[number]) => b.facilityId === f.id);
     if (busy.length > 0 || blocked.length > 0) {
-      const busyStr = busy.map((b) => `${b.startTime}-${b.endTime}`).join(", ");
-      const blockedStr = blocked.map((b) => `${b.startTime}-${b.endTime}(${b.reason})`).join(", ");
+      const busyStr = busy.map((b: typeof busy[number]) => `${b.startTime}-${b.endTime}`).join(", ");
+      const blockedStr = blocked.map((b: typeof blocked[number]) => `${b.startTime}-${b.endTime}(${b.reason})`).join(", ");
       const parts = [busyStr, blockedStr].filter(Boolean).join(", ");
       availabilityLines.push(`${f.name}: slot terisi ${parts}`);
     }
@@ -213,8 +213,8 @@ export async function loadDbContext(
     : `Semua slot tersedia pada ${targetDate} (sesuai jam operasional masing-masing fasilitas).`;
 
   // Customer bookings
-  const facilityMap = new Map(facilitiesRaw.map((f) => [f.id, f.name]));
-  const customerBookings: BookingInfo[] = bookingsRaw.map((b) => ({
+  const facilityMap = new Map(facilitiesRaw.map((f: typeof facilitiesRaw[number]) => [f.id, f.name]));
+  const customerBookings: BookingInfo[] = bookingsRaw.map((b: typeof bookingsRaw[number]) => ({
     orderNumber: b.orderNumber,
     facilityName: facilityMap.get(b.facilityId) ?? "Unknown",
     bookingDate: b.bookingDate,
@@ -238,12 +238,12 @@ export async function loadDbContext(
 
   // Active promos (filter by date)
   const activePromos: PromoInfo[] = promosRaw
-    .filter((p) => {
+    .filter((p: typeof promosRaw[number]) => {
       if (p.endDate && p.endDate < today) return false;
       if (p.startDate && p.startDate > today) return false;
       return true;
     })
-    .map((p) => ({
+    .map((p: typeof promosRaw[number]) => ({
       title: p.title,
       description: p.description,
       code: p.code,

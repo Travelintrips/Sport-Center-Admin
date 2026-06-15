@@ -81,9 +81,9 @@ router.get("/admin/wa-ai/sessions", adminMiddleware, async (req, res) => {
 
 // ─── GET /api/admin/wa-ai/sessions/:id ────────────────────────────────────────
 router.get("/admin/wa-ai/sessions/:id", adminMiddleware, async (req, res) => {
-  const id = parseInt(req.params.id);
+  const id = parseInt(String(req.params.id));
   const [session] = await db.select().from(waBookingSessionsTable).where(eq(waBookingSessionsTable.id, id)).limit(1);
-  if (!session) return res.status(404).json({ error: "Session tidak ditemukan" });
+  if (!session) { res.status(404).json({ error: "Session tidak ditemukan" }); return; }
 
   const facility = session.facilityId
     ? (await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, session.facilityId)).limit(1))[0] ?? null
@@ -280,12 +280,12 @@ router.get("/admin/wa-ai/stats", adminMiddleware, async (req, res) => {
 
 // ─── POST /api/admin/wa-ai/sessions/:id/takeover ──────────────────────────────
 router.post("/admin/wa-ai/sessions/:id/takeover", adminMiddleware, async (req, res) => {
-  const id = parseInt(req.params.id);
+  const id = parseInt(String(req.params.id));
   const { message } = req.body as { message?: string };
-  if (!message?.trim()) return res.status(400).json({ error: "Pesan kosong" });
+  if (!message?.trim()) { res.status(400).json({ error: "Pesan kosong" }); return; }
 
   const [session] = await db.select().from(waBookingSessionsTable).where(eq(waBookingSessionsTable.id, id)).limit(1);
-  if (!session) return res.status(404).json({ error: "Session tidak ditemukan" });
+  if (!session) { res.status(404).json({ error: "Session tidak ditemukan" }); return; }
 
   const adminUser = (req as any).user;
   const adminName = adminUser?.email ?? "admin";

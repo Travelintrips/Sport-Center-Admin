@@ -111,13 +111,13 @@ router.get("/admin/wa-bookings", adminMiddleware, async (req, res) => {
 
 // ─── GET /api/admin/wa-bookings/:orderNumber/detail ───────────────────────────
 router.get("/admin/wa-bookings/:orderNumber/detail", adminMiddleware, async (req, res) => {
-  const { orderNumber } = req.params;
+  const orderNumber = String(req.params.orderNumber);
   const [booking] = await db
     .select()
     .from(bookingsTable)
     .where(eq(bookingsTable.orderNumber, orderNumber))
     .limit(1);
-  if (!booking) return res.status(404).json({ error: "Booking tidak ditemukan" });
+  if (!booking) { res.status(404).json({ error: "Booking tidak ditemukan" }); return; }
 
   const [facility] = await db
     .select()
@@ -157,15 +157,15 @@ router.get("/admin/wa-bookings/:orderNumber/detail", adminMiddleware, async (req
 
 // ─── POST /api/admin/wa-bookings/:orderNumber/approve ─────────────────────────
 router.post("/admin/wa-bookings/:orderNumber/approve", adminMiddleware, async (req, res) => {
-  const { orderNumber } = req.params;
+  const orderNumber = String(req.params.orderNumber);
   const adminUser = (req as any).user;
   const adminName = adminUser?.email ?? "admin";
 
   const [booking] = await db.select().from(bookingsTable)
     .where(eq(bookingsTable.orderNumber, orderNumber)).limit(1);
-  if (!booking) return res.status(404).json({ error: "Booking tidak ditemukan" });
+  if (!booking) { res.status(404).json({ error: "Booking tidak ditemukan" }); return; }
   if (booking.status !== "waiting_admin_approval") {
-    return res.status(400).json({ error: `Status tidak valid: ${booking.status}` });
+    res.status(400).json({ error: `Status tidak valid: ${booking.status}` }); return;
   }
 
   const [facility] = await db.select().from(facilitiesTable)
@@ -224,16 +224,16 @@ router.post("/admin/wa-bookings/:orderNumber/approve", adminMiddleware, async (r
 
 // ─── POST /api/admin/wa-bookings/:orderNumber/reject ─────────────────────────
 router.post("/admin/wa-bookings/:orderNumber/reject", adminMiddleware, async (req, res) => {
-  const { orderNumber } = req.params;
+  const orderNumber = String(req.params.orderNumber);
   const { reason = "" } = req.body;
   const adminUser = (req as any).user;
   const adminName = adminUser?.email ?? "admin";
 
   const [booking] = await db.select().from(bookingsTable)
     .where(eq(bookingsTable.orderNumber, orderNumber)).limit(1);
-  if (!booking) return res.status(404).json({ error: "Booking tidak ditemukan" });
+  if (!booking) { res.status(404).json({ error: "Booking tidak ditemukan" }); return; }
   if (["cancelled", "rejected", "refunded", "completed"].includes(booking.status)) {
-    return res.status(400).json({ error: `Status tidak valid: ${booking.status}` });
+    res.status(400).json({ error: `Status tidak valid: ${booking.status}` }); return;
   }
 
   const [facility] = await db.select({ name: facilitiesTable.name })
@@ -279,15 +279,15 @@ router.post("/admin/wa-bookings/:orderNumber/reject", adminMiddleware, async (re
 
 // ─── POST /api/admin/wa-bookings/:orderNumber/paid ────────────────────────────
 router.post("/admin/wa-bookings/:orderNumber/paid", adminMiddleware, async (req, res) => {
-  const { orderNumber } = req.params;
+  const orderNumber = String(req.params.orderNumber);
   const adminUser = (req as any).user;
   const adminName = adminUser?.email ?? "admin";
 
   const [booking] = await db.select().from(bookingsTable)
     .where(eq(bookingsTable.orderNumber, orderNumber)).limit(1);
-  if (!booking) return res.status(404).json({ error: "Booking tidak ditemukan" });
+  if (!booking) { res.status(404).json({ error: "Booking tidak ditemukan" }); return; }
   if (!["pending_payment", "waiting_confirmation", "waiting_admin_approval"].includes(booking.status)) {
-    return res.status(400).json({ error: `Status tidak valid untuk mark paid: ${booking.status}` });
+    res.status(400).json({ error: `Status tidak valid untuk mark paid: ${booking.status}` }); return;
   }
 
   const [facility] = await db.select().from(facilitiesTable)
@@ -362,13 +362,13 @@ router.post("/admin/wa-bookings/:orderNumber/paid", adminMiddleware, async (req,
 
 // ─── POST /api/admin/wa-bookings/:orderNumber/resend ─────────────────────────
 router.post("/admin/wa-bookings/:orderNumber/resend", adminMiddleware, async (req, res) => {
-  const { orderNumber } = req.params;
+  const orderNumber = String(req.params.orderNumber);
   const adminUser = (req as any).user;
   const adminName = adminUser?.email ?? "admin";
 
   const [booking] = await db.select().from(bookingsTable)
     .where(eq(bookingsTable.orderNumber, orderNumber)).limit(1);
-  if (!booking) return res.status(404).json({ error: "Booking tidak ditemukan" });
+  if (!booking) { res.status(404).json({ error: "Booking tidak ditemukan" }); return; }
 
   const [facility] = await db.select().from(facilitiesTable)
     .where(eq(facilitiesTable.id, booking.facilityId)).limit(1);
@@ -423,7 +423,7 @@ router.post("/admin/wa-bookings/:orderNumber/resend", adminMiddleware, async (re
     });
     sentTo = "customer (konfirmasi booking)";
   } else {
-    return res.status(400).json({ error: `Tidak bisa resend untuk status: ${booking.status}` });
+    res.status(400).json({ error: `Tidak bisa resend untuk status: ${booking.status}` }); return;
   }
 
   await logAudit({

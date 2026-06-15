@@ -6,7 +6,7 @@ import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
 
 const router = Router();
 
-const INACTIVE_STATUSES = ["cancelled", "expired", "rejected", "refunded"];
+const INACTIVE_STATUSES: ("pending_payment" | "waiting_confirmation" | "waiting_admin_approval" | "paid" | "confirmed" | "completed" | "cancelled" | "rejected" | "expired" | "refunded")[] = ["cancelled", "expired", "rejected", "refunded"];
 
 function timeToMinutes(t: string): number {
   const [h, m] = t.split(":").map(Number);

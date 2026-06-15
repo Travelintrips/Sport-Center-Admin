@@ -66,9 +66,20 @@ if (IS_DEV) {
   }
 } else {
   const prodKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
+  if (!prodKey) {
+    console.error(
+      "\n╔══════════════════════════════════════════════════════════════════╗\n" +
+      "║  FATAL: SUPABASE_SERVICE_ROLE_KEY is not set in production.     ║\n" +
+      "║                                                                  ║\n" +
+      "║  File uploads (payment proofs, facility images, QRIS) will      ║\n" +
+      "║  fail without this key. Set it in the production environment.   ║\n" +
+      "╚══════════════════════════════════════════════════════════════════╝\n"
+    );
+    process.exit(1);
+  }
   SERVICE_KEY = prodKey;
-  const ref = getProjectRef(prodKey) ?? "unknown";
-  storageProjectSource = `SUPABASE_SERVICE_ROLE_KEY (production, ref=${ref})`;
+  // Do NOT log project ref in production — keep it out of logs
+  storageProjectSource = "SUPABASE_SERVICE_ROLE_KEY (production)";
 }
 
 const PROJECT_REF = getProjectRef(SERVICE_KEY);

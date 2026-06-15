@@ -110,12 +110,12 @@ export async function notifyBookingCreated(data: BookingNotifData): Promise<void
 
 export async function notifyPaymentConfirmed(data: BookingNotifData): Promise<void> {
   const tpl = await getTemplate("payment_confirmed");
-  if (tpl) await sendWA(data.customerPhone, interpolate(tpl, data as Record<string, string>));
+  if (tpl) await sendWA(data.customerPhone, interpolate(tpl, data as unknown as Record<string, string>));
 }
 
 export async function notifyBookingCancelled(data: BookingNotifData): Promise<void> {
   const tpl = await getTemplate("booking_cancelled");
-  if (tpl) await sendWA(data.customerPhone, interpolate(tpl, { ...data, reason: data.reason ?? "" }));
+  if (tpl) await sendWA(data.customerPhone, interpolate(tpl, { ...data as unknown as Record<string, string>, reason: data.reason ?? "" }));
 }
 
 export async function notifyBookingCompleted(data: BookingNotifData): Promise<void> {
@@ -127,20 +127,20 @@ export async function notifyBookingCompleted(data: BookingNotifData): Promise<vo
 
 export async function notifyBookingExpired(data: BookingNotifData): Promise<void> {
   const customerTpl = await getTemplate("booking_expired");
-  if (customerTpl) await sendWA(data.customerPhone, interpolate(customerTpl, data as Record<string, string>));
+  if (customerTpl) await sendWA(data.customerPhone, interpolate(customerTpl, data as unknown as Record<string, string>));
 
   const adminTpl = await getTemplate("admin_booking_expired");
-  if (adminTpl) await sendWAToAdmins(interpolate(adminTpl, data as Record<string, string>));
+  if (adminTpl) await sendWAToAdmins(interpolate(adminTpl, data as unknown as Record<string, string>));
 }
 
 export async function notifyPaymentProofUploaded(data: BookingNotifData): Promise<void> {
   const tpl = await getTemplate("admin_payment_proof");
-  if (tpl) await sendWAToAdmins(interpolate(tpl, data as Record<string, string>));
+  if (tpl) await sendWAToAdmins(interpolate(tpl, data as unknown as Record<string, string>));
 }
 
 export async function notifyReminderH1(data: BookingNotifData): Promise<void> {
   const tpl = await getTemplate("reminder_h1");
-  if (tpl) await sendWA(data.customerPhone, interpolate(tpl, data as Record<string, string>));
+  if (tpl) await sendWA(data.customerPhone, interpolate(tpl, data as unknown as Record<string, string>));
 }
 
 export interface PaymentReminderData extends BookingNotifData {
