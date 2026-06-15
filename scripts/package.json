@@ -10,6 +10,7 @@
     "migrate": "tsx ../migrate.ts",
     "migrate:dev": "tsx ./src/db-migrate.ts",
     "migrate:prod": "tsx ./src/db-migrate.ts --prod",
+    "fix-admin:dev": "tsx ./src/fix-admin-hash.ts",
     "test-ppn": "tsx ./src/test-ppn.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
