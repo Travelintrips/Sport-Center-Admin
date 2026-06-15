@@ -27,7 +27,7 @@ async function main() {
       centerName: "Sport Center Jakarta",
       address: "Jl. Sudirman No. 123, Jakarta Pusat",
       phone: "+62-21-1234567",
-      whatsapp: "+6281234567890",
+      whatsapp: "+6281216104734",
       email: "info@sportcenterjakarta.com",
       openHour: "06:00",
       closeHour: "22:00",

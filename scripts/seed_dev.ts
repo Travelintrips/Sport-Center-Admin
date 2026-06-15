@@ -19,7 +19,7 @@ async function main() {
     center_name='Sport Center Jakarta',
     address='Jl. Sudirman No. 88, Jakarta Pusat',
     phone='021-5555-8888',
-    whatsapp='6281234567890',
+    whatsapp='6281216104734',
     email='info@sportcenterjakarta.com',
     open_hour='06:00',
     close_hour='23:00',
