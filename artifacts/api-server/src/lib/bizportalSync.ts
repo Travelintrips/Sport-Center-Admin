@@ -18,6 +18,31 @@ function getProdPool(): pg.Pool | null {
   return _prodPool;
 }
 
+export const bizportalSyncConfigured = Boolean(PROD_URL);
+
+// In-memory last sync tracking for diagnostic endpoint
+export const lastSyncState = {
+  booking: { at: null as string | null, success: null as boolean | null, error: null as string | null },
+  membership: { at: null as string | null, success: null as boolean | null, error: null as string | null },
+  status: { at: null as string | null, success: null as boolean | null, error: null as string | null },
+};
+
+async function withRetry<T>(fn: () => Promise<T>, label: string, retries = 2): Promise<T> {
+  let lastErr: any;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await fn();
+    } catch (err: any) {
+      lastErr = err;
+      if (attempt < retries) {
+        await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+        console.warn(`[bizportalSync] Retry ${attempt + 1}/${retries} for ${label}: ${err?.message}`);
+      }
+    }
+  }
+  throw lastErr;
+}
+
 function toStatus(scStatus: string): string {
   switch (scStatus) {
     case "confirmed": return "confirmed";
@@ -40,10 +65,6 @@ function toPaymentStatus(scStatus: string): string {
   }
 }
 
-function toFacilityId(facilityName: string, facilityId: number): string {
-  return `sc-${facilityId}`;
-}
-
 export interface SyncBookingPayload {
   booking: Booking;
   facilityName: string;
@@ -56,48 +77,51 @@ export async function syncBookingToBizportal(payload: SyncBookingPayload): Promi
   if (!pool) return;
 
   const { booking, facilityName, paymentProofUrl, paidAt } = payload;
-
-  const bizFacilityId = toFacilityId(facilityName, booking.facilityId);
+  const bizFacilityId = `sc-${booking.facilityId}`;
   const status = toStatus(booking.status);
   const paymentStatus = toPaymentStatus(booking.status);
 
   try {
-    // Upsert berdasarkan booking_code = orderNumber Sport Center
-    await pool.query(
-      `INSERT INTO public.sport_center_bookings
-        (booking_code, facility_id, facility_name, customer_name, customer_phone, customer_email,
-         date, start_time, end_time, total_hours, total_price, notes, status,
-         payment_status, payment_proof_url, payment_proof_at, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,NOW())
-       ON CONFLICT (booking_code) DO UPDATE SET
-         status               = EXCLUDED.status,
-         payment_status       = EXCLUDED.payment_status,
-         payment_proof_url    = COALESCE(EXCLUDED.payment_proof_url, sport_center_bookings.payment_proof_url),
-         payment_proof_at     = COALESCE(EXCLUDED.payment_proof_at, sport_center_bookings.payment_proof_at),
-         updated_at           = NOW()`,
-      [
-        booking.orderNumber,
-        bizFacilityId,
-        facilityName,
-        booking.customerName,
-        booking.customerPhone,
-        booking.customerEmail,
-        booking.bookingDate,
-        booking.startTime,
-        booking.endTime,
-        booking.durationHours,
-        Math.round(Number(booking.totalPrice)),
-        booking.notes || null,
-        status,
-        paymentStatus,
-        paymentProofUrl || null,
-        paidAt || null,
-        booking.createdAt,
-      ]
-    );
+    await withRetry(async () => {
+      await pool.query(
+        `INSERT INTO public.sport_center_bookings
+          (booking_code, facility_id, facility_name, customer_name, customer_phone, customer_email,
+           date, start_time, end_time, total_hours, total_price, notes, status,
+           payment_status, payment_proof_url, payment_proof_at, created_at, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,NOW())
+         ON CONFLICT (booking_code) DO UPDATE SET
+           status               = EXCLUDED.status,
+           payment_status       = EXCLUDED.payment_status,
+           payment_proof_url    = COALESCE(EXCLUDED.payment_proof_url, sport_center_bookings.payment_proof_url),
+           payment_proof_at     = COALESCE(EXCLUDED.payment_proof_at, sport_center_bookings.payment_proof_at),
+           updated_at           = NOW()`,
+        [
+          booking.orderNumber,
+          bizFacilityId,
+          facilityName,
+          booking.customerName,
+          booking.customerPhone,
+          booking.customerEmail,
+          booking.bookingDate,
+          booking.startTime,
+          booking.endTime,
+          booking.durationHours,
+          Math.round(Number(booking.totalPrice)),
+          booking.notes || null,
+          status,
+          paymentStatus,
+          paymentProofUrl || null,
+          paidAt || null,
+          booking.createdAt,
+        ]
+      );
+    }, `syncBooking:${booking.orderNumber}`);
+
+    lastSyncState.booking = { at: new Date().toISOString(), success: true, error: null };
+    console.info(`[bizportalSync] ✓ Booking synced: ${booking.orderNumber} → ${status}`);
   } catch (err: any) {
-    // Jangan sampai gagal sync menghentikan operasi utama
-    console.error("[bizportalSync] Sync error:", err?.message);
+    lastSyncState.booking = { at: new Date().toISOString(), success: false, error: err?.message };
+    console.error(`[bizportalSync] ✗ Booking sync failed after retries: ${booking.orderNumber} — ${err?.message}`);
   }
 }
 
@@ -106,43 +130,49 @@ export async function syncMembershipToBizportal(membership: GymMembership): Prom
   if (!pool) return;
 
   try {
-    await pool.query(
-      `INSERT INTO public.sport_center_memberships
-        (id, name, email, phone, start_date, end_date, months, total_price,
-         status, notes, payment_method, payment_proof_url, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
-       ON CONFLICT (id) DO UPDATE SET
-         name              = EXCLUDED.name,
-         email             = EXCLUDED.email,
-         phone             = EXCLUDED.phone,
-         start_date        = EXCLUDED.start_date,
-         end_date          = EXCLUDED.end_date,
-         months            = EXCLUDED.months,
-         total_price       = EXCLUDED.total_price,
-         status            = EXCLUDED.status,
-         notes             = EXCLUDED.notes,
-         payment_method    = COALESCE(EXCLUDED.payment_method, sport_center_memberships.payment_method),
-         payment_proof_url = COALESCE(EXCLUDED.payment_proof_url, sport_center_memberships.payment_proof_url),
-         updated_at        = EXCLUDED.updated_at`,
-      [
-        membership.id,
-        membership.name,
-        membership.email,
-        membership.phone,
-        membership.startDate,
-        membership.endDate,
-        membership.months,
-        Math.round(Number(membership.totalPrice)),
-        membership.status,
-        membership.notes || null,
-        membership.paymentMethod || null,
-        membership.paymentProofUrl || null,
-        membership.createdAt,
-        membership.updatedAt,
-      ]
-    );
+    await withRetry(async () => {
+      await pool.query(
+        `INSERT INTO public.sport_center_memberships
+          (id, name, email, phone, start_date, end_date, months, total_price,
+           status, notes, payment_method, payment_proof_url, created_at, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+         ON CONFLICT (id) DO UPDATE SET
+           name              = EXCLUDED.name,
+           email             = EXCLUDED.email,
+           phone             = EXCLUDED.phone,
+           start_date        = EXCLUDED.start_date,
+           end_date          = EXCLUDED.end_date,
+           months            = EXCLUDED.months,
+           total_price       = EXCLUDED.total_price,
+           status            = EXCLUDED.status,
+           notes             = EXCLUDED.notes,
+           payment_method    = COALESCE(EXCLUDED.payment_method, sport_center_memberships.payment_method),
+           payment_proof_url = COALESCE(EXCLUDED.payment_proof_url, sport_center_memberships.payment_proof_url),
+           updated_at        = EXCLUDED.updated_at`,
+        [
+          membership.id,
+          membership.name,
+          membership.email,
+          membership.phone,
+          membership.startDate,
+          membership.endDate,
+          membership.months,
+          Math.round(Number(membership.totalPrice)),
+          membership.status,
+          membership.notes || null,
+          membership.paymentMethod || null,
+          membership.paymentProofUrl || null,
+          membership.createdAt,
+          membership.updatedAt,
+        ]
+      );
+    }, `syncMembership:${membership.id}`);
+
+    lastSyncState.membership = { at: new Date().toISOString(), success: true, error: null };
+    console.info(`[bizportalSync] ✓ Membership synced: ID=${membership.id} → ${membership.status}`);
   } catch (err: any) {
-    console.error("[bizportalSync] Membership sync error:", err?.message);
+    lastSyncState.membership = { at: new Date().toISOString(), success: false, error: err?.message };
+    console.error(`[bizportalSync] ✗ Membership sync failed after retries: ID=${membership.id} — ${err?.message}`);
   }
 }
 
@@ -156,23 +186,29 @@ export async function syncStatusToBizportal(
   if (!pool) return;
 
   try {
-    await pool.query(
-      `UPDATE public.sport_center_bookings
-       SET status            = $2,
-           payment_status    = $3,
-           payment_proof_url = COALESCE($4, payment_proof_url),
-           payment_proof_at  = COALESCE($5, payment_proof_at),
-           updated_at        = NOW()
-       WHERE booking_code    = $1`,
-      [
-        orderNumber,
-        toStatus(scStatus),
-        toPaymentStatus(scStatus),
-        paymentProofUrl || null,
-        paidAt || null,
-      ]
-    );
+    await withRetry(async () => {
+      await pool.query(
+        `UPDATE public.sport_center_bookings
+         SET status            = $2,
+             payment_status    = $3,
+             payment_proof_url = COALESCE($4, payment_proof_url),
+             payment_proof_at  = COALESCE($5, payment_proof_at),
+             updated_at        = NOW()
+         WHERE booking_code    = $1`,
+        [
+          orderNumber,
+          toStatus(scStatus),
+          toPaymentStatus(scStatus),
+          paymentProofUrl || null,
+          paidAt || null,
+        ]
+      );
+    }, `syncStatus:${orderNumber}`);
+
+    lastSyncState.status = { at: new Date().toISOString(), success: true, error: null };
+    console.info(`[bizportalSync] ✓ Status synced: ${orderNumber} → ${toStatus(scStatus)}`);
   } catch (err: any) {
-    console.error("[bizportalSync] Status sync error:", err?.message);
+    lastSyncState.status = { at: new Date().toISOString(), success: false, error: err?.message };
+    console.error(`[bizportalSync] ✗ Status sync failed after retries: ${orderNumber} — ${err?.message}`);
   }
 }

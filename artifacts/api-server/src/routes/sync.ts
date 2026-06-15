@@ -2,23 +2,47 @@ import { Router, Request, Response, NextFunction } from "express";
 import { db, bookingsTable, facilitiesTable, paymentsTable, usersTable, gymMembershipsTable } from "@workspace/db";
 import { desc, gte, and, lte, eq } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
-import { syncBookingToBizportal, syncMembershipToBizportal } from "../lib/bizportalSync";
+import { syncBookingToBizportal, syncMembershipToBizportal, bizportalSyncConfigured } from "../lib/bizportalSync";
 
 const router = Router();
+
+const SYNC_API_KEY_CONFIGURED = Boolean(process.env.BIZPORTAL_SYNC_API_KEY);
 
 function apiKeyMiddleware(req: Request, res: Response, next: NextFunction): void {
   const key = req.headers["x-api-key"] || req.query.api_key;
   const validKey = process.env.BIZPORTAL_SYNC_API_KEY;
   if (!validKey) {
-    res.status(503).json({ error: "Sync API not configured" });
+    res.status(503).json({ error: "Sync API not configured — BIZPORTAL_SYNC_API_KEY not set" });
     return;
   }
   if (!key || key !== validKey) {
+    req.log?.warn({ path: req.path, ip: req.ip }, "[sync] Unauthorized API key attempt");
     res.status(401).json({ error: "Invalid or missing API key" });
     return;
   }
   next();
 }
+
+/**
+ * GET /api/sync/health
+ * Public health check — shows sync configuration status WITHOUT exposing keys.
+ */
+router.get("/sync/health", (_req, res) => {
+  res.json({
+    ok: true,
+    syncedAt: new Date().toISOString(),
+    source: "sport-center",
+    pull: {
+      configured: SYNC_API_KEY_CONFIGURED,
+      endpoints: ["/api/sync/bookings", "/api/sync/facilities", "/api/sync/memberships", "/api/sync/stats"],
+      auth: "X-API-Key header required",
+    },
+    push: {
+      configured: bizportalSyncConfigured,
+      note: "Sport Center pushes booking/membership events to BizPortal automatically",
+    },
+  });
+});
 
 /**
  * GET /api/sync/bookings

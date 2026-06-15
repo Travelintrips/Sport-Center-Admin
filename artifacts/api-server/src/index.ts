@@ -433,4 +433,11 @@ app.listen(port, (err) => {
   runStartupMigrations().catch(() => {});
   startScheduler();
   ensureDefaultTemplates().catch(() => {});
+
+  // Validate Supabase Storage buckets at startup
+  import("./lib/supabaseStorage").then(({ validateBuckets }) => {
+    validateBuckets().catch((err) =>
+      logger.warn({ err }, "Storage bucket validation failed (non-fatal)")
+    );
+  });
 });

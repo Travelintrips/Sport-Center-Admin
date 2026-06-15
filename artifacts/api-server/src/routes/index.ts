@@ -47,6 +47,7 @@ import bookingGroupsRouter from "./bookingGroups";
 import waBookingsAdminRouter from "./waBookingsAdmin";
 import waAiAdminRouter from "./waAiAdmin";
 import seedDemoRouter from "./seedDemo";
+import systemAdminRouter from "./systemAdmin";
 
 const router: IRouter = Router();
 
@@ -97,5 +98,6 @@ router.use(bankReconciliationSheetsRouter);
 router.use(waBookingsAdminRouter);
 router.use(waAiAdminRouter);
 router.use(seedDemoRouter);
+router.use(systemAdminRouter);
 
 export default router;
