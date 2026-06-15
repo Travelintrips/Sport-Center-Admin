@@ -9,7 +9,7 @@ Web app untuk manajemen dan pemesanan fasilitas olahraga — customer-facing boo
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
-- DB schema push: `drizzle-kit push` does NOT work against the Supabase instance (it hangs on introspection of the shared `public` schema). Instead run `drizzle-kit generate` then apply the SQL with a `pg` client over the session pooler (port 5432). See Gotchas + memory.
+- DB migrations: `pnpm migrate:dev` — apply to Supabase DEV, `pnpm migrate:prod` — apply to Supabase PROD. Script idempotent, otomatis baseline jika schema sudah ada. Untuk schema baru: `drizzle-kit generate` lalu `pnpm migrate:dev`.
 - Required env: `SUPABASE_DATABASE_URL` (prod) / `SUPABASE_DATABASE_URL_DEV` (dev) — Supabase Postgres pooler connection, `SESSION_SECRET` — used for HMAC password hashing
 
 ## Stack

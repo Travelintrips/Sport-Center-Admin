@@ -2,24 +2,7 @@ import pg from "pg";
 
 const { Client } = pg;
 
-const rawUrl =
-  process.env.SUPABASE_DATABASE_URL_DEV ||
-  process.env.SUPABASE_DATABASE_URL ||
-  process.env.DATABASE_URL;
-
-if (!rawUrl) throw new Error("No DATABASE_URL found");
-
-const url = rawUrl.replace(
-  "pooler.supabase.com:6543",
-  "pooler.supabase.com:5432"
-);
-
-const client = new Client({
-  connectionString: url,
-  ssl: { rejectUnauthorized: false },
-});
-
-const SQL = `
+export const CUSTOM_MIGRATION_SQL = `
 -- ============================================================
 -- 1. Extend enums (safe, idempotent via IF NOT EXISTS)
 -- ============================================================
@@ -533,18 +516,3 @@ ALTER TABLE sport_center.bookings
 CREATE INDEX IF NOT EXISTS bookings_group_ref_idx ON sport_center.bookings(group_ref);
 `;
 
-async function main() {
-  await client.connect();
-  console.log("Connected to database. Running migrations...");
-  try {
-    await client.query(SQL);
-    console.log("✅ Migration completed successfully!");
-  } finally {
-    await client.end();
-  }
-}
-
-main().catch((err) => {
-  console.error("Migration failed:", err);
-  process.exit(1);
-});
