@@ -9,6 +9,7 @@ import {
   useGetReviewsSummary,
   useGetSettings,
   useGetMe,
+  getGetMeQueryKey,
 } from "@workspace/api-client-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -50,7 +51,7 @@ export default function FacilityDetail() {
   const [, setLocation] = useLocation();
   const facilityId = params?.id ? parseInt(params.id) : 0;
 
-  const { data: meData } = useGetMe({ query: { retry: false } });
+  const { data: meData } = useGetMe({ query: { retry: false, queryKey: getGetMeQueryKey() } });
   const isAdminOrOperator = !!meData && (meData as { role?: string }).role !== "customer";
 
   const [date, setDate] = useState<Date | undefined>(new Date());

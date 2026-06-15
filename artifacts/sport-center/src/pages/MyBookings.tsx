@@ -1,6 +1,6 @@
 import { useState, useEffect, memo } from "react";
 import { Link, useLocation } from "wouter";
-import { useGetMe, useGetMyBookings, useGetReviews, useCreateReview, useLogout, getGetMeQueryKey, getGetMyBookingsQueryKey } from "@workspace/api-client-react";
+import { useGetMe, useGetMyBookings, useGetReviews, useCreateReview, useLogout, getGetMeQueryKey, getGetMyBookingsQueryKey, getGetReviewsQueryKey } from "@workspace/api-client-react";
 import { removeToken, getToken } from "@/lib/auth";
 import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
@@ -14,6 +14,7 @@ import { CalendarDays, Clock, ChevronRight, LogOut, ReceiptText, Star, Trophy, M
 import RescheduleDialog from "@/components/RescheduleDialog";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
+import type { Locale } from "date-fns";
 import { id as idLocale, enUS } from "date-fns/locale";
 
 const STATUS_CONFIG: Record<string, { label: string; labelEn: string; stripe: string; badge: string }> = {
@@ -174,7 +175,7 @@ export default function MyBookings() {
 
   const { data: user, isLoading: userLoading, isError } = useGetMe({ query: { retry: false, queryKey: getGetMeQueryKey() } });
   const { data: bookings, isLoading: bookingsLoading } = useGetMyBookings({ query: { enabled: !!user, queryKey: getGetMyBookingsQueryKey() } });
-  const { data: allReviews } = useGetReviews(undefined, { query: { enabled: !!user } });
+  const { data: allReviews } = useGetReviews(undefined, { query: { enabled: !!user, queryKey: getGetReviewsQueryKey() } });
 
   const [reviewState, setReviewState] = useState<Record<number, { rating: number; comment: string; hover: number }>>({});
   const [rescheduleTarget, setRescheduleTarget] = useState<BookingItem | null>(null);

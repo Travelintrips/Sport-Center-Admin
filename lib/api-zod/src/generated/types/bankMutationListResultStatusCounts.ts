@@ -6,7 +6,4 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export interface SheetConnectInput {
-  sheetId: string;
-  sheetName?: string;
-}
+export type BankMutationListResultStatusCounts = {[key: string]: number};

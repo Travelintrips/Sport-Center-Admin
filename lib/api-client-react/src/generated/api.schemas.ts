@@ -640,6 +640,8 @@ export interface DashboardStats {
   totalRevenue: number;
   todayBookings: number;
   pendingBookings: number;
+  membershipRevenue?: number | null;
+  activeMemberships?: number | null;
   topFacilities: FacilityStat[];
   recentBookings: Booking[];
   bookingsByStatus: StatusCount[];
@@ -1191,6 +1193,7 @@ export interface TaxReport {
 
 export interface SheetConnectInput {
   sheetId: string;
+  sheetName?: string;
 }
 
 export interface SheetConnectResult {
@@ -1291,6 +1294,7 @@ export interface BankReconciliationMatch {
   note?: string | null;
   status: BankReconciliationMatchStatus;
   createdAt: string;
+  ocrAmount?: string | null;
 }
 
 export type EnrichedBankCandidateCandidateType = typeof EnrichedBankCandidateCandidateType[keyof typeof EnrichedBankCandidateCandidateType];
@@ -1379,11 +1383,14 @@ export interface BankMutationImportResult {
   matching?: BankMutationImportResultMatching;
 }
 
+export type BankMutationListResultStatusCounts = {[key: string]: number};
+
 export interface BankMutationListResult {
   mutations: BankMutation[];
   total: number;
   page: number;
   pageSize: number;
+  statusCounts?: BankMutationListResultStatusCounts;
 }
 
 export interface BankMutationWithMatches {

@@ -81,6 +81,8 @@ function validateProductionEnv(): void {
 async function runStartupMigrations() {
   // Jalankan setiap migration secara terpisah — ADD VALUE harus di luar transaksi
   const migrations = [
+    // Buat schema jika belum ada (idempotent)
+    `CREATE SCHEMA IF NOT EXISTS sport_center`,
     // Enums — DO $$ pakai EXCEPTION agar tidak error jika sudah ada
     `DO $$ BEGIN
        CREATE TYPE sport_center.bank_mutation_status AS ENUM (

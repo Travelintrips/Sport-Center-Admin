@@ -3071,6 +3071,12 @@ components:
           type: integer
         pendingBookings:
           type: integer
+        membershipRevenue:
+          type: number
+          nullable: true
+        activeMemberships:
+          type: integer
+          nullable: true
         topFacilities:
           type: array
           items:
@@ -3834,6 +3840,8 @@ components:
       properties:
         sheetId:
           type: string
+        sheetName:
+          type: string
 
     SheetConnectResult:
       type: object
@@ -3982,6 +3990,9 @@ components:
           enum: [candidate, approved, rejected]
         createdAt:
           type: string
+        ocrAmount:
+          type: string
+          nullable: true
 
     EnrichedBankCandidate:
       type: object
@@ -4115,6 +4126,10 @@ components:
           type: integer
         pageSize:
           type: integer
+        statusCounts:
+          type: object
+          additionalProperties:
+            type: integer
 
     BankMutationWithMatches:
       type: object

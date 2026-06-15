@@ -944,7 +944,8 @@ export const CreateCustomerBody = zod.object({
  * @summary Verify Google Sheet access
  */
 export const ConnectCustomerSheetBody = zod.object({
-  "sheetId": zod.string()
+  "sheetId": zod.string(),
+  "sheetName": zod.string().optional()
 })
 
 export const ConnectCustomerSheetResponse = zod.object({
@@ -1500,6 +1501,8 @@ export const GetDashboardResponse = zod.object({
   "totalRevenue": zod.number(),
   "todayBookings": zod.number(),
   "pendingBookings": zod.number(),
+  "membershipRevenue": zod.number().nullish(),
+  "activeMemberships": zod.number().nullish(),
   "topFacilities": zod.array(zod.object({
   "facilityId": zod.number(),
   "facilityName": zod.string(),
@@ -2482,7 +2485,8 @@ export const ListBankMutationsResponse = zod.object({
 })),
   "total": zod.number(),
   "page": zod.number(),
-  "pageSize": zod.number()
+  "pageSize": zod.number(),
+  "statusCounts": zod.record(zod.string(), zod.number()).optional()
 })
 
 
@@ -2543,7 +2547,8 @@ export const GetBankMutationMatchesResponse = zod.object({
   "toleranceUsed": zod.boolean().optional(),
   "note": zod.string().nullish(),
   "status": zod.enum(['candidate', 'approved', 'rejected']),
-  "createdAt": zod.string()
+  "createdAt": zod.string(),
+  "ocrAmount": zod.string().nullish()
 }))
 })
 
@@ -2708,7 +2713,8 @@ export const MarkBankMutationDuplicateResponse = zod.object({
  * @summary Verify access to a Google Sheet for bank reconciliation
  */
 export const ConnectBankReconSheetBody = zod.object({
-  "sheetId": zod.string()
+  "sheetId": zod.string(),
+  "sheetName": zod.string().optional()
 })
 
 export const ConnectBankReconSheetResponse = zod.object({
@@ -2722,7 +2728,8 @@ export const ConnectBankReconSheetResponse = zod.object({
  * @summary Pull bank mutations from Google Sheet and import to DB
  */
 export const PullBankMutationsFromSheetBody = zod.object({
-  "sheetId": zod.string()
+  "sheetId": zod.string(),
+  "sheetName": zod.string().optional()
 })
 
 export const PullBankMutationsFromSheetResponse = zod.object({

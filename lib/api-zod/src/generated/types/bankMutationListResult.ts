@@ -6,10 +6,12 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { BankMutation } from './bankMutation';
+import type { BankMutationListResultStatusCounts } from './bankMutationListResultStatusCounts';
 
 export interface BankMutationListResult {
   mutations: BankMutation[];
   total: number;
   page: number;
   pageSize: number;
+  statusCounts?: BankMutationListResultStatusCounts;
 }
