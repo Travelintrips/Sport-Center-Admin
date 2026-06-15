@@ -1,25 +1,82 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import ws from "ws";
 
-const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
+// ─── Dev/Prod Storage Isolation ────────────────────────────────────────────
+// Development: SUPABASE_SERVICE_ROLE_KEY_DEV (isolated dev Supabase project)
+// Production:  SUPABASE_SERVICE_ROLE_KEY (prod Supabase project)
+//
+// Guard:
+//   Dev + no _DEV key + ALLOW_DEV_ON_PROD_STORAGE=true → warning, use prod key
+//   Dev + no _DEV key + no override                    → FATAL, process.exit(1)
+
+const IS_DEV = process.env.NODE_ENV === "development";
+export const allowDevOnProdStorage = process.env.ALLOW_DEV_ON_PROD_STORAGE === "true";
 
 function getProjectRef(key: string): string | null {
   try {
-    const payload = JSON.parse(
-      Buffer.from(key.split(".")[1], "base64").toString(),
-    );
+    const payload = JSON.parse(Buffer.from(key.split(".")[1], "base64").toString());
     return payload.ref ?? null;
   } catch {
     return null;
   }
 }
 
+let SERVICE_KEY: string;
+export let storageProjectSource: string;
+export let isDevUsingProdStorage = false;
+
+if (IS_DEV) {
+  const devKey = process.env.SUPABASE_SERVICE_ROLE_KEY_DEV ?? "";
+  if (devKey) {
+    SERVICE_KEY = devKey;
+    const ref = getProjectRef(devKey) ?? "unknown";
+    storageProjectSource = `SUPABASE_SERVICE_ROLE_KEY_DEV (dev — isolated, ref=${ref})`;
+  } else if (allowDevOnProdStorage) {
+    const prodKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
+    SERVICE_KEY = prodKey;
+    isDevUsingProdStorage = true;
+    const ref = getProjectRef(prodKey) ?? "unknown";
+    storageProjectSource = `SUPABASE_SERVICE_ROLE_KEY (PROD — EMERGENCY OVERRIDE, ref=${ref})`;
+    console.warn(
+      "\n╔══════════════════════════════════════════════════════════╗\n" +
+      "║  ⚠️  STORAGE DANGER: DEV IS UPLOADING TO PRODUCTION      ║\n" +
+      "║  ALLOW_DEV_ON_PROD_STORAGE=true is active.               ║\n" +
+      "║  Every file upload from dev hits the prod Supabase.      ║\n" +
+      "║  Remove this override and set SUPABASE_SERVICE_ROLE_KEY_DEV. ║\n" +
+      "╚══════════════════════════════════════════════════════════╝\n"
+    );
+  } else {
+    console.error(
+      "\n╔══════════════════════════════════════════════════════════╗\n" +
+      "║  FATAL: Storage isolation not configured for dev          ║\n" +
+      "║                                                            ║\n" +
+      "║  NODE_ENV=development but SUPABASE_SERVICE_ROLE_KEY_DEV   ║\n" +
+      "║  is not set. Dev uploads would hit production storage.    ║\n" +
+      "║                                                            ║\n" +
+      "║  Fix:                                                      ║\n" +
+      "║    Set SUPABASE_SERVICE_ROLE_KEY_DEV to an isolated dev    ║\n" +
+      "║    Supabase project service role key.                     ║\n" +
+      "║                                                            ║\n" +
+      "║  Emergency override (discouraged):                        ║\n" +
+      "║    Set ALLOW_DEV_ON_PROD_STORAGE=true to allow dev        ║\n" +
+      "║    uploads to production (EMERGENCY USE ONLY).            ║\n" +
+      "╚══════════════════════════════════════════════════════════╝\n"
+    );
+    process.exit(1);
+  }
+} else {
+  const prodKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
+  SERVICE_KEY = prodKey;
+  const ref = getProjectRef(prodKey) ?? "unknown";
+  storageProjectSource = `SUPABASE_SERVICE_ROLE_KEY (production, ref=${ref})`;
+}
+
 const PROJECT_REF = getProjectRef(SERVICE_KEY);
 const STORAGE_URL = PROJECT_REF ? `https://${PROJECT_REF}.supabase.co` : "";
 
 // NOTE: SUPABASE_STORAGE_BUCKET env var is set but NOT used — buckets are
-// addressed explicitly via the BUCKETS constant below. It is kept for
-// backward-compat and documented as DEPRECATED in docs/supabase-env-audit.md.
+// addressed explicitly via the BUCKETS constant below. It is documented as
+// DEPRECATED in docs/supabase-env-audit.md.
 export const BUCKETS = {
   facility: "facility-images",
   proof: "payment-proofs",
@@ -36,7 +93,7 @@ let client: SupabaseClient | null = null;
 function getClient(): SupabaseClient {
   if (!SERVICE_KEY || !STORAGE_URL) {
     throw new Error(
-      "Supabase Storage is not configured: SUPABASE_SERVICE_ROLE_KEY missing or invalid",
+      "Supabase Storage is not configured: service role key missing or invalid"
     );
   }
   if (!client) {
@@ -54,8 +111,8 @@ export function isStorageConfigured(): boolean {
 
 /**
  * Validate that required buckets exist at startup.
- * Logs clearly but does NOT auto-create in production without explicit intent.
- * In development it will attempt to create missing buckets.
+ * In production: logs error only, never auto-creates.
+ * In development: auto-creates missing buckets (in the dev Supabase project).
  */
 export async function validateBuckets(): Promise<void> {
   if (!isStorageConfigured()) {
@@ -78,7 +135,6 @@ export async function validateBuckets(): Promise<void> {
           );
           bucketStatus[bucket] = { ok: false, checkedAt: now, error: error?.message ?? "Not found" };
         } else {
-          // Dev: auto-create with public access
           const { error: createErr } = await supabase.storage.createBucket(bucket, {
             public: true,
             allowedMimeTypes: bucket === BUCKETS.facility
@@ -90,12 +146,13 @@ export async function validateBuckets(): Promise<void> {
             console.error(`[Storage] ❌ Failed to create bucket "${bucket}": ${createErr.message}`);
             bucketStatus[bucket] = { ok: false, checkedAt: now, error: createErr.message };
           } else {
-            console.info(`[Storage] ✓ Bucket "${bucket}" created (dev).`);
+            console.info(`[Storage] ✓ Bucket "${bucket}" exists/created (dev).`);
             bucketStatus[bucket] = { ok: true, checkedAt: now, error: null };
           }
         }
       } else {
-        console.info(`[Storage] ✓ Bucket "${bucket}" exists (public=${data.public}).`);
+        const source = IS_DEV ? "dev" : "prod";
+        console.info(`[Storage] ✓ Bucket "${bucket}" exists (public=${data.public}, env=${source}).`);
         bucketStatus[bucket] = { ok: true, checkedAt: now, error: null };
       }
     } catch (err: any) {
