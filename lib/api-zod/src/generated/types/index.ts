@@ -109,6 +109,8 @@ export * from './myBookingItem';
 export * from './okResult';
 export * from './payment';
 export * from './paymentInput';
+export * from './paymentInputPaymentType';
+export * from './paymentPaymentType';
 export * from './paymentStatus';
 export * from './paymentUpdate';
 export * from './paymentUpdateStatus';

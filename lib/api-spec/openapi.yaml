@@ -2575,6 +2575,12 @@ components:
         payment:
           $ref: "#/components/schemas/Payment"
           nullable: true
+        payments:
+          type: array
+          items:
+            $ref: "#/components/schemas/Payment"
+        remainingAmount:
+          type: number
         createdAt:
           type: string
 
@@ -2728,6 +2734,9 @@ components:
           type: ["string", "null"]
         paymentMethod:
           type: ["string", "null"]
+        paymentType:
+          type: string
+          enum: [dp, pelunasan, full_payment]
         status:
           type: string
           enum: [pending, confirmed, rejected]
@@ -2750,6 +2759,9 @@ components:
           type: number
         proofUrl:
           type: string
+        paymentType:
+          type: string
+          enum: [dp, pelunasan, full_payment]
         notes:
           type: string
 

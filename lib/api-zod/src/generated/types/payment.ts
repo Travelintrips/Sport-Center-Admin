@@ -5,6 +5,7 @@
  * Sport Center API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { PaymentPaymentType } from './paymentPaymentType';
 import type { PaymentStatus } from './paymentStatus';
 
 export interface Payment {
@@ -15,6 +16,7 @@ export interface Payment {
   proofUrl?: string | null;
   /** @nullable */
   paymentMethod?: string | null;
+  paymentType?: PaymentPaymentType;
   status: PaymentStatus;
   /** @nullable */
   confirmedAt?: string | null;

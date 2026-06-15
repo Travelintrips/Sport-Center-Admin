@@ -178,6 +178,15 @@ export const BookingVerificationStatus = {
   rejected: 'rejected',
 } as const;
 
+export type PaymentPaymentType = typeof PaymentPaymentType[keyof typeof PaymentPaymentType];
+
+
+export const PaymentPaymentType = {
+  dp: 'dp',
+  pelunasan: 'pelunasan',
+  full_payment: 'full_payment',
+} as const;
+
 export type PaymentStatus = typeof PaymentStatus[keyof typeof PaymentStatus];
 
 
@@ -195,6 +204,7 @@ export interface Payment {
   proofUrl?: string | null;
   /** @nullable */
   paymentMethod?: string | null;
+  paymentType?: PaymentPaymentType;
   status: PaymentStatus;
   /** @nullable */
   confirmedAt?: string | null;
@@ -253,6 +263,8 @@ export interface Booking {
   downPayment?: number;
   isDpPaid?: boolean;
   payment?: Payment | null;
+  payments?: Payment[];
+  remainingAmount?: number;
   createdAt?: string;
 }
 
@@ -367,10 +379,20 @@ export interface BookingUpdate {
   adminNotes?: string;
 }
 
+export type PaymentInputPaymentType = typeof PaymentInputPaymentType[keyof typeof PaymentInputPaymentType];
+
+
+export const PaymentInputPaymentType = {
+  dp: 'dp',
+  pelunasan: 'pelunasan',
+  full_payment: 'full_payment',
+} as const;
+
 export interface PaymentInput {
   bookingId: number;
   amount: number;
   proofUrl?: string;
+  paymentType?: PaymentInputPaymentType;
   notes?: string;
 }
 

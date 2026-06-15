@@ -472,6 +472,15 @@ async function runStartupMigrations() {
     `INSERT INTO sport_center.tax_settings (tax_code, tax_name, tax_rate, tax_type, applies_to, is_active)
      SELECT 'PPN_OUT_11','PPN Keluaran 11%',11,'output_vat','sport_center_booking',false
      WHERE NOT EXISTS (SELECT 1 FROM sport_center.tax_settings WHERE tax_code = 'PPN_OUT_11')`,
+    // payment_type enum untuk DP flow
+    `DO $$ BEGIN
+       CREATE TYPE sport_center.payment_type AS ENUM ('dp', 'pelunasan', 'full_payment');
+     EXCEPTION WHEN duplicate_object THEN null; END $$`,
+    `ALTER TABLE sport_center.payments
+       ADD COLUMN IF NOT EXISTS payment_type sport_center.payment_type NOT NULL DEFAULT 'full_payment'`,
+    // Hapus unique constraint booking_id agar bisa ada multiple payments per booking
+    `ALTER TABLE sport_center.payments
+       DROP CONSTRAINT IF EXISTS payments_booking_id_unique`,
   ];
 
   for (const stmt of migrations) {
