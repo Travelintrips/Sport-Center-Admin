@@ -123,9 +123,7 @@ VITE_SUPABASE_URL = "https://xssrfshdrtdfupgqwfdw.supabase.co"
 SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhzc3Jmc2hkcnRkZnVwZ3F3ZmR3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg4OTY3MjgsImV4cCI6MjA5NDQ3MjcyOH0.czKzR9GjEL6UK8AhPAX6OYyF74fz1YtImYQSXiiG69U"
 VITE_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhzc3Jmc2hkcnRkZnVwZ3F3ZmR3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg4OTY3MjgsImV4cCI6MjA5NDQ3MjcyOH0.czKzR9GjEL6UK8AhPAX6OYyF74fz1YtImYQSXiiG69U"
 SUPABASE_STORAGE_BUCKET = "https://xssrfshdrtdfupgqwfdw.storage.supabase.co/storage/v1/s3"
-SUPABASE_PG_URL = "postgresql://postgres.xssrfshdrtdfupgqwfdw:wnu93rqzb9tvo6xi@aws-1-ap-southeast-2.pooler.supabase.com:6543/postgres"
-SUPABASE_DATABASE_URL = "postgresql://postgres.xssrfshdrtdfupgqwfdw:wnu93rqzb9tvo6xi@aws-1-ap-southeast-2.pooler.supabase.com:6543/postgres"
-ALLOW_DEV_ON_PROD_DB = "true"
+SUPABASE_DATABASE_URL_DEV = "postgresql://postgres:password@helium/heliumdb?sslmode=disable"
 
 [userenv.production]
 SUPABASE_DATABASE_URL = "postgresql://postgres.nzdweipzckfszczzqtuw:ZRM0IiRaXvHrY7dP@aws-1-ap-southeast-2.pooler.supabase.com:6543/postgres"
