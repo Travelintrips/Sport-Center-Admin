@@ -437,15 +437,13 @@ export default function AdminExpenses() {
                           >
                             <Eye className="w-3.5 h-3.5" />
                           </Button>
-                          {["draft", "rejected"].includes(expense.paymentStatus) && (
-                            <Button
-                              size="sm" variant="ghost"
-                              className="h-7 w-7 p-0 text-blue-400 hover:text-blue-600"
-                              onClick={() => openEdit(expense)}
-                            >
-                              <Edit2 className="w-3.5 h-3.5" />
-                            </Button>
-                          )}
+                          <Button
+                            size="sm" variant="ghost"
+                            className="h-7 w-7 p-0 text-blue-400 hover:text-blue-600"
+                            onClick={() => openEdit(expense)}
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </Button>
                           {expense.paymentStatus === "draft" && (
                             <>
                               <Button
