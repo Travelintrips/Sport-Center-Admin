@@ -333,4 +333,34 @@ router.patch("/admin/expenses/:id/status", adminMiddleware, async (req, res) => 
   }
 });
 
+router.delete("/admin/expenses/:id", adminMiddleware, async (req, res) => {
+  try {
+    const user = getUserFromReq(req);
+    const { ipAddress, userAgent } = getClientInfo(req);
+    const id = Number(req.params["id"]);
+
+    const [existing] = await db.select().from(expensesTable).where(eq(expensesTable.id, id)).limit(1);
+    if (!existing) {
+      res.status(404).json({ error: "Expense not found" });
+      return;
+    }
+    if (existing.paymentStatus !== "draft") {
+      res.status(409).json({ error: `Hanya expense berstatus draft yang bisa dihapus. Status saat ini: ${existing.paymentStatus}` });
+      return;
+    }
+
+    await db.delete(expensesTable).where(eq(expensesTable.id, id));
+
+    await logAudit({
+      ...user, action: "EXPENSE_DELETED", entity: "expense", entityId: id,
+      before: existing, ipAddress, userAgent,
+    });
+
+    res.json({ message: "Expense berhasil dihapus", expenseNo: existing.expenseNo });
+  } catch (err) {
+    req.log.error({ err }, "Delete expense error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 export default router;

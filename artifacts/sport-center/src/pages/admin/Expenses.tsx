@@ -13,7 +13,7 @@ import { useToast } from "@/hooks/use-toast";
 import {
   Plus, Search, Filter, TrendingDown, Clock, CheckCircle2, XCircle,
   Eye, Edit2, ThumbsUp, ThumbsDown, Banknote, X, Receipt,
-  Upload, ImageIcon, Loader2,
+  Upload, ImageIcon, Loader2, Trash2,
 } from "lucide-react";
 
 const API = import.meta.env.VITE_API_BASE_URL ?? "/api";
@@ -88,6 +88,9 @@ export default function AdminExpenses() {
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectTargetId, setRejectTargetId] = useState<number | null>(null);
   const [rejectReason, setRejectReason] = useState("");
+
+  const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
+  const [deleteConfirmNo, setDeleteConfirmNo] = useState("");
 
   const [uploadingReceipt, setUploadingReceipt] = useState(false);
   const receiptInputRef = useRef<HTMLInputElement>(null);
@@ -207,6 +210,24 @@ export default function AdminExpenses() {
       toast({ title: labels[vars.action] ?? "Status diupdate" });
     },
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) =>
+      fetch(`${API}/admin/expenses/${id}`, { method: "DELETE", headers: authHeaders() }).then(async (r) => {
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error ?? "Gagal menghapus");
+        return d;
+      }),
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ["expenses"] });
+      qc.invalidateQueries({ queryKey: ["dashboard-stats"] });
+      setDeleteConfirmId(null);
+      setDeleteConfirmNo("");
+      setDetailOpen(false);
+      toast({ title: `${data.expenseNo} berhasil dihapus` });
+    },
+    onError: (e: any) => toast({ title: "Gagal hapus", description: e.message, variant: "destructive" }),
   });
 
   const summary = data?.summary ?? { totalThisMonth: 0, pendingApproval: 0, paid: 0, unpaid: 0 };
@@ -426,13 +447,23 @@ export default function AdminExpenses() {
                             </Button>
                           )}
                           {expense.paymentStatus === "draft" && (
-                            <Button
-                              size="sm" variant="ghost"
-                              className="h-7 px-2 text-xs text-yellow-600 hover:text-yellow-700"
-                              onClick={() => statusMutation.mutate({ id: expense.id, action: "submit" })}
-                            >
-                              Ajukan
-                            </Button>
+                            <>
+                              <Button
+                                size="sm" variant="ghost"
+                                className="h-7 px-2 text-xs text-yellow-600 hover:text-yellow-700"
+                                onClick={() => statusMutation.mutate({ id: expense.id, action: "submit" })}
+                              >
+                                Ajukan
+                              </Button>
+                              <Button
+                                size="sm" variant="ghost"
+                                className="h-7 w-7 p-0 text-red-400 hover:text-red-600"
+                                title="Hapus"
+                                onClick={() => { setDeleteConfirmId(expense.id); setDeleteConfirmNo(expense.expenseNo); }}
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </Button>
+                            </>
                           )}
                           {expense.paymentStatus === "pending_approval" && (
                             <>
@@ -743,6 +774,12 @@ export default function AdminExpenses() {
                     <X className="w-3.5 h-3.5 mr-1" /> Batalkan
                   </Button>
                 )}
+                {detail.paymentStatus === "draft" && (
+                  <Button size="sm" variant="ghost" className="text-red-500 hover:text-red-700 hover:bg-red-50"
+                    onClick={() => { setDeleteConfirmId(detail.id); setDeleteConfirmNo(detail.expenseNo); setDetailOpen(false); }}>
+                    <Trash2 className="w-3.5 h-3.5 mr-1" /> Hapus
+                  </Button>
+                )}
               </div>
             </div>
           ) : (
@@ -779,6 +816,43 @@ export default function AdminExpenses() {
                 disabled={statusMutation.isPending}
               >
                 Tolak
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirm Dialog */}
+      <Dialog open={!!deleteConfirmId} onOpenChange={(o) => { if (!o) { setDeleteConfirmId(null); setDeleteConfirmNo(""); } }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="font-black text-red-600 flex items-center gap-2">
+              <Trash2 className="w-5 h-5" /> Hapus Pengeluaran
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-gray-600">
+              Yakin ingin menghapus pengeluaran{" "}
+              <span className="font-bold font-mono text-gray-900">{deleteConfirmNo}</span>?
+              <br />
+              <span className="text-red-500 font-medium">Data akan terhapus permanen dan tidak bisa dikembalikan.</span>
+            </p>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={() => { setDeleteConfirmId(null); setDeleteConfirmNo(""); }}
+                disabled={deleteMutation.isPending}
+              >
+                Batal
+              </Button>
+              <Button
+                className="flex-1 bg-red-500 hover:bg-red-600 text-white font-bold"
+                onClick={() => { if (deleteConfirmId) deleteMutation.mutate(deleteConfirmId); }}
+                disabled={deleteMutation.isPending}
+              >
+                {deleteMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Trash2 className="w-4 h-4 mr-1" />}
+                Hapus Selamanya
               </Button>
             </div>
           </div>
