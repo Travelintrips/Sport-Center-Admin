@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,7 @@ import { useToast } from "@/hooks/use-toast";
 import {
   Plus, Search, Filter, TrendingDown, Clock, CheckCircle2, XCircle,
   Eye, Edit2, ThumbsUp, ThumbsDown, Banknote, X, Receipt,
+  Upload, ImageIcon, Loader2,
 } from "lucide-react";
 
 const API = import.meta.env.VITE_API_BASE_URL ?? "/api";
@@ -87,6 +88,39 @@ export default function AdminExpenses() {
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectTargetId, setRejectTargetId] = useState<number | null>(null);
   const [rejectReason, setRejectReason] = useState("");
+
+  const [uploadingReceipt, setUploadingReceipt] = useState(false);
+  const receiptInputRef = useRef<HTMLInputElement>(null);
+
+  async function handleReceiptUpload(file: File) {
+    const allowed = ["image/jpeg", "image/png", "image/webp", "image/gif", "image/heic"];
+    if (!allowed.includes(file.type)) {
+      toast({ title: "Format tidak didukung", description: "Gunakan JPG, PNG, WebP, atau GIF", variant: "destructive" });
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      toast({ title: "File terlalu besar", description: "Maksimal 10 MB", variant: "destructive" });
+      return;
+    }
+    setUploadingReceipt(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const resp = await fetch(`${API}/storage/upload-proof`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${getToken()}` },
+        body: fd,
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error ?? "Upload gagal");
+      setForm((prev) => ({ ...prev, receiptUrl: data.url }));
+      toast({ title: "Foto nota berhasil diupload" });
+    } catch (err: any) {
+      toast({ title: "Upload gagal", description: err.message, variant: "destructive" });
+    } finally {
+      setUploadingReceipt(false);
+    }
+  }
 
   const params = new URLSearchParams();
   if (startDate) params.set("startDate", startDate);
@@ -538,8 +572,68 @@ export default function AdminExpenses() {
             </div>
 
             <div className="space-y-1">
-              <Label>URL Nota / Struk</Label>
-              <Input value={form.receiptUrl} onChange={(e) => setForm({ ...form, receiptUrl: e.target.value })} placeholder="https://..." />
+              <Label>Foto Nota / Struk</Label>
+              <input
+                ref={receiptInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp,image/gif,image/heic"
+                className="hidden"
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) handleReceiptUpload(f); e.target.value = ""; }}
+              />
+              {form.receiptUrl ? (
+                <div className="border rounded-lg overflow-hidden bg-gray-50">
+                  <div className="relative">
+                    <img
+                      src={form.receiptUrl}
+                      alt="Nota / Struk"
+                      className="w-full max-h-48 object-contain bg-white"
+                      onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                    />
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="destructive"
+                      className="absolute top-2 right-2 h-7 w-7 p-0 rounded-full opacity-90"
+                      onClick={() => setForm({ ...form, receiptUrl: "" })}
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </Button>
+                  </div>
+                  <div className="px-3 py-2 flex items-center justify-between border-t bg-gray-50">
+                    <span className="text-xs text-gray-500 truncate max-w-[200px]">{form.receiptUrl.split("/").pop()}</span>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 text-xs text-orange-600 hover:text-orange-700"
+                      onClick={() => receiptInputRef.current?.click()}
+                      disabled={uploadingReceipt}
+                    >
+                      Ganti Foto
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => receiptInputRef.current?.click()}
+                  disabled={uploadingReceipt}
+                  className="w-full border-2 border-dashed border-gray-200 rounded-lg p-5 flex flex-col items-center gap-2 text-gray-400 hover:border-orange-300 hover:text-orange-500 transition-colors disabled:opacity-60 cursor-pointer"
+                >
+                  {uploadingReceipt ? (
+                    <>
+                      <Loader2 className="w-6 h-6 animate-spin text-orange-500" />
+                      <span className="text-sm font-medium text-orange-500">Mengupload...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="w-6 h-6" />
+                      <span className="text-sm font-medium">Klik untuk upload foto nota</span>
+                      <span className="text-xs">JPG, PNG, WebP — maks 10 MB</span>
+                    </>
+                  )}
+                </button>
+              )}
             </div>
 
             <div className="space-y-1">
@@ -594,9 +688,19 @@ export default function AdminExpenses() {
                 {detail.receiptUrl && (
                   <div className="col-span-2">
                     <span className="text-gray-500">Nota / Struk</span>
-                    <a href={detail.receiptUrl} target="_blank" rel="noopener noreferrer" className="block text-blue-600 underline font-semibold text-sm mt-0.5 truncate">
-                      Lihat Nota
-                    </a>
+                    <div className="mt-1 border rounded-lg overflow-hidden bg-gray-50">
+                      <img
+                        src={detail.receiptUrl}
+                        alt="Nota / Struk"
+                        className="w-full max-h-56 object-contain bg-white"
+                        onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                      />
+                      <div className="px-3 py-2 border-t">
+                        <a href={detail.receiptUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline text-xs font-medium">
+                          Buka di tab baru ↗
+                        </a>
+                      </div>
+                    </div>
                   </div>
                 )}
                 {detail.journalId && <div className="col-span-2"><span className="text-gray-500">Journal ID</span><p className="font-mono text-xs text-gray-700">{detail.journalId}</p></div>}
