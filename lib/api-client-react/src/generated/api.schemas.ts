@@ -178,6 +178,15 @@ export const BookingVerificationStatus = {
   rejected: 'rejected',
 } as const;
 
+export type PaymentPaymentType = typeof PaymentPaymentType[keyof typeof PaymentPaymentType];
+
+
+export const PaymentPaymentType = {
+  dp: 'dp',
+  pelunasan: 'pelunasan',
+  full_payment: 'full_payment',
+} as const;
+
 export type PaymentStatus = typeof PaymentStatus[keyof typeof PaymentStatus];
 
 
@@ -195,6 +204,7 @@ export interface Payment {
   proofUrl?: string | null;
   /** @nullable */
   paymentMethod?: string | null;
+  paymentType?: PaymentPaymentType;
   status: PaymentStatus;
   /** @nullable */
   confirmedAt?: string | null;
@@ -253,6 +263,8 @@ export interface Booking {
   downPayment?: number;
   isDpPaid?: boolean;
   payment?: Payment | null;
+  payments?: Payment[];
+  remainingAmount?: number;
   createdAt?: string;
 }
 
@@ -367,10 +379,20 @@ export interface BookingUpdate {
   adminNotes?: string;
 }
 
+export type PaymentInputPaymentType = typeof PaymentInputPaymentType[keyof typeof PaymentInputPaymentType];
+
+
+export const PaymentInputPaymentType = {
+  dp: 'dp',
+  pelunasan: 'pelunasan',
+  full_payment: 'full_payment',
+} as const;
+
 export interface PaymentInput {
   bookingId: number;
   amount: number;
   proofUrl?: string;
+  paymentType?: PaymentInputPaymentType;
   notes?: string;
 }
 
@@ -1454,6 +1476,93 @@ export interface BankSheetPushResult {
   updatedRows: number;
 }
 
+export type ExpensePaymentStatus = typeof ExpensePaymentStatus[keyof typeof ExpensePaymentStatus];
+
+
+export const ExpensePaymentStatus = {
+  draft: 'draft',
+  pending_approval: 'pending_approval',
+  approved: 'approved',
+  paid: 'paid',
+  rejected: 'rejected',
+  cancelled: 'cancelled',
+} as const;
+
+export interface Expense {
+  id: number;
+  expenseNo: string;
+  expenseDate: string;
+  category: string;
+  description: string;
+  vendorName?: string | null;
+  facilityId?: number | null;
+  facilityName?: string | null;
+  amount: number;
+  ppnAmount: number;
+  totalAmount: number;
+  paymentMethod?: string | null;
+  paymentAccount?: string | null;
+  paymentStatus: ExpensePaymentStatus;
+  receiptUrl?: string | null;
+  notes?: string | null;
+  createdBy?: number | null;
+  approvedBy?: number | null;
+  approvedAt?: string | null;
+  paidAt?: string | null;
+  rejectedReason?: string | null;
+  journalId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type ExpenseDetail = Expense & ({
+  createdByName?: string | null;
+  approvedByName?: string | null;
+});
+
+export type ExpenseListResultSummary = {
+  totalThisMonth: number;
+  pendingApproval: number;
+  paid: number;
+  unpaid: number;
+};
+
+export interface ExpenseListResult {
+  expenses: Expense[];
+  summary: ExpenseListResultSummary;
+  categories: string[];
+}
+
+export interface ExpenseInput {
+  expenseDate: string;
+  category: string;
+  description: string;
+  vendorName?: string;
+  facilityId?: number;
+  amount: number;
+  ppnAmount?: number;
+  paymentMethod?: string;
+  paymentAccount?: string;
+  receiptUrl?: string;
+  notes?: string;
+}
+
+export type ExpenseStatusInputAction = typeof ExpenseStatusInputAction[keyof typeof ExpenseStatusInputAction];
+
+
+export const ExpenseStatusInputAction = {
+  submit: 'submit',
+  approve: 'approve',
+  reject: 'reject',
+  pay: 'pay',
+  cancel: 'cancel',
+} as const;
+
+export interface ExpenseStatusInput {
+  action: ExpenseStatusInputAction;
+  rejectedReason?: string;
+}
+
 export type SendOtp200 = {
   success?: boolean;
   message?: string;
@@ -1599,5 +1708,14 @@ maxAmount?: number;
 search?: string;
 page?: number;
 pageSize?: number;
+};
+
+export type ListExpensesParams = {
+startDate?: string;
+endDate?: string;
+category?: string;
+status?: string;
+vendorName?: string;
+facilityId?: number;
 };
 

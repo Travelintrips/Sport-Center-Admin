@@ -30,6 +30,7 @@ import {
   Landmark,
   MessageSquare,
   Bot,
+  TrendingDown,
 } from "lucide-react";
 import { useGetMe, useLogout, getGetMeQueryKey } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -75,6 +76,7 @@ const NAV_GROUPS = [
     label: "Laporan & Sistem",
     items: [
       { href: "/admin/reports", label: "Laporan Keuangan", icon: TrendingUp },
+      { href: "/admin/expenses", label: "Pengeluaran", icon: TrendingDown },
       { href: "/admin/notifications", label: "Kirim WA", icon: Send },
       { href: "/admin/notification-templates", label: "Template WA", icon: Bell },
       { href: "/admin/tax-report", label: "Laporan Pajak PPN", icon: Receipt },

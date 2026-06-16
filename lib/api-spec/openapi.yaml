@@ -41,6 +41,8 @@ tags:
     description: Tax settings and tax reporting (PPN)
   - name: bank-reconciliation
     description: Bank mutation import and reconciliation matching
+  - name: expenses
+    description: Operational expense management
 paths:
   /healthz:
     get:
@@ -2282,6 +2284,138 @@ paths:
               schema:
                 $ref: "#/components/schemas/BankSheetPushResult"
 
+  /admin/expenses:
+    get:
+      operationId: listExpenses
+      tags: [expenses]
+      summary: List expenses with filters and summary
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: startDate
+          schema:
+            type: string
+        - in: query
+          name: endDate
+          schema:
+            type: string
+        - in: query
+          name: category
+          schema:
+            type: string
+        - in: query
+          name: status
+          schema:
+            type: string
+        - in: query
+          name: vendorName
+          schema:
+            type: string
+        - in: query
+          name: facilityId
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Expense list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExpenseListResult"
+    post:
+      operationId: createExpense
+      tags: [expenses]
+      summary: Create a new expense (draft)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ExpenseInput"
+      responses:
+        "201":
+          description: Created expense
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Expense"
+
+  /admin/expenses/{id}:
+    get:
+      operationId: getExpense
+      tags: [expenses]
+      summary: Get expense detail
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Expense detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExpenseDetail"
+    patch:
+      operationId: updateExpense
+      tags: [expenses]
+      summary: Update expense (only draft/rejected)
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ExpenseInput"
+      responses:
+        "200":
+          description: Updated expense
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Expense"
+
+  /admin/expenses/{id}/status:
+    patch:
+      operationId: updateExpenseStatus
+      tags: [expenses]
+      summary: Change expense status (submit/approve/reject/pay/cancel)
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ExpenseStatusInput"
+      responses:
+        "200":
+          description: Updated expense
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Expense"
+
 components:
   schemas:
     HealthStatus:
@@ -2575,6 +2709,12 @@ components:
         payment:
           $ref: "#/components/schemas/Payment"
           nullable: true
+        payments:
+          type: array
+          items:
+            $ref: "#/components/schemas/Payment"
+        remainingAmount:
+          type: number
         createdAt:
           type: string
 
@@ -2728,6 +2868,9 @@ components:
           type: ["string", "null"]
         paymentMethod:
           type: ["string", "null"]
+        paymentType:
+          type: string
+          enum: [dp, pelunasan, full_payment]
         status:
           type: string
           enum: [pending, confirmed, rejected]
@@ -2750,6 +2893,9 @@ components:
           type: number
         proofUrl:
           type: string
+        paymentType:
+          type: string
+          enum: [dp, pelunasan, full_payment]
         notes:
           type: string
 
@@ -4242,3 +4388,144 @@ components:
           type: boolean
         updatedRows:
           type: integer
+
+    Expense:
+      type: object
+      required: [id, expenseNo, expenseDate, category, description, amount, ppnAmount, totalAmount, paymentStatus, createdAt, updatedAt]
+      properties:
+        id:
+          type: integer
+        expenseNo:
+          type: string
+        expenseDate:
+          type: string
+        category:
+          type: string
+        description:
+          type: string
+        vendorName:
+          type: string
+          nullable: true
+        facilityId:
+          type: integer
+          nullable: true
+        facilityName:
+          type: string
+          nullable: true
+        amount:
+          type: number
+        ppnAmount:
+          type: number
+        totalAmount:
+          type: number
+        paymentMethod:
+          type: string
+          nullable: true
+        paymentAccount:
+          type: string
+          nullable: true
+        paymentStatus:
+          type: string
+          enum: [draft, pending_approval, approved, paid, rejected, cancelled]
+        receiptUrl:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        createdBy:
+          type: integer
+          nullable: true
+        approvedBy:
+          type: integer
+          nullable: true
+        approvedAt:
+          type: string
+          nullable: true
+        paidAt:
+          type: string
+          nullable: true
+        rejectedReason:
+          type: string
+          nullable: true
+        journalId:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+
+    ExpenseDetail:
+      allOf:
+        - $ref: "#/components/schemas/Expense"
+        - type: object
+          properties:
+            createdByName:
+              type: string
+              nullable: true
+            approvedByName:
+              type: string
+              nullable: true
+
+    ExpenseListResult:
+      type: object
+      required: [expenses, summary, categories]
+      properties:
+        expenses:
+          type: array
+          items:
+            $ref: "#/components/schemas/Expense"
+        summary:
+          type: object
+          required: [totalThisMonth, pendingApproval, paid, unpaid]
+          properties:
+            totalThisMonth:
+              type: number
+            pendingApproval:
+              type: integer
+            paid:
+              type: number
+            unpaid:
+              type: number
+        categories:
+          type: array
+          items:
+            type: string
+
+    ExpenseInput:
+      type: object
+      required: [expenseDate, category, description, amount]
+      properties:
+        expenseDate:
+          type: string
+        category:
+          type: string
+        description:
+          type: string
+        vendorName:
+          type: string
+        facilityId:
+          type: integer
+        amount:
+          type: number
+        ppnAmount:
+          type: number
+        paymentMethod:
+          type: string
+        paymentAccount:
+          type: string
+        receiptUrl:
+          type: string
+        notes:
+          type: string
+
+    ExpenseStatusInput:
+      type: object
+      required: [action]
+      properties:
+        action:
+          type: string
+          enum: [submit, approve, reject, pay, cancel]
+        rejectedReason:
+          type: string

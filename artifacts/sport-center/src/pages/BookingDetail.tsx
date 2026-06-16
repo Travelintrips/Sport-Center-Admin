@@ -155,6 +155,32 @@ export default function BookingDetail() {
     e.preventDefault();
     if (!booking || !selectedFile) return;
 
+    // Deteksi payment_type dan amount yang tepat berdasarkan state booking
+    const bPayments = ((booking as any).payments as any[]) ?? [];
+    const isDpMode =
+      !!(booking as any).isDpPaid && Number((booking as any).downPayment || 0) > 0;
+    let detectedType = "full_payment";
+    let detectedAmount: number = booking.totalPrice;
+
+    if (isDpMode) {
+      const hasDpActive = bPayments.some(
+        (p: any) =>
+          p.paymentType === "dp" && (p.status === "pending" || p.status === "confirmed"),
+      );
+      if (!hasDpActive) {
+        detectedType = "dp";
+        detectedAmount = Number((booking as any).downPayment || 0);
+      } else {
+        detectedType = "pelunasan";
+        detectedAmount =
+          (booking as any).remainingAmount ??
+          Math.max(
+            0,
+            booking.totalPrice - Number((booking as any).downPayment || 0),
+          );
+      }
+    }
+
     try {
       setUploadProgress("uploading");
 
@@ -177,9 +203,10 @@ export default function BookingDetail() {
       submitPayment.mutate({
         data: {
           bookingId: booking.id,
-          amount: booking.totalPrice,
+          amount: detectedAmount,
           proofUrl: url ?? objectPath,
           notes: notes || undefined,
+          paymentType: detectedType as any,
         },
       });
     } catch (err: any) {
@@ -398,20 +425,73 @@ export default function BookingDetail() {
               </CardHeader>
               <CardContent className="p-6 space-y-5">
                 {/* DP Info Banner */}
-                {(booking as any).isDpPaid && (
-                  <div className="flex items-start gap-3 p-3.5 rounded-xl border border-violet-200 bg-violet-50 dark:bg-violet-900/20 dark:border-violet-800">
-                    <div className="w-8 h-8 rounded-lg bg-violet-100 dark:bg-violet-900/40 flex items-center justify-center shrink-0">
-                      <CreditCard size={16} className="text-violet-600 dark:text-violet-300" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="font-semibold text-sm text-violet-800 dark:text-violet-200">{t("DP Sudah Dicatat", "Down Payment Recorded")}</div>
-                      <div className="text-xs text-violet-600 dark:text-violet-400 mt-0.5 space-y-0.5">
-                        <div>{t("DP", "DP")}: <span className="font-bold">Rp {Number((booking as any).downPayment || 0).toLocaleString("id-ID")}</span></div>
-                        <div>{t("Sisa Pembayaran", "Remaining")}: <span className="font-bold">Rp {Math.max(0, Number(booking.totalPrice) - Number((booking as any).downPayment || 0)).toLocaleString("id-ID")}</span></div>
+                {(booking as any).isDpPaid && (() => {
+                  const bPayments = ((booking as any).payments as any[]) ?? [];
+                  const dpConfirmed = bPayments.some((p: any) => p.paymentType === "dp" && p.status === "confirmed");
+                  const dpPending = bPayments.some((p: any) => p.paymentType === "dp" && p.status === "pending");
+                  const pelunasanPending = bPayments.some((p: any) => p.paymentType === "pelunasan" && p.status === "pending");
+                  const remaining = (booking as any).remainingAmount ?? Math.max(0, Number(booking.totalPrice) - Number((booking as any).downPayment || 0));
+
+                  if (dpConfirmed && pelunasanPending) {
+                    return (
+                      <div className="flex items-start gap-3 p-3.5 rounded-xl border border-blue-200 bg-blue-50 dark:bg-blue-900/20 dark:border-blue-800">
+                        <div className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-900/40 flex items-center justify-center shrink-0">
+                          <Clock size={16} className="text-blue-600 dark:text-blue-300" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="font-semibold text-sm text-blue-800 dark:text-blue-200">{t("Bukti Pelunasan Diterima", "Pelunasan Proof Received")}</div>
+                          <div className="text-xs text-blue-600 dark:text-blue-400 mt-0.5">{t("Admin sedang memverifikasi pelunasan Anda.", "Admin is verifying your payment.")}</div>
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  if (dpConfirmed) {
+                    return (
+                      <div className="flex items-start gap-3 p-3.5 rounded-xl border border-emerald-200 bg-emerald-50 dark:bg-emerald-900/20 dark:border-emerald-800">
+                        <div className="w-8 h-8 rounded-lg bg-emerald-100 dark:bg-emerald-900/40 flex items-center justify-center shrink-0">
+                          <CheckCircle2 size={16} className="text-emerald-600 dark:text-emerald-300" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="font-semibold text-sm text-emerald-800 dark:text-emerald-200">{t("DP Dikonfirmasi ✓", "DP Confirmed ✓")}</div>
+                          <div className="text-xs text-emerald-600 dark:text-emerald-400 mt-0.5 space-y-0.5">
+                            <div>{t("DP", "DP")}: <span className="font-bold">Rp {Number((booking as any).downPayment || 0).toLocaleString("id-ID")}</span></div>
+                            <div>{t("Sisa Pelunasan", "Remaining")}: <span className="font-bold text-primary">Rp {remaining.toLocaleString("id-ID")}</span></div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  if (dpPending) {
+                    return (
+                      <div className="flex items-start gap-3 p-3.5 rounded-xl border border-amber-200 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-800">
+                        <div className="w-8 h-8 rounded-lg bg-amber-100 dark:bg-amber-900/40 flex items-center justify-center shrink-0">
+                          <Clock size={16} className="text-amber-600 dark:text-amber-300" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="font-semibold text-sm text-amber-800 dark:text-amber-200">{t("Bukti DP Menunggu Konfirmasi", "DP Proof Awaiting Confirmation")}</div>
+                          <div className="text-xs text-amber-600 dark:text-amber-400 mt-0.5">{t("Admin sedang memverifikasi bukti DP Anda.", "Admin is verifying your DP proof.")}</div>
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="flex items-start gap-3 p-3.5 rounded-xl border border-violet-200 bg-violet-50 dark:bg-violet-900/20 dark:border-violet-800">
+                      <div className="w-8 h-8 rounded-lg bg-violet-100 dark:bg-violet-900/40 flex items-center justify-center shrink-0">
+                        <CreditCard size={16} className="text-violet-600 dark:text-violet-300" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="font-semibold text-sm text-violet-800 dark:text-violet-200">{t("DP Sudah Dicatat", "Down Payment Recorded")}</div>
+                        <div className="text-xs text-violet-600 dark:text-violet-400 mt-0.5 space-y-0.5">
+                          <div>{t("DP", "DP")}: <span className="font-bold">Rp {Number((booking as any).downPayment || 0).toLocaleString("id-ID")}</span></div>
+                          <div>{t("Sisa Pembayaran", "Remaining")}: <span className="font-bold">Rp {remaining.toLocaleString("id-ID")}</span></div>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                )}
+                  );
+                })()}
 
                 {/* DP Toggle (only if isDpPaid is false) */}
                 {!(booking as any).isDpPaid && !dpMode && !paymentMethod && (
@@ -467,7 +547,9 @@ export default function BookingDetail() {
                 )}
 
                 {(() => {
-                  const remaining = Math.max(0, Number(booking.totalPrice) - Number((booking as any).downPayment || 0));
+                  const remaining =
+                    (booking as any).remainingAmount ??
+                    Math.max(0, Number(booking.totalPrice) - Number((booking as any).downPayment || 0));
                   const isDpFullyPaid = (booking as any).isDpPaid && remaining <= 0;
 
                   if (isDpFullyPaid) {

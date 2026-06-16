@@ -5,10 +5,12 @@
  * Sport Center API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { PaymentInputPaymentType } from './paymentInputPaymentType';
 
 export interface PaymentInput {
   bookingId: number;
   amount: number;
   proofUrl?: string;
+  paymentType?: PaymentInputPaymentType;
   notes?: string;
 }

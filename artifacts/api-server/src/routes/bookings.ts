@@ -39,7 +39,12 @@ async function getBookingWithPayment(id: number) {
   const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, id)).limit(1);
   if (!booking) return null;
   const [facility] = await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, booking.facilityId)).limit(1);
-  const [payment] = await db.select().from(paymentsTable).where(eq(paymentsTable.bookingId, id)).limit(1);
+  const allPayments = await db.select().from(paymentsTable).where(eq(paymentsTable.bookingId, id));
+  allPayments.sort((a, b) => a.id - b.id);
+  const payment =
+    allPayments.find((p) => p.status === "pending" || p.status === "confirmed") ??
+    allPayments[allPayments.length - 1] ??
+    null;
 
   // Jika booking bagian dari grup recurring, ambil info grup
   let groupInfo: { groupTotalPayment: number; groupSessionCount: number; groupRef: string } | null = null;
@@ -76,6 +81,16 @@ async function getBookingWithPayment(id: number) {
     downPayment: Number(booking.downPayment ?? 0),
     isDpPaid: booking.isDpPaid ?? false,
     payment: payment ? { ...payment, amount: Number(payment.amount) } : null,
+    payments: allPayments.map((p) => ({ ...p, amount: Number(p.amount) })),
+    remainingAmount: (() => {
+      const total =
+        booking.grandTotal != null ? Number(booking.grandTotal) : Number(booking.totalPrice);
+      const confirmedDp = allPayments
+        .filter((p) => p.paymentType === "dp" && p.status === "confirmed")
+        .reduce((s, p) => s + Number(p.amount), 0);
+      const dpAmt = Number(booking.downPayment ?? 0);
+      return Math.max(0, total - (confirmedDp > 0 ? confirmedDp : dpAmt));
+    })(),
     groupInfo,
   };
 }
@@ -97,11 +112,23 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
       : [];
 
     const bookingIds = bookings.map((b) => b.id);
-    const payments = bookingIds.length > 0 ? await db.select().from(paymentsTable) : [];
+    const allPayments = bookingIds.length > 0 ? await db.select().from(paymentsTable) : [];
+
+    const paymentsByBookingId: Record<number, typeof allPayments> = {};
+    for (const p of allPayments) {
+      if (!paymentsByBookingId[p.bookingId]) paymentsByBookingId[p.bookingId] = [];
+      paymentsByBookingId[p.bookingId].push(p);
+    }
 
     const result = bookings.map((b) => {
       const facility = facilities.find((f) => f.id === b.facilityId);
-      const payment = payments.find((p) => p.bookingId === b.id);
+      const bPayments = paymentsByBookingId[b.id] ?? [];
+      const payment =
+        bPayments.find((p) => p.status === "pending" || p.status === "confirmed") ??
+        bPayments[bPayments.length - 1] ??
+        null;
+      const grandTotalNum = b.grandTotal != null ? Number(b.grandTotal) : Number(b.totalPrice);
+      const dpAmt = Number(b.downPayment ?? 0);
       return {
         ...b,
         totalPrice: Number(b.totalPrice),
@@ -111,11 +138,13 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
         ppnRate: b.ppnRate == null ? null : Number(b.ppnRate),
         ppnAmount: b.ppnAmount == null ? null : Number(b.ppnAmount),
         grandTotal: b.grandTotal == null ? null : Number(b.grandTotal),
-        downPayment: Number(b.downPayment ?? 0),
+        downPayment: dpAmt,
         isDpPaid: b.isDpPaid ?? false,
         facilityName: facility?.name ?? "",
         facilityCategory: facility?.category ?? "",
         payment: payment ? { ...payment, amount: Number(payment.amount) } : null,
+        payments: bPayments.map((p) => ({ ...p, amount: Number(p.amount) })),
+        remainingAmount: Math.max(0, grandTotalNum - dpAmt),
       };
     });
 

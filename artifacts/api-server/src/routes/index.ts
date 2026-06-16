@@ -48,6 +48,7 @@ import waBookingsAdminRouter from "./waBookingsAdmin";
 import waAiAdminRouter from "./waAiAdmin";
 import seedDemoRouter from "./seedDemo";
 import systemAdminRouter from "./systemAdmin";
+import expensesRouter from "./expenses";
 
 const router: IRouter = Router();
 
@@ -99,5 +100,6 @@ router.use(waBookingsAdminRouter);
 router.use(waAiAdminRouter);
 router.use(seedDemoRouter);
 router.use(systemAdminRouter);
+router.use(expensesRouter);
 
 export default router;

@@ -59,5 +59,7 @@ export interface Booking {
   downPayment?: number;
   isDpPaid?: boolean;
   payment?: Payment | null;
+  payments?: Payment[];
+  remainingAmount?: number;
   createdAt?: string;
 }

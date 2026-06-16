@@ -385,12 +385,27 @@ export const ListBookingsResponseItem = zod.object({
   "amount": zod.number(),
   "proofUrl": zod.string().nullish(),
   "paymentMethod": zod.string().nullish(),
+  "paymentType": zod.enum(['dp', 'pelunasan', 'full_payment']).optional(),
   "status": zod.enum(['pending', 'confirmed', 'rejected']),
   "confirmedAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
   "updatedAt": zod.string().optional()
 }).nullish(),
+  "payments": zod.array(zod.object({
+  "id": zod.number(),
+  "bookingId": zod.number(),
+  "amount": zod.number(),
+  "proofUrl": zod.string().nullish(),
+  "paymentMethod": zod.string().nullish(),
+  "paymentType": zod.enum(['dp', 'pelunasan', 'full_payment']).optional(),
+  "status": zod.enum(['pending', 'confirmed', 'rejected']),
+  "confirmedAt": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "createdAt": zod.string().optional(),
+  "updatedAt": zod.string().optional()
+})).optional(),
+  "remainingAmount": zod.number().optional(),
   "createdAt": zod.string().optional()
 })
 export const ListBookingsResponse = zod.array(ListBookingsResponseItem)
@@ -507,12 +522,27 @@ export const GetBookingResponse = zod.object({
   "amount": zod.number(),
   "proofUrl": zod.string().nullish(),
   "paymentMethod": zod.string().nullish(),
+  "paymentType": zod.enum(['dp', 'pelunasan', 'full_payment']).optional(),
   "status": zod.enum(['pending', 'confirmed', 'rejected']),
   "confirmedAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
   "updatedAt": zod.string().optional()
 }).nullish(),
+  "payments": zod.array(zod.object({
+  "id": zod.number(),
+  "bookingId": zod.number(),
+  "amount": zod.number(),
+  "proofUrl": zod.string().nullish(),
+  "paymentMethod": zod.string().nullish(),
+  "paymentType": zod.enum(['dp', 'pelunasan', 'full_payment']).optional(),
+  "status": zod.enum(['pending', 'confirmed', 'rejected']),
+  "confirmedAt": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "createdAt": zod.string().optional(),
+  "updatedAt": zod.string().optional()
+})).optional(),
+  "remainingAmount": zod.number().optional(),
   "createdAt": zod.string().optional()
 })
 
@@ -569,12 +599,27 @@ export const UpdateBookingResponse = zod.object({
   "amount": zod.number(),
   "proofUrl": zod.string().nullish(),
   "paymentMethod": zod.string().nullish(),
+  "paymentType": zod.enum(['dp', 'pelunasan', 'full_payment']).optional(),
   "status": zod.enum(['pending', 'confirmed', 'rejected']),
   "confirmedAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
   "updatedAt": zod.string().optional()
 }).nullish(),
+  "payments": zod.array(zod.object({
+  "id": zod.number(),
+  "bookingId": zod.number(),
+  "amount": zod.number(),
+  "proofUrl": zod.string().nullish(),
+  "paymentMethod": zod.string().nullish(),
+  "paymentType": zod.enum(['dp', 'pelunasan', 'full_payment']).optional(),
+  "status": zod.enum(['pending', 'confirmed', 'rejected']),
+  "confirmedAt": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "createdAt": zod.string().optional(),
+  "updatedAt": zod.string().optional()
+})).optional(),
+  "remainingAmount": zod.number().optional(),
   "createdAt": zod.string().optional()
 })
 
@@ -634,12 +679,27 @@ export const PayBookingDpResponse = zod.object({
   "amount": zod.number(),
   "proofUrl": zod.string().nullish(),
   "paymentMethod": zod.string().nullish(),
+  "paymentType": zod.enum(['dp', 'pelunasan', 'full_payment']).optional(),
   "status": zod.enum(['pending', 'confirmed', 'rejected']),
   "confirmedAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
   "updatedAt": zod.string().optional()
 }).nullish(),
+  "payments": zod.array(zod.object({
+  "id": zod.number(),
+  "bookingId": zod.number(),
+  "amount": zod.number(),
+  "proofUrl": zod.string().nullish(),
+  "paymentMethod": zod.string().nullish(),
+  "paymentType": zod.enum(['dp', 'pelunasan', 'full_payment']).optional(),
+  "status": zod.enum(['pending', 'confirmed', 'rejected']),
+  "confirmedAt": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "createdAt": zod.string().optional(),
+  "updatedAt": zod.string().optional()
+})).optional(),
+  "remainingAmount": zod.number().optional(),
   "createdAt": zod.string().optional()
 })
 
@@ -691,12 +751,27 @@ export const GetBookingByOrderResponse = zod.object({
   "amount": zod.number(),
   "proofUrl": zod.string().nullish(),
   "paymentMethod": zod.string().nullish(),
+  "paymentType": zod.enum(['dp', 'pelunasan', 'full_payment']).optional(),
   "status": zod.enum(['pending', 'confirmed', 'rejected']),
   "confirmedAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
   "updatedAt": zod.string().optional()
 }).nullish(),
+  "payments": zod.array(zod.object({
+  "id": zod.number(),
+  "bookingId": zod.number(),
+  "amount": zod.number(),
+  "proofUrl": zod.string().nullish(),
+  "paymentMethod": zod.string().nullish(),
+  "paymentType": zod.enum(['dp', 'pelunasan', 'full_payment']).optional(),
+  "status": zod.enum(['pending', 'confirmed', 'rejected']),
+  "confirmedAt": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "createdAt": zod.string().optional(),
+  "updatedAt": zod.string().optional()
+})).optional(),
+  "remainingAmount": zod.number().optional(),
   "createdAt": zod.string().optional()
 })
 
@@ -714,6 +789,7 @@ export const ListPaymentsResponseItem = zod.object({
   "amount": zod.number(),
   "proofUrl": zod.string().nullish(),
   "paymentMethod": zod.string().nullish(),
+  "paymentType": zod.enum(['dp', 'pelunasan', 'full_payment']).optional(),
   "status": zod.enum(['pending', 'confirmed', 'rejected']),
   "confirmedAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
@@ -730,6 +806,7 @@ export const CreatePaymentBody = zod.object({
   "bookingId": zod.number(),
   "amount": zod.number(),
   "proofUrl": zod.string().optional(),
+  "paymentType": zod.enum(['dp', 'pelunasan', 'full_payment']).optional(),
   "notes": zod.string().optional()
 })
 
@@ -752,6 +829,7 @@ export const UpdatePaymentResponse = zod.object({
   "amount": zod.number(),
   "proofUrl": zod.string().nullish(),
   "paymentMethod": zod.string().nullish(),
+  "paymentType": zod.enum(['dp', 'pelunasan', 'full_payment']).optional(),
   "status": zod.enum(['pending', 'confirmed', 'rejected']),
   "confirmedAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
@@ -1272,12 +1350,27 @@ export const ListCompanyInvoicesResponseItem = zod.object({
   "amount": zod.number(),
   "proofUrl": zod.string().nullish(),
   "paymentMethod": zod.string().nullish(),
+  "paymentType": zod.enum(['dp', 'pelunasan', 'full_payment']).optional(),
   "status": zod.enum(['pending', 'confirmed', 'rejected']),
   "confirmedAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
   "updatedAt": zod.string().optional()
 }).nullish(),
+  "payments": zod.array(zod.object({
+  "id": zod.number(),
+  "bookingId": zod.number(),
+  "amount": zod.number(),
+  "proofUrl": zod.string().nullish(),
+  "paymentMethod": zod.string().nullish(),
+  "paymentType": zod.enum(['dp', 'pelunasan', 'full_payment']).optional(),
+  "status": zod.enum(['pending', 'confirmed', 'rejected']),
+  "confirmedAt": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "createdAt": zod.string().optional(),
+  "updatedAt": zod.string().optional()
+})).optional(),
+  "remainingAmount": zod.number().optional(),
   "createdAt": zod.string().optional()
 })).optional()
 })
@@ -1366,12 +1459,27 @@ export const GetCompanyInvoiceResponse = zod.object({
   "amount": zod.number(),
   "proofUrl": zod.string().nullish(),
   "paymentMethod": zod.string().nullish(),
+  "paymentType": zod.enum(['dp', 'pelunasan', 'full_payment']).optional(),
   "status": zod.enum(['pending', 'confirmed', 'rejected']),
   "confirmedAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
   "updatedAt": zod.string().optional()
 }).nullish(),
+  "payments": zod.array(zod.object({
+  "id": zod.number(),
+  "bookingId": zod.number(),
+  "amount": zod.number(),
+  "proofUrl": zod.string().nullish(),
+  "paymentMethod": zod.string().nullish(),
+  "paymentType": zod.enum(['dp', 'pelunasan', 'full_payment']).optional(),
+  "status": zod.enum(['pending', 'confirmed', 'rejected']),
+  "confirmedAt": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "createdAt": zod.string().optional(),
+  "updatedAt": zod.string().optional()
+})).optional(),
+  "remainingAmount": zod.number().optional(),
   "createdAt": zod.string().optional()
 })).optional()
 })
@@ -1442,12 +1550,27 @@ export const UpdateCompanyInvoiceResponse = zod.object({
   "amount": zod.number(),
   "proofUrl": zod.string().nullish(),
   "paymentMethod": zod.string().nullish(),
+  "paymentType": zod.enum(['dp', 'pelunasan', 'full_payment']).optional(),
   "status": zod.enum(['pending', 'confirmed', 'rejected']),
   "confirmedAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
   "updatedAt": zod.string().optional()
 }).nullish(),
+  "payments": zod.array(zod.object({
+  "id": zod.number(),
+  "bookingId": zod.number(),
+  "amount": zod.number(),
+  "proofUrl": zod.string().nullish(),
+  "paymentMethod": zod.string().nullish(),
+  "paymentType": zod.enum(['dp', 'pelunasan', 'full_payment']).optional(),
+  "status": zod.enum(['pending', 'confirmed', 'rejected']),
+  "confirmedAt": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "createdAt": zod.string().optional(),
+  "updatedAt": zod.string().optional()
+})).optional(),
+  "remainingAmount": zod.number().optional(),
   "createdAt": zod.string().optional()
 })).optional()
 })
@@ -1549,12 +1672,27 @@ export const GetDashboardResponse = zod.object({
   "amount": zod.number(),
   "proofUrl": zod.string().nullish(),
   "paymentMethod": zod.string().nullish(),
+  "paymentType": zod.enum(['dp', 'pelunasan', 'full_payment']).optional(),
   "status": zod.enum(['pending', 'confirmed', 'rejected']),
   "confirmedAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
   "updatedAt": zod.string().optional()
 }).nullish(),
+  "payments": zod.array(zod.object({
+  "id": zod.number(),
+  "bookingId": zod.number(),
+  "amount": zod.number(),
+  "proofUrl": zod.string().nullish(),
+  "paymentMethod": zod.string().nullish(),
+  "paymentType": zod.enum(['dp', 'pelunasan', 'full_payment']).optional(),
+  "status": zod.enum(['pending', 'confirmed', 'rejected']),
+  "confirmedAt": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "createdAt": zod.string().optional(),
+  "updatedAt": zod.string().optional()
+})).optional(),
+  "remainingAmount": zod.number().optional(),
   "createdAt": zod.string().optional()
 })),
   "bookingsByStatus": zod.array(zod.object({
@@ -1997,12 +2135,27 @@ export const CheckInBookingResponse = zod.object({
   "amount": zod.number(),
   "proofUrl": zod.string().nullish(),
   "paymentMethod": zod.string().nullish(),
+  "paymentType": zod.enum(['dp', 'pelunasan', 'full_payment']).optional(),
   "status": zod.enum(['pending', 'confirmed', 'rejected']),
   "confirmedAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
   "updatedAt": zod.string().optional()
 }).nullish(),
+  "payments": zod.array(zod.object({
+  "id": zod.number(),
+  "bookingId": zod.number(),
+  "amount": zod.number(),
+  "proofUrl": zod.string().nullish(),
+  "paymentMethod": zod.string().nullish(),
+  "paymentType": zod.enum(['dp', 'pelunasan', 'full_payment']).optional(),
+  "status": zod.enum(['pending', 'confirmed', 'rejected']),
+  "confirmedAt": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "createdAt": zod.string().optional(),
+  "updatedAt": zod.string().optional()
+})).optional(),
+  "remainingAmount": zod.number().optional(),
   "createdAt": zod.string().optional()
 })
 
@@ -2067,12 +2220,27 @@ export const VerifyBookingResponse = zod.object({
   "amount": zod.number(),
   "proofUrl": zod.string().nullish(),
   "paymentMethod": zod.string().nullish(),
+  "paymentType": zod.enum(['dp', 'pelunasan', 'full_payment']).optional(),
   "status": zod.enum(['pending', 'confirmed', 'rejected']),
   "confirmedAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
   "updatedAt": zod.string().optional()
 }).nullish(),
+  "payments": zod.array(zod.object({
+  "id": zod.number(),
+  "bookingId": zod.number(),
+  "amount": zod.number(),
+  "proofUrl": zod.string().nullish(),
+  "paymentMethod": zod.string().nullish(),
+  "paymentType": zod.enum(['dp', 'pelunasan', 'full_payment']).optional(),
+  "status": zod.enum(['pending', 'confirmed', 'rejected']),
+  "confirmedAt": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "createdAt": zod.string().optional(),
+  "updatedAt": zod.string().optional()
+})).optional(),
+  "remainingAmount": zod.number().optional(),
   "createdAt": zod.string().optional()
 }).nullish()
 })
@@ -2135,12 +2303,27 @@ export const VerifyBookingByOrderResponse = zod.object({
   "amount": zod.number(),
   "proofUrl": zod.string().nullish(),
   "paymentMethod": zod.string().nullish(),
+  "paymentType": zod.enum(['dp', 'pelunasan', 'full_payment']).optional(),
   "status": zod.enum(['pending', 'confirmed', 'rejected']),
   "confirmedAt": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "createdAt": zod.string().optional(),
   "updatedAt": zod.string().optional()
 }).nullish(),
+  "payments": zod.array(zod.object({
+  "id": zod.number(),
+  "bookingId": zod.number(),
+  "amount": zod.number(),
+  "proofUrl": zod.string().nullish(),
+  "paymentMethod": zod.string().nullish(),
+  "paymentType": zod.enum(['dp', 'pelunasan', 'full_payment']).optional(),
+  "status": zod.enum(['pending', 'confirmed', 'rejected']),
+  "confirmedAt": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "createdAt": zod.string().optional(),
+  "updatedAt": zod.string().optional()
+})).optional(),
+  "remainingAmount": zod.number().optional(),
   "createdAt": zod.string().optional()
 }).nullish()
 })
@@ -2751,6 +2934,200 @@ export const PushBankReconToSheetBody = zod.object({
 export const PushBankReconToSheetResponse = zod.object({
   "ok": zod.boolean(),
   "updatedRows": zod.number()
+})
+
+
+/**
+ * @summary List expenses with filters and summary
+ */
+export const ListExpensesQueryParams = zod.object({
+  "startDate": zod.coerce.string().optional(),
+  "endDate": zod.coerce.string().optional(),
+  "category": zod.coerce.string().optional(),
+  "status": zod.coerce.string().optional(),
+  "vendorName": zod.coerce.string().optional(),
+  "facilityId": zod.coerce.number().optional()
+})
+
+export const ListExpensesResponse = zod.object({
+  "expenses": zod.array(zod.object({
+  "id": zod.number(),
+  "expenseNo": zod.string(),
+  "expenseDate": zod.string(),
+  "category": zod.string(),
+  "description": zod.string(),
+  "vendorName": zod.string().nullish(),
+  "facilityId": zod.number().nullish(),
+  "facilityName": zod.string().nullish(),
+  "amount": zod.number(),
+  "ppnAmount": zod.number(),
+  "totalAmount": zod.number(),
+  "paymentMethod": zod.string().nullish(),
+  "paymentAccount": zod.string().nullish(),
+  "paymentStatus": zod.enum(['draft', 'pending_approval', 'approved', 'paid', 'rejected', 'cancelled']),
+  "receiptUrl": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "createdBy": zod.number().nullish(),
+  "approvedBy": zod.number().nullish(),
+  "approvedAt": zod.string().nullish(),
+  "paidAt": zod.string().nullish(),
+  "rejectedReason": zod.string().nullish(),
+  "journalId": zod.string().nullish(),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
+})),
+  "summary": zod.object({
+  "totalThisMonth": zod.number(),
+  "pendingApproval": zod.number(),
+  "paid": zod.number(),
+  "unpaid": zod.number()
+}),
+  "categories": zod.array(zod.string())
+})
+
+
+/**
+ * @summary Create a new expense (draft)
+ */
+export const CreateExpenseBody = zod.object({
+  "expenseDate": zod.string(),
+  "category": zod.string(),
+  "description": zod.string(),
+  "vendorName": zod.string().optional(),
+  "facilityId": zod.number().optional(),
+  "amount": zod.number(),
+  "ppnAmount": zod.number().optional(),
+  "paymentMethod": zod.string().optional(),
+  "paymentAccount": zod.string().optional(),
+  "receiptUrl": zod.string().optional(),
+  "notes": zod.string().optional()
+})
+
+
+/**
+ * @summary Get expense detail
+ */
+export const GetExpenseParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetExpenseResponse = zod.object({
+  "id": zod.number(),
+  "expenseNo": zod.string(),
+  "expenseDate": zod.string(),
+  "category": zod.string(),
+  "description": zod.string(),
+  "vendorName": zod.string().nullish(),
+  "facilityId": zod.number().nullish(),
+  "facilityName": zod.string().nullish(),
+  "amount": zod.number(),
+  "ppnAmount": zod.number(),
+  "totalAmount": zod.number(),
+  "paymentMethod": zod.string().nullish(),
+  "paymentAccount": zod.string().nullish(),
+  "paymentStatus": zod.enum(['draft', 'pending_approval', 'approved', 'paid', 'rejected', 'cancelled']),
+  "receiptUrl": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "createdBy": zod.number().nullish(),
+  "approvedBy": zod.number().nullish(),
+  "approvedAt": zod.string().nullish(),
+  "paidAt": zod.string().nullish(),
+  "rejectedReason": zod.string().nullish(),
+  "journalId": zod.string().nullish(),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
+}).and(zod.object({
+  "createdByName": zod.string().nullish(),
+  "approvedByName": zod.string().nullish()
+}))
+
+
+/**
+ * @summary Update expense (only draft/rejected)
+ */
+export const UpdateExpenseParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const UpdateExpenseBody = zod.object({
+  "expenseDate": zod.string(),
+  "category": zod.string(),
+  "description": zod.string(),
+  "vendorName": zod.string().optional(),
+  "facilityId": zod.number().optional(),
+  "amount": zod.number(),
+  "ppnAmount": zod.number().optional(),
+  "paymentMethod": zod.string().optional(),
+  "paymentAccount": zod.string().optional(),
+  "receiptUrl": zod.string().optional(),
+  "notes": zod.string().optional()
+})
+
+export const UpdateExpenseResponse = zod.object({
+  "id": zod.number(),
+  "expenseNo": zod.string(),
+  "expenseDate": zod.string(),
+  "category": zod.string(),
+  "description": zod.string(),
+  "vendorName": zod.string().nullish(),
+  "facilityId": zod.number().nullish(),
+  "facilityName": zod.string().nullish(),
+  "amount": zod.number(),
+  "ppnAmount": zod.number(),
+  "totalAmount": zod.number(),
+  "paymentMethod": zod.string().nullish(),
+  "paymentAccount": zod.string().nullish(),
+  "paymentStatus": zod.enum(['draft', 'pending_approval', 'approved', 'paid', 'rejected', 'cancelled']),
+  "receiptUrl": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "createdBy": zod.number().nullish(),
+  "approvedBy": zod.number().nullish(),
+  "approvedAt": zod.string().nullish(),
+  "paidAt": zod.string().nullish(),
+  "rejectedReason": zod.string().nullish(),
+  "journalId": zod.string().nullish(),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
+})
+
+
+/**
+ * @summary Change expense status (submit/approve/reject/pay/cancel)
+ */
+export const UpdateExpenseStatusParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const UpdateExpenseStatusBody = zod.object({
+  "action": zod.enum(['submit', 'approve', 'reject', 'pay', 'cancel']),
+  "rejectedReason": zod.string().optional()
+})
+
+export const UpdateExpenseStatusResponse = zod.object({
+  "id": zod.number(),
+  "expenseNo": zod.string(),
+  "expenseDate": zod.string(),
+  "category": zod.string(),
+  "description": zod.string(),
+  "vendorName": zod.string().nullish(),
+  "facilityId": zod.number().nullish(),
+  "facilityName": zod.string().nullish(),
+  "amount": zod.number(),
+  "ppnAmount": zod.number(),
+  "totalAmount": zod.number(),
+  "paymentMethod": zod.string().nullish(),
+  "paymentAccount": zod.string().nullish(),
+  "paymentStatus": zod.enum(['draft', 'pending_approval', 'approved', 'paid', 'rejected', 'cancelled']),
+  "receiptUrl": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "createdBy": zod.number().nullish(),
+  "approvedBy": zod.number().nullish(),
+  "approvedAt": zod.string().nullish(),
+  "paidAt": zod.string().nullish(),
+  "rejectedReason": zod.string().nullish(),
+  "journalId": zod.string().nullish(),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
 })
 
 

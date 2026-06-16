@@ -681,8 +681,7 @@ function BookingDetailDrawer({
     }
   };
 
-  const isPaymentPending = booking.payment?.status === "pending";
-  const hasPaymentProof = !!booking.payment?.proofUrl;
+  const allPayments: any[] = booking.payments ?? (booking.payment ? [booking.payment] : []);
   const isCompleted = booking.status === "completed" || booking.status === "confirmed";
 
   return (
@@ -848,51 +847,79 @@ function BookingDetailDrawer({
             </div>
           )}
 
-          {/* Payment Proof Section */}
-          {booking.payment && (
+          {/* Payment Proof Section — multi-payment (DP + Pelunasan) */}
+          {allPayments.length > 0 && (
             <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
-              <div className="px-4 py-2.5 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
-                <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Bukti Pembayaran</span>
-                <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
-                  booking.payment.status === "confirmed"
-                    ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
-                    : booking.payment.status === "rejected"
-                    ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300"
-                    : "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300"
-                }`}>
-                  {booking.payment.status === "confirmed" ? "Dikonfirmasi" : booking.payment.status === "rejected" ? "Ditolak" : "Menunggu"}
-                </span>
+              <div className="px-4 py-2.5 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-700">
+                <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Riwayat Pembayaran</span>
               </div>
-              <div className="p-4 space-y-3">
-                <div className="flex justify-between text-sm">
-                  <span className="text-slate-500">Jumlah Transfer</span>
-                  <span className="font-bold">{formatCurrency(booking.payment.amount)}</span>
-                </div>
-                {booking.payment.proofUrl && (
-                  <ProofImage proofUrl={booking.payment.proofUrl} />
-                )}
-
-                {/* Payment Action Buttons */}
-                {isPaymentPending && hasPaymentProof && (
-                  <div className="flex gap-2 pt-1">
-                    <button
-                      onClick={() => onConfirmPayment(booking.payment.id)}
-                      disabled={isUpdating}
-                      className="flex-1 flex items-center justify-center gap-1.5 h-9 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50 transition-colors"
-                    >
-                      <CheckCircle2 size={13} />
-                      Konfirmasi → Completed
-                    </button>
-                    <button
-                      onClick={() => onRejectPayment(booking.payment.id)}
-                      disabled={isUpdating}
-                      className="flex items-center justify-center gap-1.5 h-9 px-3 rounded-xl text-xs font-semibold border border-red-200 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50 transition-colors"
-                    >
-                      <XCircle size={13} />
-                      Tolak
-                    </button>
-                  </div>
-                )}
+              <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                {allPayments.map((pmt: any) => {
+                  const typeLabel =
+                    pmt.paymentType === "dp"
+                      ? "DP"
+                      : pmt.paymentType === "pelunasan"
+                      ? "Pelunasan"
+                      : "Full Payment";
+                  const typeColor =
+                    pmt.paymentType === "dp"
+                      ? "bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300"
+                      : pmt.paymentType === "pelunasan"
+                      ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300"
+                      : "bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300";
+                  const statusColor =
+                    pmt.status === "confirmed"
+                      ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
+                      : pmt.status === "rejected"
+                      ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300"
+                      : "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300";
+                  const statusLabel =
+                    pmt.status === "confirmed"
+                      ? "Dikonfirmasi"
+                      : pmt.status === "rejected"
+                      ? "Ditolak"
+                      : "Menunggu";
+                  const confirmLabel =
+                    pmt.paymentType === "dp"
+                      ? "Konfirmasi DP"
+                      : "Konfirmasi → Selesai";
+                  return (
+                    <div key={pmt.id} className="p-4 space-y-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-1.5">
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${typeColor}`}>
+                            {typeLabel}
+                          </span>
+                          <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${statusColor}`}>
+                            {statusLabel}
+                          </span>
+                        </div>
+                        <span className="font-bold text-sm">{formatCurrency(pmt.amount)}</span>
+                      </div>
+                      {pmt.proofUrl && <ProofImage proofUrl={pmt.proofUrl} />}
+                      {pmt.status === "pending" && pmt.proofUrl && (
+                        <div className="flex gap-2 pt-1">
+                          <button
+                            onClick={() => onConfirmPayment(pmt.id)}
+                            disabled={isUpdating}
+                            className="flex-1 flex items-center justify-center gap-1.5 h-9 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50 transition-colors"
+                          >
+                            <CheckCircle2 size={13} />
+                            {confirmLabel}
+                          </button>
+                          <button
+                            onClick={() => onRejectPayment(pmt.id)}
+                            disabled={isUpdating}
+                            className="flex items-center justify-center gap-1.5 h-9 px-3 rounded-xl text-xs font-semibold border border-red-200 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50 transition-colors"
+                          >
+                            <XCircle size={13} />
+                            Tolak
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
