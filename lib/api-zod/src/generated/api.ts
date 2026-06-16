@@ -2937,3 +2937,197 @@ export const PushBankReconToSheetResponse = zod.object({
 })
 
 
+/**
+ * @summary List expenses with filters and summary
+ */
+export const ListExpensesQueryParams = zod.object({
+  "startDate": zod.coerce.string().optional(),
+  "endDate": zod.coerce.string().optional(),
+  "category": zod.coerce.string().optional(),
+  "status": zod.coerce.string().optional(),
+  "vendorName": zod.coerce.string().optional(),
+  "facilityId": zod.coerce.number().optional()
+})
+
+export const ListExpensesResponse = zod.object({
+  "expenses": zod.array(zod.object({
+  "id": zod.number(),
+  "expenseNo": zod.string(),
+  "expenseDate": zod.string(),
+  "category": zod.string(),
+  "description": zod.string(),
+  "vendorName": zod.string().nullish(),
+  "facilityId": zod.number().nullish(),
+  "facilityName": zod.string().nullish(),
+  "amount": zod.number(),
+  "ppnAmount": zod.number(),
+  "totalAmount": zod.number(),
+  "paymentMethod": zod.string().nullish(),
+  "paymentAccount": zod.string().nullish(),
+  "paymentStatus": zod.enum(['draft', 'pending_approval', 'approved', 'paid', 'rejected', 'cancelled']),
+  "receiptUrl": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "createdBy": zod.number().nullish(),
+  "approvedBy": zod.number().nullish(),
+  "approvedAt": zod.string().nullish(),
+  "paidAt": zod.string().nullish(),
+  "rejectedReason": zod.string().nullish(),
+  "journalId": zod.string().nullish(),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
+})),
+  "summary": zod.object({
+  "totalThisMonth": zod.number(),
+  "pendingApproval": zod.number(),
+  "paid": zod.number(),
+  "unpaid": zod.number()
+}),
+  "categories": zod.array(zod.string())
+})
+
+
+/**
+ * @summary Create a new expense (draft)
+ */
+export const CreateExpenseBody = zod.object({
+  "expenseDate": zod.string(),
+  "category": zod.string(),
+  "description": zod.string(),
+  "vendorName": zod.string().optional(),
+  "facilityId": zod.number().optional(),
+  "amount": zod.number(),
+  "ppnAmount": zod.number().optional(),
+  "paymentMethod": zod.string().optional(),
+  "paymentAccount": zod.string().optional(),
+  "receiptUrl": zod.string().optional(),
+  "notes": zod.string().optional()
+})
+
+
+/**
+ * @summary Get expense detail
+ */
+export const GetExpenseParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetExpenseResponse = zod.object({
+  "id": zod.number(),
+  "expenseNo": zod.string(),
+  "expenseDate": zod.string(),
+  "category": zod.string(),
+  "description": zod.string(),
+  "vendorName": zod.string().nullish(),
+  "facilityId": zod.number().nullish(),
+  "facilityName": zod.string().nullish(),
+  "amount": zod.number(),
+  "ppnAmount": zod.number(),
+  "totalAmount": zod.number(),
+  "paymentMethod": zod.string().nullish(),
+  "paymentAccount": zod.string().nullish(),
+  "paymentStatus": zod.enum(['draft', 'pending_approval', 'approved', 'paid', 'rejected', 'cancelled']),
+  "receiptUrl": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "createdBy": zod.number().nullish(),
+  "approvedBy": zod.number().nullish(),
+  "approvedAt": zod.string().nullish(),
+  "paidAt": zod.string().nullish(),
+  "rejectedReason": zod.string().nullish(),
+  "journalId": zod.string().nullish(),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
+}).and(zod.object({
+  "createdByName": zod.string().nullish(),
+  "approvedByName": zod.string().nullish()
+}))
+
+
+/**
+ * @summary Update expense (only draft/rejected)
+ */
+export const UpdateExpenseParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const UpdateExpenseBody = zod.object({
+  "expenseDate": zod.string(),
+  "category": zod.string(),
+  "description": zod.string(),
+  "vendorName": zod.string().optional(),
+  "facilityId": zod.number().optional(),
+  "amount": zod.number(),
+  "ppnAmount": zod.number().optional(),
+  "paymentMethod": zod.string().optional(),
+  "paymentAccount": zod.string().optional(),
+  "receiptUrl": zod.string().optional(),
+  "notes": zod.string().optional()
+})
+
+export const UpdateExpenseResponse = zod.object({
+  "id": zod.number(),
+  "expenseNo": zod.string(),
+  "expenseDate": zod.string(),
+  "category": zod.string(),
+  "description": zod.string(),
+  "vendorName": zod.string().nullish(),
+  "facilityId": zod.number().nullish(),
+  "facilityName": zod.string().nullish(),
+  "amount": zod.number(),
+  "ppnAmount": zod.number(),
+  "totalAmount": zod.number(),
+  "paymentMethod": zod.string().nullish(),
+  "paymentAccount": zod.string().nullish(),
+  "paymentStatus": zod.enum(['draft', 'pending_approval', 'approved', 'paid', 'rejected', 'cancelled']),
+  "receiptUrl": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "createdBy": zod.number().nullish(),
+  "approvedBy": zod.number().nullish(),
+  "approvedAt": zod.string().nullish(),
+  "paidAt": zod.string().nullish(),
+  "rejectedReason": zod.string().nullish(),
+  "journalId": zod.string().nullish(),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
+})
+
+
+/**
+ * @summary Change expense status (submit/approve/reject/pay/cancel)
+ */
+export const UpdateExpenseStatusParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const UpdateExpenseStatusBody = zod.object({
+  "action": zod.enum(['submit', 'approve', 'reject', 'pay', 'cancel']),
+  "rejectedReason": zod.string().optional()
+})
+
+export const UpdateExpenseStatusResponse = zod.object({
+  "id": zod.number(),
+  "expenseNo": zod.string(),
+  "expenseDate": zod.string(),
+  "category": zod.string(),
+  "description": zod.string(),
+  "vendorName": zod.string().nullish(),
+  "facilityId": zod.number().nullish(),
+  "facilityName": zod.string().nullish(),
+  "amount": zod.number(),
+  "ppnAmount": zod.number(),
+  "totalAmount": zod.number(),
+  "paymentMethod": zod.string().nullish(),
+  "paymentAccount": zod.string().nullish(),
+  "paymentStatus": zod.enum(['draft', 'pending_approval', 'approved', 'paid', 'rejected', 'cancelled']),
+  "receiptUrl": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "createdBy": zod.number().nullish(),
+  "approvedBy": zod.number().nullish(),
+  "approvedAt": zod.string().nullish(),
+  "paidAt": zod.string().nullish(),
+  "rejectedReason": zod.string().nullish(),
+  "journalId": zod.string().nullish(),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
+})
+
+

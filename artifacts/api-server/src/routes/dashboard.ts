@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { db, bookingsTable, facilitiesTable, gymMembershipsTable } from "@workspace/db";
+import { db, bookingsTable, facilitiesTable, gymMembershipsTable, expensesTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
 
@@ -7,10 +7,11 @@ const router = Router();
 
 router.get("/admin/dashboard", adminMiddleware, async (req, res) => {
   try {
-    const [bookings, facilities, memberships] = await Promise.all([
+    const [bookings, facilities, memberships, expenses] = await Promise.all([
       db.select().from(bookingsTable),
       db.select().from(facilitiesTable),
       db.select().from(gymMembershipsTable),
+      db.select().from(expensesTable),
     ]);
 
     const today = new Date().toISOString().split("T")[0];
@@ -68,11 +69,24 @@ router.get("/admin/dashboard", adminMiddleware, async (req, res) => {
       return { ...b, totalPrice: Number(b.totalPrice), facilityName: fac?.name ?? "", facilityCategory: fac?.category ?? "", payment: null };
     });
 
+    const now = new Date();
+    const thisMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+    const totalExpenses = expenses
+      .filter((e) => !["cancelled", "rejected", "draft"].includes(e.paymentStatus) && e.expenseDate.startsWith(thisMonth))
+      .reduce((s, e) => s + Number(e.totalAmount), 0);
+    const paidExpenses = expenses
+      .filter((e) => e.paymentStatus === "paid" && e.expenseDate.startsWith(thisMonth))
+      .reduce((s, e) => s + Number(e.totalAmount), 0);
+    const netProfit = totalRevenue - totalExpenses;
+
     res.json({
       totalBookings,
       totalRevenue,
       bookingRevenue,
       membershipRevenue,
+      totalExpenses,
+      paidExpenses,
+      netProfit,
       todayBookings,
       pendingBookings,
       activeMemberships,

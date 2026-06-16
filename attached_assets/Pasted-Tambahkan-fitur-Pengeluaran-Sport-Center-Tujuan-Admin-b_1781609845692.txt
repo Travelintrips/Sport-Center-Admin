@@ -1,0 +1,139 @@
+Tambahkan fitur Pengeluaran Sport Center.
+
+Tujuan:
+Admin bisa mencatat semua pengeluaran operasional Sport Center seperti:
+- pembelian alat gym
+- pembelian bola
+- pembelian raket/shuttlecock
+- perbaikan lapangan
+- maintenance AC/lampu
+- gaji/fee staff
+- kebersihan
+- listrik/air
+- vendor service
+
+Tambahkan menu sidebar:
+
+LAPORAN & SISTEM
+├─ Laporan Keuangan
+├─ Pengeluaran
+
+Atau di section baru:
+
+KEUANGAN
+├─ Pembayaran Masuk
+├─ Pengeluaran
+├─ Laporan Keuangan
+
+Database:
+Buat tabel sport_expenses:
+
+- id
+- expense_no
+- expense_date
+- category
+- description
+- vendor_name
+- facility_id nullable
+- amount
+- ppn_amount
+- total_amount
+- payment_method
+- payment_account
+- payment_status: draft, pending_approval, approved, paid, rejected, cancelled
+- receipt_url
+- notes
+- created_by
+- approved_by
+- approved_at
+- paid_at
+- created_at
+- updated_at
+
+Kategori default:
+- Alat Gym
+- Bola & Peralatan Olahraga
+- Perbaikan Lapangan
+- Maintenance Fasilitas
+- Listrik & Air
+- Kebersihan
+- Gaji / Fee Staff
+- Sewa / Vendor
+- Lain-lain
+
+Fitur halaman Pengeluaran:
+1. Summary card:
+   - Total Pengeluaran Bulan Ini
+   - Pending Approval
+   - Sudah Dibayar
+   - Belum Dibayar
+
+2. Tombol:
+   + Tambah Pengeluaran
+
+3. Form Tambah Pengeluaran:
+   - Tanggal
+   - Kategori
+   - Deskripsi
+   - Vendor
+   - Fasilitas terkait optional
+   - Nominal
+   - PPN Masukan optional
+   - Total
+   - Metode pembayaran
+   - Upload nota/struk
+   - Catatan
+
+4. Approval flow:
+   - Draft
+   - Pending Approval
+   - Approved
+   - Paid
+   - Rejected
+
+5. Admin bisa:
+   - edit
+   - approve
+   - reject
+   - tandai paid
+   - upload bukti pembayaran
+   - lihat detail
+
+Integrasi accounting:
+1. Saat pengeluaran dibuat:
+   - buat audit log EXPENSE_CREATED
+
+2. Saat approved:
+   - audit log EXPENSE_APPROVED
+
+3. Saat paid:
+   - buat payment keluar
+   - buat jurnal double entry:
+     Debit Expense sesuai kategori
+     Debit PPN Masukan jika ada
+     Credit Kas/Bank
+
+4. Jika belum ada accounting journal engine, masukkan dulu ke accounting_queue dengan status pending_posting.
+
+Laporan:
+1. Pengeluaran harus masuk ke Laporan Keuangan.
+2. Dashboard revenue harus punya:
+   - Total Pendapatan
+   - Total Pengeluaran
+   - Laba Bersih
+3. Laporan bisa filter:
+   - tanggal
+   - kategori
+   - fasilitas
+   - vendor
+   - status
+
+Audit log:
+- EXPENSE_CREATED
+- EXPENSE_UPDATED
+- EXPENSE_APPROVED
+- EXPENSE_REJECTED
+- EXPENSE_PAID
+- EXPENSE_CANCELLED
+
+Pastikan fitur ini tidak merusak booking, pembayaran masuk, corporate billing, dan laporan revenue yang sudah ada.

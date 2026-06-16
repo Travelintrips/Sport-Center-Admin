@@ -481,6 +481,44 @@ async function runStartupMigrations() {
     // Hapus unique constraint booking_id agar bisa ada multiple payments per booking
     `ALTER TABLE sport_center.payments
        DROP CONSTRAINT IF EXISTS payments_booking_id_unique`,
+    // expense_status enum
+    `DO $$ BEGIN
+       CREATE TYPE sport_center.expense_status AS ENUM ('draft','pending_approval','approved','paid','rejected','cancelled');
+     EXCEPTION WHEN duplicate_object THEN null; END $$`,
+    // expense_category enum
+    `DO $$ BEGIN
+       CREATE TYPE sport_center.expense_category AS ENUM ('Alat Gym','Bola & Peralatan Olahraga','Perbaikan Lapangan','Maintenance Fasilitas','Listrik & Air','Kebersihan','Gaji / Fee Staff','Sewa / Vendor','Lain-lain');
+     EXCEPTION WHEN duplicate_object THEN null; END $$`,
+    // sport_expenses table
+    `CREATE TABLE IF NOT EXISTS sport_center.sport_expenses (
+       id serial PRIMARY KEY,
+       expense_no text NOT NULL,
+       expense_date text NOT NULL,
+       category sport_center.expense_category NOT NULL,
+       description text NOT NULL,
+       vendor_name text,
+       facility_id int REFERENCES sport_center.facilities(id) ON DELETE SET NULL,
+       amount numeric(14,2) NOT NULL,
+       ppn_amount numeric(14,2) NOT NULL DEFAULT 0,
+       total_amount numeric(14,2) NOT NULL,
+       payment_method text,
+       payment_account text,
+       payment_status sport_center.expense_status NOT NULL DEFAULT 'draft',
+       receipt_url text,
+       notes text,
+       created_by int REFERENCES sport_center.users(id) ON DELETE SET NULL,
+       approved_by int REFERENCES sport_center.users(id) ON DELETE SET NULL,
+       approved_at timestamptz,
+       paid_at timestamptz,
+       rejected_reason text,
+       journal_id text,
+       created_at timestamptz NOT NULL DEFAULT NOW(),
+       updated_at timestamptz NOT NULL DEFAULT NOW()
+     )`,
+    // sequence for expense_no
+    `CREATE SEQUENCE IF NOT EXISTS sport_center.expense_no_seq`,
+    // accounting_journals.booking_id nullable untuk expense journal entries
+    `ALTER TABLE sport_center.accounting_journals ALTER COLUMN booking_id DROP NOT NULL`,
   ];
 
   for (const stmt of migrations) {
