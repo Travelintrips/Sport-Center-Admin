@@ -463,7 +463,7 @@ router.post("/bookings", async (req, res) => {
     }
 
     // Sync to Bizportal (non-blocking)
-    syncBookingToBizportal({ booking, facilityName: facility.name }).catch(() => {});
+    syncBookingToBizportal({ booking, facilityName: facility.name, facilityCategory: facility.category }).catch(() => {});
 
     // Send WA notification (non-blocking)
     if (isCompanyBilling) {

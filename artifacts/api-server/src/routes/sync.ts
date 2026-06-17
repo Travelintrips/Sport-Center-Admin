@@ -306,19 +306,21 @@ router.post("/admin/sync-bizportal", adminMiddleware, async (req, res) => {
 
     const facilityIds = [...new Set(allBookings.map((b) => b.facilityId))];
     const facilities = facilityIds.length
-      ? await db.select({ id: facilitiesTable.id, name: facilitiesTable.name }).from(facilitiesTable)
+      ? await db.select({ id: facilitiesTable.id, name: facilitiesTable.name, category: facilitiesTable.category }).from(facilitiesTable)
       : [];
 
-    const facilityMap = new Map(facilities.map((f) => [f.id, f.name]));
+    const facilityMap = new Map(facilities.map((f) => [f.id, { name: f.name, category: f.category }]));
 
     let synced = 0;
     let failed = 0;
     const errors: string[] = [];
 
     for (const booking of allBookings) {
-      const facilityName = facilityMap.get(booking.facilityId) ?? "Unknown";
+      const facilityInfo = facilityMap.get(booking.facilityId);
+      const facilityName = facilityInfo?.name ?? "Unknown";
+      const facilityCategory = facilityInfo?.category ?? null;
       try {
-        await syncBookingToBizportal({ booking, facilityName });
+        await syncBookingToBizportal({ booking, facilityName, facilityCategory });
         synced++;
       } catch (err: any) {
         failed++;

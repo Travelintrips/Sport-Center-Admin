@@ -68,20 +68,46 @@ function toPaymentStatus(scStatus: string): string {
 export interface SyncBookingPayload {
   booking: Booking;
   facilityName: string;
+  facilityCategory?: string | null;
   paymentProofUrl?: string | null;
   paidAt?: Date | null;
+}
+
+/**
+ * Upsert facility ke BizPortal sebelum booking — agar FK constraint tidak gagal.
+ * sport_center_bookings.facility_id -> sport_center_facilities.id
+ */
+async function syncFacilityToBizportal(
+  pool: pg.Pool,
+  bizFacilityId: string,
+  facilityName: string,
+  facilityCategory: string | null | undefined
+): Promise<void> {
+  await withRetry(async () => {
+    await pool.query(
+      `INSERT INTO public.sport_center_facilities (id, name, category)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (id) DO UPDATE SET
+         name     = EXCLUDED.name,
+         category = COALESCE(EXCLUDED.category, sport_center_facilities.category)`,
+      [bizFacilityId, facilityName, facilityCategory || null]
+    );
+  }, `syncFacility:${bizFacilityId}`);
 }
 
 export async function syncBookingToBizportal(payload: SyncBookingPayload): Promise<void> {
   const pool = getProdPool();
   if (!pool) return;
 
-  const { booking, facilityName, paymentProofUrl, paidAt } = payload;
+  const { booking, facilityName, facilityCategory, paymentProofUrl, paidAt } = payload;
   const bizFacilityId = `sc-${booking.facilityId}`;
   const status = toStatus(booking.status);
   const paymentStatus = toPaymentStatus(booking.status);
 
   try {
+    // Upsert facility dulu agar FK constraint tidak gagal
+    await syncFacilityToBizportal(pool, bizFacilityId, facilityName, facilityCategory);
+
     await withRetry(async () => {
       await pool.query(
         `INSERT INTO public.sport_center_bookings
