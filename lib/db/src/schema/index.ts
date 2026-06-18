@@ -31,3 +31,4 @@ export * from "./bankReconciliation";
 export * from "./bookingGroups";
 export * from "./waBookingSessions";
 export * from "./expenses";
+export * from "./companyBillingRequirements";

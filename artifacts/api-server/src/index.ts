@@ -519,6 +519,16 @@ async function runStartupMigrations() {
     `CREATE SEQUENCE IF NOT EXISTS sport_center.expense_no_seq`,
     // accounting_journals.booking_id nullable untuk expense journal entries
     `ALTER TABLE sport_center.accounting_journals ALTER COLUMN booking_id DROP NOT NULL`,
+    // company_billing_requirements — dokumen tagihan per perusahaan
+    `CREATE TABLE IF NOT EXISTS sport_center.company_billing_requirements (
+       id serial PRIMARY KEY,
+       company_id int NOT NULL REFERENCES sport_center.users(id) ON DELETE CASCADE,
+       document_type text NOT NULL,
+       required boolean NOT NULL DEFAULT true,
+       active boolean NOT NULL DEFAULT true,
+       created_at timestamptz NOT NULL DEFAULT NOW(),
+       updated_at timestamptz NOT NULL DEFAULT NOW()
+     )`,
   ];
 
   for (const stmt of migrations) {

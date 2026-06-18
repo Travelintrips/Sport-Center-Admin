@@ -34,6 +34,7 @@ import authSocialRouter from "./auth-social";
 import verificationLogsRouter from "./verificationLogs";
 import companyInvoicesRouter from "./companyInvoices";
 import companyVerificationsRouter from "./companyVerifications";
+import companyBillingRequirementsRouter from "./companyBillingRequirements";
 
 import taxConfigRouter from "./taxConfig";
 import taxReportRouter from "./taxReport";
@@ -88,6 +89,7 @@ router.use(whatsappRouter);
 router.use(verificationLogsRouter);
 router.use(companyInvoicesRouter);
 router.use(companyVerificationsRouter);
+router.use(companyBillingRequirementsRouter);
 router.use(taxConfigRouter);
 router.use(taxReportRouter);
 router.use(sportCenterBookingsRouter);
