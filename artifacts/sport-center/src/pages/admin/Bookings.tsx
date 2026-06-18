@@ -256,34 +256,46 @@ function printInvoice(booking: any, settings?: any) {
           <th>Tanggal</th>
           <th>Jam</th>
           <th>Durasi</th>
-          <th style="text-align:right">Harga</th>
+          <th style="text-align:right">Harga (Inc. PPN)</th>
         </tr>
       </thead>
       <tbody>
+        ${(() => {
+          const gt = Number(booking.grandTotal ?? booking.totalPrice);
+          const hasPpn = booking.ppnAmount != null && Number(booking.ppnAmount) > 0;
+          const dpp = hasPpn ? Math.round(gt / 1.11) : gt;
+          const dppNilaiLain = hasPpn ? Math.round(dpp * 11 / 12) : 0;
+          const ppn = hasPpn ? (gt - dpp) : 0;
+          return `
         <tr>
           <td>${booking.facilityName}</td>
           <td>${formatDate(booking.bookingDate)}</td>
           <td>${booking.startTime?.slice(0,5)} – ${booking.endTime?.slice(0,5)}</td>
           <td>${booking.durationHours} jam</td>
-          <td style="text-align:right;font-weight:600">${formatCurrency(booking.totalPrice)}</td>
+          <td style="text-align:right;font-weight:600">${formatCurrency(gt)}</td>
         </tr>
-        ${booking.ppnAmount != null && Number(booking.ppnAmount) > 0 ? `
+        ${hasPpn ? `
         <tr>
           <td colspan="4" style="text-align:right;padding-right:16px;font-size:12px;color:#555">DPP</td>
-          <td style="text-align:right;font-size:12px;color:#555">${formatCurrency(Number(booking.totalPrice))}</td>
+          <td style="text-align:right;font-size:12px;color:#555">${formatCurrency(dpp)}</td>
         </tr>
         <tr>
-          <td colspan="4" style="text-align:right;padding-right:16px;font-size:12px;color:#555">PPN ${Number(booking.ppnRate ?? 11)}%</td>
-          <td style="text-align:right;font-size:12px;color:#555">${formatCurrency(Number(booking.ppnAmount))}</td>
+          <td colspan="4" style="text-align:right;padding-right:16px;font-size:12px;color:#888">DPP Nilai Lain (11/12 × DPP)</td>
+          <td style="text-align:right;font-size:12px;color:#888">${formatCurrency(dppNilaiLain)}</td>
+        </tr>
+        <tr>
+          <td colspan="4" style="text-align:right;padding-right:16px;font-size:12px;color:#555">PPN 12%</td>
+          <td style="text-align:right;font-size:12px;color:#555">${formatCurrency(ppn)}</td>
         </tr>
         <tr class="total-row">
-          <td colspan="4" style="text-align:right;padding-right:16px">Grand Total (DPP + PPN)</td>
-          <td style="text-align:right">${formatCurrency(Number(booking.grandTotal ?? (Number(booking.totalPrice) + Number(booking.ppnAmount))))}</td>
+          <td colspan="4" style="text-align:right;padding-right:16px">Total DPP + PPN</td>
+          <td style="text-align:right">${formatCurrency(gt)}</td>
         </tr>` : `
         <tr class="total-row">
           <td colspan="4" style="text-align:right;padding-right:16px">Total</td>
-          <td style="text-align:right">${formatCurrency(booking.totalPrice)}</td>
-        </tr>`}
+          <td style="text-align:right">${formatCurrency(gt)}</td>
+        </tr>`}`;
+        })()}
       </tbody>
     </table>
   </div>
@@ -326,10 +338,11 @@ function printKwitansi(booking: any, settings?: any) {
   const logoUrl = settings?.logoUrl ?? "";
   const now = new Date().toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" });
 
-  const dpp = Math.round(Number(booking.totalPrice));
-  const ppnRate = booking.ppnRate != null ? Number(booking.ppnRate) : 11;
-  const ppn = booking.ppnAmount != null ? Math.round(Number(booking.ppnAmount)) : Math.round(dpp * ppnRate / 100);
-  const total = booking.grandTotal != null ? Math.round(Number(booking.grandTotal)) : dpp + ppn;
+  const total = booking.grandTotal != null ? Math.round(Number(booking.grandTotal)) : Math.round(Number(booking.totalPrice));
+  const hasPpnK = booking.ppnAmount != null && Number(booking.ppnAmount) > 0;
+  const dpp = hasPpnK ? Math.round(total / 1.11) : total;
+  const dppNilaiLain = hasPpnK ? Math.round(dpp * 11 / 12) : 0;
+  const ppn = hasPpnK ? (total - dpp) : 0;
   const terbilangText = terbilang(total) + " Rupiah";
 
   const statusLabel = booking.status === "completed" ? "Lunas" :
@@ -455,14 +468,19 @@ function printKwitansi(booking: any, settings?: any) {
 
   <div class="totals-section">
     <table class="totals-table">
+      ${hasPpnK ? `
       <tr>
         <td>DPP</td>
         <td>${formatCurrency(dpp)}</td>
       </tr>
       <tr>
-        <td>PPN ${ppnRate}%</td>
-        <td>${formatCurrency(ppn)}</td>
+        <td style="font-size:11px;color:#999;">DPP Nilai Lain (11/12 × DPP)</td>
+        <td style="font-size:11px;color:#999;">${formatCurrency(dppNilaiLain)}</td>
       </tr>
+      <tr>
+        <td>PPN 12%</td>
+        <td>${formatCurrency(ppn)}</td>
+      </tr>` : ""}
       <tr class="grand-total">
         <td>Total DPP + PPN</td>
         <td>${formatCurrency(total)}</td>
@@ -815,22 +833,34 @@ function BookingDetailDrawer({
               <InfoRow icon={Hash} label="Durasi" value={`${booking.durationHours} jam`} />
               {booking.ppnAmount != null && Number(booking.ppnAmount) > 0 ? (
                 <div className="col-span-2 border-t border-slate-100 dark:border-slate-700 pt-3 mt-1 space-y-1.5">
-                  <div className="flex justify-between items-center text-sm">
-                    <span className="flex items-center gap-1 text-slate-500"><CreditCard size={11} />Subtotal (DPP)</span>
-                    <span className="font-semibold text-slate-700 dark:text-slate-300">{formatCurrency(booking.totalPrice)}</span>
-                  </div>
-                  <div className="flex justify-between items-center text-sm">
-                    <span className="text-slate-500 pl-3.5">PPN {Number(booking.ppnRate ?? 11)}%</span>
-                    <span className="text-orange-600 font-semibold">+{formatCurrency(Number(booking.ppnAmount))}</span>
-                  </div>
-                  <div className="flex justify-between items-center text-sm border-t border-slate-100 dark:border-slate-700 pt-1.5 mt-1">
-                    <span className="font-bold text-slate-700 dark:text-slate-200">Grand Total</span>
-                    <span className="font-black text-emerald-600 dark:text-emerald-400 text-base">{formatCurrency(Number(booking.grandTotal))}</span>
-                  </div>
-                  <div className="flex items-center gap-2 pt-1">
-                    <span className="text-[10px] bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300 px-2 py-0.5 rounded font-semibold">PPN_OUT_11</span>
-                    <span className="text-[10px] bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 px-2 py-0.5 rounded font-semibold">Terutang PPN</span>
-                  </div>
+                  {(() => {
+                    const gt = Number(booking.grandTotal ?? booking.totalPrice);
+                    const dppCard = Math.round(gt / 1.11);
+                    const dppNilaiLainCard = Math.round(dppCard * 11 / 12);
+                    const ppnCard = gt - dppCard;
+                    return (<>
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="flex items-center gap-1 text-slate-500"><CreditCard size={11} />DPP</span>
+                        <span className="font-semibold text-slate-700 dark:text-slate-300">{formatCurrency(dppCard)}</span>
+                      </div>
+                      <div className="flex justify-between items-center text-xs text-slate-400">
+                        <span className="pl-3.5">DPP Nilai Lain (11/12 × DPP)</span>
+                        <span>{formatCurrency(dppNilaiLainCard)}</span>
+                      </div>
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="text-slate-500 pl-3.5">PPN 12%</span>
+                        <span className="text-orange-600 font-semibold">+{formatCurrency(ppnCard)}</span>
+                      </div>
+                      <div className="flex justify-between items-center text-sm border-t border-slate-100 dark:border-slate-700 pt-1.5 mt-1">
+                        <span className="font-bold text-slate-700 dark:text-slate-200">Total DPP + PPN</span>
+                        <span className="font-black text-emerald-600 dark:text-emerald-400 text-base">{formatCurrency(gt)}</span>
+                      </div>
+                      <div className="flex items-center gap-2 pt-1">
+                        <span className="text-[10px] bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300 px-2 py-0.5 rounded font-semibold">PPN_OUT_12</span>
+                        <span className="text-[10px] bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 px-2 py-0.5 rounded font-semibold">DPP Nilai Lain</span>
+                      </div>
+                    </>);
+                  })()}
                 </div>
               ) : (
                 <InfoRow

@@ -518,7 +518,7 @@ export function buildInvoiceHtml(data: InvoiceData, opts: BuildOptions = {}): st
         <th>Tanggal</th>
         <th style="text-align:center;">Jam</th>
         <th style="text-align:center;">Durasi</th>
-        <th style="text-align:right;">Harga</th>
+        <th style="text-align:right;">Harga (Inc. PPN)</th>
       </tr>
     </thead>
     <tbody>
@@ -531,31 +531,25 @@ export function buildInvoiceHtml(data: InvoiceData, opts: BuildOptions = {}): st
   ═══════════════════════════════════════════════════════════════ -->
   <div class="sc-total-wrap">
     <table class="sc-total-table">
+      ${data.ppnAmount > 0 ? `
       <tr class="subtotal">
         <td>DPP</td>
         <td style="text-align:right;font-family:'Courier New',monospace;">Rp ${rp(data.dpp)}</td>
       </tr>
-      ${data.dppNilaiLain > 0 ? `
       <tr class="subtotal">
         <td style="color:#6b7280;font-size:12px;">DPP Nilai Lain <span style="font-weight:400;font-size:11px;">(11/12 × DPP)</span></td>
         <td style="text-align:right;font-family:'Courier New',monospace;color:#6b7280;font-size:12px;">Rp ${rp(data.dppNilaiLain)}</td>
-      </tr>` : ""}
-      <tr class="ppn">
-        <td>PPN ${data.ppnRate}%</td>
-        <td style="text-align:right;font-family:'Courier New',monospace;">Rp ${rp(data.ppnAmount)}</td>
       </tr>
+      <tr class="ppn">
+        <td>PPN 12%</td>
+        <td style="text-align:right;font-family:'Courier New',monospace;">Rp ${rp(data.ppnAmount)}</td>
+      </tr>` : ""}
       <tr class="grand">
         <td>TOTAL</td>
         <td style="text-align:right;font-family:'Courier New',monospace;">Rp ${rp(data.grandTotal)}</td>
       </tr>
     </table>
   </div>
-  ${data.dppNilaiLain > 0 ? `
-  <div style="text-align:right;margin-top:-14px;margin-bottom:16px;">
-    <span style="font-size:10px;color:#9ca3af;font-style:italic;">
-      Perhitungan pajak menggunakan DPP Nilai Lain (11/12 dari DPP) sesuai konfigurasi sistem.
-    </span>
-  </div>` : ""}
 
   <div class="sc-terbilang">
     <strong>Terbilang:</strong> ${terbilangStr}
