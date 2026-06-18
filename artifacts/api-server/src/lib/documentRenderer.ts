@@ -335,5 +335,78 @@ export async function renderDocument(params: {
 
   const html = wrapInHtmlPage(bodyContent, tpl?.paperStyle || "A4", printMode);
 
-  return { html, templateId: tpl?.id ?? null, documentNumber };
+  return { html, templateId: tpl?.id ?? null, documentNumber, tplVars };
+}
+
+/**
+ * Returns a WhatsApp-formatted plain text representation of the document,
+ * using company-specific template branding (companyDisplayName, financeName,
+ * financeTitle) merged with entity data. Returns null if entity not found.
+ */
+export async function renderDocumentText(params: {
+  documentType: DocumentType;
+  entityId: number;
+  companyId?: number | null;
+}): Promise<string | null> {
+  const { documentType, entityId, companyId = null } = params;
+
+  try {
+    const tpl = await getTemplate(documentType, companyId);
+    const settings = await getSettings();
+    const centerName = settings?.centerName || "Sport Center Jakarta";
+
+    const companyDisplayName = tpl?.companyDisplayName || centerName;
+    const financeName = tpl?.financeName || "";
+    const financeTitle = tpl?.financeTitle || "Finance Manager";
+
+    if (documentType === "invoice" || documentType === "lampiran" || documentType === "berita_acara") {
+      const [inv] = await db.select().from(companyInvoicesTable).where(eq(companyInvoicesTable.id, entityId)).limit(1);
+      if (!inv) return null;
+      const [company] = await db.select().from(usersTable).where(eq(usersTable.id, inv.companyCustomerId)).limit(1);
+      const total = Number(inv.grandTotal || inv.totalAmount || 0);
+
+      return [
+        `📄 *INVOICE PEMBAYARAN*`,
+        `Nomor: ${inv.invoiceNumber || "-"}`,
+        `Periode: ${inv.periodMonth || "-"}`,
+        ``,
+        `Kepada Yth.`,
+        `*${company?.companyName || company?.name || "-"}*`,
+        ``,
+        `Total Tagihan: *${formatIDR(total)}*`,
+        ``,
+        `Diterbitkan oleh: ${companyDisplayName}`,
+        financeName ? `${financeTitle}: ${financeName}` : "",
+      ].filter(Boolean).join("\n");
+    } else {
+      const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, entityId)).limit(1);
+      if (!booking) return null;
+      const [facility] = await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, booking.facilityId)).limit(1);
+      const grand = Number(booking.grandTotal ?? booking.totalPrice ?? 0);
+
+      const docTitleMap: Record<string, string> = {
+        spp: "SURAT PERINTAH PEMBAYARAN (SPP)",
+        faktur: "FAKTUR PEMBAYARAN",
+        kwitansi: "KWITANSI PEMBAYARAN",
+      };
+      const docTitle = docTitleMap[documentType] || documentType.toUpperCase();
+
+      return [
+        `📄 *${docTitle}*`,
+        ``,
+        `Kepada: *${booking.customerName || "-"}*`,
+        `Fasilitas: ${facility?.name || "-"}`,
+        `Tanggal: ${formatDate(booking.bookingDate)}`,
+        `Waktu: ${booking.startTime} – ${booking.endTime}`,
+        ``,
+        `Total: *${formatIDR(grand)}*`,
+        documentType === "kwitansi" ? `✅ Pembayaran telah dikonfirmasi` : "",
+        ``,
+        `Diterbitkan oleh: ${companyDisplayName}`,
+        financeName ? `${financeTitle}: ${financeName}` : "",
+      ].filter(Boolean).join("\n");
+    }
+  } catch {
+    return null;
+  }
 }

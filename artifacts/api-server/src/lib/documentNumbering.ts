@@ -29,6 +29,10 @@ export async function generateDocumentNumber(params: {
   const { prefix, companyId, companyCode, documentType, entityType, entityId } = params;
   const code = companyCode || "SC";
 
+  // Use sentinel value 0 for system-default (NULL company_id).
+  // This ensures ON CONFLICT works correctly — NULL != NULL in Postgres UNIQUE constraints.
+  const companyIdSentinel = companyId ?? 0;
+
   // Idempotent: check if a number was already issued for this entity
   try {
     const existing = await db.execute(drizzleSql`
@@ -36,7 +40,7 @@ export async function generateDocumentNumber(params: {
       WHERE entity_type = ${entityType}
         AND entity_id  = ${entityId}
         AND document_type = ${documentType}
-        AND company_id IS NOT DISTINCT FROM ${companyId ?? null}
+        AND company_id = ${companyIdSentinel}
       LIMIT 1
     `);
     if (existing.rows.length > 0) {
@@ -46,13 +50,13 @@ export async function generateDocumentNumber(params: {
     // Table may not exist yet (before migration) — fall through
   }
 
-  // Atomic sequence increment using INSERT … ON CONFLICT … DO UPDATE RETURNING
-  // This is safe under concurrent load; no read-then-update race condition.
+  // Atomic sequence increment using INSERT … ON CONFLICT … DO UPDATE RETURNING.
+  // company_id uses sentinel 0 for system-default so ON CONFLICT triggers correctly.
   const seqResult = await db.execute(drizzleSql`
     INSERT INTO sport_center.document_number_sequences
       (company_id, document_type, year, current_seq)
     VALUES
-      (${companyId ?? null}, ${documentType}, ${year}, 1)
+      (${companyIdSentinel}, ${documentType}, ${year}, 1)
     ON CONFLICT (company_id, document_type, year)
     DO UPDATE SET current_seq = sport_center.document_number_sequences.current_seq + 1
     RETURNING current_seq
@@ -68,7 +72,7 @@ export async function generateDocumentNumber(params: {
       INSERT INTO sport_center.document_issued_numbers
         (entity_type, entity_id, document_type, company_id, document_number)
       VALUES
-        (${entityType}, ${entityId}, ${documentType}, ${companyId ?? null}, ${docNumber})
+        (${entityType}, ${entityId}, ${documentType}, ${companyIdSentinel}, ${docNumber})
       ON CONFLICT (entity_type, entity_id, document_type, company_id) DO NOTHING
     `);
   } catch {

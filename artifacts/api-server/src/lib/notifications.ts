@@ -1,4 +1,5 @@
 import { db, notificationTemplatesTable, settingsTable } from "@workspace/db";
+import { renderDocumentText } from "./documentRenderer";
 import { eq } from "drizzle-orm";
 import { trackSentMessage } from "./waSentTracker";
 
@@ -110,18 +111,28 @@ export async function notifyBookingCreated(data: BookingNotifData): Promise<void
 }
 
 export async function notifyPaymentConfirmed(data: BookingNotifData): Promise<void> {
-  const tpl = await getTemplate("payment_confirmed");
-  if (!tpl) return;
-  let kwitansiUrl = "";
+  // Attempt to render WA message from company document template engine (kwitansi)
   if (data.bookingId) {
     try {
-      const [s] = await db.select().from(settingsTable).limit(1).catch(() => [null]);
-      const appUrl = (s as { appUrl?: string } | null)?.appUrl || process.env.APP_URL || "";
-      if (appUrl) kwitansiUrl = `${appUrl}/api/admin/documents/kwitansi/${data.bookingId}/preview?_token=`;
-    } catch { /* non-fatal */ }
+      const rendered = await renderDocumentText({ documentType: "kwitansi", entityId: data.bookingId });
+      if (rendered) {
+        // Optionally append preview link if app URL is configured
+        let msg = rendered;
+        try {
+          const [s] = await db.select().from(settingsTable).limit(1).catch(() => [null]);
+          const appUrl = (s as { appUrl?: string } | null)?.appUrl || process.env.APP_URL || "";
+          if (appUrl) msg += `\n\n🔗 Lihat kwitansi digital:\n${appUrl}/api/admin/documents/kwitansi/${data.bookingId}/preview`;
+        } catch { /* non-fatal */ }
+        await sendWA(data.customerPhone, msg);
+        return;
+      }
+    } catch { /* non-fatal — fall through to legacy template */ }
   }
-  const vars = { ...(data as unknown as Record<string, string>), kwitansiUrl };
-  await sendWA(data.customerPhone, interpolate(tpl, vars));
+
+  // Fallback: legacy notification template
+  const tpl = await getTemplate("payment_confirmed");
+  if (!tpl) return;
+  await sendWA(data.customerPhone, interpolate(tpl, data as unknown as Record<string, string>));
 }
 
 export async function notifyBookingCancelled(data: BookingNotifData): Promise<void> {

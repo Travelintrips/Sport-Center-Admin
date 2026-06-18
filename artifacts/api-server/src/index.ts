@@ -543,14 +543,20 @@ async function runStartupMigrations() {
      )`,
     `CREATE INDEX IF NOT EXISTS company_document_templates_company_id_idx ON sport_center.company_document_templates(company_id)`,
     `CREATE INDEX IF NOT EXISTS company_document_templates_document_type_idx ON sport_center.company_document_templates(document_type)`,
-    // document_number_sequences
+    // document_number_sequences (company_id = 0 is sentinel for system-default)
     `CREATE TABLE IF NOT EXISTS sport_center.document_number_sequences (
        id serial PRIMARY KEY,
-       company_id integer,
+       company_id integer NOT NULL DEFAULT 0,
        document_type text NOT NULL,
        year integer NOT NULL,
        current_seq integer NOT NULL DEFAULT 0
      )`,
+    // Migrate existing rows that used NULL before sentinel was introduced
+    `UPDATE sport_center.document_number_sequences SET company_id = 0 WHERE company_id IS NULL`,
+    `DO $$ BEGIN
+       ALTER TABLE sport_center.document_number_sequences ALTER COLUMN company_id SET NOT NULL;
+       ALTER TABLE sport_center.document_number_sequences ALTER COLUMN company_id SET DEFAULT 0;
+     EXCEPTION WHEN others THEN NULL; END $$`,
     `DO $$ BEGIN
        IF NOT EXISTS (
          SELECT 1 FROM pg_constraint
@@ -573,16 +579,22 @@ async function runStartupMigrations() {
        SELECT 1 FROM sport_center.company_document_templates
        WHERE company_id IS NULL AND document_type = t.dt AND is_default = true
      )`,
-    // document_issued_numbers for idempotent document number assignment
+    // document_issued_numbers (company_id = 0 is sentinel for system-default)
     `CREATE TABLE IF NOT EXISTS sport_center.document_issued_numbers (
        id serial PRIMARY KEY,
        entity_type text NOT NULL,
        entity_id integer NOT NULL,
        document_type text NOT NULL,
-       company_id integer,
+       company_id integer NOT NULL DEFAULT 0,
        document_number text NOT NULL,
        issued_at timestamptz NOT NULL DEFAULT now()
      )`,
+    // Migrate existing rows that used NULL before sentinel was introduced
+    `UPDATE sport_center.document_issued_numbers SET company_id = 0 WHERE company_id IS NULL`,
+    `DO $$ BEGIN
+       ALTER TABLE sport_center.document_issued_numbers ALTER COLUMN company_id SET NOT NULL;
+       ALTER TABLE sport_center.document_issued_numbers ALTER COLUMN company_id SET DEFAULT 0;
+     EXCEPTION WHEN others THEN NULL; END $$`,
     `DO $$ BEGIN
        IF NOT EXISTS (
          SELECT 1 FROM pg_constraint

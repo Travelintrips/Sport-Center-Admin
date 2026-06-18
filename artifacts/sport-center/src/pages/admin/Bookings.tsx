@@ -734,16 +734,15 @@ function BookingDetailDrawer({
                 <Receipt size={14} />
               </button>
             )}
-            {/* Document template preview — opens rendered kwitansi/invoice in new tab */}
+            {/* Document template preview — kwitansi uses booking.id directly */}
             {booking.id && (
               <button
                 onClick={() => {
                   const apiBase = import.meta.env.VITE_API_BASE_URL ?? "/api";
                   const token = getToken() ?? "";
-                  const docType = isCompleted ? "kwitansi" : "invoice";
-                  window.open(`${apiBase}/admin/documents/${docType}/${booking.id}/preview?_token=${encodeURIComponent(token)}`, "_blank");
+                  window.open(`${apiBase}/admin/documents/kwitansi/${booking.id}/preview?_token=${encodeURIComponent(token)}`, "_blank");
                 }}
-                title="Preview Dokumen Template"
+                title="Preview Kwitansi (Template)"
                 className="w-7 h-7 rounded-lg flex items-center justify-center text-violet-500 hover:text-violet-700 hover:bg-violet-50 dark:hover:bg-violet-900/20 transition-colors"
               >
                 <Eye size={14} />

@@ -260,7 +260,13 @@ router.get("/admin/documents/:documentType/:entityId/pdf", adminDocumentPreviewM
 
     const { ipAddress, userAgent } = getClientInfo(req);
     const userInfo = getUserFromReq(req);
+
+    // Audit: render event (always)
     await logAudit({ ...userInfo, action: "DOCUMENT_RENDERED_WITH_TEMPLATE", entity: documentType, entityId: parseInt(entityId), after: { templateId, companyId, documentNumber, mode: pdfBuffer ? "pdf" : "html-fallback" }, ipAddress, userAgent });
+    // Audit: distinct PDF generated event (only when binary PDF produced)
+    if (pdfBuffer) {
+      await logAudit({ ...userInfo, action: "DOCUMENT_PDF_GENERATED", entity: documentType, entityId: parseInt(entityId), after: { templateId, companyId, documentNumber, bytes: pdfBuffer.length }, ipAddress, userAgent });
+    }
 
     if (pdfBuffer) {
       res.setHeader("Content-Type", "application/pdf");

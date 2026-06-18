@@ -544,13 +544,24 @@ CREATE INDEX IF NOT EXISTS company_document_templates_company_id_idx ON sport_ce
 CREATE INDEX IF NOT EXISTS company_document_templates_document_type_idx ON sport_center.company_document_templates(document_type);
 
 -- Document number sequences per company per document_type per year
+-- company_id = 0 is sentinel for system-default (NULL cannot be used with ON CONFLICT)
 CREATE TABLE IF NOT EXISTS sport_center.document_number_sequences (
   id serial PRIMARY KEY,
-  company_id integer,
+  company_id integer NOT NULL DEFAULT 0,
   document_type text NOT NULL,
   year integer NOT NULL,
   current_seq integer NOT NULL DEFAULT 0
 );
+
+-- Migrate any pre-sentinel NULL rows to 0
+UPDATE sport_center.document_number_sequences SET company_id = 0 WHERE company_id IS NULL;
+
+DO $$
+BEGIN
+  ALTER TABLE sport_center.document_number_sequences ALTER COLUMN company_id SET NOT NULL;
+  ALTER TABLE sport_center.document_number_sequences ALTER COLUMN company_id SET DEFAULT 0;
+EXCEPTION WHEN others THEN NULL;
+END $$;
 
 DO $$
 BEGIN
@@ -566,15 +577,26 @@ EXCEPTION WHEN others THEN NULL;
 END $$;
 
 -- Idempotent issued-number tracking for document template engine
+-- company_id = 0 is sentinel for system-default (NULL cannot be used with ON CONFLICT)
 CREATE TABLE IF NOT EXISTS sport_center.document_issued_numbers (
   id serial PRIMARY KEY,
   entity_type text NOT NULL,
   entity_id integer NOT NULL,
   document_type text NOT NULL,
-  company_id integer,
+  company_id integer NOT NULL DEFAULT 0,
   document_number text NOT NULL,
   issued_at timestamptz NOT NULL DEFAULT now()
 );
+
+-- Migrate any pre-sentinel NULL rows to 0
+UPDATE sport_center.document_issued_numbers SET company_id = 0 WHERE company_id IS NULL;
+
+DO $$
+BEGIN
+  ALTER TABLE sport_center.document_issued_numbers ALTER COLUMN company_id SET NOT NULL;
+  ALTER TABLE sport_center.document_issued_numbers ALTER COLUMN company_id SET DEFAULT 0;
+EXCEPTION WHEN others THEN NULL;
+END $$;
 
 DO $$
 BEGIN
