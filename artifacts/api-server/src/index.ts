@@ -605,6 +605,16 @@ async function runStartupMigrations() {
            ADD CONSTRAINT doc_issued_unique UNIQUE (entity_type, entity_id, document_type, company_id);
        END IF;
      EXCEPTION WHEN others THEN NULL; END $$`,
+    // company_billing_requirements — dokumen tagihan per perusahaan
+    `CREATE TABLE IF NOT EXISTS sport_center.company_billing_requirements (
+       id serial PRIMARY KEY,
+       company_id int NOT NULL REFERENCES sport_center.users(id) ON DELETE CASCADE,
+       document_type text NOT NULL,
+       required boolean NOT NULL DEFAULT true,
+       active boolean NOT NULL DEFAULT true,
+       created_at timestamptz NOT NULL DEFAULT NOW(),
+       updated_at timestamptz NOT NULL DEFAULT NOW()
+     )`,
   ];
 
   for (const stmt of migrations) {
