@@ -141,7 +141,7 @@ export function buildInvoiceHtml(data: InvoiceData, opts: BuildOptions = {}): st
       <td style="padding:10px 12px;font-size:13px;">${bookingDateFmt}</td>
       <td style="padding:10px 12px;font-size:13px;">${data.startTime} – ${data.endTime}</td>
       <td style="padding:10px 12px;font-size:13px;text-align:center;">${data.durationHours} jam</td>
-      <td style="padding:10px 12px;font-size:13px;text-align:right;">Rp ${rp(data.dpp)}</td>
+      <td style="padding:10px 12px;font-size:13px;text-align:right;">Rp ${rp(data.grandTotal)}</td>
     </tr>
     ${hasDiscount ? `
     <tr style="background:#fff7ed;">

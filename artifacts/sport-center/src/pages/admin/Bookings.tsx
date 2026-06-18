@@ -265,24 +265,30 @@ function printInvoice(booking: any, settings?: any) {
           <td>${formatDate(booking.bookingDate)}</td>
           <td>${booking.startTime?.slice(0,5)} – ${booking.endTime?.slice(0,5)}</td>
           <td>${booking.durationHours} jam</td>
-          <td style="text-align:right;font-weight:600">${formatCurrency(booking.totalPrice)}</td>
+          <td style="text-align:right;font-weight:600">${formatCurrency(booking.grandTotal ?? booking.totalPrice)}</td>
         </tr>
-        ${booking.ppnAmount != null && Number(booking.ppnAmount) > 0 ? `
+        ${booking.ppnRate != null && Number(booking.ppnRate) > 0 ? (() => {
+          const gt = Math.round(Number(booking.grandTotal ?? booking.totalPrice));
+          const rate = Number(booking.ppnRate);
+          const _dpp = Math.round(gt / (1 + rate / 100));
+          const _ppn = gt - _dpp;
+          return `
         <tr>
           <td colspan="4" style="text-align:right;padding-right:16px;font-size:12px;color:#555">DPP</td>
-          <td style="text-align:right;font-size:12px;color:#555">${formatCurrency(Number(booking.totalPrice))}</td>
+          <td style="text-align:right;font-size:12px;color:#555">${formatCurrency(_dpp)}</td>
         </tr>
         <tr>
-          <td colspan="4" style="text-align:right;padding-right:16px;font-size:12px;color:#555">PPN ${Number(booking.ppnRate ?? 11)}%</td>
-          <td style="text-align:right;font-size:12px;color:#555">${formatCurrency(Number(booking.ppnAmount))}</td>
+          <td colspan="4" style="text-align:right;padding-right:16px;font-size:12px;color:#555">PPN ${rate}%</td>
+          <td style="text-align:right;font-size:12px;color:#555">${formatCurrency(_ppn)}</td>
         </tr>
         <tr class="total-row">
-          <td colspan="4" style="text-align:right;padding-right:16px">Grand Total (DPP + PPN)</td>
-          <td style="text-align:right">${formatCurrency(Number(booking.grandTotal ?? (Number(booking.totalPrice) + Number(booking.ppnAmount))))}</td>
-        </tr>` : `
+          <td colspan="4" style="text-align:right;padding-right:16px">Total (sudah termasuk PPN)</td>
+          <td style="text-align:right">${formatCurrency(gt)}</td>
+        </tr>`;
+        })() : `
         <tr class="total-row">
           <td colspan="4" style="text-align:right;padding-right:16px">Total</td>
-          <td style="text-align:right">${formatCurrency(booking.totalPrice)}</td>
+          <td style="text-align:right">${formatCurrency(booking.grandTotal ?? booking.totalPrice)}</td>
         </tr>`}
       </tbody>
     </table>
@@ -326,10 +332,13 @@ function printKwitansi(booking: any, settings?: any) {
   const logoUrl = settings?.logoUrl ?? "";
   const now = new Date().toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" });
 
-  const dpp = Math.round(Number(booking.totalPrice));
+  // Harga tax-inclusive: grandTotal = harga all-in, DPP di-extract dari grandTotal
+  const total = booking.grandTotal != null
+    ? Math.round(Number(booking.grandTotal))
+    : Math.round(Number(booking.totalPrice));
   const ppnRate = booking.ppnRate != null ? Number(booking.ppnRate) : 11;
-  const ppn = booking.ppnAmount != null ? Math.round(Number(booking.ppnAmount)) : Math.round(dpp * ppnRate / 100);
-  const total = booking.grandTotal != null ? Math.round(Number(booking.grandTotal)) : dpp + ppn;
+  const dpp = Math.round(total / (1 + ppnRate / 100));
+  const ppn = total - dpp;
   const terbilangText = terbilang(total) + " Rupiah";
 
   const statusLabel = booking.status === "completed" ? "Lunas" :
@@ -447,7 +456,7 @@ function printKwitansi(booking: any, settings?: any) {
         <td>${formatDate(booking.bookingDate)}</td>
         <td>${booking.startTime?.slice(0,5)} – ${booking.endTime?.slice(0,5)}</td>
         <td>${booking.durationHours} Jam</td>
-        <td>${formatCurrency(dpp)}</td>
+        <td>${formatCurrency(total)}</td>
       </tr>
       <tr><td colspan="5" style="padding:4px;background:#fff7f3;"></td></tr>
     </tbody>
@@ -464,7 +473,7 @@ function printKwitansi(booking: any, settings?: any) {
         <td>${formatCurrency(ppn)}</td>
       </tr>
       <tr class="grand-total">
-        <td>Total DPP + PPN</td>
+        <td>Total (sudah termasuk PPN)</td>
         <td>${formatCurrency(total)}</td>
       </tr>
     </table>

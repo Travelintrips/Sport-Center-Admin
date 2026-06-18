@@ -38,11 +38,9 @@ async function resolveInvoiceData(orderNumber: string): Promise<InvoiceData | nu
 
   const [settings] = await db.select().from(settingsTable).limit(1);
 
-  // Get tax rate from booking or active tax settings
+  // Harga bersifat tax-inclusive: grandTotal IS harga all-in yang customer bayar
+  // DPP di-back-calculate dari grandTotal: DPP = grandTotal / (1 + rate/100)
   let ppnRate = booking.ppnRate ? Number(booking.ppnRate) : 0;
-  let ppnAmount = booking.ppnAmount ? Number(booking.ppnAmount) : 0;
-  const dpp = Number(booking.totalPrice ?? 0);
-  let grandTotal = booking.grandTotal ? Number(booking.grandTotal) : dpp + ppnAmount;
 
   if (!ppnRate) {
     // No PPN stored on booking – use active tax setting (default 12%)
@@ -58,9 +56,15 @@ async function resolveInvoiceData(orderNumber: string): Promise<InvoiceData | nu
       .limit(1);
 
     ppnRate = taxSetting ? Number(taxSetting.taxRate) : 12;
-    ppnAmount = Math.round(dpp * (ppnRate / 100));
-    grandTotal = dpp + ppnAmount;
   }
+
+  // grandTotal = harga all-in (sudah termasuk PPN)
+  const grandTotal = booking.grandTotal
+    ? Number(booking.grandTotal)
+    : Number(booking.totalPrice ?? 0);
+  // DPP di-extract dari grandTotal (tax-inclusive)
+  const dpp = Math.round(grandTotal / (1 + ppnRate / 100));
+  const ppnAmount = grandTotal - dpp;
 
   const invoiceNumber = formatInvoiceNumber(booking.orderNumber, booking.bookingDate);
 
