@@ -95,6 +95,7 @@ export interface BookingNotifData {
   paymentDeadline?: string;
   reason?: string;
   reviewUrl?: string;
+  bookingId?: number;
 }
 
 export async function notifyBookingCreated(data: BookingNotifData): Promise<void> {
@@ -110,7 +111,17 @@ export async function notifyBookingCreated(data: BookingNotifData): Promise<void
 
 export async function notifyPaymentConfirmed(data: BookingNotifData): Promise<void> {
   const tpl = await getTemplate("payment_confirmed");
-  if (tpl) await sendWA(data.customerPhone, interpolate(tpl, data as unknown as Record<string, string>));
+  if (!tpl) return;
+  let kwitansiUrl = "";
+  if (data.bookingId) {
+    try {
+      const [s] = await db.select().from(settingsTable).limit(1).catch(() => [null]);
+      const appUrl = (s as { appUrl?: string } | null)?.appUrl || process.env.APP_URL || "";
+      if (appUrl) kwitansiUrl = `${appUrl}/api/admin/documents/kwitansi/${data.bookingId}/preview`;
+    } catch { /* non-fatal */ }
+  }
+  const vars = { ...(data as unknown as Record<string, string>), kwitansiUrl };
+  await sendWA(data.customerPhone, interpolate(tpl, vars));
 }
 
 export async function notifyBookingCancelled(data: BookingNotifData): Promise<void> {

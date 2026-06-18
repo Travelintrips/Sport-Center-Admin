@@ -1,8 +1,18 @@
 import { db, companyDocumentTemplatesTable, companyInvoicesTable, companyInvoiceItemsTable, bookingsTable, usersTable, facilitiesTable, settingsTable } from "@workspace/db";
 import { eq, and, isNull } from "drizzle-orm";
 import type { DocumentTemplate } from "@workspace/db";
+import { generateDocumentNumber, deriveCompanyCode } from "./documentNumbering";
 
 export type DocumentType = "invoice" | "spp" | "faktur" | "kwitansi" | "lampiran" | "berita_acara";
+
+const DOC_PREFIX_MAP: Record<DocumentType, string> = {
+  invoice: "INV",
+  spp: "SPP",
+  faktur: "FAKTUR",
+  kwitansi: "KWT",
+  lampiran: "LMP",
+  berita_acara: "BA",
+};
 
 function formatIDR(n: number | string | null | undefined): string {
   const num = Number(n ?? 0);
@@ -123,7 +133,7 @@ function wrapInHtmlPage(bodyContent: string, paperStyle = "A4", printMode = fals
       @page { size: ${pageSize}; margin: 15mm; }
     }
   </style>
-  ${printMode ? "<script>window.onload = () => window.print();</script>" : ""}
+  ${printMode ? "<script>window.onload = () => { document.title = 'Dokumen Sport Center'; window.print(); };</script>" : ""}
 </head>
 <body>
   <div class="page">
@@ -138,8 +148,9 @@ export async function renderDocument(params: {
   entityId: number;
   companyId?: number | null;
   printMode?: boolean;
+  issueDocumentNumber?: boolean;
 }): Promise<{ html: string; templateId: number | null; documentNumber: string | null }> {
-  const { documentType, entityId, companyId = null, printMode = false } = params;
+  const { documentType, entityId, companyId = null, printMode = false, issueDocumentNumber = false } = params;
   const tpl = await getTemplate(documentType, companyId);
   const settings = await getSettings();
 
@@ -177,7 +188,22 @@ export async function renderDocument(params: {
     if (!inv) throw new Error("Invoice tidak ditemukan");
     const [company] = await db.select().from(usersTable).where(eq(usersTable.id, inv.companyCustomerId)).limit(1);
     const items = await db.select().from(companyInvoiceItemsTable).where(eq(companyInvoiceItemsTable.invoiceId, entityId));
-    documentNumber = inv.invoiceNumber;
+
+    const prefix = tpl?.numberFormatPrefix || DOC_PREFIX_MAP[documentType];
+    const companyCode = deriveCompanyCode(company?.companyName || company?.name);
+
+    if (issueDocumentNumber) {
+      documentNumber = await generateDocumentNumber({
+        prefix,
+        companyId,
+        companyCode,
+        documentType,
+        entityType: "invoice",
+        entityId,
+      });
+    } else {
+      documentNumber = inv.invoiceNumber;
+    }
 
     const docTitle = documentType === "invoice" ? "INVOICE" : documentType === "lampiran" ? "LAMPIRAN INVOICE" : "BERITA ACARA PEMBAYARAN";
     const subtotal = Number(inv.totalAmount);
@@ -191,7 +217,7 @@ export async function renderDocument(params: {
       <div style="margin-bottom:24px;display:flex;justify-content:space-between;align-items:flex-start;">
         <div>
           <h2 style="font-size:18px;font-weight:900;text-transform:uppercase;color:#1f2937;">${docTitle}</h2>
-          <div style="font-size:13px;color:#6b7280;">Nomor: <strong>${inv.invoiceNumber}</strong></div>
+          <div style="font-size:13px;color:#6b7280;">Nomor: <strong>${documentNumber}</strong></div>
           <div style="font-size:13px;color:#6b7280;">Periode: <strong>${inv.periodMonth}</strong></div>
           <div style="font-size:13px;color:#6b7280;">Tanggal: <strong>${formatDate(inv.createdAt?.toString())}</strong></div>
         </div>
@@ -226,7 +252,21 @@ export async function renderDocument(params: {
     if (!booking) throw new Error("Booking tidak ditemukan");
     const [facility] = await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, booking.facilityId)).limit(1);
 
-    documentNumber = booking.orderNumber;
+    const prefix = tpl?.numberFormatPrefix || DOC_PREFIX_MAP[documentType];
+    const companyCode = "SC";
+
+    if (issueDocumentNumber) {
+      documentNumber = await generateDocumentNumber({
+        prefix,
+        companyId,
+        companyCode,
+        documentType,
+        entityType: "booking",
+        entityId,
+      });
+    } else {
+      documentNumber = booking.orderNumber;
+    }
 
     const docTitleMap: Record<string, string> = {
       spp: "SURAT PERINTAH PEMBAYARAN (SPP)",
@@ -243,7 +283,7 @@ export async function renderDocument(params: {
       <div style="margin-bottom:24px;display:flex;justify-content:space-between;align-items:flex-start;">
         <div>
           <h2 style="font-size:18px;font-weight:900;text-transform:uppercase;color:#1f2937;">${docTitle}</h2>
-          <div style="font-size:13px;color:#6b7280;">Nomor Order: <strong>${booking.orderNumber}</strong></div>
+          <div style="font-size:13px;color:#6b7280;">Nomor: <strong>${documentNumber}</strong></div>
           <div style="font-size:13px;color:#6b7280;">Tanggal: <strong>${formatDate(booking.bookingDate)}</strong></div>
         </div>
         <div style="text-align:right;">

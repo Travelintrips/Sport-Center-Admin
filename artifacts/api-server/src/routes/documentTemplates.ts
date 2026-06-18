@@ -9,6 +9,8 @@ const router = Router();
 
 const DOCUMENT_TYPES = ["invoice", "spp", "faktur", "kwitansi", "lampiran", "berita_acara"];
 
+// ─── Template CRUD ────────────────────────────────────────────────────────────
+
 router.get("/document-templates", adminMiddleware, async (req, res) => {
   try {
     const { companyId, documentType } = req.query;
@@ -152,27 +154,29 @@ router.delete("/document-templates/:id", adminMiddleware, async (req, res) => {
   }
 });
 
+// ─── Document Rendering Endpoints ─────────────────────────────────────────────
+
 router.get("/documents/:documentType/:entityId/preview", adminMiddleware, async (req, res) => {
   try {
     const { documentType, entityId } = req.params;
     const companyId = req.query.companyId ? parseInt(String(req.query.companyId)) : null;
-    const printMode = req.query.print === "1";
 
     if (!DOCUMENT_TYPES.includes(documentType)) {
       res.status(400).json({ error: "documentType tidak valid" });
       return;
     }
 
-    const { html, templateId } = await renderDocument({
+    const { html, templateId, documentNumber } = await renderDocument({
       documentType: documentType as DocumentType,
       entityId: parseInt(entityId),
       companyId,
-      printMode,
+      printMode: false,
+      issueDocumentNumber: false,
     });
 
     const { ipAddress, userAgent } = getClientInfo(req);
     const userInfo = getUserFromReq(req);
-    await logAudit({ ...userInfo, action: "DOCUMENT_RENDERED_WITH_TEMPLATE", entity: documentType, entityId: parseInt(entityId), after: { templateId, companyId, printMode }, ipAddress, userAgent });
+    await logAudit({ ...userInfo, action: "DOCUMENT_PREVIEW_RENDERED", entity: documentType, entityId: parseInt(entityId), after: { templateId, companyId, documentNumber }, ipAddress, userAgent });
 
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     res.send(html);
@@ -192,20 +196,68 @@ router.get("/documents/:documentType/:entityId/pdf", adminMiddleware, async (req
       return;
     }
 
-    const { html, templateId } = await renderDocument({
+    // Render the HTML with document number issuance
+    const { html, templateId, documentNumber } = await renderDocument({
       documentType: documentType as DocumentType,
       entityId: parseInt(entityId),
       companyId,
-      printMode: true,
+      printMode: false,
+      issueDocumentNumber: true,
     });
+
+    let pdfBuffer: Buffer | null = null;
+
+    try {
+      const puppeteer = await import("puppeteer-core");
+      const chromium = await import("@sparticuz/chromium-min");
+
+      const execPath = await (chromium as any).default.executablePath(
+        `https://github.com/Sparticuz/chromium/releases/download/v131.0.0/chromium-v131.0.0-pack.tar`
+      );
+
+      const browser = await puppeteer.default.launch({
+        args: (chromium as any).default.args,
+        defaultViewport: (chromium as any).default.defaultViewport,
+        executablePath: execPath,
+        headless: true,
+      });
+
+      const page = await browser.newPage();
+      await page.setContent(html, { waitUntil: "networkidle0" });
+
+      pdfBuffer = Buffer.from(await page.pdf({
+        format: "A4",
+        printBackground: true,
+        margin: { top: "15mm", right: "15mm", bottom: "15mm", left: "15mm" },
+      }));
+
+      await browser.close();
+    } catch (puppeteerErr) {
+      req.log.warn({ err: puppeteerErr }, "Puppeteer PDF generation failed, falling back to HTML");
+    }
 
     const { ipAddress, userAgent } = getClientInfo(req);
     const userInfo = getUserFromReq(req);
-    await logAudit({ ...userInfo, action: "DOCUMENT_PDF_GENERATED", entity: documentType, entityId: parseInt(entityId), after: { templateId, companyId }, ipAddress, userAgent });
+    await logAudit({ ...userInfo, action: "DOCUMENT_PDF_GENERATED", entity: documentType, entityId: parseInt(entityId), after: { templateId, companyId, documentNumber, method: pdfBuffer ? "puppeteer" : "html-fallback" }, ipAddress, userAgent });
 
-    res.setHeader("Content-Type", "text/html; charset=utf-8");
-    res.setHeader("Content-Disposition", `inline; filename="${documentType}-${entityId}.html"`);
-    res.send(html);
+    if (pdfBuffer) {
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `attachment; filename="${documentType}-${documentNumber || entityId}.pdf"`);
+      res.setHeader("Content-Length", pdfBuffer.length);
+      res.end(pdfBuffer);
+    } else {
+      // Graceful fallback: return print-ready HTML for browser Ctrl+P
+      const { html: printHtml } = await renderDocument({
+        documentType: documentType as DocumentType,
+        entityId: parseInt(entityId),
+        companyId,
+        printMode: true,
+        issueDocumentNumber: false,
+      });
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.setHeader("Content-Disposition", `inline; filename="${documentType}-${documentNumber || entityId}.html"`);
+      res.send(printHtml);
+    }
   } catch (err: any) {
     req.log.error({ err }, "Document PDF error");
     res.status(500).json({ error: err?.message || "Internal server error" });

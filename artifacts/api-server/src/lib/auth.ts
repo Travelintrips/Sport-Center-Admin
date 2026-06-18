@@ -32,12 +32,14 @@ export function hashPassword(password: string): string {
 
 export function authMiddleware(req: Request, res: Response, next: NextFunction): void {
   const authHeader = req.headers.authorization;
-  if (!authHeader?.startsWith("Bearer ")) {
+  // Support _token query param for browser window.open() flows (preview/pdf endpoints)
+  const queryToken = typeof req.query._token === "string" ? req.query._token : null;
+  const rawToken = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : queryToken;
+  if (!rawToken) {
     res.status(401).json({ error: "Unauthorized" });
     return;
   }
-  const token = authHeader.slice(7);
-  const payload = verifyToken(token);
+  const payload = verifyToken(rawToken);
   if (!payload) {
     res.status(401).json({ error: "Invalid or expired token" });
     return;

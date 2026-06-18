@@ -172,7 +172,7 @@ export default function AdminDocumentTemplates() {
     const params = new URLSearchParams();
     if (companyId) params.set("companyId", String(companyId));
     const token = getToken();
-    const url = `${API}/documents/${documentType}/${entityId}/preview?${params}&_token=${token}`;
+    if (token) params.set("_token", token);
     setPreviewUrl(`${API}/documents/${documentType}/${entityId}/preview?${params}`);
     window.open(`${API}/documents/${documentType}/${entityId}/preview?${params}`, "_blank");
   }
@@ -180,7 +180,8 @@ export default function AdminDocumentTemplates() {
   function openPdf(documentType: string, entityId: number, companyId?: number | null) {
     const params = new URLSearchParams();
     if (companyId) params.set("companyId", String(companyId));
-    params.set("print", "1");
+    const token = getToken();
+    if (token) params.set("_token", token);
     window.open(`${API}/documents/${documentType}/${entityId}/pdf?${params}`, "_blank");
   }
 
@@ -465,7 +466,8 @@ export function DocumentActions({ documentType, entityId, companyId, label }: { 
   function openPreview(printMode = false) {
     const params = new URLSearchParams();
     if (companyId) params.set("companyId", String(companyId));
-    if (printMode) params.set("print", "1");
+    const token = getToken();
+    if (token) params.set("_token", token);
     const path = printMode ? "pdf" : "preview";
     window.open(`${API}/documents/${documentType}/${entityId}/${path}?${params}`, "_blank");
   }

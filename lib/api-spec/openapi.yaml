@@ -2418,6 +2418,195 @@ paths:
               schema:
                 $ref: "#/components/schemas/Expense"
 
+  /admin/document-templates:
+    get:
+      operationId: listDocumentTemplates
+      tags: [document-templates]
+      summary: List document templates with optional filters
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: companyId
+          schema:
+            type: string
+        - in: query
+          name: documentType
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of document templates
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DocumentTemplate"
+    post:
+      operationId: createDocumentTemplate
+      tags: [document-templates]
+      summary: Create a new document template
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DocumentTemplateInput"
+      responses:
+        "201":
+          description: Created template
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentTemplate"
+
+  /admin/document-templates/{id}:
+    get:
+      operationId: getDocumentTemplate
+      tags: [document-templates]
+      summary: Get a document template by ID
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Document template
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentTemplate"
+    put:
+      operationId: updateDocumentTemplate
+      tags: [document-templates]
+      summary: Update a document template
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DocumentTemplateInput"
+      responses:
+        "200":
+          description: Updated template
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentTemplate"
+    delete:
+      operationId: deleteDocumentTemplate
+      tags: [document-templates]
+      summary: Delete a document template (non-default only)
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+
+  /admin/documents/{documentType}/{entityId}/preview:
+    get:
+      operationId: previewDocument
+      tags: [document-templates]
+      summary: Render document as HTML preview (no number issuance)
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: documentType
+          required: true
+          schema:
+            type: string
+            enum: [invoice, spp, faktur, kwitansi, lampiran, berita_acara]
+        - in: path
+          name: entityId
+          required: true
+          schema:
+            type: integer
+        - in: query
+          name: companyId
+          schema:
+            type: integer
+        - in: query
+          name: _token
+          description: JWT token for browser window.open() flows (alternative to Authorization header)
+          schema:
+            type: string
+      responses:
+        "200":
+          description: HTML document preview
+          content:
+            text/html:
+              schema:
+                type: string
+
+  /admin/documents/{documentType}/{entityId}/pdf:
+    get:
+      operationId: generateDocumentPdf
+      tags: [document-templates]
+      summary: Generate PDF binary (Puppeteer) or print-ready HTML fallback; issues document number
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: documentType
+          required: true
+          schema:
+            type: string
+            enum: [invoice, spp, faktur, kwitansi, lampiran, berita_acara]
+        - in: path
+          name: entityId
+          required: true
+          schema:
+            type: integer
+        - in: query
+          name: companyId
+          schema:
+            type: integer
+        - in: query
+          name: _token
+          description: JWT token for browser window.open() flows (alternative to Authorization header)
+          schema:
+            type: string
+      responses:
+        "200":
+          description: PDF binary (application/pdf) or HTML fallback (text/html)
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+            text/html:
+              schema:
+                type: string
+
 components:
   schemas:
     HealthStatus:

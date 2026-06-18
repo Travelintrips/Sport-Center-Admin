@@ -248,6 +248,7 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
             startTime: booking.startTime,
             endTime: booking.endTime,
             totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
+            bookingId: booking.id,
           });
           syncStatusToBizportal(booking.orderNumber, "confirmed", payment.proofUrl, new Date()).catch(() => {});
 

@@ -1785,3 +1785,28 @@ vendorName?: string;
 facilityId?: number;
 };
 
+export type ListDocumentTemplatesParams = {
+companyId?: string;
+documentType?: string;
+};
+
+export type DeleteDocumentTemplate200 = {
+  success?: boolean;
+};
+
+export type PreviewDocumentParams = {
+companyId?: number;
+/**
+ * JWT token for browser window.open() flows (alternative to Authorization header)
+ */
+_token?: string;
+};
+
+export type GenerateDocumentPdfParams = {
+companyId?: number;
+/**
+ * JWT token for browser window.open() flows (alternative to Authorization header)
+ */
+_token?: string;
+};
+

@@ -3131,3 +3131,180 @@ export const UpdateExpenseStatusResponse = zod.object({
 })
 
 
+/**
+ * @summary List document templates with optional filters
+ */
+export const ListDocumentTemplatesQueryParams = zod.object({
+  "companyId": zod.coerce.string().optional(),
+  "documentType": zod.coerce.string().optional()
+})
+
+export const ListDocumentTemplatesResponseItem = zod.object({
+  "id": zod.number().optional(),
+  "companyId": zod.number().nullish(),
+  "companyName": zod.string().optional(),
+  "documentType": zod.enum(['invoice', 'spp', 'faktur', 'kwitansi', 'lampiran', 'berita_acara']).optional(),
+  "isDefault": zod.boolean().optional(),
+  "headerLogoUrl": zod.string().nullish(),
+  "kopSuratHtml": zod.string().nullish(),
+  "footerHtml": zod.string().nullish(),
+  "companyDisplayName": zod.string().nullish(),
+  "financeName": zod.string().nullish(),
+  "financeTitle": zod.string().nullish(),
+  "financeSignature": zod.string().nullish(),
+  "address": zod.string().nullish(),
+  "phone": zod.string().nullish(),
+  "email": zod.string().nullish(),
+  "numberFormatPrefix": zod.string().nullish(),
+  "numberFormatPattern": zod.string().nullish(),
+  "paperStyle": zod.string().optional(),
+  "createdAt": zod.string().optional(),
+  "updatedAt": zod.string().optional()
+})
+export const ListDocumentTemplatesResponse = zod.array(ListDocumentTemplatesResponseItem)
+
+
+/**
+ * @summary Create a new document template
+ */
+export const CreateDocumentTemplateBody = zod.object({
+  "companyId": zod.number().nullish(),
+  "documentType": zod.enum(['invoice', 'spp', 'faktur', 'kwitansi', 'lampiran', 'berita_acara']),
+  "isDefault": zod.boolean().optional(),
+  "headerLogoUrl": zod.string().optional(),
+  "kopSuratHtml": zod.string().optional(),
+  "footerHtml": zod.string().optional(),
+  "companyDisplayName": zod.string().optional(),
+  "financeName": zod.string().optional(),
+  "financeTitle": zod.string().optional(),
+  "financeSignature": zod.string().optional(),
+  "address": zod.string().optional(),
+  "phone": zod.string().optional(),
+  "email": zod.string().optional(),
+  "numberFormatPrefix": zod.string().optional(),
+  "numberFormatPattern": zod.string().optional(),
+  "paperStyle": zod.string().optional()
+})
+
+
+/**
+ * @summary Get a document template by ID
+ */
+export const GetDocumentTemplateParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetDocumentTemplateResponse = zod.object({
+  "id": zod.number().optional(),
+  "companyId": zod.number().nullish(),
+  "companyName": zod.string().optional(),
+  "documentType": zod.enum(['invoice', 'spp', 'faktur', 'kwitansi', 'lampiran', 'berita_acara']).optional(),
+  "isDefault": zod.boolean().optional(),
+  "headerLogoUrl": zod.string().nullish(),
+  "kopSuratHtml": zod.string().nullish(),
+  "footerHtml": zod.string().nullish(),
+  "companyDisplayName": zod.string().nullish(),
+  "financeName": zod.string().nullish(),
+  "financeTitle": zod.string().nullish(),
+  "financeSignature": zod.string().nullish(),
+  "address": zod.string().nullish(),
+  "phone": zod.string().nullish(),
+  "email": zod.string().nullish(),
+  "numberFormatPrefix": zod.string().nullish(),
+  "numberFormatPattern": zod.string().nullish(),
+  "paperStyle": zod.string().optional(),
+  "createdAt": zod.string().optional(),
+  "updatedAt": zod.string().optional()
+})
+
+
+/**
+ * @summary Update a document template
+ */
+export const UpdateDocumentTemplateParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const UpdateDocumentTemplateBody = zod.object({
+  "companyId": zod.number().nullish(),
+  "documentType": zod.enum(['invoice', 'spp', 'faktur', 'kwitansi', 'lampiran', 'berita_acara']),
+  "isDefault": zod.boolean().optional(),
+  "headerLogoUrl": zod.string().optional(),
+  "kopSuratHtml": zod.string().optional(),
+  "footerHtml": zod.string().optional(),
+  "companyDisplayName": zod.string().optional(),
+  "financeName": zod.string().optional(),
+  "financeTitle": zod.string().optional(),
+  "financeSignature": zod.string().optional(),
+  "address": zod.string().optional(),
+  "phone": zod.string().optional(),
+  "email": zod.string().optional(),
+  "numberFormatPrefix": zod.string().optional(),
+  "numberFormatPattern": zod.string().optional(),
+  "paperStyle": zod.string().optional()
+})
+
+export const UpdateDocumentTemplateResponse = zod.object({
+  "id": zod.number().optional(),
+  "companyId": zod.number().nullish(),
+  "companyName": zod.string().optional(),
+  "documentType": zod.enum(['invoice', 'spp', 'faktur', 'kwitansi', 'lampiran', 'berita_acara']).optional(),
+  "isDefault": zod.boolean().optional(),
+  "headerLogoUrl": zod.string().nullish(),
+  "kopSuratHtml": zod.string().nullish(),
+  "footerHtml": zod.string().nullish(),
+  "companyDisplayName": zod.string().nullish(),
+  "financeName": zod.string().nullish(),
+  "financeTitle": zod.string().nullish(),
+  "financeSignature": zod.string().nullish(),
+  "address": zod.string().nullish(),
+  "phone": zod.string().nullish(),
+  "email": zod.string().nullish(),
+  "numberFormatPrefix": zod.string().nullish(),
+  "numberFormatPattern": zod.string().nullish(),
+  "paperStyle": zod.string().optional(),
+  "createdAt": zod.string().optional(),
+  "updatedAt": zod.string().optional()
+})
+
+
+/**
+ * @summary Delete a document template (non-default only)
+ */
+export const DeleteDocumentTemplateParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const DeleteDocumentTemplateResponse = zod.object({
+  "success": zod.boolean().optional()
+})
+
+
+/**
+ * @summary Render document as HTML preview (no number issuance)
+ */
+export const PreviewDocumentParams = zod.object({
+  "documentType": zod.enum(['invoice', 'spp', 'faktur', 'kwitansi', 'lampiran', 'berita_acara']),
+  "entityId": zod.coerce.number()
+})
+
+export const PreviewDocumentQueryParams = zod.object({
+  "companyId": zod.coerce.number().optional(),
+  "_token": zod.coerce.string().optional().describe('JWT token for browser window.open() flows (alternative to Authorization header)')
+})
+
+
+/**
+ * @summary Generate PDF binary (Puppeteer) or print-ready HTML fallback; issues document number
+ */
+export const GenerateDocumentPdfParams = zod.object({
+  "documentType": zod.enum(['invoice', 'spp', 'faktur', 'kwitansi', 'lampiran', 'berita_acara']),
+  "entityId": zod.coerce.number()
+})
+
+export const GenerateDocumentPdfQueryParams = zod.object({
+  "companyId": zod.coerce.number().optional(),
+  "_token": zod.coerce.string().optional().describe('JWT token for browser window.open() flows (alternative to Authorization header)')
+})
+
+
