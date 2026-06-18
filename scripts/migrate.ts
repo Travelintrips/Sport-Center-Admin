@@ -514,5 +514,72 @@ ALTER TABLE sport_center.bookings
   ADD COLUMN IF NOT EXISTS group_ref TEXT REFERENCES sport_center.booking_groups(group_ref) ON DELETE SET NULL;
 
 CREATE INDEX IF NOT EXISTS bookings_group_ref_idx ON sport_center.bookings(group_ref);
+
+-- ============================================================
+-- Company Document Templates
+-- ============================================================
+CREATE TABLE IF NOT EXISTS sport_center.company_document_templates (
+  id serial PRIMARY KEY,
+  company_id integer REFERENCES sport_center.users(id) ON DELETE CASCADE,
+  document_type text NOT NULL,
+  is_default boolean NOT NULL DEFAULT false,
+  header_logo_url text,
+  kop_surat_html text,
+  footer_html text,
+  company_display_name text,
+  finance_name text,
+  finance_title text,
+  finance_signature text,
+  address text,
+  phone text,
+  email text,
+  number_format_prefix text,
+  number_format_pattern text,
+  paper_style text NOT NULL DEFAULT 'A4',
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS company_document_templates_company_id_idx ON sport_center.company_document_templates(company_id);
+CREATE INDEX IF NOT EXISTS company_document_templates_document_type_idx ON sport_center.company_document_templates(document_type);
+
+-- Document number sequences per company per document_type per year
+CREATE TABLE IF NOT EXISTS sport_center.document_number_sequences (
+  id serial PRIMARY KEY,
+  company_id integer,
+  document_type text NOT NULL,
+  year integer NOT NULL,
+  current_seq integer NOT NULL DEFAULT 0
+);
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'doc_num_seq_unique'
+      AND conrelid = 'sport_center.document_number_sequences'::regclass
+  ) THEN
+    ALTER TABLE sport_center.document_number_sequences
+      ADD CONSTRAINT doc_num_seq_unique UNIQUE (company_id, document_type, year);
+  END IF;
+EXCEPTION WHEN others THEN NULL;
+END $$;
+
+-- Seed system default templates (idempotent)
+INSERT INTO sport_center.company_document_templates
+  (company_id, document_type, is_default, company_display_name, finance_name, finance_title, number_format_prefix, paper_style)
+SELECT NULL, t.dt, true, 'Sport Center Jakarta', 'Kepala Keuangan', 'Finance Manager', t.prefix, 'A4'
+FROM (VALUES
+  ('invoice',      'INV'),
+  ('spp',          'SPP'),
+  ('faktur',       'FAKTUR'),
+  ('kwitansi',     'KWT'),
+  ('lampiran',     'LMP'),
+  ('berita_acara', 'BA')
+) AS t(dt, prefix)
+WHERE NOT EXISTS (
+  SELECT 1 FROM sport_center.company_document_templates
+  WHERE company_id IS NULL AND document_type = t.dt AND is_default = true
+);
 `;
 

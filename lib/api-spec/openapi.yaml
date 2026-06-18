@@ -43,6 +43,8 @@ tags:
     description: Bank mutation import and reconciliation matching
   - name: expenses
     description: Operational expense management
+  - name: document-templates
+    description: Company document template management (invoice, SPP, faktur, kwitansi, etc.)
 paths:
   /healthz:
     get:
@@ -4528,4 +4530,101 @@ components:
           type: string
           enum: [submit, approve, reject, pay, cancel]
         rejectedReason:
+          type: string
+
+    DocumentTemplate:
+      type: object
+      properties:
+        id:
+          type: integer
+        companyId:
+          type: integer
+          nullable: true
+        companyName:
+          type: string
+        documentType:
+          type: string
+          enum: [invoice, spp, faktur, kwitansi, lampiran, berita_acara]
+        isDefault:
+          type: boolean
+        headerLogoUrl:
+          type: string
+          nullable: true
+        kopSuratHtml:
+          type: string
+          nullable: true
+        footerHtml:
+          type: string
+          nullable: true
+        companyDisplayName:
+          type: string
+          nullable: true
+        financeName:
+          type: string
+          nullable: true
+        financeTitle:
+          type: string
+          nullable: true
+        financeSignature:
+          type: string
+          nullable: true
+        address:
+          type: string
+          nullable: true
+        phone:
+          type: string
+          nullable: true
+        email:
+          type: string
+          nullable: true
+        numberFormatPrefix:
+          type: string
+          nullable: true
+        numberFormatPattern:
+          type: string
+          nullable: true
+        paperStyle:
+          type: string
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+
+    DocumentTemplateInput:
+      type: object
+      required: [documentType]
+      properties:
+        companyId:
+          type: integer
+          nullable: true
+        documentType:
+          type: string
+          enum: [invoice, spp, faktur, kwitansi, lampiran, berita_acara]
+        isDefault:
+          type: boolean
+        headerLogoUrl:
+          type: string
+        kopSuratHtml:
+          type: string
+        footerHtml:
+          type: string
+        companyDisplayName:
+          type: string
+        financeName:
+          type: string
+        financeTitle:
+          type: string
+        financeSignature:
+          type: string
+        address:
+          type: string
+        phone:
+          type: string
+        email:
+          type: string
+        numberFormatPrefix:
+          type: string
+        numberFormatPattern:
+          type: string
+        paperStyle:
           type: string
