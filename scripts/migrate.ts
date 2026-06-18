@@ -565,6 +565,30 @@ BEGIN
 EXCEPTION WHEN others THEN NULL;
 END $$;
 
+-- Idempotent issued-number tracking for document template engine
+CREATE TABLE IF NOT EXISTS sport_center.document_issued_numbers (
+  id serial PRIMARY KEY,
+  entity_type text NOT NULL,
+  entity_id integer NOT NULL,
+  document_type text NOT NULL,
+  company_id integer,
+  document_number text NOT NULL,
+  issued_at timestamptz NOT NULL DEFAULT now()
+);
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'doc_issued_unique'
+      AND conrelid = 'sport_center.document_issued_numbers'::regclass
+  ) THEN
+    ALTER TABLE sport_center.document_issued_numbers
+      ADD CONSTRAINT doc_issued_unique UNIQUE (entity_type, entity_id, document_type, company_id);
+  END IF;
+EXCEPTION WHEN others THEN NULL;
+END $$;
+
 -- Seed system default templates (idempotent)
 INSERT INTO sport_center.company_document_templates
   (company_id, document_type, is_default, company_display_name, finance_name, finance_title, number_format_prefix, paper_style)

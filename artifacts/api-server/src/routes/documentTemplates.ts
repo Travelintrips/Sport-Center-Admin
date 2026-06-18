@@ -1,17 +1,42 @@
 import { Router } from "express";
 import { db, companyDocumentTemplatesTable, usersTable } from "@workspace/db";
-import { eq, and, isNull } from "drizzle-orm";
-import { adminMiddleware } from "../lib/auth";
+import { eq } from "drizzle-orm";
+import { adminMiddleware, adminDocumentPreviewMiddleware } from "../lib/auth";
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
 import { renderDocument, type DocumentType } from "../lib/documentRenderer";
 
 const router = Router();
 
-const DOCUMENT_TYPES = ["invoice", "spp", "faktur", "kwitansi", "lampiran", "berita_acara"];
+const DOCUMENT_TYPES = ["invoice", "spp", "faktur", "kwitansi", "lampiran", "berita_acara"] as const;
+const PAPER_STYLES = ["A4", "F4", "Letter"] as const;
+
+function validateTemplateBody(body: any): { valid: true; error?: never } | { valid: false; error: string } {
+  if (!body.documentType || !(DOCUMENT_TYPES as readonly string[]).includes(body.documentType)) {
+    return { valid: false, error: `documentType harus salah satu dari: ${DOCUMENT_TYPES.join(", ")}` };
+  }
+  if (body.paperStyle !== undefined && !(PAPER_STYLES as readonly string[]).includes(body.paperStyle)) {
+    return { valid: false, error: `paperStyle harus salah satu dari: ${PAPER_STYLES.join(", ")}` };
+  }
+  if (body.companyId !== undefined && body.companyId !== null) {
+    const cid = Number(body.companyId);
+    if (!Number.isFinite(cid) || cid < 1) return { valid: false, error: "companyId harus angka positif atau null" };
+  }
+  return { valid: true };
+}
+
+function validateTemplatePatch(body: any): { valid: true; error?: never } | { valid: false; error: string } {
+  if (body.documentType !== undefined && !(DOCUMENT_TYPES as readonly string[]).includes(body.documentType)) {
+    return { valid: false, error: `documentType harus salah satu dari: ${DOCUMENT_TYPES.join(", ")}` };
+  }
+  if (body.paperStyle !== undefined && !(PAPER_STYLES as readonly string[]).includes(body.paperStyle)) {
+    return { valid: false, error: `paperStyle harus salah satu dari: ${PAPER_STYLES.join(", ")}` };
+  }
+  return { valid: true };
+}
 
 // ─── Template CRUD ────────────────────────────────────────────────────────────
 
-router.get("/document-templates", adminMiddleware, async (req, res) => {
+router.get("/admin/document-templates", adminMiddleware, async (req, res) => {
   try {
     const { companyId, documentType } = req.query;
     let rows = await db.select().from(companyDocumentTemplatesTable);
@@ -39,7 +64,7 @@ router.get("/document-templates", adminMiddleware, async (req, res) => {
   }
 });
 
-router.get("/document-templates/:id", adminMiddleware, async (req, res) => {
+router.get("/admin/document-templates/:id", adminMiddleware, async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     const [tpl] = await db.select().from(companyDocumentTemplatesTable).where(eq(companyDocumentTemplatesTable.id, id)).limit(1);
@@ -51,14 +76,12 @@ router.get("/document-templates/:id", adminMiddleware, async (req, res) => {
   }
 });
 
-router.post("/document-templates", adminMiddleware, async (req, res) => {
+router.post("/admin/document-templates", adminMiddleware, async (req, res) => {
   try {
-    const { companyId, documentType, isDefault, headerLogoUrl, kopSuratHtml, footerHtml, companyDisplayName, financeName, financeTitle, financeSignature, address, phone, email, numberFormatPrefix, numberFormatPattern, paperStyle } = req.body;
+    const validation = validateTemplateBody(req.body);
+    if (!validation.valid) { res.status(400).json({ error: validation.error }); return; }
 
-    if (!documentType || !DOCUMENT_TYPES.includes(documentType)) {
-      res.status(400).json({ error: `documentType harus salah satu dari: ${DOCUMENT_TYPES.join(", ")}` });
-      return;
-    }
+    const { companyId, documentType, isDefault, headerLogoUrl, kopSuratHtml, footerHtml, companyDisplayName, financeName, financeTitle, financeSignature, address, phone, email, numberFormatPrefix, numberFormatPattern, paperStyle } = req.body;
 
     const [tpl] = await db.insert(companyDocumentTemplatesTable).values({
       companyId: companyId ? parseInt(String(companyId)) : null,
@@ -90,18 +113,16 @@ router.post("/document-templates", adminMiddleware, async (req, res) => {
   }
 });
 
-router.put("/document-templates/:id", adminMiddleware, async (req, res) => {
+router.put("/admin/document-templates/:id", adminMiddleware, async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     const [existing] = await db.select().from(companyDocumentTemplatesTable).where(eq(companyDocumentTemplatesTable.id, id)).limit(1);
     if (!existing) { res.status(404).json({ error: "Template tidak ditemukan" }); return; }
 
-    const { companyId, documentType, isDefault, headerLogoUrl, kopSuratHtml, footerHtml, companyDisplayName, financeName, financeTitle, financeSignature, address, phone, email, numberFormatPrefix, numberFormatPattern, paperStyle } = req.body;
+    const validation = validateTemplatePatch(req.body);
+    if (!validation.valid) { res.status(400).json({ error: validation.error }); return; }
 
-    if (documentType && !DOCUMENT_TYPES.includes(documentType)) {
-      res.status(400).json({ error: `documentType harus salah satu dari: ${DOCUMENT_TYPES.join(", ")}` });
-      return;
-    }
+    const { companyId, documentType, isDefault, headerLogoUrl, kopSuratHtml, footerHtml, companyDisplayName, financeName, financeTitle, financeSignature, address, phone, email, numberFormatPrefix, numberFormatPattern, paperStyle } = req.body;
 
     const updates: Partial<typeof companyDocumentTemplatesTable.$inferInsert> = {};
     if (companyId !== undefined) updates.companyId = companyId ? parseInt(String(companyId)) : null;
@@ -134,7 +155,7 @@ router.put("/document-templates/:id", adminMiddleware, async (req, res) => {
   }
 });
 
-router.delete("/document-templates/:id", adminMiddleware, async (req, res) => {
+router.delete("/admin/document-templates/:id", adminMiddleware, async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     const [existing] = await db.select().from(companyDocumentTemplatesTable).where(eq(companyDocumentTemplatesTable.id, id)).limit(1);
@@ -155,13 +176,15 @@ router.delete("/document-templates/:id", adminMiddleware, async (req, res) => {
 });
 
 // ─── Document Rendering Endpoints ─────────────────────────────────────────────
+// adminDocumentPreviewMiddleware supports both Bearer header AND ?_token= query param
+// (needed for browser window.open() flows where custom headers cannot be set)
 
-router.get("/documents/:documentType/:entityId/preview", adminMiddleware, async (req, res) => {
+router.get("/admin/documents/:documentType/:entityId/preview", adminDocumentPreviewMiddleware, async (req, res) => {
   try {
     const { documentType, entityId } = req.params;
     const companyId = req.query.companyId ? parseInt(String(req.query.companyId)) : null;
 
-    if (!DOCUMENT_TYPES.includes(documentType)) {
+    if (!(DOCUMENT_TYPES as readonly string[]).includes(documentType)) {
       res.status(400).json({ error: "documentType tidak valid" });
       return;
     }
@@ -176,7 +199,7 @@ router.get("/documents/:documentType/:entityId/preview", adminMiddleware, async 
 
     const { ipAddress, userAgent } = getClientInfo(req);
     const userInfo = getUserFromReq(req);
-    await logAudit({ ...userInfo, action: "DOCUMENT_PREVIEW_RENDERED", entity: documentType, entityId: parseInt(entityId), after: { templateId, companyId, documentNumber }, ipAddress, userAgent });
+    await logAudit({ ...userInfo, action: "DOCUMENT_RENDERED_WITH_TEMPLATE", entity: documentType, entityId: parseInt(entityId), after: { templateId, companyId, documentNumber, mode: "preview" }, ipAddress, userAgent });
 
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     res.send(html);
@@ -186,17 +209,16 @@ router.get("/documents/:documentType/:entityId/preview", adminMiddleware, async 
   }
 });
 
-router.get("/documents/:documentType/:entityId/pdf", adminMiddleware, async (req, res) => {
+router.get("/admin/documents/:documentType/:entityId/pdf", adminDocumentPreviewMiddleware, async (req, res) => {
   try {
     const { documentType, entityId } = req.params;
     const companyId = req.query.companyId ? parseInt(String(req.query.companyId)) : null;
 
-    if (!DOCUMENT_TYPES.includes(documentType)) {
+    if (!(DOCUMENT_TYPES as readonly string[]).includes(documentType)) {
       res.status(400).json({ error: "documentType tidak valid" });
       return;
     }
 
-    // Render the HTML with document number issuance
     const { html, templateId, documentNumber } = await renderDocument({
       documentType: documentType as DocumentType,
       entityId: parseInt(entityId),
@@ -238,7 +260,7 @@ router.get("/documents/:documentType/:entityId/pdf", adminMiddleware, async (req
 
     const { ipAddress, userAgent } = getClientInfo(req);
     const userInfo = getUserFromReq(req);
-    await logAudit({ ...userInfo, action: "DOCUMENT_PDF_GENERATED", entity: documentType, entityId: parseInt(entityId), after: { templateId, companyId, documentNumber, method: pdfBuffer ? "puppeteer" : "html-fallback" }, ipAddress, userAgent });
+    await logAudit({ ...userInfo, action: "DOCUMENT_RENDERED_WITH_TEMPLATE", entity: documentType, entityId: parseInt(entityId), after: { templateId, companyId, documentNumber, mode: pdfBuffer ? "pdf" : "html-fallback" }, ipAddress, userAgent });
 
     if (pdfBuffer) {
       res.setHeader("Content-Type", "application/pdf");
@@ -246,7 +268,6 @@ router.get("/documents/:documentType/:entityId/pdf", adminMiddleware, async (req
       res.setHeader("Content-Length", pdfBuffer.length);
       res.end(pdfBuffer);
     } else {
-      // Graceful fallback: return print-ready HTML for browser Ctrl+P
       const { html: printHtml } = await renderDocument({
         documentType: documentType as DocumentType,
         entityId: parseInt(entityId),

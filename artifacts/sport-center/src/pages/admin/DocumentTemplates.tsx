@@ -60,7 +60,7 @@ async function fetchTemplates(companyId?: string, documentType?: string) {
   const params = new URLSearchParams();
   if (companyId) params.set("companyId", companyId);
   if (documentType) params.set("documentType", documentType);
-  const r = await fetch(`${API}/document-templates?${params}`, { headers: authHeaders() });
+  const r = await fetch(`${API}/admin/document-templates?${params}`, { headers: authHeaders() });
   if (!r.ok) throw new Error("Gagal memuat template");
   return r.json();
 }
@@ -102,7 +102,7 @@ export default function AdminDocumentTemplates() {
         companyId: data.companyId ? parseInt(data.companyId) : null,
         isDefault: data.isDefault,
       };
-      const url = editingId ? `${API}/document-templates/${editingId}` : `${API}/document-templates`;
+      const url = editingId ? `${API}/admin/document-templates/${editingId}` : `${API}/admin/document-templates`;
       const method = editingId ? "PUT" : "POST";
       const r = await fetch(url, { method, headers: authHeaders(), body: JSON.stringify(body) });
       if (!r.ok) { const e = await r.json(); throw new Error(e.error || "Gagal menyimpan"); }
@@ -118,7 +118,7 @@ export default function AdminDocumentTemplates() {
 
   const deleteMutation = useMutation({
     mutationFn: async (id: number) => {
-      const r = await fetch(`${API}/document-templates/${id}`, { method: "DELETE", headers: authHeaders() });
+      const r = await fetch(`${API}/admin/document-templates/${id}`, { method: "DELETE", headers: authHeaders() });
       if (!r.ok) { const e = await r.json(); throw new Error(e.error || "Gagal menghapus"); }
     },
     onSuccess: () => { toast({ title: "Template dihapus" }); qc.invalidateQueries({ queryKey: ["document-templates"] }); },
@@ -173,8 +173,8 @@ export default function AdminDocumentTemplates() {
     if (companyId) params.set("companyId", String(companyId));
     const token = getToken();
     if (token) params.set("_token", token);
-    setPreviewUrl(`${API}/documents/${documentType}/${entityId}/preview?${params}`);
-    window.open(`${API}/documents/${documentType}/${entityId}/preview?${params}`, "_blank");
+    setPreviewUrl(`${API}/admin/documents/${documentType}/${entityId}/preview?${params}`);
+    window.open(`${API}/admin/documents/${documentType}/${entityId}/preview?${params}`, "_blank");
   }
 
   function openPdf(documentType: string, entityId: number, companyId?: number | null) {
@@ -182,7 +182,7 @@ export default function AdminDocumentTemplates() {
     if (companyId) params.set("companyId", String(companyId));
     const token = getToken();
     if (token) params.set("_token", token);
-    window.open(`${API}/documents/${documentType}/${entityId}/pdf?${params}`, "_blank");
+    window.open(`${API}/admin/documents/${documentType}/${entityId}/pdf?${params}`, "_blank");
   }
 
   const f = (field: keyof FormState, value: any) => setForm((prev) => ({ ...prev, [field]: value }));
@@ -469,7 +469,7 @@ export function DocumentActions({ documentType, entityId, companyId, label }: { 
     const token = getToken();
     if (token) params.set("_token", token);
     const path = printMode ? "pdf" : "preview";
-    window.open(`${API}/documents/${documentType}/${entityId}/${path}?${params}`, "_blank");
+    window.open(`${API}/admin/documents/${documentType}/${entityId}/${path}?${params}`, "_blank");
   }
 
   return (

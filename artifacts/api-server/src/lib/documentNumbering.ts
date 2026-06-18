@@ -1,27 +1,22 @@
 import { db } from "@workspace/db";
 import { documentNumberSequencesTable } from "@workspace/db";
 import { and, eq, isNull, sql as drizzleSql } from "drizzle-orm";
-import { pgSchema, pgTable, serial, text, integer, timestamp } from "drizzle-orm/pg-core";
+import { pgSchema } from "drizzle-orm/pg-core";
 
 const scSchema = pgSchema("sport_center");
 
-const documentIssuedNumbersTable = scSchema.table("document_issued_numbers", {
-  id: serial("id").primaryKey(),
-  entityType: text("entity_type").notNull(),
-  entityId: integer("entity_id").notNull(),
-  documentType: text("document_type").notNull(),
-  companyId: integer("company_id"),
-  documentNumber: text("document_number").notNull(),
-  issuedAt: timestamp("issued_at", { withTimezone: true }).defaultNow(),
-});
-
-function deriveCompanyCode(companyName: string | null | undefined): string {
+export function deriveCompanyCode(companyName: string | null | undefined): string {
   if (!companyName) return "SC";
   const words = companyName.trim().toUpperCase().split(/\s+/);
   if (words.length === 1) return words[0].slice(0, 5);
   return words.map((w) => w[0]).join("").slice(0, 6);
 }
 
+/**
+ * Idempotently generate and persist a document number for a given entity.
+ * Uses atomic SQL (INSERT ... ON CONFLICT DO UPDATE RETURNING) so concurrent
+ * calls never produce duplicate sequence values.
+ */
 export async function generateDocumentNumber(params: {
   prefix: string;
   companyId: number | null;
@@ -36,68 +31,38 @@ export async function generateDocumentNumber(params: {
 
   // Idempotent: check if a number was already issued for this entity
   try {
-    const existingIssued = await db
-      .select()
-      .from(documentIssuedNumbersTable)
-      .where(
-        and(
-          eq(documentIssuedNumbersTable.entityType, entityType),
-          eq(documentIssuedNumbersTable.entityId, entityId),
-          eq(documentIssuedNumbersTable.documentType, documentType),
-          companyId != null
-            ? eq(documentIssuedNumbersTable.companyId, companyId)
-            : isNull(documentIssuedNumbersTable.companyId)
-        )
-      )
-      .limit(1);
-
-    if (existingIssued.length > 0) {
-      return existingIssued[0].documentNumber;
+    const existing = await db.execute(drizzleSql`
+      SELECT document_number FROM sport_center.document_issued_numbers
+      WHERE entity_type = ${entityType}
+        AND entity_id  = ${entityId}
+        AND document_type = ${documentType}
+        AND company_id IS NOT DISTINCT FROM ${companyId ?? null}
+      LIMIT 1
+    `);
+    if (existing.rows.length > 0) {
+      return (existing.rows[0] as any).document_number as string;
     }
   } catch {
-    // Table may not exist yet (before migration) — fall through to generate
+    // Table may not exist yet (before migration) — fall through
   }
 
-  // Get or increment sequence
-  const existingSeq = await db
-    .select()
-    .from(documentNumberSequencesTable)
-    .where(
-      and(
-        companyId != null
-          ? eq(documentNumberSequencesTable.companyId, companyId)
-          : isNull(documentNumberSequencesTable.companyId),
-        eq(documentNumberSequencesTable.documentType, documentType),
-        eq(documentNumberSequencesTable.year, year)
-      )
-    )
-    .limit(1);
+  // Atomic sequence increment using INSERT … ON CONFLICT … DO UPDATE RETURNING
+  // This is safe under concurrent load; no read-then-update race condition.
+  const seqResult = await db.execute(drizzleSql`
+    INSERT INTO sport_center.document_number_sequences
+      (company_id, document_type, year, current_seq)
+    VALUES
+      (${companyId ?? null}, ${documentType}, ${year}, 1)
+    ON CONFLICT (company_id, document_type, year)
+    DO UPDATE SET current_seq = sport_center.document_number_sequences.current_seq + 1
+    RETURNING current_seq
+  `);
 
-  let seq: number;
-  if (existingSeq.length > 0) {
-    const newSeq = (existingSeq[0].currentSeq ?? 0) + 1;
-    await db
-      .update(documentNumberSequencesTable)
-      .set({ currentSeq: newSeq })
-      .where(eq(documentNumberSequencesTable.id, existingSeq[0].id));
-    seq = newSeq;
-  } else {
-    const [inserted] = await db
-      .insert(documentNumberSequencesTable)
-      .values({
-        companyId: companyId ?? null,
-        documentType,
-        year,
-        currentSeq: 1,
-      })
-      .returning();
-    seq = inserted.currentSeq;
-  }
-
+  const seq: number = (seqResult.rows[0] as any).current_seq;
   const seqStr = String(seq).padStart(4, "0");
   const docNumber = `${prefix}-${code}-${year}-${seqStr}`;
 
-  // Store the assignment for idempotency (best-effort)
+  // Persist assignment for idempotency (best-effort; non-fatal if table missing)
   try {
     await db.execute(drizzleSql`
       INSERT INTO sport_center.document_issued_numbers
@@ -107,10 +72,8 @@ export async function generateDocumentNumber(params: {
       ON CONFLICT (entity_type, entity_id, document_type, company_id) DO NOTHING
     `);
   } catch {
-    // Non-fatal: table may not exist yet before migration
+    // Non-fatal: table may not exist yet
   }
 
   return docNumber;
 }
-
-export { deriveCompanyCode };

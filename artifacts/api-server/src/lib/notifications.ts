@@ -117,7 +117,7 @@ export async function notifyPaymentConfirmed(data: BookingNotifData): Promise<vo
     try {
       const [s] = await db.select().from(settingsTable).limit(1).catch(() => [null]);
       const appUrl = (s as { appUrl?: string } | null)?.appUrl || process.env.APP_URL || "";
-      if (appUrl) kwitansiUrl = `${appUrl}/api/admin/documents/kwitansi/${data.bookingId}/preview`;
+      if (appUrl) kwitansiUrl = `${appUrl}/api/admin/documents/kwitansi/${data.bookingId}/preview?_token=`;
     } catch { /* non-fatal */ }
   }
   const vars = { ...(data as unknown as Record<string, string>), kwitansiUrl };
