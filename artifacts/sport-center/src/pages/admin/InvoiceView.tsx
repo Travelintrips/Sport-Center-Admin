@@ -25,6 +25,7 @@ interface InvoiceData {
   endTime: string;
   durationHours: number;
   dpp: number;
+  dppNilaiLain: number;
   ppnRate: number;
   ppnAmount: number;
   grandTotal: number;
@@ -302,10 +303,18 @@ export default function InvoiceView() {
                       <span>DPP</span>
                       <span className="font-mono">{rp(invoiceData.dpp)}</span>
                     </div>
-                    <div className="flex justify-between text-amber-700">
-                      <span>PPN {invoiceData.ppnRate}%</span>
-                      <span className="font-mono">{rp(invoiceData.ppnAmount)}</span>
-                    </div>
+                    {invoiceData.dppNilaiLain > 0 && (
+                      <div className="flex justify-between text-gray-400">
+                        <span className="italic">DPP Nilai Lain</span>
+                        <span className="font-mono">{rp(invoiceData.dppNilaiLain)}</span>
+                      </div>
+                    )}
+                    {invoiceData.ppnRate > 0 && (
+                      <div className="flex justify-between text-amber-700">
+                        <span>PPN {invoiceData.ppnRate}%</span>
+                        <span className="font-mono">{rp(invoiceData.ppnAmount)}</span>
+                      </div>
+                    )}
                     <div className="flex justify-between font-bold text-sm text-gray-900 bg-orange-50 -mx-1 px-1 py-1 rounded border border-orange-100">
                       <span>TOTAL</span>
                       <span className="font-mono text-orange-600">{rp(invoiceData.grandTotal)}</span>

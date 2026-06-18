@@ -40,12 +40,12 @@ async function resolveInvoiceData(orderNumber: string): Promise<InvoiceData | nu
 
   // Get tax rate from booking or active tax settings
   let ppnRate = booking.ppnRate ? Number(booking.ppnRate) : 0;
-  let ppnAmount = booking.ppnAmount ? Number(booking.ppnAmount) : 0;
-  const dpp = Number(booking.totalPrice ?? 0);
-  let grandTotal = booking.grandTotal ? Number(booking.grandTotal) : dpp + ppnAmount;
+
+  // grandTotal = harga final yang dibayar customer (inclusive PPN)
+  const bookingBasePrice = Number(booking.totalPrice ?? 0);
+  let grandTotal = booking.grandTotal ? Number(booking.grandTotal) : bookingBasePrice;
 
   if (!ppnRate) {
-    // No PPN stored on booking – use active tax setting (default 12%)
     const [taxSetting] = await db
       .select()
       .from(taxSettingsTable)
@@ -57,9 +57,29 @@ async function resolveInvoiceData(orderNumber: string): Promise<InvoiceData | nu
       )
       .limit(1);
 
-    ppnRate = taxSetting ? Number(taxSetting.taxRate) : 12;
-    ppnAmount = Math.round(dpp * (ppnRate / 100));
+    ppnRate = taxSetting ? Number(taxSetting.taxRate) : 0;
+  }
+
+  // ── DPP Nilai Lain formula (sesuai regulasi PPN Indonesia) ────────────────
+  // harga di DB = inclusive PPN
+  // dpp        = grandTotal / 1.11
+  // dppNilaiLain = dpp × (11/12)
+  // ppnAmount  = dppNilaiLain × 12%
+  // total      = dpp + ppnAmount  (≈ grandTotal, max rounding diff ±1)
+  let dpp: number;
+  let dppNilaiLain: number;
+  let ppnAmount: number;
+
+  if (ppnRate > 0) {
+    dpp = Math.round(grandTotal / 1.11);
+    dppNilaiLain = Math.round(dpp * 11 / 12);
+    ppnAmount = Math.round(dppNilaiLain * 0.12);
+    // Re-align grandTotal so DPP + PPN matches exactly
     grandTotal = dpp + ppnAmount;
+  } else {
+    dpp = grandTotal;
+    dppNilaiLain = 0;
+    ppnAmount = 0;
   }
 
   const invoiceNumber = formatInvoiceNumber(booking.orderNumber, booking.bookingDate);
@@ -82,6 +102,7 @@ async function resolveInvoiceData(orderNumber: string): Promise<InvoiceData | nu
 
     pricePerHour: facility ? Number(facility.pricePerHour) : 0,
     dpp,
+    dppNilaiLain,
     ppnRate,
     ppnAmount,
     grandTotal,
