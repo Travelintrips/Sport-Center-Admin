@@ -34,6 +34,7 @@ async function main() {
       bankName: "BCA",
       bankAccount: "1234567890",
       bankAccountName: "Sport Center Jakarta",
+      qrisImageUrl: "https://nzdweipzckfszczzqtuw.supabase.co/storage/v1/object/public/facility-images/qris-263226c1-c51d-4353-9165-cedaba32adb4.jpeg",
     });
     console.log("Settings created");
   }
