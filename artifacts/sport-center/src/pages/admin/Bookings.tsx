@@ -1,4 +1,5 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
+import { useLocation } from "wouter";
 import {
   useListBookings,
   useUpdateBooking,
@@ -930,13 +931,24 @@ function BookingDetailDrawer({
               <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Dokumen</span>
             </div>
             <div className="p-3 flex flex-col gap-2">
+              <a
+                href={`/admin/invoice/${booking.orderNumber}`}
+                className="flex items-center gap-3 px-3 py-2.5 rounded-xl border border-orange-200 dark:border-orange-800 text-left hover:bg-orange-50 dark:hover:bg-orange-900/20 transition-colors no-underline"
+              >
+                <FileText size={15} className="text-orange-500 shrink-0" />
+                <div>
+                  <div className="text-xs font-semibold text-slate-700 dark:text-slate-300">Invoice Template Baru</div>
+                  <div className="text-[11px] text-slate-400">Preview · PDF · WhatsApp · Email</div>
+                </div>
+                <ExternalLink size={11} className="ml-auto text-slate-400" />
+              </a>
               <button
                 onClick={() => printInvoice(booking, settings)}
                 className="flex items-center gap-3 px-3 py-2.5 rounded-xl border border-blue-200 dark:border-blue-800 text-left hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
               >
                 <FileText size={15} className="text-blue-500 shrink-0" />
                 <div>
-                  <div className="text-xs font-semibold text-slate-700 dark:text-slate-300">Cetak Invoice</div>
+                  <div className="text-xs font-semibold text-slate-700 dark:text-slate-300">Cetak Invoice (Lama)</div>
                   <div className="text-[11px] text-slate-400">Dokumen tagihan untuk semua status</div>
                 </div>
               </button>

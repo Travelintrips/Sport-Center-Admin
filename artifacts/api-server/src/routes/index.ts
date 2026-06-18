@@ -50,6 +50,7 @@ import waAiAdminRouter from "./waAiAdmin";
 import seedDemoRouter from "./seedDemo";
 import systemAdminRouter from "./systemAdmin";
 import expensesRouter from "./expenses";
+import invoicesRouter from "./invoices";
 
 const router: IRouter = Router();
 
@@ -103,5 +104,6 @@ router.use(waAiAdminRouter);
 router.use(seedDemoRouter);
 router.use(systemAdminRouter);
 router.use(expensesRouter);
+router.use(invoicesRouter);
 
 export default router;
