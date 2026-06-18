@@ -35,8 +35,13 @@ if (isProd) {
 
 // ── Development ───────────────────────────────────────────────────────────────
 } else {
-  if (SUPABASE_DEV_URL) {
-    // Happy path — isolated dev DB is configured
+  if (FALLBACK_URL) {
+    // Happy path — local heliumdb (DATABASE_URL) is available; use it for dev
+    connectionString = FALLBACK_URL;
+    dbSource = "DATABASE_URL (dev — local heliumdb)";
+
+  } else if (SUPABASE_DEV_URL) {
+    // Isolated dev Supabase DB (only if DATABASE_URL not set)
     connectionString = SUPABASE_DEV_URL;
     dbSource = "SUPABASE_DATABASE_URL_DEV (dev — isolated)";
 
