@@ -71,10 +71,16 @@ async function resolveInvoiceData(orderNumber: string): Promise<InvoiceData | nu
   let ppnAmount: number;
 
   if (ppnRate > 0) {
+    // Core calculation (inclusive PPN 11%):
+    //   DPP          = grandTotal / 1.11
+    //   PPN          = DPP × 11%          ← tax base is DPP
+    //   TOTAL        = DPP + PPN
+    // Display-only field (tidak mempengaruhi total):
+    //   DPP Nilai Lain = DPP × (11/12)
     dpp = Math.round(grandTotal / 1.11);
-    dppNilaiLain = Math.round(dpp * 11 / 12);
-    ppnAmount = Math.round(dppNilaiLain * 0.12);
-    // Re-align grandTotal so DPP + PPN matches exactly
+    dppNilaiLain = Math.round(dpp * 11 / 12);   // DISPLAY ONLY
+    ppnAmount = Math.round(dpp * 0.11);          // PPN = DPP × 11%
+    // Re-align grandTotal so DPP + PPN = TOTAL always
     grandTotal = dpp + ppnAmount;
   } else {
     dpp = grandTotal;
