@@ -61,6 +61,7 @@ import AdminWaAiAssistant from "@/pages/admin/WaAiAssistant";
 import AdminExpenses from "@/pages/admin/Expenses";
 import AdminDocumentTemplates from "@/pages/admin/DocumentTemplates";
 import AdminInvoiceSettings from "@/pages/admin/InvoiceSettings";
+import AdminDocumentSettings from "@/pages/admin/DocumentSettings";
 import AdminInvoiceView from "@/pages/admin/InvoiceView";
 
 // WhatsApp Booking Flow Pages (standalone, no auth)
@@ -122,6 +123,7 @@ function AdminRouter() {
     if (location === "/admin/wa-ai") return <AdminWaAiAssistant />;
     if (location === "/admin/expenses") return <AdminExpenses />;
     if (location === "/admin/invoice-settings") return <AdminInvoiceSettings />;
+    if (location === "/admin/document-settings") return <AdminDocumentSettings />;
     if (location === "/admin/document-templates") return <AdminDocumentTemplates />;
     if (location.startsWith("/admin/invoice/")) return <AdminInvoiceView />;
     return <NotFound />;
@@ -166,6 +168,7 @@ function Router() {
       <Route path="/admin/wa-ai" component={AdminRouter} />
       <Route path="/admin/expenses" component={AdminRouter} />
       <Route path="/admin/invoice-settings" component={AdminRouter} />
+      <Route path="/admin/document-settings" component={AdminRouter} />
       <Route path="/admin/document-templates" component={AdminRouter} />
       <Route path="/admin/invoice/:orderNumber" component={AdminRouter} />
       <Route path="/admin" component={AdminRouter} />

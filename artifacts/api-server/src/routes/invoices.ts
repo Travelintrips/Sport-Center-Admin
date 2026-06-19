@@ -5,9 +5,9 @@ import {
   facilitiesTable,
   settingsTable,
   taxSettingsTable,
-  companyInvoiceSettingsTable,
+  companyDocumentSettingsTable,
 } from "@workspace/db";
-import { eq, and } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
 import { buildInvoiceHtml, type InvoiceData } from "../lib/invoiceTemplate";
@@ -38,7 +38,22 @@ async function resolveInvoiceData(orderNumber: string): Promise<InvoiceData | nu
     .limit(1);
 
   const [settings] = await db.select().from(settingsTable).limit(1);
-  const [invoiceSettings] = await db.select().from(companyInvoiceSettingsTable).limit(1);
+
+  // Load both 'invoice' and 'general' in one query; invoice takes priority
+  const docRows = await db
+    .select()
+    .from(companyDocumentSettingsTable)
+    .where(inArray(companyDocumentSettingsTable.documentType, ["invoice", "general"]));
+  const invoiceDoc = docRows.find(r => r.documentType === "invoice");
+  const generalDoc = docRows.find(r => r.documentType === "general");
+  // Merge: invoice overrides general, which overrides settings table
+  function pick<T>(invoice: T | null | undefined, general: T | null | undefined, fallback: T): T {
+    return (invoice !== null && invoice !== undefined && invoice !== "" as unknown as T)
+      ? invoice as T
+      : (general !== null && general !== undefined && general !== "" as unknown as T)
+        ? general as T
+        : fallback;
+  }
 
   // Get tax rate from booking or active tax settings
   let ppnRate = booking.ppnRate ? Number(booking.ppnRate) : 0;
@@ -118,21 +133,21 @@ async function resolveInvoiceData(orderNumber: string): Promise<InvoiceData | nu
     promoCode: booking.promoCode ?? null,
     discountAmount: Number(booking.discountAmount ?? 0),
 
-    centerName: invoiceSettings?.companyName || settings?.centerName || "Sport Center Soekarno-Hatta",
-    centerAddress: invoiceSettings?.address || settings?.address || "Kawasan Bandara Soekarno-Hatta, Tangerang 19110",
-    centerPhone: invoiceSettings?.phone || settings?.phone || "",
-    bankName: invoiceSettings?.bankName || settings?.bankName || "Bank Mandiri",
-    bankAccount: invoiceSettings?.bankAccount || settings?.bankAccount || "",
-    bankAccountName: invoiceSettings?.bankAccountName || settings?.bankAccountName || "Sport Center Soekarno-Hatta",
+    centerName: settings?.centerName || "Sport Center Soekarno-Hatta",
+    centerAddress: settings?.address || "Kawasan Bandara Soekarno-Hatta, Tangerang 19110",
+    centerPhone: settings?.phone || "",
+    bankName: pick(invoiceDoc?.bankName, generalDoc?.bankName, settings?.bankName || "Bank Mandiri"),
+    bankAccount: pick(invoiceDoc?.bankAccount, generalDoc?.bankAccount, settings?.bankAccount || ""),
+    bankAccountName: pick(invoiceDoc?.bankHolder, generalDoc?.bankHolder, settings?.bankAccountName || "Sport Center Soekarno-Hatta"),
 
-    // Dynamic invoice template fields
-    logoUrl: invoiceSettings?.logoUrl ?? settings?.logoUrl ?? null,
-    kopSuratHtml: invoiceSettings?.kopSuratHtml ?? null,
-    financeName: invoiceSettings?.financeName ?? null,
-    financeTitle: invoiceSettings?.financeTitle ?? null,
-    signatureUrl: invoiceSettings?.signatureUrl ?? null,
-    footerText: invoiceSettings?.footerText ?? null,
-    invoicePrefix: invoiceSettings?.invoicePrefix ?? "INV",
+    // Dynamic template fields — invoice doc > general doc > settings fallback
+    logoUrl: invoiceDoc?.logoUrl ?? generalDoc?.logoUrl ?? (settings as any)?.logoUrl ?? null,
+    kopSuratHtml: invoiceDoc?.kopSuratHtml ?? generalDoc?.kopSuratHtml ?? null,
+    financeName: pick(invoiceDoc?.financeName, generalDoc?.financeName, ""),
+    financeTitle: pick(invoiceDoc?.financeTitle, generalDoc?.financeTitle, "Finance Manager"),
+    signatureUrl: invoiceDoc?.signatureUrl ?? generalDoc?.signatureUrl ?? null,
+    footerText: invoiceDoc?.footerHtml ?? generalDoc?.footerHtml ?? null,
+    invoicePrefix: pick(invoiceDoc?.prefixNumber, generalDoc?.prefixNumber, "INV"),
   };
 }
 

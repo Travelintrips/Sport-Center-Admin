@@ -34,3 +34,4 @@ export * from "./expenses";
 export * from "./documentTemplates";
 export * from "./companyBillingRequirements";
 export * from "./companyInvoiceSettings";
+export * from "./companyDocumentSettings";
