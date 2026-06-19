@@ -437,8 +437,10 @@ export function buildInvoiceHtml(data: InvoiceData, opts: BuildOptions = {}): st
   <div class="sc-header">
     <div>
       <div class="sc-brand-name">SPORT CENTER</div>
-      <div class="sc-brand-sub">Bandara Soekarno-Hatta</div>
-      <div class="sc-brand-addr">${data.centerAddress || "Kawasan Bandara Soekarno-Hatta, Tangerang 19110"}</div>
+      <div class="sc-brand-sub">BANDARA SOEKARNO – HATTA</div>
+      <div class="sc-brand-addr">Jl. C3 No. 831 RT 001 RW 010</div>
+      <div class="sc-brand-addr">(Belakang Masjid Nurul Barkah)</div>
+      <div class="sc-brand-addr">Pajang, Benda – Kota Tangerang Banten 15126</div>
       ${data.centerPhone ? `<div class="sc-brand-addr" style="margin-top:3px;">Telp: ${data.centerPhone}</div>` : ""}
     </div>
     <div class="sc-invoice-label">
@@ -561,23 +563,11 @@ export function buildInvoiceHtml(data: InvoiceData, opts: BuildOptions = {}): st
   <div class="sc-bottom-row">
     <div class="sc-payment-box">
       <h4>Informasi Pembayaran</h4>
-      <table class="sc-info-table">
-        <tr>
-          <td>Bank</td>
-          <td>:</td>
-          <td style="font-weight:700;color:#0369a1;">${data.bankName || "Bank Mandiri"}</td>
-        </tr>
-        <tr>
-          <td>No Rekening</td>
-          <td>:</td>
-          <td style="font-family:'Courier New',monospace;font-weight:700;">${data.bankAccount || "-"}</td>
-        </tr>
-        <tr>
-          <td>Atas Nama</td>
-          <td>:</td>
-          <td>${data.bankAccountName || "Sport Center Soekarno-Hatta"}</td>
-        </tr>
-      </table>
+      <div style="font-size:12px;color:#111827;line-height:1.9;">
+        <div style="font-weight:700;color:#0369a1;">PT CAHAYA SEJATI TEKNOLOGI</div>
+        <div>Bank Mandiri</div>
+        <div style="font-family:'Courier New',monospace;font-weight:700;font-size:13px;">Account No. 1640006707220</div>
+      </div>
     </div>
 
     <div class="sc-notes-box">
@@ -604,9 +594,9 @@ export function buildInvoiceHtml(data: InvoiceData, opts: BuildOptions = {}): st
     </div>
     <div class="sc-signature">
       <div style="font-size:12px;color:#374151;margin-bottom:4px;">Hormat kami,</div>
+      <div style="height:140px;"></div>
       <div class="sc-signature-line"></div>
-      <div class="sc-signature-name">${data.centerName || "Sport Center Soekarno-Hatta"}</div>
-      <div class="sc-signature-role">Tim Finance</div>
+      <div class="sc-signature-name">SPORT CENTER</div>
     </div>
   </div>
 
