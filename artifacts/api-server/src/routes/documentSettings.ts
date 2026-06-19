@@ -145,7 +145,7 @@ router.post(
       if (!req.file) { res.status(400).json({ error: "File diperlukan" }); return; }
       const ext = req.file.originalname.split(".").pop() ?? "png";
       const filename = `doc-logo-${type}-${randomUUID()}.${ext}`;
-      const url = await uploadToStorage(BUCKETS.FACILITY_IMAGES, filename, req.file.buffer, req.file.mimetype);
+      const url = await uploadToStorage(BUCKETS.facility, filename, req.file.buffer, req.file.mimetype);
 
       const existing = await getDocumentSettings(type);
       const [updated] = await db
@@ -186,7 +186,7 @@ router.post(
       if (!req.file) { res.status(400).json({ error: "File diperlukan" }); return; }
       const ext = req.file.originalname.split(".").pop() ?? "png";
       const filename = `doc-signature-${type}-${randomUUID()}.${ext}`;
-      const url = await uploadToStorage(BUCKETS.FACILITY_IMAGES, filename, req.file.buffer, req.file.mimetype);
+      const url = await uploadToStorage(BUCKETS.facility, filename, req.file.buffer, req.file.mimetype);
 
       const existing = await getDocumentSettings(type);
       const [updated] = await db

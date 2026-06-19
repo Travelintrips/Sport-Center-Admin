@@ -106,7 +106,7 @@ router.post("/admin/invoice-settings/upload-logo", adminMiddleware, upload.singl
     if (!req.file) { res.status(400).json({ error: "File diperlukan" }); return; }
     const ext = req.file.originalname.split(".").pop() ?? "png";
     const filename = `invoice-logo-${randomUUID()}.${ext}`;
-    const url = await uploadToStorage(BUCKETS.FACILITY_IMAGES, filename, req.file.buffer, req.file.mimetype);
+    const url = await uploadToStorage(BUCKETS.facility, filename, req.file.buffer, req.file.mimetype);
 
     const existing = await getOrCreate();
     const [updated] = await db
@@ -140,7 +140,7 @@ router.post("/admin/invoice-settings/upload-signature", adminMiddleware, upload.
     if (!req.file) { res.status(400).json({ error: "File diperlukan" }); return; }
     const ext = req.file.originalname.split(".").pop() ?? "png";
     const filename = `invoice-signature-${randomUUID()}.${ext}`;
-    const url = await uploadToStorage(BUCKETS.FACILITY_IMAGES, filename, req.file.buffer, req.file.mimetype);
+    const url = await uploadToStorage(BUCKETS.facility, filename, req.file.buffer, req.file.mimetype);
 
     const existing = await getOrCreate();
     const [updated] = await db
