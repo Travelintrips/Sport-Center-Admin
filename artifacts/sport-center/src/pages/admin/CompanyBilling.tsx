@@ -112,8 +112,9 @@ function printInvoicePdf(invoice: any) {
       <td style="padding:6px 7px; font-size:11px;">${item.bookingDate ?? "-"}</td>
       <td style="padding:6px 7px; font-size:11px;">${item.startTime ?? "-"}–${item.endTime ?? "-"}</td>
       <td style="padding:6px 7px; font-size:11px; text-align:center;">${item.durationHours ?? 0} jam</td>
-      <td style="padding:6px 7px; font-size:11px; text-align:right;">${formatCurrency(item.subtotal ?? 0)}</td>
-      <td style="padding:6px 7px; font-size:11px; text-align:right; font-weight:600;">${formatCurrency(item.totalAmount ?? 0)}</td>
+      <td style="padding:6px 7px; font-size:11px; text-align:right;">${formatCurrency(Math.round((item.subtotal ?? 0) / 1.11))}</td>
+      <td style="padding:6px 7px; font-size:11px; text-align:right; color:#6b7280;">${formatCurrency(Math.round(Math.round(Math.round((item.subtotal ?? 0) / 1.11) * 11 / 12) * 0.12))}</td>
+      <td style="padding:6px 7px; font-size:11px; text-align:right; font-weight:600;">${formatCurrency(item.subtotal ?? 0)}</td>
     </tr>
   `).join("");
 
@@ -178,14 +179,17 @@ function printInvoicePdf(invoice: any) {
     <th style="width:24px;">No.</th>
     <th>Customer</th><th>No. WA</th><th>Fasilitas</th><th>Tanggal</th><th>Jam</th>
     <th style="text-align:center;">Durasi</th>
-    <th style="text-align:right;">Harga</th>
+    <th style="text-align:right;">DPP</th>
+    <th style="text-align:right;">PPN 12%</th>
     <th style="text-align:right;">Total</th>
   </tr></thead><tbody>
-    ${rows || `<tr><td colspan="9" style="text-align:center;padding:16px;color:#9ca3af;">Tidak ada data pemakaian</td></tr>`}
+    ${rows || `<tr><td colspan="10" style="text-align:center;padding:16px;color:#9ca3af;">Tidak ada data pemakaian</td></tr>`}
   </tbody><tfoot>
     <tr class="total-row">
-      <td colspan="7" style="padding:8px 7px;font-size:12px;border-top:2px solid #ea580c;">Subtotal Pemakaian</td>
-      <td colspan="2" style="padding:8px 7px;text-align:right;font-size:12px;border-top:2px solid #ea580c;">${formatCurrency(items.reduce((s: number, i: any) => s + Number(i.subtotal ?? 0), 0))}</td>
+      <td colspan="7" style="padding:8px 7px;font-size:12px;border-top:2px solid #ea580c;">Total</td>
+      <td style="padding:8px 7px;text-align:right;font-size:12px;border-top:2px solid #ea580c;">${formatCurrency(items.reduce((s: number, i: any) => s + Math.round(Number(i.subtotal ?? 0) / 1.11), 0))}</td>
+      <td style="padding:8px 7px;text-align:right;font-size:12px;border-top:2px solid #ea580c;color:#6b7280;">${formatCurrency(items.reduce((s: number, i: any) => s + Math.round(Math.round(Math.round(Number(i.subtotal ?? 0) / 1.11) * 11 / 12) * 0.12), 0))}</td>
+      <td style="padding:8px 7px;text-align:right;font-size:12px;border-top:2px solid #ea580c;">${formatCurrency(items.reduce((s: number, i: any) => s + Number(i.subtotal ?? 0), 0))}</td>
     </tr>
   </tfoot></table>
 
@@ -260,12 +264,13 @@ function printLampiranPemakaian(invoice: any) {
       <td style="padding:6px 8px;font-size:12px;border:1px solid #e5e7eb;">${item.bookingDate ?? "-"}</td>
       <td style="padding:6px 8px;font-size:12px;border:1px solid #e5e7eb;">${item.startTime ?? "-"}–${item.endTime ?? "-"}</td>
       <td style="padding:6px 8px;font-size:12px;border:1px solid #e5e7eb;text-align:center;">${item.durationHours ?? 0} jam</td>
-      <td style="padding:6px 8px;font-size:12px;border:1px solid #e5e7eb;text-align:right;">${formatCurrency(item.subtotal ?? 0)}</td>
-      <td style="padding:6px 8px;font-size:12px;border:1px solid #e5e7eb;text-align:right;font-weight:600;">${formatCurrency(item.totalAmount ?? 0)}</td>
+      <td style="padding:6px 8px;font-size:12px;border:1px solid #e5e7eb;text-align:right;">${formatCurrency(Math.round(Number(item.subtotal ?? 0) / 1.11))}</td>
+      <td style="padding:6px 8px;font-size:12px;border:1px solid #e5e7eb;text-align:right;color:#6b7280;">${formatCurrency(Math.round(Math.round(Math.round(Number(item.subtotal ?? 0) / 1.11) * 11 / 12) * 0.12))}</td>
+      <td style="padding:6px 8px;font-size:12px;border:1px solid #e5e7eb;text-align:right;font-weight:600;">${formatCurrency(item.subtotal ?? 0)}</td>
     </tr>
   `).join("");
   const totalDurasi = items.reduce((s, i) => s + Number(i.durationHours ?? 0), 0);
-  const totalHarga = items.reduce((s, i) => s + Number(i.totalAmount ?? 0), 0);
+  const totalHarga = items.reduce((s, i) => s + Number(i.subtotal ?? 0), 0);
 
   const html = `<!DOCTYPE html><html lang="id"><head><meta charset="utf-8"/>
   <title>Lampiran Pemakaian – ${invoice.invoiceNumber}</title>
@@ -301,15 +306,17 @@ function printLampiranPemakaian(invoice: any) {
     <th>Tanggal</th>
     <th>Jam</th>
     <th style="text-align:center;">Durasi</th>
-    <th style="text-align:right;">Harga</th>
+    <th style="text-align:right;">DPP</th>
+    <th style="text-align:right;">PPN 12%</th>
     <th style="text-align:right;">Total</th>
   </tr></thead><tbody>
-    ${rows || `<tr><td colspan="8" style="text-align:center;padding:16px;color:#9ca3af;border:1px solid #e5e7eb;">Tidak ada data pemakaian</td></tr>`}
+    ${rows || `<tr><td colspan="9" style="text-align:center;padding:16px;color:#9ca3af;border:1px solid #e5e7eb;">Tidak ada data pemakaian</td></tr>`}
   </tbody><tfoot>
     <tr class="total-row">
       <td colspan="5" style="padding:8px;text-align:right;font-size:12px;">Total:</td>
       <td style="padding:8px;text-align:center;font-size:12px;font-weight:700;">${totalDurasi.toFixed(1)} jam</td>
-      <td></td>
+      <td style="padding:8px;text-align:right;font-size:12px;font-weight:700;">${formatCurrency(items.reduce((s: number, i: any) => s + Math.round(Number(i.subtotal ?? 0) / 1.11), 0))}</td>
+      <td style="padding:8px;text-align:right;font-size:12px;color:#6b7280;">${formatCurrency(items.reduce((s: number, i: any) => s + Math.round(Math.round(Math.round(Number(i.subtotal ?? 0) / 1.11) * 11 / 12) * 0.12), 0))}</td>
       <td style="padding:8px;text-align:right;font-size:13px;font-weight:900;color:#ea580c;">${formatCurrency(totalHarga)}</td>
     </tr>
   </tfoot></table>
@@ -1188,8 +1195,8 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
                     <th className="text-left p-2.5 font-semibold text-muted-foreground whitespace-nowrap">Tanggal</th>
                     <th className="text-left p-2.5 font-semibold text-muted-foreground whitespace-nowrap">Jam</th>
                     <th className="text-center p-2.5 font-semibold text-muted-foreground whitespace-nowrap">Durasi</th>
-                    <th className="text-right p-2.5 font-semibold text-muted-foreground whitespace-nowrap">Subtotal</th>
-                    <th className="text-right p-2.5 font-semibold text-muted-foreground whitespace-nowrap">PPN 11%</th>
+                    <th className="text-right p-2.5 font-semibold text-muted-foreground whitespace-nowrap">DPP</th>
+                    <th className="text-right p-2.5 font-semibold text-muted-foreground whitespace-nowrap">PPN 12%</th>
                     <th className="text-right p-2.5 font-semibold text-muted-foreground whitespace-nowrap">Total</th>
                     <th className="text-left p-2.5 font-semibold text-muted-foreground whitespace-nowrap">No. Booking</th>
                   </tr>
@@ -1207,9 +1214,9 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
                         {item.startTime ?? "-"}{item.endTime ? `–${item.endTime}` : ""}
                       </td>
                       <td className="p-2.5 text-center whitespace-nowrap">{item.durationHours ?? 0} jam</td>
-                      <td className="p-2.5 text-right whitespace-nowrap">{formatCurrency(item.subtotal ?? 0)}</td>
-                      <td className="p-2.5 text-right whitespace-nowrap text-muted-foreground">{formatCurrency(item.taxAmount ?? 0)}</td>
-                      <td className="p-2.5 text-right whitespace-nowrap font-semibold">{formatCurrency(item.totalAmount ?? 0)}</td>
+                      <td className="p-2.5 text-right whitespace-nowrap">{formatCurrency(Math.round((item.subtotal ?? 0) / 1.11))}</td>
+                      <td className="p-2.5 text-right whitespace-nowrap text-muted-foreground">{formatCurrency(Math.round(Math.round(Math.round((item.subtotal ?? 0) / 1.11) * 11 / 12) * 0.12))}</td>
+                      <td className="p-2.5 text-right whitespace-nowrap font-semibold">{formatCurrency(item.subtotal ?? 0)}</td>
                       <td className="p-2.5 whitespace-nowrap font-mono text-[10px] text-muted-foreground">{item.orderNumber ?? "-"}</td>
                     </tr>
                   ))}
@@ -1217,9 +1224,9 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
                 <tfoot>
                   <tr className="border-t bg-muted/30">
                     <td colSpan={6} className="p-2.5 text-xs font-semibold text-muted-foreground">{items.length} sesi</td>
-                    <td className="p-2.5 text-right text-xs font-semibold">{formatCurrency(items.reduce((s: number, i: any) => s + (i.subtotal ?? 0), 0))}</td>
-                    <td className="p-2.5 text-right text-xs text-muted-foreground">{formatCurrency(items.reduce((s: number, i: any) => s + (i.taxAmount ?? 0), 0))}</td>
-                    <td className="p-2.5 text-right text-xs font-bold text-primary">{formatCurrency(items.reduce((s: number, i: any) => s + (i.totalAmount ?? 0), 0))}</td>
+                    <td className="p-2.5 text-right text-xs font-semibold">{formatCurrency(items.reduce((s: number, i: any) => s + Math.round((i.subtotal ?? 0) / 1.11), 0))}</td>
+                    <td className="p-2.5 text-right text-xs text-muted-foreground">{formatCurrency(items.reduce((s: number, i: any) => s + Math.round(Math.round(Math.round((i.subtotal ?? 0) / 1.11) * 11 / 12) * 0.12), 0))}</td>
+                    <td className="p-2.5 text-right text-xs font-bold text-primary">{formatCurrency(items.reduce((s: number, i: any) => s + (i.subtotal ?? 0), 0))}</td>
                     <td />
                   </tr>
                 </tfoot>
@@ -1406,8 +1413,8 @@ export default function AdminCompanyBilling() {
                       <th className="pb-3 pr-4 font-semibold text-muted-foreground">No. Invoice</th>
                       <th className="pb-3 pr-4 font-semibold text-muted-foreground">Perusahaan</th>
                       <th className="pb-3 pr-4 font-semibold text-muted-foreground">Periode</th>
-                      <th className="pb-3 pr-4 font-semibold text-muted-foreground">Subtotal</th>
-                      <th className="pb-3 pr-4 font-semibold text-muted-foreground">PPN 11%</th>
+                      <th className="pb-3 pr-4 font-semibold text-muted-foreground">DPP</th>
+                      <th className="pb-3 pr-4 font-semibold text-muted-foreground">PPN 12%</th>
                       <th className="pb-3 pr-4 font-semibold text-muted-foreground">Grand Total</th>
                       <th className="pb-3 pr-4 font-semibold text-muted-foreground">Status</th>
                       <th className="pb-3 font-semibold text-muted-foreground">Aksi</th>
@@ -1428,7 +1435,7 @@ export default function AdminCompanyBilling() {
                             </div>
                           </td>
                           <td className="py-3 pr-4 text-muted-foreground">{label}</td>
-                          <td className="py-3 pr-4">{formatCurrency(inv.totalAmount)}</td>
+                          <td className="py-3 pr-4">{formatCurrency(inv.dpp ?? Math.round((inv.totalAmount ?? 0) / 1.11))}</td>
                           <td className="py-3 pr-4 text-muted-foreground">{formatCurrency(inv.ppnAmount)}</td>
                           <td className="py-3 pr-4 font-semibold">{formatCurrency(inv.grandTotal)}</td>
                           <td className="py-3 pr-4"><StatusBadge status={inv.status} /></td>
