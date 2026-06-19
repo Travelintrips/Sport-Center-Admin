@@ -89,9 +89,61 @@ function taxBreakdown(totalAmountInclusive: number) {
   return { dpp, dppNilaiLain, ppn, grandTotal };
 }
 
+// ─── Document Template Settings ──────────────────────────────────────────────
+
+interface DocTemplateSettings {
+  centerName: string;
+  centerAddress: string;
+  phone: string;
+  logoUrl: string | null;
+  bankHolder: string;
+  bankName: string;
+  bankAccount: string;
+  financeName: string;
+  financeTitle: string;
+  signatureUrl: string | null;
+  prefixes: { invoice: string; kwitansi: string; spp: string; lampiran: string; berita_acara: string };
+}
+
+async function loadDocTemplateSettings(): Promise<DocTemplateSettings> {
+  const base = (import.meta as any).env?.VITE_API_BASE_URL ?? "/api";
+  const [docRows, site] = await Promise.all([
+    fetch(`${base}/document-settings/public`).then(r => r.json()).catch(() => []),
+    fetch(`${base}/settings`).then(r => r.json()).catch(() => ({})),
+  ]);
+  const inv = docRows.find((r: any) => r.documentType === "invoice") ?? {};
+  const gen = docRows.find((r: any) => r.documentType === "general") ?? {};
+  const kwt = docRows.find((r: any) => r.documentType === "kwitansi") ?? {};
+  const spp = docRows.find((r: any) => r.documentType === "spp") ?? {};
+  const lmp = docRows.find((r: any) => r.documentType === "lampiran") ?? {};
+  const ba  = docRows.find((r: any) => r.documentType === "berita_acara") ?? {};
+  function pick(a: any, b: any, fb: string) {
+    return (a !== null && a !== undefined && a !== "") ? a : (b !== null && b !== undefined && b !== "") ? b : fb;
+  }
+  return {
+    centerName:    site?.centerName    || "Sport Center Soekarno-Hatta",
+    centerAddress: site?.address       || "Kawasan Bandara Soekarno-Hatta, Tangerang",
+    phone:         site?.phone         || "",
+    logoUrl:       inv.logoUrl         ?? gen.logoUrl ?? null,
+    bankHolder:    pick(inv.bankHolder,   gen.bankHolder,   site?.bankAccountName  || "PT Cahaya Sejati Teknologi"),
+    bankName:      pick(inv.bankName,     gen.bankName,     site?.bankName         || "Bank Mandiri"),
+    bankAccount:   pick(inv.bankAccount,  gen.bankAccount,  site?.bankAccount      || ""),
+    financeName:   pick(inv.financeName,  gen.financeName,  "Admin Sport Center"),
+    financeTitle:  pick(inv.financeTitle, gen.financeTitle, "Finance Manager"),
+    signatureUrl:  inv.signatureUrl ?? gen.signatureUrl ?? null,
+    prefixes: {
+      invoice:     inv.prefixNumber || "INV",
+      kwitansi:    kwt.prefixNumber || "KWT",
+      spp:         spp.prefixNumber || "SPP",
+      lampiran:    lmp.prefixNumber || "LMP",
+      berita_acara: ba.prefixNumber || "BA",
+    },
+  };
+}
+
 // ─── PDF Print Helpers ────────────────────────────────────────────────────────
 
-function printInvoicePdf(invoice: any) {
+function printInvoicePdf(invoice: any, ds: DocTemplateSettings) {
   const items: any[] = invoice.items ?? [];
   const periodStr = periodLabel(invoice.periodMonth);
   const today = new Date().toLocaleDateString("id-ID", { day:"numeric", month:"long", year:"numeric" });
@@ -144,8 +196,9 @@ function printInvoicePdf(invoice: any) {
   <!-- HEADER -->
   <div class="flex" style="margin-bottom:14px;">
     <div>
-      <h1>Sport Center Soekarno-Hatta</h1>
-      <div style="color:#6b7280;font-size:11px;margin-top:3px;">Kawasan Bandara Soekarno-Hatta, Tangerang</div>
+      ${ds.logoUrl ? `<img src="${ds.logoUrl}" alt="Logo" style="max-height:48px;margin-bottom:6px;display:block;"/>` : ""}
+      <h1>${ds.centerName}</h1>
+      <div style="color:#6b7280;font-size:11px;margin-top:3px;">${ds.centerAddress}</div>
     </div>
     <div style="text-align:right;">
       <div style="font-size:20px;font-weight:900;color:#ea580c;">${invoice.invoiceNumber}</div>
@@ -212,8 +265,8 @@ function printInvoicePdf(invoice: any) {
     <div class="section-title" style="margin-bottom:6px;">Informasi Pembayaran</div>
     <div style="font-size:12px;line-height:1.8;">
       Harap melakukan pembayaran melalui transfer bank ke:<br/>
-      <strong>PT CAHAYA SEJATI TEKNOLOGI</strong><br/>
-      Bank Mandiri · No. Rekening: <strong>1640006707220</strong><br/>
+      <strong>${ds.bankHolder}</strong><br/>
+      ${ds.bankName} · No. Rekening: <strong>${ds.bankAccount}</strong><br/>
       Dengan mencantumkan No. Invoice <strong>${invoice.invoiceNumber}</strong> sebagai keterangan transfer.
     </div>
   </div>
@@ -232,28 +285,26 @@ function printInvoicePdf(invoice: any) {
     </div>
     <div class="sign-box" style="width:200px;">
       <div style="font-size:11px;">Hormat kami,</div>
-      <div style="font-size:10px;color:#6b7280;">Sport Center Soekarno-Hatta</div>
-      <div style="border:1px dashed #d1d5db;border-radius:50%;width:64px;height:64px;margin:8px auto 0;display:flex;align-items:center;justify-content:center;">
-        <span style="font-size:8px;color:#9ca3af;text-align:center;line-height:1.3;">Materai<br/>Rp 10.000</span>
-      </div>
-      <div style="border:2px dashed #ea580c;border-radius:50%;width:80px;height:80px;margin:-20px auto 0;display:flex;align-items:center;justify-content:center;">
-        <span style="font-size:7px;color:#ea580c;text-align:center;line-height:1.4;font-weight:700;">STEMPEL<br/>SPORT CENTER<br/>SOEKARNO-HATTA</span>
-      </div>
-      <div class="sign-line" style="margin-top:4px;"></div>
-      <div style="font-size:11px;font-weight:600;">Admin Sport Center</div>
-      <div style="font-size:10px;color:#6b7280;">Sport Center Soekarno-Hatta</div>
+      <div style="font-size:10px;color:#6b7280;">${ds.centerName}</div>
+      ${ds.signatureUrl
+        ? `<img src="${ds.signatureUrl}" alt="TTD" style="height:64px;margin:8px auto 0;display:block;"/>`
+        : `<div style="border:1px dashed #d1d5db;border-radius:50%;width:64px;height:64px;margin:8px auto 0;display:flex;align-items:center;justify-content:center;"><span style="font-size:8px;color:#9ca3af;text-align:center;line-height:1.3;">Materai<br/>Rp 10.000</span></div>`
+      }
+      <div class="sign-line" style="margin-top:${ds.signatureUrl ? "4px" : "-20px"};"></div>
+      <div style="font-size:11px;font-weight:600;">${ds.financeName}</div>
+      <div style="font-size:10px;color:#6b7280;">${ds.financeTitle}</div>
     </div>
   </div>
 
   <hr style="margin:20px 0 10px;border:none;border-top:1px solid #e5e7eb;"/>
-  <div style="font-size:9px;color:#9ca3af;text-align:center;">Dokumen ini diterbitkan secara otomatis oleh sistem Sport Center Soekarno-Hatta · ${invoice.invoiceNumber} · ${today}</div>
+  <div style="font-size:9px;color:#9ca3af;text-align:center;">Dokumen ini diterbitkan secara otomatis oleh sistem ${ds.centerName} · ${invoice.invoiceNumber} · ${today}</div>
   <script>window.onload=function(){window.print();};</script>
 </body></html>`;
   const win = window.open("", "_blank");
   if (win) { win.document.write(html); win.document.close(); }
 }
 
-function printLampiranPemakaian(invoice: any) {
+function printLampiranPemakaian(invoice: any, ds: DocTemplateSettings) {
   const items: any[] = invoice.items ?? [];
   const periodStr = periodLabel(invoice.periodMonth);
   const rows = items.map((item: any, i: number) => `
@@ -284,8 +335,9 @@ function printLampiranPemakaian(invoice: any) {
     .header-row { display:flex; justify-content:space-between; margin-bottom:16px; }
     .info-block { background:#f9fafb; border:1px solid #e5e7eb; border-radius:6px; padding:10px 14px; }
   </style></head><body>
+  ${ds.logoUrl ? `<img src="${ds.logoUrl}" alt="Logo" style="max-height:40px;margin-bottom:6px;display:block;"/>` : ""}
   <h2>LAMPIRAN PEMAKAIAN FASILITAS</h2>
-  <div style="color:#6b7280;font-size:12px;margin-bottom:16px;">Sport Center Soekarno-Hatta · Kawasan Bandara Soekarno-Hatta, Tangerang</div>
+  <div style="color:#6b7280;font-size:12px;margin-bottom:16px;">${ds.centerName} · ${ds.centerAddress}</div>
   <div class="header-row">
     <div class="info-block">
       <div style="font-size:11px;color:#9ca3af;font-weight:700;text-transform:uppercase;margin-bottom:6px;">Perusahaan</div>
@@ -323,8 +375,10 @@ function printLampiranPemakaian(invoice: any) {
   <div style="margin-top:32px;display:flex;justify-content:flex-end;">
     <div style="text-align:center;width:180px;">
       <div style="font-size:12px;color:#6b7280;">Mengetahui,</div>
-      <div style="margin:48px 0 4px;border-bottom:1px solid #111;"></div>
-      <div style="font-size:12px;font-weight:600;">Admin Sport Center</div>
+      ${ds.signatureUrl ? `<img src="${ds.signatureUrl}" alt="TTD" style="height:52px;margin:6px auto 0;display:block;"/>` : `<div style="margin:48px 0 0;"></div>`}
+      <div style="margin:4px 0 4px;border-bottom:1px solid #111;"></div>
+      <div style="font-size:12px;font-weight:600;">${ds.financeName}</div>
+      <div style="font-size:11px;color:#6b7280;">${ds.financeTitle}</div>
     </div>
   </div>
   <script>window.onload=function(){window.print();};</script>
@@ -333,7 +387,7 @@ function printLampiranPemakaian(invoice: any) {
   if (win) { win.document.write(html); win.document.close(); }
 }
 
-function printKwitansi(invoice: any) {
+function printKwitansi(invoice: any, ds: DocTemplateSettings) {
   const periodStr = periodLabel(invoice.periodMonth);
   const html = `<!DOCTYPE html><html lang="id"><head><meta charset="utf-8"/>
   <title>Kwitansi – ${invoice.invoiceNumber}</title>
@@ -351,11 +405,12 @@ function printKwitansi(invoice: any) {
     .sign-box { text-align:center; width:160px; }
   </style></head><body>
   <div class="kwitansi-box">
-    <div style="text-align:center;margin-bottom:8px;font-size:13px;color:#6b7280;">Sport Center Soekarno-Hatta</div>
+    ${ds.logoUrl ? `<img src="${ds.logoUrl}" alt="Logo" style="max-height:40px;margin-bottom:6px;display:block;margin-left:auto;margin-right:auto;"/>` : ""}
+    <div style="text-align:center;margin-bottom:8px;font-size:13px;color:#6b7280;">${ds.centerName}</div>
     <h2>K W I T A N S I</h2>
     <div class="row">
       <div class="label">No. Kwitansi</div>
-      <div class="value">${invoice.invoiceNumber.replace("INV-", "KWT-")}</div>
+      <div class="value">${invoice.invoiceNumber.replace("INV-", `${ds.prefixes.kwitansi}-`)}</div>
     </div>
     <div class="row">
       <div class="label">Sudah Terima Dari</div>
@@ -383,20 +438,19 @@ function printKwitansi(invoice: any) {
     </div>
     <div style="margin:18px 0;padding:12px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;font-size:12px;">
       <div style="font-weight:700;margin-bottom:4px;">Transfer ke:</div>
-      <div style="font-weight:700;">PT CAHAYA SEJATI TEKNOLOGI</div>
-      <div>Bank Mandiri · No. Rek: <strong>1640006707220</strong></div>
+      <div style="font-weight:700;">${ds.bankHolder}</div>
+      <div>${ds.bankName} · No. Rek: <strong>${ds.bankAccount}</strong></div>
     </div>
     <div class="footer">
       <div class="sign-box">
         <div style="font-size:12px;color:#6b7280;">Hormat kami,</div>
-        <div style="border:1px dashed #d1d5db;border-radius:50%;width:56px;height:56px;margin:6px auto;display:flex;align-items:center;justify-content:center;">
-          <span style="font-size:7px;color:#9ca3af;text-align:center;line-height:1.3;">Materai<br/>Rp 10.000</span>
-        </div>
-        <div style="border:2px dashed #ea580c;border-radius:50%;width:72px;height:72px;margin:-18px auto 0;display:flex;align-items:center;justify-content:center;">
-          <span style="font-size:6px;color:#ea580c;text-align:center;line-height:1.4;font-weight:700;">STEMPEL<br/>SPORT CENTER</span>
-        </div>
+        ${ds.signatureUrl
+          ? `<img src="${ds.signatureUrl}" alt="TTD" style="height:56px;margin:6px auto;display:block;"/>`
+          : `<div style="margin:48px 0 0;"></div>`
+        }
         <div style="margin:4px 0 4px;border-bottom:1px solid #111;"></div>
-        <div style="font-size:12px;font-weight:600;">Sport Center Soekarno-Hatta</div>
+        <div style="font-size:12px;font-weight:600;">${ds.financeName}</div>
+        <div style="font-size:11px;color:#6b7280;">${ds.financeTitle}</div>
       </div>
     </div>
   </div>
@@ -406,7 +460,7 @@ function printKwitansi(invoice: any) {
   if (win) { win.document.write(html); win.document.close(); }
 }
 
-function printSpp(invoice: any) {
+function printSpp(invoice: any, ds: DocTemplateSettings) {
   const periodStr = periodLabel(invoice.periodMonth);
   const today = new Date().toLocaleDateString("id-ID", { day:"numeric", month:"long", year:"numeric" });
   const dueDate = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 10).toLocaleDateString("id-ID", { day:"numeric", month:"long", year:"numeric" });
@@ -431,8 +485,9 @@ function printSpp(invoice: any) {
     .sign-section { margin-top:40px; display:flex; justify-content:flex-end; }
     .sign-box { text-align:center; width:180px; }
   </style></head><body>
-  <div style="text-align:center;margin-bottom:4px;font-size:15px;font-weight:700;">SPORT CENTER SOEKARNO-HATTA</div>
-  <div style="text-align:center;font-size:12px;color:#555;margin-bottom:20px;">Kawasan Bandara Soekarno-Hatta, Tangerang</div>
+  ${ds.logoUrl ? `<div style="text-align:center;margin-bottom:6px;"><img src="${ds.logoUrl}" alt="Logo" style="max-height:44px;"/></div>` : ""}
+  <div style="text-align:center;margin-bottom:4px;font-size:15px;font-weight:700;">${ds.centerName.toUpperCase()}</div>
+  <div style="text-align:center;font-size:12px;color:#555;margin-bottom:20px;">${ds.centerAddress}</div>
   <hr style="border:none;border-top:2px solid #111;margin-bottom:4px;"/>
   <hr style="border:none;border-top:1px solid #111;margin-bottom:20px;"/>
   <h2>Surat Permohonan Pembayaran</h2>
@@ -446,7 +501,7 @@ function printSpp(invoice: any) {
 
   <div class="body-text">
     <p>Dengan hormat,</p>
-    <p>Bersama surat ini kami mengajukan permohonan pembayaran atas pemakaian fasilitas olahraga Sport Center Soekarno-Hatta oleh karyawan <strong>${invoice.companyName}</strong> untuk periode <strong>${periodStr}</strong>, dengan rincian sebagai berikut:</p>
+    <p>Bersama surat ini kami mengajukan permohonan pembayaran atas pemakaian fasilitas olahraga ${ds.centerName} oleh karyawan <strong>${invoice.companyName}</strong> untuk periode <strong>${periodStr}</strong>, dengan rincian sebagai berikut:</p>
   </div>
 
   <table class="detail">
@@ -469,9 +524,9 @@ function printSpp(invoice: any) {
     <p>Kami mohon agar pembayaran dapat dilakukan selambat-lambatnya pada tanggal <strong>${dueDate}</strong> melalui transfer bank ke rekening berikut:</p>
     <table class="detail" style="margin:12px 0;">
       <tbody>
-        <tr><td style="width:160px;">Nama Rekening</td><td><strong>PT CAHAYA SEJATI TEKNOLOGI</strong></td></tr>
-        <tr><td>Bank</td><td>Bank Mandiri</td></tr>
-        <tr><td>No. Rekening</td><td><strong>1640006707220</strong></td></tr>
+        <tr><td style="width:160px;">Nama Rekening</td><td><strong>${ds.bankHolder}</strong></td></tr>
+        <tr><td>Bank</td><td>${ds.bankName}</td></tr>
+        <tr><td>No. Rekening</td><td><strong>${ds.bankAccount}</strong></td></tr>
         <tr><td>Keterangan</td><td><strong>${invoice.invoiceNumber}</strong></td></tr>
       </tbody>
     </table>
@@ -482,15 +537,13 @@ function printSpp(invoice: any) {
   <div class="sign-section">
     <div class="sign-box">
       <div>Hormat kami,</div>
-      <div style="border:1px dashed #d1d5db;border-radius:50%;width:56px;height:56px;margin:8px auto;display:flex;align-items:center;justify-content:center;">
-        <span style="font-size:7px;color:#9ca3af;text-align:center;line-height:1.3;">Materai<br/>Rp 10.000</span>
-      </div>
-      <div style="border:2px dashed #ea580c;border-radius:50%;width:72px;height:72px;margin:-20px auto 0;display:flex;align-items:center;justify-content:center;">
-        <span style="font-size:6px;color:#ea580c;text-align:center;line-height:1.4;font-weight:700;">STEMPEL<br/>SPORT CENTER</span>
-      </div>
+      ${ds.signatureUrl
+        ? `<img src="${ds.signatureUrl}" alt="TTD" style="height:56px;margin:8px auto;display:block;"/>`
+        : `<div style="margin:56px 0 0;"></div>`
+      }
       <div style="margin:4px 0 4px;border-bottom:1px solid #111;"></div>
-      <div style="font-weight:700;">Admin Sport Center</div>
-      <div style="font-size:12px;color:#555;">Sport Center Soekarno-Hatta</div>
+      <div style="font-weight:700;">${ds.financeName}</div>
+      <div style="font-size:12px;color:#555;">${ds.financeTitle}</div>
     </div>
   </div>
   <script>window.onload=function(){window.print();};</script>
@@ -499,7 +552,7 @@ function printSpp(invoice: any) {
   if (win) { win.document.write(html); win.document.close(); }
 }
 
-function printBeritaAcara(invoice: any) {
+function printBeritaAcara(invoice: any, ds: DocTemplateSettings) {
   const periodStr = periodLabel(invoice.periodMonth);
   const today = new Date().toLocaleDateString("id-ID", { day:"numeric", month:"long", year:"numeric" });
 
@@ -509,11 +562,12 @@ function printBeritaAcara(invoice: any) {
     @media print { body { margin: 0; } }
     body { font-family: 'Times New Roman', serif; margin: 48px; color: #111; font-size:13px; line-height:1.8; }
   </style></head><body>
+  ${ds.logoUrl ? `<div style="text-align:center;margin-bottom:6px;"><img src="${ds.logoUrl}" alt="Logo" style="max-height:40px;"/></div>` : ""}
   <div style="text-align:center;font-weight:700;font-size:15px;margin-bottom:4px;">BERITA ACARA PEMAKAIAN FASILITAS</div>
-  <div style="text-align:center;font-size:13px;margin-bottom:20px;">Sport Center Soekarno-Hatta</div>
+  <div style="text-align:center;font-size:13px;margin-bottom:20px;">${ds.centerName}</div>
   <hr style="border:none;border-top:2px solid #111;margin-bottom:20px;"/>
-  <p>Nomor: BA-${invoice.invoiceNumber.replace("INV-", "")}</p>
-  <p>Pada hari ini, <strong>${today}</strong>, telah dilaksanakan pemakaian fasilitas olahraga Sport Center Soekarno-Hatta oleh:</p>
+  <p>Nomor: ${ds.prefixes.berita_acara}-${invoice.invoiceNumber.replace("INV-", "")}</p>
+  <p>Pada hari ini, <strong>${today}</strong>, telah dilaksanakan pemakaian fasilitas olahraga ${ds.centerName} oleh:</p>
   <p><strong>Perusahaan:</strong> ${invoice.companyName}</p>
   <p><strong>Periode:</strong> ${periodStr}</p>
   <p><strong>Jumlah Sesi:</strong> ${invoice.items?.length ?? 0} sesi pemakaian</p>
@@ -528,9 +582,13 @@ function printBeritaAcara(invoice: any) {
     </div>
     <div style="text-align:center;width:200px;">
       <div>Pihak Sport Center,</div>
-      <div style="margin:52px 0 4px;border-bottom:1px solid #111;"></div>
-      <div style="font-weight:700;">Admin Sport Center</div>
-      <div style="font-size:12px;">Sport Center Soekarno-Hatta</div>
+      ${ds.signatureUrl
+        ? `<img src="${ds.signatureUrl}" alt="TTD" style="height:52px;margin:6px auto 0;display:block;"/>`
+        : `<div style="margin:52px 0 0;"></div>`
+      }
+      <div style="margin:4px 0 4px;border-bottom:1px solid #111;"></div>
+      <div style="font-weight:700;">${ds.financeName}</div>
+      <div style="font-size:12px;">${ds.financeTitle}</div>
     </div>
   </div>
   <script>window.onload=function(){window.print();};</script>
@@ -540,28 +598,29 @@ function printBeritaAcara(invoice: any) {
 }
 
 async function downloadBillingPackage(invoice: any, requirements: any[]) {
+  const ds = await loadDocTemplateSettings();
   const docTypes = requirements.map((r: any) => r.documentType);
   const delays: Array<{ fn: () => void; delay: number; doc: string }> = [];
   let delay = 0;
 
   if (docTypes.includes("invoice")) {
-    delays.push({ fn: () => printInvoicePdf(invoice), delay, doc: "invoice" });
+    delays.push({ fn: () => printInvoicePdf(invoice, ds), delay, doc: "invoice" });
     delay += 800;
   }
   if (docTypes.includes("lampiran_pemakaian")) {
-    delays.push({ fn: () => printLampiranPemakaian(invoice), delay, doc: "lampiran_pemakaian" });
+    delays.push({ fn: () => printLampiranPemakaian(invoice, ds), delay, doc: "lampiran_pemakaian" });
     delay += 800;
   }
   if (docTypes.includes("kwitansi")) {
-    delays.push({ fn: () => printKwitansi(invoice), delay, doc: "kwitansi" });
+    delays.push({ fn: () => printKwitansi(invoice, ds), delay, doc: "kwitansi" });
     delay += 800;
   }
   if (docTypes.includes("spp")) {
-    delays.push({ fn: () => printSpp(invoice), delay, doc: "spp" });
+    delays.push({ fn: () => printSpp(invoice, ds), delay, doc: "spp" });
     delay += 800;
   }
   if (docTypes.includes("berita_acara")) {
-    delays.push({ fn: () => printBeritaAcara(invoice), delay, doc: "berita_acara" });
+    delays.push({ fn: () => printBeritaAcara(invoice, ds), delay, doc: "berita_acara" });
     delay += 800;
   }
 
@@ -921,6 +980,12 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
     refetchOnMount: "always",
   });
 
+  const { data: siteSettings } = useQuery({
+    queryKey: ["settings-public"],
+    queryFn: () => fetch("/api/settings").then(r => r.json()),
+    staleTime: 5 * 60 * 1000,
+  });
+
   const { data: billingDocStatus } = useQuery({
     queryKey: ["billing-doc-status", invoiceId],
     queryFn: async () => {
@@ -986,7 +1051,8 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
 
   const handleDownloadInvoice = async () => {
     if (!invoice) return;
-    printInvoicePdf(invoice);
+    const ds = await loadDocTemplateSettings();
+    printInvoicePdf(invoice, ds);
     await auditBillingAction(invoiceId, "COMPANY_DOCUMENT_DOWNLOADED", ["invoice"]);
   };
 
@@ -1110,22 +1176,22 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
             {/* Quick print individual docs */}
             <div className="flex flex-wrap gap-2 pt-1 border-t">
               {docStatusList.some((d: any) => d.documentType === "lampiran_pemakaian" && d.available) && (
-                <Button size="sm" variant="ghost" className="h-7 text-xs gap-1" onClick={() => { printLampiranPemakaian(invoice); auditBillingAction(invoiceId, "COMPANY_DOCUMENT_DOWNLOADED", ["lampiran_pemakaian"]); }}>
+                <Button size="sm" variant="ghost" className="h-7 text-xs gap-1" onClick={async () => { const ds = await loadDocTemplateSettings(); printLampiranPemakaian(invoice, ds); auditBillingAction(invoiceId, "COMPANY_DOCUMENT_DOWNLOADED", ["lampiran_pemakaian"]); }}>
                   <Download size={11} /> Lampiran Pemakaian
                 </Button>
               )}
               {docStatusList.some((d: any) => d.documentType === "kwitansi" && d.available) && (
-                <Button size="sm" variant="ghost" className="h-7 text-xs gap-1" onClick={() => { printKwitansi(invoice); auditBillingAction(invoiceId, "COMPANY_DOCUMENT_DOWNLOADED", ["kwitansi"]); }}>
+                <Button size="sm" variant="ghost" className="h-7 text-xs gap-1" onClick={async () => { const ds = await loadDocTemplateSettings(); printKwitansi(invoice, ds); auditBillingAction(invoiceId, "COMPANY_DOCUMENT_DOWNLOADED", ["kwitansi"]); }}>
                   <Download size={11} /> Kwitansi
                 </Button>
               )}
               {docStatusList.some((d: any) => d.documentType === "spp" && d.available) && (
-                <Button size="sm" variant="ghost" className="h-7 text-xs gap-1" onClick={() => { printSpp(invoice); auditBillingAction(invoiceId, "COMPANY_DOCUMENT_DOWNLOADED", ["spp"]); }}>
+                <Button size="sm" variant="ghost" className="h-7 text-xs gap-1" onClick={async () => { const ds = await loadDocTemplateSettings(); printSpp(invoice, ds); auditBillingAction(invoiceId, "COMPANY_DOCUMENT_DOWNLOADED", ["spp"]); }}>
                   <Download size={11} /> SPP
                 </Button>
               )}
               {docStatusList.some((d: any) => d.documentType === "berita_acara" && d.available) && (
-                <Button size="sm" variant="ghost" className="h-7 text-xs gap-1" onClick={() => { printBeritaAcara(invoice); auditBillingAction(invoiceId, "COMPANY_DOCUMENT_DOWNLOADED", ["berita_acara"]); }}>
+                <Button size="sm" variant="ghost" className="h-7 text-xs gap-1" onClick={async () => { const ds = await loadDocTemplateSettings(); printBeritaAcara(invoice, ds); auditBillingAction(invoiceId, "COMPANY_DOCUMENT_DOWNLOADED", ["berita_acara"]); }}>
                   <Download size={11} /> Berita Acara
                 </Button>
               )}
@@ -1137,16 +1203,16 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
         {!hasRequirements && (
           <div className="flex flex-wrap gap-2 rounded-lg border p-3 bg-muted/20">
             <div className="text-xs text-muted-foreground w-full mb-1">Cetak dokumen:</div>
-            <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => { printLampiranPemakaian(invoice); auditBillingAction(invoiceId, "COMPANY_DOCUMENT_DOWNLOADED", ["lampiran_pemakaian"]); }}>
+            <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={async () => { const ds = await loadDocTemplateSettings(); printLampiranPemakaian(invoice, ds); auditBillingAction(invoiceId, "COMPANY_DOCUMENT_DOWNLOADED", ["lampiran_pemakaian"]); }}>
               <Download size={11} /> Lampiran Pemakaian
             </Button>
-            <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => { printKwitansi(invoice); auditBillingAction(invoiceId, "COMPANY_DOCUMENT_DOWNLOADED", ["kwitansi"]); }}>
+            <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={async () => { const ds = await loadDocTemplateSettings(); printKwitansi(invoice, ds); auditBillingAction(invoiceId, "COMPANY_DOCUMENT_DOWNLOADED", ["kwitansi"]); }}>
               <Download size={11} /> Kwitansi
             </Button>
-            <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => { printSpp(invoice); auditBillingAction(invoiceId, "COMPANY_DOCUMENT_DOWNLOADED", ["spp"]); }}>
+            <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={async () => { const ds = await loadDocTemplateSettings(); printSpp(invoice, ds); auditBillingAction(invoiceId, "COMPANY_DOCUMENT_DOWNLOADED", ["spp"]); }}>
               <Download size={11} /> SPP
             </Button>
-            <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => { printBeritaAcara(invoice); auditBillingAction(invoiceId, "COMPANY_DOCUMENT_DOWNLOADED", ["berita_acara"]); }}>
+            <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={async () => { const ds = await loadDocTemplateSettings(); printBeritaAcara(invoice, ds); auditBillingAction(invoiceId, "COMPANY_DOCUMENT_DOWNLOADED", ["berita_acara"]); }}>
               <Download size={11} /> Berita Acara
             </Button>
           </div>
@@ -1275,8 +1341,8 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
         <div className="rounded-lg border border-green-200 bg-green-50 dark:bg-green-900/20 dark:border-green-800 p-4 text-sm">
           <div className="font-semibold text-green-800 dark:text-green-300 text-xs uppercase tracking-wide mb-2">Informasi Pembayaran</div>
           <div className="text-green-900 dark:text-green-200 space-y-0.5 text-sm">
-            <div className="font-bold">PT CAHAYA SEJATI TEKNOLOGI</div>
-            <div>Bank Mandiri &nbsp;·&nbsp; No. Rek: <span className="font-mono font-bold">1640006707220</span></div>
+            <div className="font-bold">{siteSettings?.bankAccountName || "—"}</div>
+            <div>{siteSettings?.bankName || "—"} &nbsp;·&nbsp; No. Rek: <span className="font-mono font-bold">{siteSettings?.bankAccount || "—"}</span></div>
             <div className="text-xs text-green-700 dark:text-green-400 mt-1">Cantumkan No. Invoice <strong>{invoice.invoiceNumber}</strong> sebagai keterangan transfer.</div>
           </div>
         </div>
