@@ -159,7 +159,7 @@ export function buildInvoiceHtml(data: InvoiceData, opts: BuildOptions = {}): st
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Invoice ${data.invoiceNumber}</title>
   <style>
-    @page { margin: 16mm 18mm; size: A4; }
+    @page { margin: 10mm 14mm; size: A4; }
     @media print {
       body { margin: 0 !important; }
       .no-print { display: none !important; }
@@ -170,8 +170,8 @@ export function buildInvoiceHtml(data: InvoiceData, opts: BuildOptions = {}): st
       font-family: Arial, 'Segoe UI', sans-serif;
       color: #111827;
       margin: 0;
-      padding: 28px 36px;
-      font-size: 13px;
+      padding: 16px 24px;
+      font-size: 12px;
       background: #fff;
     }
 
@@ -180,34 +180,35 @@ export function buildInvoiceHtml(data: InvoiceData, opts: BuildOptions = {}): st
       display: flex;
       justify-content: space-between;
       align-items: flex-start;
-      padding-bottom: 18px;
+      padding-bottom: 10px;
       border-bottom: 3px solid #ea580c;
-      margin-bottom: 22px;
+      margin-bottom: 12px;
     }
     .sc-brand-name {
-      font-size: 22px;
+      font-size: 19px;
       font-weight: 900;
       color: #ea580c;
       letter-spacing: -0.5px;
       margin: 0;
     }
     .sc-brand-sub {
-      font-size: 13px;
+      font-size: 11px;
       font-weight: 700;
       color: #374151;
-      margin: 2px 0 4px;
+      margin: 1px 0 2px;
     }
     .sc-brand-addr {
-      font-size: 11px;
+      font-size: 10px;
       color: #6b7280;
       margin: 0;
       max-width: 260px;
+      line-height: 1.4;
     }
     .sc-invoice-label {
       text-align: right;
     }
     .sc-invoice-title {
-      font-size: 28px;
+      font-size: 24px;
       font-weight: 900;
       color: #ea580c;
       letter-spacing: 4px;
@@ -222,35 +223,35 @@ export function buildInvoiceHtml(data: InvoiceData, opts: BuildOptions = {}): st
     /* ── Info Row ── */
     .sc-info-row {
       display: flex;
-      gap: 24px;
-      margin-bottom: 22px;
+      gap: 14px;
+      margin-bottom: 12px;
     }
     .sc-info-box {
       flex: 1;
       background: #f9fafb;
       border: 1px solid #e5e7eb;
-      border-radius: 8px;
-      padding: 14px 16px;
+      border-radius: 6px;
+      padding: 8px 12px;
     }
     .sc-info-box h4 {
-      margin: 0 0 10px;
-      font-size: 11px;
+      margin: 0 0 6px;
+      font-size: 10px;
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 1px;
       color: #6b7280;
       border-bottom: 1px solid #e5e7eb;
-      padding-bottom: 6px;
+      padding-bottom: 4px;
     }
     .sc-info-table td {
-      padding: 3px 0;
-      font-size: 12px;
+      padding: 2px 0;
+      font-size: 11px;
       vertical-align: top;
     }
     .sc-info-table td:first-child {
       color: #6b7280;
-      width: 115px;
-      font-size: 11.5px;
+      width: 110px;
+      font-size: 11px;
     }
     .sc-info-table td:nth-child(2) {
       color: #6b7280;
@@ -261,33 +262,33 @@ export function buildInvoiceHtml(data: InvoiceData, opts: BuildOptions = {}): st
       color: #111827;
     }
     .sc-notice {
-      font-size: 10.5px;
+      font-size: 9.5px;
       color: #9ca3af;
       font-style: italic;
-      margin-top: 8px;
-      padding-top: 8px;
+      margin-top: 5px;
+      padding-top: 5px;
       border-top: 1px dashed #e5e7eb;
     }
 
     /* ── Detail Table ── */
     .sc-section-title {
-      font-size: 11px;
+      font-size: 10px;
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 1px;
       color: #6b7280;
-      margin: 0 0 8px;
+      margin: 0 0 5px;
     }
     .sc-detail-table {
       width: 100%;
       border-collapse: collapse;
-      margin-bottom: 20px;
+      margin-bottom: 10px;
     }
     .sc-detail-table thead th {
       background: #ea580c;
       color: #fff;
-      padding: 9px 12px;
-      font-size: 11.5px;
+      padding: 6px 10px;
+      font-size: 10.5px;
       font-weight: 700;
       text-align: left;
     }
@@ -309,15 +310,15 @@ export function buildInvoiceHtml(data: InvoiceData, opts: BuildOptions = {}): st
     .sc-total-wrap {
       display: flex;
       justify-content: flex-end;
-      margin-bottom: 20px;
+      margin-bottom: 10px;
     }
     .sc-total-table {
       border-collapse: collapse;
-      min-width: 320px;
+      min-width: 300px;
     }
     .sc-total-table td {
-      padding: 7px 14px;
-      font-size: 13px;
+      padding: 5px 12px;
+      font-size: 12px;
     }
     .sc-total-table tr.subtotal td {
       background: #f9fafb;
@@ -339,7 +340,7 @@ export function buildInvoiceHtml(data: InvoiceData, opts: BuildOptions = {}): st
       background: #ea580c;
       color: #fff;
       font-weight: 900;
-      font-size: 15px;
+      font-size: 14px;
     }
     .sc-total-table tr.grand td:last-child {
       text-align: right;
@@ -349,81 +350,81 @@ export function buildInvoiceHtml(data: InvoiceData, opts: BuildOptions = {}): st
       background: #fff7ed;
       border: 1px solid #fed7aa;
       border-radius: 6px;
-      padding: 10px 14px;
-      font-size: 12px;
+      padding: 7px 12px;
+      font-size: 11px;
       color: #92400e;
-      margin-bottom: 20px;
+      margin-bottom: 10px;
     }
     .sc-terbilang strong { font-weight: 700; }
 
     /* ── Payment Info ── */
     .sc-bottom-row {
       display: flex;
-      gap: 20px;
-      margin-bottom: 28px;
+      gap: 14px;
+      margin-bottom: 12px;
     }
     .sc-payment-box {
       flex: 1;
       background: #f0f9ff;
       border: 1px solid #bae6fd;
-      border-radius: 8px;
-      padding: 14px 16px;
+      border-radius: 6px;
+      padding: 8px 12px;
     }
     .sc-payment-box h4 {
-      margin: 0 0 10px;
-      font-size: 11px;
+      margin: 0 0 6px;
+      font-size: 10px;
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 1px;
       color: #0369a1;
       border-bottom: 1px solid #bae6fd;
-      padding-bottom: 6px;
+      padding-bottom: 4px;
     }
     .sc-notes-box {
       flex: 1;
       background: #fafafa;
       border: 1px dashed #d1d5db;
-      border-radius: 8px;
-      padding: 14px 16px;
+      border-radius: 6px;
+      padding: 8px 12px;
     }
     .sc-notes-box h4 {
-      margin: 0 0 10px;
-      font-size: 11px;
+      margin: 0 0 6px;
+      font-size: 10px;
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 1px;
       color: #6b7280;
       border-bottom: 1px solid #e5e7eb;
-      padding-bottom: 6px;
+      padding-bottom: 4px;
     }
 
     /* ── Footer ── */
     .sc-footer {
       border-top: 1px solid #e5e7eb;
-      padding-top: 16px;
+      padding-top: 10px;
       display: flex;
       justify-content: space-between;
       align-items: flex-end;
     }
     .sc-footer-left {
-      font-size: 11px;
+      font-size: 10px;
       color: #9ca3af;
     }
     .sc-signature {
       text-align: center;
-      font-size: 12px;
+      font-size: 11px;
     }
     .sc-signature-line {
       border-bottom: 1px solid #374151;
       width: 140px;
-      margin: 40px auto 6px;
+      margin: 0 auto 5px;
     }
     .sc-signature-name {
       font-weight: 700;
-      font-size: 12px;
+      font-size: 11px;
     }
     .sc-signature-role {
-      font-size: 11px;
+      font-size: 10px;
       color: #6b7280;
     }
   </style>
@@ -583,7 +584,7 @@ export function buildInvoiceHtml(data: InvoiceData, opts: BuildOptions = {}): st
     </div>
     <div class="sc-signature">
       <div style="font-size:12px;color:#374151;margin-bottom:4px;">Hormat kami,</div>
-      <div style="height:140px;"></div>
+      <div style="height:80px;"></div>
       <div class="sc-signature-line"></div>
       <div class="sc-signature-name">SPORT CENTER</div>
     </div>
