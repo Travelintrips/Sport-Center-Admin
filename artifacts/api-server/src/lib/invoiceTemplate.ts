@@ -570,17 +570,6 @@ export function buildInvoiceHtml(data: InvoiceData, opts: BuildOptions = {}): st
       </div>
     </div>
 
-    <div class="sc-notes-box">
-      <h4>Petunjuk Pembayaran</h4>
-      <div style="font-size:12px;color:#374151;line-height:1.7;">
-        <div>1. Transfer sesuai jumlah total invoice</div>
-        <div>2. Cantumkan No Pesanan sebagai referensi</div>
-        <div>3. Kirim bukti transfer via WhatsApp</div>
-        <div style="margin-top:8px;font-size:11px;color:#9ca3af;">
-          Pembayaran berlaku <strong>setelah dikonfirmasi</strong> oleh tim Finance
-        </div>
-      </div>
-    </div>
   </div>
 
   <!-- ═══════════════════════════════════════════════════════════════
