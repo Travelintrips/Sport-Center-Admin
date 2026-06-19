@@ -351,12 +351,38 @@ export default function BookingDetail() {
                 </div>
               </div>
             ) : (
-              <div className="flex justify-between items-center text-xl font-black">
-                <div>{t("Grand Total", "Grand Total")}</div>
-                <div className="text-primary">
-                  Rp {booking.totalPrice.toLocaleString("id-ID")}
-                </div>
-              </div>
+              (() => {
+                const gt = Number((booking as any).grandTotal ?? booking.totalPrice);
+                const hasPpn = (booking as any).ppnAmount != null && Number((booking as any).ppnAmount) > 0;
+                const dppVal = hasPpn ? Math.round(gt / 1.11) : gt;
+                const dppNilaiLainVal = hasPpn ? Math.round(dppVal * 11 / 12) : 0;
+                const ppnVal = hasPpn ? (gt - dppVal) : 0;
+                return (
+                  <div className="space-y-1.5 w-full">
+                    {hasPpn && (
+                      <>
+                        <div className="flex justify-between items-center text-sm text-muted-foreground">
+                          <span>DPP</span>
+                          <span className="font-medium">Rp {dppVal.toLocaleString("id-ID")}</span>
+                        </div>
+                        <div className="flex justify-between items-center text-xs text-muted-foreground/70">
+                          <span>{t("DPP Nilai Lain (11/12 × DPP)", "DPP Nilai Lain (11/12 × DPP)")}</span>
+                          <span>Rp {dppNilaiLainVal.toLocaleString("id-ID")}</span>
+                        </div>
+                        <div className="flex justify-between items-center text-sm text-muted-foreground">
+                          <span>PPN 12%</span>
+                          <span className="text-primary font-semibold">+Rp {ppnVal.toLocaleString("id-ID")}</span>
+                        </div>
+                        <div className="h-px bg-border" />
+                      </>
+                    )}
+                    <div className="flex justify-between items-center text-xl font-black">
+                      <div>{t("Total DPP + PPN", "Total DPP + PPN")}</div>
+                      <div className="text-primary">Rp {gt.toLocaleString("id-ID")}</div>
+                    </div>
+                  </div>
+                );
+              })()
             )}
           </CardContent>
         </Card>

@@ -615,6 +615,10 @@ async function runStartupMigrations() {
        created_at timestamptz NOT NULL DEFAULT NOW(),
        updated_at timestamptz NOT NULL DEFAULT NOW()
      )`,
+    // Monthly Corporate Invoice — DPP Nilai Lain field
+    `ALTER TABLE sport_center.company_invoices ADD COLUMN IF NOT EXISTS dpp_nilai_lain numeric(14,2) NOT NULL DEFAULT 0`,
+    // Backfill dpp_nilai_lain for existing rows: DPP × (11/12)
+    `UPDATE sport_center.company_invoices SET dpp_nilai_lain = ROUND((total_amount * 11 / 12), 2) WHERE dpp_nilai_lain = 0 AND total_amount > 0`,
   ];
 
   for (const stmt of migrations) {

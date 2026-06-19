@@ -18,12 +18,27 @@ function periodDateRange(periodMonth: string) {
   return { startDate, endDate };
 }
 
+// totalAmountInclusive = harga jual termasuk PPN (yang customer bayar)
+// DPP              = totalAmountInclusive / 1.11
+// DPP Nilai Lain   = DPP × (11/12)
+// PPN 12%          = DPP Nilai Lain × 0.12  (≡ DPP × 11%)
+// Grand Total      = DPP + PPN ≈ totalAmountInclusive
+function calcTaxBreakdown(totalAmountInclusive: number) {
+  const dpp = Math.round(totalAmountInclusive / 1.11);
+  const dppNilaiLain = Math.round(dpp * 11 / 12);
+  const ppnAmount = Math.round(dppNilaiLain * 0.12);
+  const grandTotal = dpp + ppnAmount;
+  return { dpp, dppNilaiLain, ppnAmount, grandTotal };
+}
+
 function mapInvoice(
   inv: typeof companyInvoicesTable.$inferSelect,
   companyName?: string,
   items?: any[],
   company?: typeof usersTable.$inferSelect | null,
 ) {
+  const totalAmount = Number(inv.totalAmount); // inclusive price (subtotal pemakaian)
+  const { dpp, dppNilaiLain, ppnAmount, grandTotal } = calcTaxBreakdown(totalAmount);
   return {
     id: inv.id,
     invoiceNumber: inv.invoiceNumber,
@@ -34,9 +49,11 @@ function mapInvoice(
     picEmail: company?.picEmail ?? null,
     billingAddress: company?.billingAddress ?? null,
     periodMonth: inv.periodMonth,
-    totalAmount: Number(inv.totalAmount),
-    ppnAmount: Number(inv.ppnAmount),
-    grandTotal: Number(inv.grandTotal),
+    totalAmount,  // inclusive = subtotal pemakaian
+    dpp,
+    dppNilaiLain,
+    ppnAmount,
+    grandTotal,
     status: inv.status,
     paidAt: inv.paidAt ?? null,
     notes: inv.notes ?? null,
@@ -151,9 +168,9 @@ router.get("/company-invoices/preview", adminMiddleware, async (req, res) => {
       grandTotal: b.grandTotal == null ? null : Number(b.grandTotal),
     }));
 
+    // subtotal = sum of inclusive prices (what customers paid)
     const subtotal = bookingList.reduce((s, b) => s + b.totalPrice, 0);
-    const ppnAmount = bookingList.reduce((s, b) => s + (b.ppnAmount ?? 0), 0);
-    const grandTotal = subtotal + ppnAmount;
+    const { dpp, dppNilaiLain, ppnAmount, grandTotal } = calcTaxBreakdown(subtotal);
 
     // Check if invoice already exists for this company + period
     const [existingInvoice] = await db.select().from(companyInvoicesTable).where(
@@ -169,6 +186,8 @@ router.get("/company-invoices/preview", adminMiddleware, async (req, res) => {
       periodMonth: String(periodMonth),
       bookingCount: bookingList.length,
       subtotal,
+      dpp,
+      dppNilaiLain,
       ppnAmount,
       grandTotal,
       bookings: bookingList,
@@ -252,17 +271,17 @@ async function handleGenerateInvoice(req: any, res: any) {
       // Add new bookings as items and recalculate totals
       await buildAndInsertItems(existingInvoice.id, companyCustomerId, unbilledBookings, facilityMap);
 
-      // Get all items to recalculate totals
+      // Get all items, recalc from inclusive subtotals
       const allItems = await db.select().from(companyInvoiceItemsTable).where(
         eq(companyInvoiceItemsTable.invoiceId, existingInvoice.id)
       );
-      const newSubtotal = allItems.reduce((s, i) => s + Number(i.subtotal ?? 0), 0);
-      const newPpn = allItems.reduce((s, i) => s + Number(i.taxAmount ?? 0), 0);
-      const newGrandTotal = newSubtotal + newPpn;
+      const newSubtotal = allItems.reduce((s, i) => s + Number(i.subtotal ?? 0), 0); // inclusive
+      const { dpp: nd, dppNilaiLain: newDppNilaiLain, ppnAmount: newPpn, grandTotal: newGrandTotal } = calcTaxBreakdown(newSubtotal);
 
       const [updated] = await db.update(companyInvoicesTable)
         .set({
           totalAmount: String(newSubtotal),
+          dppNilaiLain: String(newDppNilaiLain),
           ppnAmount: String(newPpn),
           grandTotal: String(newGrandTotal),
           ...(notes ? { notes } : {}),
@@ -279,10 +298,10 @@ async function handleGenerateInvoice(req: any, res: any) {
 
       await logAudit({
         ...userInfo,
-        action: "COMPANY_INVOICE_ITEM_ADDED",
+        action: "CORPORATE_BILLING_AGGREGATED",
         entity: "company_invoice",
         entityId: existingInvoice.id,
-        after: { addedBookings: unbilledBookings.length, invoiceNumber: existingInvoice.invoiceNumber },
+        after: { addedBookings: unbilledBookings.length, invoiceNumber: existingInvoice.invoiceNumber, dppNilaiLain: newDppNilaiLain, dpp: nd },
         ipAddress,
         userAgent,
       });
@@ -297,15 +316,16 @@ async function handleGenerateInvoice(req: any, res: any) {
     }
 
     // No existing invoice — create new one
+    // totalAmount = sum of inclusive prices (what customers paid)
     const totalAmount = unbilledBookings.reduce((sum, b) => sum + Number(b.totalPrice), 0);
-    const ppnAmount = unbilledBookings.reduce((sum, b) => sum + Number(b.ppnAmount ?? 0), 0);
-    const grandTotal = totalAmount + ppnAmount;
+    const { dpp, dppNilaiLain, ppnAmount, grandTotal } = calcTaxBreakdown(totalAmount);
 
     const [inv] = await db.insert(companyInvoicesTable).values({
       invoiceNumber: "TEMP",
       companyCustomerId,
       periodMonth,
       totalAmount: String(totalAmount),
+      dppNilaiLain: String(dppNilaiLain),
       ppnAmount: String(ppnAmount),
       grandTotal: String(grandTotal),
       status: "unpaid",
@@ -330,10 +350,19 @@ async function handleGenerateInvoice(req: any, res: any) {
 
     await logAudit({
       ...userInfo,
-      action: "COMPANY_INVOICE_GENERATED",
+      action: "MONTHLY_INVOICE_GENERATED",
       entity: "company_invoice",
       entityId: inv.id,
-      after: { invoiceNumber, companyId: companyCustomerId, periodMonth, bookingCount: unbilledBookings.length, grandTotal },
+      after: { invoiceNumber, companyId: companyCustomerId, periodMonth, bookingCount: unbilledBookings.length, totalAmount, dpp, dppNilaiLain, ppnAmount, grandTotal },
+      ipAddress,
+      userAgent,
+    });
+    await logAudit({
+      ...userInfo,
+      action: "CORPORATE_BILLING_AGGREGATED",
+      entity: "company_invoice",
+      entityId: inv.id,
+      after: { invoiceNumber, companyId: companyCustomerId, periodMonth, bookingCount: unbilledBookings.length, totalAmount, dpp, dppNilaiLain, ppnAmount, grandTotal },
       ipAddress,
       userAgent,
     });

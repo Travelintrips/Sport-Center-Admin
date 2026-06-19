@@ -207,10 +207,25 @@ export async function renderDocument(params: {
 
     const docTitle = documentType === "invoice" ? "INVOICE" : documentType === "lampiran" ? "LAMPIRAN INVOICE" : "BERITA ACARA PEMBAYARAN";
     const subtotal = Number(inv.totalAmount);
-    const ppn = Number(inv.ppnAmount);
     const grand = Number(inv.grandTotal);
+    // Core tax calculation (DPP Nilai Lain is display-only):
+    //   DPP          = grandTotal / 1.11
+    //   DPP Nilai Lain = DPP × (11/12)  ← display only, tidak masuk total
+    //   PPN          = DPP × 11%
+    //   TOTAL        = DPP + PPN
+    const dppCorp = grand > 0 ? Math.round(grand / 1.11) : 0;
+    const dppNilaiLainCorp = dppCorp > 0 ? Math.round(dppCorp * 11 / 12) : 0;
+    const ppnCorp = dppCorp > 0 ? Math.round(dppCorp * 0.11) : Number(inv.ppnAmount);
+    const grandAligned = dppCorp > 0 ? dppCorp + ppnCorp : grand;
 
     const itemsTable = buildInvoiceTableHtml(items);
+
+    const corpTaxRows = dppCorp > 0 ? `
+          <tr><td style="padding:4px 16px;">Subtotal</td><td style="text-align:right;font-weight:600;">${formatIDR(subtotal)}</td></tr>
+          <tr><td style="padding:4px 16px;">DPP</td><td style="text-align:right;font-weight:600;">${formatIDR(dppCorp)}</td></tr>
+          <tr><td style="padding:4px 16px;color:#6b7280;font-size:12px;">DPP Nilai Lain <span style="font-weight:400;">(11/12 × DPP)</span></td><td style="text-align:right;color:#6b7280;font-size:12px;">${formatIDR(dppNilaiLainCorp)}</td></tr>
+          <tr><td style="padding:4px 16px;">PPN 11%</td><td style="text-align:right;font-weight:600;">${formatIDR(ppnCorp)}</td></tr>` : `
+          <tr><td style="padding:4px 16px;">Subtotal</td><td style="text-align:right;font-weight:600;">${formatIDR(subtotal)}</td></tr>`;
 
     bodyContent = `
       ${kopHtml}
@@ -230,12 +245,11 @@ export async function renderDocument(params: {
       </div>
       ${itemsTable}
       <div style="display:flex;justify-content:flex-end;margin-top:8px;">
-        <table style="font-size:13px;min-width:280px;">
-          <tr><td style="padding:4px 16px;">Subtotal</td><td style="text-align:right;font-weight:600;">${formatIDR(subtotal)}</td></tr>
-          <tr><td style="padding:4px 16px;">PPN 11%</td><td style="text-align:right;font-weight:600;">${formatIDR(ppn)}</td></tr>
+        <table style="font-size:13px;min-width:320px;">
+          ${corpTaxRows}
           <tr style="background:#ea580c;color:#fff;">
             <td style="padding:8px 16px;font-weight:700;">GRAND TOTAL</td>
-            <td style="padding:8px 16px;text-align:right;font-weight:900;font-size:15px;">${formatIDR(grand)}</td>
+            <td style="padding:8px 16px;text-align:right;font-weight:900;font-size:15px;">${formatIDR(grandAligned)}</td>
           </tr>
         </table>
       </div>
@@ -275,8 +289,17 @@ export async function renderDocument(params: {
     };
     const docTitle = docTitleMap[documentType] || documentType.toUpperCase();
     const total = Number(booking.totalPrice ?? 0);
-    const ppn = Number(booking.ppnAmount ?? 0);
     const grand = Number(booking.grandTotal ?? total);
+    // Core tax calculation (DPP Nilai Lain is display-only):
+    //   DPP          = grandTotal / 1.11
+    //   DPP Nilai Lain = DPP × (11/12)  ← display only, tidak masuk total
+    //   PPN          = DPP × 11%
+    //   TOTAL        = DPP + PPN
+    const hasPpn = Number(booking.ppnAmount ?? 0) > 0 || Number(booking.ppnRate ?? 0) > 0;
+    const dppBook = hasPpn ? Math.round(grand / 1.11) : 0;
+    const dppNilaiLainBook = dppBook > 0 ? Math.round(dppBook * 11 / 12) : 0;
+    const ppnBook = dppBook > 0 ? Math.round(dppBook * 0.11) : 0;
+    const grandAlignedBook = dppBook > 0 ? dppBook + ppnBook : grand;
 
     bodyContent = `
       ${kopHtml}
@@ -306,15 +329,26 @@ export async function renderDocument(params: {
             <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;">${booking.bookingDate} | ${booking.startTime} – ${booking.endTime} (${booking.durationHours} jam)</td>
             <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;text-align:right;">${formatIDR(total)}</td>
           </tr>
-          ${ppn > 0 ? `<tr>
+          ${dppBook > 0 ? `
+          <tr>
+            <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;">DPP</td>
+            <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;"></td>
+            <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;text-align:right;">${formatIDR(dppBook)}</td>
+          </tr>
+          <tr>
+            <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;color:#6b7280;font-size:12px;">DPP Nilai Lain <span style="font-weight:400;">(11/12 × DPP)</span></td>
+            <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;"></td>
+            <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;text-align:right;color:#6b7280;font-size:12px;">${formatIDR(dppNilaiLainBook)}</td>
+          </tr>
+          <tr>
             <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;">PPN 11%</td>
             <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;"></td>
-            <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;text-align:right;">${formatIDR(ppn)}</td>
+            <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;text-align:right;">${formatIDR(ppnBook)}</td>
           </tr>` : ""}
           <tr style="background:#ea580c;color:#fff;">
             <td style="padding:8px 10px;font-weight:700;">TOTAL</td>
             <td style="padding:8px 10px;"></td>
-            <td style="padding:8px 10px;text-align:right;font-weight:900;font-size:15px;">${formatIDR(grand)}</td>
+            <td style="padding:8px 10px;text-align:right;font-weight:900;font-size:15px;">${formatIDR(grandAlignedBook)}</td>
           </tr>
         </tbody>
       </table>
