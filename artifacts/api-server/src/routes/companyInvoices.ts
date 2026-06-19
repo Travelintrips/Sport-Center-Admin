@@ -18,12 +18,18 @@ function periodDateRange(periodMonth: string) {
   return { startDate, endDate };
 }
 
+function calcDppNilaiLain(totalAmount: number): number {
+  return Math.round((totalAmount * 11 / 12) * 100) / 100;
+}
+
 function mapInvoice(
   inv: typeof companyInvoicesTable.$inferSelect,
   companyName?: string,
   items?: any[],
   company?: typeof usersTable.$inferSelect | null,
 ) {
+  const totalAmount = Number(inv.totalAmount);
+  const dppNilaiLain = Number(inv.dppNilaiLain) || calcDppNilaiLain(totalAmount);
   return {
     id: inv.id,
     invoiceNumber: inv.invoiceNumber,
@@ -34,7 +40,8 @@ function mapInvoice(
     picEmail: company?.picEmail ?? null,
     billingAddress: company?.billingAddress ?? null,
     periodMonth: inv.periodMonth,
-    totalAmount: Number(inv.totalAmount),
+    totalAmount,
+    dppNilaiLain,
     ppnAmount: Number(inv.ppnAmount),
     grandTotal: Number(inv.grandTotal),
     status: inv.status,
@@ -154,6 +161,7 @@ router.get("/company-invoices/preview", adminMiddleware, async (req, res) => {
     const subtotal = bookingList.reduce((s, b) => s + b.totalPrice, 0);
     const ppnAmount = bookingList.reduce((s, b) => s + (b.ppnAmount ?? 0), 0);
     const grandTotal = subtotal + ppnAmount;
+    const dppNilaiLain = calcDppNilaiLain(subtotal);
 
     // Check if invoice already exists for this company + period
     const [existingInvoice] = await db.select().from(companyInvoicesTable).where(
@@ -169,6 +177,7 @@ router.get("/company-invoices/preview", adminMiddleware, async (req, res) => {
       periodMonth: String(periodMonth),
       bookingCount: bookingList.length,
       subtotal,
+      dppNilaiLain,
       ppnAmount,
       grandTotal,
       bookings: bookingList,
@@ -259,10 +268,12 @@ async function handleGenerateInvoice(req: any, res: any) {
       const newSubtotal = allItems.reduce((s, i) => s + Number(i.subtotal ?? 0), 0);
       const newPpn = allItems.reduce((s, i) => s + Number(i.taxAmount ?? 0), 0);
       const newGrandTotal = newSubtotal + newPpn;
+      const newDppNilaiLain = calcDppNilaiLain(newSubtotal);
 
       const [updated] = await db.update(companyInvoicesTable)
         .set({
           totalAmount: String(newSubtotal),
+          dppNilaiLain: String(newDppNilaiLain),
           ppnAmount: String(newPpn),
           grandTotal: String(newGrandTotal),
           ...(notes ? { notes } : {}),
@@ -279,10 +290,10 @@ async function handleGenerateInvoice(req: any, res: any) {
 
       await logAudit({
         ...userInfo,
-        action: "COMPANY_INVOICE_ITEM_ADDED",
+        action: "CORPORATE_BILLING_AGGREGATED",
         entity: "company_invoice",
         entityId: existingInvoice.id,
-        after: { addedBookings: unbilledBookings.length, invoiceNumber: existingInvoice.invoiceNumber },
+        after: { addedBookings: unbilledBookings.length, invoiceNumber: existingInvoice.invoiceNumber, dppNilaiLain: newDppNilaiLain },
         ipAddress,
         userAgent,
       });
@@ -300,12 +311,14 @@ async function handleGenerateInvoice(req: any, res: any) {
     const totalAmount = unbilledBookings.reduce((sum, b) => sum + Number(b.totalPrice), 0);
     const ppnAmount = unbilledBookings.reduce((sum, b) => sum + Number(b.ppnAmount ?? 0), 0);
     const grandTotal = totalAmount + ppnAmount;
+    const dppNilaiLain = calcDppNilaiLain(totalAmount);
 
     const [inv] = await db.insert(companyInvoicesTable).values({
       invoiceNumber: "TEMP",
       companyCustomerId,
       periodMonth,
       totalAmount: String(totalAmount),
+      dppNilaiLain: String(dppNilaiLain),
       ppnAmount: String(ppnAmount),
       grandTotal: String(grandTotal),
       status: "unpaid",
@@ -330,10 +343,19 @@ async function handleGenerateInvoice(req: any, res: any) {
 
     await logAudit({
       ...userInfo,
-      action: "COMPANY_INVOICE_GENERATED",
+      action: "MONTHLY_INVOICE_GENERATED",
       entity: "company_invoice",
       entityId: inv.id,
-      after: { invoiceNumber, companyId: companyCustomerId, periodMonth, bookingCount: unbilledBookings.length, grandTotal },
+      after: { invoiceNumber, companyId: companyCustomerId, periodMonth, bookingCount: unbilledBookings.length, grandTotal, dppNilaiLain },
+      ipAddress,
+      userAgent,
+    });
+    await logAudit({
+      ...userInfo,
+      action: "CORPORATE_BILLING_AGGREGATED",
+      entity: "company_invoice",
+      entityId: inv.id,
+      after: { invoiceNumber, companyId: companyCustomerId, periodMonth, bookingCount: unbilledBookings.length, totalAmount, ppnAmount, dppNilaiLain, grandTotal },
       ipAddress,
       userAgent,
     });

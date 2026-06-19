@@ -80,80 +80,153 @@ async function auditBillingAction(invoiceId: number, action: string, documents?:
 function printInvoicePdf(invoice: any) {
   const items: any[] = invoice.items ?? [];
   const periodStr = periodLabel(invoice.periodMonth);
+  const today = new Date().toLocaleDateString("id-ID", { day:"numeric", month:"long", year:"numeric" });
+
+  // Tax breakdown calculation
+  const dpp = invoice.totalAmount ?? 0;
+  const dppNilaiLain = invoice.dppNilaiLain ?? Math.round((dpp * 11 / 12) * 100) / 100;
+  const ppn = invoice.ppnAmount ?? 0;
+  const grandTotal = invoice.grandTotal ?? 0;
+
   const rows = items.map((item: any, i: number) => `
     <tr style="border-bottom:1px solid #e5e7eb; ${i % 2 === 1 ? "background:#f9fafb;" : ""}">
-      <td style="padding:7px 8px; font-size:12px;">${item.customerName ?? "-"}</td>
-      <td style="padding:7px 8px; font-size:12px;">${item.customerPhone ?? "-"}</td>
-      <td style="padding:7px 8px; font-size:12px;">${item.facilityName ?? "-"}</td>
-      <td style="padding:7px 8px; font-size:12px;">${item.bookingDate ?? "-"}</td>
-      <td style="padding:7px 8px; font-size:12px;">${item.startTime ?? "-"}–${item.endTime ?? "-"}</td>
-      <td style="padding:7px 8px; font-size:12px; text-align:center;">${item.durationHours ?? 0} jam</td>
-      <td style="padding:7px 8px; font-size:12px; text-align:right;">${formatCurrency(item.subtotal ?? 0)}</td>
-      <td style="padding:7px 8px; font-size:12px; text-align:right;">${formatCurrency(item.taxAmount ?? 0)}</td>
-      <td style="padding:7px 8px; font-size:12px; text-align:right; font-weight:600;">${formatCurrency(item.totalAmount ?? 0)}</td>
-      <td style="padding:7px 8px; font-size:11px; color:#6b7280; font-family:monospace;">${item.orderNumber ?? "-"}</td>
+      <td style="padding:6px 7px; font-size:11px;">${i + 1}</td>
+      <td style="padding:6px 7px; font-size:11px;">${item.customerName ?? "-"}</td>
+      <td style="padding:6px 7px; font-size:11px;">${item.customerPhone ?? "-"}</td>
+      <td style="padding:6px 7px; font-size:11px;">${item.facilityName ?? "-"}</td>
+      <td style="padding:6px 7px; font-size:11px;">${item.bookingDate ?? "-"}</td>
+      <td style="padding:6px 7px; font-size:11px;">${item.startTime ?? "-"}–${item.endTime ?? "-"}</td>
+      <td style="padding:6px 7px; font-size:11px; text-align:center;">${item.durationHours ?? 0} jam</td>
+      <td style="padding:6px 7px; font-size:11px; text-align:right;">${formatCurrency(item.subtotal ?? 0)}</td>
+      <td style="padding:6px 7px; font-size:11px; text-align:right; font-weight:600;">${formatCurrency(item.totalAmount ?? 0)}</td>
     </tr>
   `).join("");
 
   const html = `<!DOCTYPE html><html lang="id"><head><meta charset="utf-8"/>
   <title>Invoice ${invoice.invoiceNumber}</title>
   <style>
+    @page { size: A4; margin: 18mm 16mm; }
     @media print { body { margin: 0; } }
-    body { font-family: 'Segoe UI', Arial, sans-serif; margin: 32px; color: #111; }
-    h1 { margin:0; font-size:22px; color:#ea580c; }
-    h2 { margin:0; font-size:15px; font-weight:700; }
-    table { width:100%; border-collapse:collapse; margin-top:16px; }
-    th { background:#ea580c; color:#fff; padding:8px 8px; font-size:12px; text-align:left; }
-    .total-row td { font-weight:700; background:#fff7ed; border-top:2px solid #ea580c; }
-    .grand-row td { font-weight:900; font-size:14px; background:#ea580c; color:#fff; }
-    .info-box { background:#f9fafb; border:1px solid #e5e7eb; border-radius:8px; padding:14px; margin-bottom:16px; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; margin: 28px 32px; color: #111; font-size:12px; }
+    h1 { margin:0; font-size:20px; color:#ea580c; font-weight:900; }
+    table { width:100%; border-collapse:collapse; margin-top:12px; }
+    th { background:#ea580c; color:#fff; padding:7px 7px; font-size:11px; text-align:left; }
+    .total-row td { font-weight:600; background:#fff7ed; }
+    .tax-row td { font-size:11px; color:#374151; }
+    .grand-row td { font-weight:900; font-size:13px; background:#ea580c; color:#fff; }
+    .info-box { background:#f9fafb; border:1px solid #e5e7eb; border-radius:6px; padding:12px; }
     .flex { display:flex; justify-content:space-between; align-items:flex-start; }
-    .badge-unpaid { background:#fef9c3; color:#a16207; padding:4px 12px; border-radius:99px; font-size:12px; font-weight:600; }
-    .badge-paid { background:#dcfce7; color:#15803d; padding:4px 12px; border-radius:99px; font-size:12px; font-weight:600; }
+    .badge-unpaid { background:#fef9c3; color:#a16207; padding:3px 10px; border-radius:99px; font-size:11px; font-weight:700; }
+    .badge-paid { background:#dcfce7; color:#15803d; padding:3px 10px; border-radius:99px; font-size:11px; font-weight:700; }
+    .section-title { font-size:11px; color:#9ca3af; font-weight:700; text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px; }
+    .payment-box { border:1px solid #e5e7eb; border-radius:6px; padding:12px 14px; background:#f0fdf4; margin-top:14px; }
+    .sign-section { margin-top:28px; display:flex; justify-content:space-between; }
+    .sign-box { text-align:center; }
+    .sign-line { margin:52px 0 6px; border-bottom:1px solid #111; }
   </style></head><body>
-  <div class="flex">
-    <div><h1>Sport Center Soekarno-Hatta</h1><div style="color:#6b7280;font-size:13px;margin-top:4px;">Kawasan Bandara Soekarno-Hatta, Tangerang</div></div>
+
+  <!-- HEADER -->
+  <div class="flex" style="margin-bottom:14px;">
+    <div>
+      <h1>Sport Center Soekarno-Hatta</h1>
+      <div style="color:#6b7280;font-size:11px;margin-top:3px;">Kawasan Bandara Soekarno-Hatta, Tangerang</div>
+    </div>
     <div style="text-align:right;">
-      <div style="font-size:22px;font-weight:900;color:#ea580c;">${invoice.invoiceNumber}</div>
-      <div style="font-size:13px;color:#6b7280;">Tanggal: ${new Date().toLocaleDateString("id-ID", { day:"numeric", month:"long", year:"numeric" })}</div>
-      <div class="${invoice.status === "paid" ? "badge-paid" : "badge-unpaid"}" style="margin-top:6px;display:inline-block;">${invoice.status === "paid" ? "✓ LUNAS" : "BELUM LUNAS"}</div>
+      <div style="font-size:20px;font-weight:900;color:#ea580c;">${invoice.invoiceNumber}</div>
+      <div style="font-size:11px;color:#6b7280;">Tanggal Terbit: ${today}</div>
+      <div class="${invoice.status === "paid" ? "badge-paid" : "badge-unpaid"}" style="margin-top:5px;display:inline-block;">${invoice.status === "paid" ? "✓ LUNAS" : "BELUM LUNAS"}</div>
     </div>
   </div>
-  <hr style="margin:20px 0;border:none;border-top:2px solid #ea580c;"/>
-  <div class="flex" style="gap:20px;">
+  <hr style="margin:0 0 14px;border:none;border-top:2px solid #ea580c;"/>
+
+  <!-- TAGIHAN KEPADA + PERIODE -->
+  <div class="flex" style="gap:16px;margin-bottom:14px;">
     <div class="info-box" style="flex:1;">
-      <div style="font-size:11px;color:#9ca3af;font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;">Tagihan Kepada</div>
-      <div style="font-weight:700;font-size:14px;">${invoice.companyName}</div>
-      ${invoice.picName ? `<div style="font-size:13px;color:#374151;margin-top:4px;">PIC: ${invoice.picName}</div>` : ""}
-      ${invoice.picPhone ? `<div style="font-size:13px;color:#374151;">Telp: ${invoice.picPhone}</div>` : ""}
-      ${invoice.picEmail ? `<div style="font-size:13px;color:#374151;">Email: ${invoice.picEmail}</div>` : ""}
-      ${invoice.billingAddress ? `<div style="font-size:13px;color:#374151;">${invoice.billingAddress}</div>` : ""}
+      <div class="section-title">Tagihan Kepada</div>
+      <div style="font-weight:700;font-size:13px;">${invoice.companyName}</div>
+      ${invoice.picName ? `<div style="font-size:11px;color:#374151;margin-top:3px;">PIC: ${invoice.picName}</div>` : ""}
+      ${invoice.picPhone ? `<div style="font-size:11px;color:#374151;">Telp: ${invoice.picPhone}</div>` : ""}
+      ${invoice.picEmail ? `<div style="font-size:11px;color:#374151;">Email: ${invoice.picEmail}</div>` : ""}
+      ${invoice.billingAddress ? `<div style="font-size:11px;color:#374151;margin-top:2px;">${invoice.billingAddress}</div>` : ""}
     </div>
     <div class="info-box" style="flex:1;">
-      <div style="font-size:11px;color:#9ca3af;font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;">Periode Tagihan</div>
-      <div style="font-weight:700;font-size:14px;">${periodStr}</div>
-      <div style="font-size:13px;color:#374151;margin-top:8px;">Total Pemakaian: <strong>${items.length} sesi</strong></div>
+      <div class="section-title">Periode Tagihan</div>
+      <div style="font-weight:700;font-size:13px;">${periodStr}</div>
+      <div style="font-size:11px;color:#374151;margin-top:4px;">Jumlah Sesi: <strong>${items.length} sesi</strong></div>
+      <div style="font-size:11px;color:#374151;">Tgl Cetak: ${today}</div>
     </div>
   </div>
-  <h2 style="margin:20px 0 8px;font-size:14px;">Detail Pemakaian</h2>
+
+  <!-- DETAIL PEMAKAIAN -->
+  <div style="font-weight:700;font-size:12px;margin-bottom:6px;">Detail Pemakaian Fasilitas</div>
   <table><thead><tr>
+    <th style="width:24px;">No.</th>
     <th>Customer</th><th>No. WA</th><th>Fasilitas</th><th>Tanggal</th><th>Jam</th>
-    <th style="text-align:center;">Durasi</th><th style="text-align:right;">Subtotal</th>
-    <th style="text-align:right;">PPN 11%</th><th style="text-align:right;">Total</th><th>No. Booking</th>
+    <th style="text-align:center;">Durasi</th>
+    <th style="text-align:right;">Harga</th>
+    <th style="text-align:right;">Total</th>
   </tr></thead><tbody>
-    ${rows || `<tr><td colspan="10" style="text-align:center;padding:20px;color:#9ca3af;">Tidak ada data</td></tr>`}
+    ${rows || `<tr><td colspan="9" style="text-align:center;padding:16px;color:#9ca3af;">Tidak ada data pemakaian</td></tr>`}
   </tbody><tfoot>
-    <tr class="total-row"><td colspan="6" style="padding:10px 8px;font-size:13px;">DPP (Subtotal)</td>
-      <td colspan="3" style="padding:10px 8px;text-align:right;font-size:13px;">${formatCurrency(invoice.totalAmount)}</td><td></td></tr>
-    <tr class="total-row"><td colspan="6" style="padding:8px 8px;font-size:13px;">PPN 11%</td>
-      <td colspan="3" style="padding:8px 8px;text-align:right;font-size:13px;">${formatCurrency(invoice.ppnAmount)}</td><td></td></tr>
-    <tr class="grand-row"><td colspan="6" style="padding:10px 8px;font-size:14px;">GRAND TOTAL</td>
-      <td colspan="3" style="padding:10px 8px;text-align:right;font-size:16px;">${formatCurrency(invoice.grandTotal)}</td><td></td></tr>
+    <tr class="total-row">
+      <td colspan="7" style="padding:8px 7px;font-size:12px;border-top:2px solid #ea580c;">Subtotal Pemakaian</td>
+      <td colspan="2" style="padding:8px 7px;text-align:right;font-size:12px;border-top:2px solid #ea580c;">${formatCurrency(items.reduce((s: number, i: any) => s + Number(i.subtotal ?? 0), 0))}</td>
+    </tr>
   </tfoot></table>
-  ${invoice.notes ? `<div style="margin-top:20px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:12px;font-size:13px;"><strong>Catatan:</strong> ${invoice.notes}</div>` : ""}
-  ${invoice.paidAt ? `<div style="margin-top:16px;color:#15803d;font-size:13px;">✓ Dibayar pada ${new Date(invoice.paidAt).toLocaleDateString("id-ID", { day:"numeric", month:"long", year:"numeric" })}</div>` : ""}
-  <hr style="margin:32px 0 16px;border:none;border-top:1px solid #e5e7eb;"/>
-  <div style="font-size:11px;color:#9ca3af;text-align:center;">Dokumen ini dicetak secara otomatis dari sistem Sport Center Soekarno-Hatta</div>
+
+  <!-- TAX SUMMARY BOX -->
+  <div style="margin-top:14px;border:1px solid #e5e7eb;border-radius:6px;overflow:hidden;">
+    <table style="margin:0;">
+      <colgroup><col style="width:60%"/><col style="width:40%"/></colgroup>
+      <tbody>
+        <tr class="tax-row"><td style="padding:7px 12px;">DPP (Dasar Pengenaan Pajak)</td><td style="padding:7px 12px;text-align:right;font-weight:600;">${formatCurrency(dpp)}</td></tr>
+        <tr class="tax-row" style="background:#f9fafb;"><td style="padding:7px 12px;">DPP Nilai Lain (DPP × 11/12)</td><td style="padding:7px 12px;text-align:right;font-weight:600;">${formatCurrency(dppNilaiLain)}</td></tr>
+        <tr class="tax-row"><td style="padding:7px 12px;">PPN 11% (DPP × 11%)</td><td style="padding:7px 12px;text-align:right;font-weight:600;">${formatCurrency(ppn)}</td></tr>
+        <tr class="grand-row"><td style="padding:10px 12px;font-size:13px;">GRAND TOTAL</td><td style="padding:10px 12px;text-align:right;font-size:15px;font-weight:900;">${formatCurrency(grandTotal)}</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- INFORMASI PEMBAYARAN -->
+  <div class="payment-box">
+    <div class="section-title" style="margin-bottom:6px;">Informasi Pembayaran</div>
+    <div style="font-size:12px;line-height:1.8;">
+      Harap melakukan pembayaran melalui transfer bank ke:<br/>
+      <strong>PT CAHAYA SEJATI TEKNOLOGI</strong><br/>
+      Bank Mandiri · No. Rekening: <strong>1640006707220</strong><br/>
+      Dengan mencantumkan No. Invoice <strong>${invoice.invoiceNumber}</strong> sebagai keterangan transfer.
+    </div>
+  </div>
+
+  ${invoice.notes ? `<div style="margin-top:12px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;padding:10px;font-size:11px;"><strong>Catatan:</strong> ${invoice.notes}</div>` : ""}
+  ${invoice.paidAt ? `<div style="margin-top:10px;color:#15803d;font-size:11px;">✓ Dibayar pada ${new Date(invoice.paidAt).toLocaleDateString("id-ID", { day:"numeric", month:"long", year:"numeric" })}</div>` : ""}
+
+  <!-- TANDA TANGAN & MATERAI -->
+  <div class="sign-section">
+    <div class="sign-box" style="width:180px;">
+      <div style="font-size:11px;">Diterima oleh,</div>
+      <div style="font-size:10px;color:#6b7280;">(${invoice.companyName})</div>
+      <div class="sign-line"></div>
+      <div style="font-size:11px;font-weight:600;">${invoice.picName ?? "......................................"}</div>
+      <div style="font-size:10px;color:#6b7280;">Jabatan: ...............................</div>
+    </div>
+    <div class="sign-box" style="width:200px;">
+      <div style="font-size:11px;">Hormat kami,</div>
+      <div style="font-size:10px;color:#6b7280;">Sport Center Soekarno-Hatta</div>
+      <div style="border:1px dashed #d1d5db;border-radius:50%;width:64px;height:64px;margin:8px auto 0;display:flex;align-items:center;justify-content:center;">
+        <span style="font-size:8px;color:#9ca3af;text-align:center;line-height:1.3;">Materai<br/>Rp 10.000</span>
+      </div>
+      <div style="border:2px dashed #ea580c;border-radius:50%;width:80px;height:80px;margin:-20px auto 0;display:flex;align-items:center;justify-content:center;">
+        <span style="font-size:7px;color:#ea580c;text-align:center;line-height:1.4;font-weight:700;">STEMPEL<br/>SPORT CENTER<br/>SOEKARNO-HATTA</span>
+      </div>
+      <div class="sign-line" style="margin-top:4px;"></div>
+      <div style="font-size:11px;font-weight:600;">Admin Sport Center</div>
+      <div style="font-size:10px;color:#6b7280;">Sport Center Soekarno-Hatta</div>
+    </div>
+  </div>
+
+  <hr style="margin:20px 0 10px;border:none;border-top:1px solid #e5e7eb;"/>
+  <div style="font-size:9px;color:#9ca3af;text-align:center;">Dokumen ini diterbitkan secara otomatis oleh sistem Sport Center Soekarno-Hatta · ${invoice.invoiceNumber} · ${today}</div>
   <script>window.onload=function(){window.print();};</script>
 </body></html>`;
   const win = window.open("", "_blank");
@@ -285,10 +358,21 @@ function printKwitansi(invoice: any) {
       <div class="label">Status</div>
       <div class="value">${invoice.status === "paid" ? "✓ LUNAS" : "BELUM LUNAS"}</div>
     </div>
+    <div style="margin:18px 0;padding:12px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;font-size:12px;">
+      <div style="font-weight:700;margin-bottom:4px;">Transfer ke:</div>
+      <div style="font-weight:700;">PT CAHAYA SEJATI TEKNOLOGI</div>
+      <div>Bank Mandiri · No. Rek: <strong>1640006707220</strong></div>
+    </div>
     <div class="footer">
       <div class="sign-box">
         <div style="font-size:12px;color:#6b7280;">Hormat kami,</div>
-        <div style="margin:48px 0 4px;border-bottom:1px solid #111;"></div>
+        <div style="border:1px dashed #d1d5db;border-radius:50%;width:56px;height:56px;margin:6px auto;display:flex;align-items:center;justify-content:center;">
+          <span style="font-size:7px;color:#9ca3af;text-align:center;line-height:1.3;">Materai<br/>Rp 10.000</span>
+        </div>
+        <div style="border:2px dashed #ea580c;border-radius:50%;width:72px;height:72px;margin:-18px auto 0;display:flex;align-items:center;justify-content:center;">
+          <span style="font-size:6px;color:#ea580c;text-align:center;line-height:1.4;font-weight:700;">STEMPEL<br/>SPORT CENTER</span>
+        </div>
+        <div style="margin:4px 0 4px;border-bottom:1px solid #111;"></div>
         <div style="font-size:12px;font-weight:600;">Sport Center Soekarno-Hatta</div>
       </div>
     </div>
@@ -349,15 +433,24 @@ function printSpp(invoice: any) {
       <tr><td>Perusahaan</td><td>${invoice.companyName}</td></tr>
       <tr><td>Periode Tagihan</td><td>${periodStr}</td></tr>
       <tr><td>Jumlah Sesi Pemakaian</td><td>${invoice.items?.length ?? 0} sesi</td></tr>
-      <tr><td>DPP (Subtotal)</td><td>${formatCurrency(invoice.totalAmount)}</td></tr>
-      <tr><td>PPN 11%</td><td>${formatCurrency(invoice.ppnAmount)}</td></tr>
-      <tr><td style="font-weight:700;">TOTAL TAGIHAN</td><td style="font-weight:700;color:#dc2626;font-size:14px;">${formatCurrency(invoice.grandTotal)}</td></tr>
+      <tr><td>DPP (Dasar Pengenaan Pajak)</td><td>${formatCurrency(invoice.totalAmount)}</td></tr>
+      <tr><td>DPP Nilai Lain (DPP × 11/12)</td><td>${formatCurrency(invoice.dppNilaiLain ?? Math.round(invoice.totalAmount * 11 / 12))}</td></tr>
+      <tr><td>PPN 11% (DPP × 11%)</td><td>${formatCurrency(invoice.ppnAmount)}</td></tr>
+      <tr><td style="font-weight:700;background:#fef3c7;">GRAND TOTAL</td><td style="font-weight:700;color:#dc2626;font-size:14px;background:#fef3c7;">${formatCurrency(invoice.grandTotal)}</td></tr>
       <tr><td>Jatuh Tempo</td><td>${dueDate}</td></tr>
     </tbody>
   </table>
 
   <div class="body-text">
-    <p>Kami mohon agar pembayaran dapat dilakukan selambat-lambatnya pada tanggal <strong>${dueDate}</strong> melalui transfer ke rekening Sport Center Soekarno-Hatta.</p>
+    <p>Kami mohon agar pembayaran dapat dilakukan selambat-lambatnya pada tanggal <strong>${dueDate}</strong> melalui transfer bank ke rekening berikut:</p>
+    <table class="detail" style="margin:12px 0;">
+      <tbody>
+        <tr><td style="width:160px;">Nama Rekening</td><td><strong>PT CAHAYA SEJATI TEKNOLOGI</strong></td></tr>
+        <tr><td>Bank</td><td>Bank Mandiri</td></tr>
+        <tr><td>No. Rekening</td><td><strong>1640006707220</strong></td></tr>
+        <tr><td>Keterangan</td><td><strong>${invoice.invoiceNumber}</strong></td></tr>
+      </tbody>
+    </table>
     <p>Terlampir bersama surat ini: Invoice, Lampiran Pemakaian, dan dokumen pendukung lainnya.</p>
     <p>Atas perhatian dan kerjasamanya, kami ucapkan terima kasih.</p>
   </div>
@@ -365,7 +458,13 @@ function printSpp(invoice: any) {
   <div class="sign-section">
     <div class="sign-box">
       <div>Hormat kami,</div>
-      <div style="margin:52px 0 4px;border-bottom:1px solid #111;"></div>
+      <div style="border:1px dashed #d1d5db;border-radius:50%;width:56px;height:56px;margin:8px auto;display:flex;align-items:center;justify-content:center;">
+        <span style="font-size:7px;color:#9ca3af;text-align:center;line-height:1.3;">Materai<br/>Rp 10.000</span>
+      </div>
+      <div style="border:2px dashed #ea580c;border-radius:50%;width:72px;height:72px;margin:-20px auto 0;display:flex;align-items:center;justify-content:center;">
+        <span style="font-size:6px;color:#ea580c;text-align:center;line-height:1.4;font-weight:700;">STEMPEL<br/>SPORT CENTER</span>
+      </div>
+      <div style="margin:4px 0 4px;border-bottom:1px solid #111;"></div>
       <div style="font-weight:700;">Admin Sport Center</div>
       <div style="font-size:12px;color:#555;">Sport Center Soekarno-Hatta</div>
     </div>
@@ -740,6 +839,7 @@ function GenerateInvoiceDialog({ onClose }: { onClose: () => void }) {
         {companyId && preview && (preview.bookingCount ?? 0) > 0 && (
           <div className="rounded-lg bg-muted/40 p-3 space-y-1 text-sm">
             <div className="flex justify-between"><span className="text-muted-foreground">DPP (Harga Netto)</span><span className="font-semibold">{formatCurrency(subtotal)}</span></div>
+            <div className="flex justify-between text-xs"><span className="text-muted-foreground">DPP Nilai Lain (×11/12)</span><span className="text-orange-600">{formatCurrency(preview?.dppNilaiLain ?? Math.round(subtotal * 11 / 12))}</span></div>
             <div className="flex justify-between text-xs"><span className="text-muted-foreground">PPN 11%</span><span>{formatCurrency(ppnAmount)}</span></div>
             <div className="flex justify-between border-t pt-1 font-black"><span>Grand Total Invoice</span><span className="text-primary">{formatCurrency(grandTotal)}</span></div>
           </div>
@@ -1104,12 +1204,42 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
         </div>
 
         {/* Totals */}
-        <div className="rounded-lg border p-4 space-y-2 text-sm">
-          <div className="flex justify-between"><span className="text-muted-foreground">DPP (Subtotal)</span><span className="font-semibold">{formatCurrency(invoice.totalAmount)}</span></div>
-          {invoice.ppnAmount > 0 && (
-            <div className="flex justify-between"><span className="text-muted-foreground">PPN 11%</span><span className="font-semibold">{formatCurrency(invoice.ppnAmount)}</span></div>
-          )}
-          <div className="flex justify-between border-t pt-2 font-black text-base"><span>Grand Total</span><span className="text-primary">{formatCurrency(invoice.grandTotal)}</span></div>
+        <div className="rounded-lg border overflow-hidden text-sm">
+          <div className="bg-muted/30 px-4 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Ringkasan Pajak</div>
+          <div className="divide-y">
+            <div className="flex justify-between px-4 py-2.5">
+              <span className="text-muted-foreground">Subtotal Pemakaian</span>
+              <span className="font-semibold">{formatCurrency(invoice.totalAmount)}</span>
+            </div>
+            <div className="flex justify-between px-4 py-2.5">
+              <span className="text-muted-foreground">DPP (Dasar Pengenaan Pajak)</span>
+              <span className="font-semibold">{formatCurrency(invoice.totalAmount)}</span>
+            </div>
+            <div className="flex justify-between px-4 py-2.5 bg-orange-50/50 dark:bg-orange-900/10">
+              <span className="text-muted-foreground">DPP Nilai Lain (DPP × 11/12)</span>
+              <span className="font-semibold text-orange-700 dark:text-orange-400">{formatCurrency(invoice.dppNilaiLain ?? Math.round(invoice.totalAmount * 11 / 12))}</span>
+            </div>
+            {invoice.ppnAmount > 0 && (
+              <div className="flex justify-between px-4 py-2.5">
+                <span className="text-muted-foreground">PPN 11% (DPP × 11%)</span>
+                <span className="font-semibold">{formatCurrency(invoice.ppnAmount)}</span>
+              </div>
+            )}
+          </div>
+          <div className="flex justify-between px-4 py-3 bg-primary text-white font-black text-base">
+            <span>Grand Total</span>
+            <span>{formatCurrency(invoice.grandTotal)}</span>
+          </div>
+        </div>
+
+        {/* Payment info */}
+        <div className="rounded-lg border border-green-200 bg-green-50 dark:bg-green-900/20 dark:border-green-800 p-4 text-sm">
+          <div className="font-semibold text-green-800 dark:text-green-300 text-xs uppercase tracking-wide mb-2">Informasi Pembayaran</div>
+          <div className="text-green-900 dark:text-green-200 space-y-0.5 text-sm">
+            <div className="font-bold">PT CAHAYA SEJATI TEKNOLOGI</div>
+            <div>Bank Mandiri &nbsp;·&nbsp; No. Rek: <span className="font-mono font-bold">1640006707220</span></div>
+            <div className="text-xs text-green-700 dark:text-green-400 mt-1">Cantumkan No. Invoice <strong>{invoice.invoiceNumber}</strong> sebagai keterangan transfer.</div>
+          </div>
         </div>
 
         {invoice.notes && <div className="text-sm text-muted-foreground bg-muted/40 rounded p-3">{invoice.notes}</div>}
