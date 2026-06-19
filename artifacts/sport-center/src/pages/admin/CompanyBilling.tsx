@@ -194,11 +194,11 @@ function printInvoicePdf(invoice: any) {
     <table style="margin:0;">
       <colgroup><col style="width:60%"/><col style="width:40%"/></colgroup>
       <tbody>
-        <tr class="tax-row"><td style="padding:7px 12px;">Subtotal Pemakaian (Harga Inklusif PPN)</td><td style="padding:7px 12px;text-align:right;font-weight:600;">${formatCurrency(invoice.totalAmount ?? 0)}</td></tr>
-        <tr class="tax-row" style="background:#f9fafb;"><td style="padding:7px 12px;">DPP (Dasar Pengenaan Pajak = Subtotal ÷ 1,11)</td><td style="padding:7px 12px;text-align:right;font-weight:600;">${formatCurrency(dpp)}</td></tr>
-        <tr class="tax-row"><td style="padding:7px 12px;">DPP Nilai Lain (DPP × 11/12)</td><td style="padding:7px 12px;text-align:right;font-weight:600;">${formatCurrency(dppNilaiLain)}</td></tr>
-        <tr class="tax-row" style="background:#f9fafb;"><td style="padding:7px 12px;">PPN 12% (DPP Nilai Lain × 12%)</td><td style="padding:7px 12px;text-align:right;font-weight:600;">${formatCurrency(ppn)}</td></tr>
-        <tr class="grand-row"><td style="padding:10px 12px;font-size:13px;">GRAND TOTAL (DPP + PPN)</td><td style="padding:10px 12px;text-align:right;font-size:15px;font-weight:900;">${formatCurrency(grandTotal)}</td></tr>
+        <tr class="tax-row"><td style="padding:7px 12px;">Subtotal Pemakaian</td><td style="padding:7px 12px;text-align:right;font-weight:600;">${formatCurrency(invoice.totalAmount ?? 0)}</td></tr>
+        <tr class="tax-row" style="background:#f9fafb;"><td style="padding:7px 12px;">DPP</td><td style="padding:7px 12px;text-align:right;font-weight:600;">${formatCurrency(dpp)}</td></tr>
+        <tr class="tax-row"><td style="padding:7px 12px;">DPP Nilai Lain</td><td style="padding:7px 12px;text-align:right;font-weight:600;">${formatCurrency(dppNilaiLain)}</td></tr>
+        <tr class="tax-row" style="background:#f9fafb;"><td style="padding:7px 12px;">PPN 12%</td><td style="padding:7px 12px;text-align:right;font-weight:600;">${formatCurrency(ppn)}</td></tr>
+        <tr class="grand-row"><td style="padding:10px 12px;font-size:13px;">GRAND TOTAL</td><td style="padding:10px 12px;text-align:right;font-size:15px;font-weight:900;">${formatCurrency(grandTotal)}</td></tr>
       </tbody>
     </table>
   </div>
@@ -449,11 +449,11 @@ function printSpp(invoice: any) {
       <tr><td>Perusahaan</td><td>${invoice.companyName}</td></tr>
       <tr><td>Periode Tagihan</td><td>${periodStr}</td></tr>
       <tr><td>Jumlah Sesi Pemakaian</td><td>${invoice.items?.length ?? 0} sesi</td></tr>
-      <tr><td>Subtotal Pemakaian (Inklusif PPN)</td><td>${formatCurrency(invoice.totalAmount)}</td></tr>
-      <tr><td>DPP (Subtotal ÷ 1,11)</td><td>${formatCurrency(invoice.dpp ?? Math.round((invoice.totalAmount ?? 0) / 1.11))}</td></tr>
-      <tr><td>DPP Nilai Lain (DPP × 11/12)</td><td>${formatCurrency(invoice.dppNilaiLain ?? Math.round(Math.round((invoice.totalAmount ?? 0) / 1.11) * 11 / 12))}</td></tr>
-      <tr><td>PPN 12% (DPP Nilai Lain × 12%)</td><td>${formatCurrency(invoice.ppnAmount)}</td></tr>
-      <tr><td style="font-weight:700;background:#fef3c7;">GRAND TOTAL (DPP + PPN)</td><td style="font-weight:700;color:#dc2626;font-size:14px;background:#fef3c7;">${formatCurrency(invoice.grandTotal)}</td></tr>
+      <tr><td>Subtotal Pemakaian</td><td>${formatCurrency(invoice.totalAmount)}</td></tr>
+      <tr><td>DPP</td><td>${formatCurrency(invoice.dpp ?? Math.round((invoice.totalAmount ?? 0) / 1.11))}</td></tr>
+      <tr><td>DPP Nilai Lain</td><td>${formatCurrency(invoice.dppNilaiLain ?? Math.round(Math.round((invoice.totalAmount ?? 0) / 1.11) * 11 / 12))}</td></tr>
+      <tr><td>PPN 12%</td><td>${formatCurrency(invoice.ppnAmount)}</td></tr>
+      <tr><td style="font-weight:700;background:#fef3c7;">GRAND TOTAL</td><td style="font-weight:700;color:#dc2626;font-size:14px;background:#fef3c7;">${formatCurrency(invoice.grandTotal)}</td></tr>
       <tr><td>Jatuh Tempo</td><td>${dueDate}</td></tr>
     </tbody>
   </table>
@@ -862,8 +862,8 @@ function GenerateInvoiceDialog({ onClose }: { onClose: () => void }) {
           return (
             <div className="rounded-lg bg-muted/40 p-3 space-y-1 text-sm">
               <div className="flex justify-between"><span className="text-muted-foreground">Subtotal Pemakaian</span><span className="font-semibold">{formatCurrency(subtotal)}</span></div>
-              <div className="flex justify-between text-xs"><span className="text-muted-foreground">DPP (Subtotal ÷ 1,11)</span><span>{formatCurrency(pvDpp)}</span></div>
-              <div className="flex justify-between text-xs"><span className="text-muted-foreground">DPP Nilai Lain (DPP × 11/12)</span><span className="text-orange-600">{formatCurrency(pvDppNilaiLain)}</span></div>
+              <div className="flex justify-between text-xs"><span className="text-muted-foreground">DPP</span><span>{formatCurrency(pvDpp)}</span></div>
+              <div className="flex justify-between text-xs"><span className="text-muted-foreground">DPP Nilai Lain</span><span className="text-orange-600">{formatCurrency(pvDppNilaiLain)}</span></div>
               <div className="flex justify-between text-xs"><span className="text-muted-foreground">PPN 12%</span><span>{formatCurrency(pvPpn)}</span></div>
               <div className="flex justify-between border-t pt-1 font-black"><span>Grand Total</span><span className="text-primary">{formatCurrency(pvGrandTotal)}</span></div>
             </div>
@@ -1240,24 +1240,24 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
               <div className="bg-muted/30 px-4 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Ringkasan Pajak</div>
               <div className="divide-y">
                 <div className="flex justify-between px-4 py-2.5">
-                  <span className="text-muted-foreground">Subtotal Pemakaian (Harga Inklusif PPN)</span>
+                  <span className="text-muted-foreground">Subtotal Pemakaian</span>
                   <span className="font-semibold">{formatCurrency(invoice.totalAmount)}</span>
                 </div>
                 <div className="flex justify-between px-4 py-2.5 bg-muted/20">
-                  <span className="text-muted-foreground">DPP (Subtotal ÷ 1,11)</span>
+                  <span className="text-muted-foreground">DPP</span>
                   <span className="font-semibold">{formatCurrency(dpp)}</span>
                 </div>
                 <div className="flex justify-between px-4 py-2.5 bg-orange-50/50 dark:bg-orange-900/10">
-                  <span className="text-muted-foreground">DPP Nilai Lain (DPP × 11/12)</span>
+                  <span className="text-muted-foreground">DPP Nilai Lain</span>
                   <span className="font-semibold text-orange-700 dark:text-orange-400">{formatCurrency(dppNilaiLain)}</span>
                 </div>
                 <div className="flex justify-between px-4 py-2.5">
-                  <span className="text-muted-foreground">PPN 12% (DPP Nilai Lain × 12%)</span>
+                  <span className="text-muted-foreground">PPN 12%</span>
                   <span className="font-semibold">{formatCurrency(ppn)}</span>
                 </div>
               </div>
               <div className="flex justify-between px-4 py-3 bg-primary text-white font-black text-base">
-                <span>Grand Total (DPP + PPN)</span>
+                <span>Grand Total</span>
                 <span>{formatCurrency(grand)}</span>
               </div>
             </div>
