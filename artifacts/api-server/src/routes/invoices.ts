@@ -5,6 +5,7 @@ import {
   facilitiesTable,
   settingsTable,
   taxSettingsTable,
+  companyInvoiceSettingsTable,
 } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
@@ -37,6 +38,7 @@ async function resolveInvoiceData(orderNumber: string): Promise<InvoiceData | nu
     .limit(1);
 
   const [settings] = await db.select().from(settingsTable).limit(1);
+  const [invoiceSettings] = await db.select().from(companyInvoiceSettingsTable).limit(1);
 
   // Get tax rate from booking or active tax settings
   let ppnRate = booking.ppnRate ? Number(booking.ppnRate) : 0;
@@ -116,14 +118,21 @@ async function resolveInvoiceData(orderNumber: string): Promise<InvoiceData | nu
     promoCode: booking.promoCode ?? null,
     discountAmount: Number(booking.discountAmount ?? 0),
 
-    centerName: settings?.centerName ?? "Sport Center Soekarno-Hatta",
-    centerAddress:
-      settings?.address || "Kawasan Bandara Soekarno-Hatta, Tangerang 19110",
-    centerPhone: settings?.phone ?? "",
-    bankName: settings?.bankName ?? "Bank Mandiri",
-    bankAccount: settings?.bankAccount ?? "",
-    bankAccountName:
-      settings?.bankAccountName ?? "Sport Center Soekarno-Hatta",
+    centerName: invoiceSettings?.companyName || settings?.centerName || "Sport Center Soekarno-Hatta",
+    centerAddress: invoiceSettings?.address || settings?.address || "Kawasan Bandara Soekarno-Hatta, Tangerang 19110",
+    centerPhone: invoiceSettings?.phone || settings?.phone || "",
+    bankName: invoiceSettings?.bankName || settings?.bankName || "Bank Mandiri",
+    bankAccount: invoiceSettings?.bankAccount || settings?.bankAccount || "",
+    bankAccountName: invoiceSettings?.bankAccountName || settings?.bankAccountName || "Sport Center Soekarno-Hatta",
+
+    // Dynamic invoice template fields
+    logoUrl: invoiceSettings?.logoUrl ?? settings?.logoUrl ?? null,
+    kopSuratHtml: invoiceSettings?.kopSuratHtml ?? null,
+    financeName: invoiceSettings?.financeName ?? null,
+    financeTitle: invoiceSettings?.financeTitle ?? null,
+    signatureUrl: invoiceSettings?.signatureUrl ?? null,
+    footerText: invoiceSettings?.footerText ?? null,
+    invoicePrefix: invoiceSettings?.invoicePrefix ?? "INV",
   };
 }
 

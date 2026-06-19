@@ -52,6 +52,7 @@ import systemAdminRouter from "./systemAdmin";
 import expensesRouter from "./expenses";
 import documentTemplatesRouter from "./documentTemplates";
 import invoicesRouter from "./invoices";
+import invoiceSettingsRouter from "./invoiceSettings";
 
 const router: IRouter = Router();
 
@@ -107,5 +108,6 @@ router.use(systemAdminRouter);
 router.use(expensesRouter);
 router.use(documentTemplatesRouter);
 router.use(invoicesRouter);
+router.use(invoiceSettingsRouter);
 
 export default router;
