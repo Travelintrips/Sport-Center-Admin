@@ -2,6 +2,7 @@ import app from "./app";
 import { logger } from "./lib/logger";
 import { startScheduler } from "./lib/scheduler";
 import { ensureDefaultTemplates } from "./lib/seedTemplates";
+import { initBizportalTables } from "./lib/bizportalSync";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 
@@ -642,6 +643,7 @@ app.listen(port, (err) => {
 
   logger.info({ port }, "Server listening");
   runStartupMigrations().catch(() => {});
+  initBizportalTables().catch(() => {});
   startScheduler();
   ensureDefaultTemplates().catch(() => {});
 

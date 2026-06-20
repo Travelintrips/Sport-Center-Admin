@@ -3,7 +3,7 @@ import type { Booking, GymMembership } from "@workspace/db";
 
 const { Pool } = pg;
 
-const PROD_URL = process.env.SUPABASE_DATABASE_URL;
+const PROD_URL = process.env.SUPABASE_DATABASE_URL || process.env.SUPABASE_DB_URL;
 
 let _prodPool: pg.Pool | null = null;
 function getProdPool(): pg.Pool | null {
@@ -19,6 +19,61 @@ function getProdPool(): pg.Pool | null {
 }
 
 export const bizportalSyncConfigured = Boolean(PROD_URL);
+
+export async function initBizportalTables(): Promise<void> {
+  const pool = getProdPool();
+  if (!pool) return;
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS public.sport_center_facilities (
+        id         TEXT PRIMARY KEY,
+        name       TEXT NOT NULL,
+        category   TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE TABLE IF NOT EXISTS public.sport_center_bookings (
+        id                SERIAL PRIMARY KEY,
+        booking_code      TEXT UNIQUE NOT NULL,
+        facility_id       TEXT REFERENCES public.sport_center_facilities(id),
+        facility_name     TEXT,
+        customer_name     TEXT,
+        customer_phone    TEXT,
+        customer_email    TEXT,
+        date              TEXT,
+        start_time        TEXT,
+        end_time          TEXT,
+        total_hours       NUMERIC,
+        total_price       BIGINT,
+        notes             TEXT,
+        status            TEXT DEFAULT 'pending_payment',
+        payment_status    TEXT DEFAULT 'unpaid',
+        payment_proof_url TEXT,
+        payment_proof_at  TIMESTAMPTZ,
+        created_at        TIMESTAMPTZ DEFAULT NOW(),
+        updated_at        TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE TABLE IF NOT EXISTS public.sport_center_memberships (
+        id                SERIAL PRIMARY KEY,
+        name              TEXT,
+        email             TEXT,
+        phone             TEXT,
+        start_date        TEXT,
+        end_date          TEXT,
+        months            INTEGER,
+        total_price       BIGINT,
+        status            TEXT DEFAULT 'active',
+        notes             TEXT,
+        payment_method    TEXT,
+        payment_proof_url TEXT,
+        created_at        TIMESTAMPTZ DEFAULT NOW(),
+        updated_at        TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+    console.info("[bizportalSync] ✓ BizPortal tables ensured");
+  } catch (err: any) {
+    console.warn(`[bizportalSync] ⚠ Could not ensure BizPortal tables: ${err?.message}`);
+  }
+}
 
 // In-memory last sync tracking for diagnostic endpoint
 export const lastSyncState = {
