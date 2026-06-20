@@ -117,11 +117,6 @@ router.get("/admin/system/supabase-status", adminMiddleware, (_req, res) => {
         status: process.env.SUPABASE_PG_URL ? "set-but-unused" : "not-set",
         note: "Redundant alias of SUPABASE_DATABASE_URL. Safe to remove.",
       },
-      {
-        name: "SUPABASE_STORAGE_BUCKET",
-        status: process.env.SUPABASE_STORAGE_BUCKET ? "set-but-unused" : "not-set",
-        note: "Buckets are addressed by explicit name in code. This var is ignored.",
-      },
     ],
 
     safeMode: isProd
