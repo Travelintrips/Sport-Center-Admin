@@ -13,6 +13,29 @@ const INACTIVE_STATUSES = ["cancelled", "expired", "rejected", "refunded"];
 
 const router = Router();
 
+// ─── POST /bookings/track-payer-selection — log when customer toggles payer type ──
+router.post("/bookings/track-payer-selection", async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith("Bearer ")) { res.status(401).json({ error: "Unauthorized" }); return; }
+    const payload = verifyToken(authHeader.slice(7));
+    if (!payload?.userId) { res.status(401).json({ error: "Unauthorized" }); return; }
+    const { selection } = req.body; // 'personal' | 'corporate'
+    if (!["personal", "corporate"].includes(String(selection))) { res.status(400).json({ error: "Invalid selection" }); return; }
+    logAudit({
+      userId: payload.userId,
+      userName: (payload as any).name ?? null,
+      userRole: payload.role ?? null,
+      action: selection === "corporate" ? "CUSTOMER_SELECTED_CORPORATE" : "CUSTOMER_SELECTED_PERSONAL",
+      entity: "booking_form",
+      ...getClientInfo(req),
+    });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 async function generateOrderNumber(): Promise<string> {
   const rows = await db.select({ orderNumber: bookingsTable.orderNumber }).from(bookingsTable);
   let maxNum = 0;
@@ -233,6 +256,13 @@ router.post("/bookings", async (req, res) => {
           pendingCompanyUser = cu;
         }
       }
+    } else if (loggedInUser?.accountType === "company" && explicitCompanyId === loggedInUserId) {
+      // Prioritas 3a: akun perusahaan booking untuk dirinya sendiri (companyCustomerId = userId sendiri)
+      if (loggedInUser.allowMonthlyBilling) {
+        companyBillingUser = loggedInUser;
+      } else {
+        pendingCompanyUser = loggedInUser;
+      }
     } else if (bodyCustomerId && !explicitCompanyId) {
       // Admin membooking atas nama user perusahaan — infer dari customerId
       const [cu] = await db.select().from(usersTable).where(eq(usersTable.id, bodyCustomerId)).limit(1);
@@ -392,9 +422,11 @@ router.post("/bookings", async (req, res) => {
       activityType,
       numberOfPeople,
       notes,
-      // Company billing: auto-confirm, no immediate payment required
+      // Company billing: auto-confirm KECUALI company punya requirePerBookingApproval = true
       // Pending company: waiting_confirmation (menunggu verifikasi admin perusahaan)
-      status: isCompanyBilling ? "confirmed" : (isPendingCompany ? "waiting_confirmation" : "pending_payment"),
+      status: isCompanyBilling
+        ? (companyBillingUser?.requirePerBookingApproval ? "waiting_confirmation" : "confirmed")
+        : (isPendingCompany ? "waiting_confirmation" : "pending_payment"),
       payerType: (isCompanyBilling || isPendingCompany) ? "company" : "personal",
       companyCustomerId: effectiveCompanyCustomerId,
       paymentRequiredNow: !isCompanyBilling && !isPendingCompany,
@@ -516,6 +548,7 @@ router.post("/bookings", async (req, res) => {
         totalPrice: totalPrice.toLocaleString("id-ID"),
         companyName: companyBillingUser!.companyName ?? companyBillingUser!.name ?? "",
         periodMonth: bookingMonth,
+        picPhone: companyBillingUser!.picPhone ?? undefined,
       }).catch(() => {});
     } else {
       const deadline = new Date(Date.now() + deadlineHours * 60 * 60 * 1000);

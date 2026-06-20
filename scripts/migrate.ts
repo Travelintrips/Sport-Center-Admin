@@ -627,5 +627,11 @@ WHERE NOT EXISTS (
   SELECT 1 FROM sport_center.company_document_templates
   WHERE company_id IS NULL AND document_type = t.dt AND is_default = true
 );
+
+-- ============================================================
+-- require_per_booking_approval per company (opsional)
+-- ============================================================
+ALTER TABLE sport_center.users
+  ADD COLUMN IF NOT EXISTS require_per_booking_approval boolean NOT NULL DEFAULT false;
 `;
 
