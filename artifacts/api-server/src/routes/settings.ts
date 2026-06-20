@@ -36,6 +36,7 @@ async function getOrCreateSettings() {
     bankName: "BCA",
     bankAccount: "1234567890",
     bankAccountName: "PT Cahaya Sejati Teknologi",
+    paymentDeadlineHours: "24",
   }).returning();
   return newSettings;
 }
@@ -56,7 +57,7 @@ router.patch("/settings", adminMiddleware, async (req, res) => {
     const allowed = [
       "centerName","address","phone","whatsapp","email",
       "openHour","closeHour","logoUrl","bankName","bankAccount","bankAccountName",
-      "fonnteToken","fonnteAdminWa","adminWaPhones","appUrl",
+      "fonnteToken","fonnteAdminWa","adminWaPhones","appUrl","paymentDeadlineHours",
     ];
     const patch: Record<string, unknown> = {};
     for (const key of allowed) {

@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { db, bookingsTable, facilitiesTable, paymentsTable, promosTable, discountSettingsTable, apMembersTable, bookingHistoryTable, usersTable, verificationLogsTable, companyUsersTable, bookingGroupsTable } from "@workspace/db";
+import { db, bookingsTable, facilitiesTable, paymentsTable, promosTable, discountSettingsTable, apMembersTable, bookingHistoryTable, usersTable, verificationLogsTable, companyUsersTable, bookingGroupsTable, settingsTable } from "@workspace/db";
 import { eq, and, sql, or, ilike, desc, inArray } from "drizzle-orm";
 import { adminMiddleware, authMiddleware, verifyToken } from "../lib/auth";
 import { broadcastAvailabilityChange } from "../lib/supabase";
@@ -280,6 +280,21 @@ router.post("/bookings", async (req, res) => {
       return;
     }
 
+    // ── Security: personal user TIDAK BOLEH submit payerType=company tanpa verifikasi ──
+    const requestedPayerType = req.body.payerType;
+    if (!isAdminRequest && requestedPayerType === "company" && !isCompanyBilling && !isPendingCompany) {
+      res.status(403).json({
+        error: "Booking Corporate tidak diizinkan. Anda harus menjadi karyawan terverifikasi perusahaan terlebih dahulu.",
+      });
+      return;
+    }
+
+    // ── Fetch settings untuk payment_deadline_hours ──────────────────────────
+    const [appSettings] = await db.select({
+      paymentDeadlineHours: settingsTable.paymentDeadlineHours,
+    }).from(settingsTable).limit(1);
+    const deadlineHours = Math.max(1, parseInt(appSettings?.paymentDeadlineHours ?? "24") || 24);
+
     const [facility] = await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, Number(facilityId))).limit(1);
     if (!facility) {
       res.status(404).json({ error: "Facility not found" });
@@ -384,7 +399,7 @@ router.post("/bookings", async (req, res) => {
       companyCustomerId: effectiveCompanyCustomerId,
       paymentRequiredNow: !isCompanyBilling && !isPendingCompany,
       billingStatus: isCompanyBilling ? "unbilled" : null,
-      paymentDeadline: (isCompanyBilling || isPendingCompany) ? null : new Date(Date.now() + 30 * 60 * 1000),
+      paymentDeadline: (isCompanyBilling || isPendingCompany) ? null : new Date(Date.now() + deadlineHours * 60 * 60 * 1000),
       bookedForName: (isCompanyBilling || isPendingCompany) ? (req.body.bookedForName?.trim() || customerName) : null,
       bookedForPhone: (isCompanyBilling || isPendingCompany) ? (req.body.bookedForPhone?.trim() || customerPhone) : null,
       ppnRate: taxCalc.taxRate > 0 ? String(taxCalc.taxRate) : null,
@@ -444,7 +459,28 @@ router.post("/bookings", async (req, res) => {
       }
     }
 
-    logAudit({ action: "BOOKING_CREATED", entity: "booking", entityId: booking.id, after: { orderNumber: booking.orderNumber, customerName, facilityId, bookingDate }, ...getClientInfo(req) });
+    const auditAction = isAp
+      ? "ANGKASAPURA_BOOKING_CREATED"
+      : isCompanyBilling
+        ? "CORPORATE_BOOKING_CREATED"
+        : isPendingCompany
+          ? "CORPORATE_BOOKING_PENDING_CREATED"
+          : "PERSONAL_BOOKING_CREATED";
+    logAudit({
+      action: auditAction,
+      entity: "booking",
+      entityId: booking.id,
+      after: {
+        orderNumber: booking.orderNumber,
+        customerName,
+        facilityId,
+        bookingDate,
+        payerType: booking.payerType ?? "personal",
+        companyCustomerId: booking.companyCustomerId ?? null,
+        status: booking.status,
+      },
+      ...getClientInfo(req),
+    });
 
     // Record history
     await db.insert(bookingHistoryTable).values({
@@ -482,7 +518,7 @@ router.post("/bookings", async (req, res) => {
         periodMonth: bookingMonth,
       }).catch(() => {});
     } else {
-      const deadline = new Date(Date.now() + 30 * 60 * 1000);
+      const deadline = new Date(Date.now() + deadlineHours * 60 * 60 * 1000);
       const deadlineStr = deadline.toLocaleString("id-ID", { timeZone: "Asia/Jakarta", hour12: false });
       notifyBookingCreated({
         customerName,

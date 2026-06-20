@@ -835,12 +835,16 @@ export default function Booking() {
                   <button
                     type="button"
                     onClick={() => setBookingMode("perusahaan")}
-                    className={`flex flex-col items-center gap-2 p-3 rounded-lg border text-center transition-colors ${isCompanyMode ? "bg-blue-600 text-white border-blue-600" : "bg-background border-border hover:border-blue-400/50"}`}
+                    className={`flex flex-col items-center gap-2 p-3 rounded-lg border text-center transition-colors relative ${isCompanyMode ? "bg-blue-600 text-white border-blue-600" : "bg-background border-border hover:border-blue-400/50"}`}
                   >
                     <Building2 size={18} className="shrink-0" />
                     <div>
                       <div className="font-semibold text-xs">{t("Perusahaan", "Company")}</div>
-                      <div className={`text-xs ${isCompanyMode ? "text-blue-100" : "text-muted-foreground"}`}>{t("Tagihan bulanan", "Monthly bill")}</div>
+                      <div className={`text-xs ${isCompanyMode ? "text-blue-100" : "text-muted-foreground"}`}>
+                        {billingStatus?.eligible
+                          ? t("Tagihan bulanan", "Monthly bill")
+                          : t("Perlu verifikasi", "Needs verification")}
+                      </div>
                     </div>
                   </button>
                 )}
@@ -967,13 +971,31 @@ export default function Booking() {
                   </div>
                 </div>
 
+                {/* Warning: belum diverifikasi sebagai karyawan */}
+                {!billingStatus?.eligible && (
+                  <div className="flex items-start gap-2 text-xs bg-orange-50 border border-orange-200 rounded-md p-3">
+                    <AlertTriangle size={13} className="mt-0.5 shrink-0 text-orange-500" />
+                    <span className="text-orange-700">
+                      {t(
+                        "Akun Anda belum terverifikasi sebagai karyawan perusahaan. Status booking akan menjadi Menunggu Konfirmasi dan perlu approval admin.",
+                        "Your account is not yet verified as a company employee. Booking status will be Waiting Confirmation and requires admin approval."
+                      )}
+                    </span>
+                  </div>
+                )}
+
                 <div className="flex items-start gap-2 text-xs text-muted-foreground bg-blue-50 border border-blue-200 rounded-md p-3">
                   <AlertTriangle size={13} className="mt-0.5 shrink-0 text-blue-500" />
                   <span>
-                    {t(
-                      "Booking akan ditagihkan ke perusahaan. Jika verifikasi belum selesai, status booking menjadi Menunggu Konfirmasi.",
-                      "Booking will be billed to the company. If verification is pending, booking status will be Waiting Confirmation."
-                    )}
+                    {billingStatus?.eligible
+                      ? t(
+                          "Booking akan ditagihkan ke perusahaan. Tidak perlu bayar sekarang — masuk dalam tagihan bulanan.",
+                          "Booking will be billed to the company. No payment needed now — included in monthly billing."
+                        )
+                      : t(
+                          "Booking akan ditagihkan ke perusahaan. Jika verifikasi belum selesai, status booking menjadi Menunggu Konfirmasi.",
+                          "Booking will be billed to the company. If verification is pending, booking status will be Waiting Confirmation."
+                        )}
                   </span>
                 </div>
               </CardContent>
