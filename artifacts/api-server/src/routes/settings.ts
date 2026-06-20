@@ -26,8 +26,8 @@ async function getOrCreateSettings() {
   const [settings] = await db.select().from(settingsTable).limit(1);
   if (settings) return settings;
   const [newSettings] = await db.insert(settingsTable).values({
-    centerName: "Sport Center",
-    address: "Jl. Sport Center No. 1, Jakarta",
+    centerName: "PT Cahaya Sejati Teknologi",
+    address: "Cabang Soekarno Hatta",
     phone: "+62 21 1234567",
     whatsapp: "6281234567890",
     email: "info@sportcenter.com",
@@ -35,7 +35,7 @@ async function getOrCreateSettings() {
     closeHour: "22:00",
     bankName: "BCA",
     bankAccount: "1234567890",
-    bankAccountName: "PT Sport Center",
+    bankAccountName: "PT Cahaya Sejati Teknologi",
   }).returning();
   return newSettings;
 }
