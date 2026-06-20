@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Link, useLocation, useSearch } from "wouter";
-import { useLogin, useSendOtp, useVerifyOtp, useLoginWithGoogle } from "@workspace/api-client-react";
+import { useLogin, useSendOtp, useVerifyOtp, useLoginWithGoogle, getGetMeQueryKey } from "@workspace/api-client-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { setToken } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -35,6 +36,7 @@ export default function Login() {
   const search = useSearch();
   const { toast } = useToast();
   const { t } = useLang();
+  const queryClient = useQueryClient();
 
   const [tab, setTab] = useState<LoginTab>("email");
   const [form, setForm] = useState({ email: "", password: "" });
@@ -49,8 +51,9 @@ export default function Login() {
 
   const redirectTo = new URLSearchParams(search).get("redirect");
 
-  function handleSuccess(data: { token: string; user: { name: string } }) {
+  function handleSuccess(data: { token: string; user: any }) {
     setToken(data.token);
+    queryClient.setQueryData(getGetMeQueryKey(), data.user);
     toast({ title: t("Selamat datang!", "Welcome!"), description: `${t("Halo", "Hello")}, ${data.user.name}` });
     setLocation(redirectTo ?? "/my-bookings");
   }
