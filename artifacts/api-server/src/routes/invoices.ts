@@ -66,15 +66,11 @@ async function resolveInvoiceData(orderNumber: string): Promise<InvoiceData | nu
     const [taxSetting] = await db
       .select()
       .from(taxSettingsTable)
-      .where(
-        and(
-          eq(taxSettingsTable.appliesTo, "sport_booking"),
-          eq(taxSettingsTable.isActive, true),
-        ),
-      )
+      .where(eq(taxSettingsTable.appliesTo, "sport_booking"))
+      .orderBy(taxSettingsTable.isActive)
       .limit(1);
 
-    ppnRate = taxSetting ? Number(taxSetting.taxRate) : 0;
+    ppnRate = taxSetting ? Number(taxSetting.taxRate) : 11;
   }
 
   // ── DPP Nilai Lain formula — PMK-131/2024 (PPN 12%, berlaku Jan 2025) ───────
