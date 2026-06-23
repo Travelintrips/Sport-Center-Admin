@@ -68,8 +68,8 @@ async function checkDatabase(): Promise<ConnectionResult> {
     }
 
     const REQUIRED_TABLES = [
-      "users", "facilities", "bookings", "payments", "blocked_schedules",
-      "settings", "company_invoices", "accounting_journals",
+      "users", "sport_facilities", "sport_bookings", "sport_payments", "blocked_schedules",
+      "sport_settings", "company_invoices", "accounting_journals",
     ];
     const tableList = REQUIRED_TABLES.map((t) => `'${t}'`).join(",");
     const { rows: tableRows } = await db.execute(

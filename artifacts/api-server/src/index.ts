@@ -280,52 +280,52 @@ async function runStartupMigrations() {
     `CREATE INDEX IF NOT EXISTS idx_bank_journal_entries_mutation
        ON sport_center.bank_journal_entries (mutation_id)`,
     // Kolom OCR pada payments
-    `ALTER TABLE sport_center.payments
+    `ALTER TABLE sport_center.sport_payments
        ADD COLUMN IF NOT EXISTS ocr_name text`,
-    `ALTER TABLE sport_center.payments
+    `ALTER TABLE sport_center.sport_payments
        ADD COLUMN IF NOT EXISTS ocr_amount numeric(14,2)`,
-    `ALTER TABLE sport_center.payments
+    `ALTER TABLE sport_center.sport_payments
        ADD COLUMN IF NOT EXISTS ocr_date text`,
-    `ALTER TABLE sport_center.payments
+    `ALTER TABLE sport_center.sport_payments
        ADD COLUMN IF NOT EXISTS ocr_raw text`,
-    `ALTER TABLE sport_center.payments
+    `ALTER TABLE sport_center.sport_payments
        ADD COLUMN IF NOT EXISTS ocr_data jsonb`,
     // Enum billing_status untuk bookings
     `DO $$ BEGIN
        CREATE TYPE sport_center.billing_status AS ENUM ('unbilled','billed','paid');
      EXCEPTION WHEN duplicate_object THEN null; END $$`,
     // Kolom-kolom baru pada bookings (idempotent)
-    `ALTER TABLE sport_center.bookings
+    `ALTER TABLE sport_center.sport_bookings
        ADD COLUMN IF NOT EXISTS booked_for_name text`,
-    `ALTER TABLE sport_center.bookings
+    `ALTER TABLE sport_center.sport_bookings
        ADD COLUMN IF NOT EXISTS booked_for_phone text`,
-    `ALTER TABLE sport_center.bookings
+    `ALTER TABLE sport_center.sport_bookings
        ADD COLUMN IF NOT EXISTS payment_required_now boolean DEFAULT true`,
-    `ALTER TABLE sport_center.bookings
+    `ALTER TABLE sport_center.sport_bookings
        ADD COLUMN IF NOT EXISTS billing_status sport_center.billing_status`,
-    `ALTER TABLE sport_center.bookings
+    `ALTER TABLE sport_center.sport_bookings
        ADD COLUMN IF NOT EXISTS company_invoice_id int`,
-    `ALTER TABLE sport_center.bookings
+    `ALTER TABLE sport_center.sport_bookings
        ADD COLUMN IF NOT EXISTS ppn_rate numeric(5,2)`,
-    `ALTER TABLE sport_center.bookings
+    `ALTER TABLE sport_center.sport_bookings
        ADD COLUMN IF NOT EXISTS ppn_amount numeric(12,2)`,
-    `ALTER TABLE sport_center.bookings
+    `ALTER TABLE sport_center.sport_bookings
        ADD COLUMN IF NOT EXISTS grand_total numeric(12,2)`,
-    `ALTER TABLE sport_center.bookings
+    `ALTER TABLE sport_center.sport_bookings
        ADD COLUMN IF NOT EXISTS down_payment numeric(12,2) NOT NULL DEFAULT 0`,
-    `ALTER TABLE sport_center.bookings
+    `ALTER TABLE sport_center.sport_bookings
        ADD COLUMN IF NOT EXISTS is_dp_paid boolean NOT NULL DEFAULT false`,
-    `ALTER TABLE sport_center.bookings
+    `ALTER TABLE sport_center.sport_bookings
        ADD COLUMN IF NOT EXISTS booked_by_user_id int`,
-    `ALTER TABLE sport_center.bookings
+    `ALTER TABLE sport_center.sport_bookings
        ADD COLUMN IF NOT EXISTS group_ref text`,
-    `ALTER TABLE sport_center.bookings
+    `ALTER TABLE sport_center.sport_bookings
        ADD COLUMN IF NOT EXISTS approved_by_admin_phone text`,
-    `ALTER TABLE sport_center.bookings
+    `ALTER TABLE sport_center.sport_bookings
        ADD COLUMN IF NOT EXISTS approved_at timestamptz`,
-    `ALTER TABLE sport_center.bookings
+    `ALTER TABLE sport_center.sport_bookings
        ADD COLUMN IF NOT EXISTS rejected_reason text`,
-    `ALTER TABLE sport_center.bookings
+    `ALTER TABLE sport_center.sport_bookings
        ADD COLUMN IF NOT EXISTS paid_at timestamptz`,
     // ── Tabel-tabel yang belum ada di prod ─────────────────────────────────────
     // booking_groups
@@ -365,7 +365,7 @@ async function runStartupMigrations() {
        ADD COLUMN IF NOT EXISTS notes text`,
     `ALTER TABLE sport_center.wa_booking_sessions
        ADD COLUMN IF NOT EXISTS booker_name text`,
-    `ALTER TABLE sport_center.bookings
+    `ALTER TABLE sport_center.sport_bookings
        ADD COLUMN IF NOT EXISTS booker_name text`,
     // wa_blocked_phones — spam protection
     `CREATE TABLE IF NOT EXISTS sport_center.wa_blocked_phones (
@@ -382,7 +382,7 @@ async function runStartupMigrations() {
     `CREATE TABLE IF NOT EXISTS sport_center.wa_action_tokens (
        id serial PRIMARY KEY,
        token text NOT NULL UNIQUE,
-       booking_id int NOT NULL REFERENCES sport_center.bookings(id) ON DELETE CASCADE,
+       booking_id int NOT NULL REFERENCES sport_center.sport_bookings(id) ON DELETE CASCADE,
        action text NOT NULL,
        used_at timestamptz,
        expires_at timestamptz,
@@ -477,10 +477,10 @@ async function runStartupMigrations() {
     `DO $$ BEGIN
        CREATE TYPE sport_center.payment_type AS ENUM ('dp', 'pelunasan', 'full_payment');
      EXCEPTION WHEN duplicate_object THEN null; END $$`,
-    `ALTER TABLE sport_center.payments
+    `ALTER TABLE sport_center.sport_payments
        ADD COLUMN IF NOT EXISTS payment_type sport_center.payment_type NOT NULL DEFAULT 'full_payment'`,
     // Hapus unique constraint booking_id agar bisa ada multiple payments per booking
-    `ALTER TABLE sport_center.payments
+    `ALTER TABLE sport_center.sport_payments
        DROP CONSTRAINT IF EXISTS payments_booking_id_unique`,
     // expense_status enum
     `DO $$ BEGIN
