@@ -520,6 +520,18 @@ async function runStartupMigrations() {
     `CREATE SEQUENCE IF NOT EXISTS sport_center.expense_no_seq`,
     // accounting_journals.booking_id nullable untuk expense journal entries
     `ALTER TABLE sport_center.accounting_journals ALTER COLUMN booking_id DROP NOT NULL`,
+    // accounting_journal_lines — double-entry lines per jurnal (debit/kredit)
+    `CREATE TABLE IF NOT EXISTS sport_center.accounting_journal_lines (
+       id          serial PRIMARY KEY,
+       journal_id  integer NOT NULL REFERENCES sport_center.accounting_journals(id) ON DELETE CASCADE,
+       line_type   text    NOT NULL,
+       account_code text   NOT NULL,
+       account_name text   NOT NULL,
+       amount      numeric(14,2) NOT NULL,
+       description text,
+       created_at  timestamptz NOT NULL DEFAULT now()
+     )`,
+    `CREATE INDEX IF NOT EXISTS idx_accounting_journal_lines_journal_id ON sport_center.accounting_journal_lines(journal_id)`,
     // company_document_templates
     `CREATE TABLE IF NOT EXISTS sport_center.company_document_templates (
        id serial PRIMARY KEY,

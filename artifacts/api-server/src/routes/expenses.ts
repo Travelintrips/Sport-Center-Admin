@@ -1,8 +1,9 @@
 import { Router } from "express";
-import { db, expensesTable, facilitiesTable, usersTable, accountingJournalsTable } from "@workspace/db";
+import { db, expensesTable, facilitiesTable, usersTable } from "@workspace/db";
 import { eq, desc, and, gte, lte, sql } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
+import { createExpenseJournalEntry } from "../lib/accounting";
 
 const router = Router();
 
@@ -297,23 +298,19 @@ router.patch("/admin/expenses/:id/status", adminMiddleware, async (req, res) => 
         const ppnNum = Number(existing.ppnAmount);
         const totalNum = Number(existing.totalAmount);
 
-        const journalRow: Record<string, unknown> = {
-          bookingId: null,
-          orderNumber: existing.expenseNo,
-          journalType: "expense_paid",
-          debitAccount: existing.category,
-          debitAmount: String(ppnNum > 0 ? amountNum : totalNum),
-          creditRevenueAccount: `Kas/Bank (${existing.paymentMethod ?? "Transfer"})`,
-          creditRevenueAmount: String(totalNum),
-          creditPpnAccount: "PPN Masukan",
-          creditPpnAmount: String(ppnNum),
-          journalDate: today,
-          isReversal: false,
-          notes: `Pengeluaran ${existing.expenseNo}: ${existing.description}`,
-        };
-
-        const [journal] = await db.insert(accountingJournalsTable).values(journalRow as any).returning();
-        await db.update(expensesTable).set({ journalId: `JRN-${journal!.id}` }).where(eq(expensesTable.id, id));
+        const journalId = await createExpenseJournalEntry(
+          existing.expenseNo,
+          existing.category,
+          amountNum,
+          ppnNum,
+          totalNum,
+          existing.paymentMethod ?? "Transfer",
+          existing.description,
+          today,
+        );
+        if (journalId) {
+          await db.update(expensesTable).set({ journalId: `JRN-${journalId}` }).where(eq(expensesTable.id, id));
+        }
       } catch (journalErr) {
         req.log.warn({ journalErr }, "Failed to create expense journal (non-fatal)");
       }

@@ -77,27 +77,22 @@ async function resolveInvoiceData(orderNumber: string): Promise<InvoiceData | nu
     ppnRate = taxSetting ? Number(taxSetting.taxRate) : 0;
   }
 
-  // ── DPP Nilai Lain formula (sesuai regulasi PPN Indonesia) ────────────────
-  // harga di DB = inclusive PPN
-  // dpp        = grandTotal / 1.11
-  // dppNilaiLain = dpp × (11/12)
-  // ppnAmount  = dppNilaiLain × 12%
-  // total      = dpp + ppnAmount  (≈ grandTotal, max rounding diff ±1)
+  // ── DPP Nilai Lain formula — PMK-131/2024 (PPN 12%, berlaku Jan 2025) ───────
+  // Harga di DB = inclusive PPN
+  // DPP          = grandTotal / (1 + ppnRate/100)      ← ekstrak harga netto
+  // DPP Nilai Lain = DPP × (11/12)                     ← dasar pengenaan pajak
+  // PPN 12%      = DPP Nilai Lain × 12%                ← PPN terutang
+  // TOTAL        = DPP + PPN                            ← ≈ grandTotal, max diff ±1
   let dpp: number;
   let dppNilaiLain: number;
   let ppnAmount: number;
 
   if (ppnRate > 0) {
-    // Core calculation (inclusive PPN 11%):
-    //   DPP          = grandTotal / 1.11
-    //   PPN          = DPP × 11%          ← tax base is DPP
-    //   TOTAL        = DPP + PPN
-    // Display-only field (tidak mempengaruhi total):
-    //   DPP Nilai Lain = DPP × (11/12)
-    dpp = Math.round(grandTotal / 1.11);
-    dppNilaiLain = Math.round(dpp * 11 / 12);   // DISPLAY ONLY
-    ppnAmount = Math.round(dpp * 0.11);          // PPN = DPP × 11%
-    // Re-align grandTotal so DPP + PPN = TOTAL always
+    const rate = ppnRate / 100;                              // mis. 0.12 untuk 12%
+    dpp = Math.round(grandTotal / (1 + rate));
+    dppNilaiLain = Math.round(dpp * 11 / 12);               // dasar pengenaan PMK-131
+    ppnAmount = Math.round(dppNilaiLain * 0.12);             // PPN 12% dari DPP Nilai Lain
+    // Re-align total agar DPP + PPN selalu konsisten
     grandTotal = dpp + ppnAmount;
   } else {
     dpp = grandTotal;

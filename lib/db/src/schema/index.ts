@@ -27,6 +27,7 @@ export * from "./companyVerificationTokens";
 export * from "./taxSettings";
 export * from "./taxTransactions";
 export * from "./accountingJournals";
+export * from "./accountingJournalLines";
 export * from "./bankReconciliation";
 export * from "./bookingGroups";
 export * from "./waBookingSessions";

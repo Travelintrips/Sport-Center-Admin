@@ -564,7 +564,7 @@ export function buildInvoiceHtml(data: InvoiceData, opts: BuildOptions = {}): st
         <td style="text-align:right;font-family:'Courier New',monospace;color:#6b7280;font-size:12px;">Rp ${rp(data.dppNilaiLain)}</td>
       </tr>
       <tr class="ppn">
-        <td>PPN 11%</td>
+        <td>PPN 12%</td>
         <td style="text-align:right;font-family:'Courier New',monospace;">Rp ${rp(data.ppnAmount)}</td>
       </tr>` : ""}
       <tr class="grand">
