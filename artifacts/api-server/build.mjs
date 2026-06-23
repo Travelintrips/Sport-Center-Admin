@@ -98,6 +98,8 @@ async function buildAll() {
       "zeromq",
       "zeromq-prebuilt",
       "xlsx",
+      "googleapis",
+      "openai",
       "playwright",
       "puppeteer",
       "puppeteer-core",
