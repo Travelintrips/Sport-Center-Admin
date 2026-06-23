@@ -665,7 +665,7 @@ router.post("/wa/booking", async (req, res) => {
 
     const totalPrice = Number(facility.pricePerHour) * Number(durationHours);
     // Hitung PPN — mengikuti effective_date backward-compat rule
-    const taxCalc = await calculateTax(totalPrice, "sport_center_booking", bookingDate);
+    const taxCalc = await calculateTax(totalPrice, "sport_booking", bookingDate);
     const orderNumber = await generateOrderNumber();
     const paymentDeadline = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
 
@@ -2515,7 +2515,7 @@ async function execCreateBookingFromSession(session: WaBookingSessionRow, phone:
     : "";
 
   // ── 9. Hitung PPN ──────────────────────────────────────────────────────────
-  const taxCalc = await calculateTax(totalPrice, "sport_center_booking", session.bookingDate);
+  const taxCalc = await calculateTax(totalPrice, "sport_booking", session.bookingDate);
   const grandTotal = taxCalc.taxAmount > 0 ? taxCalc.grandTotal : totalPrice;
   const orderNumber = await generateOrderNumber();
 

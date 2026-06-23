@@ -1,0 +1,90 @@
+IMPLEMENTASI PERSONAL VS MEMBER PERUSAHAAN DI FORM BOOKING
+
+TUJUAN:
+Customer dapat memilih Personal atau Member Perusahaan saat booking fasilitas Sport Center. Sistem menyesuaikan flow pembayaran, billing, dan validasi employee.
+
+1. UI FORM BOOKING
+- Tambahkan toggle / radio button:
+  ○ Personal
+  ○ Member Perusahaan
+
+- Jika Personal dipilih:
+  - Tampilkan tombol “Lanjut ke Pembayaran”
+  - Harga/fasilitas normal
+  - booking record akan menyimpan:
+    payer_type = 'personal'
+    payment_required_now = TRUE
+    billing_status = NULL
+    payment_deadline = setting dari admin (default 24 jam)
+
+- Jika Member Perusahaan dipilih:
+  - Tampilkan kolom “Nama Perusahaan” otomatis sesuai login corporate, read-only
+  - Sembunyikan tombol “Lanjut ke Pembayaran”
+  - booking record akan menyimpan:
+    payer_type = 'company'
+    company_customer_id = login user / verified employee
+    payment_required_now = FALSE
+    billing_status = 'unbilled'
+    status = 'confirmed'
+
+2. BACKEND VALIDATION
+- Hanya employee verified yang boleh pilih Member Perusahaan:
+  - company_users.verificationStatus = 'approved'
+  - corporateBillingEnabled = true
+- Non-verified employee → ditolak dengan alert
+- Personal user tidak boleh submit companyCustomerId
+- Slot conflict tetap diperiksa per payer_type:
+  - corporate tidak bisa override slot personal
+
+3. DATABASE UPDATE
+- bookings:
+  - customer_id
+  - company_customer_id (nullable)
+  - payer_type
+  - bookedForName / bookedForPhone
+  - payment_status / billing_status
+- Validasi companyCustomerId FK ke users.id dengan account_type='company'
+
+4. AUDIT LOG
+- Tambahkan event khusus:
+  - PERSONAL_BOOKING_CREATED
+  - CORPORATE_BOOKING_CREATED
+  - CORPORATE_BOOKING_PENDING_CREATED
+  - CUSTOMER_SELECTED_CORPORATE
+  - CUSTOMER_SELECTED_PERSONAL
+
+5. NOTIFIKASI
+- Saat corporate booking dibuat:
+  - Kirim WA ke PIC perusahaan
+  - Email opsional
+
+6. UI FRONTEND BOOKINGDETAIL
+- Tampilkan badge:
+  - Personal / Corporate
+  - billingStatus
+  - Digunakan oleh (nama pemakai)
+- Untuk corporate, kolom perusahaan read-only sesuai login
+
+7. ADMIN SETTINGS
+- Batas waktu pembayaran Personal configurable (default 24 jam)
+- Flag per perusahaan: require_per_booking_approval (opsional)
+
+8. TEST CASES
+- Booking Personal
+- Booking Corporate employee verified
+- Booking Corporate employee non-verified → alert / reject
+- Slot conflict test Personal vs Corporate
+- DP booking exposure
+- Audit log event check Corporate vs Personal
+
+9. EDGE CASES
+- Personal mencoba kirim companyCustomerId → backend reject
+- Employee belum verified pilih corporate → alert
+- Corporate per-booking approval flag → optional validation
+
+OUTPUT:
+- Customer portal form sudah punya toggle Personal / Member Perusahaan
+- Flow payment otomatis sesuai tipe customer
+- Kolom nama perusahaan otomatis untuk member perusahaan
+- Validasi keamanan & audit log lengkap
+- Siap untuk billing bulanan corporate

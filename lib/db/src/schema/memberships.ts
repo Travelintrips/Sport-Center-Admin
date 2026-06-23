@@ -5,7 +5,7 @@ import { scSchema } from "./_schema";
 
 export const membershipStatusEnum = scSchema.enum("membership_status", ["pending_payment", "waiting_confirmation", "active", "expired", "cancelled"]);
 
-export const gymMembershipsTable = scSchema.table("gym_memberships", {
+export const gymMembershipsTable = scSchema.table("sport_memberships", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
   email: text("email").notNull(),

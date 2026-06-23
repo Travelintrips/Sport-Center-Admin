@@ -153,7 +153,7 @@ function printInvoicePdf(invoice: any, ds: DocTemplateSettings) {
   const dpp = invoice.dpp ?? tb.dpp;
   const dppNilaiLain = invoice.dppNilaiLain ?? tb.dppNilaiLain;
   const ppn = invoice.ppnAmount ?? tb.ppn;
-  const grandTotal = invoice.grandTotal ?? tb.grandTotal;
+  const grandTotal = dpp + ppn; // Grand Total = DPP + PPN (always)
 
   const rows = items.map((item: any, i: number) => `
     <tr style="border-bottom:1px solid #e5e7eb; ${i % 2 === 1 ? "background:#f9fafb;" : ""}">
@@ -924,7 +924,7 @@ function GenerateInvoiceDialog({ onClose }: { onClose: () => void }) {
           const pvDpp = preview?.dpp ?? tb.dpp;
           const pvDppNilaiLain = preview?.dppNilaiLain ?? tb.dppNilaiLain;
           const pvPpn = preview?.ppnAmount ?? tb.ppn;
-          const pvGrandTotal = preview?.grandTotal ?? tb.grandTotal;
+          const pvGrandTotal = pvDpp + pvPpn; // Grand Total = DPP + PPN (always)
           return (
             <div className="rounded-lg bg-muted/40 p-3 space-y-1 text-sm">
               <div className="flex justify-between"><span className="text-muted-foreground">Subtotal Pemakaian</span><span className="font-semibold">{formatCurrency(subtotal)}</span></div>
@@ -1307,7 +1307,7 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
           const dpp = invoice.dpp ?? tb.dpp;
           const dppNilaiLain = invoice.dppNilaiLain ?? tb.dppNilaiLain;
           const ppn = invoice.ppnAmount ?? tb.ppn;
-          const grand = invoice.grandTotal ?? tb.grandTotal;
+          const grand = dpp + ppn; // Grand Total = DPP + PPN (always)
           return (
             <div className="rounded-lg border overflow-hidden text-sm">
               <div className="bg-muted/30 px-4 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Ringkasan Pajak</div>

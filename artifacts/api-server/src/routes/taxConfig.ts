@@ -40,11 +40,11 @@ router.patch("/admin/tax-config/ppn", adminMiddleware, async (req, res) => {
       effectiveDate?: string | null;
     };
 
-    // Find the existing sport_center_booking tax setting
+    // Find the existing sport_booking tax setting
     const [existing] = await db
       .select()
       .from(taxSettingsTable)
-      .where(eq(taxSettingsTable.appliesTo, "sport_center_booking"))
+      .where(eq(taxSettingsTable.appliesTo, "sport_booking"))
       .limit(1);
 
     const patch: Record<string, unknown> = {};
@@ -86,7 +86,7 @@ router.patch("/admin/tax-config/ppn", adminMiddleware, async (req, res) => {
         taxName: "PPN Keluaran 11%",
         taxRate: String(taxRate ?? 11),
         taxType: "output_vat",
-        appliesTo: "sport_center_booking",
+        appliesTo: "sport_booking",
         isActive: typeof enabled === "boolean" ? enabled : true,
         effectiveDate: effectiveDate || null,
       });

@@ -560,7 +560,7 @@ export function buildInvoiceHtml(data: InvoiceData, opts: BuildOptions = {}): st
         <td style="text-align:right;font-family:'Courier New',monospace;">Rp ${rp(data.dpp)}</td>
       </tr>
       <tr class="subtotal">
-        <td style="color:#6b7280;font-size:12px;">DPP Nilai Lain <span style="font-weight:400;font-size:11px;">(11/12 × DPP)</span></td>
+        <td style="color:#6b7280;font-size:12px;">DPP Nilai Lain</td>
         <td style="text-align:right;font-family:'Courier New',monospace;color:#6b7280;font-size:12px;">Rp ${rp(data.dppNilaiLain)}</td>
       </tr>
       <tr class="ppn">
@@ -573,6 +573,12 @@ export function buildInvoiceHtml(data: InvoiceData, opts: BuildOptions = {}): st
       </tr>
     </table>
   </div>
+  ${data.dppNilaiLain > 0 ? `
+  <div style="text-align:right;margin-top:-14px;margin-bottom:16px;">
+    <span style="font-size:10px;color:#9ca3af;font-style:italic;">
+      Perhitungan pajak menggunakan DPP Nilai Lain sesuai konfigurasi sistem.
+    </span>
+  </div>` : ""}
 
   <div class="sc-terbilang">
     <strong>Terbilang:</strong> ${terbilangStr}

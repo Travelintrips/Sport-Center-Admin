@@ -41,7 +41,7 @@ export const billingStatusEnum = scSchema.enum("billing_status", [
   "paid",
 ]);
 
-export const bookingsTable = scSchema.table("bookings", {
+export const bookingsTable = scSchema.table("sport_bookings", {
   id: serial("id").primaryKey(),
   orderNumber: text("order_number").notNull().unique(),
   customerId: integer("customer_id").references(() => usersTable.id, { onDelete: "set null" }),

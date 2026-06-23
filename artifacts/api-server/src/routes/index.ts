@@ -54,6 +54,7 @@ import documentTemplatesRouter from "./documentTemplates";
 import invoicesRouter from "./invoices";
 import invoiceSettingsRouter from "./invoiceSettings";
 import documentSettingsRouter from "./documentSettings";
+import dataConnectionsRouter from "./dataConnections";
 
 const router: IRouter = Router();
 
@@ -111,5 +112,6 @@ router.use(documentTemplatesRouter);
 router.use(invoicesRouter);
 router.use(invoiceSettingsRouter);
 router.use(documentSettingsRouter);
+router.use(dataConnectionsRouter);
 
 export default router;

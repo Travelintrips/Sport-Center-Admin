@@ -214,6 +214,7 @@ export interface CompanyBookingNotifData {
   totalPrice: string;
   companyName: string;
   periodMonth: string;
+  picPhone?: string;
 }
 
 export async function notifyCompanyBookingCreated(data: CompanyBookingNotifData): Promise<void> {
@@ -222,6 +223,11 @@ export async function notifyCompanyBookingCreated(data: CompanyBookingNotifData)
 
   const adminMsg = `📋 *Booking Perusahaan Baru*\nOrder: *${data.orderNumber}*\nPerusahaan: ${data.companyName}\nFasilitas: ${data.facilityName}\nTanggal: ${data.bookingDate} | ${data.startTime}–${data.endTime}\nTagihan: Bulanan ${data.periodMonth}\nNilai: Rp${data.totalPrice}`;
   await sendWAToAdmins(adminMsg);
+
+  if (data.picPhone) {
+    const picMsg = `📋 *Notifikasi Booking Perusahaan*\n\nHalo PIC *${data.companyName}*,\n\nAda booking baru atas nama perusahaan Anda.\n\nOrder: *${data.orderNumber}*\nPemesan: ${data.customerName}\nFasilitas: ${data.facilityName}\nTanggal: *${data.bookingDate}* | ${data.startTime}–${data.endTime}\nTagihan: Bulanan ${data.periodMonth}\nNilai: Rp ${data.totalPrice}\n\nBooking ini akan masuk dalam tagihan bulanan perusahaan. Terima kasih!`;
+    await sendWA(data.picPhone, picMsg);
+  }
 }
 
 export async function notifyRescheduleApproved(data: RescheduleNotifData): Promise<void> {

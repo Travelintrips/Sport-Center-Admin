@@ -3,7 +3,7 @@ import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { scSchema } from "./_schema";
 
-export const settingsTable = scSchema.table("settings", {
+export const settingsTable = scSchema.table("sport_settings", {
   id: serial("id").primaryKey(),
   centerName: text("center_name").notNull().default("Sport Center"),
   address: text("address").notNull().default(""),
@@ -21,6 +21,7 @@ export const settingsTable = scSchema.table("settings", {
   fonnteAdminWa: text("fonnte_admin_wa"),
   adminWaPhones: text("admin_wa_phones"),
   appUrl: text("app_url"),
+  paymentDeadlineHours: text("payment_deadline_hours").default("24"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });

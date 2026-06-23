@@ -21,7 +21,7 @@ export interface TaxCalculation {
  */
 export async function calculateTax(
   subtotal: number,
-  appliesTo: string = "sport_center_booking",
+  appliesTo: string = "sport_booking",
   bookingDate?: string,
 ): Promise<TaxCalculation> {
   const noTax: TaxCalculation = { dpp: subtotal, taxRate: 0, taxAmount: 0, grandTotal: subtotal, taxCode: "" };
@@ -131,7 +131,7 @@ export async function getPpnConfig(): Promise<{
   const [setting] = await db
     .select()
     .from(taxSettingsTable)
-    .where(eq(taxSettingsTable.appliesTo, "sport_center_booking"))
+    .where(eq(taxSettingsTable.appliesTo, "sport_booking"))
     .limit(1);
 
   if (!setting) {

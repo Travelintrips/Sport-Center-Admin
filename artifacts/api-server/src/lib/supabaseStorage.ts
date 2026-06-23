@@ -85,9 +85,6 @@ if (IS_DEV) {
 const PROJECT_REF = getProjectRef(SERVICE_KEY);
 const STORAGE_URL = PROJECT_REF ? `https://${PROJECT_REF}.supabase.co` : "";
 
-// NOTE: SUPABASE_STORAGE_BUCKET env var is set but NOT used — buckets are
-// addressed explicitly via the BUCKETS constant below. It is documented as
-// DEPRECATED in docs/supabase-env-audit.md.
 export const BUCKETS = {
   facility: "facility-images",
   proof: "payment-proofs",
