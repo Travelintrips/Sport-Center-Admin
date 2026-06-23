@@ -26,8 +26,8 @@ async function getOrCreateSettings() {
   const [settings] = await db.select().from(settingsTable).limit(1);
   if (settings) return settings;
   const [newSettings] = await db.insert(settingsTable).values({
-    centerName: "Sport Center",
-    address: "Jl. Sport Center No. 1, Jakarta",
+    centerName: "PT Cahaya Sejati Teknologi",
+    address: "Cabang Soekarno Hatta",
     phone: "+62 21 1234567",
     whatsapp: "6281234567890",
     email: "info@sportcenter.com",
@@ -35,7 +35,8 @@ async function getOrCreateSettings() {
     closeHour: "22:00",
     bankName: "BCA",
     bankAccount: "1234567890",
-    bankAccountName: "PT Sport Center",
+    bankAccountName: "PT Cahaya Sejati Teknologi",
+    paymentDeadlineHours: "24",
   }).returning();
   return newSettings;
 }
@@ -56,7 +57,7 @@ router.patch("/settings", adminMiddleware, async (req, res) => {
     const allowed = [
       "centerName","address","phone","whatsapp","email",
       "openHour","closeHour","logoUrl","bankName","bankAccount","bankAccountName",
-      "fonnteToken","fonnteAdminWa","adminWaPhones","appUrl",
+      "fonnteToken","fonnteAdminWa","adminWaPhones","appUrl","paymentDeadlineHours",
     ];
     const patch: Record<string, unknown> = {};
     for (const key of allowed) {

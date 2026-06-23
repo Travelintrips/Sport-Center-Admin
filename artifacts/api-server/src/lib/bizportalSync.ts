@@ -3,7 +3,7 @@ import type { Booking, GymMembership } from "@workspace/db";
 
 const { Pool } = pg;
 
-const PROD_URL = process.env.SUPABASE_DATABASE_URL;
+const PROD_URL = process.env.SUPABASE_DATABASE_URL || process.env.SUPABASE_DB_URL;
 
 let _prodPool: pg.Pool | null = null;
 function getProdPool(): pg.Pool | null {
@@ -13,6 +13,8 @@ function getProdPool(): pg.Pool | null {
       connectionString: PROD_URL,
       ssl: { rejectUnauthorized: false },
       max: 3,
+      // Set search_path agar semua query tanpa prefix pun jatuh ke sport_center
+      options: "-c search_path=sport_center,public",
     });
   }
   return _prodPool;
@@ -20,11 +22,66 @@ function getProdPool(): pg.Pool | null {
 
 export const bizportalSyncConfigured = Boolean(PROD_URL);
 
+export async function initBizportalTables(): Promise<void> {
+  const pool = getProdPool();
+  if (!pool) return;
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS sport_center.sport_center_facilities (
+        id         TEXT PRIMARY KEY,
+        name       TEXT NOT NULL,
+        category   TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE TABLE IF NOT EXISTS sport_center.sport_center_bookings (
+        id                SERIAL PRIMARY KEY,
+        booking_code      TEXT UNIQUE NOT NULL,
+        facility_id       TEXT REFERENCES sport_center.sport_center_facilities(id),
+        facility_name     TEXT,
+        customer_name     TEXT,
+        customer_phone    TEXT,
+        customer_email    TEXT,
+        date              TEXT,
+        start_time        TEXT,
+        end_time          TEXT,
+        total_hours       NUMERIC,
+        total_price       BIGINT,
+        notes             TEXT,
+        status            TEXT DEFAULT 'pending_payment',
+        payment_status    TEXT DEFAULT 'unpaid',
+        payment_proof_url TEXT,
+        payment_proof_at  TIMESTAMPTZ,
+        created_at        TIMESTAMPTZ DEFAULT NOW(),
+        updated_at        TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE TABLE IF NOT EXISTS sport_center.sport_center_memberships (
+        id                SERIAL PRIMARY KEY,
+        name              TEXT,
+        email             TEXT,
+        phone             TEXT,
+        start_date        TEXT,
+        end_date          TEXT,
+        months            INTEGER,
+        total_price       BIGINT,
+        status            TEXT DEFAULT 'active',
+        notes             TEXT,
+        payment_method    TEXT,
+        payment_proof_url TEXT,
+        created_at        TIMESTAMPTZ DEFAULT NOW(),
+        updated_at        TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+    console.info("[bizportalSync] ✓ BizPortal tables ensured (schema: sport_center)");
+  } catch (err: any) {
+    console.warn(`[bizportalSync] ⚠ Could not ensure BizPortal tables: ${err?.message}`);
+  }
+}
+
 // In-memory last sync tracking for diagnostic endpoint
 export const lastSyncState = {
-  booking: { at: null as string | null, success: null as boolean | null, error: null as string | null },
+  booking:    { at: null as string | null, success: null as boolean | null, error: null as string | null },
   membership: { at: null as string | null, success: null as boolean | null, error: null as string | null },
-  status: { at: null as string | null, success: null as boolean | null, error: null as string | null },
+  status:     { at: null as string | null, success: null as boolean | null, error: null as string | null },
 };
 
 async function withRetry<T>(fn: () => Promise<T>, label: string, retries = 2): Promise<T> {
@@ -45,13 +102,13 @@ async function withRetry<T>(fn: () => Promise<T>, label: string, retries = 2): P
 
 function toStatus(scStatus: string): string {
   switch (scStatus) {
-    case "confirmed": return "confirmed";
-    case "completed": return "completed";
+    case "confirmed":  return "confirmed";
+    case "completed":  return "completed";
     case "cancelled":
     case "rejected":
     case "expired":
-    case "refunded": return "cancelled";
-    default: return "pending_payment";
+    case "refunded":   return "cancelled";
+    default:           return "pending_payment";
   }
 }
 
@@ -59,9 +116,9 @@ function toPaymentStatus(scStatus: string): string {
   switch (scStatus) {
     case "paid":
     case "confirmed":
-    case "completed": return "paid";
+    case "completed":         return "paid";
     case "waiting_confirmation": return "pending";
-    default: return "unpaid";
+    default:                  return "unpaid";
   }
 }
 
@@ -73,10 +130,6 @@ export interface SyncBookingPayload {
   paidAt?: Date | null;
 }
 
-/**
- * Upsert facility ke BizPortal sebelum booking — agar FK constraint tidak gagal.
- * sport_center_bookings.facility_id -> sport_center_facilities.id
- */
 async function syncFacilityToBizportal(
   pool: pg.Pool,
   bizFacilityId: string,
@@ -85,7 +138,7 @@ async function syncFacilityToBizportal(
 ): Promise<void> {
   await withRetry(async () => {
     await pool.query(
-      `INSERT INTO public.sport_center_facilities (id, name, category)
+      `INSERT INTO sport_center.sport_center_facilities (id, name, category)
        VALUES ($1, $2, $3)
        ON CONFLICT (id) DO UPDATE SET
          name     = EXCLUDED.name,
@@ -101,26 +154,25 @@ export async function syncBookingToBizportal(payload: SyncBookingPayload): Promi
 
   const { booking, facilityName, facilityCategory, paymentProofUrl, paidAt } = payload;
   const bizFacilityId = `sc-${booking.facilityId}`;
-  const status = toStatus(booking.status);
+  const status        = toStatus(booking.status);
   const paymentStatus = toPaymentStatus(booking.status);
 
   try {
-    // Upsert facility dulu agar FK constraint tidak gagal
     await syncFacilityToBizportal(pool, bizFacilityId, facilityName, facilityCategory);
 
     await withRetry(async () => {
       await pool.query(
-        `INSERT INTO public.sport_center_bookings
+        `INSERT INTO sport_center.sport_center_bookings
           (booking_code, facility_id, facility_name, customer_name, customer_phone, customer_email,
            date, start_time, end_time, total_hours, total_price, notes, status,
            payment_status, payment_proof_url, payment_proof_at, created_at, updated_at)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,NOW())
          ON CONFLICT (booking_code) DO UPDATE SET
-           status               = EXCLUDED.status,
-           payment_status       = EXCLUDED.payment_status,
-           payment_proof_url    = COALESCE(EXCLUDED.payment_proof_url, sport_center_bookings.payment_proof_url),
-           payment_proof_at     = COALESCE(EXCLUDED.payment_proof_at, sport_center_bookings.payment_proof_at),
-           updated_at           = NOW()`,
+           status            = EXCLUDED.status,
+           payment_status    = EXCLUDED.payment_status,
+           payment_proof_url = COALESCE(EXCLUDED.payment_proof_url, sport_center_bookings.payment_proof_url),
+           payment_proof_at  = COALESCE(EXCLUDED.payment_proof_at,  sport_center_bookings.payment_proof_at),
+           updated_at        = NOW()`,
         [
           booking.orderNumber,
           bizFacilityId,
@@ -147,7 +199,7 @@ export async function syncBookingToBizportal(payload: SyncBookingPayload): Promi
     console.info(`[bizportalSync] ✓ Booking synced: ${booking.orderNumber} → ${status}`);
   } catch (err: any) {
     lastSyncState.booking = { at: new Date().toISOString(), success: false, error: err?.message };
-    console.error(`[bizportalSync] ✗ Booking sync failed after retries: ${booking.orderNumber} — ${err?.message}`);
+    console.error(`[bizportalSync] ✗ Booking sync failed: ${booking.orderNumber} — ${err?.message}`);
   }
 }
 
@@ -158,7 +210,7 @@ export async function syncMembershipToBizportal(membership: GymMembership): Prom
   try {
     await withRetry(async () => {
       await pool.query(
-        `INSERT INTO public.sport_center_memberships
+        `INSERT INTO sport_center.sport_center_memberships
           (id, name, email, phone, start_date, end_date, months, total_price,
            status, notes, payment_method, payment_proof_url, created_at, updated_at)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
@@ -172,7 +224,7 @@ export async function syncMembershipToBizportal(membership: GymMembership): Prom
            total_price       = EXCLUDED.total_price,
            status            = EXCLUDED.status,
            notes             = EXCLUDED.notes,
-           payment_method    = COALESCE(EXCLUDED.payment_method, sport_center_memberships.payment_method),
+           payment_method    = COALESCE(EXCLUDED.payment_method,    sport_center_memberships.payment_method),
            payment_proof_url = COALESCE(EXCLUDED.payment_proof_url, sport_center_memberships.payment_proof_url),
            updated_at        = EXCLUDED.updated_at`,
         [
@@ -198,7 +250,7 @@ export async function syncMembershipToBizportal(membership: GymMembership): Prom
     console.info(`[bizportalSync] ✓ Membership synced: ID=${membership.id} → ${membership.status}`);
   } catch (err: any) {
     lastSyncState.membership = { at: new Date().toISOString(), success: false, error: err?.message };
-    console.error(`[bizportalSync] ✗ Membership sync failed after retries: ID=${membership.id} — ${err?.message}`);
+    console.error(`[bizportalSync] ✗ Membership sync failed: ID=${membership.id} — ${err?.message}`);
   }
 }
 
@@ -214,7 +266,7 @@ export async function syncStatusToBizportal(
   try {
     await withRetry(async () => {
       await pool.query(
-        `UPDATE public.sport_center_bookings
+        `UPDATE sport_center.sport_center_bookings
          SET status            = $2,
              payment_status    = $3,
              payment_proof_url = COALESCE($4, payment_proof_url),
@@ -235,6 +287,6 @@ export async function syncStatusToBizportal(
     console.info(`[bizportalSync] ✓ Status synced: ${orderNumber} → ${toStatus(scStatus)}`);
   } catch (err: any) {
     lastSyncState.status = { at: new Date().toISOString(), success: false, error: err?.message };
-    console.error(`[bizportalSync] ✗ Status sync failed after retries: ${orderNumber} — ${err?.message}`);
+    console.error(`[bizportalSync] ✗ Status sync failed: ${orderNumber} — ${err?.message}`);
   }
 }

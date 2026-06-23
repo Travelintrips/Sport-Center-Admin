@@ -5,6 +5,7 @@ import { createWaToken } from "./waTokens";
 import { reverseTaxTransaction } from "./tax";
 import { reverseJournalEntry } from "./accounting";
 import { runBankAudit } from "./bankAudit";
+import { runConnectionHealthCheck } from "./connectionHealth";
 
 const APP_URL = process.env.APP_URL ?? "";
 
@@ -353,14 +354,23 @@ async function runNightlyBankAudit(): Promise<void> {
   }
 }
 
+async function checkConnections(): Promise<void> {
+  try {
+    await runConnectionHealthCheck("scheduler");
+  } catch (err) {
+    console.error("[scheduler] checkConnections error:", err);
+  }
+}
+
 export function startScheduler(): void {
   console.log("[scheduler] Starting background scheduler...");
 
   // Run immediately on startup
   expireOverdueBookings();
   autoCompleteBookings();
+  checkConnections();
 
-  // Every 5 minutes: expire overdue bookings + auto-complete + reminders + nightly audit
+  // Every 5 minutes: expire overdue bookings + auto-complete + reminders + nightly audit + connection health
   setInterval(async () => {
     await expireOverdueBookings();
     await autoCompleteBookings();
@@ -368,5 +378,6 @@ export function startScheduler(): void {
     await sendReminderH1();
     await sendDayOfReminder();
     await runNightlyBankAudit();
+    await checkConnections();
   }, 5 * 60 * 1000);
 }

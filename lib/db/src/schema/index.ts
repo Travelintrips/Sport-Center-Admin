@@ -35,3 +35,4 @@ export * from "./documentTemplates";
 export * from "./companyBillingRequirements";
 export * from "./companyInvoiceSettings";
 export * from "./companyDocumentSettings";
+export * from "./connectionBaselines";

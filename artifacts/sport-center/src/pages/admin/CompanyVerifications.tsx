@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -10,13 +10,25 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Search, CheckCircle2, XCircle, ShieldOff, ExternalLink, Building2, User, Eye } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { Search, CheckCircle2, XCircle, ShieldOff, ExternalLink, Building2, User, Eye, Settings } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { getToken } from "@/lib/auth";
 
 const API_BASE = "/api";
 
 type VerifStatus = "pending" | "approved" | "rejected" | "revoked";
+
+interface CompanyAccount {
+  id: number;
+  name: string;
+  companyName: string | null;
+  email: string;
+  phone: string | null;
+  allowMonthlyBilling: boolean;
+  requirePerBookingApproval: boolean;
+  accountStatus: string | null;
+}
 
 interface VerificationRequest {
   id: number;
@@ -57,6 +69,80 @@ const STATUS_CONFIG: Record<VerifStatus, { label: string; color: string; bg: str
   rejected: { label: "Ditolak", color: "#ef4444", bg: "#fee2e2" },
   revoked: { label: "Dicabut", color: "#6b7280", bg: "#f3f4f6" },
 };
+
+function CompanySettingsPanel() {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const [toggling, setToggling] = useState<string | null>(null);
+
+  const { data: companies, isLoading } = useQuery<CompanyAccount[]>({
+    queryKey: ["company-accounts-list"],
+    queryFn: () => apiFetch("/companies?status=active"),
+  });
+
+  const updateSetting = async (id: number, field: "requirePerBookingApproval" | "allowMonthlyBilling", value: boolean) => {
+    const key = `${id}-${field}`;
+    setToggling(key);
+    try {
+      await apiFetch(`/companies/${id}/settings`, {
+        method: "PATCH",
+        body: JSON.stringify({ [field]: value }),
+      });
+      qc.invalidateQueries({ queryKey: ["company-accounts-list"] });
+      toast({ title: "Pengaturan perusahaan diperbarui" });
+    } catch {
+      toast({ title: "Gagal memperbarui pengaturan", variant: "destructive" });
+    } finally {
+      setToggling(null);
+    }
+  };
+
+  if (isLoading) return <Skeleton className="h-32" />;
+  if (!companies?.length) return (
+    <Card>
+      <CardHeader><CardTitle className="text-base flex items-center gap-2"><Settings size={16} /> Pengaturan Perusahaan</CardTitle></CardHeader>
+      <CardContent><p className="text-sm text-muted-foreground">Belum ada akun perusahaan terdaftar.</p></CardContent>
+    </Card>
+  );
+
+  return (
+    <Card>
+      <CardHeader><CardTitle className="text-base flex items-center gap-2"><Settings size={16} /> Pengaturan Perusahaan</CardTitle></CardHeader>
+      <CardContent className="p-0">
+        <div className="divide-y">
+          {companies.map((c) => (
+            <div key={c.id} className="flex items-center justify-between px-6 py-3 gap-4">
+              <div className="min-w-0 flex-1">
+                <div className="font-semibold text-sm truncate">{c.companyName ?? c.name}</div>
+                <div className="text-xs text-muted-foreground">{c.email}</div>
+              </div>
+              <div className="flex items-center gap-6 shrink-0">
+                <div className="flex items-center gap-2 text-xs">
+                  <Switch
+                    id={`monthly-${c.id}`}
+                    checked={c.allowMonthlyBilling}
+                    disabled={toggling === `${c.id}-allowMonthlyBilling`}
+                    onCheckedChange={(v) => updateSetting(c.id, "allowMonthlyBilling", v)}
+                  />
+                  <Label htmlFor={`monthly-${c.id}`} className="text-muted-foreground cursor-pointer">Tagihan Bulanan</Label>
+                </div>
+                <div className="flex items-center gap-2 text-xs">
+                  <Switch
+                    id={`approval-${c.id}`}
+                    checked={c.requirePerBookingApproval}
+                    disabled={toggling === `${c.id}-requirePerBookingApproval`}
+                    onCheckedChange={(v) => updateSetting(c.id, "requirePerBookingApproval", v)}
+                  />
+                  <Label htmlFor={`approval-${c.id}`} className="text-muted-foreground cursor-pointer">Approval per Booking</Label>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
 
 function StatusBadge({ status }: { status: VerifStatus }) {
   const cfg = STATUS_CONFIG[status] ?? STATUS_CONFIG.pending;
@@ -262,6 +348,8 @@ export default function AdminCompanyVerifications() {
         <h1 className="text-2xl font-black">Verifikasi Karyawan</h1>
         <p className="text-muted-foreground">Kelola permintaan verifikasi karyawan untuk tagihan perusahaan</p>
       </div>
+
+      <CompanySettingsPanel />
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[

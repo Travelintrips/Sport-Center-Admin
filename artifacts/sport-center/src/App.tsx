@@ -63,6 +63,8 @@ import AdminDocumentTemplates from "@/pages/admin/DocumentTemplates";
 import AdminInvoiceSettings from "@/pages/admin/InvoiceSettings";
 import AdminDocumentSettings from "@/pages/admin/DocumentSettings";
 import AdminInvoiceView from "@/pages/admin/InvoiceView";
+import AdminDataConnections from "@/pages/admin/DataConnections";
+import AdminDiscountSettings from "@/pages/admin/DiscountSettings";
 
 // WhatsApp Booking Flow Pages (standalone, no auth)
 import WaBookingForm from "@/pages/wa/BookingForm";
@@ -77,7 +79,11 @@ function handle401(error: unknown) {
   const status = (error as any)?.status ?? (error as any)?.response?.status;
   if (status === 401) {
     removeToken();
-    window.location.href = "/admin/login";
+    const isAdminPath = window.location.pathname.startsWith("/admin");
+    if (isAdminPath) {
+      window.location.href = "/admin/login";
+    }
+    // Customer paths: token dihapus, biarkan halaman handle sendiri (tidak redirect paksa)
   }
 }
 
@@ -126,6 +132,8 @@ function AdminRouter() {
     if (location === "/admin/document-settings") return <AdminDocumentSettings />;
     if (location === "/admin/document-templates") return <AdminDocumentTemplates />;
     if (location.startsWith("/admin/invoice/")) return <AdminInvoiceView />;
+    if (location === "/admin/data-connections") return <AdminDataConnections />;
+    if (location === "/admin/discount-settings") return <AdminDiscountSettings />;
     return <NotFound />;
   })();
 
@@ -171,6 +179,8 @@ function Router() {
       <Route path="/admin/document-settings" component={AdminRouter} />
       <Route path="/admin/document-templates" component={AdminRouter} />
       <Route path="/admin/invoice/:orderNumber" component={AdminRouter} />
+      <Route path="/admin/data-connections" component={AdminRouter} />
+      <Route path="/admin/discount-settings" component={AdminRouter} />
       <Route path="/admin" component={AdminRouter} />
 
       {/* WhatsApp Booking Flow — standalone, no layout wrapper */}
