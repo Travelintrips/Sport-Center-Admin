@@ -203,12 +203,12 @@ export function buildInvoiceHtml(data: InvoiceData, opts: BuildOptions = {}): st
     .sc-brand-sub {
       font-size: 11px;
       font-weight: 700;
-      color: #374151;
+      color: #111827;
       margin: 1px 0 2px;
     }
     .sc-brand-addr {
       font-size: 10px;
-      color: #6b7280;
+      color: #374151;
       margin: 0;
       max-width: 260px;
       line-height: 1.4;
@@ -248,7 +248,7 @@ export function buildInvoiceHtml(data: InvoiceData, opts: BuildOptions = {}): st
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 1px;
-      color: #6b7280;
+      color: #374151;
       border-bottom: 1px solid #e5e7eb;
       padding-bottom: 4px;
     }
@@ -258,12 +258,12 @@ export function buildInvoiceHtml(data: InvoiceData, opts: BuildOptions = {}): st
       vertical-align: top;
     }
     .sc-info-table td:first-child {
-      color: #6b7280;
+      color: #374151;
       width: 110px;
       font-size: 11px;
     }
     .sc-info-table td:nth-child(2) {
-      color: #6b7280;
+      color: #374151;
       width: 8px;
     }
     .sc-info-table td:last-child {
@@ -272,7 +272,7 @@ export function buildInvoiceHtml(data: InvoiceData, opts: BuildOptions = {}): st
     }
     .sc-notice {
       font-size: 9.5px;
-      color: #9ca3af;
+      color: #4b5563;
       font-style: italic;
       margin-top: 5px;
       padding-top: 5px;
@@ -285,7 +285,7 @@ export function buildInvoiceHtml(data: InvoiceData, opts: BuildOptions = {}): st
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 1px;
-      color: #6b7280;
+      color: #374151;
       margin: 0 0 5px;
     }
     .sc-detail-table {
@@ -402,7 +402,7 @@ export function buildInvoiceHtml(data: InvoiceData, opts: BuildOptions = {}): st
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 1px;
-      color: #6b7280;
+      color: #374151;
       border-bottom: 1px solid #e5e7eb;
       padding-bottom: 4px;
     }
@@ -417,7 +417,7 @@ export function buildInvoiceHtml(data: InvoiceData, opts: BuildOptions = {}): st
     }
     .sc-footer-left {
       font-size: 10px;
-      color: #9ca3af;
+      color: #4b5563;
     }
     .sc-signature {
       text-align: center;
@@ -434,7 +434,7 @@ export function buildInvoiceHtml(data: InvoiceData, opts: BuildOptions = {}): st
     }
     .sc-signature-role {
       font-size: 10px;
-      color: #6b7280;
+      color: #374151;
     }
   </style>
   ${autoPrint ? `<script>window.onload = function(){ setTimeout(function(){ window.print(); }, 500); }</script>` : ""}
