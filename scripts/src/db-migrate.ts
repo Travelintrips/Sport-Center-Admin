@@ -108,6 +108,41 @@ try {
     console.log("      ✓ Done\n");
   }
 
+  // ── Step 1b: Rename legacy tables to sport_ prefix (idempotent) ────────────
+  console.log(`[1b] Rename legacy tables to sport_ prefix if needed...`);
+  const tablesToRename: [string, string][] = [
+    ['settings',      'sport_settings'],
+    ['bookings',      'sport_bookings'],
+    ['facilities',    'sport_facilities'],
+    ['gym_memberships','sport_memberships'],
+    ['payments',      'sport_payments'],
+  ];
+  for (const [from, to] of tablesToRename) {
+    await client.query(`
+      DO $$ BEGIN
+        IF EXISTS (
+          SELECT 1 FROM information_schema.tables
+          WHERE table_schema = 'sport_center' AND table_name = '${from}'
+        ) AND NOT EXISTS (
+          SELECT 1 FROM information_schema.tables
+          WHERE table_schema = 'sport_center' AND table_name = '${to}'
+        ) THEN
+          EXECUTE 'ALTER TABLE sport_center.${from} RENAME TO ${to}';
+        END IF;
+      END $$
+    `);
+  }
+  // Add extra columns to sport_settings that were added after base migration
+  await client.query(`
+    ALTER TABLE sport_center.sport_settings
+      ADD COLUMN IF NOT EXISTS fonnte_token text,
+      ADD COLUMN IF NOT EXISTS fonnte_admin_wa text,
+      ADD COLUMN IF NOT EXISTS admin_wa_phones text,
+      ADD COLUMN IF NOT EXISTS app_url text,
+      ADD COLUMN IF NOT EXISTS payment_deadline_hours text DEFAULT '24'
+  `);
+  console.log("      ✓ Done\n");
+
   // ── Step 2: Extra SQL file (add_tax_effective_date) ─────────────────────────
   const extraSql = path.resolve(__dirname, "../../lib/db/drizzle/add_tax_effective_date.sql");
   if (fs.existsSync(extraSql)) {
