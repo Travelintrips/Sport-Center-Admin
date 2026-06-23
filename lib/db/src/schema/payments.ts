@@ -7,7 +7,7 @@ import { scSchema } from "./_schema";
 export const paymentStatusEnum = scSchema.enum("payment_status", ["pending", "confirmed", "rejected"]);
 export const paymentTypeEnum = scSchema.enum("payment_type", ["dp", "pelunasan", "full_payment"]);
 
-export const paymentsTable = scSchema.table("payments", {
+export const paymentsTable = scSchema.table("sport_payments", {
   id: serial("id").primaryKey(),
   bookingId: integer("booking_id").notNull().references(() => bookingsTable.id, { onDelete: "cascade" }),
   amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),

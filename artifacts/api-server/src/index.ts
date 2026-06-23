@@ -407,7 +407,7 @@ async function runStartupMigrations() {
        tax_name text NOT NULL,
        tax_rate numeric(5,2) NOT NULL,
        tax_type text NOT NULL DEFAULT 'output_vat',
-       applies_to text NOT NULL DEFAULT 'sport_center_booking',
+       applies_to text NOT NULL DEFAULT 'sport_booking',
        is_active boolean NOT NULL DEFAULT true,
        effective_date text,
        created_at timestamptz NOT NULL DEFAULT NOW(),
@@ -471,7 +471,7 @@ async function runStartupMigrations() {
      )`,
     // Seed tax_settings jika kosong
     `INSERT INTO sport_center.tax_settings (tax_code, tax_name, tax_rate, tax_type, applies_to, is_active)
-     SELECT 'PPN_OUT_11','PPN Keluaran 11%',11,'output_vat','sport_center_booking',false
+     SELECT 'PPN_OUT_11','PPN Keluaran 11%',11,'output_vat','sport_booking',false
      WHERE NOT EXISTS (SELECT 1 FROM sport_center.tax_settings WHERE tax_code = 'PPN_OUT_11')`,
     // payment_type enum untuk DP flow
     `DO $$ BEGIN

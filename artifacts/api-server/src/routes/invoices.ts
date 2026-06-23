@@ -68,7 +68,7 @@ async function resolveInvoiceData(orderNumber: string): Promise<InvoiceData | nu
       .from(taxSettingsTable)
       .where(
         and(
-          eq(taxSettingsTable.appliesTo, "sport_center_booking"),
+          eq(taxSettingsTable.appliesTo, "sport_booking"),
           eq(taxSettingsTable.isActive, true),
         ),
       )

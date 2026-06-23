@@ -13,7 +13,6 @@ function getProdPool(): pg.Pool | null {
       connectionString: PROD_URL,
       ssl: { rejectUnauthorized: false },
       max: 3,
-      // Set search_path agar semua query tanpa prefix pun jatuh ke sport_center
       options: "-c search_path=sport_center,public",
     });
   }
@@ -27,16 +26,16 @@ export async function initBizportalTables(): Promise<void> {
   if (!pool) return;
   try {
     await pool.query(`
-      CREATE TABLE IF NOT EXISTS sport_center.sport_center_facilities (
+      CREATE TABLE IF NOT EXISTS sport_center.sport_facilities (
         id         TEXT PRIMARY KEY,
         name       TEXT NOT NULL,
         category   TEXT,
         created_at TIMESTAMPTZ DEFAULT NOW()
       );
-      CREATE TABLE IF NOT EXISTS sport_center.sport_center_bookings (
+      CREATE TABLE IF NOT EXISTS sport_center.sport_bookings_sync (
         id                SERIAL PRIMARY KEY,
         booking_code      TEXT UNIQUE NOT NULL,
-        facility_id       TEXT REFERENCES sport_center.sport_center_facilities(id),
+        facility_id       TEXT REFERENCES sport_center.sport_facilities(id),
         facility_name     TEXT,
         customer_name     TEXT,
         customer_phone    TEXT,
@@ -54,7 +53,7 @@ export async function initBizportalTables(): Promise<void> {
         created_at        TIMESTAMPTZ DEFAULT NOW(),
         updated_at        TIMESTAMPTZ DEFAULT NOW()
       );
-      CREATE TABLE IF NOT EXISTS sport_center.sport_center_memberships (
+      CREATE TABLE IF NOT EXISTS sport_center.sport_memberships_sync (
         id                SERIAL PRIMARY KEY,
         name              TEXT,
         email             TEXT,
@@ -138,11 +137,11 @@ async function syncFacilityToBizportal(
 ): Promise<void> {
   await withRetry(async () => {
     await pool.query(
-      `INSERT INTO sport_center.sport_center_facilities (id, name, category)
+      `INSERT INTO sport_center.sport_facilities (id, name, category)
        VALUES ($1, $2, $3)
        ON CONFLICT (id) DO UPDATE SET
          name     = EXCLUDED.name,
-         category = COALESCE(EXCLUDED.category, sport_center_facilities.category)`,
+         category = COALESCE(EXCLUDED.category, sport_facilities.category)`,
       [bizFacilityId, facilityName, facilityCategory || null]
     );
   }, `syncFacility:${bizFacilityId}`);
@@ -162,7 +161,7 @@ export async function syncBookingToBizportal(payload: SyncBookingPayload): Promi
 
     await withRetry(async () => {
       await pool.query(
-        `INSERT INTO sport_center.sport_center_bookings
+        `INSERT INTO sport_center.sport_bookings_sync
           (booking_code, facility_id, facility_name, customer_name, customer_phone, customer_email,
            date, start_time, end_time, total_hours, total_price, notes, status,
            payment_status, payment_proof_url, payment_proof_at, created_at, updated_at)
@@ -170,8 +169,8 @@ export async function syncBookingToBizportal(payload: SyncBookingPayload): Promi
          ON CONFLICT (booking_code) DO UPDATE SET
            status            = EXCLUDED.status,
            payment_status    = EXCLUDED.payment_status,
-           payment_proof_url = COALESCE(EXCLUDED.payment_proof_url, sport_center_bookings.payment_proof_url),
-           payment_proof_at  = COALESCE(EXCLUDED.payment_proof_at,  sport_center_bookings.payment_proof_at),
+           payment_proof_url = COALESCE(EXCLUDED.payment_proof_url, sport_bookings_sync.payment_proof_url),
+           payment_proof_at  = COALESCE(EXCLUDED.payment_proof_at,  sport_bookings_sync.payment_proof_at),
            updated_at        = NOW()`,
         [
           booking.orderNumber,
@@ -210,7 +209,7 @@ export async function syncMembershipToBizportal(membership: GymMembership): Prom
   try {
     await withRetry(async () => {
       await pool.query(
-        `INSERT INTO sport_center.sport_center_memberships
+        `INSERT INTO sport_center.sport_memberships_sync
           (id, name, email, phone, start_date, end_date, months, total_price,
            status, notes, payment_method, payment_proof_url, created_at, updated_at)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
@@ -224,8 +223,8 @@ export async function syncMembershipToBizportal(membership: GymMembership): Prom
            total_price       = EXCLUDED.total_price,
            status            = EXCLUDED.status,
            notes             = EXCLUDED.notes,
-           payment_method    = COALESCE(EXCLUDED.payment_method,    sport_center_memberships.payment_method),
-           payment_proof_url = COALESCE(EXCLUDED.payment_proof_url, sport_center_memberships.payment_proof_url),
+           payment_method    = COALESCE(EXCLUDED.payment_method,    sport_memberships_sync.payment_method),
+           payment_proof_url = COALESCE(EXCLUDED.payment_proof_url, sport_memberships_sync.payment_proof_url),
            updated_at        = EXCLUDED.updated_at`,
         [
           membership.id,
@@ -266,7 +265,7 @@ export async function syncStatusToBizportal(
   try {
     await withRetry(async () => {
       await pool.query(
-        `UPDATE sport_center.sport_center_bookings
+        `UPDATE sport_center.sport_bookings_sync
          SET status            = $2,
              payment_status    = $3,
              payment_proof_url = COALESCE($4, payment_proof_url),

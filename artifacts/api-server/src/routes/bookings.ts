@@ -394,7 +394,7 @@ router.post("/bookings", async (req, res) => {
     const basePrice = Number(facility.pricePerHour) * (isWalkIn ? 1 : durationHours);
     const discount = isAp ? 0 : Math.min(Number(discountAmount) || 0, basePrice);
     const totalPrice = basePrice - discount;
-    const taxCalc = await calculateTax(totalPrice, "sport_center_booking", bookingDate);
+    const taxCalc = await calculateTax(totalPrice, "sport_booking", bookingDate);
     const orderNumber = await generateOrderNumber();
 
     // customerId: admin → bodyCustomerId atau null; admin_booking/customer → bodyCustomerId atau loggedInUserId
@@ -713,7 +713,7 @@ router.post("/bookings/recurring", async (req, res) => {
         continue;
       }
       // Per-date tax calc: respects effectiveDate backward-compat rule
-      const taxCalc = await calculateTax(totalPrice, "sport_center_booking", bookingDate);
+      const taxCalc = await calculateTax(totalPrice, "sport_booking", bookingDate);
       const orderNumber = await generateOrderNumber();
       const [booking] = await db.insert(bookingsTable).values({
         orderNumber,

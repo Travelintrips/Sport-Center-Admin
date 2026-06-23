@@ -338,7 +338,7 @@ export default function InvoiceView() {
                 <div>
                   <div className="text-xs text-gray-400 mb-1">Info Invoice</div>
                   <div className="text-xs text-gray-600 font-mono break-all">{invoiceData.invoiceNumber}</div>
-                  <div className="text-xs text-gray-400 mt-1">Template: invoice_template_sport_center_v1</div>
+                  <div className="text-xs text-gray-400 mt-1">Template: invoice_template_sport_v1</div>
                 </div>
               </div>
             ) : null}
