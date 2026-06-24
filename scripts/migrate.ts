@@ -669,6 +669,32 @@ CREATE INDEX IF NOT EXISTS sc_expenses_expense_date_idx ON public.sport_center_e
 CREATE INDEX IF NOT EXISTS sc_expenses_payment_status_idx ON public.sport_center_expenses(payment_status);
 
 -- ============================================================
+-- public.sport_center_memberships mirror table (sync dari sport_center.sport_memberships)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS public.sport_center_memberships (
+  id              SERIAL PRIMARY KEY,
+  source_id       INTEGER,
+  name            TEXT NOT NULL,
+  email           TEXT NOT NULL,
+  phone           TEXT NOT NULL,
+  start_date      TEXT NOT NULL,
+  end_date        TEXT NOT NULL,
+  months          INTEGER NOT NULL DEFAULT 1,
+  total_price     NUMERIC(12,2) NOT NULL,
+  status          TEXT NOT NULL DEFAULT 'pending_payment',
+  notes           TEXT,
+  payment_method  TEXT,
+  payment_proof_url TEXT,
+  source          TEXT NOT NULL DEFAULT 'sport_center',
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS sc_memberships_source_id_idx ON public.sport_center_memberships(source_id);
+CREATE INDEX IF NOT EXISTS sc_memberships_status_idx ON public.sport_center_memberships(status);
+CREATE INDEX IF NOT EXISTS sc_memberships_start_date_idx ON public.sport_center_memberships(start_date DESC);
+
+-- ============================================================
 -- company_document_settings (kop surat, bank, finance, TTD)
 -- ============================================================
 DO $$ BEGIN

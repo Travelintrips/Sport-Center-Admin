@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { db, gymMembershipsTable } from "@workspace/db";
+import { db, gymMembershipsTable, publicMembershipsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
 import { syncMembershipToBizportal } from "../lib/bizportalSync";
@@ -7,6 +7,57 @@ import { syncMembershipToBizportal } from "../lib/bizportalSync";
 const router = Router();
 
 const PRICE_PER_MONTH = 300000;
+
+async function syncToPublic(m: typeof gymMembershipsTable.$inferSelect) {
+  try {
+    await db
+      .insert(publicMembershipsTable)
+      .values({
+        sourceId: m.id,
+        name: m.name,
+        email: m.email,
+        phone: m.phone,
+        startDate: m.startDate,
+        endDate: m.endDate,
+        months: m.months,
+        totalPrice: m.totalPrice,
+        status: m.status,
+        notes: m.notes,
+        paymentMethod: m.paymentMethod,
+        paymentProofUrl: m.paymentProofUrl,
+        source: "sport_center",
+        createdAt: m.createdAt,
+        updatedAt: m.updatedAt,
+      })
+      .onConflictDoUpdate({
+        target: publicMembershipsTable.sourceId,
+        set: {
+          name: m.name,
+          email: m.email,
+          phone: m.phone,
+          startDate: m.startDate,
+          endDate: m.endDate,
+          months: m.months,
+          totalPrice: m.totalPrice,
+          status: m.status,
+          notes: m.notes,
+          paymentMethod: m.paymentMethod,
+          paymentProofUrl: m.paymentProofUrl,
+          updatedAt: m.updatedAt,
+        },
+      });
+  } catch (err) {
+    console.warn("[sync-public-memberships] Non-fatal sync error:", err);
+  }
+}
+
+async function deleteFromPublic(sourceId: number) {
+  try {
+    await db.delete(publicMembershipsTable).where(eq(publicMembershipsTable.sourceId, sourceId));
+  } catch (err) {
+    console.warn("[sync-public-memberships] Non-fatal delete error:", err);
+  }
+}
 
 router.get("/memberships", adminMiddleware, async (req, res) => {
   try {
@@ -59,7 +110,8 @@ router.post("/memberships", async (req, res) => {
       .returning();
 
     syncMembershipToBizportal(membership).catch(() => {});
-    res.status(201).json({ ...membership, totalPrice: Number(membership.totalPrice) });
+    await syncToPublic(membership!);
+    res.status(201).json({ ...membership, totalPrice: Number(membership!.totalPrice) });
   } catch (err) {
     req.log.error({ err }, "Create membership error");
     res.status(500).json({ error: "Internal server error" });
@@ -89,7 +141,8 @@ router.post("/memberships/:id/payment-proof", async (req, res) => {
 
     const [membership] = await db.select().from(gymMembershipsTable).where(eq(gymMembershipsTable.id, id)).limit(1);
     syncMembershipToBizportal(membership).catch(() => {});
-    res.json({ ...membership, totalPrice: Number(membership.totalPrice) });
+    await syncToPublic(membership!);
+    res.json({ ...membership, totalPrice: Number(membership!.totalPrice) });
   } catch (err) {
     req.log.error({ err }, "Submit payment proof error");
     res.status(500).json({ error: "Internal server error" });
@@ -105,6 +158,7 @@ router.patch("/memberships/:id", adminMiddleware, async (req, res) => {
     const [membership] = await db.select().from(gymMembershipsTable).where(eq(gymMembershipsTable.id, id)).limit(1);
     if (!membership) { res.status(404).json({ error: "Not found" }); return; }
     syncMembershipToBizportal(membership).catch(() => {});
+    await syncToPublic(membership);
     res.json({ ...membership, totalPrice: Number(membership.totalPrice) });
   } catch (err) {
     req.log.error({ err }, "Update membership error");
@@ -116,6 +170,7 @@ router.delete("/memberships/:id", adminMiddleware, async (req, res) => {
   try {
     const id = parseInt(String(req.params.id));
     await db.delete(gymMembershipsTable).where(eq(gymMembershipsTable.id, id));
+    await deleteFromPublic(id);
     res.status(204).send();
   } catch (err) {
     req.log.error({ err }, "Delete membership error");
