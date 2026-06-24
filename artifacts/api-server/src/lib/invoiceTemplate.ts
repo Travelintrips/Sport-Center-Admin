@@ -182,7 +182,7 @@ export function buildInvoiceHtml(data: InvoiceData, opts: BuildOptions = {}): st
       font-family: 'Inter', Arial, 'Segoe UI', sans-serif;
       color: #111827;
       margin: 0;
-      padding: 16px 24px;
+      padding: 32px 24px 16px;
       font-size: 12px;
       line-height: 1.5;
       background: #fff;
@@ -476,7 +476,7 @@ export function buildInvoiceHtml(data: InvoiceData, opts: BuildOptions = {}): st
       }</div>`
     : `<div class="sc-header">
     <div style="display:flex;align-items:center;gap:12px;">
-      ${data.logoUrl ? `<img src="${data.logoUrl}" alt="Logo" style="height:56px;width:auto;object-fit:contain;" />` : ""}
+      ${data.logoUrl ? `<img src="${data.logoUrl}" alt="Logo" style="height:80px;width:auto;object-fit:contain;" />` : ""}
       <div>
         <div class="sc-brand-name">${data.centerName}</div>
         ${data.centerAddress ? `<div class="sc-brand-addr">${data.centerAddress}</div>` : ""}
