@@ -105,12 +105,14 @@ function printInvoicePdf(invoice: any) {
   const periodStr = periodLabel(invoice.periodMonth);
   const today = new Date().toLocaleDateString("id-ID", { day:"numeric", month:"long", year:"numeric" });
 
-  // Tax breakdown — always recompute from inclusive totalAmount for accuracy
-  const tb = taxBreakdown(invoice.totalAmount ?? 0);
-  const dpp = invoice.dpp ?? tb.dpp;
-  const dppNilaiLain = invoice.dppNilaiLain ?? tb.dppNilaiLain;
-  const ppn = invoice.ppnAmount ?? tb.ppn;
-  const grandTotal = dpp + ppn; // Grand Total = DPP + PPN (always)
+  // Sum-of-rows agar konsisten dengan tabel (hindari rounding drift)
+  const rowDpp   = (i: any) => Math.round(Number(i.subtotal ?? 0) / 1.11);
+  const rowDppNL = (i: any) => Math.round(rowDpp(i) * 11 / 12);
+  const rowPpn   = (i: any) => Math.round(rowDppNL(i) * 0.12);
+  const dpp         = items.reduce((s: number, i: any) => s + rowDpp(i), 0);
+  const dppNilaiLain = items.reduce((s: number, i: any) => s + rowDppNL(i), 0);
+  const ppn         = items.reduce((s: number, i: any) => s + rowPpn(i), 0);
+  const grandTotal  = invoice.totalAmount ?? 0; // selalu = sum subtotal, bukan dpp+ppn
 
   const rows = items.map((item: any, i: number) => `
     <tr style="border-bottom:1px solid #e5e7eb; ${i % 2 === 1 ? "background:#f9fafb;" : ""}">
@@ -870,11 +872,15 @@ function GenerateInvoiceDialog({ onClose }: { onClose: () => void }) {
         )}
 
         {companyId && preview && (preview.bookingCount ?? 0) > 0 && (() => {
-          const tb = taxBreakdown(subtotal);
-          const pvDpp = preview?.dpp ?? tb.dpp;
-          const pvDppNilaiLain = preview?.dppNilaiLain ?? tb.dppNilaiLain;
-          const pvPpn = preview?.ppnAmount ?? tb.ppn;
-          const pvGrandTotal = pvDpp + pvPpn; // Grand Total = DPP + PPN (always)
+          // Sum-of-rows agar konsisten dengan tabel (hindari rounding drift)
+          const pvRows: any[] = preview?.bookings ?? [];
+          const rowDpp   = (b: any) => Math.round((b.totalPrice ?? 0) / 1.11);
+          const rowDppNL = (b: any) => Math.round(rowDpp(b) * 11 / 12);
+          const rowPpn   = (b: any) => Math.round(rowDppNL(b) * 0.12);
+          const pvDpp         = pvRows.length > 0 ? pvRows.reduce((s, b) => s + rowDpp(b), 0) : (preview?.dpp ?? Math.round(subtotal / 1.11));
+          const pvDppNilaiLain = pvRows.length > 0 ? pvRows.reduce((s, b) => s + rowDppNL(b), 0) : (preview?.dppNilaiLain ?? Math.round(pvDpp * 11 / 12));
+          const pvPpn          = pvRows.length > 0 ? pvRows.reduce((s, b) => s + rowPpn(b), 0) : (preview?.ppnAmount ?? Math.round(pvDppNilaiLain * 0.12));
+          const pvGrandTotal  = subtotal; // selalu = sum subtotal
           return (
             <div className="rounded-lg bg-muted/40 p-3 space-y-1 text-sm">
               <div className="flex justify-between"><span className="text-muted-foreground">Subtotal Pemakaian</span><span className="font-semibold">{formatCurrency(subtotal)}</span></div>
@@ -1246,11 +1252,14 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
 
         {/* Totals */}
         {(() => {
-          const tb = taxBreakdown(invoice.totalAmount ?? 0);
-          const dpp = invoice.dpp ?? tb.dpp;
-          const dppNilaiLain = invoice.dppNilaiLain ?? tb.dppNilaiLain;
-          const ppn = invoice.ppnAmount ?? tb.ppn;
-          const grand = dpp + ppn; // Grand Total = DPP + PPN (always)
+          // Hitung dari sum-of-rows supaya konsisten dengan tabel (hindari rounding drift)
+          const rowDpp      = (i: any) => Math.round((i.subtotal ?? 0) / 1.11);
+          const rowDppNL    = (i: any) => Math.round(rowDpp(i) * 11 / 12);
+          const rowPpn      = (i: any) => Math.round(rowDppNL(i) * 0.12);
+          const dpp         = items.reduce((s: number, i: any) => s + rowDpp(i), 0);
+          const dppNilaiLain = items.reduce((s: number, i: any) => s + rowDppNL(i), 0);
+          const ppn         = items.reduce((s: number, i: any) => s + rowPpn(i), 0);
+          const grand       = invoice.totalAmount ?? 0; // selalu = sum subtotal, bukan dpp+ppn
           return (
             <div className="rounded-lg border overflow-hidden text-sm">
               <div className="bg-muted/30 px-4 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Ringkasan Pajak</div>
