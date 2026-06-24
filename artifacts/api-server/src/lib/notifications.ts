@@ -2,6 +2,7 @@ import { db, notificationTemplatesTable, settingsTable } from "@workspace/db";
 import { renderDocumentText } from "./documentRenderer";
 import { eq } from "drizzle-orm";
 import { trackSentMessage } from "./waSentTracker";
+import { logger } from "./logger";
 
 const ENV_FONNTE_TOKEN = process.env.FONNTE_TOKEN || "";
 const ENV_FONNTE_ADMIN_WA = process.env.FONNTE_ADMIN_WA || "";
@@ -33,17 +34,33 @@ async function getWaConfig(): Promise<{ token: string; adminPhones: string[] }> 
   }
 }
 
+function cleanPhoneNumber(raw: string): string {
+  let p = raw.replace(/\D/g, "");
+  if (p.startsWith("0")) p = "62" + p.slice(1);
+  else if (p && !p.startsWith("62")) p = "62" + p;
+  return p;
+}
+
+function isValidPhone(phone: string): boolean {
+  // Minimal format: 62 + 8-13 digit (total 10-15 karakter)
+  return /^62\d{8,13}$/.test(phone);
+}
+
 async function sendWA(phone: string, message: string): Promise<void> {
-  if (!phone) return;
+  const cleanPhone = cleanPhoneNumber(phone);
+  if (!cleanPhone || !isValidPhone(cleanPhone)) {
+    logger.warn({ phone, cleanPhone }, "[WA] sendWA: nomor tidak valid, pesan tidak dikirim");
+    return;
+  }
   // Catat SEGERA sebelum await apapun — Fonnte echo bisa datang saat getWaConfig() pending
   trackSentMessage(message);
   const { token } = await getWaConfig();
   if (!token) {
-    console.error("[WA] sendWA: token kosong, pesan tidak dikirim ke", phone);
+    logger.error("[WA] sendWA: FONNTE_TOKEN kosong — pesan tidak dikirim ke " + cleanPhone);
     return;
   }
+  logger.info({ target: cleanPhone }, "[WA] Mengirim pesan WA via Fonnte");
   try {
-    const cleanPhone = phone.replace(/^0/, "62").replace(/\D/g, "");
     const resp = await fetch("https://api.fonnte.com/send", {
       method: "POST",
       headers: {
@@ -52,17 +69,20 @@ async function sendWA(phone: string, message: string): Promise<void> {
       },
       body: JSON.stringify({ target: cleanPhone, message }),
     });
+    const body = await resp.text().catch(() => "(no body)");
     if (!resp.ok) {
-      const body = await resp.text().catch(() => "(no body)");
-      console.error(`[WA] Fonnte HTTP ${resp.status} saat kirim ke ${cleanPhone}: ${body}`);
+      logger.error({ status: resp.status, target: cleanPhone, body }, "[WA] Fonnte HTTP error");
     } else {
-      const json = await resp.json().catch(() => null);
-      if (json && json.status === false) {
-        console.error(`[WA] Fonnte error ke ${cleanPhone}: ${JSON.stringify(json)}`);
+      let json: Record<string, unknown> | null = null;
+      try { json = JSON.parse(body); } catch { /* non-json */ }
+      if (json && json["status"] === false) {
+        logger.error({ target: cleanPhone, response: json }, "[WA] Fonnte gagal kirim pesan");
+      } else {
+        logger.info({ target: cleanPhone, id: json?.["id"] }, "[WA] Pesan berhasil masuk queue Fonnte");
       }
     }
   } catch (err) {
-    console.error("[WA] sendWA exception:", (err as Error).message);
+    logger.error({ err: (err as Error).message, target: cleanPhone }, "[WA] sendWA exception");
   }
 }
 
