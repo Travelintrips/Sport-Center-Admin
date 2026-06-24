@@ -563,7 +563,7 @@ router.post("/bookings", async (req, res) => {
         endTime: booking.endTime,
         totalPrice: totalPrice.toLocaleString("id-ID"),
         paymentDeadline: deadlineStr,
-      });
+      }).catch((err) => console.error("[WA] notifyBookingCreated error:", err));
 
       // Notifikasi admin jika booking berasal dari link Mina AI
       if (bookingSource === "mina") {
