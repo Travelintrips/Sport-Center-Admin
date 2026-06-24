@@ -691,6 +691,14 @@ router.post("/bookings/recurring", async (req, res) => {
   try {
     const { customerName, customerEmail, customerPhone, facilityId, startDate, startTime, durationHours, notes, repeatType, repeatCount, specificDates, promoCode, discountAmountPerSession } = req.body;
 
+    // Deteksi user yang sedang login (opsional)
+    let loggedInUserId: number | null = null;
+    const authHeader = req.headers.authorization;
+    if (authHeader?.startsWith("Bearer ")) {
+      const payload = verifyToken(authHeader.slice(7));
+      if (payload?.userId) loggedInUserId = payload.userId;
+    }
+
     const [facility] = await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, Number(facilityId))).limit(1);
     if (!facility) { res.status(404).json({ error: "Facility not found" }); return; }
 
@@ -717,6 +725,8 @@ router.post("/bookings/recurring", async (req, res) => {
       const orderNumber = await generateOrderNumber();
       const [booking] = await db.insert(bookingsTable).values({
         orderNumber,
+        customerId: loggedInUserId,
+        bookedByUserId: loggedInUserId,
         customerName,
         customerEmail: customerEmail || "",
         customerPhone,
