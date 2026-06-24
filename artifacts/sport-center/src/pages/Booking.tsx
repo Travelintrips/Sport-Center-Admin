@@ -473,8 +473,8 @@ export default function Booking() {
       toast({ title: t("Format nomor tidak valid", "Invalid phone format"), description: t("Gunakan format Indonesia, contoh: 08123456789", "Use Indonesian format, e.g. 08123456789"), variant: "destructive" });
       return;
     }
-    if (!email) {
-      toast({ title: t("Form tidak lengkap", "Incomplete form"), description: t("Harap isi semua field yang wajib.", "Please fill in all required fields."), variant: "destructive" });
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      toast({ title: t("Format email tidak valid", "Invalid email format"), description: t("Masukkan email yang benar, contoh: nama@email.com", "Enter a valid email, e.g. nama@email.com"), variant: "destructive" });
       return;
     }
     const normalizedPhone = normalizePhoneInput(phone);

@@ -405,7 +405,7 @@ router.post("/bookings", async (req, res) => {
       customerId: effectiveCustomerId,
       bookedByUserId: loggedInUserId,
       customerName,
-      customerEmail,
+      customerEmail: customerEmail || "",
       customerPhone,
       facilityId: Number(facilityId),
       bookingDate,
@@ -718,7 +718,7 @@ router.post("/bookings/recurring", async (req, res) => {
       const [booking] = await db.insert(bookingsTable).values({
         orderNumber,
         customerName,
-        customerEmail,
+        customerEmail: customerEmail || "",
         customerPhone,
         facilityId: Number(facilityId),
         bookingDate,
