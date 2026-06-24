@@ -133,7 +133,7 @@ router.post("/admin/expenses", adminMiddleware, async (req, res) => {
     const { ipAddress, userAgent } = getClientInfo(req);
     const {
       expenseDate, category, description, vendorName, facilityId,
-      amount, ppnAmount = 0, paymentMethod, paymentAccount, receiptUrl, notes,
+      amount, ppnAmount = 0, paymentMethod, paymentAccount, receiptUrl, receiptUrls, notes,
     } = req.body;
 
     if (!expenseDate || !category || !description || !amount) {
@@ -161,6 +161,7 @@ router.post("/admin/expenses", adminMiddleware, async (req, res) => {
       paymentAccount: paymentAccount || null,
       paymentStatus: "draft",
       receiptUrl: receiptUrl || null,
+      receiptUrls: Array.isArray(receiptUrls) ? receiptUrls : [],
       notes: notes || null,
       createdBy: user.userId ?? null,
     }).returning();
@@ -195,7 +196,7 @@ router.patch("/admin/expenses/:id", adminMiddleware, async (req, res) => {
 
     const {
       expenseDate, category, description, vendorName, facilityId,
-      amount, ppnAmount, paymentMethod, paymentAccount, receiptUrl, notes,
+      amount, ppnAmount, paymentMethod, paymentAccount, receiptUrl, receiptUrls, notes,
     } = req.body;
 
     const amountNum = amount !== undefined ? Number(amount) : Number(existing.amount);
@@ -214,6 +215,7 @@ router.patch("/admin/expenses/:id", adminMiddleware, async (req, res) => {
       paymentMethod: paymentMethod !== undefined ? paymentMethod || null : existing.paymentMethod,
       paymentAccount: paymentAccount !== undefined ? paymentAccount || null : existing.paymentAccount,
       receiptUrl: receiptUrl !== undefined ? receiptUrl || null : existing.receiptUrl,
+      receiptUrls: receiptUrls !== undefined ? (Array.isArray(receiptUrls) ? receiptUrls : []) : (existing.receiptUrls ?? []),
       notes: notes !== undefined ? notes || null : existing.notes,
     }).where(eq(expensesTable.id, id)).returning();
 
