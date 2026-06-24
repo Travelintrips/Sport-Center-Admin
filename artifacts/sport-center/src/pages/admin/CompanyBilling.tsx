@@ -44,8 +44,17 @@ function formatCurrency(n: number) {
 function getMonthOptions() {
   const opts = [];
   const now = new Date();
-  for (let i = 0; i < 2; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
+  const year = now.getFullYear();
+  // Bulan depan s/d akhir tahun (belum lewat)
+  for (let m = 11; m > now.getMonth(); m--) {
+    const d = new Date(year, m, 1);
+    const value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    const label = d.toLocaleDateString("id-ID", { year: "numeric", month: "long" });
+    opts.push({ value, label });
+  }
+  // Bulan saat ini s/d Januari (sudah lewat / sekarang)
+  for (let m = now.getMonth(); m >= 0; m--) {
+    const d = new Date(year, m, 1);
     const value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
     const label = d.toLocaleDateString("id-ID", { year: "numeric", month: "long" });
     opts.push({ value, label });
