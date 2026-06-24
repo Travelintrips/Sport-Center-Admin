@@ -689,7 +689,12 @@ router.post("/bookings/recurring/check", async (req, res) => {
 // POST /bookings/recurring — create all valid (non-conflicting) bookings
 router.post("/bookings/recurring", async (req, res) => {
   try {
-    const { customerName, customerEmail, customerPhone, facilityId, startDate, startTime, durationHours, notes, repeatType, repeatCount, specificDates, promoCode, discountAmountPerSession } = req.body;
+    const {
+      customerName, customerEmail, customerPhone, facilityId, startDate, startTime, durationHours,
+      notes, repeatType, repeatCount, specificDates, promoCode, discountAmountPerSession,
+      // Company billing fields (optional)
+      payerType, companyCustomerId, customerId: bodyCustomerId, bookedForName, bookedForPhone,
+    } = req.body;
 
     // Deteksi user yang sedang login (opsional)
     let loggedInUserId: number | null = null;
@@ -698,6 +703,9 @@ router.post("/bookings/recurring", async (req, res) => {
       const payload = verifyToken(authHeader.slice(7));
       if (payload?.userId) loggedInUserId = payload.userId;
     }
+
+    const isCompanyPayer = payerType === "company" && companyCustomerId;
+    const effectiveCustomerId = bodyCustomerId ?? loggedInUserId;
 
     const [facility] = await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, Number(facilityId))).limit(1);
     if (!facility) { res.status(404).json({ error: "Facility not found" }); return; }
@@ -725,7 +733,7 @@ router.post("/bookings/recurring", async (req, res) => {
       const orderNumber = await generateOrderNumber();
       const [booking] = await db.insert(bookingsTable).values({
         orderNumber,
-        customerId: loggedInUserId,
+        customerId: effectiveCustomerId,
         bookedByUserId: loggedInUserId,
         customerName,
         customerEmail: customerEmail || "",
@@ -742,6 +750,14 @@ router.post("/bookings/recurring", async (req, res) => {
         ppnRate: taxCalc.taxRate > 0 ? String(taxCalc.taxRate) : null,
         ppnAmount: taxCalc.taxAmount > 0 ? String(taxCalc.taxAmount) : null,
         grandTotal: taxCalc.taxAmount > 0 ? String(taxCalc.grandTotal) : null,
+        ...(isCompanyPayer ? {
+          payerType: "company",
+          companyCustomerId: Number(companyCustomerId),
+          bookedForName: bookedForName || customerName,
+          bookedForPhone: bookedForPhone || customerPhone,
+          paymentRequiredNow: false,
+          status: "confirmed",
+        } : {}),
       }).returning();
       broadcastAvailabilityChange(Number(facilityId), bookingDate);
       if (taxCalc.taxCode) {

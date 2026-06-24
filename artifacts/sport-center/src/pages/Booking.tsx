@@ -426,25 +426,48 @@ export default function Booking() {
           return;
         }
 
-        createBooking.mutate({
-          data: {
-            customerName: effName,
-            customerEmail: email || undefined,
-            customerPhone: effPhone,
-            facilityId,
-            bookingDate: date,
-            ...(isWalkIn ? {} : { startTime, durationHours: duration }),
-            activityType: urlActivityType || undefined,
-            numberOfPeople: isWalkIn ? parseInt(numberOfPeople) || 1 : undefined,
-            notes,
-            customerType: "umum",
-            payerType: "company",
-            companyCustomerId: Number(selectedCompanyId),
-            customerId: isAdminBooking ? prepData.customerId : undefined,
-            bookedForName: bookedForName.trim() || effName,
-            bookedForPhone: effPhone,
-          } as any,
-        });
+        if (isRepeat && checkResult && effectiveCount > 0) {
+          createRecurring.mutate({
+            data: {
+              customerName: effName,
+              customerEmail: email || "",
+              customerPhone: effPhone,
+              facilityId,
+              startDate: date,
+              startTime,
+              durationHours: duration,
+              notes,
+              repeatType,
+              repeatCount,
+              specificDates: selectedDates,
+              payerType: "company",
+              companyCustomerId: Number(selectedCompanyId),
+              customerId: isAdminBooking ? prepData.customerId : undefined,
+              bookedForName: bookedForName.trim() || effName,
+              bookedForPhone: effPhone,
+            } as any,
+          });
+        } else {
+          createBooking.mutate({
+            data: {
+              customerName: effName,
+              customerEmail: email || undefined,
+              customerPhone: effPhone,
+              facilityId,
+              bookingDate: date,
+              ...(isWalkIn ? {} : { startTime, durationHours: duration }),
+              activityType: urlActivityType || undefined,
+              numberOfPeople: isWalkIn ? parseInt(numberOfPeople) || 1 : undefined,
+              notes,
+              customerType: "umum",
+              payerType: "company",
+              companyCustomerId: Number(selectedCompanyId),
+              customerId: isAdminBooking ? prepData.customerId : undefined,
+              bookedForName: bookedForName.trim() || effName,
+              bookedForPhone: effPhone,
+            } as any,
+          });
+        }
       } catch {
         toast({ title: t("Gagal menghubungi server", "Failed to reach server"), variant: "destructive" });
       } finally {
