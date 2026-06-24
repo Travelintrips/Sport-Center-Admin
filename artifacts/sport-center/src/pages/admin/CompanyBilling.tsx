@@ -44,8 +44,8 @@ function formatCurrency(n: number) {
 function getMonthOptions() {
   const opts = [];
   const now = new Date();
-  for (let i = 0; i < 12; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+  for (let i = 0; i < 2; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
     const value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
     const label = d.toLocaleDateString("id-ID", { year: "numeric", month: "long" });
     opts.push({ value, label });
