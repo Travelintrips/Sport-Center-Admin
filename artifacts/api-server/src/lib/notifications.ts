@@ -116,10 +116,44 @@ export async function notifyBookingCreated(data: BookingNotifData): Promise<void
   const vars = { ...data, ...bankInfo, paymentDeadline: data.paymentDeadline ?? "" };
 
   const customerTpl = await getTemplate("booking_created");
-  if (customerTpl) await sendWA(data.customerPhone, interpolate(customerTpl, vars));
+  if (customerTpl) {
+    await sendWA(data.customerPhone, interpolate(customerTpl, vars));
+  } else {
+    // Fallback: pesan hardcoded jika template belum di-set
+    const msg =
+      `✅ *Booking Berhasil Dibuat!*\n\n` +
+      `Halo *${data.customerName}*,\n` +
+      `Booking *${data.facilityName}* kamu sudah kami terima.\n\n` +
+      `📋 *Detail Booking:*\n` +
+      `• No. Order: *${data.orderNumber}*\n` +
+      `• Tanggal: *${data.bookingDate}*\n` +
+      `• Jam: *${data.startTime} – ${data.endTime}*\n` +
+      `• Total: *Rp ${data.totalPrice}*\n\n` +
+      `💳 *Pembayaran via Transfer Bank:*\n` +
+      `Bank: *${bankInfo.bankName}*\n` +
+      `Rekening: *${bankInfo.bankAccount}*\n` +
+      `Atas Nama: *${bankInfo.bankAccountName}*\n\n` +
+      (data.paymentDeadline ? `⏰ Batas pembayaran: *${data.paymentDeadline}*\n\n` : "") +
+      `Setelah transfer, segera upload bukti pembayaran di halaman booking kamu.\n\nTerima kasih! 🏆`;
+    await sendWA(data.customerPhone, msg);
+  }
 
   const adminTpl = await getTemplate("admin_new_booking");
-  if (adminTpl) await sendWAToAdmins(interpolate(adminTpl, vars));
+  if (adminTpl) {
+    await sendWAToAdmins(interpolate(adminTpl, vars));
+  } else {
+    // Fallback: notifikasi admin hardcoded
+    const adminMsg =
+      `🏅 *BOOKING BARU — ${data.orderNumber}*\n\n` +
+      `Customer: *${data.customerName}*\n` +
+      `WA: *${data.customerPhone}*\n` +
+      `Fasilitas: *${data.facilityName}*\n` +
+      `Tanggal: *${data.bookingDate}*\n` +
+      `Jam: *${data.startTime} – ${data.endTime}*\n` +
+      `Total: *Rp ${data.totalPrice}*\n` +
+      (data.paymentDeadline ? `Batas bayar: ${data.paymentDeadline}` : "");
+    await sendWAToAdmins(adminMsg);
+  }
 }
 
 export async function notifyPaymentConfirmed(data: BookingNotifData): Promise<void> {
