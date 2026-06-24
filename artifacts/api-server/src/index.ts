@@ -367,6 +367,25 @@ async function runStartupMigrations() {
        ADD COLUMN IF NOT EXISTS booker_name text`,
     `ALTER TABLE sport_center.sport_bookings
        ADD COLUMN IF NOT EXISTS booker_name text`,
+    // kolom dpp di bookings (untuk audit pajak lengkap)
+    `ALTER TABLE sport_center.sport_bookings
+       ADD COLUMN IF NOT EXISTS dpp numeric(14,2)`,
+    // backfill dpp dari grand_total yang sudah ada
+    `UPDATE sport_center.sport_bookings
+       SET dpp = ROUND(grand_total / 1.11, 2)
+       WHERE dpp IS NULL AND grand_total IS NOT NULL AND ppn_amount IS NOT NULL AND ppn_amount > 0`,
+    // kolom baru di tax_transactions
+    `ALTER TABLE sport_center.tax_transactions
+       ADD COLUMN IF NOT EXISTS dpp_nilai_lain numeric(14,2)`,
+    `ALTER TABLE sport_center.tax_transactions
+       ADD COLUMN IF NOT EXISTS grand_total numeric(14,2)`,
+    // backfill dpp_nilai_lain dan grand_total di tax_transactions
+    `UPDATE sport_center.tax_transactions
+       SET dpp_nilai_lain = ROUND(dpp * 11 / 12, 2)
+       WHERE dpp_nilai_lain IS NULL AND dpp IS NOT NULL`,
+    `UPDATE sport_center.tax_transactions
+       SET grand_total = dpp + tax_amount
+       WHERE grand_total IS NULL AND dpp IS NOT NULL AND tax_amount IS NOT NULL`,
     // wa_blocked_phones — spam protection
     `CREATE TABLE IF NOT EXISTS sport_center.wa_blocked_phones (
        id serial PRIMARY KEY,

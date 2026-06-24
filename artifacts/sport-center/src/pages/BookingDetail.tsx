@@ -379,7 +379,9 @@ export default function BookingDetail() {
               (() => {
                 const gt = Number((booking as any).grandTotal ?? booking.totalPrice);
                 const hasPpn = (booking as any).ppnAmount != null && Number((booking as any).ppnAmount) > 0;
-                const dppVal = hasPpn ? Math.round(gt / 1.11) : gt;
+                const dppVal = hasPpn
+                  ? ((booking as any).dpp != null ? Number((booking as any).dpp) : Math.round(gt / 1.11))
+                  : gt;
                 const dppNilaiLainVal = hasPpn ? Math.round(dppVal * 11 / 12) : 0;
                 const ppnVal = hasPpn ? (gt - dppVal) : 0;
                 return (

@@ -84,6 +84,7 @@ export const bookingsTable = scSchema.table("sport_bookings", {
   billingStatus: billingStatusEnum("billing_status"),
   companyInvoiceId: integer("company_invoice_id"),
   ppnRate: numeric("ppn_rate", { precision: 5, scale: 2 }),
+  dpp: numeric("dpp", { precision: 14, scale: 2 }),
   ppnAmount: numeric("ppn_amount", { precision: 12, scale: 2 }),
   grandTotal: numeric("grand_total", { precision: 12, scale: 2 }),
   downPayment: numeric("down_payment", { precision: 12, scale: 2 }).notNull().default("0"),

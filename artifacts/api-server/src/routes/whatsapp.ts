@@ -182,6 +182,7 @@ async function getBookingFull(id: number) {
     basePrice: booking.basePrice == null ? null : Number(booking.basePrice),
     apDiscountAmount: Number(booking.apDiscountAmount),
     ppnRate: booking.ppnRate == null ? null : Number(booking.ppnRate),
+    dpp: booking.dpp == null ? null : Number(booking.dpp),
     ppnAmount: booking.ppnAmount == null ? null : Number(booking.ppnAmount),
     grandTotal: booking.grandTotal == null ? null : Number(booking.grandTotal),
     facilityName: facility?.name ?? "",
@@ -688,6 +689,7 @@ router.post("/wa/booking", async (req, res) => {
       paymentDeadline,
       status: "pending_payment",
       ppnRate: taxCalc.taxRate > 0 ? String(taxCalc.taxRate) : null,
+      dpp: taxCalc.taxAmount > 0 ? String(taxCalc.dpp) : null,
       ppnAmount: taxCalc.taxAmount > 0 ? String(taxCalc.taxAmount) : null,
       grandTotal: taxCalc.taxAmount > 0 ? String(taxCalc.grandTotal) : null,
     }).returning();
@@ -789,6 +791,7 @@ router.get("/wa/status/:orderNumber", async (req, res) => {
       durationHours: booking.durationHours,
       totalPrice: Number(booking.totalPrice),
       ppnRate: booking.ppnRate == null ? null : Number(booking.ppnRate),
+      dpp: booking.dpp == null ? null : Number(booking.dpp),
       ppnAmount: booking.ppnAmount == null ? null : Number(booking.ppnAmount),
       grandTotal: booking.grandTotal == null ? null : Number(booking.grandTotal),
       status: booking.status,
@@ -2540,6 +2543,7 @@ async function execCreateBookingFromSession(session: WaBookingSessionRow, phone:
     bookerName: session.bookerName || null,
     notes: session.notes || null,
     ppnRate: taxCalc.taxAmount > 0 ? String(taxCalc.taxRate) : null,
+    dpp: taxCalc.taxAmount > 0 ? String(taxCalc.dpp) : null,
     ppnAmount: taxCalc.taxAmount > 0 ? String(taxCalc.taxAmount) : null,
     grandTotal: taxCalc.taxAmount > 0 ? String(taxCalc.grandTotal) : null,
   }).returning();
