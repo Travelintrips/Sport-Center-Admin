@@ -16,3 +16,4 @@
 - [DP multi-payment flow](dp-multi-payment.md) — payments table has payment_type (dp/pelunasan/full_payment); no unique constraint on booking_id; confirm DP → booking stays pending_payment; confirm pelunasan → booking confirmed.
 - [Expenses feature](expenses-feature.md) — sport_expenses table + expense_no_seq + expense_status/category enums; accounting_journals.booking_id made nullable for expense journal entries; /admin/expenses routes.
 - [Data Connection Monitor](data-connection-monitor.md) — connectionHealth.ts lib; Drizzle sql.raw() needed for IN queries on information_schema; blocked_schedules (not "schedules") is the table name; system_connection_baselines table in sport_center schema.
+- [Prod schema sync approach](prod-schema-sync.md) — drizzle-kit push hangs on shared Supabase (150+ tables); use targeted ALTER TABLE script via scripts/src/ instead.
