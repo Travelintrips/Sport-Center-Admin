@@ -635,6 +635,40 @@ ALTER TABLE sport_center.users
   ADD COLUMN IF NOT EXISTS require_per_booking_approval boolean NOT NULL DEFAULT false;
 
 -- ============================================================
+-- public.sport_center_expenses mirror table (sync dari sport_center.sport_expenses)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS public.sport_center_expenses (
+  id              SERIAL PRIMARY KEY,
+  source_id       INTEGER,
+  expense_no      TEXT NOT NULL,
+  expense_date    TEXT NOT NULL,
+  category        TEXT NOT NULL,
+  description     TEXT NOT NULL,
+  vendor_name     TEXT,
+  facility_id     INTEGER,
+  facility_name   TEXT,
+  amount          NUMERIC(14,2) NOT NULL,
+  ppn_amount      NUMERIC(14,2) NOT NULL DEFAULT 0,
+  total_amount    NUMERIC(14,2) NOT NULL,
+  payment_method  TEXT,
+  payment_account TEXT,
+  payment_status  TEXT NOT NULL DEFAULT 'draft',
+  receipt_url     TEXT,
+  receipt_urls    JSONB DEFAULT '[]',
+  notes           TEXT,
+  rejected_reason TEXT,
+  journal_id      TEXT,
+  source          TEXT NOT NULL DEFAULT 'sport_center',
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS sc_expenses_expense_no_idx ON public.sport_center_expenses(expense_no);
+CREATE INDEX IF NOT EXISTS sc_expenses_source_id_idx ON public.sport_center_expenses(source_id);
+CREATE INDEX IF NOT EXISTS sc_expenses_expense_date_idx ON public.sport_center_expenses(expense_date DESC);
+CREATE INDEX IF NOT EXISTS sc_expenses_payment_status_idx ON public.sport_center_expenses(payment_status);
+
+-- ============================================================
 -- company_document_settings (kop surat, bank, finance, TTD)
 -- ============================================================
 DO $$ BEGIN

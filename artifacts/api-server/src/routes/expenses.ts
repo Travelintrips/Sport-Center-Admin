@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { db, expensesTable, facilitiesTable, usersTable } from "@workspace/db";
+import { db, expensesTable, facilitiesTable, usersTable, publicExpensesTable } from "@workspace/db";
 import { eq, desc, and, gte, lte, sql } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
@@ -30,6 +30,77 @@ async function generateExpenseNo(): Promise<string> {
   const row = (result as any).rows?.[0] ?? (result as any)[0];
   const seq = String(row?.val ?? 1).padStart(6, "0");
   return `${prefix}${seq}`;
+}
+
+async function getFacilityName(facilityId: number | null): Promise<string | null> {
+  if (!facilityId) return null;
+  const [f] = await db.select({ name: facilitiesTable.name }).from(facilitiesTable).where(eq(facilitiesTable.id, facilityId)).limit(1);
+  return f?.name ?? null;
+}
+
+async function syncToPublic(expense: typeof expensesTable.$inferSelect, facilityName: string | null) {
+  try {
+    await db
+      .insert(publicExpensesTable)
+      .values({
+        sourceId: expense.id,
+        expenseNo: expense.expenseNo,
+        expenseDate: expense.expenseDate,
+        category: expense.category,
+        description: expense.description,
+        vendorName: expense.vendorName,
+        facilityId: expense.facilityId,
+        facilityName,
+        amount: expense.amount,
+        ppnAmount: expense.ppnAmount,
+        totalAmount: expense.totalAmount,
+        paymentMethod: expense.paymentMethod,
+        paymentAccount: expense.paymentAccount,
+        paymentStatus: expense.paymentStatus,
+        receiptUrl: expense.receiptUrl,
+        receiptUrls: expense.receiptUrls ?? [],
+        notes: expense.notes,
+        rejectedReason: expense.rejectedReason,
+        journalId: expense.journalId,
+        source: "sport_center",
+        createdAt: expense.createdAt,
+        updatedAt: expense.updatedAt,
+      })
+      .onConflictDoUpdate({
+        target: publicExpensesTable.expenseNo,
+        set: {
+          sourceId: expense.id,
+          expenseDate: expense.expenseDate,
+          category: expense.category,
+          description: expense.description,
+          vendorName: expense.vendorName,
+          facilityId: expense.facilityId,
+          facilityName,
+          amount: expense.amount,
+          ppnAmount: expense.ppnAmount,
+          totalAmount: expense.totalAmount,
+          paymentMethod: expense.paymentMethod,
+          paymentAccount: expense.paymentAccount,
+          paymentStatus: expense.paymentStatus,
+          receiptUrl: expense.receiptUrl,
+          receiptUrls: expense.receiptUrls ?? [],
+          notes: expense.notes,
+          rejectedReason: expense.rejectedReason,
+          journalId: expense.journalId,
+          updatedAt: expense.updatedAt,
+        },
+      });
+  } catch (err) {
+    console.warn("[sync-public-expenses] Non-fatal sync error:", err);
+  }
+}
+
+async function deleteFromPublic(expenseNo: string) {
+  try {
+    await db.delete(publicExpensesTable).where(eq(publicExpensesTable.expenseNo, expenseNo));
+  } catch (err) {
+    console.warn("[sync-public-expenses] Non-fatal delete error:", err);
+  }
 }
 
 router.get("/admin/expenses", adminMiddleware, async (req, res) => {
@@ -171,6 +242,9 @@ router.post("/admin/expenses", adminMiddleware, async (req, res) => {
       after: expense, ipAddress, userAgent,
     });
 
+    const facilityName = await getFacilityName(expense!.facilityId);
+    await syncToPublic(expense!, facilityName);
+
     res.status(201).json({ ...expense!, amount: Number(expense!.amount), ppnAmount: Number(expense!.ppnAmount), totalAmount: Number(expense!.totalAmount) });
   } catch (err) {
     req.log.error({ err }, "Create expense error");
@@ -223,6 +297,9 @@ router.patch("/admin/expenses/:id", adminMiddleware, async (req, res) => {
       ...user, action: "EXPENSE_UPDATED", entity: "expense", entityId: id,
       before: existing, after: updated, ipAddress, userAgent,
     });
+
+    const facilityName = await getFacilityName(updated!.facilityId);
+    await syncToPublic(updated!, facilityName);
 
     res.json({ ...updated!, amount: Number(updated!.amount), ppnAmount: Number(updated!.ppnAmount), totalAmount: Number(updated!.totalAmount) });
   } catch (err) {
@@ -312,6 +389,7 @@ router.patch("/admin/expenses/:id/status", adminMiddleware, async (req, res) => 
         );
         if (journalId) {
           await db.update(expensesTable).set({ journalId: `JRN-${journalId}` }).where(eq(expensesTable.id, id));
+          updated!.journalId = `JRN-${journalId}`;
         }
       } catch (journalErr) {
         req.log.warn({ journalErr }, "Failed to create expense journal (non-fatal)");
@@ -324,6 +402,9 @@ router.patch("/admin/expenses/:id/status", adminMiddleware, async (req, res) => 
       after: { status: newStatusMap[action], rejectedReason },
       ipAddress, userAgent,
     });
+
+    const facilityName = await getFacilityName(updated!.facilityId);
+    await syncToPublic(updated!, facilityName);
 
     res.json({ ...updated!, amount: Number(updated!.amount), ppnAmount: Number(updated!.ppnAmount), totalAmount: Number(updated!.totalAmount) });
   } catch (err) {
@@ -349,6 +430,7 @@ router.delete("/admin/expenses/:id", adminMiddleware, async (req, res) => {
     }
 
     await db.delete(expensesTable).where(eq(expensesTable.id, id));
+    await deleteFromPublic(existing.expenseNo);
 
     await logAudit({
       ...user, action: "EXPENSE_DELETED", entity: "expense", entityId: id,
