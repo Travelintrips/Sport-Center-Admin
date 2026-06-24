@@ -214,7 +214,8 @@ function getNowMinutesWIB(): number {
 
 router.post("/bookings", async (req, res) => {
   try {
-    const { customerName, customerEmail, customerPhone, facilityId, bookingDate, notes, promoCode, discountAmount, customerType } = req.body;
+    const { customerName, customerEmail, facilityId, bookingDate, notes, promoCode, discountAmount, customerType } = req.body;
+    const customerPhone: string = normalizePhone(String(req.body.customerPhone ?? "").trim());
     const bookingSource: string = req.body.source || "";
     let { startTime, durationHours } = req.body;
 
@@ -690,11 +691,12 @@ router.post("/bookings/recurring/check", async (req, res) => {
 router.post("/bookings/recurring", async (req, res) => {
   try {
     const {
-      customerName, customerEmail, customerPhone, facilityId, startDate, startTime, durationHours,
+      customerName, customerEmail, facilityId, startDate, startTime, durationHours,
       notes, repeatType, repeatCount, specificDates, promoCode, discountAmountPerSession,
       // Company billing fields (optional)
       payerType, companyCustomerId, customerId: bodyCustomerId, bookedForName, bookedForPhone,
     } = req.body;
+    const customerPhone: string = normalizePhone(String(req.body.customerPhone ?? "").trim());
 
     // Deteksi user yang sedang login (opsional)
     let loggedInUserId: number | null = null;
