@@ -53,6 +53,12 @@ export async function initBizportalTables(): Promise<void> {
         created_at        TIMESTAMPTZ DEFAULT NOW(),
         updated_at        TIMESTAMPTZ DEFAULT NOW()
       );
+      ALTER TABLE sport_center.sport_bookings_sync
+        ADD COLUMN IF NOT EXISTS ppn_rate      NUMERIC(5,2),
+        ADD COLUMN IF NOT EXISTS dpp           BIGINT,
+        ADD COLUMN IF NOT EXISTS dpp_nilai_lain BIGINT,
+        ADD COLUMN IF NOT EXISTS ppn_amount    BIGINT,
+        ADD COLUMN IF NOT EXISTS grand_total   BIGINT;
       CREATE TABLE IF NOT EXISTS sport_center.sport_memberships_sync (
         id                SERIAL PRIMARY KEY,
         name              TEXT,
@@ -147,6 +153,26 @@ async function syncFacilityToBizportal(
   }, `syncFacility:${bizFacilityId}`);
 }
 
+function calcTaxBreakdown(booking: Booking): {
+  ppnRate: number | null;
+  dpp: number | null;
+  dppNilaiLain: number | null;
+  ppnAmount: number | null;
+  grandTotal: number | null;
+} {
+  const rate = booking.ppnRate != null ? Number(booking.ppnRate) : null;
+  const storedPpn = booking.ppnAmount != null ? Math.round(Number(booking.ppnAmount)) : null;
+  const storedGrand = booking.grandTotal != null ? Math.round(Number(booking.grandTotal)) : null;
+
+  if (rate === null || rate === 0 || storedPpn === null || storedGrand === null) {
+    return { ppnRate: null, dpp: null, dppNilaiLain: null, ppnAmount: null, grandTotal: null };
+  }
+
+  const dpp = storedGrand - storedPpn;
+  const dppNilaiLain = Math.round(dpp * 11 / 12);
+  return { ppnRate: rate, dpp, dppNilaiLain, ppnAmount: storedPpn, grandTotal: storedGrand };
+}
+
 export async function syncBookingToBizportal(payload: SyncBookingPayload): Promise<void> {
   const pool = getProdPool();
   if (!pool) return;
@@ -155,6 +181,7 @@ export async function syncBookingToBizportal(payload: SyncBookingPayload): Promi
   const bizFacilityId = `sc-${booking.facilityId}`;
   const status        = toStatus(booking.status);
   const paymentStatus = toPaymentStatus(booking.status);
+  const tax           = calcTaxBreakdown(booking);
 
   try {
     await syncFacilityToBizportal(pool, bizFacilityId, facilityName, facilityCategory);
@@ -164,13 +191,20 @@ export async function syncBookingToBizportal(payload: SyncBookingPayload): Promi
         `INSERT INTO sport_center.sport_bookings_sync
           (booking_code, facility_id, facility_name, customer_name, customer_phone, customer_email,
            date, start_time, end_time, total_hours, total_price, notes, status,
-           payment_status, payment_proof_url, payment_proof_at, created_at, updated_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,NOW())
+           payment_status, payment_proof_url, payment_proof_at,
+           ppn_rate, dpp, dpp_nilai_lain, ppn_amount, grand_total,
+           created_at, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,NOW())
          ON CONFLICT (booking_code) DO UPDATE SET
            status            = EXCLUDED.status,
            payment_status    = EXCLUDED.payment_status,
            payment_proof_url = COALESCE(EXCLUDED.payment_proof_url, sport_bookings_sync.payment_proof_url),
            payment_proof_at  = COALESCE(EXCLUDED.payment_proof_at,  sport_bookings_sync.payment_proof_at),
+           ppn_rate          = COALESCE(EXCLUDED.ppn_rate,          sport_bookings_sync.ppn_rate),
+           dpp               = COALESCE(EXCLUDED.dpp,               sport_bookings_sync.dpp),
+           dpp_nilai_lain    = COALESCE(EXCLUDED.dpp_nilai_lain,    sport_bookings_sync.dpp_nilai_lain),
+           ppn_amount        = COALESCE(EXCLUDED.ppn_amount,        sport_bookings_sync.ppn_amount),
+           grand_total       = COALESCE(EXCLUDED.grand_total,       sport_bookings_sync.grand_total),
            updated_at        = NOW()`,
         [
           booking.orderNumber,
@@ -189,6 +223,11 @@ export async function syncBookingToBizportal(payload: SyncBookingPayload): Promi
           paymentStatus,
           paymentProofUrl || null,
           paidAt || null,
+          tax.ppnRate,
+          tax.dpp,
+          tax.dppNilaiLain,
+          tax.ppnAmount,
+          tax.grandTotal,
           booking.createdAt,
         ]
       );
