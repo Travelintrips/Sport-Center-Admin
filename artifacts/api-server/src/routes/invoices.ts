@@ -66,8 +66,9 @@ async function resolveInvoiceData(orderNumber: string): Promise<InvoiceData | nu
     const [taxSetting] = await db
       .select()
       .from(taxSettingsTable)
-      .where(eq(taxSettingsTable.appliesTo, "sport_booking"))
-      .orderBy(taxSettingsTable.isActive)
+      .where(
+        taxSettingsTable.isActive
+      )
       .limit(1);
 
     ppnRate = taxSetting ? Number(taxSetting.taxRate) : 11;

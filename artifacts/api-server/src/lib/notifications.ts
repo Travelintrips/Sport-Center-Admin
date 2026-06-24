@@ -38,10 +38,13 @@ async function sendWA(phone: string, message: string): Promise<void> {
   // Catat SEGERA sebelum await apapun — Fonnte echo bisa datang saat getWaConfig() pending
   trackSentMessage(message);
   const { token } = await getWaConfig();
-  if (!token) return;
+  if (!token) {
+    console.error("[WA] sendWA: token kosong, pesan tidak dikirim ke", phone);
+    return;
+  }
   try {
     const cleanPhone = phone.replace(/^0/, "62").replace(/\D/g, "");
-    await fetch("https://api.fonnte.com/send", {
+    const resp = await fetch("https://api.fonnte.com/send", {
       method: "POST",
       headers: {
         Authorization: token,
@@ -49,8 +52,17 @@ async function sendWA(phone: string, message: string): Promise<void> {
       },
       body: JSON.stringify({ target: cleanPhone, message }),
     });
-  } catch {
-    // Non-critical — swallow error
+    if (!resp.ok) {
+      const body = await resp.text().catch(() => "(no body)");
+      console.error(`[WA] Fonnte HTTP ${resp.status} saat kirim ke ${cleanPhone}: ${body}`);
+    } else {
+      const json = await resp.json().catch(() => null);
+      if (json && json.status === false) {
+        console.error(`[WA] Fonnte error ke ${cleanPhone}: ${JSON.stringify(json)}`);
+      }
+    }
+  } catch (err) {
+    console.error("[WA] sendWA exception:", (err as Error).message);
   }
 }
 

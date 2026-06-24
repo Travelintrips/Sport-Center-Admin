@@ -214,7 +214,8 @@ function getNowMinutesWIB(): number {
 
 router.post("/bookings", async (req, res) => {
   try {
-    const { customerName, customerEmail, customerPhone, facilityId, bookingDate, notes, promoCode, discountAmount, customerType } = req.body;
+    const { customerName, customerEmail, facilityId, bookingDate, notes, promoCode, discountAmount, customerType } = req.body;
+    const customerPhone: string = normalizePhone(String(req.body.customerPhone ?? "").trim());
     const bookingSource: string = req.body.source || "";
     let { startTime, durationHours } = req.body;
 
@@ -563,7 +564,7 @@ router.post("/bookings", async (req, res) => {
         endTime: booking.endTime,
         totalPrice: totalPrice.toLocaleString("id-ID"),
         paymentDeadline: deadlineStr,
-      });
+      }).catch((err) => console.error("[WA] notifyBookingCreated error:", err));
 
       // Notifikasi admin jika booking berasal dari link Mina AI
       if (bookingSource === "mina") {
@@ -690,11 +691,12 @@ router.post("/bookings/recurring/check", async (req, res) => {
 router.post("/bookings/recurring", async (req, res) => {
   try {
     const {
-      customerName, customerEmail, customerPhone, facilityId, startDate, startTime, durationHours,
+      customerName, customerEmail, facilityId, startDate, startTime, durationHours,
       notes, repeatType, repeatCount, specificDates, promoCode, discountAmountPerSession,
       // Company billing fields (optional)
       payerType, companyCustomerId, customerId: bodyCustomerId, bookedForName, bookedForPhone,
     } = req.body;
+    const customerPhone: string = normalizePhone(String(req.body.customerPhone ?? "").trim());
 
     // Deteksi user yang sedang login (opsional)
     let loggedInUserId: number | null = null;

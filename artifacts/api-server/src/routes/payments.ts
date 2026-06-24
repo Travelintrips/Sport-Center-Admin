@@ -249,7 +249,7 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
             endTime: booking.endTime,
             totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
             bookingId: booking.id,
-          });
+          }).catch((err) => console.error("[WA] notifyPaymentConfirmed error:", err));
           syncStatusToBizportal(booking.orderNumber, "confirmed", payment.proofUrl, new Date()).catch(() => {});
 
           const today = new Date().toISOString().split("T")[0];

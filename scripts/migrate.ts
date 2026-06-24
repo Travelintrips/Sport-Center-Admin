@@ -633,5 +633,33 @@ WHERE NOT EXISTS (
 -- ============================================================
 ALTER TABLE sport_center.users
   ADD COLUMN IF NOT EXISTS require_per_booking_approval boolean NOT NULL DEFAULT false;
+
+-- ============================================================
+-- company_document_settings (kop surat, bank, finance, TTD)
+-- ============================================================
+DO $$ BEGIN
+  CREATE TYPE sport_center.document_type_enum AS ENUM (
+    'general', 'invoice', 'spp', 'kwitansi', 'lampiran', 'berita_acara', 'surat_pengantar'
+  );
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+CREATE TABLE IF NOT EXISTS sport_center.company_document_settings (
+  id              SERIAL PRIMARY KEY,
+  document_type   sport_center.document_type_enum NOT NULL DEFAULT 'general',
+  logo_url        TEXT,
+  kop_surat_html  TEXT,
+  footer_html     TEXT,
+  bank_name       TEXT NOT NULL DEFAULT '',
+  bank_account    TEXT NOT NULL DEFAULT '',
+  bank_holder     TEXT NOT NULL DEFAULT '',
+  finance_name    TEXT NOT NULL DEFAULT '',
+  finance_title   TEXT NOT NULL DEFAULT 'Finance Manager',
+  signature_url   TEXT,
+  prefix_number   TEXT NOT NULL DEFAULT 'INV',
+  tax_rate        NUMERIC(5,2) NOT NULL DEFAULT 11,
+  is_active       BOOLEAN NOT NULL DEFAULT true,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 `;
 
