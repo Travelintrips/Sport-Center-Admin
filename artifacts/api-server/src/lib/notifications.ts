@@ -44,6 +44,7 @@ async function sendWA(phone: string, message: string): Promise<void> {
   }
   try {
     const cleanPhone = phone.replace(/^0/, "62").replace(/\D/g, "");
+    console.log(`[WA] Kirim ke ${cleanPhone}, panjang pesan: ${message.length} karakter`);
     const resp = await fetch("https://api.fonnte.com/send", {
       method: "POST",
       headers: {
