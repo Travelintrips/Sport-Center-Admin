@@ -309,13 +309,13 @@ export default function Booking() {
           },
           onError: () => {
             setIsChecking(false);
-            toast({ title: t("Gagal cek jadwal", "Failed to check schedule"), variant: "destructive" });
           },
         }
       );
     }, 400);
     return () => clearTimeout(timer);
-  }, [isRepeat, repeatType, repeatCount, facilityId, date, startTime, duration, checkRecurringMutate, toast]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isRepeat, repeatType, repeatCount, facilityId, date, startTime, duration, checkRecurringMutate]);
 
   // Redirect if missing params
   useEffect(() => {
