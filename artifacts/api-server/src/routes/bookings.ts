@@ -7,7 +7,7 @@ import { notifyBookingCreated, notifyPaymentConfirmed, notifyBookingCancelled, n
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
 import { syncBookingToBizportal, syncStatusToBizportal } from "../lib/bizportalSync";
 import { calculateTax, recordTaxTransaction, reverseTaxTransaction } from "../lib/tax";
-import { reverseJournalEntry } from "../lib/accounting";
+import { reverseJournalEntry, reversePublicAccountingEntry } from "../lib/accounting";
 
 const INACTIVE_STATUSES = ["cancelled", "expired", "rejected", "refunded"];
 
@@ -1041,6 +1041,7 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
         const reason = `Booking ${beforeUpdate.orderNumber} — status diubah ke ${status}`;
         reverseTaxTransaction(beforeUpdate.id, beforeUpdate.orderNumber, today).catch(() => {});
         reverseJournalEntry(beforeUpdate.id, beforeUpdate.orderNumber, reason, today).catch(() => {});
+        reversePublicAccountingEntry(beforeUpdate.orderNumber, reason, today).catch(() => {});
       }
     }
 

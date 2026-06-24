@@ -1,5 +1,99 @@
 import { db, accountingJournalsTable, accountingJournalLinesTable } from "@workspace/db";
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
+
+// ─── Public Accounting (public.accounting_entries) ───────────────────────────
+const PUBLIC_JOURNAL_ID = 8065;        // CSH-CST (Kas)
+const COA_KAS_CST = 49097;             // 1-1010-CST  Kas CST
+const COA_PENDAPATAN_BOOKING = 72354;  // 4-1017-CST  Pendapatan Booking Sport Center CST
+const COMPANY_ID = 1;
+
+async function nextPublicEntryNumber(year: number): Promise<string> {
+  const result = await db.execute(sql`
+    SELECT COALESCE(MAX(
+      NULLIF(REGEXP_REPLACE(entry_number, '^CSH-CST/[0-9]+/', ''), '')::integer
+    ), 0) + 1 AS seq
+    FROM public.accounting_entries
+    WHERE entry_number LIKE ${'CSH-CST/' + year + '/%'}
+  `);
+  const seq = Number((result.rows[0] as any).seq ?? 1);
+  return `CSH-CST/${year}/${String(seq).padStart(4, "0")}`;
+}
+
+export async function createPublicAccountingEntry(
+  bookingId: number,
+  orderNumber: string,
+  subtotal: number,
+  ppnAmount: number,
+  facilityId: number | null,
+  journalDate: string,
+): Promise<void> {
+  const grandTotal = subtotal + ppnAmount;
+  const year = new Date(journalDate).getFullYear();
+  const entryNumber = await nextPublicEntryNumber(year);
+
+  const entryResult = await db.execute(sql`
+    INSERT INTO public.accounting_entries
+      (entry_number, journal_id, date, ref, description, status, source, source_id,
+       total_debit, total_credit, company_id, facility_id, correlation_id, governance_flags)
+    VALUES (
+      ${entryNumber}, ${PUBLIC_JOURNAL_ID}, ${journalDate}::date, ${orderNumber},
+      ${'Pembayaran Booking Sport Center (' + orderNumber + ')'}, 'draft',
+      'sport_center_booking', ${bookingId},
+      ${grandTotal}, ${grandTotal}, ${COMPANY_ID}, ${facilityId ?? null},
+      ${'sc_booking_' + orderNumber}, '{}'
+    )
+    RETURNING id
+  `);
+  const entryId = Number((entryResult.rows[0] as any).id);
+
+  await db.execute(sql`
+    INSERT INTO public.accounting_entry_lines (entry_id, account_id, description, debit, credit) VALUES
+      (${entryId}, ${COA_KAS_CST},            ${'Penerimaan booking ' + orderNumber}, ${grandTotal}, 0),
+      (${entryId}, ${COA_PENDAPATAN_BOOKING},  ${'Pendapatan booking ' + orderNumber}, 0, ${subtotal})
+  `);
+
+  await db.execute(sql`UPDATE public.accounting_entries SET status = 'posted' WHERE id = ${entryId}`);
+}
+
+export async function reversePublicAccountingEntry(
+  orderNumber: string,
+  reason: string,
+  journalDate: string,
+): Promise<void> {
+  const originalResult = await db.execute(sql`
+    SELECT id, total_debit, total_credit FROM public.accounting_entries
+    WHERE source = 'sport_center_booking' AND ref = ${orderNumber} AND status = 'posted'
+    LIMIT 1
+  `);
+  if (!originalResult.rows.length) return;
+
+  const original = originalResult.rows[0] as any;
+  const year = new Date(journalDate).getFullYear();
+  const entryNumber = await nextPublicEntryNumber(year);
+
+  const revResult = await db.execute(sql`
+    INSERT INTO public.accounting_entries
+      (entry_number, journal_id, date, ref, description, status, source, source_id,
+       total_debit, total_credit, company_id, correlation_id, governance_flags)
+    VALUES (
+      ${entryNumber}, ${PUBLIC_JOURNAL_ID}, ${journalDate}::date, ${orderNumber},
+      ${'Reversal Booking ' + orderNumber + ': ' + reason}, 'draft',
+      'sport_center_booking_reversal', ${original.id},
+      ${original.total_debit}, ${original.total_credit}, ${COMPANY_ID},
+      ${'sc_reversal_' + orderNumber}, '{}'
+    )
+    RETURNING id
+  `);
+  const revId = Number((revResult.rows[0] as any).id);
+
+  await db.execute(sql`
+    INSERT INTO public.accounting_entry_lines (entry_id, account_id, description, debit, credit)
+    SELECT ${revId}, account_id, ${'Reversal: ' + reason}, credit, debit
+    FROM public.accounting_entry_lines WHERE entry_id = ${original.id}
+  `);
+
+  await db.execute(sql`UPDATE public.accounting_entries SET status = 'posted' WHERE id = ${revId}`);
+}
 
 async function postJournalLines(
   journalId: number,
