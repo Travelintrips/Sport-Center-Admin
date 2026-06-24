@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { db, bookingsTable, facilitiesTable, paymentsTable, promosTable, discountSettingsTable, apMembersTable, bookingHistoryTable, usersTable, verificationLogsTable, companyUsersTable, bookingGroupsTable } from "@workspace/db";
+import { db, bookingsTable, facilitiesTable, paymentsTable, promosTable, discountSettingsTable, apMembersTable, bookingHistoryTable, usersTable, verificationLogsTable, companyUsersTable, bookingGroupsTable, settingsTable } from "@workspace/db";
 import { eq, and, sql, or, ilike, desc, inArray } from "drizzle-orm";
 import { adminMiddleware, authMiddleware, verifyToken } from "../lib/auth";
 import { broadcastAvailabilityChange } from "../lib/supabase";
@@ -7,11 +7,34 @@ import { notifyBookingCreated, notifyPaymentConfirmed, notifyBookingCancelled, n
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
 import { syncBookingToBizportal, syncStatusToBizportal } from "../lib/bizportalSync";
 import { calculateTax, recordTaxTransaction, reverseTaxTransaction } from "../lib/tax";
-import { reverseJournalEntry } from "../lib/accounting";
+import { reverseJournalEntry, reversePublicAccountingEntry } from "../lib/accounting";
 
 const INACTIVE_STATUSES = ["cancelled", "expired", "rejected", "refunded"];
 
 const router = Router();
+
+// ─── POST /bookings/track-payer-selection — log when customer toggles payer type ──
+router.post("/bookings/track-payer-selection", async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith("Bearer ")) { res.status(401).json({ error: "Unauthorized" }); return; }
+    const payload = verifyToken(authHeader.slice(7));
+    if (!payload?.userId) { res.status(401).json({ error: "Unauthorized" }); return; }
+    const { selection } = req.body; // 'personal' | 'corporate'
+    if (!["personal", "corporate"].includes(String(selection))) { res.status(400).json({ error: "Invalid selection" }); return; }
+    logAudit({
+      userId: payload.userId,
+      userName: (payload as any).name ?? null,
+      userRole: payload.role ?? null,
+      action: selection === "corporate" ? "CUSTOMER_SELECTED_CORPORATE" : "CUSTOMER_SELECTED_PERSONAL",
+      entity: "booking_form",
+      ...getClientInfo(req),
+    });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
 
 async function generateOrderNumber(): Promise<string> {
   const rows = await db.select({ orderNumber: bookingsTable.orderNumber }).from(bookingsTable);
@@ -76,6 +99,7 @@ async function getBookingWithPayment(id: number) {
     facilityPricePerHour: facility ? Number(facility.pricePerHour) : null,
     facilityCloseTime: facility?.closeTime ?? null,
     ppnRate: booking.ppnRate == null ? null : Number(booking.ppnRate),
+    dpp: booking.dpp == null ? null : Number(booking.dpp),
     ppnAmount: booking.ppnAmount == null ? null : Number(booking.ppnAmount),
     grandTotal: booking.grandTotal == null ? null : Number(booking.grandTotal),
     downPayment: Number(booking.downPayment ?? 0),
@@ -136,6 +160,7 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
         basePrice: b.basePrice == null ? null : Number(b.basePrice),
         apDiscountAmount: Number(b.apDiscountAmount),
         ppnRate: b.ppnRate == null ? null : Number(b.ppnRate),
+        dpp: b.dpp == null ? null : Number(b.dpp),
         ppnAmount: b.ppnAmount == null ? null : Number(b.ppnAmount),
         grandTotal: b.grandTotal == null ? null : Number(b.grandTotal),
         downPayment: dpAmt,
@@ -191,7 +216,8 @@ function getNowMinutesWIB(): number {
 
 router.post("/bookings", async (req, res) => {
   try {
-    const { customerName, customerEmail, customerPhone, facilityId, bookingDate, notes, promoCode, discountAmount, customerType } = req.body;
+    const { customerName, customerEmail, facilityId, bookingDate, notes, promoCode, discountAmount, customerType } = req.body;
+    const customerPhone: string = normalizePhone(String(req.body.customerPhone ?? "").trim());
     const bookingSource: string = req.body.source || "";
     let { startTime, durationHours } = req.body;
 
@@ -232,6 +258,13 @@ router.post("/bookings", async (req, res) => {
           // Perusahaan terdaftar tapi billing belum diaktifkan → pending
           pendingCompanyUser = cu;
         }
+      }
+    } else if (loggedInUser?.accountType === "company" && explicitCompanyId === loggedInUserId) {
+      // Prioritas 3a: akun perusahaan booking untuk dirinya sendiri (companyCustomerId = userId sendiri)
+      if (loggedInUser.allowMonthlyBilling) {
+        companyBillingUser = loggedInUser;
+      } else {
+        pendingCompanyUser = loggedInUser;
       }
     } else if (bodyCustomerId && !explicitCompanyId) {
       // Admin membooking atas nama user perusahaan — infer dari customerId
@@ -279,6 +312,21 @@ router.post("/bookings", async (req, res) => {
       res.status(400).json({ error: "Nomor ID Card wajib untuk customer Angkasa Pura" });
       return;
     }
+
+    // ── Security: personal user TIDAK BOLEH submit payerType=company tanpa verifikasi ──
+    const requestedPayerType = req.body.payerType;
+    if (!isAdminRequest && requestedPayerType === "company" && !isCompanyBilling && !isPendingCompany) {
+      res.status(403).json({
+        error: "Booking Corporate tidak diizinkan. Anda harus menjadi karyawan terverifikasi perusahaan terlebih dahulu.",
+      });
+      return;
+    }
+
+    // ── Fetch settings untuk payment_deadline_hours ──────────────────────────
+    const [appSettings] = await db.select({
+      paymentDeadlineHours: settingsTable.paymentDeadlineHours,
+    }).from(settingsTable).limit(1);
+    const deadlineHours = Math.max(1, parseInt(appSettings?.paymentDeadlineHours ?? "24") || 24);
 
     const [facility] = await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, Number(facilityId))).limit(1);
     if (!facility) {
@@ -349,7 +397,7 @@ router.post("/bookings", async (req, res) => {
     const basePrice = Number(facility.pricePerHour) * (isWalkIn ? 1 : durationHours);
     const discount = isAp ? 0 : Math.min(Number(discountAmount) || 0, basePrice);
     const totalPrice = basePrice - discount;
-    const taxCalc = await calculateTax(totalPrice, "sport_center_booking", bookingDate);
+    const taxCalc = await calculateTax(totalPrice, "sport_booking", bookingDate);
     const orderNumber = await generateOrderNumber();
 
     // customerId: admin → bodyCustomerId atau null; admin_booking/customer → bodyCustomerId atau loggedInUserId
@@ -360,7 +408,7 @@ router.post("/bookings", async (req, res) => {
       customerId: effectiveCustomerId,
       bookedByUserId: loggedInUserId,
       customerName,
-      customerEmail,
+      customerEmail: customerEmail || "",
       customerPhone,
       facilityId: Number(facilityId),
       bookingDate,
@@ -377,17 +425,20 @@ router.post("/bookings", async (req, res) => {
       activityType,
       numberOfPeople,
       notes,
-      // Company billing: auto-confirm, no immediate payment required
+      // Company billing: auto-confirm KECUALI company punya requirePerBookingApproval = true
       // Pending company: waiting_confirmation (menunggu verifikasi admin perusahaan)
-      status: isCompanyBilling ? "confirmed" : (isPendingCompany ? "waiting_confirmation" : "pending_payment"),
+      status: isCompanyBilling
+        ? (companyBillingUser?.requirePerBookingApproval ? "waiting_confirmation" : "confirmed")
+        : (isPendingCompany ? "waiting_confirmation" : "pending_payment"),
       payerType: (isCompanyBilling || isPendingCompany) ? "company" : "personal",
       companyCustomerId: effectiveCompanyCustomerId,
       paymentRequiredNow: !isCompanyBilling && !isPendingCompany,
       billingStatus: isCompanyBilling ? "unbilled" : null,
-      paymentDeadline: (isCompanyBilling || isPendingCompany) ? null : new Date(Date.now() + 30 * 60 * 1000),
+      paymentDeadline: (isCompanyBilling || isPendingCompany) ? null : new Date(Date.now() + deadlineHours * 60 * 60 * 1000),
       bookedForName: (isCompanyBilling || isPendingCompany) ? (req.body.bookedForName?.trim() || customerName) : null,
       bookedForPhone: (isCompanyBilling || isPendingCompany) ? (req.body.bookedForPhone?.trim() || customerPhone) : null,
       ppnRate: taxCalc.taxRate > 0 ? String(taxCalc.taxRate) : null,
+      dpp: taxCalc.taxAmount > 0 ? String(taxCalc.dpp) : null,
       ppnAmount: taxCalc.taxAmount > 0 ? String(taxCalc.taxAmount) : null,
       grandTotal: taxCalc.taxAmount > 0 ? String(taxCalc.grandTotal) : null,
     }).returning();
@@ -444,7 +495,28 @@ router.post("/bookings", async (req, res) => {
       }
     }
 
-    logAudit({ action: "BOOKING_CREATED", entity: "booking", entityId: booking.id, after: { orderNumber: booking.orderNumber, customerName, facilityId, bookingDate }, ...getClientInfo(req) });
+    const auditAction = isAp
+      ? "ANGKASAPURA_BOOKING_CREATED"
+      : isCompanyBilling
+        ? "CORPORATE_BOOKING_CREATED"
+        : isPendingCompany
+          ? "CORPORATE_BOOKING_PENDING_CREATED"
+          : "PERSONAL_BOOKING_CREATED";
+    logAudit({
+      action: auditAction,
+      entity: "booking",
+      entityId: booking.id,
+      after: {
+        orderNumber: booking.orderNumber,
+        customerName,
+        facilityId,
+        bookingDate,
+        payerType: booking.payerType ?? "personal",
+        companyCustomerId: booking.companyCustomerId ?? null,
+        status: booking.status,
+      },
+      ...getClientInfo(req),
+    });
 
     // Record history
     await db.insert(bookingHistoryTable).values({
@@ -463,7 +535,7 @@ router.post("/bookings", async (req, res) => {
     }
 
     // Sync to Bizportal (non-blocking)
-    syncBookingToBizportal({ booking, facilityName: facility.name }).catch(() => {});
+    syncBookingToBizportal({ booking, facilityName: facility.name, facilityCategory: facility.category }).catch(() => {});
 
     // Send WA notification (non-blocking)
     if (isCompanyBilling) {
@@ -480,9 +552,10 @@ router.post("/bookings", async (req, res) => {
         totalPrice: totalPrice.toLocaleString("id-ID"),
         companyName: companyBillingUser!.companyName ?? companyBillingUser!.name ?? "",
         periodMonth: bookingMonth,
+        picPhone: companyBillingUser!.picPhone ?? undefined,
       }).catch(() => {});
     } else {
-      const deadline = new Date(Date.now() + 30 * 60 * 1000);
+      const deadline = new Date(Date.now() + deadlineHours * 60 * 60 * 1000);
       const deadlineStr = deadline.toLocaleString("id-ID", { timeZone: "Asia/Jakarta", hour12: false });
       notifyBookingCreated({
         customerName,
@@ -494,7 +567,7 @@ router.post("/bookings", async (req, res) => {
         endTime: booking.endTime,
         totalPrice: totalPrice.toLocaleString("id-ID"),
         paymentDeadline: deadlineStr,
-      });
+      }).catch((err) => console.error("[WA] notifyBookingCreated error:", err));
 
       // Notifikasi admin jika booking berasal dari link Mina AI
       if (bookingSource === "mina") {
@@ -525,6 +598,7 @@ router.post("/bookings", async (req, res) => {
       basePrice: booking.basePrice == null ? null : Number(booking.basePrice),
       apDiscountAmount: Number(booking.apDiscountAmount),
       ppnRate: booking.ppnRate == null ? null : Number(booking.ppnRate),
+      dpp: booking.dpp == null ? null : Number(booking.dpp),
       ppnAmount: booking.ppnAmount == null ? null : Number(booking.ppnAmount),
       grandTotal: booking.grandTotal == null ? null : Number(booking.grandTotal),
       facilityName: facility.name,
@@ -620,7 +694,24 @@ router.post("/bookings/recurring/check", async (req, res) => {
 // POST /bookings/recurring — create all valid (non-conflicting) bookings
 router.post("/bookings/recurring", async (req, res) => {
   try {
-    const { customerName, customerEmail, customerPhone, facilityId, startDate, startTime, durationHours, notes, repeatType, repeatCount, specificDates, promoCode, discountAmountPerSession } = req.body;
+    const {
+      customerName, customerEmail, facilityId, startDate, startTime, durationHours,
+      notes, repeatType, repeatCount, specificDates, promoCode, discountAmountPerSession,
+      // Company billing fields (optional)
+      payerType, companyCustomerId, customerId: bodyCustomerId, bookedForName, bookedForPhone,
+    } = req.body;
+    const customerPhone: string = normalizePhone(String(req.body.customerPhone ?? "").trim());
+
+    // Deteksi user yang sedang login (opsional)
+    let loggedInUserId: number | null = null;
+    const authHeader = req.headers.authorization;
+    if (authHeader?.startsWith("Bearer ")) {
+      const payload = verifyToken(authHeader.slice(7));
+      if (payload?.userId) loggedInUserId = payload.userId;
+    }
+
+    const isCompanyPayer = payerType === "company" && companyCustomerId;
+    const effectiveCustomerId = bodyCustomerId ?? loggedInUserId;
 
     const [facility] = await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, Number(facilityId))).limit(1);
     if (!facility) { res.status(404).json({ error: "Facility not found" }); return; }
@@ -644,12 +735,14 @@ router.post("/bookings/recurring", async (req, res) => {
         continue;
       }
       // Per-date tax calc: respects effectiveDate backward-compat rule
-      const taxCalc = await calculateTax(totalPrice, "sport_center_booking", bookingDate);
+      const taxCalc = await calculateTax(totalPrice, "sport_booking", bookingDate);
       const orderNumber = await generateOrderNumber();
       const [booking] = await db.insert(bookingsTable).values({
         orderNumber,
+        customerId: effectiveCustomerId,
+        bookedByUserId: loggedInUserId,
         customerName,
-        customerEmail,
+        customerEmail: customerEmail || "",
         customerPhone,
         facilityId: Number(facilityId),
         bookingDate,
@@ -661,8 +754,17 @@ router.post("/bookings/recurring", async (req, res) => {
         discountAmount: String(discount),
         notes,
         ppnRate: taxCalc.taxRate > 0 ? String(taxCalc.taxRate) : null,
+        dpp: taxCalc.taxAmount > 0 ? String(taxCalc.dpp) : null,
         ppnAmount: taxCalc.taxAmount > 0 ? String(taxCalc.taxAmount) : null,
         grandTotal: taxCalc.taxAmount > 0 ? String(taxCalc.grandTotal) : null,
+        ...(isCompanyPayer ? {
+          payerType: "company",
+          companyCustomerId: Number(companyCustomerId),
+          bookedForName: bookedForName || customerName,
+          bookedForPhone: bookedForPhone || customerPhone,
+          paymentRequiredNow: false,
+          status: "confirmed",
+        } : {}),
       }).returning();
       broadcastAvailabilityChange(Number(facilityId), bookingDate);
       if (taxCalc.taxCode) {
@@ -674,6 +776,7 @@ router.post("/bookings/recurring", async (req, res) => {
         totalPrice: Number(booking.totalPrice),
         discountAmount: Number(booking.discountAmount),
         ppnRate: booking.ppnRate == null ? null : Number(booking.ppnRate),
+        dpp: booking.dpp == null ? null : Number(booking.dpp),
         ppnAmount: booking.ppnAmount == null ? null : Number(booking.ppnAmount),
         grandTotal: booking.grandTotal == null ? null : Number(booking.grandTotal),
         facilityName: facility.name,
@@ -938,6 +1041,7 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
         const reason = `Booking ${beforeUpdate.orderNumber} — status diubah ke ${status}`;
         reverseTaxTransaction(beforeUpdate.id, beforeUpdate.orderNumber, today).catch(() => {});
         reverseJournalEntry(beforeUpdate.id, beforeUpdate.orderNumber, reason, today).catch(() => {});
+        reversePublicAccountingEntry(beforeUpdate.orderNumber, reason, today).catch(() => {});
       }
     }
 

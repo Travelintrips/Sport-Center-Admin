@@ -65,7 +65,7 @@ const EMPTY_FORM = {
   ppnAmount: "",
   paymentMethod: "",
   paymentAccount: "",
-  receiptUrl: "",
+  receiptUrls: [] as string[],
   notes: "",
 };
 
@@ -95,34 +95,45 @@ export default function AdminExpenses() {
   const [uploadingReceipt, setUploadingReceipt] = useState(false);
   const receiptInputRef = useRef<HTMLInputElement>(null);
 
-  async function handleReceiptUpload(file: File) {
+  async function handleReceiptUpload(files: FileList | File[]) {
     const allowed = ["image/jpeg", "image/png", "image/webp", "image/gif", "image/heic"];
-    if (!allowed.includes(file.type)) {
-      toast({ title: "Format tidak didukung", description: "Gunakan JPG, PNG, WebP, atau GIF", variant: "destructive" });
-      return;
-    }
-    if (file.size > 10 * 1024 * 1024) {
-      toast({ title: "File terlalu besar", description: "Maksimal 10 MB", variant: "destructive" });
-      return;
+    const fileArr = Array.from(files);
+    for (const file of fileArr) {
+      if (!allowed.includes(file.type)) {
+        toast({ title: "Format tidak didukung", description: `${file.name}: Gunakan JPG, PNG, WebP, atau GIF`, variant: "destructive" });
+        return;
+      }
+      if (file.size > 10 * 1024 * 1024) {
+        toast({ title: "File terlalu besar", description: `${file.name}: Maksimal 10 MB`, variant: "destructive" });
+        return;
+      }
     }
     setUploadingReceipt(true);
     try {
-      const fd = new FormData();
-      fd.append("file", file);
-      const resp = await fetch(`${API}/storage/upload-proof`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${getToken()}` },
-        body: fd,
-      });
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data.error ?? "Upload gagal");
-      setForm((prev) => ({ ...prev, receiptUrl: data.url }));
-      toast({ title: "Foto nota berhasil diupload" });
+      const uploaded: string[] = [];
+      for (const file of fileArr) {
+        const fd = new FormData();
+        fd.append("file", file);
+        const resp = await fetch(`${API}/storage/upload-proof`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${getToken()}` },
+          body: fd,
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error ?? "Upload gagal");
+        uploaded.push(data.url);
+      }
+      setForm((prev) => ({ ...prev, receiptUrls: [...prev.receiptUrls, ...uploaded] }));
+      toast({ title: `${uploaded.length} foto nota berhasil diupload` });
     } catch (err: any) {
       toast({ title: "Upload gagal", description: err.message, variant: "destructive" });
     } finally {
       setUploadingReceipt(false);
     }
+  }
+
+  function removeReceiptUrl(idx: number) {
+    setForm((prev) => ({ ...prev, receiptUrls: prev.receiptUrls.filter((_, i) => i !== idx) }));
   }
 
   const params = new URLSearchParams();
@@ -262,7 +273,7 @@ export default function AdminExpenses() {
       ppnAmount: String(expense.ppnAmount ?? "0"),
       paymentMethod: expense.paymentMethod ?? "",
       paymentAccount: expense.paymentAccount ?? "",
-      receiptUrl: expense.receiptUrl ?? "",
+      receiptUrls: Array.isArray(expense.receiptUrls) ? expense.receiptUrls : (expense.receiptUrl ? [expense.receiptUrl] : []),
       notes: expense.notes ?? "",
     });
     setFormOpen(true);
@@ -280,7 +291,7 @@ export default function AdminExpenses() {
       ppnAmount: Number(form.ppnAmount || 0),
       paymentMethod: form.paymentMethod || null,
       paymentAccount: form.paymentAccount || null,
-      receiptUrl: form.receiptUrl || null,
+      receiptUrls: form.receiptUrls,
       notes: form.notes || null,
     };
     if (editingId) {
@@ -600,69 +611,59 @@ export default function AdminExpenses() {
               </div>
             </div>
 
-            <div className="space-y-1">
-              <Label>Foto Nota / Struk</Label>
+            <div className="space-y-2">
+              <Label>Foto Nota / Struk <span className="text-gray-400 font-normal text-xs">(bisa lebih dari 1)</span></Label>
               <input
                 ref={receiptInputRef}
                 type="file"
                 accept="image/jpeg,image/png,image/webp,image/gif,image/heic"
+                multiple
                 className="hidden"
-                onChange={(e) => { const f = e.target.files?.[0]; if (f) handleReceiptUpload(f); e.target.value = ""; }}
+                onChange={(e) => { if (e.target.files?.length) handleReceiptUpload(e.target.files); e.target.value = ""; }}
               />
-              {form.receiptUrl ? (
-                <div className="border rounded-lg overflow-hidden bg-gray-50">
-                  <div className="relative">
-                    <img
-                      src={form.receiptUrl}
-                      alt="Nota / Struk"
-                      className="w-full max-h-48 object-contain bg-white"
-                      onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-                    />
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="destructive"
-                      className="absolute top-2 right-2 h-7 w-7 p-0 rounded-full opacity-90"
-                      onClick={() => setForm({ ...form, receiptUrl: "" })}
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </Button>
-                  </div>
-                  <div className="px-3 py-2 flex items-center justify-between border-t bg-gray-50">
-                    <span className="text-xs text-gray-500 truncate max-w-[200px]">{form.receiptUrl.split("/").pop()}</span>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      className="h-7 text-xs text-orange-600 hover:text-orange-700"
-                      onClick={() => receiptInputRef.current?.click()}
-                      disabled={uploadingReceipt}
-                    >
-                      Ganti Foto
-                    </Button>
-                  </div>
+              {form.receiptUrls.length > 0 && (
+                <div className="grid grid-cols-3 gap-2">
+                  {form.receiptUrls.map((url, idx) => (
+                    <div key={idx} className="relative border rounded-lg overflow-hidden bg-gray-50 aspect-square">
+                      <img
+                        src={url}
+                        alt={`Nota ${idx + 1}`}
+                        className="w-full h-full object-cover bg-white"
+                        onError={(e) => { (e.target as HTMLImageElement).src = ""; }}
+                      />
+                      <button
+                        type="button"
+                        className="absolute top-1 right-1 bg-red-500 hover:bg-red-600 text-white rounded-full w-5 h-5 flex items-center justify-center shadow"
+                        onClick={() => removeReceiptUrl(idx)}
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                      <div className="absolute bottom-0 left-0 right-0 bg-black/40 text-white text-[10px] px-1 py-0.5 text-center truncate">
+                        Foto {idx + 1}
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => receiptInputRef.current?.click()}
-                  disabled={uploadingReceipt}
-                  className="w-full border-2 border-dashed border-gray-200 rounded-lg p-5 flex flex-col items-center gap-2 text-gray-400 hover:border-orange-300 hover:text-orange-500 transition-colors disabled:opacity-60 cursor-pointer"
-                >
-                  {uploadingReceipt ? (
-                    <>
-                      <Loader2 className="w-6 h-6 animate-spin text-orange-500" />
-                      <span className="text-sm font-medium text-orange-500">Mengupload...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Upload className="w-6 h-6" />
-                      <span className="text-sm font-medium">Klik untuk upload foto nota</span>
-                      <span className="text-xs">JPG, PNG, WebP — maks 10 MB</span>
-                    </>
-                  )}
-                </button>
               )}
+              <button
+                type="button"
+                onClick={() => receiptInputRef.current?.click()}
+                disabled={uploadingReceipt}
+                className="w-full border-2 border-dashed border-gray-200 rounded-lg p-4 flex flex-col items-center gap-2 text-gray-400 hover:border-orange-300 hover:text-orange-500 transition-colors disabled:opacity-60 cursor-pointer"
+              >
+                {uploadingReceipt ? (
+                  <>
+                    <Loader2 className="w-5 h-5 animate-spin text-orange-500" />
+                    <span className="text-sm font-medium text-orange-500">Mengupload...</span>
+                  </>
+                ) : (
+                  <>
+                    <Upload className="w-5 h-5" />
+                    <span className="text-sm font-medium">{form.receiptUrls.length > 0 ? "Tambah foto lagi" : "Klik untuk upload foto nota"}</span>
+                    <span className="text-xs">JPG, PNG, WebP — maks 10 MB per foto</span>
+                  </>
+                )}
+              </button>
             </div>
 
             <div className="space-y-1">
@@ -714,24 +715,34 @@ export default function AdminExpenses() {
                 {detail.paidAt && <div><span className="text-gray-500">Dibayar pada</span><p className="font-semibold">{new Date(detail.paidAt).toLocaleDateString("id-ID")}</p></div>}
                 {detail.rejectedReason && <div className="col-span-2"><span className="text-gray-500">Alasan ditolak</span><p className="font-semibold text-red-600">{detail.rejectedReason}</p></div>}
                 {detail.notes && <div className="col-span-2"><span className="text-gray-500">Catatan</span><p className="font-semibold">{detail.notes}</p></div>}
-                {detail.receiptUrl && (
-                  <div className="col-span-2">
-                    <span className="text-gray-500">Nota / Struk</span>
-                    <div className="mt-1 border rounded-lg overflow-hidden bg-gray-50">
-                      <img
-                        src={detail.receiptUrl}
-                        alt="Nota / Struk"
-                        className="w-full max-h-56 object-contain bg-white"
-                        onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-                      />
-                      <div className="px-3 py-2 border-t">
-                        <a href={detail.receiptUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline text-xs font-medium">
-                          Buka di tab baru ↗
-                        </a>
+                {(() => {
+                  const photos: string[] = Array.isArray(detail.receiptUrls) && detail.receiptUrls.length > 0
+                    ? detail.receiptUrls
+                    : detail.receiptUrl ? [detail.receiptUrl] : [];
+                  return photos.length > 0 ? (
+                    <div className="col-span-2">
+                      <span className="text-gray-500">Nota / Struk ({photos.length} foto)</span>
+                      <div className="mt-1 grid grid-cols-2 gap-2">
+                        {photos.map((url: string, idx: number) => (
+                          <div key={idx} className="border rounded-lg overflow-hidden bg-gray-50">
+                            <img
+                              src={url}
+                              alt={`Nota ${idx + 1}`}
+                              className="w-full max-h-40 object-contain bg-white"
+                              onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                            />
+                            <div className="px-2 py-1.5 border-t flex items-center justify-between">
+                              <span className="text-xs text-gray-500">Foto {idx + 1}</span>
+                              <a href={url} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline text-xs font-medium">
+                                Buka ↗
+                              </a>
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     </div>
-                  </div>
-                )}
+                  ) : null;
+                })()}
                 {detail.journalId && <div className="col-span-2"><span className="text-gray-500">Journal ID</span><p className="font-mono text-xs text-gray-700">{detail.journalId}</p></div>}
               </div>
 

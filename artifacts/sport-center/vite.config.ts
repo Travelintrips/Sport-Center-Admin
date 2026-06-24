@@ -35,6 +35,9 @@ export default defineConfig({
         ]
       : []),
   ],
+  optimizeDeps: {
+    include: ["xlsx"],
+  },
   resolve: {
     alias: {
       "@": path.resolve(import.meta.dirname, "src"),

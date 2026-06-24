@@ -2,6 +2,7 @@ import app from "./app";
 import { logger } from "./lib/logger";
 import { startScheduler } from "./lib/scheduler";
 import { ensureDefaultTemplates } from "./lib/seedTemplates";
+import { initBizportalTables } from "./lib/bizportalSync";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 
@@ -279,52 +280,52 @@ async function runStartupMigrations() {
     `CREATE INDEX IF NOT EXISTS idx_bank_journal_entries_mutation
        ON sport_center.bank_journal_entries (mutation_id)`,
     // Kolom OCR pada payments
-    `ALTER TABLE sport_center.payments
+    `ALTER TABLE sport_center.sport_payments
        ADD COLUMN IF NOT EXISTS ocr_name text`,
-    `ALTER TABLE sport_center.payments
+    `ALTER TABLE sport_center.sport_payments
        ADD COLUMN IF NOT EXISTS ocr_amount numeric(14,2)`,
-    `ALTER TABLE sport_center.payments
+    `ALTER TABLE sport_center.sport_payments
        ADD COLUMN IF NOT EXISTS ocr_date text`,
-    `ALTER TABLE sport_center.payments
+    `ALTER TABLE sport_center.sport_payments
        ADD COLUMN IF NOT EXISTS ocr_raw text`,
-    `ALTER TABLE sport_center.payments
+    `ALTER TABLE sport_center.sport_payments
        ADD COLUMN IF NOT EXISTS ocr_data jsonb`,
     // Enum billing_status untuk bookings
     `DO $$ BEGIN
        CREATE TYPE sport_center.billing_status AS ENUM ('unbilled','billed','paid');
      EXCEPTION WHEN duplicate_object THEN null; END $$`,
     // Kolom-kolom baru pada bookings (idempotent)
-    `ALTER TABLE sport_center.bookings
+    `ALTER TABLE sport_center.sport_bookings
        ADD COLUMN IF NOT EXISTS booked_for_name text`,
-    `ALTER TABLE sport_center.bookings
+    `ALTER TABLE sport_center.sport_bookings
        ADD COLUMN IF NOT EXISTS booked_for_phone text`,
-    `ALTER TABLE sport_center.bookings
+    `ALTER TABLE sport_center.sport_bookings
        ADD COLUMN IF NOT EXISTS payment_required_now boolean DEFAULT true`,
-    `ALTER TABLE sport_center.bookings
+    `ALTER TABLE sport_center.sport_bookings
        ADD COLUMN IF NOT EXISTS billing_status sport_center.billing_status`,
-    `ALTER TABLE sport_center.bookings
+    `ALTER TABLE sport_center.sport_bookings
        ADD COLUMN IF NOT EXISTS company_invoice_id int`,
-    `ALTER TABLE sport_center.bookings
+    `ALTER TABLE sport_center.sport_bookings
        ADD COLUMN IF NOT EXISTS ppn_rate numeric(5,2)`,
-    `ALTER TABLE sport_center.bookings
+    `ALTER TABLE sport_center.sport_bookings
        ADD COLUMN IF NOT EXISTS ppn_amount numeric(12,2)`,
-    `ALTER TABLE sport_center.bookings
+    `ALTER TABLE sport_center.sport_bookings
        ADD COLUMN IF NOT EXISTS grand_total numeric(12,2)`,
-    `ALTER TABLE sport_center.bookings
+    `ALTER TABLE sport_center.sport_bookings
        ADD COLUMN IF NOT EXISTS down_payment numeric(12,2) NOT NULL DEFAULT 0`,
-    `ALTER TABLE sport_center.bookings
+    `ALTER TABLE sport_center.sport_bookings
        ADD COLUMN IF NOT EXISTS is_dp_paid boolean NOT NULL DEFAULT false`,
-    `ALTER TABLE sport_center.bookings
+    `ALTER TABLE sport_center.sport_bookings
        ADD COLUMN IF NOT EXISTS booked_by_user_id int`,
-    `ALTER TABLE sport_center.bookings
+    `ALTER TABLE sport_center.sport_bookings
        ADD COLUMN IF NOT EXISTS group_ref text`,
-    `ALTER TABLE sport_center.bookings
+    `ALTER TABLE sport_center.sport_bookings
        ADD COLUMN IF NOT EXISTS approved_by_admin_phone text`,
-    `ALTER TABLE sport_center.bookings
+    `ALTER TABLE sport_center.sport_bookings
        ADD COLUMN IF NOT EXISTS approved_at timestamptz`,
-    `ALTER TABLE sport_center.bookings
+    `ALTER TABLE sport_center.sport_bookings
        ADD COLUMN IF NOT EXISTS rejected_reason text`,
-    `ALTER TABLE sport_center.bookings
+    `ALTER TABLE sport_center.sport_bookings
        ADD COLUMN IF NOT EXISTS paid_at timestamptz`,
     // ── Tabel-tabel yang belum ada di prod ─────────────────────────────────────
     // booking_groups
@@ -364,8 +365,27 @@ async function runStartupMigrations() {
        ADD COLUMN IF NOT EXISTS notes text`,
     `ALTER TABLE sport_center.wa_booking_sessions
        ADD COLUMN IF NOT EXISTS booker_name text`,
-    `ALTER TABLE sport_center.bookings
+    `ALTER TABLE sport_center.sport_bookings
        ADD COLUMN IF NOT EXISTS booker_name text`,
+    // kolom dpp di bookings (untuk audit pajak lengkap)
+    `ALTER TABLE sport_center.sport_bookings
+       ADD COLUMN IF NOT EXISTS dpp numeric(14,2)`,
+    // backfill dpp dari grand_total yang sudah ada
+    `UPDATE sport_center.sport_bookings
+       SET dpp = ROUND(grand_total / 1.11, 2)
+       WHERE dpp IS NULL AND grand_total IS NOT NULL AND ppn_amount IS NOT NULL AND ppn_amount > 0`,
+    // kolom baru di tax_transactions
+    `ALTER TABLE sport_center.tax_transactions
+       ADD COLUMN IF NOT EXISTS dpp_nilai_lain numeric(14,2)`,
+    `ALTER TABLE sport_center.tax_transactions
+       ADD COLUMN IF NOT EXISTS grand_total numeric(14,2)`,
+    // backfill dpp_nilai_lain dan grand_total di tax_transactions
+    `UPDATE sport_center.tax_transactions
+       SET dpp_nilai_lain = ROUND(dpp * 11 / 12, 2)
+       WHERE dpp_nilai_lain IS NULL AND dpp IS NOT NULL`,
+    `UPDATE sport_center.tax_transactions
+       SET grand_total = dpp + tax_amount
+       WHERE grand_total IS NULL AND dpp IS NOT NULL AND tax_amount IS NOT NULL`,
     // wa_blocked_phones — spam protection
     `CREATE TABLE IF NOT EXISTS sport_center.wa_blocked_phones (
        id serial PRIMARY KEY,
@@ -381,7 +401,7 @@ async function runStartupMigrations() {
     `CREATE TABLE IF NOT EXISTS sport_center.wa_action_tokens (
        id serial PRIMARY KEY,
        token text NOT NULL UNIQUE,
-       booking_id int NOT NULL REFERENCES sport_center.bookings(id) ON DELETE CASCADE,
+       booking_id int NOT NULL REFERENCES sport_center.sport_bookings(id) ON DELETE CASCADE,
        action text NOT NULL,
        used_at timestamptz,
        expires_at timestamptz,
@@ -406,7 +426,7 @@ async function runStartupMigrations() {
        tax_name text NOT NULL,
        tax_rate numeric(5,2) NOT NULL,
        tax_type text NOT NULL DEFAULT 'output_vat',
-       applies_to text NOT NULL DEFAULT 'sport_center_booking',
+       applies_to text NOT NULL DEFAULT 'sport_booking',
        is_active boolean NOT NULL DEFAULT true,
        effective_date text,
        created_at timestamptz NOT NULL DEFAULT NOW(),
@@ -470,16 +490,19 @@ async function runStartupMigrations() {
      )`,
     // Seed tax_settings jika kosong
     `INSERT INTO sport_center.tax_settings (tax_code, tax_name, tax_rate, tax_type, applies_to, is_active)
-     SELECT 'PPN_OUT_11','PPN Keluaran 11%',11,'output_vat','sport_center_booking',false
+     SELECT 'PPN_OUT_11','PPN Keluaran 11%',11,'output_vat','sport_booking',true
      WHERE NOT EXISTS (SELECT 1 FROM sport_center.tax_settings WHERE tax_code = 'PPN_OUT_11')`,
+    // Activate PPN_OUT_11 jika sudah ada tapi masih false
+    `UPDATE sport_center.tax_settings SET is_active = true
+     WHERE tax_code = 'PPN_OUT_11' AND applies_to = 'sport_booking' AND is_active = false`,
     // payment_type enum untuk DP flow
     `DO $$ BEGIN
        CREATE TYPE sport_center.payment_type AS ENUM ('dp', 'pelunasan', 'full_payment');
      EXCEPTION WHEN duplicate_object THEN null; END $$`,
-    `ALTER TABLE sport_center.payments
+    `ALTER TABLE sport_center.sport_payments
        ADD COLUMN IF NOT EXISTS payment_type sport_center.payment_type NOT NULL DEFAULT 'full_payment'`,
     // Hapus unique constraint booking_id agar bisa ada multiple payments per booking
-    `ALTER TABLE sport_center.payments
+    `ALTER TABLE sport_center.sport_payments
        DROP CONSTRAINT IF EXISTS payments_booking_id_unique`,
     // expense_status enum
     `DO $$ BEGIN
@@ -519,6 +542,118 @@ async function runStartupMigrations() {
     `CREATE SEQUENCE IF NOT EXISTS sport_center.expense_no_seq`,
     // accounting_journals.booking_id nullable untuk expense journal entries
     `ALTER TABLE sport_center.accounting_journals ALTER COLUMN booking_id DROP NOT NULL`,
+    // accounting_journal_lines — double-entry lines per jurnal (debit/kredit)
+    `CREATE TABLE IF NOT EXISTS sport_center.accounting_journal_lines (
+       id          serial PRIMARY KEY,
+       journal_id  integer NOT NULL REFERENCES sport_center.accounting_journals(id) ON DELETE CASCADE,
+       line_type   text    NOT NULL,
+       account_code text   NOT NULL,
+       account_name text   NOT NULL,
+       amount      numeric(14,2) NOT NULL,
+       description text,
+       created_at  timestamptz NOT NULL DEFAULT now()
+     )`,
+    `CREATE INDEX IF NOT EXISTS idx_accounting_journal_lines_journal_id ON sport_center.accounting_journal_lines(journal_id)`,
+    // company_document_templates
+    `CREATE TABLE IF NOT EXISTS sport_center.company_document_templates (
+       id serial PRIMARY KEY,
+       company_id integer REFERENCES sport_center.users(id) ON DELETE CASCADE,
+       document_type text NOT NULL,
+       is_default boolean NOT NULL DEFAULT false,
+       header_logo_url text,
+       kop_surat_html text,
+       footer_html text,
+       company_display_name text,
+       finance_name text,
+       finance_title text,
+       finance_signature text,
+       address text,
+       phone text,
+       email text,
+       number_format_prefix text,
+       number_format_pattern text,
+       paper_style text NOT NULL DEFAULT 'A4',
+       created_at timestamptz NOT NULL DEFAULT now(),
+       updated_at timestamptz NOT NULL DEFAULT now()
+     )`,
+    `CREATE INDEX IF NOT EXISTS company_document_templates_company_id_idx ON sport_center.company_document_templates(company_id)`,
+    `CREATE INDEX IF NOT EXISTS company_document_templates_document_type_idx ON sport_center.company_document_templates(document_type)`,
+    // document_number_sequences (company_id = 0 is sentinel for system-default)
+    `CREATE TABLE IF NOT EXISTS sport_center.document_number_sequences (
+       id serial PRIMARY KEY,
+       company_id integer NOT NULL DEFAULT 0,
+       document_type text NOT NULL,
+       year integer NOT NULL,
+       current_seq integer NOT NULL DEFAULT 0
+     )`,
+    // Migrate existing rows that used NULL before sentinel was introduced
+    `UPDATE sport_center.document_number_sequences SET company_id = 0 WHERE company_id IS NULL`,
+    `DO $$ BEGIN
+       ALTER TABLE sport_center.document_number_sequences ALTER COLUMN company_id SET NOT NULL;
+       ALTER TABLE sport_center.document_number_sequences ALTER COLUMN company_id SET DEFAULT 0;
+     EXCEPTION WHEN others THEN NULL; END $$`,
+    `DO $$ BEGIN
+       IF NOT EXISTS (
+         SELECT 1 FROM pg_constraint
+         WHERE conname = 'doc_num_seq_unique'
+           AND conrelid = 'sport_center.document_number_sequences'::regclass
+       ) THEN
+         ALTER TABLE sport_center.document_number_sequences
+           ADD CONSTRAINT doc_num_seq_unique UNIQUE (company_id, document_type, year);
+       END IF;
+     EXCEPTION WHEN others THEN NULL; END $$`,
+    // Seed system default document templates
+    `INSERT INTO sport_center.company_document_templates
+       (company_id, document_type, is_default, company_display_name, finance_name, finance_title, number_format_prefix, paper_style)
+     SELECT NULL, t.dt, true, 'Sport Center Jakarta', 'Kepala Keuangan', 'Finance Manager', t.prefix, 'A4'
+     FROM (VALUES
+       ('invoice','INV'), ('spp','SPP'), ('faktur','FAKTUR'),
+       ('kwitansi','KWT'), ('lampiran','LMP'), ('berita_acara','BA')
+     ) AS t(dt, prefix)
+     WHERE NOT EXISTS (
+       SELECT 1 FROM sport_center.company_document_templates
+       WHERE company_id IS NULL AND document_type = t.dt AND is_default = true
+     )`,
+    // document_issued_numbers (company_id = 0 is sentinel for system-default)
+    `CREATE TABLE IF NOT EXISTS sport_center.document_issued_numbers (
+       id serial PRIMARY KEY,
+       entity_type text NOT NULL,
+       entity_id integer NOT NULL,
+       document_type text NOT NULL,
+       company_id integer NOT NULL DEFAULT 0,
+       document_number text NOT NULL,
+       issued_at timestamptz NOT NULL DEFAULT now()
+     )`,
+    // Migrate existing rows that used NULL before sentinel was introduced
+    `UPDATE sport_center.document_issued_numbers SET company_id = 0 WHERE company_id IS NULL`,
+    `DO $$ BEGIN
+       ALTER TABLE sport_center.document_issued_numbers ALTER COLUMN company_id SET NOT NULL;
+       ALTER TABLE sport_center.document_issued_numbers ALTER COLUMN company_id SET DEFAULT 0;
+     EXCEPTION WHEN others THEN NULL; END $$`,
+    `DO $$ BEGIN
+       IF NOT EXISTS (
+         SELECT 1 FROM pg_constraint
+         WHERE conname = 'doc_issued_unique'
+           AND conrelid = 'sport_center.document_issued_numbers'::regclass
+       ) THEN
+         ALTER TABLE sport_center.document_issued_numbers
+           ADD CONSTRAINT doc_issued_unique UNIQUE (entity_type, entity_id, document_type, company_id);
+       END IF;
+     EXCEPTION WHEN others THEN NULL; END $$`,
+    // company_billing_requirements — dokumen tagihan per perusahaan
+    `CREATE TABLE IF NOT EXISTS sport_center.company_billing_requirements (
+       id serial PRIMARY KEY,
+       company_id int NOT NULL REFERENCES sport_center.users(id) ON DELETE CASCADE,
+       document_type text NOT NULL,
+       required boolean NOT NULL DEFAULT true,
+       active boolean NOT NULL DEFAULT true,
+       created_at timestamptz NOT NULL DEFAULT NOW(),
+       updated_at timestamptz NOT NULL DEFAULT NOW()
+     )`,
+    // Monthly Corporate Invoice — DPP Nilai Lain field
+    `ALTER TABLE sport_center.company_invoices ADD COLUMN IF NOT EXISTS dpp_nilai_lain numeric(14,2) NOT NULL DEFAULT 0`,
+    // Backfill dpp_nilai_lain for existing rows: DPP × (11/12)
+    `UPDATE sport_center.company_invoices SET dpp_nilai_lain = ROUND((total_amount * 11 / 12), 2) WHERE dpp_nilai_lain = 0 AND total_amount > 0`,
   ];
 
   for (const stmt of migrations) {
@@ -542,6 +677,7 @@ app.listen(port, (err) => {
 
   logger.info({ port }, "Server listening");
   runStartupMigrations().catch(() => {});
+  initBizportalTables().catch(() => {});
   startScheduler();
   ensureDefaultTemplates().catch(() => {});
 

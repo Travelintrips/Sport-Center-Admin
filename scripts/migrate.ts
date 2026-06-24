@@ -514,5 +514,152 @@ ALTER TABLE sport_center.bookings
   ADD COLUMN IF NOT EXISTS group_ref TEXT REFERENCES sport_center.booking_groups(group_ref) ON DELETE SET NULL;
 
 CREATE INDEX IF NOT EXISTS bookings_group_ref_idx ON sport_center.bookings(group_ref);
+
+-- ============================================================
+-- Company Document Templates
+-- ============================================================
+CREATE TABLE IF NOT EXISTS sport_center.company_document_templates (
+  id serial PRIMARY KEY,
+  company_id integer REFERENCES sport_center.users(id) ON DELETE CASCADE,
+  document_type text NOT NULL,
+  is_default boolean NOT NULL DEFAULT false,
+  header_logo_url text,
+  kop_surat_html text,
+  footer_html text,
+  company_display_name text,
+  finance_name text,
+  finance_title text,
+  finance_signature text,
+  address text,
+  phone text,
+  email text,
+  number_format_prefix text,
+  number_format_pattern text,
+  paper_style text NOT NULL DEFAULT 'A4',
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS company_document_templates_company_id_idx ON sport_center.company_document_templates(company_id);
+CREATE INDEX IF NOT EXISTS company_document_templates_document_type_idx ON sport_center.company_document_templates(document_type);
+
+-- Document number sequences per company per document_type per year
+-- company_id = 0 is sentinel for system-default (NULL cannot be used with ON CONFLICT)
+CREATE TABLE IF NOT EXISTS sport_center.document_number_sequences (
+  id serial PRIMARY KEY,
+  company_id integer NOT NULL DEFAULT 0,
+  document_type text NOT NULL,
+  year integer NOT NULL,
+  current_seq integer NOT NULL DEFAULT 0
+);
+
+-- Migrate any pre-sentinel NULL rows to 0
+UPDATE sport_center.document_number_sequences SET company_id = 0 WHERE company_id IS NULL;
+
+DO $$
+BEGIN
+  ALTER TABLE sport_center.document_number_sequences ALTER COLUMN company_id SET NOT NULL;
+  ALTER TABLE sport_center.document_number_sequences ALTER COLUMN company_id SET DEFAULT 0;
+EXCEPTION WHEN others THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'doc_num_seq_unique'
+      AND conrelid = 'sport_center.document_number_sequences'::regclass
+  ) THEN
+    ALTER TABLE sport_center.document_number_sequences
+      ADD CONSTRAINT doc_num_seq_unique UNIQUE (company_id, document_type, year);
+  END IF;
+EXCEPTION WHEN others THEN NULL;
+END $$;
+
+-- Idempotent issued-number tracking for document template engine
+-- company_id = 0 is sentinel for system-default (NULL cannot be used with ON CONFLICT)
+CREATE TABLE IF NOT EXISTS sport_center.document_issued_numbers (
+  id serial PRIMARY KEY,
+  entity_type text NOT NULL,
+  entity_id integer NOT NULL,
+  document_type text NOT NULL,
+  company_id integer NOT NULL DEFAULT 0,
+  document_number text NOT NULL,
+  issued_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- Migrate any pre-sentinel NULL rows to 0
+UPDATE sport_center.document_issued_numbers SET company_id = 0 WHERE company_id IS NULL;
+
+DO $$
+BEGIN
+  ALTER TABLE sport_center.document_issued_numbers ALTER COLUMN company_id SET NOT NULL;
+  ALTER TABLE sport_center.document_issued_numbers ALTER COLUMN company_id SET DEFAULT 0;
+EXCEPTION WHEN others THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'doc_issued_unique'
+      AND conrelid = 'sport_center.document_issued_numbers'::regclass
+  ) THEN
+    ALTER TABLE sport_center.document_issued_numbers
+      ADD CONSTRAINT doc_issued_unique UNIQUE (entity_type, entity_id, document_type, company_id);
+  END IF;
+EXCEPTION WHEN others THEN NULL;
+END $$;
+
+-- Seed system default templates (idempotent)
+INSERT INTO sport_center.company_document_templates
+  (company_id, document_type, is_default, company_display_name, finance_name, finance_title, number_format_prefix, paper_style)
+SELECT NULL, t.dt, true, 'Sport Center Jakarta', 'Kepala Keuangan', 'Finance Manager', t.prefix, 'A4'
+FROM (VALUES
+  ('invoice',      'INV'),
+  ('spp',          'SPP'),
+  ('faktur',       'FAKTUR'),
+  ('kwitansi',     'KWT'),
+  ('lampiran',     'LMP'),
+  ('berita_acara', 'BA')
+) AS t(dt, prefix)
+WHERE NOT EXISTS (
+  SELECT 1 FROM sport_center.company_document_templates
+  WHERE company_id IS NULL AND document_type = t.dt AND is_default = true
+);
+
+-- ============================================================
+-- require_per_booking_approval per company (opsional)
+-- ============================================================
+ALTER TABLE sport_center.users
+  ADD COLUMN IF NOT EXISTS require_per_booking_approval boolean NOT NULL DEFAULT false;
+
+-- ============================================================
+-- company_document_settings (kop surat, bank, finance, TTD)
+-- ============================================================
+DO $$ BEGIN
+  CREATE TYPE sport_center.document_type_enum AS ENUM (
+    'general', 'invoice', 'spp', 'kwitansi', 'lampiran', 'berita_acara', 'surat_pengantar'
+  );
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+CREATE TABLE IF NOT EXISTS sport_center.company_document_settings (
+  id              SERIAL PRIMARY KEY,
+  document_type   sport_center.document_type_enum NOT NULL DEFAULT 'general',
+  logo_url        TEXT,
+  kop_surat_html  TEXT,
+  footer_html     TEXT,
+  bank_name       TEXT NOT NULL DEFAULT '',
+  bank_account    TEXT NOT NULL DEFAULT '',
+  bank_holder     TEXT NOT NULL DEFAULT '',
+  finance_name    TEXT NOT NULL DEFAULT '',
+  finance_title   TEXT NOT NULL DEFAULT 'Finance Manager',
+  signature_url   TEXT,
+  prefix_number   TEXT NOT NULL DEFAULT 'INV',
+  tax_rate        NUMERIC(5,2) NOT NULL DEFAULT 11,
+  is_active       BOOLEAN NOT NULL DEFAULT true,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 `;
 

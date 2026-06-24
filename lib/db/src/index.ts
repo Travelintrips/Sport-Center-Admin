@@ -35,12 +35,7 @@ if (isProd) {
 
 // ── Development ───────────────────────────────────────────────────────────────
 } else {
-  if (SUPABASE_DEV_URL) {
-    // Happy path — isolated dev DB is configured
-    connectionString = SUPABASE_DEV_URL;
-    dbSource = "SUPABASE_DATABASE_URL_DEV (dev — isolated)";
-
-  } else if (ALLOW_DEV_ON_PROD) {
+  if (ALLOW_DEV_ON_PROD) {
     // Emergency override — dev deliberately routed to prod
     if (!SUPABASE_PROD_URL && !FALLBACK_URL) {
       throw new Error(
@@ -63,6 +58,14 @@ if (isProd) {
       "║  Set SUPABASE_DATABASE_URL_DEV and remove this override ASAP.  ║\n" +
       "╚══════════════════════════════════════════════════════════════════╝\n"
     );
+
+  } else if (SUPABASE_DEV_URL) {
+    connectionString = SUPABASE_DEV_URL;
+    dbSource = "SUPABASE_DATABASE_URL_DEV (dev — isolated)";
+
+  } else if (FALLBACK_URL) {
+    connectionString = FALLBACK_URL;
+    dbSource = "DATABASE_URL (dev — local heliumdb)";
 
   } else {
     // GUARD: no dev DB, no override — refuse to start

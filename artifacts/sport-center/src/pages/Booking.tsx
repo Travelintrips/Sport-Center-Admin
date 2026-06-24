@@ -80,6 +80,8 @@ export default function Booking() {
   const isLoggedIn = !!currentUser && currentUser.role !== "admin";
   // Akun admin_booking: bisa booking atas nama customer lain
   const isAdminBooking = currentUser?.role === "admin_booking";
+  // Akun perusahaan: user IS the company account
+  const isCompanyAccount = (currentUser as any)?.accountType === "company";
 
   // --- Customer selector (hanya untuk admin_booking) ---
   const [customers, setCustomers] = useState<{ id: number; name: string; email: string | null; phone: string | null }[]>([]);
@@ -139,15 +141,33 @@ export default function Booking() {
   const [bookedForName, setBookedForName] = useState("");
   const [isPreparing, setIsPreparing] = useState(false);
 
-  // Fetch daftar perusahaan aktif saat login
+  // Fetch daftar perusahaan aktif saat login (hanya untuk non-company account)
   useEffect(() => {
-    if (!isLoggedIn) return;
+    if (!isLoggedIn || isCompanyAccount) return;
     const token = getToken();
     fetch("/api/companies?status=active", { headers: token ? { Authorization: `Bearer ${token}` } : {} })
       .then((r) => r.json())
       .then((data) => { if (Array.isArray(data)) setCompanies(data); })
       .catch(() => {});
-  }, [isLoggedIn]);
+  }, [isLoggedIn, isCompanyAccount]);
+
+  // Auto-fill company jika user adalah akun perusahaan
+  useEffect(() => {
+    if (isCompanyMode && isCompanyAccount && currentUser) {
+      setSelectedCompanyId(String((currentUser as any).id));
+    }
+  }, [isCompanyMode, isCompanyAccount, currentUser]);
+
+  // Track audit event ketika user ganti payer mode
+  function trackPayerSelection(selection: "personal" | "corporate") {
+    const token = getToken();
+    if (!token) return;
+    fetch("/api/bookings/track-payer-selection", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ selection }),
+    }).catch(() => {});
+  }
 
   // --- Corporate billing ---
   const [isCompanyBilling, setIsCompanyBilling] = useState(false);
@@ -289,13 +309,13 @@ export default function Booking() {
           },
           onError: () => {
             setIsChecking(false);
-            toast({ title: t("Gagal cek jadwal", "Failed to check schedule"), variant: "destructive" });
           },
         }
       );
     }, 400);
     return () => clearTimeout(timer);
-  }, [isRepeat, repeatType, repeatCount, facilityId, date, startTime, duration, checkRecurringMutate, toast]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isRepeat, repeatType, repeatCount, facilityId, date, startTime, duration, checkRecurringMutate]);
 
   // Redirect if missing params
   useEffect(() => {
@@ -406,25 +426,48 @@ export default function Booking() {
           return;
         }
 
-        createBooking.mutate({
-          data: {
-            customerName: effName,
-            customerEmail: email || undefined,
-            customerPhone: effPhone,
-            facilityId,
-            bookingDate: date,
-            ...(isWalkIn ? {} : { startTime, durationHours: duration }),
-            activityType: urlActivityType || undefined,
-            numberOfPeople: isWalkIn ? parseInt(numberOfPeople) || 1 : undefined,
-            notes,
-            customerType: "umum",
-            payerType: "company",
-            companyCustomerId: Number(selectedCompanyId),
-            customerId: isAdminBooking ? prepData.customerId : undefined,
-            bookedForName: bookedForName.trim() || effName,
-            bookedForPhone: effPhone,
-          } as any,
-        });
+        if (isRepeat && checkResult && effectiveCount > 0) {
+          createRecurring.mutate({
+            data: {
+              customerName: effName,
+              customerEmail: email || "",
+              customerPhone: effPhone,
+              facilityId,
+              startDate: date,
+              startTime,
+              durationHours: duration,
+              notes,
+              repeatType,
+              repeatCount,
+              specificDates: selectedDates,
+              payerType: "company",
+              companyCustomerId: Number(selectedCompanyId),
+              customerId: isAdminBooking ? prepData.customerId : undefined,
+              bookedForName: bookedForName.trim() || effName,
+              bookedForPhone: effPhone,
+            } as any,
+          });
+        } else {
+          createBooking.mutate({
+            data: {
+              customerName: effName,
+              customerEmail: email || undefined,
+              customerPhone: effPhone,
+              facilityId,
+              bookingDate: date,
+              ...(isWalkIn ? {} : { startTime, durationHours: duration }),
+              activityType: urlActivityType || undefined,
+              numberOfPeople: isWalkIn ? parseInt(numberOfPeople) || 1 : undefined,
+              notes,
+              customerType: "umum",
+              payerType: "company",
+              companyCustomerId: Number(selectedCompanyId),
+              customerId: isAdminBooking ? prepData.customerId : undefined,
+              bookedForName: bookedForName.trim() || effName,
+              bookedForPhone: effPhone,
+            } as any,
+          });
+        }
       } catch {
         toast({ title: t("Gagal menghubungi server", "Failed to reach server"), variant: "destructive" });
       } finally {
@@ -453,8 +496,8 @@ export default function Booking() {
       toast({ title: t("Format nomor tidak valid", "Invalid phone format"), description: t("Gunakan format Indonesia, contoh: 08123456789", "Use Indonesian format, e.g. 08123456789"), variant: "destructive" });
       return;
     }
-    if (!email) {
-      toast({ title: t("Form tidak lengkap", "Incomplete form"), description: t("Harap isi semua field yang wajib.", "Please fill in all required fields."), variant: "destructive" });
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      toast({ title: t("Format email tidak valid", "Invalid email format"), description: t("Masukkan email yang benar, contoh: nama@email.com", "Enter a valid email, e.g. nama@email.com"), variant: "destructive" });
       return;
     }
     const normalizedPhone = normalizePhoneInput(phone);
@@ -811,7 +854,7 @@ export default function Booking() {
               <div className={`grid gap-2 ${isLoggedIn ? "grid-cols-3" : "grid-cols-2"}`}>
                 <button
                   type="button"
-                  onClick={() => setBookingMode("umum")}
+                  onClick={() => { setBookingMode("umum"); if (isLoggedIn) trackPayerSelection("personal"); }}
                   className={`flex flex-col items-center gap-2 p-3 rounded-lg border text-center transition-colors ${bookingMode === "umum" ? "bg-primary text-primary-foreground border-primary" : "bg-background border-border hover:border-primary/50"}`}
                 >
                   <User size={18} className="shrink-0" />
@@ -822,7 +865,7 @@ export default function Booking() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setBookingMode("angkasa_pura")}
+                  onClick={() => { setBookingMode("angkasa_pura"); if (isLoggedIn) trackPayerSelection("personal"); }}
                   className={`flex flex-col items-center gap-2 p-3 rounded-lg border text-center transition-colors ${isAP ? "bg-primary text-primary-foreground border-primary" : "bg-background border-border hover:border-primary/50"}`}
                 >
                   <Plane size={18} className="shrink-0" />
@@ -834,13 +877,19 @@ export default function Booking() {
                 {isLoggedIn && (
                   <button
                     type="button"
-                    onClick={() => setBookingMode("perusahaan")}
-                    className={`flex flex-col items-center gap-2 p-3 rounded-lg border text-center transition-colors ${isCompanyMode ? "bg-blue-600 text-white border-blue-600" : "bg-background border-border hover:border-blue-400/50"}`}
+                    onClick={() => { setBookingMode("perusahaan"); trackPayerSelection("corporate"); }}
+                    className={`flex flex-col items-center gap-2 p-3 rounded-lg border text-center transition-colors relative ${isCompanyMode ? "bg-blue-600 text-white border-blue-600" : "bg-background border-border hover:border-blue-400/50"}`}
                   >
                     <Building2 size={18} className="shrink-0" />
                     <div>
                       <div className="font-semibold text-xs">{t("Perusahaan", "Company")}</div>
-                      <div className={`text-xs ${isCompanyMode ? "text-blue-100" : "text-muted-foreground"}`}>{t("Tagihan bulanan", "Monthly bill")}</div>
+                      <div className={`text-xs ${isCompanyMode ? "text-blue-100" : "text-muted-foreground"}`}>
+                        {isCompanyAccount
+                          ? t("Tagihan bulanan", "Monthly bill")
+                          : billingStatus?.eligible
+                          ? t("Tagihan bulanan", "Monthly bill")
+                          : t("Perlu verifikasi", "Needs verification")}
+                      </div>
                     </div>
                   </button>
                 )}
@@ -877,48 +926,58 @@ export default function Booking() {
                 {/* Company Selector */}
                 <div className="space-y-2">
                   <Label>{t("Nama Perusahaan", "Company Name")} <span className="text-destructive">*</span></Label>
-                  <Popover open={companyComboOpen} onOpenChange={setCompanyComboOpen}>
-                    <PopoverTrigger asChild>
-                      <button
-                        type="button"
-                        role="combobox"
-                        aria-expanded={companyComboOpen}
-                        className="w-full flex items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 h-10"
-                      >
-                        <span className={!selectedCompanyId ? "text-muted-foreground" : ""}>
-                          {selectedCompanyId
-                            ? (companies.find((c) => String(c.id) === selectedCompanyId)?.companyName || companies.find((c) => String(c.id) === selectedCompanyId)?.name || t("Pilih perusahaan...", "Select company..."))
-                            : t("Pilih perusahaan...", "Select company...")}
-                        </span>
-                        <ChevronsUpDown size={14} className="ml-2 shrink-0 text-muted-foreground" />
-                      </button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-full p-0" align="start">
-                      <Command>
-                        <CommandInput placeholder={t("Cari perusahaan...", "Search company...")} />
-                        <CommandList>
-                          <CommandEmpty>{t("Perusahaan tidak ditemukan.", "Company not found.")}</CommandEmpty>
-                          <CommandGroup>
-                            {companies.map((c) => (
-                              <CommandItem
-                                key={c.id}
-                                value={c.companyName || c.name}
-                                onSelect={() => { setSelectedCompanyId(String(c.id)); setCompanyComboOpen(false); }}
-                              >
-                                <Check size={14} className={`mr-2 ${selectedCompanyId === String(c.id) ? "opacity-100" : "opacity-0"}`} />
-                                <div>
-                                  <div className="font-medium text-sm">{c.companyName || c.name}</div>
-                                  {c.picName && <div className="text-xs text-muted-foreground">PIC: {c.picName}</div>}
-                                  {!c.allowMonthlyBilling && <div className="text-xs text-orange-500">{t("Billing belum aktif", "Billing not active")}</div>}
-                                </div>
-                              </CommandItem>
-                            ))}
-                          </CommandGroup>
-                        </CommandList>
-                      </Command>
-                    </PopoverContent>
-                  </Popover>
-                  {companies.length === 0 && (
+                  {isCompanyAccount ? (
+                    <div className="flex items-center gap-2 rounded-md border border-input bg-muted/50 px-3 py-2 h-10">
+                      <Building2 size={14} className="text-blue-600 shrink-0" />
+                      <span className="text-sm font-medium">
+                        {(currentUser as any)?.companyName || currentUser?.name || t("Perusahaan Anda", "Your Company")}
+                      </span>
+                      <Badge variant="outline" className="ml-auto text-xs text-blue-600 border-blue-300 bg-blue-50">{t("Akun Perusahaan", "Company Account")}</Badge>
+                    </div>
+                  ) : (
+                    <Popover open={companyComboOpen} onOpenChange={setCompanyComboOpen}>
+                      <PopoverTrigger asChild>
+                        <button
+                          type="button"
+                          role="combobox"
+                          aria-expanded={companyComboOpen}
+                          className="w-full flex items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 h-10"
+                        >
+                          <span className={!selectedCompanyId ? "text-muted-foreground" : ""}>
+                            {selectedCompanyId
+                              ? (companies.find((c) => String(c.id) === selectedCompanyId)?.companyName || companies.find((c) => String(c.id) === selectedCompanyId)?.name || t("Pilih perusahaan...", "Select company..."))
+                              : t("Pilih perusahaan...", "Select company...")}
+                          </span>
+                          <ChevronsUpDown size={14} className="ml-2 shrink-0 text-muted-foreground" />
+                        </button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-full p-0" align="start">
+                        <Command>
+                          <CommandInput placeholder={t("Cari perusahaan...", "Search company...")} />
+                          <CommandList>
+                            <CommandEmpty>{t("Perusahaan tidak ditemukan.", "Company not found.")}</CommandEmpty>
+                            <CommandGroup>
+                              {companies.map((c) => (
+                                <CommandItem
+                                  key={c.id}
+                                  value={c.companyName || c.name}
+                                  onSelect={() => { setSelectedCompanyId(String(c.id)); setCompanyComboOpen(false); }}
+                                >
+                                  <Check size={14} className={`mr-2 ${selectedCompanyId === String(c.id) ? "opacity-100" : "opacity-0"}`} />
+                                  <div>
+                                    <div className="font-medium text-sm">{c.companyName || c.name}</div>
+                                    {c.picName && <div className="text-xs text-muted-foreground">PIC: {c.picName}</div>}
+                                    {!c.allowMonthlyBilling && <div className="text-xs text-orange-500">{t("Billing belum aktif", "Billing not active")}</div>}
+                                  </div>
+                                </CommandItem>
+                              ))}
+                            </CommandGroup>
+                          </CommandList>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
+                  )}
+                  {!isCompanyAccount && companies.length === 0 && (
                     <p className="text-xs text-muted-foreground">{t("Belum ada perusahaan aktif terdaftar.", "No active companies registered yet.")}</p>
                   )}
                 </div>
@@ -967,13 +1026,31 @@ export default function Booking() {
                   </div>
                 </div>
 
+                {/* Warning: belum diverifikasi sebagai karyawan (hanya untuk non-company account) */}
+                {!isCompanyAccount && !billingStatus?.eligible && (
+                  <div className="flex items-start gap-2 text-xs bg-orange-50 border border-orange-200 rounded-md p-3">
+                    <AlertTriangle size={13} className="mt-0.5 shrink-0 text-orange-500" />
+                    <span className="text-orange-700">
+                      {t(
+                        "Akun Anda belum terverifikasi sebagai karyawan perusahaan. Status booking akan menjadi Menunggu Konfirmasi dan perlu approval admin.",
+                        "Your account is not yet verified as a company employee. Booking status will be Waiting Confirmation and requires admin approval."
+                      )}
+                    </span>
+                  </div>
+                )}
+
                 <div className="flex items-start gap-2 text-xs text-muted-foreground bg-blue-50 border border-blue-200 rounded-md p-3">
                   <AlertTriangle size={13} className="mt-0.5 shrink-0 text-blue-500" />
                   <span>
-                    {t(
-                      "Booking akan ditagihkan ke perusahaan. Jika verifikasi belum selesai, status booking menjadi Menunggu Konfirmasi.",
-                      "Booking will be billed to the company. If verification is pending, booking status will be Waiting Confirmation."
-                    )}
+                    {billingStatus?.eligible
+                      ? t(
+                          "Booking akan ditagihkan ke perusahaan. Tidak perlu bayar sekarang — masuk dalam tagihan bulanan.",
+                          "Booking will be billed to the company. No payment needed now — included in monthly billing."
+                        )
+                      : t(
+                          "Booking akan ditagihkan ke perusahaan. Jika verifikasi belum selesai, status booking menjadi Menunggu Konfirmasi.",
+                          "Booking will be billed to the company. If verification is pending, booking status will be Waiting Confirmation."
+                        )}
                   </span>
                 </div>
               </CardContent>

@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@google-cloud/storage": "^7.19.0",
+    "@sparticuz/chromium-min": "^149.0.0",
     "@supabase/supabase-js": "^2.106.1",
     "@types/pg": "^8.20.0",
     "@workspace/api-zod": "workspace:*",
@@ -26,6 +27,7 @@
     "pg": "^8.20.0",
     "pino": "^9.14.0",
     "pino-http": "^10.5.0",
+    "puppeteer-core": "^25.1.0",
     "tesseract.js": "^7.0.0",
     "uuid": "^14.0.0",
     "ws": "^8.21.0",

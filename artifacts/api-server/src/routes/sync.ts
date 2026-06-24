@@ -112,6 +112,14 @@ router.get("/sync/bookings", apiKeyMiddleware, async (req, res) => {
       const facility = facilities.find((f) => f.id === b.facilityId);
       const payment = payments.find((p) => p.bookingId === b.id);
       const user = users.find((u) => u.id === b.customerId);
+
+      // Hitung rincian pajak
+      const ppnRate    = b.ppnRate    != null ? Number(b.ppnRate)    : null;
+      const ppnAmount  = b.ppnAmount  != null ? Math.round(Number(b.ppnAmount))  : null;
+      const grandTotal = b.grandTotal != null ? Math.round(Number(b.grandTotal)) : null;
+      const dpp        = (ppnAmount != null && grandTotal != null) ? grandTotal - ppnAmount : null;
+      const dppNilaiLain = dpp != null ? Math.round(dpp * 11 / 12) : null;
+
       return {
         id: b.id,
         orderNumber: b.orderNumber,
@@ -140,6 +148,12 @@ router.get("/sync/bookings", apiKeyMiddleware, async (req, res) => {
         completedAt: b.completedAt,
         createdAt: b.createdAt,
         updatedAt: b.updatedAt,
+        // Rincian pajak (PPN)
+        ppnRate,
+        ppnAmount,
+        grandTotal,
+        dpp,
+        dppNilaiLain,
         registeredUser: user ? { id: user.id, name: user.name, email: user.email } : null,
         payment: payment
           ? {
@@ -306,19 +320,21 @@ router.post("/admin/sync-bizportal", adminMiddleware, async (req, res) => {
 
     const facilityIds = [...new Set(allBookings.map((b) => b.facilityId))];
     const facilities = facilityIds.length
-      ? await db.select({ id: facilitiesTable.id, name: facilitiesTable.name }).from(facilitiesTable)
+      ? await db.select({ id: facilitiesTable.id, name: facilitiesTable.name, category: facilitiesTable.category }).from(facilitiesTable)
       : [];
 
-    const facilityMap = new Map(facilities.map((f) => [f.id, f.name]));
+    const facilityMap = new Map(facilities.map((f) => [f.id, { name: f.name, category: f.category }]));
 
     let synced = 0;
     let failed = 0;
     const errors: string[] = [];
 
     for (const booking of allBookings) {
-      const facilityName = facilityMap.get(booking.facilityId) ?? "Unknown";
+      const facilityInfo = facilityMap.get(booking.facilityId);
+      const facilityName = facilityInfo?.name ?? "Unknown";
+      const facilityCategory = facilityInfo?.category ?? null;
       try {
-        await syncBookingToBizportal({ booking, facilityName });
+        await syncBookingToBizportal({ booking, facilityName, facilityCategory });
         synced++;
       } catch (err: any) {
         failed++;

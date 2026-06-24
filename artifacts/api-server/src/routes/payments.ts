@@ -9,7 +9,7 @@ import { notifyPaymentConfirmed, notifyPaymentProofUploaded } from "../lib/notif
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
 import { syncStatusToBizportal } from "../lib/bizportalSync";
 import { BUCKETS, uploadToStorage } from "../lib/supabaseStorage";
-import { createJournalEntry } from "../lib/accounting";
+import { createJournalEntry, createPublicAccountingEntry } from "../lib/accounting";
 
 const router = Router();
 
@@ -248,13 +248,15 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
             startTime: booking.startTime,
             endTime: booking.endTime,
             totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
-          });
+            bookingId: booking.id,
+          }).catch((err) => console.error("[WA] notifyPaymentConfirmed error:", err));
           syncStatusToBizportal(booking.orderNumber, "confirmed", payment.proofUrl, new Date()).catch(() => {});
 
           const today = new Date().toISOString().split("T")[0];
           const subtotal = Number(booking.totalPrice);
           const ppnAmount = booking.ppnAmount != null ? Number(booking.ppnAmount) : 0;
           createJournalEntry(booking.id, booking.orderNumber, subtotal, ppnAmount, today).catch(() => {});
+          createPublicAccountingEntry(booking.id, booking.orderNumber, subtotal, ppnAmount, booking.facilityId, today).catch(() => {});
         }
 
         await logAudit({

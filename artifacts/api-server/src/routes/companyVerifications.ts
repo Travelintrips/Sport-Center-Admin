@@ -16,7 +16,10 @@ router.get("/companies", async (req, res) => {
       id: usersTable.id,
       name: usersTable.name,
       companyName: usersTable.companyName,
+      email: usersTable.email,
+      phone: usersTable.phone,
       allowMonthlyBilling: usersTable.allowMonthlyBilling,
+      requirePerBookingApproval: usersTable.requirePerBookingApproval,
       picName: usersTable.picName,
       picPhone: usersTable.picPhone,
       picEmail: usersTable.picEmail,
@@ -450,6 +453,25 @@ router.patch("/company-verifications/:id/revoke", adminMiddleware, async (req, r
     res.json(updated);
   } catch (err) {
     req.log.error({ err }, "Revoke company verification error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ─── PATCH /companies/:id/settings — admin toggle company settings ──────────
+router.patch("/companies/:id/settings", adminMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(String(req.params.id));
+    const { allowMonthlyBilling, requirePerBookingApproval, accountStatus } = req.body;
+    const setValues: Record<string, unknown> = {};
+    if (typeof allowMonthlyBilling === "boolean") setValues.allowMonthlyBilling = allowMonthlyBilling;
+    if (typeof requirePerBookingApproval === "boolean") setValues.requirePerBookingApproval = requirePerBookingApproval;
+    if (accountStatus) setValues.accountStatus = accountStatus;
+    if (Object.keys(setValues).length === 0) { res.status(400).json({ error: "Nothing to update" }); return; }
+    const [updated] = await db.update(usersTable).set(setValues as any).where(eq(usersTable.id, id)).returning();
+    if (!updated) { res.status(404).json({ error: "Company not found" }); return; }
+    res.json(updated);
+  } catch (err) {
+    req.log.error({ err }, "Update company settings error");
     res.status(500).json({ error: "Internal server error" });
   }
 });

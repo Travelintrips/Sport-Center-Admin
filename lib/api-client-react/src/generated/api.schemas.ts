@@ -1563,6 +1563,72 @@ export interface ExpenseStatusInput {
   rejectedReason?: string;
 }
 
+export type DocumentTemplateDocumentType = typeof DocumentTemplateDocumentType[keyof typeof DocumentTemplateDocumentType];
+
+
+export const DocumentTemplateDocumentType = {
+  invoice: 'invoice',
+  spp: 'spp',
+  faktur: 'faktur',
+  kwitansi: 'kwitansi',
+  lampiran: 'lampiran',
+  berita_acara: 'berita_acara',
+} as const;
+
+export interface DocumentTemplate {
+  id?: number;
+  companyId?: number | null;
+  companyName?: string;
+  documentType?: DocumentTemplateDocumentType;
+  isDefault?: boolean;
+  headerLogoUrl?: string | null;
+  kopSuratHtml?: string | null;
+  footerHtml?: string | null;
+  companyDisplayName?: string | null;
+  financeName?: string | null;
+  financeTitle?: string | null;
+  financeSignature?: string | null;
+  address?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  numberFormatPrefix?: string | null;
+  numberFormatPattern?: string | null;
+  paperStyle?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export type DocumentTemplateInputDocumentType = typeof DocumentTemplateInputDocumentType[keyof typeof DocumentTemplateInputDocumentType];
+
+
+export const DocumentTemplateInputDocumentType = {
+  invoice: 'invoice',
+  spp: 'spp',
+  faktur: 'faktur',
+  kwitansi: 'kwitansi',
+  lampiran: 'lampiran',
+  berita_acara: 'berita_acara',
+} as const;
+
+export interface DocumentTemplateInput {
+  companyId?: number | null;
+  documentType: DocumentTemplateInputDocumentType;
+  isDefault?: boolean;
+  headerLogoUrl?: string;
+  kopSuratHtml?: string;
+  footerHtml?: string;
+  companyDisplayName?: string;
+  financeName?: string;
+  financeTitle?: string;
+  financeSignature?: string;
+  address?: string;
+  phone?: string;
+  email?: string;
+  numberFormatPrefix?: string;
+  numberFormatPattern?: string;
+  paperStyle?: string;
+}
+
 export type SendOtp200 = {
   success?: boolean;
   message?: string;
@@ -1717,5 +1783,30 @@ category?: string;
 status?: string;
 vendorName?: string;
 facilityId?: number;
+};
+
+export type ListDocumentTemplatesParams = {
+companyId?: string;
+documentType?: string;
+};
+
+export type DeleteDocumentTemplate200 = {
+  success?: boolean;
+};
+
+export type PreviewDocumentParams = {
+companyId?: number;
+/**
+ * JWT token for browser window.open() flows (alternative to Authorization header)
+ */
+_token?: string;
+};
+
+export type GenerateDocumentPdfParams = {
+companyId?: number;
+/**
+ * JWT token for browser window.open() flows (alternative to Authorization header)
+ */
+_token?: string;
 };
 

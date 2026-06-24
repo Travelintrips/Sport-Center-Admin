@@ -1,4 +1,4 @@
-import { text, serial, timestamp, numeric, integer } from "drizzle-orm/pg-core";
+import { text, serial, timestamp, numeric, integer, jsonb } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { facilitiesTable } from "./facilities";
@@ -41,6 +41,7 @@ export const expensesTable = scSchema.table("sport_expenses", {
   paymentAccount: text("payment_account"),
   paymentStatus: expenseStatusEnum("payment_status").notNull().default("draft"),
   receiptUrl: text("receipt_url"),
+  receiptUrls: jsonb("receipt_urls").$type<string[]>().default([]),
   notes: text("notes"),
   createdBy: integer("created_by").references(() => usersTable.id, { onDelete: "set null" }),
   approvedBy: integer("approved_by").references(() => usersTable.id, { onDelete: "set null" }),

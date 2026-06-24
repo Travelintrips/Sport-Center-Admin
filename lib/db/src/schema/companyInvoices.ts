@@ -12,6 +12,7 @@ export const companyInvoicesTable = scSchema.table("company_invoices", {
   companyCustomerId: integer("company_customer_id").notNull().references(() => usersTable.id),
   periodMonth: text("period_month").notNull(),
   totalAmount: numeric("total_amount", { precision: 14, scale: 2 }).notNull().default("0"),
+  dppNilaiLain: numeric("dpp_nilai_lain", { precision: 14, scale: 2 }).notNull().default("0"),
   ppnAmount: numeric("ppn_amount", { precision: 14, scale: 2 }).notNull().default("0"),
   grandTotal: numeric("grand_total", { precision: 14, scale: 2 }).notNull().default("0"),
   paidAmount: numeric("paid_amount", { precision: 14, scale: 2 }).notNull().default("0"),

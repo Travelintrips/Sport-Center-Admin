@@ -1,6 +1,8 @@
 import { db, notificationTemplatesTable, settingsTable } from "@workspace/db";
+import { renderDocumentText } from "./documentRenderer";
 import { eq } from "drizzle-orm";
 import { trackSentMessage } from "./waSentTracker";
+import { logger } from "./logger";
 
 const ENV_FONNTE_TOKEN = process.env.FONNTE_TOKEN || "";
 const ENV_FONNTE_ADMIN_WA = process.env.FONNTE_ADMIN_WA || "";
@@ -32,15 +34,34 @@ async function getWaConfig(): Promise<{ token: string; adminPhones: string[] }> 
   }
 }
 
+function cleanPhoneNumber(raw: string): string {
+  let p = raw.replace(/\D/g, "");
+  if (p.startsWith("0")) p = "62" + p.slice(1);
+  else if (p && !p.startsWith("62")) p = "62" + p;
+  return p;
+}
+
+function isValidPhone(phone: string): boolean {
+  // Minimal format: 62 + 8-13 digit (total 10-15 karakter)
+  return /^62\d{8,13}$/.test(phone);
+}
+
 async function sendWA(phone: string, message: string): Promise<void> {
-  if (!phone) return;
+  const cleanPhone = cleanPhoneNumber(phone);
+  if (!cleanPhone || !isValidPhone(cleanPhone)) {
+    logger.warn({ phone, cleanPhone }, "[WA] sendWA: nomor tidak valid, pesan tidak dikirim");
+    return;
+  }
   // Catat SEGERA sebelum await apapun — Fonnte echo bisa datang saat getWaConfig() pending
   trackSentMessage(message);
   const { token } = await getWaConfig();
-  if (!token) return;
+  if (!token) {
+    logger.error("[WA] sendWA: FONNTE_TOKEN kosong — pesan tidak dikirim ke " + cleanPhone);
+    return;
+  }
+  logger.info({ target: cleanPhone }, "[WA] Mengirim pesan WA via Fonnte");
   try {
-    const cleanPhone = phone.replace(/^0/, "62").replace(/\D/g, "");
-    await fetch("https://api.fonnte.com/send", {
+    const resp = await fetch("https://api.fonnte.com/send", {
       method: "POST",
       headers: {
         Authorization: token,
@@ -48,8 +69,20 @@ async function sendWA(phone: string, message: string): Promise<void> {
       },
       body: JSON.stringify({ target: cleanPhone, message }),
     });
-  } catch {
-    // Non-critical — swallow error
+    const body = await resp.text().catch(() => "(no body)");
+    if (!resp.ok) {
+      logger.error({ status: resp.status, target: cleanPhone, body }, "[WA] Fonnte HTTP error");
+    } else {
+      let json: Record<string, unknown> | null = null;
+      try { json = JSON.parse(body); } catch { /* non-json */ }
+      if (json && json["status"] === false) {
+        logger.error({ target: cleanPhone, response: json }, "[WA] Fonnte gagal kirim pesan");
+      } else {
+        logger.info({ target: cleanPhone, id: json?.["id"] }, "[WA] Pesan berhasil masuk queue Fonnte");
+      }
+    }
+  } catch (err) {
+    logger.error({ err: (err as Error).message, target: cleanPhone }, "[WA] sendWA exception");
   }
 }
 
@@ -95,6 +128,7 @@ export interface BookingNotifData {
   paymentDeadline?: string;
   reason?: string;
   reviewUrl?: string;
+  bookingId?: number;
 }
 
 export async function notifyBookingCreated(data: BookingNotifData): Promise<void> {
@@ -102,15 +136,69 @@ export async function notifyBookingCreated(data: BookingNotifData): Promise<void
   const vars = { ...data, ...bankInfo, paymentDeadline: data.paymentDeadline ?? "" };
 
   const customerTpl = await getTemplate("booking_created");
-  if (customerTpl) await sendWA(data.customerPhone, interpolate(customerTpl, vars));
+  if (customerTpl) {
+    await sendWA(data.customerPhone, interpolate(customerTpl, vars));
+  } else {
+    // Fallback: pesan hardcoded jika template belum di-set
+    const msg =
+      `✅ *Booking Berhasil Dibuat!*\n\n` +
+      `Halo *${data.customerName}*,\n` +
+      `Booking *${data.facilityName}* kamu sudah kami terima.\n\n` +
+      `📋 *Detail Booking:*\n` +
+      `• No. Order: *${data.orderNumber}*\n` +
+      `• Tanggal: *${data.bookingDate}*\n` +
+      `• Jam: *${data.startTime} – ${data.endTime}*\n` +
+      `• Total: *Rp ${data.totalPrice}*\n\n` +
+      `💳 *Pembayaran via Transfer Bank:*\n` +
+      `Bank: *${bankInfo.bankName}*\n` +
+      `Rekening: *${bankInfo.bankAccount}*\n` +
+      `Atas Nama: *${bankInfo.bankAccountName}*\n\n` +
+      (data.paymentDeadline ? `⏰ Batas pembayaran: *${data.paymentDeadline}*\n\n` : "") +
+      `Setelah transfer, segera upload bukti pembayaran di halaman booking kamu.\n\nTerima kasih! 🏆`;
+    await sendWA(data.customerPhone, msg);
+  }
 
   const adminTpl = await getTemplate("admin_new_booking");
-  if (adminTpl) await sendWAToAdmins(interpolate(adminTpl, vars));
+  if (adminTpl) {
+    await sendWAToAdmins(interpolate(adminTpl, vars));
+  } else {
+    // Fallback: notifikasi admin hardcoded
+    const adminMsg =
+      `🏅 *BOOKING BARU — ${data.orderNumber}*\n\n` +
+      `Customer: *${data.customerName}*\n` +
+      `WA: *${data.customerPhone}*\n` +
+      `Fasilitas: *${data.facilityName}*\n` +
+      `Tanggal: *${data.bookingDate}*\n` +
+      `Jam: *${data.startTime} – ${data.endTime}*\n` +
+      `Total: *Rp ${data.totalPrice}*\n` +
+      (data.paymentDeadline ? `Batas bayar: ${data.paymentDeadline}` : "");
+    await sendWAToAdmins(adminMsg);
+  }
 }
 
 export async function notifyPaymentConfirmed(data: BookingNotifData): Promise<void> {
+  // Attempt to render WA message from company document template engine (kwitansi)
+  if (data.bookingId) {
+    try {
+      const rendered = await renderDocumentText({ documentType: "kwitansi", entityId: data.bookingId });
+      if (rendered) {
+        // Optionally append preview link if app URL is configured
+        let msg = rendered;
+        try {
+          const [s] = await db.select().from(settingsTable).limit(1).catch(() => [null]);
+          const appUrl = (s as { appUrl?: string } | null)?.appUrl || process.env.APP_URL || "";
+          if (appUrl) msg += `\n\n🔗 Lihat kwitansi digital:\n${appUrl}/api/admin/documents/kwitansi/${data.bookingId}/preview`;
+        } catch { /* non-fatal */ }
+        await sendWA(data.customerPhone, msg);
+        return;
+      }
+    } catch { /* non-fatal — fall through to legacy template */ }
+  }
+
+  // Fallback: legacy notification template
   const tpl = await getTemplate("payment_confirmed");
-  if (tpl) await sendWA(data.customerPhone, interpolate(tpl, data as unknown as Record<string, string>));
+  if (!tpl) return;
+  await sendWA(data.customerPhone, interpolate(tpl, data as unknown as Record<string, string>));
 }
 
 export async function notifyBookingCancelled(data: BookingNotifData): Promise<void> {
@@ -192,6 +280,7 @@ export interface CompanyBookingNotifData {
   totalPrice: string;
   companyName: string;
   periodMonth: string;
+  picPhone?: string;
 }
 
 export async function notifyCompanyBookingCreated(data: CompanyBookingNotifData): Promise<void> {
@@ -200,6 +289,11 @@ export async function notifyCompanyBookingCreated(data: CompanyBookingNotifData)
 
   const adminMsg = `📋 *Booking Perusahaan Baru*\nOrder: *${data.orderNumber}*\nPerusahaan: ${data.companyName}\nFasilitas: ${data.facilityName}\nTanggal: ${data.bookingDate} | ${data.startTime}–${data.endTime}\nTagihan: Bulanan ${data.periodMonth}\nNilai: Rp${data.totalPrice}`;
   await sendWAToAdmins(adminMsg);
+
+  if (data.picPhone) {
+    const picMsg = `📋 *Notifikasi Booking Perusahaan*\n\nHalo PIC *${data.companyName}*,\n\nAda booking baru atas nama perusahaan Anda.\n\nOrder: *${data.orderNumber}*\nPemesan: ${data.customerName}\nFasilitas: ${data.facilityName}\nTanggal: *${data.bookingDate}* | ${data.startTime}–${data.endTime}\nTagihan: Bulanan ${data.periodMonth}\nNilai: Rp ${data.totalPrice}\n\nBooking ini akan masuk dalam tagihan bulanan perusahaan. Terima kasih!`;
+    await sendWA(data.picPhone, picMsg);
+  }
 }
 
 export async function notifyRescheduleApproved(data: RescheduleNotifData): Promise<void> {

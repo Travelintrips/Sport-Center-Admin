@@ -346,6 +346,7 @@ export default function AdminSettings() {
   const [form, setForm] = useState({
     centerName: "", address: "", phone: "", whatsapp: "", email: "",
     openHour: "", closeHour: "", logoUrl: "", bankName: "", bankAccount: "", bankAccountName: "",
+    paymentDeadlineHours: "24",
   });
   const [waForm, setWaForm] = useState({
     fonnteToken: "", fonnteAdminWa: "", adminWaPhones: "", appUrl: "",
@@ -369,6 +370,7 @@ export default function AdminSettings() {
         bankName: settings.bankName ?? "",
         bankAccount: settings.bankAccount ?? "",
         bankAccountName: settings.bankAccountName ?? "",
+        paymentDeadlineHours: (settings as any).paymentDeadlineHours ?? "24",
       });
       setWaForm({
         fonnteToken: (settings as any).fonnteToken ?? "",
@@ -494,6 +496,18 @@ export default function AdminSettings() {
               <div className="space-y-2">
                 <Label>Jam Tutup</Label>
                 <Input type="time" value={form.closeHour} onChange={(e) => setForm(f => ({ ...f, closeHour: e.target.value }))} />
+              </div>
+              <div className="space-y-2">
+                <Label>Batas Waktu Pembayaran Personal (jam)</Label>
+                <Input
+                  type="number"
+                  min="1"
+                  max="72"
+                  value={form.paymentDeadlineHours}
+                  onChange={(e) => setForm(f => ({ ...f, paymentDeadlineHours: e.target.value }))}
+                  placeholder="24"
+                />
+                <p className="text-xs text-muted-foreground">Waktu yang diberikan customer personal untuk upload bukti bayar (default: 24 jam)</p>
               </div>
               <div className="md:col-span-2 space-y-2">
                 <Label>URL Logo</Label>

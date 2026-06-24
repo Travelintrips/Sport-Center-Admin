@@ -278,9 +278,27 @@ export default function BookingDetail() {
     <div className="container mx-auto px-4 py-8 md:py-12 max-w-4xl">
       {/* Header */}
       <div className="mb-8 text-center">
-        <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-full border mb-6 ${statusConfig.color}`}>
-          <StatusIcon size={20} />
-          <span className="font-bold">{statusConfig.label}</span>
+        <div className="flex flex-wrap justify-center gap-2 mb-6">
+          <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-full border ${statusConfig.color}`}>
+            <StatusIcon size={20} />
+            <span className="font-bold">{statusConfig.label}</span>
+          </div>
+          {(booking as any).payerType === "company" ? (
+            <div className="inline-flex items-center gap-1.5 px-3 py-2 rounded-full border bg-blue-100 text-blue-700 border-blue-200">
+              <Building2 size={14} />
+              <span className="font-semibold text-sm">{t("Corporate", "Corporate")}</span>
+              {(booking as any).billingStatus && (
+                <span className="ml-1 text-xs bg-blue-200 text-blue-800 px-1.5 py-0.5 rounded-full font-medium uppercase">
+                  {(booking as any).billingStatus}
+                </span>
+              )}
+            </div>
+          ) : (
+            <div className="inline-flex items-center gap-1.5 px-3 py-2 rounded-full border bg-gray-100 text-gray-600 border-gray-200">
+              <CheckCircle2 size={14} />
+              <span className="font-semibold text-sm">{t("Personal", "Personal")}</span>
+            </div>
+          )}
         </div>
         <h1 className="text-3xl md:text-5xl font-black tracking-tight mb-2">
           {t("Order", "Order")} {booking.orderNumber}
@@ -288,7 +306,9 @@ export default function BookingDetail() {
         <p className="text-muted-foreground text-lg">
           {booking.status === "pending_payment"
             ? t("Selesaikan pembayaran untuk mengamankan booking ini.", "Complete payment to secure this booking.")
-            : t("Terima kasih atas pemesanan Anda!", "Thank you for your order!")}
+            : (booking as any).payerType === "company"
+              ? t("Booking akan ditagihkan ke akun perusahaan.", "Booking will be billed to the company account.")
+              : t("Terima kasih atas pemesanan Anda!", "Thank you for your order!")}
         </p>
       </div>
 
@@ -305,6 +325,11 @@ export default function BookingDetail() {
               <div className="text-sm text-muted-foreground">
                 {booking.customerPhone} · {booking.customerEmail}
               </div>
+              {(booking as any).payerType === "company" && (booking as any).bookedForName && (booking as any).bookedForName !== booking.customerName && (
+                <div className="text-xs text-blue-600 mt-1">
+                  {t("Digunakan oleh", "Used by")}: <span className="font-medium">{(booking as any).bookedForName}</span>
+                </div>
+              )}
             </div>
             <div className="h-px bg-border" />
             <div>
@@ -351,12 +376,40 @@ export default function BookingDetail() {
                 </div>
               </div>
             ) : (
-              <div className="flex justify-between items-center text-xl font-black">
-                <div>{t("Grand Total", "Grand Total")}</div>
-                <div className="text-primary">
-                  Rp {booking.totalPrice.toLocaleString("id-ID")}
-                </div>
-              </div>
+              (() => {
+                const gt = Number((booking as any).grandTotal ?? booking.totalPrice);
+                const hasPpn = (booking as any).ppnAmount != null && Number((booking as any).ppnAmount) > 0;
+                const dppVal = hasPpn
+                  ? ((booking as any).dpp != null ? Number((booking as any).dpp) : Math.round(gt / 1.11))
+                  : gt;
+                const dppNilaiLainVal = hasPpn ? Math.round(dppVal * 11 / 12) : 0;
+                const ppnVal = hasPpn ? (gt - dppVal) : 0;
+                return (
+                  <div className="space-y-1.5 w-full">
+                    {hasPpn && (
+                      <>
+                        <div className="flex justify-between items-center text-sm text-muted-foreground">
+                          <span>DPP</span>
+                          <span className="font-medium">Rp {dppVal.toLocaleString("id-ID")}</span>
+                        </div>
+                        <div className="flex justify-between items-center text-xs text-muted-foreground/70">
+                          <span>{t("DPP Nilai Lain (11/12 × DPP)", "DPP Nilai Lain (11/12 × DPP)")}</span>
+                          <span>Rp {dppNilaiLainVal.toLocaleString("id-ID")}</span>
+                        </div>
+                        <div className="flex justify-between items-center text-sm text-muted-foreground">
+                          <span>PPN 12%</span>
+                          <span className="text-primary font-semibold">+Rp {ppnVal.toLocaleString("id-ID")}</span>
+                        </div>
+                        <div className="h-px bg-border" />
+                      </>
+                    )}
+                    <div className="flex justify-between items-center text-xl font-black">
+                      <div>{t("Total DPP + PPN", "Total DPP + PPN")}</div>
+                      <div className="text-primary">Rp {gt.toLocaleString("id-ID")}</div>
+                    </div>
+                  </div>
+                );
+              })()
             )}
           </CardContent>
         </Card>
