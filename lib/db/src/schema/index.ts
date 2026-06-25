@@ -40,3 +40,4 @@ export * from "./connectionBaselines";
 export * from "./publicExpenses";
 export * from "./publicMemberships";
 export * from "./vendors";
+export * from "./coaAccounts";

@@ -17,3 +17,5 @@
 - [Expenses feature](expenses-feature.md) — sport_expenses table + expense_no_seq + expense_status/category enums; accounting_journals.booking_id made nullable for expense journal entries; /admin/expenses routes.
 - [Data Connection Monitor](data-connection-monitor.md) — connectionHealth.ts lib; Drizzle sql.raw() needed for IN queries on information_schema; blocked_schedules (not "schedules") is the table name; system_connection_baselines table in sport_center schema.
 - [Prod schema sync approach](prod-schema-sync.md) — drizzle-kit push hangs on shared Supabase (150+ tables); use targeted ALTER TABLE script via scripts/src/ instead.
+- [COA Accounts feature](coa-accounts-feature.md) — coa_accounts table in sport_center schema; expenses FK to coa_accounts; journal type auto-detected from accountType (expense→operational, asset→kasbon, liability→bayar hutang).
+- [Workflow waitForPort config](workflow-port-config.md) — restart_workflow tool fails "DIDNT_OPEN_A_PORT" if workflow not configured with waitForPort; fix via configureWorkflow({waitForPort:8080,outputType:"console"}).
