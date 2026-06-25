@@ -747,5 +747,27 @@ CREATE TABLE IF NOT EXISTS sport_center.coa_accounts (
 -- receipt_urls column on sport_expenses (jsonb multi-attachment)
 ALTER TABLE sport_center.sport_expenses
   ADD COLUMN IF NOT EXISTS receipt_urls JSONB DEFAULT '[]';
+
+-- ============================================================
+-- sport_vendors master table
+-- ============================================================
+CREATE TABLE IF NOT EXISTS sport_center.sport_vendors (
+  id           SERIAL PRIMARY KEY,
+  name         TEXT NOT NULL,
+  contact_person TEXT,
+  phone        TEXT,
+  email        TEXT,
+  address      TEXT,
+  notes        TEXT,
+  is_active    BOOLEAN NOT NULL DEFAULT true,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- vendor_id FK on sport_expenses
+ALTER TABLE sport_center.sport_expenses
+  ADD COLUMN IF NOT EXISTS vendor_id INTEGER
+    REFERENCES sport_center.sport_vendors(id)
+    ON DELETE SET NULL;
 `;
 

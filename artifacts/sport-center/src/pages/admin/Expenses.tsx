@@ -13,7 +13,7 @@ import { useToast } from "@/hooks/use-toast";
 import {
   Plus, Search, TrendingDown, Clock, CheckCircle2,
   Eye, Edit2, ThumbsUp, ThumbsDown, Banknote, X, Receipt,
-  Upload, Loader2, Trash2, BookOpen,
+  Upload, Loader2, Trash2, BookOpen, Building2,
 } from "lucide-react";
 
 const API = import.meta.env.VITE_API_BASE_URL ?? "/api";
@@ -69,7 +69,7 @@ const EMPTY_FORM = {
   expenseDate: new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Jakarta" }),
   coaAccountId: "",
   description: "",
-  vendorName: "",
+  vendorId: "",
   facilityId: "",
   amount: "",
   ppnAmount: "",
@@ -78,6 +78,11 @@ const EMPTY_FORM = {
   receiptUrls: [] as string[],
   notes: "",
 };
+
+interface Vendor {
+  id: number;
+  name: string;
+}
 
 interface CoaAccount {
   id: number;
@@ -178,6 +183,14 @@ export default function AdminExpenses() {
       fetch(`${API}/admin/expenses/coa-accounts`, { headers: authHeaders() })
         .then((r) => r.json())
         .then((d) => (Array.isArray(d) ? d : [])),
+  });
+
+  const { data: vendors = [] } = useQuery<Vendor[]>({
+    queryKey: ["vendors"],
+    queryFn: () =>
+      fetch(`${API}/admin/vendors`, { headers: authHeaders() })
+        .then((r) => r.json())
+        .then((d) => (Array.isArray(d) ? d.filter((v: any) => v.isActive) : [])),
   });
 
   const { data: detail } = useQuery({
@@ -308,7 +321,7 @@ export default function AdminExpenses() {
       expenseDate: expense.expenseDate ?? "",
       coaAccountId: expense.coaAccountId ? String(expense.coaAccountId) : "",
       description: expense.description ?? "",
-      vendorName: expense.vendorName ?? "",
+      vendorId: expense.vendorId ? String(expense.vendorId) : "",
       facilityId: expense.facilityId ? String(expense.facilityId) : "",
       amount: String(expense.amount ?? ""),
       ppnAmount: String(expense.ppnAmount ?? "0"),
@@ -330,7 +343,7 @@ export default function AdminExpenses() {
       expenseDate: form.expenseDate,
       coaAccountId: Number(form.coaAccountId),
       description: form.description,
-      vendorName: form.vendorName || null,
+      vendorId: form.vendorId ? Number(form.vendorId) : null,
       facilityId: form.facilityId ? Number(form.facilityId) : null,
       amount: Number(form.amount),
       ppnAmount: Number(form.ppnAmount || 0),
@@ -623,8 +636,27 @@ export default function AdminExpenses() {
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1">
-                <Label>Vendor / Supplier</Label>
-                <Input value={form.vendorName} onChange={(e) => setForm({ ...form, vendorName: e.target.value })} placeholder="Nama vendor" />
+                <Label className="flex items-center gap-1">
+                  <Building2 className="w-3.5 h-3.5 text-orange-500" />
+                  Vendor / Supplier
+                </Label>
+                <Select value={form.vendorId || "none"} onValueChange={(v) => setForm({ ...form, vendorId: v === "none" ? "" : v })}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Pilih vendor…" />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-60">
+                    <SelectItem value="none">— Tanpa vendor —</SelectItem>
+                    {vendors.length === 0 ? (
+                      <div className="px-3 py-2 text-xs text-gray-400 italic">
+                        Belum ada vendor aktif. Tambahkan di menu Daftar Vendor.
+                      </div>
+                    ) : (
+                      vendors.map((v) => (
+                        <SelectItem key={v.id} value={String(v.id)}>{v.name}</SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
               </div>
               <div className="space-y-1">
                 <Label>Fasilitas Terkait</Label>
