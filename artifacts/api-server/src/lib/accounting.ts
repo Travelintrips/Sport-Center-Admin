@@ -5,6 +5,8 @@ import { eq, and, sql } from "drizzle-orm";
 const PUBLIC_JOURNAL_ID = 8099;        // CSH-CST (Kas) — id=8099 di public.accounting_journals
 const COA_KAS_CST = 49097;             // 1-1010-CST  Kas CST
 const COA_PENDAPATAN_BOOKING = 72354;  // 4-1017-CST  Pendapatan Booking Sport Center CST
+const COA_PPN_KELUARAN = 49109;        // PPN Keluaran — account_id di public.accounting_taxes id=1
+const TAX_ID_PPN_11 = 1;              // id di public.accounting_taxes (PPN Keluaran 11%)
 const COMPANY_ID = 1;
 
 async function nextPublicEntryNumber(year: number): Promise<string> {
@@ -28,9 +30,12 @@ export async function createPublicAccountingEntry(
   journalDate: string,
 ): Promise<void> {
   const grandTotal = subtotal + ppnAmount;
+  const hasPpn = ppnAmount > 0;
   const year = new Date(journalDate).getFullYear();
+  const period = journalDate.slice(0, 7); // YYYY-MM
   const entryNumber = await nextPublicEntryNumber(year);
 
+  // 1. Buat accounting entry (draft)
   const entryResult = await db.execute(sql`
     INSERT INTO public.accounting_entries
       (entry_number, journal_id, date, ref, description, status, source, source_id,
@@ -46,13 +51,54 @@ export async function createPublicAccountingEntry(
   `);
   const entryId = Number((entryResult.rows[0] as any).id);
 
-  await db.execute(sql`
-    INSERT INTO public.accounting_entry_lines (entry_id, account_id, description, debit, credit) VALUES
-      (${entryId}, ${COA_KAS_CST},            ${'Penerimaan booking ' + orderNumber}, ${grandTotal}, 0),
-      (${entryId}, ${COA_PENDAPATAN_BOOKING},  ${'Pendapatan booking ' + orderNumber}, 0, ${subtotal})
-  `);
+  // 2. Baris GL: Kas (debit), Pendapatan (kredit), PPN Keluaran (kredit jika ada)
+  if (hasPpn) {
+    await db.execute(sql`
+      INSERT INTO public.accounting_entry_lines (entry_id, account_id, description, debit, credit) VALUES
+        (${entryId}, ${COA_KAS_CST},           ${'Penerimaan booking ' + orderNumber}, ${grandTotal}, 0),
+        (${entryId}, ${COA_PENDAPATAN_BOOKING}, ${'Pendapatan booking ' + orderNumber}, 0, ${subtotal}),
+        (${entryId}, ${COA_PPN_KELUARAN},       ${'PPN Keluaran booking ' + orderNumber}, 0, ${ppnAmount})
+    `);
+  } else {
+    await db.execute(sql`
+      INSERT INTO public.accounting_entry_lines (entry_id, account_id, description, debit, credit) VALUES
+        (${entryId}, ${COA_KAS_CST},           ${'Penerimaan booking ' + orderNumber}, ${grandTotal}, 0),
+        (${entryId}, ${COA_PENDAPATAN_BOOKING}, ${'Pendapatan booking ' + orderNumber}, 0, ${subtotal})
+    `);
+  }
 
+  // 3. Post entry
   await db.execute(sql`UPDATE public.accounting_entries SET status = 'posted' WHERE id = ${entryId}`);
+
+  // 4. public.transaction_taxes — hanya jika ada PPN
+  if (hasPpn) {
+    await db.execute(sql`
+      INSERT INTO public.transaction_taxes
+        (company_id, transaction_type, transaction_id, transaction_ref,
+         tax_id, tax_name, tax_rate, cut_type,
+         base_amount, tax_amount, account_id,
+         period, status, direction, created_at, updated_at)
+      VALUES (
+        ${COMPANY_ID}, 'sport_center_booking', ${bookingId}, ${orderNumber},
+        ${TAX_ID_PPN_11}, 'PPN Keluaran 11%', 11, 'self_borne',
+        ${subtotal}, ${ppnAmount}, ${COA_PPN_KELUARAN},
+        ${period}, 'posted', 'out', NOW(), NOW()
+      )
+    `);
+
+    // 5. public.gl_tax_lines — terhubung ke accounting_entry_id
+    await db.execute(sql`
+      INSERT INTO public.gl_tax_lines
+        (company_id, accounting_entry_id, tax_type, rate,
+         base_amount, tax_amount, direction, period,
+         entity_type, entity_id, is_reported, created_at)
+      VALUES (
+        ${COMPANY_ID}, ${entryId}, 'PPN_OUT', 11,
+        ${subtotal}, ${ppnAmount}, 'out', ${period},
+        'booking', ${orderNumber}, false, NOW()
+      )
+    `);
+  }
 }
 
 export async function reversePublicAccountingEntry(
@@ -69,8 +115,10 @@ export async function reversePublicAccountingEntry(
 
   const original = originalResult.rows[0] as any;
   const year = new Date(journalDate).getFullYear();
+  const period = journalDate.slice(0, 7);
   const entryNumber = await nextPublicEntryNumber(year);
 
+  // 1. Reversal accounting entry (draft)
   const revResult = await db.execute(sql`
     INSERT INTO public.accounting_entries
       (entry_number, journal_id, date, ref, description, status, source, source_id,
@@ -86,13 +134,56 @@ export async function reversePublicAccountingEntry(
   `);
   const revId = Number((revResult.rows[0] as any).id);
 
+  // 2. Swap debit/kredit dari lines asli
   await db.execute(sql`
     INSERT INTO public.accounting_entry_lines (entry_id, account_id, description, debit, credit)
     SELECT ${revId}, account_id, ${'Reversal: ' + reason}, credit, debit
     FROM public.accounting_entry_lines WHERE entry_id = ${original.id}
   `);
 
+  // 3. Post reversal entry
   await db.execute(sql`UPDATE public.accounting_entries SET status = 'posted' WHERE id = ${revId}`);
+
+  // 4. Reverse transaction_taxes — tandai yang asli jadi 'reversed', insert baris negasi
+  const taxResult = await db.execute(sql`
+    SELECT id, base_amount, tax_amount, tax_rate FROM public.transaction_taxes
+    WHERE transaction_type = 'sport_center_booking' AND transaction_ref = ${orderNumber} AND status = 'posted'
+    LIMIT 1
+  `);
+  if (taxResult.rows.length) {
+    const origTax = taxResult.rows[0] as any;
+    await db.execute(sql`
+      UPDATE public.transaction_taxes SET status = 'reversed', updated_at = NOW()
+      WHERE id = ${origTax.id}
+    `);
+    await db.execute(sql`
+      INSERT INTO public.transaction_taxes
+        (company_id, transaction_type, transaction_id, transaction_ref,
+         tax_id, tax_name, tax_rate, cut_type,
+         base_amount, tax_amount, account_id,
+         period, status, direction, created_at, updated_at)
+      VALUES (
+        ${COMPANY_ID}, 'sport_center_booking_reversal', ${revId}, ${orderNumber},
+        ${TAX_ID_PPN_11}, 'PPN Keluaran 11% (Reversal)', ${origTax.tax_rate}, 'self_borne',
+        ${-Math.abs(Number(origTax.base_amount))}, ${-Math.abs(Number(origTax.tax_amount))},
+        ${COA_PPN_KELUARAN},
+        ${period}, 'reversed', 'out', NOW(), NOW()
+      )
+    `);
+
+    // 5. Reversal gl_tax_lines
+    await db.execute(sql`
+      INSERT INTO public.gl_tax_lines
+        (company_id, accounting_entry_id, tax_type, rate,
+         base_amount, tax_amount, direction, period,
+         entity_type, entity_id, is_reported, created_at)
+      SELECT
+        ${COMPANY_ID}, ${revId}, tax_type, rate,
+        -ABS(base_amount), -ABS(tax_amount), direction, ${period},
+        entity_type, entity_id, false, NOW()
+      FROM public.gl_tax_lines WHERE accounting_entry_id = ${original.id}
+    `);
+  }
 }
 
 async function postJournalLines(
