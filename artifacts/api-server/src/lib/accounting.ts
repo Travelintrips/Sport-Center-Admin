@@ -2,7 +2,7 @@ import { db, accountingJournalsTable, accountingJournalLinesTable } from "@works
 import { eq, and, sql } from "drizzle-orm";
 
 // ─── Public Accounting (public.accounting_entries) ───────────────────────────
-const PUBLIC_JOURNAL_ID = 8065;        // CSH-CST (Kas)
+const PUBLIC_JOURNAL_ID = 8099;        // CSH-CST (Kas) — id=8099 di public.accounting_journals
 const COA_KAS_CST = 49097;             // 1-1010-CST  Kas CST
 const COA_PENDAPATAN_BOOKING = 72354;  // 4-1017-CST  Pendapatan Booking Sport Center CST
 const COMPANY_ID = 1;
