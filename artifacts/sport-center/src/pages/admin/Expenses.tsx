@@ -7,7 +7,10 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ChevronsUpDown, Check } from "lucide-react";
 import { getToken } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -99,6 +102,7 @@ export default function AdminExpenses() {
   const [endDate, setEndDate] = useState("");
 
   const [formOpen, setFormOpen] = useState(false);
+  const [coaOpen, setCoaOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState({ ...EMPTY_FORM });
 
@@ -577,26 +581,46 @@ export default function AdminExpenses() {
                   <BookOpen className="w-3.5 h-3.5 text-orange-500" />
                   Akun COA <span className="text-red-500">*</span>
                 </Label>
-                <Select value={form.coaAccountId} onValueChange={(v) => setForm({ ...form, coaAccountId: v })}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Pilih akun COA..." />
-                  </SelectTrigger>
-                  <SelectContent className="max-h-72">
-                    {Object.entries(coaByType).map(([type, accounts]) => (
-                      <div key={type}>
-                        <div className="px-2 py-1.5 text-xs font-bold text-gray-400 uppercase tracking-wide border-b bg-gray-50">
-                          {ACCOUNT_TYPE_LABELS[type] ?? type}
-                        </div>
-                        {accounts.map((acc) => (
-                          <SelectItem key={acc.id} value={String(acc.id)}>
-                            <span className="font-mono text-xs text-gray-500 mr-1">{acc.code}</span>
-                            {acc.name}
-                          </SelectItem>
+                <Popover open={coaOpen} onOpenChange={setCoaOpen}>
+                  <PopoverTrigger asChild>
+                    <button
+                      type="button"
+                      className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {selectedCoa
+                        ? <span><span className="font-mono text-xs text-gray-500 mr-1">{selectedCoa.code}</span>{selectedCoa.name}</span>
+                        : <span className="text-muted-foreground">Pilih akun COA...</span>
+                      }
+                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[320px] p-0" align="start">
+                    <Command>
+                      <CommandInput placeholder="Cari akun COA..." />
+                      <CommandList className="max-h-64">
+                        <CommandEmpty>Akun tidak ditemukan.</CommandEmpty>
+                        {Object.entries(coaByType).map(([type, accounts]) => (
+                          <CommandGroup key={type} heading={ACCOUNT_TYPE_LABELS[type] ?? type}>
+                            {accounts.map((acc) => (
+                              <CommandItem
+                                key={acc.id}
+                                value={`${acc.code} ${acc.name}`}
+                                onSelect={() => {
+                                  setForm({ ...form, coaAccountId: String(acc.id) });
+                                  setCoaOpen(false);
+                                }}
+                              >
+                                <Check className={`mr-2 h-4 w-4 ${form.coaAccountId === String(acc.id) ? "opacity-100" : "opacity-0"}`} />
+                                <span className="font-mono text-xs text-gray-500 mr-1">{acc.code}</span>
+                                {acc.name}
+                              </CommandItem>
+                            ))}
+                          </CommandGroup>
                         ))}
-                      </div>
-                    ))}
-                  </SelectContent>
-                </Select>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
                 {selectedCoa && (
                   <div className="text-xs mt-1 p-2 rounded-md bg-orange-50 border border-orange-100 flex items-center gap-2">
                     <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${ACCOUNT_TYPE_COLORS[selectedCoa.accountType] ?? "bg-gray-100"}`}>
