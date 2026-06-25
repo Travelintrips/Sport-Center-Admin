@@ -386,6 +386,21 @@ paths:
                 items:
                   $ref: "#/components/schemas/TimeSlot"
 
+  /vendors:
+    get:
+      operationId: listVendors
+      tags: [vendors]
+      summary: List active vendors (public dropdown)
+      responses:
+        "200":
+          description: List of active vendors
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/VendorSimple"
+
   /bookings:
     get:
       operationId: listBookings
@@ -3006,6 +3021,40 @@ components:
         grandTotal:
           type: number
 
+    Vendor:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        contactPerson:
+          type: ["string", "null"]
+        phone:
+          type: ["string", "null"]
+        email:
+          type: ["string", "null"]
+        address:
+          type: ["string", "null"]
+        notes:
+          type: ["string", "null"]
+        isActive:
+          type: boolean
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+
+    VendorSimple:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+
     BookingInput:
       type: object
       required: [customerName, customerEmail, customerPhone, facilityId, bookingDate]
@@ -3035,6 +3084,9 @@ components:
           type: string
         notes:
           type: string
+        vendorId:
+          type: integer
+          nullable: true
 
     BookingUpdate:
       type: object

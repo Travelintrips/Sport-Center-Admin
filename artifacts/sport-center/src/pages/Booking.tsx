@@ -9,6 +9,7 @@ import {
   useCreateRecurringBooking,
   useGetMe,
   getGetMeQueryKey,
+  useListVendors,
 } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -124,6 +125,9 @@ export default function Booking() {
   }, [isAdminBooking, selectedCustomerId, customers, currentUser]);
   const [notes, setNotes] = useState("");
   const [numberOfPeople, setNumberOfPeople] = useState<string>("1");
+  const [vendorId, setVendorId] = useState<string>("");
+
+  const { data: vendors = [] } = useListVendors();
 
   // --- Booking mode: umum / angkasa_pura / perusahaan ---
   const [bookingMode, setBookingMode] = useState<"umum" | "angkasa_pura" | "perusahaan">("umum");
@@ -445,6 +449,7 @@ export default function Booking() {
               customerId: isAdminBooking ? prepData.customerId : undefined,
               bookedForName: bookedForName.trim() || effName,
               bookedForPhone: effPhone,
+              vendorId: vendorId ? Number(vendorId) : undefined,
             } as any,
           });
         } else {
@@ -465,6 +470,7 @@ export default function Booking() {
               customerId: isAdminBooking ? prepData.customerId : undefined,
               bookedForName: bookedForName.trim() || effName,
               bookedForPhone: effPhone,
+              vendorId: vendorId ? Number(vendorId) : undefined,
             } as any,
           });
         }
@@ -532,6 +538,7 @@ export default function Booking() {
           specificDates: selectedDates,
           promoCode: couponResult?.code || undefined,
           discountAmountPerSession: discountPerSession || undefined,
+          vendorId: vendorId ? Number(vendorId) : undefined,
         } as any,
       });
     } else {
@@ -555,6 +562,7 @@ export default function Booking() {
           companyCustomerId: isCompanyBilling && billingStatus?.companyId ? billingStatus.companyId : undefined,
           ...(existingCustomerId ? { customerId: existingCustomerId } : {}),
           ...(bookingSource ? { source: bookingSource } : {}),
+          vendorId: vendorId ? Number(vendorId) : undefined,
         } as any,
       });
     }
@@ -835,6 +843,22 @@ export default function Booking() {
                     <Input id="phone" required value={phone} onChange={e => setPhone(e.target.value)} placeholder="08123456789" />
                   </div>
                 </div>
+                {vendors.length > 0 && (
+                  <div className="space-y-2">
+                    <Label htmlFor="vendor">{t("Vendor (Opsional)", "Vendor (Optional)")}</Label>
+                    <Select value={vendorId} onValueChange={setVendorId}>
+                      <SelectTrigger id="vendor">
+                        <SelectValue placeholder={t("Pilih vendor...", "Select vendor...")} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="">{t("— Tanpa vendor —", "— No vendor —")}</SelectItem>
+                        {vendors.map((v) => (
+                          <SelectItem key={v.id} value={String(v.id)}>{v.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
                 <div className="space-y-2">
                   <Label htmlFor="notes">{t("Catatan Tambahan (Opsional)", "Additional Notes (Optional)")}</Label>
                   <Textarea id="notes" value={notes} onChange={e => setNotes(e.target.value)} placeholder={t("Permintaan khusus...", "Special requests...")} />

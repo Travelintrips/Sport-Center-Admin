@@ -185,6 +185,8 @@ export * from './toggleBillingInput';
 export * from './updateProfileInput';
 export * from './user';
 export * from './userRole';
+export * from './vendor';
+export * from './vendorSimple';
 export * from './verificationLog';
 export * from './verificationLogStatus';
 export * from './verifyByOrderInput';

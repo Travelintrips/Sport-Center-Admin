@@ -441,6 +441,7 @@ router.post("/bookings", async (req, res) => {
       dpp: taxCalc.taxAmount > 0 ? String(taxCalc.dpp) : null,
       ppnAmount: taxCalc.taxAmount > 0 ? String(taxCalc.taxAmount) : null,
       grandTotal: taxCalc.taxAmount > 0 ? String(taxCalc.grandTotal) : null,
+      vendorId: req.body.vendorId ? Number(req.body.vendorId) : null,
     }).returning();
 
     if (promoCode && !isAp) {

@@ -336,6 +336,29 @@ export interface RecurringBookingResult {
   grandTotal: number;
 }
 
+export interface Vendor {
+  id: number;
+  name: string;
+  /** @nullable */
+  contactPerson?: string | null;
+  /** @nullable */
+  phone?: string | null;
+  /** @nullable */
+  email?: string | null;
+  /** @nullable */
+  address?: string | null;
+  /** @nullable */
+  notes?: string | null;
+  isActive?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface VendorSimple {
+  id: number;
+  name: string;
+}
+
 export type BookingInputCustomerType = typeof BookingInputCustomerType[keyof typeof BookingInputCustomerType];
 
 
@@ -357,6 +380,7 @@ export interface BookingInput {
   customerType?: BookingInputCustomerType;
   idCardNumber?: string;
   notes?: string;
+  vendorId?: number | null;
 }
 
 export type BookingUpdateStatus = typeof BookingUpdateStatus[keyof typeof BookingUpdateStatus];

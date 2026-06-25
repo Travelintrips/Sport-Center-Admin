@@ -336,6 +336,16 @@ export const CheckAvailabilityResponse = zod.array(CheckAvailabilityResponseItem
 
 
 /**
+ * @summary List active vendors (public dropdown)
+ */
+export const ListVendorsResponseItem = zod.object({
+  "id": zod.number(),
+  "name": zod.string()
+})
+export const ListVendorsResponse = zod.array(ListVendorsResponseItem)
+
+
+/**
  * @summary List bookings
  */
 export const ListBookingsQueryParams = zod.object({
@@ -426,7 +436,8 @@ export const CreateBookingBody = zod.object({
   "numberOfPeople": zod.number().optional(),
   "customerType": zod.enum(['umum', 'angkasa_pura']).optional(),
   "idCardNumber": zod.string().optional(),
-  "notes": zod.string().optional()
+  "notes": zod.string().optional(),
+  "vendorId": zod.number().nullish()
 })
 
 
