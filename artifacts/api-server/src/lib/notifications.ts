@@ -35,6 +35,8 @@ async function getWaConfig(): Promise<{ token: string; adminPhones: string[] }> 
 }
 
 function cleanPhoneNumber(raw: string): string {
+  // Grup WA — biarkan apa adanya (format: XXXXXXXX@g.us)
+  if (raw.includes("@g.us")) return raw.trim();
   let p = raw.replace(/\D/g, "");
   if (p.startsWith("0")) p = "62" + p.slice(1);
   else if (p && !p.startsWith("62")) p = "62" + p;
@@ -42,7 +44,9 @@ function cleanPhoneNumber(raw: string): string {
 }
 
 function isValidPhone(phone: string): boolean {
-  // Minimal format: 62 + 8-13 digit (total 10-15 karakter)
+  // Grup WA: format XXXXXXXX@g.us
+  if (phone.endsWith("@g.us")) return /^\d+@g\.us$/.test(phone);
+  // Pribadi: 62 + 8-13 digit
   return /^62\d{8,13}$/.test(phone);
 }
 
