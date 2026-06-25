@@ -39,3 +39,4 @@ export * from "./companyDocumentSettings";
 export * from "./connectionBaselines";
 export * from "./publicExpenses";
 export * from "./publicMemberships";
+export * from "./coaAccounts";

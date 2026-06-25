@@ -243,6 +243,19 @@ export async function createJournalEntry(
   await postJournalLines(journal.id, lines);
 }
 
+// ─── COA-based journal type detection ─────────────────────────────────────────
+export type ExpenseJournalType =
+  | "operational"   // Beban operasional → Debit Beban, Kredit Kas/Bank
+  | "liability"     // Bayar hutang/pinjaman → Debit Hutang/Kewajiban, Kredit Kas/Bank
+  | "kasbon"        // Kasbon karyawan → Debit Piutang Kasbon, Kredit Kas/Bank
+  | "kasbon_settlement" // Pertanggungjawaban kasbon → Debit Beban, Kredit Piutang Kasbon
+
+export function detectJournalType(accountType: string): ExpenseJournalType {
+  if (accountType === "liability") return "liability";
+  if (accountType === "asset") return "kasbon";
+  return "operational";
+}
+
 export async function createExpenseJournalEntry(
   expenseNo: string,
   category: string,
@@ -252,34 +265,70 @@ export async function createExpenseJournalEntry(
   paymentMethod: string,
   description: string,
   journalDate: string,
+  coaAccountCode?: string,
+  coaAccountName?: string,
+  coaAccountType?: string,
 ): Promise<number> {
+  const effectiveAccountCode = coaAccountCode ?? "6-0001";
+  const effectiveAccountName = coaAccountName ?? category;
+  const journalType = coaAccountType ? detectJournalType(coaAccountType) : "operational";
+  const kasSource = `Kas/Bank (${paymentMethod})`;
+
+  // Determine journal lines based on account type
+  let debitAccount = effectiveAccountName;
+  let creditAccount = kasSource;
+  let journalNotes = `Pengeluaran ${expenseNo}: ${description}`;
+  let journalTypeLabel = "expense_paid";
+
+  if (journalType === "liability") {
+    journalTypeLabel = "expense_paid_liability";
+    journalNotes = `Pembayaran hutang/pinjaman ${expenseNo}: ${description}`;
+  } else if (journalType === "kasbon") {
+    journalTypeLabel = "expense_paid_kasbon";
+    debitAccount = effectiveAccountName;
+    journalNotes = `Kasbon karyawan ${expenseNo}: ${description}`;
+  }
+
   const [journal] = await db
     .insert(accountingJournalsTable)
     .values({
       bookingId: null,
       orderNumber: expenseNo,
-      journalType: "expense_paid",
-      debitAccount: category,
+      journalType: journalTypeLabel,
+      debitAccount,
       debitAmount: String(ppnAmount > 0 ? amount : totalAmount),
-      creditRevenueAccount: `Kas/Bank (${paymentMethod})`,
+      creditRevenueAccount: creditAccount,
       creditRevenueAmount: String(totalAmount),
-      creditPpnAccount: "PPN Masukan",
+      creditPpnAccount: ppnAmount > 0 ? "PPN Masukan" : null,
       creditPpnAmount: String(ppnAmount),
       journalDate,
       isReversal: false,
-      notes: `Pengeluaran ${expenseNo}: ${description}`,
+      notes: journalNotes,
     })
     .returning();
 
   if (!journal) return 0;
 
-  const lines: Array<{ lineType: string; accountCode: string; accountName: string; amount: number; description?: string }> = [
-    { lineType: "debit", accountCode: "6-0001", accountName: category, amount, description: `Beban ${expenseNo}` },
-  ];
-  if (ppnAmount > 0) {
-    lines.push({ lineType: "debit", accountCode: "2-1201", accountName: "PPN Masukan", amount: ppnAmount, description: `PPN Masukan ${expenseNo}` });
+  const lines: Array<{ lineType: string; accountCode: string; accountName: string; amount: number; description?: string }> = [];
+
+  if (journalType === "operational") {
+    // Debit Beban, Debit PPN Masukan (jika ada), Kredit Kas/Bank
+    lines.push({ lineType: "debit", accountCode: effectiveAccountCode, accountName: effectiveAccountName, amount, description: `Beban ${expenseNo}` });
+    if (ppnAmount > 0) {
+      lines.push({ lineType: "debit", accountCode: "2-1201", accountName: "PPN Masukan", amount: ppnAmount, description: `PPN Masukan ${expenseNo}` });
+    }
+    lines.push({ lineType: "credit", accountCode: "1-1001", accountName: kasSource, amount: totalAmount, description: `Pembayaran ${expenseNo}` });
+
+  } else if (journalType === "liability") {
+    // Debit Hutang/Kewajiban, Kredit Kas/Bank
+    lines.push({ lineType: "debit", accountCode: effectiveAccountCode, accountName: effectiveAccountName, amount: totalAmount, description: `Bayar hutang ${expenseNo}` });
+    lines.push({ lineType: "credit", accountCode: "1-1001", accountName: kasSource, amount: totalAmount, description: `Pembayaran ${expenseNo}` });
+
+  } else if (journalType === "kasbon") {
+    // Debit Piutang Kasbon (Aset), Kredit Kas/Bank
+    lines.push({ lineType: "debit", accountCode: effectiveAccountCode, accountName: effectiveAccountName, amount: totalAmount, description: `Kasbon diberikan ${expenseNo}` });
+    lines.push({ lineType: "credit", accountCode: "1-1001", accountName: kasSource, amount: totalAmount, description: `Kas keluar kasbon ${expenseNo}` });
   }
-  lines.push({ lineType: "credit", accountCode: "1-1001", accountName: `Kas/Bank (${paymentMethod})`, amount: totalAmount, description: `Pembayaran ${expenseNo}` });
 
   await postJournalLines(journal.id, lines);
   return journal.id;
