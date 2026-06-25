@@ -721,5 +721,31 @@ CREATE TABLE IF NOT EXISTS sport_center.company_document_settings (
   created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- ============================================================
+-- coa_accounts (chart of accounts for expense categorization)
+-- ============================================================
+DO $$ BEGIN
+  CREATE TYPE sport_center.coa_account_type AS ENUM (
+    'asset', 'liability', 'equity', 'revenue', 'expense'
+  );
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+CREATE TABLE IF NOT EXISTS sport_center.coa_accounts (
+  id           SERIAL PRIMARY KEY,
+  code         TEXT NOT NULL UNIQUE,
+  name         TEXT NOT NULL,
+  account_type sport_center.coa_account_type NOT NULL,
+  parent_code  TEXT,
+  is_active    BOOLEAN NOT NULL DEFAULT true,
+  sort_order   INTEGER NOT NULL DEFAULT 0,
+  notes        TEXT,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- receipt_urls column on sport_expenses (jsonb multi-attachment)
+ALTER TABLE sport_center.sport_expenses
+  ADD COLUMN IF NOT EXISTS receipt_urls JSONB DEFAULT '[]';
 `;
 

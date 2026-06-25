@@ -175,7 +175,9 @@ export default function AdminExpenses() {
   const { data: coaAccounts = [] } = useQuery<CoaAccount[]>({
     queryKey: ["coa-accounts"],
     queryFn: () =>
-      fetch(`${API}/admin/expenses/coa-accounts`, { headers: authHeaders() }).then((r) => r.json()),
+      fetch(`${API}/admin/expenses/coa-accounts`, { headers: authHeaders() })
+        .then((r) => r.json())
+        .then((d) => (Array.isArray(d) ? d : [])),
   });
 
   const { data: detail } = useQuery({
