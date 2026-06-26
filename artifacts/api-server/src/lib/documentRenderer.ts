@@ -127,7 +127,7 @@ function wrapInHtmlPage(bodyContent: string, paperStyle = "A4", printMode = fals
 
   const pdfBgLayer = hasBgPdf
     ? `<div style="position:absolute;top:0;left:0;width:100%;height:100%;z-index:0;overflow:hidden;">
-        <iframe src="${bgTemplateUrl}#toolbar=0&navpanes=0&scrollbar=0" style="width:100%;height:100%;border:none;opacity:0.9;" />
+        <iframe src="${bgTemplateUrl}#toolbar=0&navpanes=0&scrollbar=0" style="width:100%;height:100%;border:none;opacity:0.9;"></iframe>
        </div>`
     : "";
 

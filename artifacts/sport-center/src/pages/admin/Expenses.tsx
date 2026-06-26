@@ -675,24 +675,6 @@ export default function AdminExpenses() {
                   <Building2 className="w-3.5 h-3.5 text-orange-500" />
                   Vendor / Supplier
                 </Label>
-                <Select value={form.vendorId || "none"} onValueChange={(v) => setForm({ ...form, vendorId: v === "none" ? "" : v })}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Pilih vendor…" />
-                  </SelectTrigger>
-                  <SelectContent className="max-h-60">
-                    <SelectItem value="none">— Tanpa vendor —</SelectItem>
-                    {vendors.length === 0 ? (
-                      <div className="px-3 py-2 text-xs text-gray-400 italic">
-                        Belum ada vendor aktif. Tambahkan di menu Daftar Vendor.
-                      </div>
-                    ) : (
-                      vendors.map((v) => (
-                        <SelectItem key={v.id} value={String(v.id)}>{v.name}</SelectItem>
-                      ))
-                    )}
-                  </SelectContent>
-                </Select>
-                <Label>Vendor / Supplier <span className="text-red-500">*</span></Label>
                 <Popover open={vendorOpen} onOpenChange={setVendorOpen}>
                   <PopoverTrigger asChild>
                     <button
