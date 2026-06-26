@@ -4,6 +4,27 @@ const { Client } = pg;
 
 export const CUSTOM_MIGRATION_SQL = `
 -- ============================================================
+-- 0. sport_vendors table (idempotent)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS sport_center.sport_vendors (
+  id serial PRIMARY KEY,
+  name text NOT NULL,
+  contact_person text,
+  phone text,
+  email text,
+  address text,
+  notes text,
+  is_active boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- Add vendor_id FK to sport_expenses (idempotent)
+ALTER TABLE sport_center.sport_expenses
+  ADD COLUMN IF NOT EXISTS vendor_id integer REFERENCES sport_center.sport_vendors(id) ON DELETE SET NULL;
+
+
+-- ============================================================
 -- 1. Extend enums (safe, idempotent via IF NOT EXISTS)
 -- ============================================================
 DO $$ BEGIN

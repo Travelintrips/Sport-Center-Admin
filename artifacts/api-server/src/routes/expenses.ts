@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { db, expensesTable, facilitiesTable, usersTable, publicExpensesTable, coaAccountsTable } from "@workspace/db";
+import { db, expensesTable, facilitiesTable, usersTable, publicExpensesTable, coaAccountsTable, vendorsTable } from "@workspace/db";
 import { eq, desc, and, gte, lte, sql, asc, inArray } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
@@ -42,6 +42,12 @@ async function getCoaAccount(coaAccountId: number | null) {
   if (!coaAccountId) return null;
   const [a] = await db.select().from(coaAccountsTable).where(eq(coaAccountsTable.id, coaAccountId)).limit(1);
   return a ?? null;
+}
+
+async function getVendorById(vendorId: number | null): Promise<{ id: number; name: string } | null> {
+  if (!vendorId) return null;
+  const [v] = await db.select({ id: vendorsTable.id, name: vendorsTable.name }).from(vendorsTable).where(eq(vendorsTable.id, vendorId)).limit(1);
+  return v ?? null;
 }
 
 async function syncToPublic(expense: typeof expensesTable.$inferSelect, facilityName: string | null) {
@@ -241,7 +247,7 @@ router.post("/admin/expenses", adminMiddleware, async (req, res) => {
     const user = getUserFromReq(req);
     const { ipAddress, userAgent } = getClientInfo(req);
     const {
-      expenseDate, category, coaAccountId, description, vendorName, facilityId,
+      expenseDate, category, coaAccountId, description, vendorId, vendorName, facilityId,
       amount, ppnAmount = 0, paymentMethod, paymentAccount, receiptUrl, receiptUrls, notes,
     } = req.body;
 
@@ -263,6 +269,14 @@ router.post("/admin/expenses", adminMiddleware, async (req, res) => {
     }
     if (!resolvedCategory) resolvedCategory = "Lain-lain";
 
+    // Resolve vendor name snapshot from vendor master
+    const resolvedVendorId = vendorId ? Number(vendorId) : null;
+    let resolvedVendorName = vendorName || null;
+    if (resolvedVendorId && !resolvedVendorName) {
+      const v = await getVendorById(resolvedVendorId);
+      resolvedVendorName = v?.name ?? null;
+    }
+
     const amountNum = Number(amount);
     const ppnNum = Number(ppnAmount);
     const totalNum = amountNum + ppnNum;
@@ -275,7 +289,8 @@ router.post("/admin/expenses", adminMiddleware, async (req, res) => {
       category: resolvedCategory,
       coaAccountId: coaAccountId ? Number(coaAccountId) : null,
       description,
-      vendorName: vendorName || null,
+      vendorId: resolvedVendorId,
+      vendorName: resolvedVendorName,
       facilityId: facilityId ? Number(facilityId) : null,
       amount: String(amountNum),
       ppnAmount: String(ppnNum),
@@ -291,7 +306,13 @@ router.post("/admin/expenses", adminMiddleware, async (req, res) => {
 
     await logAudit({
       ...user, action: "EXPENSE_CREATED", entity: "expense", entityId: expense!.id,
-      after: expense, ipAddress, userAgent,
+      after: { ...expense, vendorId: resolvedVendorId, vendorName: resolvedVendorName },
+      ipAddress, userAgent,
+    });
+    await logAudit({
+      ...user, action: "EXPENSE_VENDOR_SELECTED", entity: "expense", entityId: expense!.id,
+      after: { vendorId: resolvedVendorId, vendorName: resolvedVendorName },
+      ipAddress, userAgent,
     });
 
     const facilityName = await getFacilityName(expense!.facilityId);
@@ -328,7 +349,7 @@ router.patch("/admin/expenses/:id", adminMiddleware, async (req, res) => {
     }
 
     const {
-      expenseDate, category, coaAccountId, description, vendorName, facilityId,
+      expenseDate, category, coaAccountId, description, vendorId, vendorName, facilityId,
       amount, ppnAmount, paymentMethod, paymentAccount, receiptUrl, receiptUrls, notes,
     } = req.body;
 
@@ -340,6 +361,14 @@ router.patch("/admin/expenses/:id", adminMiddleware, async (req, res) => {
       if (coaAcc) resolvedCategory = coaAcc.name;
     }
 
+    // Resolve vendor
+    const newVendorId = vendorId !== undefined ? (vendorId ? Number(vendorId) : null) : (existing as any).vendorId ?? null;
+    let newVendorName = vendorName !== undefined ? vendorName || null : existing.vendorName;
+    if (newVendorId && vendorId !== undefined && !vendorName) {
+      const v = await getVendorById(newVendorId);
+      newVendorName = v?.name ?? null;
+    }
+
     const amountNum = amount !== undefined ? Number(amount) : Number(existing.amount);
     const ppnNum = ppnAmount !== undefined ? Number(ppnAmount) : Number(existing.ppnAmount);
     const totalNum = amountNum + ppnNum;
@@ -349,7 +378,8 @@ router.patch("/admin/expenses/:id", adminMiddleware, async (req, res) => {
       category: resolvedCategory,
       coaAccountId: newCoaId,
       description: description ?? existing.description,
-      vendorName: vendorName !== undefined ? vendorName || null : existing.vendorName,
+      vendorId: newVendorId,
+      vendorName: newVendorName,
       facilityId: facilityId !== undefined ? (facilityId ? Number(facilityId) : null) : existing.facilityId,
       amount: String(amountNum),
       ppnAmount: String(ppnNum),
@@ -359,7 +389,7 @@ router.patch("/admin/expenses/:id", adminMiddleware, async (req, res) => {
       receiptUrl: receiptUrl !== undefined ? receiptUrl || null : existing.receiptUrl,
       receiptUrls: receiptUrls !== undefined ? (Array.isArray(receiptUrls) ? receiptUrls : []) : (existing.receiptUrls ?? []),
       notes: notes !== undefined ? notes || null : existing.notes,
-    }).where(eq(expensesTable.id, id)).returning();
+    } as any).where(eq(expensesTable.id, id)).returning();
 
     await logAudit({
       ...user, action: "EXPENSE_UPDATED", entity: "expense", entityId: id,

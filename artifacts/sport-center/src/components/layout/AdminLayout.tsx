@@ -81,6 +81,7 @@ const NAV_GROUPS = [
     items: [
       { href: "/admin/reports", label: "Laporan Keuangan", icon: TrendingUp },
       { href: "/admin/expenses", label: "Pengeluaran", icon: TrendingDown },
+      { href: "/admin/vendors", label: "Daftar Vendor", icon: Building2 },
       { href: "/admin/notifications", label: "Kirim WA", icon: Send },
       { href: "/admin/notification-templates", label: "Template WA", icon: Bell },
       { href: "/admin/document-settings", label: "Template Dokumen", icon: FileText },
