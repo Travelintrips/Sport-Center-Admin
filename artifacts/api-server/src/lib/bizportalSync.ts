@@ -3,7 +3,10 @@ import type { Booking, GymMembership } from "@workspace/db";
 
 const { Pool } = pg;
 
-const PROD_URL = process.env.SUPABASE_DATABASE_URL || process.env.SUPABASE_DB_URL;
+const PROD_URL =
+  process.env.SUPABASE_DATABASE_URL ||
+  process.env.SUPABASE_DB_URL ||
+  process.env.SUPABASE_DATABASE_URL_DEV;
 
 let _prodPool: pg.Pool | null = null;
 function getProdPool(): pg.Pool | null {
@@ -26,16 +29,10 @@ export async function initBizportalTables(): Promise<void> {
   if (!pool) return;
   try {
     await pool.query(`
-      CREATE TABLE IF NOT EXISTS sport_center.sport_facilities (
-        id         TEXT PRIMARY KEY,
-        name       TEXT NOT NULL,
-        category   TEXT,
-        created_at TIMESTAMPTZ DEFAULT NOW()
-      );
       CREATE TABLE IF NOT EXISTS sport_center.sport_bookings_sync (
         id                SERIAL PRIMARY KEY,
         booking_code      TEXT UNIQUE NOT NULL,
-        facility_id       TEXT REFERENCES sport_center.sport_facilities(id),
+        facility_id       TEXT,
         facility_name     TEXT,
         customer_name     TEXT,
         customer_phone    TEXT,
@@ -135,23 +132,6 @@ export interface SyncBookingPayload {
   paidAt?: Date | null;
 }
 
-async function syncFacilityToBizportal(
-  pool: pg.Pool,
-  bizFacilityId: string,
-  facilityName: string,
-  facilityCategory: string | null | undefined
-): Promise<void> {
-  await withRetry(async () => {
-    await pool.query(
-      `INSERT INTO sport_center.sport_facilities (id, name, category)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (id) DO UPDATE SET
-         name     = EXCLUDED.name,
-         category = COALESCE(EXCLUDED.category, sport_facilities.category)`,
-      [bizFacilityId, facilityName, facilityCategory || null]
-    );
-  }, `syncFacility:${bizFacilityId}`);
-}
 
 function calcTaxBreakdown(booking: Booking): {
   ppnRate: number | null;
@@ -184,8 +164,6 @@ export async function syncBookingToBizportal(payload: SyncBookingPayload): Promi
   const tax           = calcTaxBreakdown(booking);
 
   try {
-    await syncFacilityToBizportal(pool, bizFacilityId, facilityName, facilityCategory);
-
     await withRetry(async () => {
       await pool.query(
         `INSERT INTO sport_center.sport_bookings_sync

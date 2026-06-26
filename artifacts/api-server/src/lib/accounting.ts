@@ -1,16 +1,32 @@
 import { db, accountingJournalsTable, accountingJournalLinesTable } from "@workspace/db";
 import { eq, and, sql } from "drizzle-orm";
+import pg from "pg";
 
 // ─── Public Accounting (public.accounting_entries) ───────────────────────────
-const PUBLIC_JOURNAL_ID = 520;         // CSH — Kas CST journal (id=520 di public.accounting_journals)
-const COA_KAS_CST = 17;               // 1-1010-CST  Kas CST
-const COA_PENDAPATAN_BOOKING = 1315;   // 4-1017-CST  Pendapatan Booking Sport Center CST
-const COA_PPN_KELUARAN = 29;          // 2-1020-CST  PPN Keluaran CST
-const TAX_ID_PPN_11 = 1;              // id di public.accounting_taxes (PPN Keluaran 11%)
+// Gunakan direct pg.Pool ke Supabase (PROD atau DEV fallback).
+// db Drizzle hanya konek ke sport_center schema; public.accounting_entries ada di shared Supabase.
+const SHARED_DB_URL =
+  process.env.SUPABASE_DATABASE_URL ||
+  process.env.SUPABASE_DB_URL ||
+  process.env.SUPABASE_DATABASE_URL_DEV;
 
+let _publicPool: pg.Pool | null = null;
+function getPublicPool(): pg.Pool | null {
+  if (!SHARED_DB_URL) return null;
+  if (!_publicPool) {
+    _publicPool = new pg.Pool({
+      connectionString: SHARED_DB_URL,
+      ssl: { rejectUnauthorized: false },
+      max: 3,
+    });
+  }
+  return _publicPool;
+}
+
+const TAX_ID_PPN_11 = 1;
 const COMPANY_ID = 1;
 
-// Cache untuk ID yang di-resolve dari public schema (berbeda antara dev & prod)
+// Cache COA/journal IDs dari public schema
 let _publicIds: {
   journalId: number;
   coaKas: number;
@@ -22,27 +38,22 @@ let _publicIds: {
 async function getPublicIds() {
   if (_publicIds) return _publicIds;
 
-  const journal = await db.execute(sql`
-    SELECT id FROM public.accounting_journals WHERE code = 'CSH-CST' LIMIT 1
-  `);
-  const kas = await db.execute(sql`
-    SELECT id FROM public.chart_of_accounts WHERE code = '1-1010-CST' AND is_active = true LIMIT 1
-  `);
-  const pendapatan = await db.execute(sql`
-    SELECT id FROM public.chart_of_accounts WHERE code = '4-1017-CST' AND is_active = true LIMIT 1
-  `);
-  const ppn = await db.execute(sql`
-    SELECT id FROM public.chart_of_accounts WHERE code = '2-1020-CST' AND is_active = true LIMIT 1
-  `);
-  const tax = await db.execute(sql`
-    SELECT id FROM public.accounting_taxes WHERE name ILIKE '%PPN Keluaran%' AND company_id = ${COMPANY_ID} ORDER BY id LIMIT 1
-  `);
+  const pool = getPublicPool();
+  if (!pool) throw new Error("[accounting] Tidak ada Supabase URL — tidak bisa write ke public.accounting_entries");
 
-  const journalId = Number((journal.rows[0] as any)?.id);
-  const coaKas = Number((kas.rows[0] as any)?.id);
-  const coaPendapatan = Number((pendapatan.rows[0] as any)?.id);
-  const coaPpnKeluaran = Number((ppn.rows[0] as any)?.id);
-  const taxIdPpn = Number((tax.rows[0] as any)?.id ?? 1);
+  const [journal, kas, pendapatan, ppn, tax] = await Promise.all([
+    pool.query(`SELECT id FROM public.accounting_journals WHERE code = 'CSH-CST' LIMIT 1`),
+    pool.query(`SELECT id FROM public.chart_of_accounts WHERE code = '1-1010-CST' AND is_active = true LIMIT 1`),
+    pool.query(`SELECT id FROM public.chart_of_accounts WHERE code = '4-1017-CST' AND is_active = true LIMIT 1`),
+    pool.query(`SELECT id FROM public.chart_of_accounts WHERE code = '2-1020-CST' AND is_active = true LIMIT 1`),
+    pool.query(`SELECT id FROM public.accounting_taxes WHERE name ILIKE '%PPN Keluaran%' AND company_id = $1 ORDER BY id LIMIT 1`, [COMPANY_ID]),
+  ]);
+
+  const journalId = Number(journal.rows[0]?.id);
+  const coaKas = Number(kas.rows[0]?.id);
+  const coaPendapatan = Number(pendapatan.rows[0]?.id);
+  const coaPpnKeluaran = Number(ppn.rows[0]?.id);
+  const taxIdPpn = Number(tax.rows[0]?.id ?? 1);
 
   if (!journalId || !coaKas || !coaPendapatan || !coaPpnKeluaran) {
     throw new Error(
@@ -56,16 +67,16 @@ async function getPublicIds() {
   return _publicIds;
 }
 
-async function nextPublicEntryNumber(year: number): Promise<string> {
-  const result = await db.execute(sql`
-    SELECT COALESCE(MAX(
+async function nextPublicEntryNumber(pool: pg.Pool, year: number): Promise<string> {
+  const result = await pool.query(
+    `SELECT COALESCE(MAX(
       NULLIF(REGEXP_REPLACE(entry_number, '^SC-CSH/[0-9]+/', ''), '')::integer
     ), 0) + 1 AS seq
     FROM public.accounting_entries
-    WHERE entry_number LIKE ${'SC-CSH/' + year + '/%'}
-      AND source = 'sport_center_booking'
-  `);
-  const seq = Number((result.rows[0] as any).seq ?? 1);
+    WHERE entry_number LIKE $1 AND source = 'sport_center_booking'`,
+    [`SC-CSH/${year}/%`]
+  );
+  const seq = Number(result.rows[0]?.seq ?? 1);
   return `SC-CSH/${year}/${String(seq).padStart(4, "0")}`;
 }
 
@@ -77,84 +88,86 @@ export async function createPublicAccountingEntry(
   facilityId: number | null,
   journalDate: string,
 ): Promise<void> {
-  // PPN bersifat inklusif: harga yang dibayar pelanggan sudah termasuk PPN.
-  // grandTotal = subtotal (total yang diterima), bukan subtotal + ppnAmount.
-  // Pendapatan bersih = subtotal - ppnAmount (harga sebelum PPN).
+  const pool = getPublicPool();
+  if (!pool) {
+    console.warn("[accounting] Tidak ada Supabase URL — skip createPublicAccountingEntry");
+    return;
+  }
+
+  // PPN inklusif: grandTotal = subtotal (harga sudah termasuk PPN)
+  // Pendapatan bersih = subtotal - ppnAmount
   const grandTotal = subtotal;
   const netRevenue = subtotal - ppnAmount;
   const hasPpn = ppnAmount > 0;
   const year = new Date(journalDate).getFullYear();
-  const period = journalDate.slice(0, 7); // YYYY-MM
-  const entryNumber = await nextPublicEntryNumber(year);
-
+  const period = journalDate.slice(0, 7);
+  const entryNumber = await nextPublicEntryNumber(pool, year);
   const ids = await getPublicIds();
 
   // 1. Buat accounting entry (draft)
-  const entryResult = await db.execute(sql`
-    INSERT INTO public.accounting_entries
+  const entryResult = await pool.query(
+    `INSERT INTO public.accounting_entries
       (entry_number, journal_id, date, ref, description, status, source, source_id,
        total_debit, total_credit, company_id, facility_id, correlation_id, governance_flags)
-    VALUES (
-      ${entryNumber}, ${ids.journalId}, ${journalDate}::date, ${orderNumber},
-      ${'Pembayaran Booking Sport Center (' + orderNumber + ')'}, 'draft',
-      'sport_center_booking', ${bookingId},
-      ${grandTotal}, ${grandTotal}, ${COMPANY_ID}, ${facilityId ?? null},
-      ${'sc_booking_' + orderNumber}, '{}'
-    )
-    RETURNING id
-  `);
-  const entryId = Number((entryResult.rows[0] as any).id);
+    VALUES ($1,$2,$3::date,$4,$5,'draft','sport_center_booking',$6,$7,$7,$8,$9,$10,'{}')
+    RETURNING id`,
+    [
+      entryNumber, ids.journalId, journalDate, orderNumber,
+      `Pembayaran Booking Sport Center (${orderNumber})`,
+      bookingId, grandTotal, COMPANY_ID, facilityId ?? null,
+      `sc_booking_${orderNumber}`,
+    ]
+  );
+  const entryId = Number(entryResult.rows[0]?.id);
 
   // 2. Baris GL: Kas (debit), Pendapatan net (kredit), PPN Keluaran (kredit jika ada)
-  // Kas = grandTotal; Pendapatan = grandTotal - ppnAmount; PPN = ppnAmount
-  // Total kredit = netRevenue + ppnAmount = grandTotal ✓ (balanced)
   if (hasPpn) {
-    await db.execute(sql`
-      INSERT INTO public.accounting_entry_lines (entry_id, account_id, description, debit, credit) VALUES
-        (${entryId}, ${ids.coaKas},         ${'Penerimaan booking ' + orderNumber}, ${grandTotal}, 0),
-        (${entryId}, ${ids.coaPendapatan},  ${'Pendapatan booking ' + orderNumber}, 0, ${netRevenue}),
-        (${entryId}, ${ids.coaPpnKeluaran}, ${'PPN Keluaran booking ' + orderNumber}, 0, ${ppnAmount})
-    `);
+    await pool.query(
+      `INSERT INTO public.accounting_entry_lines (entry_id, account_id, description, debit, credit) VALUES
+        ($1,$2,$3,$4,0),
+        ($1,$5,$6,0,$7),
+        ($1,$8,$9,0,$10)`,
+      [
+        entryId,
+        ids.coaKas,         `Penerimaan booking ${orderNumber}`, grandTotal,
+        ids.coaPendapatan,  `Pendapatan booking ${orderNumber}`, netRevenue,
+        ids.coaPpnKeluaran, `PPN Keluaran booking ${orderNumber}`, ppnAmount,
+      ]
+    );
   } else {
-    await db.execute(sql`
-      INSERT INTO public.accounting_entry_lines (entry_id, account_id, description, debit, credit) VALUES
-        (${entryId}, ${ids.coaKas},        ${'Penerimaan booking ' + orderNumber}, ${grandTotal}, 0),
-        (${entryId}, ${ids.coaPendapatan}, ${'Pendapatan booking ' + orderNumber}, 0, ${grandTotal})
-    `);
+    await pool.query(
+      `INSERT INTO public.accounting_entry_lines (entry_id, account_id, description, debit, credit) VALUES
+        ($1,$2,$3,$4,0),
+        ($1,$5,$6,0,$4)`,
+      [entryId, ids.coaKas, `Penerimaan booking ${orderNumber}`, grandTotal, ids.coaPendapatan, `Pendapatan booking ${orderNumber}`]
+    );
   }
 
   // 3. Post entry
-  await db.execute(sql`UPDATE public.accounting_entries SET status = 'posted' WHERE id = ${entryId}`);
+  await pool.query(`UPDATE public.accounting_entries SET status = 'posted' WHERE id = $1`, [entryId]);
 
   // 4. public.transaction_taxes — hanya jika ada PPN
   if (hasPpn) {
-    await db.execute(sql`
-      INSERT INTO public.transaction_taxes
+    await pool.query(
+      `INSERT INTO public.transaction_taxes
         (company_id, transaction_type, transaction_id, transaction_ref,
          tax_id, tax_name, tax_rate, cut_type,
-         base_amount, tax_amount, account_id,
-         period, status, direction, created_at, updated_at)
-      VALUES (
-        ${COMPANY_ID}, 'sport_center_booking', ${bookingId}, ${orderNumber},
-        ${ids.taxIdPpn}, 'PPN Keluaran 11%', 11, 'self_borne',
-        ${subtotal}, ${ppnAmount}, ${ids.coaPpnKeluaran},
-        ${period}, 'posted', 'out', NOW(), NOW()
-      )
-    `);
+         base_amount, tax_amount, account_id, period, status, direction, created_at, updated_at)
+      VALUES ($1,'sport_center_booking',$2,$3,$4,'PPN Keluaran 11%',11,'self_borne',$5,$6,$7,$8,'posted','out',NOW(),NOW())`,
+      [COMPANY_ID, bookingId, orderNumber, ids.taxIdPpn, subtotal, ppnAmount, ids.coaPpnKeluaran, period]
+    );
 
-    // 5. public.gl_tax_lines — terhubung ke accounting_entry_id
-    await db.execute(sql`
-      INSERT INTO public.gl_tax_lines
+    // 5. public.gl_tax_lines
+    await pool.query(
+      `INSERT INTO public.gl_tax_lines
         (company_id, accounting_entry_id, tax_type, rate,
-         base_amount, tax_amount, direction, period,
-         entity_type, entity_id, is_reported, created_at)
-      VALUES (
-        ${COMPANY_ID}, ${entryId}, 'PPN_OUT', 11,
-        ${subtotal}, ${ppnAmount}, 'out', ${period},
-        'booking', ${orderNumber}, false, NOW()
-      )
-    `);
+         base_amount, tax_amount, direction, period, entity_type, entity_id, is_reported, created_at)
+      VALUES ($1,$2,'PPN_OUT',11,$3,$4,'out',$5,'booking',$6,false,NOW())`,
+      [COMPANY_ID, entryId, subtotal, ppnAmount, period, orderNumber]
+    );
   }
+
+  console.info(`[accounting] ✓ Public accounting entry created: ${entryNumber} (${orderNumber})`);
 }
 
 export async function reversePublicAccountingEntry(
@@ -162,85 +175,92 @@ export async function reversePublicAccountingEntry(
   reason: string,
   journalDate: string,
 ): Promise<void> {
-  const originalResult = await db.execute(sql`
-    SELECT id, total_debit, total_credit FROM public.accounting_entries
-    WHERE source = 'sport_center_booking' AND ref = ${orderNumber} AND status = 'posted'
-    LIMIT 1
-  `);
+  const pool = getPublicPool();
+  if (!pool) {
+    console.warn("[accounting] Tidak ada Supabase URL — skip reversePublicAccountingEntry");
+    return;
+  }
+
+  const originalResult = await pool.query(
+    `SELECT id, total_debit, total_credit FROM public.accounting_entries
+     WHERE source = 'sport_center_booking' AND ref = $1 AND status = 'posted' LIMIT 1`,
+    [orderNumber]
+  );
   if (!originalResult.rows.length) return;
 
-  const original = originalResult.rows[0] as any;
+  const original = originalResult.rows[0];
   const year = new Date(journalDate).getFullYear();
   const period = journalDate.slice(0, 7);
-  const entryNumber = await nextPublicEntryNumber(year);
+  const entryNumber = await nextPublicEntryNumber(pool, year);
+  const ids = await getPublicIds();
 
   // 1. Reversal accounting entry (draft)
-  const revResult = await db.execute(sql`
-    INSERT INTO public.accounting_entries
+  const revResult = await pool.query(
+    `INSERT INTO public.accounting_entries
       (entry_number, journal_id, date, ref, description, status, source, source_id,
        total_debit, total_credit, company_id, correlation_id, governance_flags)
-    VALUES (
-      ${entryNumber}, ${PUBLIC_JOURNAL_ID}, ${journalDate}::date, ${orderNumber},
-      ${'Reversal Booking ' + orderNumber + ': ' + reason}, 'draft',
-      'sport_center_booking_reversal', ${original.id},
-      ${original.total_debit}, ${original.total_credit}, ${COMPANY_ID},
-      ${'sc_reversal_' + orderNumber}, '{}'
-    )
-    RETURNING id
-  `);
-  const revId = Number((revResult.rows[0] as any).id);
+    VALUES ($1,$2,$3::date,$4,$5,'draft','sport_center_booking_reversal',$6,$7,$7,$8,$9,'{}')
+    RETURNING id`,
+    [
+      entryNumber, ids.journalId, journalDate, orderNumber,
+      `Reversal Booking ${orderNumber}: ${reason}`,
+      original.id, original.total_debit, COMPANY_ID,
+      `sc_reversal_${orderNumber}`,
+    ]
+  );
+  const revId = Number(revResult.rows[0]?.id);
 
   // 2. Swap debit/kredit dari lines asli
-  await db.execute(sql`
-    INSERT INTO public.accounting_entry_lines (entry_id, account_id, description, debit, credit)
-    SELECT ${revId}, account_id, ${'Reversal: ' + reason}, credit, debit
-    FROM public.accounting_entry_lines WHERE entry_id = ${original.id}
-  `);
+  await pool.query(
+    `INSERT INTO public.accounting_entry_lines (entry_id, account_id, description, debit, credit)
+     SELECT $1, account_id, $2, credit, debit FROM public.accounting_entry_lines WHERE entry_id = $3`,
+    [revId, `Reversal: ${reason}`, original.id]
+  );
 
   // 3. Post reversal entry
-  await db.execute(sql`UPDATE public.accounting_entries SET status = 'posted' WHERE id = ${revId}`);
+  await pool.query(`UPDATE public.accounting_entries SET status = 'posted' WHERE id = $1`, [revId]);
 
-  // 4. Reverse transaction_taxes — tandai yang asli jadi 'reversed', insert baris negasi
-  const taxResult = await db.execute(sql`
-    SELECT id, base_amount, tax_amount, tax_rate FROM public.transaction_taxes
-    WHERE transaction_type = 'sport_center_booking' AND transaction_ref = ${orderNumber} AND status = 'posted'
-    LIMIT 1
-  `);
+  // 4. Reverse transaction_taxes
+  const taxResult = await pool.query(
+    `SELECT id, base_amount, tax_amount, tax_rate FROM public.transaction_taxes
+     WHERE transaction_type = 'sport_center_booking' AND transaction_ref = $1 AND status = 'posted' LIMIT 1`,
+    [orderNumber]
+  );
   if (taxResult.rows.length) {
-    const origTax = taxResult.rows[0] as any;
-    await db.execute(sql`
-      UPDATE public.transaction_taxes SET status = 'reversed', updated_at = NOW()
-      WHERE id = ${origTax.id}
-    `);
-    await db.execute(sql`
-      INSERT INTO public.transaction_taxes
+    const origTax = taxResult.rows[0];
+    await pool.query(
+      `UPDATE public.transaction_taxes SET status = 'reversed', updated_at = NOW() WHERE id = $1`,
+      [origTax.id]
+    );
+    await pool.query(
+      `INSERT INTO public.transaction_taxes
         (company_id, transaction_type, transaction_id, transaction_ref,
-         tax_id, tax_name, tax_rate, cut_type,
-         base_amount, tax_amount, account_id,
+         tax_id, tax_name, tax_rate, cut_type, base_amount, tax_amount, account_id,
          period, status, direction, created_at, updated_at)
-      VALUES (
-        ${COMPANY_ID}, 'sport_center_booking_reversal', ${revId}, ${orderNumber},
-        ${TAX_ID_PPN_11}, 'PPN Keluaran 11% (Reversal)', ${origTax.tax_rate}, 'self_borne',
-        ${-Math.abs(Number(origTax.base_amount))}, ${-Math.abs(Number(origTax.tax_amount))},
-        ${COA_PPN_KELUARAN},
-        ${period}, 'reversed', 'out', NOW(), NOW()
-      )
-    `);
+      VALUES ($1,'sport_center_booking_reversal',$2,$3,$4,'PPN Keluaran 11% (Reversal)',$5,'self_borne',$6,$7,$8,$9,'reversed','out',NOW(),NOW())`,
+      [
+        COMPANY_ID, revId, orderNumber, TAX_ID_PPN_11, origTax.tax_rate,
+        -Math.abs(Number(origTax.base_amount)), -Math.abs(Number(origTax.tax_amount)),
+        ids.coaPpnKeluaran, period,
+      ]
+    );
 
     // 5. Reversal gl_tax_lines
-    await db.execute(sql`
-      INSERT INTO public.gl_tax_lines
+    await pool.query(
+      `INSERT INTO public.gl_tax_lines
         (company_id, accounting_entry_id, tax_type, rate,
-         base_amount, tax_amount, direction, period,
-         entity_type, entity_id, is_reported, created_at)
-      SELECT
-        ${COMPANY_ID}, ${revId}, tax_type, rate,
-        -ABS(base_amount), -ABS(tax_amount), direction, ${period},
-        entity_type, entity_id, false, NOW()
-      FROM public.gl_tax_lines WHERE accounting_entry_id = ${original.id}
-    `);
+         base_amount, tax_amount, direction, period, entity_type, entity_id, is_reported, created_at)
+       SELECT $1,$2,tax_type,rate,-ABS(base_amount),-ABS(tax_amount),direction,$3,
+              entity_type,entity_id,false,NOW()
+       FROM public.gl_tax_lines WHERE accounting_entry_id = $4`,
+      [COMPANY_ID, revId, period, original.id]
+    );
   }
+
+  console.info(`[accounting] ✓ Public accounting entry reversed: ${entryNumber} (${orderNumber})`);
 }
+
+// ─── Sport Center Internal Journal (sport_center schema) ─────────────────────
 
 async function postJournalLines(
   journalId: number,
@@ -266,8 +286,6 @@ export async function createJournalEntry(
   ppnAmount: number,
   journalDate: string,
 ): Promise<void> {
-  // PPN inklusif: grandTotal = subtotal (harga sudah termasuk PPN)
-  // Pendapatan bersih = subtotal - ppnAmount
   const grandTotal = subtotal;
   const netRevenue = subtotal - ppnAmount;
 
@@ -302,12 +320,11 @@ export async function createJournalEntry(
   await postJournalLines(journal.id, lines);
 }
 
-// ─── COA-based journal type detection ─────────────────────────────────────────
 export type ExpenseJournalType =
-  | "operational"   // Beban operasional → Debit Beban, Kredit Kas/Bank
-  | "liability"     // Bayar hutang/pinjaman → Debit Hutang/Kewajiban, Kredit Kas/Bank
-  | "kasbon"        // Kasbon karyawan → Debit Piutang Kasbon, Kredit Kas/Bank
-  | "kasbon_settlement" // Pertanggungjawaban kasbon → Debit Beban, Kredit Piutang Kasbon
+  | "operational"
+  | "liability"
+  | "kasbon"
+  | "kasbon_settlement"
 
 export function detectJournalType(accountType: string): ExpenseJournalType {
   if (accountType === "liability") return "liability";
@@ -333,7 +350,6 @@ export async function createExpenseJournalEntry(
   const journalType = coaAccountType ? detectJournalType(coaAccountType) : "operational";
   const kasSource = `Kas/Bank (${paymentMethod})`;
 
-  // Determine journal lines based on account type
   let debitAccount = effectiveAccountName;
   let creditAccount = kasSource;
   let journalNotes = `Pengeluaran ${expenseNo}: ${description}`;
@@ -371,20 +387,15 @@ export async function createExpenseJournalEntry(
   const lines: Array<{ lineType: string; accountCode: string; accountName: string; amount: number; description?: string }> = [];
 
   if (journalType === "operational") {
-    // Debit Beban, Debit PPN Masukan (jika ada), Kredit Kas/Bank
     lines.push({ lineType: "debit", accountCode: effectiveAccountCode, accountName: effectiveAccountName, amount, description: `Beban ${expenseNo}` });
     if (ppnAmount > 0) {
       lines.push({ lineType: "debit", accountCode: "2-1201", accountName: "PPN Masukan", amount: ppnAmount, description: `PPN Masukan ${expenseNo}` });
     }
     lines.push({ lineType: "credit", accountCode: "1-1001", accountName: kasSource, amount: totalAmount, description: `Pembayaran ${expenseNo}` });
-
   } else if (journalType === "liability") {
-    // Debit Hutang/Kewajiban, Kredit Kas/Bank
     lines.push({ lineType: "debit", accountCode: effectiveAccountCode, accountName: effectiveAccountName, amount: totalAmount, description: `Bayar hutang ${expenseNo}` });
     lines.push({ lineType: "credit", accountCode: "1-1001", accountName: kasSource, amount: totalAmount, description: `Pembayaran ${expenseNo}` });
-
   } else if (journalType === "kasbon") {
-    // Debit Piutang Kasbon (Aset), Kredit Kas/Bank
     lines.push({ lineType: "debit", accountCode: effectiveAccountCode, accountName: effectiveAccountName, amount: totalAmount, description: `Kasbon diberikan ${expenseNo}` });
     lines.push({ lineType: "credit", accountCode: "1-1001", accountName: kasSource, amount: totalAmount, description: `Kas keluar kasbon ${expenseNo}` });
   }
