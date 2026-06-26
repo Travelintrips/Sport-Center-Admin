@@ -240,7 +240,7 @@ router.post(
       const templateType = isPdf ? "pdf" : "image";
       const ext = isPdf ? "pdf" : (req.file.originalname.split(".").pop() ?? "png");
       const filename = `doc-bg-template-${type}-${randomUUID()}.${ext}`;
-      const url = await uploadToStorage(BUCKETS.facility, filename, req.file.buffer, req.file.mimetype);
+      const url = await uploadToStorage(BUCKETS.docTemplates, filename, req.file.buffer, req.file.mimetype);
 
       const existing = await getDocumentSettings(type);
       const [updated] = await db

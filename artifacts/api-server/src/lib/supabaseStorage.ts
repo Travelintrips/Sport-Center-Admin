@@ -88,12 +88,14 @@ const STORAGE_URL = PROJECT_REF ? `https://${PROJECT_REF}.supabase.co` : "";
 export const BUCKETS = {
   facility: "facility-images",
   proof: "payment-proofs",
+  docTemplates: "doc-templates",
 } as const;
 
 // In-memory bucket health for diagnostic endpoint
 export const bucketStatus: Record<string, { ok: boolean; checkedAt: string | null; error: string | null }> = {
   [BUCKETS.facility]: { ok: false, checkedAt: null, error: null },
   [BUCKETS.proof]: { ok: false, checkedAt: null, error: null },
+  [BUCKETS.docTemplates]: { ok: false, checkedAt: null, error: null },
 };
 
 let client: SupabaseClient | null = null;
@@ -143,12 +145,16 @@ export async function validateBuckets(): Promise<void> {
           );
           bucketStatus[bucket] = { ok: false, checkedAt: now, error: error?.message ?? "Not found" };
         } else {
+          const mimeTypes = bucket === BUCKETS.facility
+            ? ["image/jpeg", "image/png", "image/webp"]
+            : bucket === BUCKETS.docTemplates
+              ? ["image/jpeg", "image/png", "image/webp", "application/pdf"]
+              : ["image/jpeg", "image/png", "image/webp", "application/pdf"];
+          const sizeLimit = bucket === BUCKETS.facility ? 5 * 1024 * 1024 : 10 * 1024 * 1024;
           const { error: createErr } = await supabase.storage.createBucket(bucket, {
             public: true,
-            allowedMimeTypes: bucket === BUCKETS.facility
-              ? ["image/jpeg", "image/png", "image/webp"]
-              : ["image/jpeg", "image/png", "image/webp", "application/pdf"],
-            fileSizeLimit: bucket === BUCKETS.facility ? 5 * 1024 * 1024 : 10 * 1024 * 1024,
+            allowedMimeTypes: mimeTypes,
+            fileSizeLimit: sizeLimit,
           });
           if (createErr && !createErr.message.includes("already exists")) {
             console.error(`[Storage] ❌ Failed to create bucket "${bucket}": ${createErr.message}`);
