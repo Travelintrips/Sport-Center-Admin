@@ -103,7 +103,7 @@ export default function AdminVendors() {
         method: "PATCH", headers: authHeaders(), body: JSON.stringify({ isActive }),
       }).then(async (r) => {
         const d = await r.json();
-        if (!r.ok) throw new Error(d.error ?? "Gagal update status");
+        if (!r.ok) throw new Error(d.error ?? "Gagal update status vendor");
         return d;
       }),
     onSuccess: (_, vars) => {
@@ -128,14 +128,17 @@ export default function AdminVendors() {
       setDeleteConfirmName("");
       toast({ title: "Vendor berhasil dihapus" });
     },
-    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+    onError: (e: any) => toast({ title: "Gagal hapus", description: e.message, variant: "destructive" }),
   });
 
   const filtered = vendors.filter((v) => {
-    const matchSearch = !search || v.name.toLowerCase().includes(search.toLowerCase()) ||
-      (v.contactPerson ?? "").toLowerCase().includes(search.toLowerCase()) ||
-      (v.phone ?? "").includes(search) ||
-      (v.email ?? "").toLowerCase().includes(search.toLowerCase());
+    const q = search.toLowerCase();
+    const matchSearch =
+      !search ||
+      v.name.toLowerCase().includes(q) ||
+      (v.contactPerson ?? "").toLowerCase().includes(q) ||
+      (v.phone ?? "").includes(q) ||
+      (v.email ?? "").toLowerCase().includes(q);
     const matchStatus = filterStatus === "all" || (filterStatus === "active" ? v.isActive : !v.isActive);
     return matchSearch && matchStatus;
   });
@@ -146,16 +149,16 @@ export default function AdminVendors() {
     setFormOpen(true);
   }
 
-  function openEdit(v: Vendor) {
-    setEditingId(v.id);
+  function openEdit(vendor: Vendor) {
+    setEditingId(vendor.id);
     setForm({
-      name: v.name,
-      contactPerson: v.contactPerson ?? "",
-      phone: v.phone ?? "",
-      email: v.email ?? "",
-      address: v.address ?? "",
-      notes: v.notes ?? "",
-      isActive: v.isActive,
+      name: vendor.name,
+      contactPerson: vendor.contactPerson ?? "",
+      phone: vendor.phone ?? "",
+      email: vendor.email ?? "",
+      address: vendor.address ?? "",
+      notes: vendor.notes ?? "",
+      isActive: vendor.isActive,
     });
     setFormOpen(true);
   }
@@ -176,7 +179,7 @@ export default function AdminVendors() {
       isActive: form.isActive,
     };
     if (editingId) {
-      updateMutation.mutate({ id: editingId, body });
+      updateMutation.mutate({ id: editingId, body: body as any });
     } else {
       createMutation.mutate(body as any);
     }
@@ -190,13 +193,14 @@ export default function AdminVendors() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-black text-gray-900">Daftar Vendor</h1>
-          <p className="text-gray-500 text-sm mt-0.5">Kelola master vendor untuk pengeluaran Sport Center</p>
+          <p className="text-gray-500 text-sm mt-0.5">Kelola master vendor / supplier pengeluaran</p>
         </div>
         <Button onClick={openCreate} className="bg-orange-500 hover:bg-orange-600 text-white font-bold">
           <Plus className="w-4 h-4 mr-2" /> Tambah Vendor
         </Button>
       </div>
 
+      {/* Summary */}
       <div className="grid grid-cols-3 gap-4">
         <Card className="border-l-4 border-l-orange-500">
           <CardContent className="p-4">
@@ -227,37 +231,41 @@ export default function AdminVendors() {
         </Card>
       </div>
 
+      {/* Filters */}
       <Card>
         <CardContent className="p-4">
-          <div className="flex gap-3">
-            <div className="relative flex-1">
+          <div className="flex flex-wrap gap-3">
+            <div className="relative flex-1 min-w-[200px]">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
               <Input
-                placeholder="Cari nama, contact, telepon, email..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
+                placeholder="Cari nama, kontak, telepon..."
                 className="pl-9"
               />
             </div>
-            <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
+            <div className="flex gap-2">
               {(["all", "active", "inactive"] as const).map((s) => (
-                <button
+                <Button
                   key={s}
+                  size="sm"
+                  variant={filterStatus === s ? "default" : "outline"}
+                  className={filterStatus === s ? "bg-orange-500 hover:bg-orange-600 text-white" : ""}
                   onClick={() => setFilterStatus(s)}
-                  className={`px-3 py-1 rounded-md text-xs font-semibold transition-colors ${filterStatus === s ? "bg-white shadow text-gray-900" : "text-gray-500 hover:text-gray-700"}`}
                 >
                   {s === "all" ? "Semua" : s === "active" ? "Aktif" : "Nonaktif"}
-                </button>
+                </Button>
               ))}
             </div>
           </div>
         </CardContent>
       </Card>
 
+      {/* Table */}
       <Card>
-        <CardHeader className="pb-3">
+        <CardHeader className="pb-0">
           <CardTitle className="text-base font-bold">
-            Vendor <span className="text-gray-400 font-normal">({filtered.length})</span>
+            {filtered.length} vendor{filtered.length !== vendors.length ? ` dari ${vendors.length}` : ""}
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
@@ -265,7 +273,18 @@ export default function AdminVendors() {
             <div className="p-8 text-center text-gray-400">Memuat data...</div>
           ) : filtered.length === 0 ? (
             <div className="p-8 text-center text-gray-400">
-              {vendors.length === 0 ? "Belum ada vendor. Tambahkan vendor pertama Anda!" : "Tidak ada vendor yang sesuai filter."}
+              {vendors.length === 0 ? (
+                <div className="space-y-2">
+                  <Store className="w-10 h-10 mx-auto text-gray-200" />
+                  <p className="font-medium">Belum ada vendor</p>
+                  <p className="text-sm">Tambahkan vendor pertama untuk mulai mengelola pengeluaran</p>
+                  <Button onClick={openCreate} className="mt-2 bg-orange-500 hover:bg-orange-600 text-white">
+                    <Plus className="w-4 h-4 mr-2" /> Tambah Vendor
+                  </Button>
+                </div>
+              ) : (
+                "Tidak ada vendor yang cocok dengan filter"
+              )}
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -273,7 +292,8 @@ export default function AdminVendors() {
                 <thead className="bg-gray-50 border-b">
                   <tr>
                     <th className="px-4 py-3 text-left font-semibold text-gray-600">Nama Vendor</th>
-                    <th className="px-4 py-3 text-left font-semibold text-gray-600">Contact Info</th>
+                    <th className="px-4 py-3 text-left font-semibold text-gray-600">Contact Person</th>
+                    <th className="px-4 py-3 text-left font-semibold text-gray-600">Telepon / Email</th>
                     <th className="px-4 py-3 text-left font-semibold text-gray-600">Alamat</th>
                     <th className="px-4 py-3 text-center font-semibold text-gray-600">Status</th>
                     <th className="px-4 py-3 text-center font-semibold text-gray-600">Aksi</th>
@@ -284,42 +304,43 @@ export default function AdminVendors() {
                     <tr key={vendor.id} className="hover:bg-gray-50 transition-colors">
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
-                          <div className="w-8 h-8 rounded-full bg-orange-100 flex items-center justify-center flex-shrink-0">
+                          <div className="w-8 h-8 rounded-full bg-orange-100 flex items-center justify-center shrink-0">
                             <Store className="w-4 h-4 text-orange-500" />
                           </div>
                           <div>
                             <p className="font-semibold text-gray-900">{vendor.name}</p>
-                            {vendor.contactPerson && (
-                              <p className="text-xs text-gray-500">{vendor.contactPerson}</p>
+                            {vendor.notes && (
+                              <p className="text-xs text-gray-400 truncate max-w-[150px]">{vendor.notes}</p>
                             )}
                           </div>
                         </div>
                       </td>
+                      <td className="px-4 py-3 text-gray-600">{vendor.contactPerson ?? "-"}</td>
                       <td className="px-4 py-3">
                         <div className="space-y-0.5">
                           {vendor.phone && (
-                            <div className="flex items-center gap-1 text-xs text-gray-600">
+                            <div className="flex items-center gap-1 text-gray-600">
                               <Phone className="w-3 h-3 text-gray-400" />
-                              {vendor.phone}
+                              <span className="text-xs">{vendor.phone}</span>
                             </div>
                           )}
                           {vendor.email && (
-                            <div className="flex items-center gap-1 text-xs text-gray-600">
+                            <div className="flex items-center gap-1 text-gray-600">
                               <Mail className="w-3 h-3 text-gray-400" />
-                              {vendor.email}
+                              <span className="text-xs">{vendor.email}</span>
                             </div>
                           )}
-                          {!vendor.phone && !vendor.email && <span className="text-xs text-gray-400">—</span>}
+                          {!vendor.phone && !vendor.email && <span className="text-gray-400">-</span>}
                         </div>
                       </td>
                       <td className="px-4 py-3">
                         {vendor.address ? (
-                          <div className="flex items-start gap-1 text-xs text-gray-600 max-w-[180px]">
+                          <div className="flex items-start gap-1 text-gray-600 max-w-[180px]">
                             <MapPin className="w-3 h-3 text-gray-400 mt-0.5 shrink-0" />
-                            <span className="line-clamp-2">{vendor.address}</span>
+                            <span className="text-xs line-clamp-2">{vendor.address}</span>
                           </div>
                         ) : (
-                          <span className="text-xs text-gray-400">—</span>
+                          <span className="text-gray-400">-</span>
                         )}
                       </td>
                       <td className="px-4 py-3 text-center">
@@ -342,6 +363,7 @@ export default function AdminVendors() {
                             className={`h-7 w-7 p-0 ${vendor.isActive ? "text-amber-400 hover:text-amber-600" : "text-green-400 hover:text-green-600"}`}
                             title={vendor.isActive ? "Nonaktifkan" : "Aktifkan"}
                             onClick={() => toggleActiveMutation.mutate({ id: vendor.id, isActive: !vendor.isActive })}
+                            disabled={toggleActiveMutation.isPending}
                           >
                             <Power className="w-3.5 h-3.5" />
                           </Button>
@@ -364,7 +386,11 @@ export default function AdminVendors() {
         </CardContent>
       </Card>
 
-      <Dialog open={formOpen} onOpenChange={(o) => { if (!o) { setFormOpen(false); setEditingId(null); setForm({ ...EMPTY_FORM }); } }}>
+      {/* Form Dialog */}
+      <Dialog
+        open={formOpen}
+        onOpenChange={(o) => { if (!o) { setFormOpen(false); setEditingId(null); setForm({ ...EMPTY_FORM }); } }}
+      >
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle className="font-black">{editingId ? "Edit Vendor" : "Tambah Vendor"}</DialogTitle>
@@ -375,7 +401,7 @@ export default function AdminVendors() {
               <Input
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
-                placeholder="Contoh: CV Maju Jaya Mandiri"
+                placeholder="Contoh: PT. Maju Jaya"
                 required
               />
             </div>
@@ -385,7 +411,7 @@ export default function AdminVendors() {
                 <Input
                   value={form.contactPerson}
                   onChange={(e) => setForm({ ...form, contactPerson: e.target.value })}
-                  placeholder="Nama PIC"
+                  placeholder="Nama kontak"
                 />
               </div>
               <div className="space-y-1">
@@ -393,7 +419,7 @@ export default function AdminVendors() {
                 <Input
                   value={form.phone}
                   onChange={(e) => setForm({ ...form, phone: e.target.value })}
-                  placeholder="08xxxxxxxxxx"
+                  placeholder="08xx-xxxx-xxxx"
                 />
               </div>
             </div>
@@ -439,8 +465,23 @@ export default function AdminVendors() {
                 </span>
               </div>
             )}
+            {!editingId && (
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="isActive"
+                  checked={form.isActive}
+                  onChange={(e) => setForm({ ...form, isActive: e.target.checked })}
+                  className="w-4 h-4 accent-orange-500"
+                />
+                <Label htmlFor="isActive" className="cursor-pointer">Vendor Aktif</Label>
+              </div>
+            )}
             <div className="flex gap-3 justify-end pt-2">
-              <Button type="button" variant="outline" onClick={() => { setFormOpen(false); setEditingId(null); setForm({ ...EMPTY_FORM }); }}>
+              <Button
+                type="button" variant="outline"
+                onClick={() => { setFormOpen(false); setEditingId(null); setForm({ ...EMPTY_FORM }); }}
+              >
                 Batal
               </Button>
               <Button
@@ -455,21 +496,27 @@ export default function AdminVendors() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={!!deleteConfirmId} onOpenChange={(o) => { if (!o) { setDeleteConfirmId(null); setDeleteConfirmName(""); } }}>
+      {/* Delete Confirm Dialog */}
+      <Dialog
+        open={!!deleteConfirmId}
+        onOpenChange={(o) => { if (!o) { setDeleteConfirmId(null); setDeleteConfirmName(""); } }}
+      >
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle className="font-black text-red-600">Hapus Vendor</DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
             <p className="text-sm text-gray-600">
-              Apakah Anda yakin ingin menghapus vendor <strong>"{deleteConfirmName}"</strong>?
+              Yakin ingin menghapus vendor <span className="font-bold text-orange-600">"{deleteConfirmName}"</span>?
               Tindakan ini tidak bisa dibatalkan.
             </p>
-            <p className="text-xs text-amber-600 bg-amber-50 p-2 rounded">
-              Pengeluaran yang sudah menggunakan vendor ini akan tetap menyimpan nama vendor sebagai snapshot.
+            <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded p-2">
+              Pengeluaran yang sudah memakai vendor ini akan tetap menyimpan nama vendor sebagai snapshot.
             </p>
             <div className="flex gap-2 justify-end">
-              <Button variant="outline" onClick={() => { setDeleteConfirmId(null); setDeleteConfirmName(""); }}>Batal</Button>
+              <Button variant="outline" onClick={() => { setDeleteConfirmId(null); setDeleteConfirmName(""); }}>
+                Batal
+              </Button>
               <Button
                 variant="destructive"
                 disabled={deleteMutation.isPending}

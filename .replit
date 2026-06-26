@@ -48,7 +48,8 @@ outputType = "console"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "PORT=8080 NODE_ENV=development node --enable-source-maps /home/runner/workspace/artifacts/api-server/dist/index.mjs"
+args = "PORT=8080 NODE_ENV=development pnpm --filter @workspace/api-server run dev"
+waitForPort = 8080
 
 [agent]
 stack = "BEST_EFFORT_FALLBACK"
@@ -61,6 +62,10 @@ timeoutMs = 20000
 [[ports]]
 localPort = 5000
 externalPort = 80
+
+[[ports]]
+localPort = 8080
+externalPort = 8080
 
 [userenv]
 
@@ -94,7 +99,6 @@ AI_SPORTCENTER_ENABLED = "true"
 AI_SPORTCENTER_MAX_REPLY_LENGTH = "900"
 OPENAI_API_KEY = "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"
 OPENAI_BASE_URL = "https://api.openai.com/v1"
-ADMIN_WA_GROUP = "120363411192213335@g.us"
 
 [userenv.development]
 SUPABASE_URL_DEV = "https://xssrfshdrtdfupgqwfdw.supabase.co"

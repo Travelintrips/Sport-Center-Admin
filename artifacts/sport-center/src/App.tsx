@@ -129,6 +129,7 @@ function AdminRouter() {
     if (location === "/admin/wa-bookings") return <AdminWaBookings />;
     if (location === "/admin/wa-ai") return <AdminWaAiAssistant />;
     if (location === "/admin/expenses") return <AdminExpenses />;
+    if (location === "/admin/vendors") return <AdminVendors />;
     if (location === "/admin/invoice-settings") return <AdminInvoiceSettings />;
     if (location === "/admin/document-settings") return <AdminDocumentSettings />;
     if (location === "/admin/document-templates") return <AdminDocumentTemplates />;
@@ -177,6 +178,7 @@ function Router() {
       <Route path="/admin/wa-bookings" component={AdminRouter} />
       <Route path="/admin/wa-ai" component={AdminRouter} />
       <Route path="/admin/expenses" component={AdminRouter} />
+      <Route path="/admin/vendors" component={AdminRouter} />
       <Route path="/admin/invoice-settings" component={AdminRouter} />
       <Route path="/admin/document-settings" component={AdminRouter} />
       <Route path="/admin/document-templates" component={AdminRouter} />

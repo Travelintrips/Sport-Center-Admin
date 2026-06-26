@@ -16,7 +16,7 @@ import { useToast } from "@/hooks/use-toast";
 import {
   Plus, Search, TrendingDown, Clock, CheckCircle2,
   Eye, Edit2, ThumbsUp, ThumbsDown, Banknote, X, Receipt,
-  Upload, Loader2, Trash2, BookOpen,
+  Upload, Loader2, Trash2, BookOpen, Building2,
 } from "lucide-react";
 
 const API = import.meta.env.VITE_API_BASE_URL ?? "/api";
@@ -82,6 +82,11 @@ const EMPTY_FORM = {
   receiptUrls: [] as string[],
   notes: "",
 };
+
+interface Vendor {
+  id: number;
+  name: string;
+}
 
 interface CoaAccount {
   id: number;
@@ -186,12 +191,12 @@ export default function AdminExpenses() {
         .then((d) => (Array.isArray(d) ? d : [])),
   });
 
-  const { data: vendorList = [] } = useQuery<{ id: number; name: string }[]>({
+  const { data: vendors = [] } = useQuery<Vendor[]>({
     queryKey: ["vendors"],
     queryFn: () =>
-      fetch(`${API}/vendors`, { headers: { Authorization: `Bearer ${getToken()}` } })
+      fetch(`${API}/admin/vendors`, { headers: authHeaders() })
         .then((r) => r.json())
-        .then((d) => (Array.isArray(d) ? d : [])),
+        .then((d) => (Array.isArray(d) ? d.filter((v: any) => v.isActive) : [])),
   });
 
   const { data: detail } = useQuery({
@@ -323,6 +328,8 @@ export default function AdminExpenses() {
       coaAccountId: expense.coaAccountId ? String(expense.coaAccountId) : "",
       description: expense.description ?? "",
       vendorId: expense.vendorId ? String(expense.vendorId) : "",
+
+
       vendorName: expense.vendorName ?? "",
       facilityId: expense.facilityId ? String(expense.facilityId) : "",
       amount: String(expense.amount ?? ""),
@@ -345,11 +352,12 @@ export default function AdminExpenses() {
       toast({ title: "Vendor wajib dipilih", description: "Pilih vendor dari daftar yang tersedia", variant: "destructive" });
       return;
     }
-    const selectedV = vendorList.find((v) => v.id === Number(form.vendorId));
+    const selectedV = vendors.find((v) => v.id === Number(form.vendorId));
     const body = {
       expenseDate: form.expenseDate,
       coaAccountId: Number(form.coaAccountId),
       description: form.description,
+      vendorId: form.vendorId ? Number(form.vendorId) : null,
       vendorId: Number(form.vendorId),
       vendorName: selectedV?.name ?? form.vendorName ?? null,
       facilityId: form.facilityId ? Number(form.facilityId) : null,
@@ -664,6 +672,27 @@ export default function AdminExpenses() {
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1">
+                <Label className="flex items-center gap-1">
+                  <Building2 className="w-3.5 h-3.5 text-orange-500" />
+                  Vendor / Supplier
+                </Label>
+                <Select value={form.vendorId || "none"} onValueChange={(v) => setForm({ ...form, vendorId: v === "none" ? "" : v })}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Pilih vendor…" />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-60">
+                    <SelectItem value="none">— Tanpa vendor —</SelectItem>
+                    {vendors.length === 0 ? (
+                      <div className="px-3 py-2 text-xs text-gray-400 italic">
+                        Belum ada vendor aktif. Tambahkan di menu Daftar Vendor.
+                      </div>
+                    ) : (
+                      vendors.map((v) => (
+                        <SelectItem key={v.id} value={String(v.id)}>{v.name}</SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
                 <Label>Vendor / Supplier <span className="text-red-500">*</span></Label>
                 <Popover open={vendorOpen} onOpenChange={setVendorOpen}>
                   <PopoverTrigger asChild>
@@ -672,7 +701,7 @@ export default function AdminExpenses() {
                       className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {form.vendorId
-                        ? <span className="font-medium">{vendorList.find((v) => v.id === Number(form.vendorId))?.name ?? "Pilih vendor..."}</span>
+                        ? <span className="font-medium">{vendors.find((v) => v.id === Number(form.vendorId))?.name ?? "Pilih vendor..."}</span>
                         : <span className="text-muted-foreground">Pilih vendor...</span>
                       }
                       <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
@@ -691,7 +720,7 @@ export default function AdminExpenses() {
                           </div>
                         </CommandEmpty>
                         <CommandGroup>
-                          {vendorList.map((v) => (
+                          {vendors.map((v) => (
                             <CommandItem
                               key={v.id}
                               value={v.name}
@@ -709,7 +738,7 @@ export default function AdminExpenses() {
                     </Command>
                   </PopoverContent>
                 </Popover>
-                {vendorList.length === 0 && (
+                {vendors.length === 0 && (
                   <p className="text-xs text-amber-600">Belum ada vendor aktif. <a href="/admin/vendors" className="underline" target="_blank">Tambah vendor</a></p>
                 )}
               </div>
