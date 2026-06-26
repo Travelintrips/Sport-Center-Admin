@@ -10,10 +10,10 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { getToken } from "@/lib/auth";
 import {
-  Save, Upload, Eye, FileText, CreditCard, User,
+  Save, Upload, Eye, FileText,
   Image as ImageIcon, Hash, Percent, AlignLeft,
   Building2, Receipt, FileCheck, ClipboardList, FileSignature, ScrollText,
-  ChevronRight,
+  ChevronRight, LayoutTemplate, CheckCircle2, FileIcon, Trash2,
 } from "lucide-react";
 
 const API = import.meta.env.VITE_API_BASE_URL ?? "/api";
@@ -101,7 +101,25 @@ function DocTypePanel({ docType, meta }: {
   const sigRef = useRef<HTMLInputElement>(null);
   const [logoUploading, setLogoUploading] = useState(false);
   const [sigUploading, setSigUploading] = useState(false);
-  const [innerTab, setInnerTab] = useState<"kop" | "bank" | "finance" | "template">("kop");
+  const [innerTab, setInnerTab] = useState<"kop" | "bank" | "finance" | "template" | "background">("kop");
+
+  // ── Background file template state ──────────────────────────────────────
+  const bgFileInputRef = useRef<HTMLInputElement>(null);
+  const [bgUploading, setBgUploading] = useState(false);
+  const [bgTogglingId, setBgTogglingId] = useState<number | null>(null);
+  const [bgDeletingId, setBgDeletingId] = useState<number | null>(null);
+
+  const supportsFileTemplate = docType !== "general" && docType !== "surat_pengantar";
+
+  const { data: bgTemplates = [] } = useQuery<any[]>({
+    queryKey: ["document-file-templates", docType],
+    queryFn: async () => {
+      const r = await fetch(`${API}/api/admin/document-file-templates?documentType=${docType}`, { headers: authHeaders() });
+      if (!r.ok) return [];
+      return r.json();
+    },
+    enabled: supportsFileTemplate,
+  });
 
   const { data, isLoading } = useQuery<DocSettings>({
     queryKey: ["doc-settings", docType],
@@ -172,15 +190,83 @@ function DocTypePanel({ docType, meta }: {
     }
   }
 
+  // ── Background template handlers ─────────────────────────────────────────
+  async function handleBgUpload(file: File) {
+    if (!["image/png", "image/jpeg", "image/webp", "application/pdf"].includes(file.type)) {
+      toast({ title: "Format tidak didukung", description: "Gunakan PNG, JPG, atau PDF", variant: "destructive" }); return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      toast({ title: "File terlalu besar", description: "Maksimum 10MB", variant: "destructive" }); return;
+    }
+    setBgUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append("documentType", docType);
+      fd.append("file", file);
+      const r = await fetch(`${API}/api/admin/document-file-templates/upload`, {
+        method: "POST", headers: authHeaders(), body: fd,
+      });
+      if (!r.ok) { const e = await r.json(); throw new Error(e.error || "Upload gagal"); }
+      toast({ title: "Template diupload", description: "Klik Aktifkan untuk mulai digunakan" });
+      qc.invalidateQueries({ queryKey: ["document-file-templates", docType] });
+    } catch (e: any) {
+      toast({ title: "Upload gagal", description: e.message, variant: "destructive" });
+    } finally {
+      setBgUploading(false);
+      if (bgFileInputRef.current) bgFileInputRef.current.value = "";
+    }
+  }
+
+  async function handleBgActivate(id: number) {
+    setBgTogglingId(id);
+    try {
+      const r = await fetch(`${API}/api/admin/document-file-templates/${id}/activate`, { method: "PATCH", headers: jsonHeaders() });
+      if (!r.ok) { const e = await r.json(); throw new Error(e.error); }
+      toast({ title: "Template diaktifkan" });
+      qc.invalidateQueries({ queryKey: ["document-file-templates", docType] });
+    } catch (e: any) {
+      toast({ title: "Gagal", description: e.message, variant: "destructive" });
+    } finally { setBgTogglingId(null); }
+  }
+
+  async function handleBgDeactivate(id: number) {
+    setBgTogglingId(id);
+    try {
+      const r = await fetch(`${API}/api/admin/document-file-templates/${id}/deactivate`, { method: "PATCH", headers: jsonHeaders() });
+      if (!r.ok) { const e = await r.json(); throw new Error(e.error); }
+      toast({ title: "Template dinonaktifkan" });
+      qc.invalidateQueries({ queryKey: ["document-file-templates", docType] });
+    } catch (e: any) {
+      toast({ title: "Gagal", description: e.message, variant: "destructive" });
+    } finally { setBgTogglingId(null); }
+  }
+
+  async function handleBgDelete(id: number) {
+    if (!confirm("Hapus file template ini?")) return;
+    setBgDeletingId(id);
+    try {
+      const r = await fetch(`${API}/api/admin/document-file-templates/${id}`, { method: "DELETE", headers: jsonHeaders() });
+      if (!r.ok) { const e = await r.json(); throw new Error(e.error); }
+      toast({ title: "Template dihapus" });
+      qc.invalidateQueries({ queryKey: ["document-file-templates", docType] });
+    } catch (e: any) {
+      toast({ title: "Gagal", description: e.message, variant: "destructive" });
+    } finally { setBgDeletingId(null); }
+  }
+
   if (isLoading) {
     return <div className="py-12 text-center text-muted-foreground text-sm">Memuat...</div>;
   }
 
+  const bgActive = bgTemplates.find((t) => t.isActive);
+  const bgInactive = bgTemplates.filter((t) => !t.isActive);
+
   const innerTabs = [
-    { id: "kop",      label: "Logo & Kop Surat" },
-    { id: "bank",     label: "Bank" },
-    { id: "finance",  label: "Finance & TTD" },
-    { id: "template", label: "Template HTML" },
+    { id: "kop",        label: "Logo & Kop Surat" },
+    { id: "bank",       label: "Bank" },
+    { id: "finance",    label: "Finance & TTD" },
+    { id: "template",   label: "Template HTML" },
+    ...(supportsFileTemplate ? [{ id: "background", label: "Background Template" }] : []),
   ] as const;
 
   return (
@@ -198,7 +284,7 @@ function DocTypePanel({ docType, meta }: {
         {innerTabs.map(t => (
           <button
             key={t.id}
-            onClick={() => setInnerTab(t.id)}
+            onClick={() => setInnerTab(t.id as any)}
             className={`px-3 py-2 text-xs font-semibold border-b-2 whitespace-nowrap transition-colors ${
               innerTab === t.id
                 ? "border-primary text-primary"
@@ -375,17 +461,115 @@ function DocTypePanel({ docType, meta }: {
         </div>
       )}
 
-      {/* Save button */}
-      <div className="flex justify-end pt-2 border-t">
-        <Button
-          onClick={() => saveMutation.mutate(form)}
-          disabled={saveMutation.isPending}
-          className="bg-primary hover:bg-primary/90 font-bold gap-2"
-        >
-          <Save size={14} />
-          {saveMutation.isPending ? "Menyimpan..." : `Simpan ${meta.label}`}
-        </Button>
-      </div>
+      {/* ── Background Template ── */}
+      {innerTab === "background" && supportsFileTemplate && (
+        <div className="space-y-4">
+          {/* Info */}
+          <div className="rounded-lg bg-orange-50 border border-orange-200 p-3 text-xs text-orange-900 space-y-1">
+            <p className="font-semibold flex items-center gap-1.5"><LayoutTemplate size={13} /> Background File Template</p>
+            <ul className="space-y-0.5 list-disc list-inside">
+              <li>File ini digunakan sebagai <strong>background visual</strong> dokumen — data sistem dirender sebagai overlay di atasnya</li>
+              <li>Hanya <strong>1 template aktif</strong> — mengaktifkan yang baru otomatis menonaktifkan yang lain</li>
+              <li>Jika error → otomatis <strong>fallback ke HTML default</strong></li>
+              <li>Rekomendasi: <strong>PNG A4 @300dpi</strong> (2480×3508px), background transparan</li>
+            </ul>
+          </div>
+
+          {/* Active template */}
+          {bgActive && (
+            <div className="rounded-lg border-2 border-green-300 bg-green-50 p-3">
+              <div className="flex items-start gap-3">
+                <div className="w-14 h-14 rounded-lg border bg-white flex items-center justify-center overflow-hidden flex-shrink-0">
+                  {bgActive.templateType === "pdf"
+                    ? <FileIcon size={22} className="text-red-500" />
+                    : <img src={bgActive.fileUrl} alt="" className="w-full h-full object-cover"
+                        onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                  }
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-0.5">
+                    <CheckCircle2 size={14} className="text-green-600" />
+                    <span className="text-sm font-bold text-green-800">Template Aktif</span>
+                  </div>
+                  <p className="text-xs text-gray-600 truncate">{bgActive.fileName || "template"}</p>
+                  <p className="text-[10px] text-muted-foreground">{bgActive.templateType === "image" ? "Image background" : "PDF"}</p>
+                  <div className="flex gap-3 mt-2">
+                    <a href={bgActive.fileUrl} target="_blank" rel="noreferrer" className="text-xs text-primary underline">Lihat file ↗</a>
+                    <button type="button" onClick={() => handleBgDeactivate(bgActive.id)} disabled={bgTogglingId === bgActive.id}
+                      className="text-xs text-amber-600 hover:text-amber-700 underline disabled:opacity-50">
+                      {bgTogglingId === bgActive.id ? "..." : "Nonaktifkan"}
+                    </button>
+                    <button type="button" onClick={() => handleBgDelete(bgActive.id)} disabled={bgDeletingId === bgActive.id}
+                      className="text-xs text-red-500 hover:text-red-600 underline disabled:opacity-50">
+                      {bgDeletingId === bgActive.id ? "..." : "Hapus"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Inactive templates */}
+          {bgInactive.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-xs font-semibold text-muted-foreground">Template tersimpan (tidak aktif):</p>
+              {bgInactive.map((ft: any) => (
+                <div key={ft.id} className="rounded-lg border border-gray-200 bg-gray-50 p-2.5 flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded bg-gray-200 flex items-center justify-center flex-shrink-0 overflow-hidden">
+                    {ft.templateType === "pdf"
+                      ? <FileIcon size={15} className="text-red-400" />
+                      : <img src={ft.fileUrl} alt="" className="w-full h-full object-cover"
+                          onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                    }
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs text-gray-700 truncate">{ft.fileName || "template"}</p>
+                    <p className="text-[10px] text-muted-foreground">{ft.templateType}</p>
+                  </div>
+                  <div className="flex gap-1.5 shrink-0">
+                    <button type="button" onClick={() => handleBgActivate(ft.id)} disabled={bgTogglingId === ft.id}
+                      className="text-[11px] font-semibold text-green-700 bg-green-100 hover:bg-green-200 px-2 py-1 rounded transition-colors disabled:opacity-50">
+                      {bgTogglingId === ft.id ? "..." : "Aktifkan"}
+                    </button>
+                    <button type="button" onClick={() => handleBgDelete(ft.id)} disabled={bgDeletingId === ft.id}
+                      className="text-[11px] text-red-500 bg-red-50 hover:bg-red-100 px-2 py-1 rounded transition-colors disabled:opacity-50">
+                      {bgDeletingId === ft.id ? "..." : <Trash2 size={11} />}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Upload zone */}
+          <button type="button" onClick={() => bgFileInputRef.current?.click()} disabled={bgUploading}
+            className="w-full border-2 border-dashed border-gray-300 rounded-xl p-5 flex items-center gap-3 hover:border-primary hover:bg-orange-50/40 transition-colors disabled:opacity-50 text-left">
+            <div className="w-10 h-10 rounded-full bg-orange-100 flex items-center justify-center flex-shrink-0">
+              <Upload size={18} className="text-orange-500" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-gray-700">{bgUploading ? "Mengupload..." : bgTemplates.length > 0 ? "Upload Template Baru" : "Upload Background Template"}</p>
+              <p className="text-xs text-muted-foreground">PNG/JPG (disarankan) atau PDF · maks 10MB</p>
+            </div>
+          </button>
+          <input ref={bgFileInputRef} type="file" accept="image/png,image/jpeg,image/webp,application/pdf" className="hidden"
+            onChange={(e) => { const file = e.target.files?.[0]; if (file) handleBgUpload(file); }} />
+        </div>
+      )}
+
+      {/* Save button — only for non-background tabs */}
+      {innerTab !== "background" && (
+        <div className="flex justify-end pt-2 border-t">
+          <Button
+            onClick={() => saveMutation.mutate(form)}
+            disabled={saveMutation.isPending}
+            className="bg-primary hover:bg-primary/90 font-bold gap-2"
+          >
+            <Save size={14} />
+            {saveMutation.isPending ? "Menyimpan..." : `Simpan ${meta.label}`}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
