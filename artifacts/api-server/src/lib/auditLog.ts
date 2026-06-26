@@ -33,6 +33,40 @@ export async function logAudit(entry: AuditLogEntry): Promise<void> {
   }
 }
 
+/**
+ * Log accounting failure ke console (dengan prefix yang mudah dicari) dan ke audit_logs.
+ * Dipanggil dari catch block agar error accounting tidak hilang tanpa jejak.
+ */
+export async function logAccountingError(opts: {
+  operation: "createJournalEntry" | "createPublicAccountingEntry";
+  orderNumber: string;
+  bookingId: number;
+  error: unknown;
+}): Promise<void> {
+  const message = opts.error instanceof Error ? opts.error.message : String(opts.error);
+  const stack = opts.error instanceof Error ? opts.error.stack : undefined;
+
+  console.error(
+    `[ACCOUNTING ERROR] operation=${opts.operation} booking=${opts.orderNumber} bookingId=${opts.bookingId} — ${message}`,
+  );
+  if (stack) {
+    console.error(`[ACCOUNTING ERROR] stack:`, stack);
+  }
+
+  await logAudit({
+    action: "ACCOUNTING_ERROR",
+    entity: "booking",
+    entityId: opts.bookingId,
+    after: {
+      operation: opts.operation,
+      orderNumber: opts.orderNumber,
+      errorMessage: message,
+      stack: stack ?? null,
+      occurredAt: new Date().toISOString(),
+    },
+  });
+}
+
 export function getClientInfo(req: Request): { ipAddress: string; userAgent: string } {
   const ip =
     (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ||
