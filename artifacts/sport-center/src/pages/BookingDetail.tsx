@@ -29,6 +29,7 @@ import {
   Building2,
   QrCode,
   ChevronRight,
+  ArrowLeft,
   Star,
   CalendarClock,
   ShieldCheck,
@@ -706,9 +707,10 @@ export default function BookingDetail() {
                     <button
                       type="button"
                       onClick={() => { setPaymentMethod(null); clearFile(); }}
-                      className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
+                      className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1.5 hover:gap-2 transition-all group"
                     >
-                      ← {t("Pilih metode lain", "Choose another method")}
+                      <ArrowLeft size={13} className="group-hover:-translate-x-0.5 transition-transform" />
+                      {t("Pilih metode lain", "Choose another method")}
                     </button>
 
                     <div className="bg-muted rounded-xl p-4 relative group">
@@ -755,9 +757,10 @@ export default function BookingDetail() {
                     <button
                       type="button"
                       onClick={() => { setPaymentMethod(null); clearFile(); }}
-                      className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
+                      className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1.5 hover:gap-2 transition-all group"
                     >
-                      ← {t("Pilih metode lain", "Choose another method")}
+                      <ArrowLeft size={13} className="group-hover:-translate-x-0.5 transition-transform" />
+                      {t("Pilih metode lain", "Choose another method")}
                     </button>
 
                     <div className="rounded-xl border border-border overflow-hidden">
