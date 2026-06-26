@@ -655,6 +655,23 @@ async function runStartupMigrations() {
     `ALTER TABLE sport_center.company_invoices ADD COLUMN IF NOT EXISTS dpp_nilai_lain numeric(14,2) NOT NULL DEFAULT 0`,
     // Backfill dpp_nilai_lain for existing rows: DPP × (11/12)
     `UPDATE sport_center.company_invoices SET dpp_nilai_lain = ROUND((total_amount * 11 / 12), 2) WHERE dpp_nilai_lain = 0 AND total_amount > 0`,
+    // sport_vendors master table
+    `CREATE TABLE IF NOT EXISTS sport_center.sport_vendors (
+       id serial PRIMARY KEY,
+       name text NOT NULL,
+       contact_person text,
+       phone text,
+       email text,
+       address text,
+       category text,
+       is_active boolean NOT NULL DEFAULT true,
+       notes text,
+       created_at timestamptz NOT NULL DEFAULT NOW(),
+       updated_at timestamptz NOT NULL DEFAULT NOW()
+     )`,
+    // vendor_id FK on sport_expenses (nullable, idempotent)
+    `ALTER TABLE sport_center.sport_expenses
+       ADD COLUMN IF NOT EXISTS vendor_id int REFERENCES sport_center.sport_vendors(id) ON DELETE SET NULL`,
   ];
 
   for (const stmt of migrations) {

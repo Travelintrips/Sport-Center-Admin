@@ -9,7 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { getToken } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Search, Edit2, Trash2, UserCheck, UserX, Building2, Phone, Mail, MapPin } from "lucide-react";
+import { Plus, Search, Edit2, Power, Trash2, Store, Phone, Mail, MapPin } from "lucide-react";
 
 const API = import.meta.env.VITE_API_BASE_URL ?? "/api";
 const authHeaders = () => ({ Authorization: `Bearer ${getToken()}`, "Content-Type": "application/json" });
@@ -50,37 +50,44 @@ export default function AdminVendors() {
   const [deleteConfirmName, setDeleteConfirmName] = useState("");
 
   const { data: vendors = [], isLoading } = useQuery<Vendor[]>({
-    queryKey: ["vendors-admin"],
+    queryKey: ["admin-vendors"],
     queryFn: () =>
-      fetch(`${API}/admin/vendors`, { headers: authHeaders() }).then((r) => r.json()),
+      fetch(`${API}/admin/vendors`, { headers: authHeaders() })
+        .then((r) => r.json())
+        .then((d) => (Array.isArray(d) ? d : [])),
   });
 
   const createMutation = useMutation({
-    mutationFn: (body: any) =>
-      fetch(`${API}/admin/vendors`, { method: "POST", headers: authHeaders(), body: JSON.stringify(body) }).then(async (r) => {
+    mutationFn: (body: typeof EMPTY_FORM) =>
+      fetch(`${API}/admin/vendors`, {
+        method: "POST", headers: authHeaders(), body: JSON.stringify(body),
+      }).then(async (r) => {
         const d = await r.json();
         if (!r.ok) throw new Error(d.error ?? "Gagal membuat vendor");
         return d;
       }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["vendors-admin"] });
+      qc.invalidateQueries({ queryKey: ["admin-vendors"] });
       qc.invalidateQueries({ queryKey: ["vendors"] });
       setFormOpen(false);
       setForm({ ...EMPTY_FORM });
+      setEditingId(null);
       toast({ title: "Vendor berhasil ditambahkan" });
     },
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, body }: { id: number; body: any }) =>
-      fetch(`${API}/admin/vendors/${id}`, { method: "PATCH", headers: authHeaders(), body: JSON.stringify(body) }).then(async (r) => {
+    mutationFn: ({ id, body }: { id: number; body: Partial<typeof EMPTY_FORM> }) =>
+      fetch(`${API}/admin/vendors/${id}`, {
+        method: "PATCH", headers: authHeaders(), body: JSON.stringify(body),
+      }).then(async (r) => {
         const d = await r.json();
         if (!r.ok) throw new Error(d.error ?? "Gagal update vendor");
         return d;
       }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["vendors-admin"] });
+      qc.invalidateQueries({ queryKey: ["admin-vendors"] });
       qc.invalidateQueries({ queryKey: ["vendors"] });
       setFormOpen(false);
       setForm({ ...EMPTY_FORM });
@@ -90,15 +97,32 @@ export default function AdminVendors() {
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
 
+  const toggleActiveMutation = useMutation({
+    mutationFn: ({ id, isActive }: { id: number; isActive: boolean }) =>
+      fetch(`${API}/admin/vendors/${id}`, {
+        method: "PATCH", headers: authHeaders(), body: JSON.stringify({ isActive }),
+      }).then(async (r) => {
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error ?? "Gagal update status vendor");
+        return d;
+      }),
+    onSuccess: (_, vars) => {
+      qc.invalidateQueries({ queryKey: ["admin-vendors"] });
+      qc.invalidateQueries({ queryKey: ["vendors"] });
+      toast({ title: vars.isActive ? "Vendor diaktifkan" : "Vendor dinonaktifkan" });
+    },
+    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+  });
+
   const deleteMutation = useMutation({
     mutationFn: (id: number) =>
       fetch(`${API}/admin/vendors/${id}`, { method: "DELETE", headers: authHeaders() }).then(async (r) => {
         const d = await r.json();
-        if (!r.ok) throw new Error(d.error ?? "Gagal hapus vendor");
+        if (!r.ok) throw new Error(d.error ?? "Gagal menghapus vendor");
         return d;
       }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["vendors-admin"] });
+      qc.invalidateQueries({ queryKey: ["admin-vendors"] });
       qc.invalidateQueries({ queryKey: ["vendors"] });
       setDeleteConfirmId(null);
       setDeleteConfirmName("");
@@ -107,19 +131,16 @@ export default function AdminVendors() {
     onError: (e: any) => toast({ title: "Gagal hapus", description: e.message, variant: "destructive" }),
   });
 
-  const toggleActiveMutation = useMutation({
-    mutationFn: ({ id, isActive }: { id: number; isActive: boolean }) =>
-      fetch(`${API}/admin/vendors/${id}`, { method: "PATCH", headers: authHeaders(), body: JSON.stringify({ isActive }) }).then(async (r) => {
-        const d = await r.json();
-        if (!r.ok) throw new Error(d.error ?? "Gagal update status vendor");
-        return d;
-      }),
-    onSuccess: (_, vars) => {
-      qc.invalidateQueries({ queryKey: ["vendors-admin"] });
-      qc.invalidateQueries({ queryKey: ["vendors"] });
-      toast({ title: vars.isActive ? "Vendor diaktifkan" : "Vendor dinonaktifkan" });
-    },
-    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+  const filtered = vendors.filter((v) => {
+    const q = search.toLowerCase();
+    const matchSearch =
+      !search ||
+      v.name.toLowerCase().includes(q) ||
+      (v.contactPerson ?? "").toLowerCase().includes(q) ||
+      (v.phone ?? "").includes(q) ||
+      (v.email ?? "").toLowerCase().includes(q);
+    const matchStatus = filterStatus === "all" || (filterStatus === "active" ? v.isActive : !v.isActive);
+    return matchSearch && matchStatus;
   });
 
   function openCreate() {
@@ -158,18 +179,11 @@ export default function AdminVendors() {
       isActive: form.isActive,
     };
     if (editingId) {
-      updateMutation.mutate({ id: editingId, body });
+      updateMutation.mutate({ id: editingId, body: body as any });
     } else {
-      createMutation.mutate(body);
+      createMutation.mutate(body as any);
     }
   }
-
-  const filtered = vendors.filter((v) => {
-    const q = search.toLowerCase();
-    const matchSearch = !search || v.name.toLowerCase().includes(q) || (v.contactPerson ?? "").toLowerCase().includes(q) || (v.phone ?? "").includes(q);
-    const matchStatus = filterStatus === "all" || (filterStatus === "active" ? v.isActive : !v.isActive);
-    return matchSearch && matchStatus;
-  });
 
   const activeCount = vendors.filter((v) => v.isActive).length;
   const inactiveCount = vendors.filter((v) => !v.isActive).length;
@@ -191,7 +205,7 @@ export default function AdminVendors() {
         <Card className="border-l-4 border-l-orange-500">
           <CardContent className="p-4">
             <div className="flex items-center gap-2 mb-1">
-              <Building2 className="w-4 h-4 text-orange-500" />
+              <Store className="w-4 h-4 text-orange-500" />
               <span className="text-xs text-gray-500 font-medium">Total Vendor</span>
             </div>
             <p className="text-2xl font-black text-gray-900">{vendors.length}</p>
@@ -200,7 +214,7 @@ export default function AdminVendors() {
         <Card className="border-l-4 border-l-green-500">
           <CardContent className="p-4">
             <div className="flex items-center gap-2 mb-1">
-              <UserCheck className="w-4 h-4 text-green-500" />
+              <Power className="w-4 h-4 text-green-500" />
               <span className="text-xs text-gray-500 font-medium">Aktif</span>
             </div>
             <p className="text-2xl font-black text-gray-900">{activeCount}</p>
@@ -209,7 +223,7 @@ export default function AdminVendors() {
         <Card className="border-l-4 border-l-gray-400">
           <CardContent className="p-4">
             <div className="flex items-center gap-2 mb-1">
-              <UserX className="w-4 h-4 text-gray-400" />
+              <Power className="w-4 h-4 text-gray-400" />
               <span className="text-xs text-gray-500 font-medium">Nonaktif</span>
             </div>
             <p className="text-2xl font-black text-gray-900">{inactiveCount}</p>
@@ -224,25 +238,23 @@ export default function AdminVendors() {
             <div className="relative flex-1 min-w-[200px]">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
               <Input
-                placeholder="Cari nama vendor, kontak..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
+                placeholder="Cari nama, kontak, telepon..."
                 className="pl-9"
               />
             </div>
             <div className="flex gap-2">
               {(["all", "active", "inactive"] as const).map((s) => (
-                <button
+                <Button
                   key={s}
+                  size="sm"
+                  variant={filterStatus === s ? "default" : "outline"}
+                  className={filterStatus === s ? "bg-orange-500 hover:bg-orange-600 text-white" : ""}
                   onClick={() => setFilterStatus(s)}
-                  className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                    filterStatus === s
-                      ? "bg-orange-500 text-white"
-                      : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-                  }`}
                 >
                   {s === "all" ? "Semua" : s === "active" ? "Aktif" : "Nonaktif"}
-                </button>
+                </Button>
               ))}
             </div>
           </div>
@@ -251,9 +263,9 @@ export default function AdminVendors() {
 
       {/* Table */}
       <Card>
-        <CardHeader className="pb-3">
+        <CardHeader className="pb-0">
           <CardTitle className="text-base font-bold">
-            Vendor <span className="text-gray-400 font-normal">({filtered.length})</span>
+            {filtered.length} vendor{filtered.length !== vendors.length ? ` dari ${vendors.length}` : ""}
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
@@ -263,14 +275,16 @@ export default function AdminVendors() {
             <div className="p-8 text-center text-gray-400">
               {vendors.length === 0 ? (
                 <div className="space-y-2">
-                  <Building2 className="w-10 h-10 mx-auto text-gray-200" />
+                  <Store className="w-10 h-10 mx-auto text-gray-200" />
                   <p className="font-medium">Belum ada vendor</p>
                   <p className="text-sm">Tambahkan vendor pertama untuk mulai mengelola pengeluaran</p>
                   <Button onClick={openCreate} className="mt-2 bg-orange-500 hover:bg-orange-600 text-white">
                     <Plus className="w-4 h-4 mr-2" /> Tambah Vendor
                   </Button>
                 </div>
-              ) : "Tidak ada vendor yang cocok dengan filter"}
+              ) : (
+                "Tidak ada vendor yang cocok dengan filter"
+              )}
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -291,11 +305,13 @@ export default function AdminVendors() {
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
                           <div className="w-8 h-8 rounded-full bg-orange-100 flex items-center justify-center shrink-0">
-                            <Building2 className="w-4 h-4 text-orange-500" />
+                            <Store className="w-4 h-4 text-orange-500" />
                           </div>
                           <div>
                             <p className="font-semibold text-gray-900">{vendor.name}</p>
-                            {vendor.notes && <p className="text-xs text-gray-400 truncate max-w-[150px]">{vendor.notes}</p>}
+                            {vendor.notes && (
+                              <p className="text-xs text-gray-400 truncate max-w-[150px]">{vendor.notes}</p>
+                            )}
                           </div>
                         </div>
                       </td>
@@ -323,7 +339,9 @@ export default function AdminVendors() {
                             <MapPin className="w-3 h-3 text-gray-400 mt-0.5 shrink-0" />
                             <span className="text-xs line-clamp-2">{vendor.address}</span>
                           </div>
-                        ) : <span className="text-gray-400">-</span>}
+                        ) : (
+                          <span className="text-gray-400">-</span>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-center">
                         <Badge className={vendor.isActive ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"}>
@@ -335,25 +353,25 @@ export default function AdminVendors() {
                           <Button
                             size="sm" variant="ghost"
                             className="h-7 w-7 p-0 text-blue-400 hover:text-blue-600"
-                            onClick={() => openEdit(vendor)}
                             title="Edit"
+                            onClick={() => openEdit(vendor)}
                           >
                             <Edit2 className="w-3.5 h-3.5" />
                           </Button>
                           <Button
                             size="sm" variant="ghost"
-                            className={`h-7 w-7 p-0 ${vendor.isActive ? "text-gray-400 hover:text-yellow-600" : "text-gray-400 hover:text-green-600"}`}
-                            onClick={() => toggleActiveMutation.mutate({ id: vendor.id, isActive: !vendor.isActive })}
+                            className={`h-7 w-7 p-0 ${vendor.isActive ? "text-amber-400 hover:text-amber-600" : "text-green-400 hover:text-green-600"}`}
                             title={vendor.isActive ? "Nonaktifkan" : "Aktifkan"}
+                            onClick={() => toggleActiveMutation.mutate({ id: vendor.id, isActive: !vendor.isActive })}
                             disabled={toggleActiveMutation.isPending}
                           >
-                            {vendor.isActive ? <UserX className="w-3.5 h-3.5" /> : <UserCheck className="w-3.5 h-3.5" />}
+                            <Power className="w-3.5 h-3.5" />
                           </Button>
                           <Button
                             size="sm" variant="ghost"
                             className="h-7 w-7 p-0 text-red-400 hover:text-red-600"
-                            onClick={() => { setDeleteConfirmId(vendor.id); setDeleteConfirmName(vendor.name); }}
                             title="Hapus"
+                            onClick={() => { setDeleteConfirmId(vendor.id); setDeleteConfirmName(vendor.name); }}
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </Button>
@@ -369,7 +387,10 @@ export default function AdminVendors() {
       </Card>
 
       {/* Form Dialog */}
-      <Dialog open={formOpen} onOpenChange={(o) => { if (!o) { setFormOpen(false); setEditingId(null); setForm({ ...EMPTY_FORM }); } }}>
+      <Dialog
+        open={formOpen}
+        onOpenChange={(o) => { if (!o) { setFormOpen(false); setEditingId(null); setForm({ ...EMPTY_FORM }); } }}
+      >
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle className="font-black">{editingId ? "Edit Vendor" : "Tambah Vendor"}</DialogTitle>
@@ -384,7 +405,6 @@ export default function AdminVendors() {
                 required
               />
             </div>
-
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1">
                 <Label>Contact Person</Label>
@@ -403,7 +423,6 @@ export default function AdminVendors() {
                 />
               </div>
             </div>
-
             <div className="space-y-1">
               <Label>Email</Label>
               <Input
@@ -413,7 +432,6 @@ export default function AdminVendors() {
                 placeholder="vendor@email.com"
               />
             </div>
-
             <div className="space-y-1">
               <Label>Alamat</Label>
               <Textarea
@@ -423,7 +441,6 @@ export default function AdminVendors() {
                 rows={2}
               />
             </div>
-
             <div className="space-y-1">
               <Label>Catatan</Label>
               <Textarea
@@ -433,24 +450,45 @@ export default function AdminVendors() {
                 rows={2}
               />
             </div>
-
-            <div className="flex items-center gap-3">
-              <Label className="flex items-center gap-2 cursor-pointer">
+            {editingId && (
+              <div className="flex items-center gap-3 p-3 rounded-lg bg-gray-50 border">
+                <span className="text-sm font-medium text-gray-700">Status:</span>
+                <button
+                  type="button"
+                  onClick={() => setForm({ ...form, isActive: !form.isActive })}
+                  className={`relative inline-flex h-5 w-9 rounded-full transition-colors ${form.isActive ? "bg-green-500" : "bg-gray-300"}`}
+                >
+                  <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${form.isActive ? "translate-x-4" : "translate-x-0"}`} />
+                </button>
+                <span className={`text-sm font-semibold ${form.isActive ? "text-green-600" : "text-gray-500"}`}>
+                  {form.isActive ? "Aktif" : "Nonaktif"}
+                </span>
+              </div>
+            )}
+            {!editingId && (
+              <div className="flex items-center gap-2">
                 <input
                   type="checkbox"
+                  id="isActive"
                   checked={form.isActive}
                   onChange={(e) => setForm({ ...form, isActive: e.target.checked })}
                   className="w-4 h-4 accent-orange-500"
                 />
-                <span>Vendor Aktif</span>
-              </Label>
-            </div>
-
+                <Label htmlFor="isActive" className="cursor-pointer">Vendor Aktif</Label>
+              </div>
+            )}
             <div className="flex gap-3 justify-end pt-2">
-              <Button type="button" variant="outline" onClick={() => { setFormOpen(false); setEditingId(null); setForm({ ...EMPTY_FORM }); }}>
+              <Button
+                type="button" variant="outline"
+                onClick={() => { setFormOpen(false); setEditingId(null); setForm({ ...EMPTY_FORM }); }}
+              >
                 Batal
               </Button>
-              <Button type="submit" className="bg-orange-500 hover:bg-orange-600 text-white font-bold" disabled={createMutation.isPending || updateMutation.isPending}>
+              <Button
+                type="submit"
+                className="bg-orange-500 hover:bg-orange-600 text-white font-bold"
+                disabled={createMutation.isPending || updateMutation.isPending}
+              >
                 {editingId ? "Simpan Perubahan" : "Tambah Vendor"}
               </Button>
             </div>
@@ -459,26 +497,34 @@ export default function AdminVendors() {
       </Dialog>
 
       {/* Delete Confirm Dialog */}
-      <Dialog open={!!deleteConfirmId} onOpenChange={(o) => { if (!o) { setDeleteConfirmId(null); setDeleteConfirmName(""); } }}>
+      <Dialog
+        open={!!deleteConfirmId}
+        onOpenChange={(o) => { if (!o) { setDeleteConfirmId(null); setDeleteConfirmName(""); } }}
+      >
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle className="font-black text-red-600">Hapus Vendor</DialogTitle>
           </DialogHeader>
-          <p className="text-sm text-gray-600">
-            Yakin ingin menghapus vendor <span className="font-bold text-orange-600">"{deleteConfirmName}"</span>? Tindakan ini tidak bisa dibatalkan.
-          </p>
-          <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded p-2">
-            Perhatian: Pengeluaran yang sudah memakai vendor ini akan tetap menyimpan nama vendor, tapi FK akan dihapus.
-          </p>
-          <div className="flex gap-2 justify-end mt-2">
-            <Button variant="outline" onClick={() => { setDeleteConfirmId(null); setDeleteConfirmName(""); }}>Batal</Button>
-            <Button
-              variant="destructive"
-              disabled={deleteMutation.isPending}
-              onClick={() => { if (deleteConfirmId) deleteMutation.mutate(deleteConfirmId); }}
-            >
-              Hapus
-            </Button>
+          <div className="space-y-3">
+            <p className="text-sm text-gray-600">
+              Yakin ingin menghapus vendor <span className="font-bold text-orange-600">"{deleteConfirmName}"</span>?
+              Tindakan ini tidak bisa dibatalkan.
+            </p>
+            <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded p-2">
+              Pengeluaran yang sudah memakai vendor ini akan tetap menyimpan nama vendor sebagai snapshot.
+            </p>
+            <div className="flex gap-2 justify-end">
+              <Button variant="outline" onClick={() => { setDeleteConfirmId(null); setDeleteConfirmName(""); }}>
+                Batal
+              </Button>
+              <Button
+                variant="destructive"
+                disabled={deleteMutation.isPending}
+                onClick={() => { if (deleteConfirmId) deleteMutation.mutate(deleteConfirmId); }}
+              >
+                Hapus
+              </Button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>

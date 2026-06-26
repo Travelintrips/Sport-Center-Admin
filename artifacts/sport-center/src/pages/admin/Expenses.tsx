@@ -7,7 +7,10 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ChevronsUpDown, Check } from "lucide-react";
 import { getToken } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -70,6 +73,7 @@ const EMPTY_FORM = {
   coaAccountId: "",
   description: "",
   vendorId: "",
+  vendorName: "",
   facilityId: "",
   amount: "",
   ppnAmount: "",
@@ -104,6 +108,8 @@ export default function AdminExpenses() {
   const [endDate, setEndDate] = useState("");
 
   const [formOpen, setFormOpen] = useState(false);
+  const [coaOpen, setCoaOpen] = useState(false);
+  const [vendorOpen, setVendorOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState({ ...EMPTY_FORM });
 
@@ -322,6 +328,9 @@ export default function AdminExpenses() {
       coaAccountId: expense.coaAccountId ? String(expense.coaAccountId) : "",
       description: expense.description ?? "",
       vendorId: expense.vendorId ? String(expense.vendorId) : "",
+
+
+      vendorName: expense.vendorName ?? "",
       facilityId: expense.facilityId ? String(expense.facilityId) : "",
       amount: String(expense.amount ?? ""),
       ppnAmount: String(expense.ppnAmount ?? "0"),
@@ -339,11 +348,18 @@ export default function AdminExpenses() {
       toast({ title: "Akun COA wajib dipilih", variant: "destructive" });
       return;
     }
+    if (!form.vendorId) {
+      toast({ title: "Vendor wajib dipilih", description: "Pilih vendor dari daftar yang tersedia", variant: "destructive" });
+      return;
+    }
+    const selectedV = vendors.find((v) => v.id === Number(form.vendorId));
     const body = {
       expenseDate: form.expenseDate,
       coaAccountId: Number(form.coaAccountId),
       description: form.description,
       vendorId: form.vendorId ? Number(form.vendorId) : null,
+      vendorId: Number(form.vendorId),
+      vendorName: selectedV?.name ?? form.vendorName ?? null,
       facilityId: form.facilityId ? Number(form.facilityId) : null,
       amount: Number(form.amount),
       ppnAmount: Number(form.ppnAmount || 0),
@@ -590,26 +606,46 @@ export default function AdminExpenses() {
                   <BookOpen className="w-3.5 h-3.5 text-orange-500" />
                   Akun COA <span className="text-red-500">*</span>
                 </Label>
-                <Select value={form.coaAccountId} onValueChange={(v) => setForm({ ...form, coaAccountId: v })}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Pilih akun COA..." />
-                  </SelectTrigger>
-                  <SelectContent className="max-h-72">
-                    {Object.entries(coaByType).map(([type, accounts]) => (
-                      <div key={type}>
-                        <div className="px-2 py-1.5 text-xs font-bold text-gray-400 uppercase tracking-wide border-b bg-gray-50">
-                          {ACCOUNT_TYPE_LABELS[type] ?? type}
-                        </div>
-                        {accounts.map((acc) => (
-                          <SelectItem key={acc.id} value={String(acc.id)}>
-                            <span className="font-mono text-xs text-gray-500 mr-1">{acc.code}</span>
-                            {acc.name}
-                          </SelectItem>
+                <Popover open={coaOpen} onOpenChange={setCoaOpen}>
+                  <PopoverTrigger asChild>
+                    <button
+                      type="button"
+                      className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {selectedCoa
+                        ? <span><span className="font-mono text-xs text-gray-500 mr-1">{selectedCoa.code}</span>{selectedCoa.name}</span>
+                        : <span className="text-muted-foreground">Pilih akun COA...</span>
+                      }
+                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[320px] p-0" align="start">
+                    <Command>
+                      <CommandInput placeholder="Cari akun COA..." />
+                      <CommandList className="max-h-64">
+                        <CommandEmpty>Akun tidak ditemukan.</CommandEmpty>
+                        {Object.entries(coaByType).map(([type, accounts]) => (
+                          <CommandGroup key={type} heading={ACCOUNT_TYPE_LABELS[type] ?? type}>
+                            {accounts.map((acc) => (
+                              <CommandItem
+                                key={acc.id}
+                                value={`${acc.code} ${acc.name}`}
+                                onSelect={() => {
+                                  setForm({ ...form, coaAccountId: String(acc.id) });
+                                  setCoaOpen(false);
+                                }}
+                              >
+                                <Check className={`mr-2 h-4 w-4 ${form.coaAccountId === String(acc.id) ? "opacity-100" : "opacity-0"}`} />
+                                <span className="font-mono text-xs text-gray-500 mr-1">{acc.code}</span>
+                                {acc.name}
+                              </CommandItem>
+                            ))}
+                          </CommandGroup>
                         ))}
-                      </div>
-                    ))}
-                  </SelectContent>
-                </Select>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
                 {selectedCoa && (
                   <div className="text-xs mt-1 p-2 rounded-md bg-orange-50 border border-orange-100 flex items-center gap-2">
                     <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${ACCOUNT_TYPE_COLORS[selectedCoa.accountType] ?? "bg-gray-100"}`}>
@@ -657,6 +693,54 @@ export default function AdminExpenses() {
                     )}
                   </SelectContent>
                 </Select>
+                <Label>Vendor / Supplier <span className="text-red-500">*</span></Label>
+                <Popover open={vendorOpen} onOpenChange={setVendorOpen}>
+                  <PopoverTrigger asChild>
+                    <button
+                      type="button"
+                      className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {form.vendorId
+                        ? <span className="font-medium">{vendors.find((v) => v.id === Number(form.vendorId))?.name ?? "Pilih vendor..."}</span>
+                        : <span className="text-muted-foreground">Pilih vendor...</span>
+                      }
+                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[280px] p-0" align="start">
+                    <Command>
+                      <CommandInput placeholder="Cari vendor..." />
+                      <CommandList className="max-h-56">
+                        <CommandEmpty>
+                          <div className="text-center py-2">
+                            <p className="text-sm text-gray-500">Vendor tidak ditemukan.</p>
+                            <a href="/admin/vendors" className="text-xs text-orange-500 underline" target="_blank">
+                              Tambah vendor baru →
+                            </a>
+                          </div>
+                        </CommandEmpty>
+                        <CommandGroup>
+                          {vendors.map((v) => (
+                            <CommandItem
+                              key={v.id}
+                              value={v.name}
+                              onSelect={() => {
+                                setForm({ ...form, vendorId: String(v.id), vendorName: v.name });
+                                setVendorOpen(false);
+                              }}
+                            >
+                              <Check className={`mr-2 h-4 w-4 ${form.vendorId === String(v.id) ? "opacity-100" : "opacity-0"}`} />
+                              {v.name}
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
+                {vendors.length === 0 && (
+                  <p className="text-xs text-amber-600">Belum ada vendor aktif. <a href="/admin/vendors" className="underline" target="_blank">Tambah vendor</a></p>
+                )}
               </div>
               <div className="space-y-1">
                 <Label>Fasilitas Terkait</Label>

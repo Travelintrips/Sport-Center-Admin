@@ -50,6 +50,12 @@ async function getCoaAccount(coaAccountId: number | null) {
   return a ?? null;
 }
 
+async function getVendorById(vendorId: number | null): Promise<{ id: number; name: string } | null> {
+  if (!vendorId) return null;
+  const [v] = await db.select({ id: vendorsTable.id, name: vendorsTable.name }).from(vendorsTable).where(eq(vendorsTable.id, vendorId)).limit(1);
+  return v ?? null;
+}
+
 async function syncToPublic(expense: typeof expensesTable.$inferSelect, facilityName: string | null) {
   try {
     await db
@@ -293,6 +299,11 @@ router.post("/admin/expenses", adminMiddleware, async (req, res) => {
     const resolvedVendorId = vendorId ? Number(vendorId) : null;
     if (resolvedVendorId && !resolvedVendorName) {
       const v = await getVendor(resolvedVendorId);
+    // Resolve vendor name snapshot from vendor master
+    const resolvedVendorId = vendorId ? Number(vendorId) : null;
+    let resolvedVendorName = vendorName || null;
+    if (resolvedVendorId && !resolvedVendorName) {
+      const v = await getVendorById(resolvedVendorId);
       resolvedVendorName = v?.name ?? null;
     }
 
@@ -326,6 +337,13 @@ router.post("/admin/expenses", adminMiddleware, async (req, res) => {
     await logAudit({
       ...user, action: "EXPENSE_CREATED", entity: "expense", entityId: expense!.id,
       after: { ...expense, vendorId: resolvedVendorId, vendorName: resolvedVendorName }, ipAddress, userAgent,
+      after: { ...expense, vendorId: resolvedVendorId, vendorName: resolvedVendorName },
+      ipAddress, userAgent,
+    });
+    await logAudit({
+      ...user, action: "EXPENSE_VENDOR_SELECTED", entity: "expense", entityId: expense!.id,
+      after: { vendorId: resolvedVendorId, vendorName: resolvedVendorName },
+      ipAddress, userAgent,
     });
 
     if (resolvedVendorId) {
@@ -392,6 +410,12 @@ router.patch("/admin/expenses/:id", adminMiddleware, async (req, res) => {
     if (newVendorId && vendorId !== undefined) {
       const v = await getVendor(newVendorId);
       newVendorName = v?.name ?? newVendorName;
+    // Resolve vendor
+    const newVendorId = vendorId !== undefined ? (vendorId ? Number(vendorId) : null) : (existing as any).vendorId ?? null;
+    let newVendorName = vendorName !== undefined ? vendorName || null : existing.vendorName;
+    if (newVendorId && vendorId !== undefined && !vendorName) {
+      const v = await getVendorById(newVendorId);
+      newVendorName = v?.name ?? null;
     }
 
     const amountNum = amount !== undefined ? Number(amount) : Number(existing.amount);
