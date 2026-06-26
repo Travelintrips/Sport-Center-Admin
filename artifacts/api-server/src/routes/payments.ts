@@ -255,8 +255,8 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
           const today = new Date().toISOString().split("T")[0];
           const subtotal = Number(booking.totalPrice);
           const ppnAmount = booking.ppnAmount != null ? Number(booking.ppnAmount) : 0;
-          createJournalEntry(booking.id, booking.orderNumber, subtotal, ppnAmount, today).catch(() => {});
-          createPublicAccountingEntry(booking.id, booking.orderNumber, subtotal, ppnAmount, booking.facilityId, today).catch(() => {});
+          createJournalEntry(booking.id, booking.orderNumber, subtotal, ppnAmount, today).catch((err) => console.error("[journal] createJournalEntry error:", err));
+          createPublicAccountingEntry(booking.id, booking.orderNumber, subtotal, ppnAmount, booking.facilityId, today).catch((err) => console.error("[journal] createPublicAccountingEntry error:", err));
         }
 
         await logAudit({

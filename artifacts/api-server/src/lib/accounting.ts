@@ -2,23 +2,65 @@ import { db, accountingJournalsTable, accountingJournalLinesTable } from "@works
 import { eq, and, sql } from "drizzle-orm";
 
 // ─── Public Accounting (public.accounting_entries) ───────────────────────────
-const PUBLIC_JOURNAL_ID = 8099;        // CSH-CST (Kas) — id=8099 di public.accounting_journals
-const COA_KAS_CST = 49097;             // 1-1010-CST  Kas CST
-const COA_PENDAPATAN_BOOKING = 72354;  // 4-1017-CST  Pendapatan Booking Sport Center CST
-const COA_PPN_KELUARAN = 49109;        // PPN Keluaran — account_id di public.accounting_taxes id=1
-const TAX_ID_PPN_11 = 1;              // id di public.accounting_taxes (PPN Keluaran 11%)
 const COMPANY_ID = 1;
+
+// Cache untuk ID yang di-resolve dari public schema (berbeda antara dev & prod)
+let _publicIds: {
+  journalId: number;
+  coaKas: number;
+  coaPendapatan: number;
+  coaPpnKeluaran: number;
+  taxIdPpn: number;
+} | null = null;
+
+async function getPublicIds() {
+  if (_publicIds) return _publicIds;
+
+  const journal = await db.execute(sql`
+    SELECT id FROM public.accounting_journals WHERE code = 'CSH-CST' LIMIT 1
+  `);
+  const kas = await db.execute(sql`
+    SELECT id FROM public.chart_of_accounts WHERE code = '1-1010-CST' AND is_active = true LIMIT 1
+  `);
+  const pendapatan = await db.execute(sql`
+    SELECT id FROM public.chart_of_accounts WHERE code = '4-1017-CST' AND is_active = true LIMIT 1
+  `);
+  const ppn = await db.execute(sql`
+    SELECT id FROM public.chart_of_accounts WHERE code = '2-1020-CST' AND is_active = true LIMIT 1
+  `);
+  const tax = await db.execute(sql`
+    SELECT id FROM public.accounting_taxes WHERE name ILIKE '%PPN Keluaran%' AND company_id = ${COMPANY_ID} ORDER BY id LIMIT 1
+  `);
+
+  const journalId = Number((journal.rows[0] as any)?.id);
+  const coaKas = Number((kas.rows[0] as any)?.id);
+  const coaPendapatan = Number((pendapatan.rows[0] as any)?.id);
+  const coaPpnKeluaran = Number((ppn.rows[0] as any)?.id);
+  const taxIdPpn = Number((tax.rows[0] as any)?.id ?? 1);
+
+  if (!journalId || !coaKas || !coaPendapatan || !coaPpnKeluaran) {
+    throw new Error(
+      `[accounting] Public COA/journal lookup gagal. ` +
+      `journalId=${journalId} coaKas=${coaKas} coaPendapatan=${coaPendapatan} coaPpnKeluaran=${coaPpnKeluaran}. ` +
+      `Pastikan public.accounting_journals code=CSH-CST dan chart_of_accounts 1-1010-CST, 4-1017-CST, 2-1020-CST ada.`
+    );
+  }
+
+  _publicIds = { journalId, coaKas, coaPendapatan, coaPpnKeluaran, taxIdPpn };
+  return _publicIds;
+}
 
 async function nextPublicEntryNumber(year: number): Promise<string> {
   const result = await db.execute(sql`
     SELECT COALESCE(MAX(
-      NULLIF(REGEXP_REPLACE(entry_number, '^CSH-CST/[0-9]+/', ''), '')::integer
+      NULLIF(REGEXP_REPLACE(entry_number, '^SC-CSH/[0-9]+/', ''), '')::integer
     ), 0) + 1 AS seq
     FROM public.accounting_entries
-    WHERE entry_number LIKE ${'CSH-CST/' + year + '/%'}
+    WHERE entry_number LIKE ${'SC-CSH/' + year + '/%'}
+      AND source = 'sport_center_booking'
   `);
   const seq = Number((result.rows[0] as any).seq ?? 1);
-  return `CSH-CST/${year}/${String(seq).padStart(4, "0")}`;
+  return `SC-CSH/${year}/${String(seq).padStart(4, "0")}`;
 }
 
 export async function createPublicAccountingEntry(
@@ -35,13 +77,15 @@ export async function createPublicAccountingEntry(
   const period = journalDate.slice(0, 7); // YYYY-MM
   const entryNumber = await nextPublicEntryNumber(year);
 
+  const ids = await getPublicIds();
+
   // 1. Buat accounting entry (draft)
   const entryResult = await db.execute(sql`
     INSERT INTO public.accounting_entries
       (entry_number, journal_id, date, ref, description, status, source, source_id,
        total_debit, total_credit, company_id, facility_id, correlation_id, governance_flags)
     VALUES (
-      ${entryNumber}, ${PUBLIC_JOURNAL_ID}, ${journalDate}::date, ${orderNumber},
+      ${entryNumber}, ${ids.journalId}, ${journalDate}::date, ${orderNumber},
       ${'Pembayaran Booking Sport Center (' + orderNumber + ')'}, 'draft',
       'sport_center_booking', ${bookingId},
       ${grandTotal}, ${grandTotal}, ${COMPANY_ID}, ${facilityId ?? null},
@@ -55,15 +99,15 @@ export async function createPublicAccountingEntry(
   if (hasPpn) {
     await db.execute(sql`
       INSERT INTO public.accounting_entry_lines (entry_id, account_id, description, debit, credit) VALUES
-        (${entryId}, ${COA_KAS_CST},           ${'Penerimaan booking ' + orderNumber}, ${grandTotal}, 0),
-        (${entryId}, ${COA_PENDAPATAN_BOOKING}, ${'Pendapatan booking ' + orderNumber}, 0, ${subtotal}),
-        (${entryId}, ${COA_PPN_KELUARAN},       ${'PPN Keluaran booking ' + orderNumber}, 0, ${ppnAmount})
+        (${entryId}, ${ids.coaKas},         ${'Penerimaan booking ' + orderNumber}, ${grandTotal}, 0),
+        (${entryId}, ${ids.coaPendapatan},  ${'Pendapatan booking ' + orderNumber}, 0, ${subtotal}),
+        (${entryId}, ${ids.coaPpnKeluaran}, ${'PPN Keluaran booking ' + orderNumber}, 0, ${ppnAmount})
     `);
   } else {
     await db.execute(sql`
       INSERT INTO public.accounting_entry_lines (entry_id, account_id, description, debit, credit) VALUES
-        (${entryId}, ${COA_KAS_CST},           ${'Penerimaan booking ' + orderNumber}, ${grandTotal}, 0),
-        (${entryId}, ${COA_PENDAPATAN_BOOKING}, ${'Pendapatan booking ' + orderNumber}, 0, ${subtotal})
+        (${entryId}, ${ids.coaKas},        ${'Penerimaan booking ' + orderNumber}, ${grandTotal}, 0),
+        (${entryId}, ${ids.coaPendapatan}, ${'Pendapatan booking ' + orderNumber}, 0, ${subtotal})
     `);
   }
 
@@ -80,8 +124,8 @@ export async function createPublicAccountingEntry(
          period, status, direction, created_at, updated_at)
       VALUES (
         ${COMPANY_ID}, 'sport_center_booking', ${bookingId}, ${orderNumber},
-        ${TAX_ID_PPN_11}, 'PPN Keluaran 11%', 11, 'self_borne',
-        ${subtotal}, ${ppnAmount}, ${COA_PPN_KELUARAN},
+        ${ids.taxIdPpn}, 'PPN Keluaran 11%', 11, 'self_borne',
+        ${subtotal}, ${ppnAmount}, ${ids.coaPpnKeluaran},
         ${period}, 'posted', 'out', NOW(), NOW()
       )
     `);
