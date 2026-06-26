@@ -71,7 +71,11 @@ export async function createPublicAccountingEntry(
   facilityId: number | null,
   journalDate: string,
 ): Promise<void> {
-  const grandTotal = subtotal + ppnAmount;
+  // PPN bersifat inklusif: harga yang dibayar pelanggan sudah termasuk PPN.
+  // grandTotal = subtotal (total yang diterima), bukan subtotal + ppnAmount.
+  // Pendapatan bersih = subtotal - ppnAmount (harga sebelum PPN).
+  const grandTotal = subtotal;
+  const netRevenue = subtotal - ppnAmount;
   const hasPpn = ppnAmount > 0;
   const year = new Date(journalDate).getFullYear();
   const period = journalDate.slice(0, 7); // YYYY-MM
@@ -95,19 +99,21 @@ export async function createPublicAccountingEntry(
   `);
   const entryId = Number((entryResult.rows[0] as any).id);
 
-  // 2. Baris GL: Kas (debit), Pendapatan (kredit), PPN Keluaran (kredit jika ada)
+  // 2. Baris GL: Kas (debit), Pendapatan net (kredit), PPN Keluaran (kredit jika ada)
+  // Kas = grandTotal; Pendapatan = grandTotal - ppnAmount; PPN = ppnAmount
+  // Total kredit = netRevenue + ppnAmount = grandTotal ✓ (balanced)
   if (hasPpn) {
     await db.execute(sql`
       INSERT INTO public.accounting_entry_lines (entry_id, account_id, description, debit, credit) VALUES
         (${entryId}, ${ids.coaKas},         ${'Penerimaan booking ' + orderNumber}, ${grandTotal}, 0),
-        (${entryId}, ${ids.coaPendapatan},  ${'Pendapatan booking ' + orderNumber}, 0, ${subtotal}),
+        (${entryId}, ${ids.coaPendapatan},  ${'Pendapatan booking ' + orderNumber}, 0, ${netRevenue}),
         (${entryId}, ${ids.coaPpnKeluaran}, ${'PPN Keluaran booking ' + orderNumber}, 0, ${ppnAmount})
     `);
   } else {
     await db.execute(sql`
       INSERT INTO public.accounting_entry_lines (entry_id, account_id, description, debit, credit) VALUES
         (${entryId}, ${ids.coaKas},        ${'Penerimaan booking ' + orderNumber}, ${grandTotal}, 0),
-        (${entryId}, ${ids.coaPendapatan}, ${'Pendapatan booking ' + orderNumber}, 0, ${subtotal})
+        (${entryId}, ${ids.coaPendapatan}, ${'Pendapatan booking ' + orderNumber}, 0, ${grandTotal})
     `);
   }
 
@@ -254,7 +260,10 @@ export async function createJournalEntry(
   ppnAmount: number,
   journalDate: string,
 ): Promise<void> {
-  const grandTotal = subtotal + ppnAmount;
+  // PPN inklusif: grandTotal = subtotal (harga sudah termasuk PPN)
+  // Pendapatan bersih = subtotal - ppnAmount
+  const grandTotal = subtotal;
+  const netRevenue = subtotal - ppnAmount;
 
   const [journal] = await db
     .insert(accountingJournalsTable)
@@ -265,8 +274,8 @@ export async function createJournalEntry(
       debitAccount: "Kas/Bank",
       debitAmount: String(grandTotal),
       creditRevenueAccount: "Pendapatan Sport Center",
-      creditRevenueAmount: String(subtotal),
-      creditPpnAccount: "PPN Keluaran",
+      creditRevenueAmount: String(ppnAmount > 0 ? netRevenue : grandTotal),
+      creditPpnAccount: ppnAmount > 0 ? "PPN Keluaran" : null,
       creditPpnAmount: String(ppnAmount),
       journalDate,
       isReversal: false,
@@ -277,11 +286,11 @@ export async function createJournalEntry(
   if (!journal) return;
 
   const lines: Array<{ lineType: string; accountCode: string; accountName: string; amount: number; description?: string }> = [
-    { lineType: "debit",  accountCode: "1-1001", accountName: "Kas/Bank",               amount: grandTotal, description: `Penerimaan booking ${orderNumber}` },
-    { lineType: "credit", accountCode: "4-1001", accountName: "Pendapatan Sport Center", amount: subtotal,   description: `Pendapatan booking ${orderNumber}` },
+    { lineType: "debit",  accountCode: "1-1001", accountName: "Kas/Bank",               amount: grandTotal,  description: `Penerimaan booking ${orderNumber}` },
+    { lineType: "credit", accountCode: "4-1001", accountName: "Pendapatan Sport Center", amount: ppnAmount > 0 ? netRevenue : grandTotal, description: `Pendapatan booking ${orderNumber}` },
   ];
   if (ppnAmount > 0) {
-    lines.push({ lineType: "credit", accountCode: "2-1101", accountName: "PPN Keluaran", amount: ppnAmount, description: `PPN 12% booking ${orderNumber}` });
+    lines.push({ lineType: "credit", accountCode: "2-1101", accountName: "PPN Keluaran", amount: ppnAmount, description: `PPN 11% booking ${orderNumber}` });
   }
 
   await postJournalLines(journal.id, lines);

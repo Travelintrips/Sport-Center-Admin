@@ -294,11 +294,6 @@ router.post("/admin/expenses", adminMiddleware, async (req, res) => {
     }
     if (!resolvedCategory) resolvedCategory = "Lain-lain";
 
-    // Resolve vendor name from vendorId if provided
-    let resolvedVendorName = vendorName || null;
-    const resolvedVendorId = vendorId ? Number(vendorId) : null;
-    if (resolvedVendorId && !resolvedVendorName) {
-      const v = await getVendor(resolvedVendorId);
     // Resolve vendor name snapshot from vendor master
     const resolvedVendorId = vendorId ? Number(vendorId) : null;
     let resolvedVendorName = vendorName || null;
@@ -336,13 +331,7 @@ router.post("/admin/expenses", adminMiddleware, async (req, res) => {
 
     await logAudit({
       ...user, action: "EXPENSE_CREATED", entity: "expense", entityId: expense!.id,
-      after: { ...expense, vendorId: resolvedVendorId, vendorName: resolvedVendorName }, ipAddress, userAgent,
       after: { ...expense, vendorId: resolvedVendorId, vendorName: resolvedVendorName },
-      ipAddress, userAgent,
-    });
-    await logAudit({
-      ...user, action: "EXPENSE_VENDOR_SELECTED", entity: "expense", entityId: expense!.id,
-      after: { vendorId: resolvedVendorId, vendorName: resolvedVendorName },
       ipAddress, userAgent,
     });
 
@@ -403,15 +392,9 @@ router.patch("/admin/expenses/:id", adminMiddleware, async (req, res) => {
       if (coaAcc) resolvedCategory = coaAcc.name;
     }
 
-    // Resolve vendorId and vendorName
+    // Resolve vendor
     const existingVendorId = (existing as any).vendorId ?? null;
     const newVendorId = vendorId !== undefined ? (vendorId ? Number(vendorId) : null) : existingVendorId;
-    let newVendorName = vendorName !== undefined ? vendorName || null : existing.vendorName;
-    if (newVendorId && vendorId !== undefined) {
-      const v = await getVendor(newVendorId);
-      newVendorName = v?.name ?? newVendorName;
-    // Resolve vendor
-    const newVendorId = vendorId !== undefined ? (vendorId ? Number(vendorId) : null) : (existing as any).vendorId ?? null;
     let newVendorName = vendorName !== undefined ? vendorName || null : existing.vendorName;
     if (newVendorId && vendorId !== undefined && !vendorName) {
       const v = await getVendorById(newVendorId);
