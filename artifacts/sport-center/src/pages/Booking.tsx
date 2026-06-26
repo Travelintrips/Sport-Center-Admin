@@ -449,7 +449,7 @@ export default function Booking() {
               customerId: isAdminBooking ? prepData.customerId : undefined,
               bookedForName: bookedForName.trim() || effName,
               bookedForPhone: effPhone,
-              vendorId: vendorId ? Number(vendorId) : undefined,
+              vendorId: (vendorId && vendorId !== "__none__") ? Number(vendorId) : undefined,
             } as any,
           });
         } else {
@@ -470,7 +470,7 @@ export default function Booking() {
               customerId: isAdminBooking ? prepData.customerId : undefined,
               bookedForName: bookedForName.trim() || effName,
               bookedForPhone: effPhone,
-              vendorId: vendorId ? Number(vendorId) : undefined,
+              vendorId: (vendorId && vendorId !== "__none__") ? Number(vendorId) : undefined,
             } as any,
           });
         }
@@ -851,7 +851,7 @@ export default function Booking() {
                         <SelectValue placeholder={t("Pilih vendor...", "Select vendor...")} />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="">{t("— Tanpa vendor —", "— No vendor —")}</SelectItem>
+                        <SelectItem value="__none__">{t("— Tanpa vendor —", "— No vendor —")}</SelectItem>
                         {vendors.map((v) => (
                           <SelectItem key={v.id} value={String(v.id)}>{v.name}</SelectItem>
                         ))}
