@@ -2,23 +2,23 @@ import { db, accountingJournalsTable, accountingJournalLinesTable } from "@works
 import { eq, and, sql } from "drizzle-orm";
 
 // ─── Public Accounting (public.accounting_entries) ───────────────────────────
-const PUBLIC_JOURNAL_ID = 8099;        // CSH-CST (Kas) — id=8099 di public.accounting_journals
-const COA_KAS_CST = 49097;             // 1-1010-CST  Kas CST
-const COA_PENDAPATAN_BOOKING = 72354;  // 4-1017-CST  Pendapatan Booking Sport Center CST
-const COA_PPN_KELUARAN = 49109;        // PPN Keluaran — account_id di public.accounting_taxes id=1
+const PUBLIC_JOURNAL_ID = 520;         // CSH — Kas CST journal (id=520 di public.accounting_journals)
+const COA_KAS_CST = 17;               // 1-1010-CST  Kas CST
+const COA_PENDAPATAN_BOOKING = 1315;   // 4-1017-CST  Pendapatan Booking Sport Center CST
+const COA_PPN_KELUARAN = 29;          // 2-1020-CST  PPN Keluaran CST
 const TAX_ID_PPN_11 = 1;              // id di public.accounting_taxes (PPN Keluaran 11%)
 const COMPANY_ID = 1;
 
 async function nextPublicEntryNumber(year: number): Promise<string> {
   const result = await db.execute(sql`
     SELECT COALESCE(MAX(
-      NULLIF(REGEXP_REPLACE(entry_number, '^CSH-CST/[0-9]+/', ''), '')::integer
+      NULLIF(REGEXP_REPLACE(entry_number, '^CSH/[0-9]+/', ''), '')::integer
     ), 0) + 1 AS seq
     FROM public.accounting_entries
-    WHERE entry_number LIKE ${'CSH-CST/' + year + '/%'}
+    WHERE entry_number LIKE ${'CSH/' + year + '/%'}
   `);
   const seq = Number((result.rows[0] as any).seq ?? 1);
-  return `CSH-CST/${year}/${String(seq).padStart(4, "0")}`;
+  return `CSH/${year}/${String(seq).padStart(6, "0")}`;
 }
 
 export async function createPublicAccountingEntry(
