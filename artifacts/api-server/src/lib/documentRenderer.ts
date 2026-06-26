@@ -1,4 +1,4 @@
-import { db, companyDocumentTemplatesTable, companyInvoicesTable, companyInvoiceItemsTable, bookingsTable, usersTable, facilitiesTable, settingsTable } from "@workspace/db";
+import { db, companyDocumentTemplatesTable, companyInvoicesTable, companyInvoiceItemsTable, bookingsTable, usersTable, facilitiesTable, settingsTable, documentFileTemplatesTable } from "@workspace/db";
 import { eq, and, isNull } from "drizzle-orm";
 import type { DocumentTemplate } from "@workspace/db";
 import { generateDocumentNumber, deriveCompanyCode } from "./documentNumbering";
@@ -52,6 +52,26 @@ async function getSettings() {
     const [s] = await db.select().from(settingsTable).limit(1);
     return s;
   } catch { return null; }
+}
+
+async function getActiveFileTemplate(documentType: string, companyId: number | null): Promise<{ fileUrl: string; templateType: string } | null> {
+  try {
+    const rows = await db.select().from(documentFileTemplatesTable).where(
+      and(
+        eq(documentFileTemplatesTable.documentType, documentType),
+        eq(documentFileTemplatesTable.isActive, true),
+      )
+    ).limit(10);
+    // Company-specific takes priority over global
+    if (companyId != null) {
+      const match = rows.find((r) => r.companyId === companyId);
+      if (match) return { fileUrl: match.fileUrl, templateType: match.templateType };
+    }
+    const global = rows.find((r) => r.companyId == null);
+    return global ? { fileUrl: global.fileUrl, templateType: global.templateType } : null;
+  } catch {
+    return null;
+  }
 }
 
 function buildDefaultKopHtml(vars: Record<string, string>): string {
@@ -115,8 +135,15 @@ function buildInvoiceTableHtml(items: any[]): string {
 </table>`;
 }
 
-function wrapInHtmlPage(bodyContent: string, paperStyle = "A4", printMode = false): string {
+function wrapInHtmlPage(bodyContent: string, paperStyle = "A4", printMode = false, backgroundUrl?: string | null): string {
   const pageSize = paperStyle === "A4" ? "210mm 297mm" : "216mm 279mm";
+  const hasBackground = backgroundUrl && !backgroundUrl.toLowerCase().endsWith(".pdf");
+  const bgLayer = hasBackground ? `
+  <div style="position:fixed;top:0;left:0;width:100%;height:100%;z-index:0;pointer-events:none;">
+    <img src="${backgroundUrl}" style="width:100%;height:100%;object-fit:contain;print-color-adjust:exact;-webkit-print-color-adjust:exact;"
+      onerror="this.parentElement.style.display='none'" />
+  </div>` : "";
+
   return `<!DOCTYPE html>
 <html lang="id">
 <head>
@@ -126,9 +153,9 @@ function wrapInHtmlPage(bodyContent: string, paperStyle = "A4", printMode = fals
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: Arial, sans-serif; font-size: 13px; color: #1f2937; background: #f3f4f6; }
-    .page { background: #fff; max-width: 800px; margin: 24px auto; padding: 40px; box-shadow: 0 1px 8px rgba(0,0,0,0.1); }
+    .page { ${hasBackground ? "background: transparent;" : "background: #fff;"} max-width: 800px; margin: 24px auto; padding: 40px; box-shadow: 0 1px 8px rgba(0,0,0,0.1); position: relative; z-index: 1; }
     @media print {
-      body { background: #fff; }
+      body { background: #fff; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
       .page { margin: 0; box-shadow: none; padding: 20px; }
       @page { size: ${pageSize}; margin: 15mm; }
     }
@@ -136,6 +163,7 @@ function wrapInHtmlPage(bodyContent: string, paperStyle = "A4", printMode = fals
   ${printMode ? "<script>window.onload = () => { document.title = 'Dokumen Sport Center'; window.print(); };</script>" : ""}
 </head>
 <body>
+  ${bgLayer}
   <div class="page">
     ${bodyContent}
   </div>
@@ -367,9 +395,10 @@ export async function renderDocument(params: {
       ${footerHtml}`;
   }
 
-  const html = wrapInHtmlPage(bodyContent, tpl?.paperStyle || "A4", printMode);
+  const fileTpl = await getActiveFileTemplate(documentType, companyId);
+  const html = wrapInHtmlPage(bodyContent, tpl?.paperStyle || "A4", printMode, fileTpl?.fileUrl ?? null);
 
-  return { html, templateId: tpl?.id ?? null, documentNumber, tplVars };
+  return { html, templateId: tpl?.id ?? null, documentNumber, tplVars, fileTemplateUrl: fileTpl?.fileUrl ?? null };
 }
 
 /**

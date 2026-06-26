@@ -88,12 +88,16 @@ const STORAGE_URL = PROJECT_REF ? `https://${PROJECT_REF}.supabase.co` : "";
 export const BUCKETS = {
   facility: "facility-images",
   proof: "payment-proofs",
+  invoiceTemplates: "invoice-templates",
+  documentTemplates: "document-templates",
 } as const;
 
 // In-memory bucket health for diagnostic endpoint
 export const bucketStatus: Record<string, { ok: boolean; checkedAt: string | null; error: string | null }> = {
   [BUCKETS.facility]: { ok: false, checkedAt: null, error: null },
   [BUCKETS.proof]: { ok: false, checkedAt: null, error: null },
+  [BUCKETS.invoiceTemplates]: { ok: false, checkedAt: null, error: null },
+  [BUCKETS.documentTemplates]: { ok: false, checkedAt: null, error: null },
 };
 
 let client: SupabaseClient | null = null;
