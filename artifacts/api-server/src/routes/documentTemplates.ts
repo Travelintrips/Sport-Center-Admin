@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { db, companyDocumentTemplatesTable, usersTable } from "@workspace/db";
+import { db, companyDocumentTemplatesTable, usersTable, bookingsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { adminMiddleware, adminDocumentPreviewMiddleware } from "../lib/auth";
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
@@ -288,6 +288,38 @@ router.get("/admin/documents/:documentType/:entityId/pdf", adminDocumentPreviewM
   } catch (err: any) {
     req.log.error({ err }, "Document PDF error");
     res.status(500).json({ error: err?.message || "Internal server error" });
+  }
+});
+
+// ─── GET /public/kwitansi/:orderNumber ────────────────────────────────────────
+// Public endpoint — no auth required. Customer can open link from WA.
+router.get("/public/kwitansi/:orderNumber", async (req, res) => {
+  try {
+    const { orderNumber } = req.params;
+
+    const [booking] = await db
+      .select()
+      .from(bookingsTable)
+      .where(eq(bookingsTable.orderNumber, orderNumber))
+      .limit(1);
+
+    if (!booking) {
+      res.status(404).send("<h2 style='font-family:sans-serif;text-align:center;margin-top:80px;'>Kwitansi tidak ditemukan</h2>");
+      return;
+    }
+
+    const { html } = await renderDocument({
+      documentType: "kwitansi",
+      entityId: booking.id,
+      printMode: false,
+      issueDocumentNumber: false,
+    });
+
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.send(html);
+  } catch (err: any) {
+    req.log.error({ err }, "Public kwitansi error");
+    res.status(500).send("<h2 style='font-family:sans-serif;text-align:center;margin-top:80px;'>Terjadi kesalahan</h2>");
   }
 });
 

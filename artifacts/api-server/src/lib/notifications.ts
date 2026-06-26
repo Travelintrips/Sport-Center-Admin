@@ -190,8 +190,8 @@ export async function notifyPaymentConfirmed(data: BookingNotifData): Promise<vo
         let msg = rendered;
         try {
           const [s] = await db.select().from(settingsTable).limit(1).catch(() => [null]);
-          const appUrl = (s as { appUrl?: string } | null)?.appUrl || process.env.APP_URL || "";
-          if (appUrl) msg += `\n\n🔗 Lihat kwitansi digital:\n${appUrl}/api/admin/documents/kwitansi/${data.bookingId}/preview`;
+          const appUrl = process.env.APP_URL || (s as { appUrl?: string } | null)?.appUrl || "";
+          if (appUrl && data.orderNumber) msg += `\n\n🔗 Lihat kwitansi digital:\n${appUrl}/api/public/kwitansi/${data.orderNumber}`;
         } catch { /* non-fatal */ }
         await sendWA(data.customerPhone, msg);
         return;
