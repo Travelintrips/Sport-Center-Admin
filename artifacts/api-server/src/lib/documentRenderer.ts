@@ -1,4 +1,4 @@
-import { db, companyDocumentTemplatesTable, companyInvoicesTable, companyInvoiceItemsTable, bookingsTable, usersTable, facilitiesTable, settingsTable } from "@workspace/db";
+import { db, companyDocumentTemplatesTable, companyDocumentSettingsTable, companyInvoicesTable, companyInvoiceItemsTable, bookingsTable, usersTable, facilitiesTable, settingsTable } from "@workspace/db";
 import { eq, and, isNull } from "drizzle-orm";
 import type { DocumentTemplate } from "@workspace/db";
 import { generateDocumentNumber, deriveCompanyCode } from "./documentNumbering";
@@ -115,8 +115,30 @@ function buildInvoiceTableHtml(items: any[]): string {
 </table>`;
 }
 
-function wrapInHtmlPage(bodyContent: string, paperStyle = "A4", printMode = false): string {
+function wrapInHtmlPage(bodyContent: string, paperStyle = "A4", printMode = false, bgTemplateUrl?: string | null, bgTemplateType?: string | null): string {
   const pageSize = paperStyle === "A4" ? "210mm 297mm" : "216mm 279mm";
+
+  const hasBgImage = bgTemplateUrl && bgTemplateType === "image";
+  const hasBgPdf = bgTemplateUrl && bgTemplateType === "pdf";
+
+  const bgStyles = hasBgImage
+    ? `background-image: url('${bgTemplateUrl}'); background-size: cover; background-position: top left; background-repeat: no-repeat;`
+    : "";
+
+  const pdfBgLayer = hasBgPdf
+    ? `<div style="position:absolute;top:0;left:0;width:100%;height:100%;z-index:0;overflow:hidden;">
+        <iframe src="${bgTemplateUrl}#toolbar=0&navpanes=0&scrollbar=0" style="width:100%;height:100%;border:none;opacity:0.9;" />
+       </div>`
+    : "";
+
+  const contentStyle = (hasBgImage || hasBgPdf)
+    ? `position:relative; z-index:1; padding:40px; min-height:inherit;`
+    : `padding:40px;`;
+
+  const pageStyle = (hasBgImage || hasBgPdf)
+    ? `background: #fff; max-width: 800px; margin: 24px auto; min-height: 1122px; position: relative; box-shadow: 0 1px 8px rgba(0,0,0,0.1); ${bgStyles}`
+    : `background: #fff; max-width: 800px; margin: 24px auto; padding: 40px; box-shadow: 0 1px 8px rgba(0,0,0,0.1);`;
+
   return `<!DOCTYPE html>
 <html lang="id">
 <head>
@@ -126,21 +148,53 @@ function wrapInHtmlPage(bodyContent: string, paperStyle = "A4", printMode = fals
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: Arial, sans-serif; font-size: 13px; color: #1f2937; background: #f3f4f6; }
-    .page { background: #fff; max-width: 800px; margin: 24px auto; padding: 40px; box-shadow: 0 1px 8px rgba(0,0,0,0.1); }
+    .page { ${pageStyle} }
+    .bg-layer { position:absolute; top:0; left:0; width:100%; height:100%; z-index:0; }
+    .content-layer { ${contentStyle} }
     @media print {
       body { background: #fff; }
-      .page { margin: 0; box-shadow: none; padding: 20px; }
-      @page { size: ${pageSize}; margin: 15mm; }
+      .page { margin: 0; box-shadow: none; ${hasBgImage || hasBgPdf ? "" : "padding: 20px;"} }
+      @page { size: ${pageSize}; margin: 0; }
     }
   </style>
   ${printMode ? "<script>window.onload = () => { document.title = 'Dokumen Sport Center'; window.print(); };</script>" : ""}
 </head>
 <body>
   <div class="page">
-    ${bodyContent}
+    ${pdfBgLayer}
+    <div class="content-layer">
+      ${bodyContent}
+    </div>
   </div>
 </body>
 </html>`;
+}
+
+async function getDocSettingsForType(documentType: string) {
+  try {
+    const [row] = await db
+      .select()
+      .from(companyDocumentSettingsTable)
+      .where(eq(companyDocumentSettingsTable.documentType, documentType as any))
+      .limit(1);
+    if (row?.bgTemplateActive && row?.bgTemplateUrl) {
+      return { bgTemplateUrl: row.bgTemplateUrl, bgTemplateType: row.bgTemplateType };
+    }
+    // Fallback to "general" if this type has no active bg template
+    if (documentType !== "general") {
+      const [general] = await db
+        .select()
+        .from(companyDocumentSettingsTable)
+        .where(eq(companyDocumentSettingsTable.documentType, "general" as any))
+        .limit(1);
+      if (general?.bgTemplateActive && general?.bgTemplateUrl) {
+        return { bgTemplateUrl: general.bgTemplateUrl, bgTemplateType: general.bgTemplateType };
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 export async function renderDocument(params: {
@@ -367,7 +421,16 @@ export async function renderDocument(params: {
       ${footerHtml}`;
   }
 
-  const html = wrapInHtmlPage(bodyContent, tpl?.paperStyle || "A4", printMode);
+  // Background template override (image/pdf as page background)
+  let bgTemplateUrl: string | null | undefined = undefined;
+  let bgTemplateType: string | null | undefined = undefined;
+  try {
+    const bgSettings = await getDocSettingsForType(documentType);
+    bgTemplateUrl = bgSettings?.bgTemplateUrl;
+    bgTemplateType = bgSettings?.bgTemplateType;
+  } catch { /* fallback to no bg */ }
+
+  const html = wrapInHtmlPage(bodyContent, tpl?.paperStyle || "A4", printMode, bgTemplateUrl, bgTemplateType);
 
   return { html, templateId: tpl?.id ?? null, documentNumber, tplVars };
 }

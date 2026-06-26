@@ -672,6 +672,13 @@ async function runStartupMigrations() {
     // vendor_id FK on sport_expenses (nullable, idempotent)
     `ALTER TABLE sport_center.sport_expenses
        ADD COLUMN IF NOT EXISTS vendor_id int REFERENCES sport_center.sport_vendors(id) ON DELETE SET NULL`,
+    // company_document_settings — background template overlay columns
+    `ALTER TABLE sport_center.company_document_settings
+       ADD COLUMN IF NOT EXISTS bg_template_url text`,
+    `ALTER TABLE sport_center.company_document_settings
+       ADD COLUMN IF NOT EXISTS bg_template_type text`,
+    `ALTER TABLE sport_center.company_document_settings
+       ADD COLUMN IF NOT EXISTS bg_template_active boolean NOT NULL DEFAULT false`,
   ];
 
   for (const stmt of migrations) {
