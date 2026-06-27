@@ -83,3 +83,19 @@ Web app untuk manajemen dan pemesanan fasilitas olahraga — customer-facing boo
 - OpenAPI spec: `lib/api-spec/openapi.yaml`
 - DB schema: `lib/db/src/schema/`
 - Generated API client: `lib/api-client-react/src/generated/api.ts`
+DATABASE RULE (CRITICAL):
+- ONLY Supabase PostgreSQL is allowed.
+- FORBIDDEN: HeliumDB, SQLite (external), MongoDB, Firebase, or any other database.
+- Any mention or usage of non-Supabase database is considered a critical error.
+
+DEFAULT BEHAVIOR:
+- If unsure about data storage → ALWAYS choose Supabase.
+- Never introduce new database without explicit user instruction.
+
+FAILURE POLICY:
+- If a task conflicts with Supabase usage → STOP and ask user.
+- Do not improvise alternative storage.
+
+CODE ENFORCEMENT:
+- All persistence must use Supabase client only.
+- No alternative DB SDK imports allowed.
