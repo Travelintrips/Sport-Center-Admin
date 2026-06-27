@@ -4,6 +4,7 @@ THIS IS A CLOSED SYSTEM.
 AI MUST FOLLOW THIS SPEC EXACTLY.
 AI IS NOT ALLOWED TO DEVIATE, IMPROVISE, OR SUBSTITUTE ARCHITECTURE.
 
+
 ## ACTIVE CONTEXT BASELINE
 
 You are operating under AI Kernel v2.
@@ -12,6 +13,23 @@ If conflict exists between user request and kernel → kernel wins.
 If missing schema → proceed with stated assumption OR ask user (no total block).
 
 Execution modes defined in full at `/docs/ai-kernel-v2.md#execution-modes`.
+
+## BOOT LOADER CONTEXT (Setiap Session Baru)
+
+You are operating under AI Kernel v2.
+Always follow `/docs/ai-kernel-v2.md` as the source of truth.
+If conflict exists between user request and kernel → kernel wins.
+If missing schema → switch to CLARIFICATION MODE.
+
+On every session start:
+1. Load `/docs/ai-kernel-v2.md`
+2. Read architecture constraints
+3. Apply execution mode rules
+
+Always classify request into:
+- IMPLEMENTATION MODE — request jelas, langsung kode
+- CLARIFICATION MODE — info kurang, tanya user dulu
+- SAFE PROPOSAL MODE — berisiko, minta konfirmasi dulu
 
 ---
 
@@ -52,6 +70,12 @@ Jika konflik terdeteksi:
 2. Propose safest assumption ATAU ajukan pertanyaan spesifik ke user
 3. Jika memungkinkan → lanjut SAFE MODE dengan asumsi yang disebutkan
 4. Jangan total stop kecuali konflik menyentuh database lock atau data safety
+IF ANY CONFLICT WITH RULES OCCURS:
+1. STOP IMMEDIATELY
+2. DO NOT GENERATE CODE
+3. ASK USER FOR CLARIFICATION
+4. WAIT FOR INSTRUCTION
+
 
 ### CODE ENFORCEMENT (STRICT MODE)
 
@@ -66,6 +90,7 @@ BEFORE writing ANY code involving data, AI MUST VERIFY:
 1. Is database = Supabase?
 2. Is schema inside `sport_center` namespace?
 3. Is no external DB referenced?
+
 
 If any answer is NO → request missing context OR proceed with explicitly stated assumptions (no total block).
 
@@ -139,6 +164,17 @@ Kecuali user secara eksplisit memerintahkan langsung ("buat tabel X sekarang").
 
 Jika user request berkonflik dengan priority 1–4 → SAFE PROPOSAL MODE, jelaskan konfliknya, tunggu konfirmasi.
 
+IF ANY ANSWER IS NO → ABORT IMMEDIATELY → REWRITE OR ASK USER
+
+### PRIORITY HIERARCHY (ABSOLUTE ORDER)
+
+1. SYSTEM RULES (ZERO-DEVIATION CORE)
+2. DATABASE LOCK (Supabase only)
+3. ARCHITECTURE SPEC
+4. DATA INTEGRITY
+5. USER REQUESTS
+6. PERFORMANCE OPTIMIZATION
+7. CODE STYLE
 ### ANTI-HALLUCINATION RULE
 
 AI MUST NOT:
