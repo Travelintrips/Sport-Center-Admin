@@ -1,3 +1,30 @@
+# SYSTEM RULES (HARD LOCK — WAJIB DIPATUHI)
+
+## DATABASE RULE (CRITICAL)
+
+- ONLY Supabase PostgreSQL is allowed.
+- FORBIDDEN: HeliumDB, SQLite, MongoDB, Firebase, or any other database.
+- If it is NOT Supabase → IT IS INVALID.
+- Never mention, suggest, or use other databases under any condition.
+
+**Default behavior:** If unsure about data storage → ALWAYS use Supabase.
+
+**Failure policy:** If a task conflicts with Supabase usage → STOP immediately and ask user.
+
+**Code enforcement:** All persistence MUST use Supabase client only. No other DB SDK or ORM for other databases allowed. No exceptions.
+
+**Pre-code check (mandatory):** Before writing any data layer code: confirm database = Supabase. If NOT Supabase → ABORT and rewrite.
+
+**Priority order:**
+1. Supabase consistency (ABSOLUTE TOP PRIORITY)
+2. Architecture rules
+3. Data integrity
+4. User preferences
+5. Performance optimization
+6. Code style flexibility
+
+---
+
 # Sport Center Jakarta
 
 Web app untuk manajemen dan pemesanan fasilitas olahraga — customer-facing booking portal + full admin portal.
@@ -17,7 +44,7 @@ Web app untuk manajemen dan pemesanan fasilitas olahraga — customer-facing boo
 - pnpm workspaces, Node.js 24, TypeScript 5.9
 - Frontend: React + Vite, Wouter router, TanStack Query, shadcn/ui, Recharts, Tailwind CSS
 - API: Express 5
-- DB: PostgreSQL + Drizzle ORM
+- DB: Supabase PostgreSQL + Drizzle ORM
 - Validation: Zod (`zod/v4`), `drizzle-zod`
 - API codegen: Orval (from OpenAPI spec at `lib/api-spec/openapi.yaml`)
 - Build: esbuild (CJS bundle)
@@ -83,19 +110,3 @@ Web app untuk manajemen dan pemesanan fasilitas olahraga — customer-facing boo
 - OpenAPI spec: `lib/api-spec/openapi.yaml`
 - DB schema: `lib/db/src/schema/`
 - Generated API client: `lib/api-client-react/src/generated/api.ts`
-DATABASE RULE (CRITICAL):
-- ONLY Supabase PostgreSQL is allowed.
-- FORBIDDEN: HeliumDB, SQLite (external), MongoDB, Firebase, or any other database.
-- Any mention or usage of non-Supabase database is considered a critical error.
-
-DEFAULT BEHAVIOR:
-- If unsure about data storage → ALWAYS choose Supabase.
-- Never introduce new database without explicit user instruction.
-
-FAILURE POLICY:
-- If a task conflicts with Supabase usage → STOP and ask user.
-- Do not improvise alternative storage.
-
-CODE ENFORCEMENT:
-- All persistence must use Supabase client only.
-- No alternative DB SDK imports allowed.
