@@ -19,10 +19,17 @@ import {
   notifyWaBookingRejectedByAdmin,
   notifyWaBookingConfirmed,
   notifyWaStaffCheckin,
+  notifyPaymentConfirmed,
 } from "../lib/notifications";
 
 const router = Router();
-const APP_URL = process.env.APP_URL ?? "";
+
+function getAppUrl(): string {
+  const isProd = process.env.NODE_ENV === "production";
+  if (isProd) return (process.env.APP_URL ?? "").replace(/\/$/, "");
+  if (process.env.REPLIT_DEV_DOMAIN) return `https://${process.env.REPLIT_DEV_DOMAIN}`;
+  return (process.env.APP_URL ?? "").replace(/\/$/, "");
+}
 
 function formatIDR(n: number): string {
   return "Rp " + n.toLocaleString("id-ID");
@@ -204,8 +211,8 @@ router.post("/admin/wa-bookings/:orderNumber/approve", adminMiddleware, async (r
     endTime: booking.endTime,
     totalPrice: amountToPay.toLocaleString("id-ID"),
     paymentDeadline: deadlineStr,
-    statusUrl: `${APP_URL}/wa/status/${booking.orderNumber}`,
-    uploadProofUrl: `${APP_URL}/wa/proof/${proofToken}`,
+    statusUrl: `${getAppUrl()}/wa/status/${booking.orderNumber}`,
+    uploadProofUrl: `${getAppUrl()}/wa/proof/${proofToken}`,
     bankName: settings?.bankName ?? "",
     bankAccount: settings?.bankAccount ?? "",
     bankAccountName: settings?.bankAccountName ?? "",
@@ -326,7 +333,7 @@ router.post("/admin/wa-bookings/:orderNumber/paid", adminMiddleware, async (req,
   const checkinToken = await createWaToken(booking.id, "checkin", 30);
   const finishToken = await createWaToken(booking.id, "finish", 30);
 
-  notifyWaBookingConfirmed({
+  notifyPaymentConfirmed({
     customerName: booking.customerName,
     customerPhone: booking.customerPhone,
     orderNumber: booking.orderNumber,
@@ -335,8 +342,8 @@ router.post("/admin/wa-bookings/:orderNumber/paid", adminMiddleware, async (req,
     startTime: booking.startTime,
     endTime: booking.endTime,
     totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
-    statusUrl: `${APP_URL}/wa/status/${booking.orderNumber}`,
-  });
+    bookingId: booking.id,
+  }).catch((err) => console.error("[WA] notifyPaymentConfirmed error:", err));
 
   notifyWaStaffCheckin({
     orderNumber: booking.orderNumber,
@@ -345,9 +352,9 @@ router.post("/admin/wa-bookings/:orderNumber/paid", adminMiddleware, async (req,
     bookingDate: booking.bookingDate,
     startTime: booking.startTime,
     endTime: booking.endTime,
-    checkinUrl: `${APP_URL}/wa/action/${checkinToken}`,
-    finishUrl: `${APP_URL}/wa/action/${finishToken}`,
-  });
+    checkinUrl: `${getAppUrl()}/wa/action/${checkinToken}`,
+    finishUrl: `${getAppUrl()}/wa/action/${finishToken}`,
+  }).catch((err) => console.error("[WA] notifyWaStaffCheckin error:", err));
 
   await logAudit({
     action: "admin_paid_via_wa",
@@ -413,8 +420,8 @@ router.post("/admin/wa-bookings/:orderNumber/resend", adminMiddleware, async (re
       endTime: booking.endTime,
       totalPrice: amountToPay.toLocaleString("id-ID"),
       paymentDeadline: deadline,
-      statusUrl: `${APP_URL}/wa/status/${booking.orderNumber}`,
-      uploadProofUrl: `${APP_URL}/wa/proof/${proofToken}`,
+      statusUrl: `${getAppUrl()}/wa/status/${booking.orderNumber}`,
+      uploadProofUrl: `${getAppUrl()}/wa/proof/${proofToken}`,
       bankName: settings?.bankName ?? "",
       bankAccount: settings?.bankAccount ?? "",
       bankAccountName: settings?.bankAccountName ?? "",
@@ -430,7 +437,7 @@ router.post("/admin/wa-bookings/:orderNumber/resend", adminMiddleware, async (re
       startTime: booking.startTime,
       endTime: booking.endTime,
       totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
-      statusUrl: `${APP_URL}/wa/status/${booking.orderNumber}`,
+      statusUrl: `${getAppUrl()}/wa/status/${booking.orderNumber}`,
     });
     sentTo = "customer (konfirmasi booking)";
   } else {
