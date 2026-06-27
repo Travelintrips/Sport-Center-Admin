@@ -292,35 +292,9 @@ router.get("/admin/documents/:documentType/:entityId/pdf", adminDocumentPreviewM
 });
 
 // ─── GET /public/kwitansi/:orderNumber ────────────────────────────────────────
-// Public endpoint — no auth required. Customer can open link from WA.
-router.get("/public/kwitansi/:orderNumber", async (req, res) => {
-  try {
-    const { orderNumber } = req.params;
-
-    const [booking] = await db
-      .select()
-      .from(bookingsTable)
-      .where(eq(bookingsTable.orderNumber, orderNumber))
-      .limit(1);
-
-    if (!booking) {
-      res.status(404).send("<h2 style='font-family:sans-serif;text-align:center;margin-top:80px;'>Kwitansi tidak ditemukan</h2>");
-      return;
-    }
-
-    const { html } = await renderDocument({
-      documentType: "kwitansi",
-      entityId: booking.id,
-      printMode: false,
-      issueDocumentNumber: false,
-    });
-
-    res.setHeader("Content-Type", "text/html; charset=utf-8");
-    res.send(html);
-  } catch (err: any) {
-    req.log.error({ err }, "Public kwitansi error");
-    res.status(500).send("<h2 style='font-family:sans-serif;text-align:center;margin-top:80px;'>Terjadi kesalahan</h2>");
-  }
+// Redirect ke React kwitansi page — backward compat untuk link WA lama.
+router.get("/public/kwitansi/:orderNumber", (req, res) => {
+  res.redirect(301, `/kwitansi/${req.params.orderNumber}`);
 });
 
 // ─── GET /public/kwitansi-data/:orderNumber ───────────────────────────────────
