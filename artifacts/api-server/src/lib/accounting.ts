@@ -1,4 +1,4 @@
-import { db, accountingJournalsTable, accountingJournalLinesTable } from "@workspace/db";
+import { db, accountingJournalsTable, accountingJournalLinesTable, taxTransactionsTable } from "@workspace/db";
 import { eq, and, sql } from "drizzle-orm";
 import pg from "pg";
 
@@ -146,16 +146,22 @@ export async function createPublicAccountingEntry(
   // 3. Post entry
   await pool.query(`UPDATE public.accounting_entries SET status = 'posted' WHERE id = $1`, [entryId]);
 
-  // 4. public.transaction_taxes — hanya jika ada PPN
+  // 4. sport_center.tax_transactions — hanya jika ada PPN
   if (hasPpn) {
-    await pool.query(
-      `INSERT INTO public.transaction_taxes
-        (company_id, transaction_type, transaction_id, transaction_ref,
-         tax_id, tax_name, tax_rate, cut_type,
-         base_amount, tax_amount, account_id, period, status, direction, created_at, updated_at)
-      VALUES ($1,'sport_center_booking',$2,$3,$4,'PPN Keluaran 11%',11,'self_borne',$5,$6,$7,$8,'posted','out',NOW(),NOW())`,
-      [COMPANY_ID, bookingId, orderNumber, ids.taxIdPpn, subtotal, ppnAmount, ids.coaPpnKeluaran, period]
-    );
+    await db.insert(taxTransactionsTable).values({
+      referenceType: "sport_center_booking",
+      referenceId: bookingId,
+      referenceNumber: orderNumber,
+      taxCode: "PPN_OUT_11",
+      taxRate: "11",
+      dpp: String(subtotal),
+      dppNilaiLain: String(Math.round((subtotal * 11) / 12 * 100) / 100),
+      grandTotal: String(subtotal),
+      taxAmount: String(ppnAmount),
+      transactionDate: period,
+      status: "posted",
+      transactionType: "original",
+    });
 
     // 5. public.gl_tax_lines
     await pool.query(
@@ -220,30 +226,37 @@ export async function reversePublicAccountingEntry(
   // 3. Post reversal entry
   await pool.query(`UPDATE public.accounting_entries SET status = 'posted' WHERE id = $1`, [revId]);
 
-  // 4. Reverse transaction_taxes
-  const taxResult = await pool.query(
-    `SELECT id, base_amount, tax_amount, tax_rate FROM public.transaction_taxes
-     WHERE transaction_type = 'sport_center_booking' AND transaction_ref = $1 AND status = 'posted' LIMIT 1`,
-    [orderNumber]
-  );
-  if (taxResult.rows.length) {
-    const origTax = taxResult.rows[0];
-    await pool.query(
-      `UPDATE public.transaction_taxes SET status = 'reversed', updated_at = NOW() WHERE id = $1`,
-      [origTax.id]
-    );
-    await pool.query(
-      `INSERT INTO public.transaction_taxes
-        (company_id, transaction_type, transaction_id, transaction_ref,
-         tax_id, tax_name, tax_rate, cut_type, base_amount, tax_amount, account_id,
-         period, status, direction, created_at, updated_at)
-      VALUES ($1,'sport_center_booking_reversal',$2,$3,$4,'PPN Keluaran 11% (Reversal)',$5,'self_borne',$6,$7,$8,$9,'reversed','out',NOW(),NOW())`,
-      [
-        COMPANY_ID, revId, orderNumber, TAX_ID_PPN_11, origTax.tax_rate,
-        -Math.abs(Number(origTax.base_amount)), -Math.abs(Number(origTax.tax_amount)),
-        ids.coaPpnKeluaran, period,
-      ]
-    );
+  // 4. Reverse sport_center.tax_transactions
+  const origTaxRows = await db
+    .select()
+    .from(taxTransactionsTable)
+    .where(
+      and(
+        eq(taxTransactionsTable.referenceType, "sport_center_booking"),
+        eq(taxTransactionsTable.referenceNumber, orderNumber),
+        eq(taxTransactionsTable.status, "posted"),
+      )
+    )
+    .limit(1);
+  if (origTaxRows.length) {
+    const origTax = origTaxRows[0];
+    await db
+      .update(taxTransactionsTable)
+      .set({ status: "reversed" })
+      .where(eq(taxTransactionsTable.id, origTax.id));
+    await db.insert(taxTransactionsTable).values({
+      referenceType: "sport_center_booking_reversal",
+      referenceId: revId,
+      referenceNumber: orderNumber,
+      taxCode: "PPN_OUT_11",
+      taxRate: origTax.taxRate,
+      dpp: String(-Math.abs(Number(origTax.dpp))),
+      taxAmount: String(-Math.abs(Number(origTax.taxAmount))),
+      transactionDate: period,
+      status: "reversed",
+      transactionType: "reversal",
+      reversalOfId: origTax.id,
+    });
 
     // 5. Reversal gl_tax_lines
     await pool.query(
