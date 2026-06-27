@@ -201,8 +201,28 @@ export async function notifyPaymentConfirmed(data: BookingNotifData): Promise<vo
 
   // Fallback: legacy notification template
   const tpl = await getTemplate("payment_confirmed");
-  if (!tpl) return;
-  await sendWA(data.customerPhone, interpolate(tpl, data as unknown as Record<string, string>));
+  if (tpl) {
+    await sendWA(data.customerPhone, interpolate(tpl, data as unknown as Record<string, string>));
+    return;
+  }
+
+  // Final hardcoded fallback — selalu kirim meski template tidak ada di DB
+  const bankInfo = await getBankInfo();
+  const appUrl = process.env.APP_URL || "";
+  const msg =
+    `🎉 *Pembayaran Dikonfirmasi!*\n\n` +
+    `Halo *${data.customerName}*,\n` +
+    `Pembayaran booking *${data.orderNumber}* untuk *${data.facilityName}* sudah kami verifikasi dan booking *DIKONFIRMASI* ✅\n\n` +
+    `📋 *Detail Booking:*\n` +
+    `• Tanggal: *${data.bookingDate}*\n` +
+    `• Jam: *${data.startTime} – ${data.endTime}*\n` +
+    `• Total: *Rp ${data.totalPrice}*\n\n` +
+    `📄 *Kwitansi Pembayaran*\n` +
+    `Fasilitas: ${data.facilityName}\n` +
+    `✅ Pembayaran telah dikonfirmasi\n\n` +
+    (appUrl && data.orderNumber ? `🔗 Lihat kwitansi digital:\n${appUrl}/booking/${data.orderNumber}\n\n` : "") +
+    `Sampai jumpa di lapangan! 🏆`;
+  await sendWA(data.customerPhone, msg);
 }
 
 export async function notifyBookingCancelled(data: BookingNotifData): Promise<void> {
