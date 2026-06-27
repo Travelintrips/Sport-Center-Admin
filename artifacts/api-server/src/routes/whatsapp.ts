@@ -35,7 +35,8 @@ import {
   notifyWaBookingRejectedByAdmin,
 } from "../lib/notifications";
 import { calculatePrice } from "../lib/pricing";
-import { logAudit } from "../lib/auditLog";
+import { logAudit, logAccountingError } from "../lib/auditLog";
+import { createJournalEntry, createPublicAccountingEntry } from "../lib/accounting";
 import { hashPassword } from "../lib/auth";
 import { syncStatusToBizportal } from "../lib/bizportalSync";
 import { calculateTax, recordTaxTransaction } from "../lib/tax";
@@ -906,6 +907,16 @@ router.post("/wa/action/:token", async (req, res) => {
           userName: "admin (WhatsApp)",
         });
 
+        const _today = new Date().toISOString().split("T")[0];
+        const _subtotal = Number(booking.totalPrice);
+        const _ppnAmount = booking.ppnAmount != null ? Number(booking.ppnAmount) : 0;
+        createJournalEntry(booking.id, booking.orderNumber, _subtotal, _ppnAmount, _today).catch((err) =>
+          logAccountingError({ operation: "createJournalEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
+        );
+        createPublicAccountingEntry(booking.id, booking.orderNumber, _subtotal, _ppnAmount, booking.facilityId, _today).catch((err) =>
+          logAccountingError({ operation: "createPublicAccountingEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
+        );
+
         res.json({ success: true, message: "Pembayaran dikonfirmasi. Customer diberitahu." });
         break;
       }
@@ -1648,6 +1659,16 @@ async function execAdminPaid(adminPhone: string, orderNumber: string) {
     after: { status: "confirmed", paidAt: new Date() },
     userName: `admin (WA: ${adminPhone})`,
   });
+
+  const _paidToday = new Date().toISOString().split("T")[0];
+  const _paidSubtotal = Number(booking.totalPrice);
+  const _paidPpnAmount = booking.ppnAmount != null ? Number(booking.ppnAmount) : 0;
+  createJournalEntry(booking.id, booking.orderNumber, _paidSubtotal, _paidPpnAmount, _paidToday).catch((err) =>
+    logAccountingError({ operation: "createJournalEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
+  );
+  createPublicAccountingEntry(booking.id, booking.orderNumber, _paidSubtotal, _paidPpnAmount, booking.facilityId, _paidToday).catch((err) =>
+    logAccountingError({ operation: "createPublicAccountingEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
+  );
 
   await sendWAMsg(adminPhone,
     `💰 *${orderNumber}* berhasil dikonfirmasi LUNAS!\n` +
