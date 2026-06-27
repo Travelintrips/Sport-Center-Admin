@@ -146,11 +146,25 @@ export interface BookingNotifData {
 
 export async function notifyBookingCreated(data: BookingNotifData): Promise<void> {
   const bankInfo = await getBankInfo();
-  const vars = { ...data, ...bankInfo, paymentDeadline: data.paymentDeadline ?? "" };
+  const vars = {
+    ...data,
+    ...bankInfo,
+    paymentDeadline: data.paymentDeadline ?? "",
+    uploadProofUrl: data.uploadProofUrl ?? "",
+    statusUrl: data.statusUrl ?? "",
+  };
 
   const customerTpl = await getTemplate("booking_created");
   if (customerTpl) {
-    await sendWA(data.customerPhone, interpolate(customerTpl, vars));
+    let msg = interpolate(customerTpl, vars);
+    // Append link jika template tidak menyertakan placeholder-nya
+    if (data.uploadProofUrl && !msg.includes(data.uploadProofUrl)) {
+      msg += `\n\n📎 Upload bukti transfer:\n${data.uploadProofUrl}`;
+    }
+    if (data.statusUrl && !msg.includes(data.statusUrl)) {
+      msg += `\n🔍 Cek status booking:\n${data.statusUrl}`;
+    }
+    await sendWA(data.customerPhone, msg);
   } else {
     // Fallback: pesan hardcoded jika template belum di-set
     const msg =
