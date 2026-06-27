@@ -594,7 +594,12 @@ router.post("/bookings", async (req, res) => {
 
       // ─── Kirim WA approval link ke semua admin untuk setiap booking baru ──────
       try {
-        const appUrl = (process.env.APP_URL ?? "").replace(/\/$/, "");
+        const isProdEnv = process.env.NODE_ENV === "production";
+        const appUrl = isProdEnv
+          ? (process.env.APP_URL ?? "").replace(/\/$/, "")
+          : process.env.REPLIT_DEV_DOMAIN
+            ? `https://${process.env.REPLIT_DEV_DOMAIN}`
+            : (process.env.APP_URL ?? "").replace(/\/$/, "");
         if (appUrl) {
           const approvalToken = await createWaToken(booking.id, "approve_booking", 1);
           notifyAdminBookingApprovalRequest({
