@@ -1,27 +1,84 @@
-# SYSTEM RULES (HARD LOCK — WAJIB DIPATUHI)
+# SYSTEM CORE PRINCIPLE
 
-## DATABASE RULE (CRITICAL)
+THIS IS A CLOSED SYSTEM.
+AI MUST FOLLOW THIS SPEC EXACTLY.
+AI IS NOT ALLOWED TO DEVIATE, IMPROVISE, OR SUBSTITUTE ARCHITECTURE.
 
-- ONLY Supabase PostgreSQL is allowed.
-- FORBIDDEN: HeliumDB, SQLite, MongoDB, Firebase, or any other database.
-- If it is NOT Supabase → IT IS INVALID.
-- Never mention, suggest, or use other databases under any condition.
+---
 
-**Default behavior:** If unsure about data storage → ALWAYS use Supabase.
+## SYSTEM RULES (IMMUTABLE — ABSOLUTE HIGHEST PRIORITY)
 
-**Failure policy:** If a task conflicts with Supabase usage → STOP immediately and ask user.
+### DATABASE LOCK (NON-NEGOTIABLE)
 
-**Code enforcement:** All persistence MUST use Supabase client only. No other DB SDK or ORM for other databases allowed. No exceptions.
+ONLY VALID DATABASE: **Supabase PostgreSQL**
 
-**Pre-code check (mandatory):** Before writing any data layer code: confirm database = Supabase. If NOT Supabase → ABORT and rewrite.
+ABSOLUTE FORBIDDEN: ANY OTHER DATABASE SYSTEM (NO EXCEPTIONS)
+- Includes: Firebase, MongoDB, SQLite, MySQL external, HeliumDB, etc.
 
-**Priority order:**
-1. Supabase consistency (ABSOLUTE TOP PRIORITY)
-2. Architecture rules
-3. Data integrity
-4. User preferences
-5. Performance optimization
-6. Code style flexibility
+RULE ENFORCEMENT:
+- If not Supabase → IT IS INVALID AND MUST NOT BE USED
+- AI MUST NEVER suggest or reference alternative databases
+
+### ZERO-DEVIATION RULE
+
+AI MUST NOT:
+- Modify architecture rules
+- Replace database system
+- Invent new infrastructure
+- Assume missing systems
+- Use external tools not defined in this spec
+
+IF INFORMATION IS MISSING → AI MUST ASK USER → NEVER GUESS
+
+### DEFAULT BEHAVIOR LOCK
+
+- If unsure about storage → ALWAYS USE SUPABASE
+- Never create alternative persistence layer
+- Never redesign architecture
+
+### FAILURE HANDLING PROTOCOL
+
+IF ANY CONFLICT WITH RULES OCCURS:
+1. STOP IMMEDIATELY
+2. DO NOT GENERATE CODE
+3. ASK USER FOR CLARIFICATION
+4. WAIT FOR INSTRUCTION
+
+### CODE ENFORCEMENT (STRICT MODE)
+
+- ALL data persistence MUST use Supabase client only
+- NO other DB SDKs allowed
+- NO fallback database implementations
+- NO mock replacement of DB in production logic
+
+### MANDATORY PRE-CODE VALIDATION
+
+BEFORE writing ANY code involving data, AI MUST VERIFY:
+1. Is database = Supabase?
+2. Is schema inside `sport_center` namespace?
+3. Is no external DB referenced?
+
+IF ANY ANSWER IS NO → ABORT IMMEDIATELY → REWRITE OR ASK USER
+
+### PRIORITY HIERARCHY (ABSOLUTE ORDER)
+
+1. SYSTEM RULES (ZERO-DEVIATION CORE)
+2. DATABASE LOCK (Supabase only)
+3. ARCHITECTURE SPEC
+4. DATA INTEGRITY
+5. USER REQUESTS
+6. PERFORMANCE OPTIMIZATION
+7. CODE STYLE
+
+### ANTI-HALLUCINATION RULE
+
+AI MUST NOT:
+- Assume missing APIs
+- Assume missing tables
+- Assume external services
+- Assume unknown business logic
+
+IF NOT SPECIFIED → ASK USER → DO NOT INVENT
 
 ---
 
@@ -44,7 +101,7 @@ Web app untuk manajemen dan pemesanan fasilitas olahraga — customer-facing boo
 - pnpm workspaces, Node.js 24, TypeScript 5.9
 - Frontend: React + Vite, Wouter router, TanStack Query, shadcn/ui, Recharts, Tailwind CSS
 - API: Express 5
-- DB: Supabase PostgreSQL + Drizzle ORM
+- DB: **Supabase PostgreSQL ONLY** + Drizzle ORM
 - Validation: Zod (`zod/v4`), `drizzle-zod`
 - API codegen: Orval (from OpenAPI spec at `lib/api-spec/openapi.yaml`)
 - Build: esbuild (CJS bundle)
@@ -106,7 +163,6 @@ Web app untuk manajemen dan pemesanan fasilitas olahraga — customer-facing boo
 
 ## Pointers
 
-- See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details
 - OpenAPI spec: `lib/api-spec/openapi.yaml`
 - DB schema: `lib/db/src/schema/`
 - Generated API client: `lib/api-client-react/src/generated/api.ts`
