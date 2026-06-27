@@ -191,7 +191,7 @@ export async function notifyPaymentConfirmed(data: BookingNotifData): Promise<vo
         try {
           const [s] = await db.select().from(settingsTable).limit(1).catch(() => [null]);
           const appUrl = process.env.APP_URL || (s as { appUrl?: string } | null)?.appUrl || "";
-          if (appUrl && data.orderNumber) msg += `\n\n🧾 Lihat & cetak kwitansi digital:\n${appUrl}/kwitansi/${data.orderNumber}`;
+          if (appUrl && data.orderNumber) msg += `\n\n🧾 Lihat & cetak kwitansi digital:\n${appUrl}/api/public/kwitansi/${data.orderNumber}`;
         } catch { /* non-fatal */ }
         await sendWA(data.customerPhone, msg);
         return;
@@ -209,7 +209,7 @@ export async function notifyPaymentConfirmed(data: BookingNotifData): Promise<vo
   // Final hardcoded fallback — selalu kirim meski template tidak ada di DB
   const bankInfo = await getBankInfo();
   const appUrl = process.env.APP_URL || "";
-  const kwitansiUrl = appUrl && data.orderNumber ? `${appUrl}/kwitansi/${data.orderNumber}` : "";
+  const kwitansiUrl = appUrl && data.orderNumber ? `${appUrl}/api/public/kwitansi/${data.orderNumber}` : "";
   const msg =
     `🎉 *Pembayaran Dikonfirmasi!*\n\n` +
     `Halo *${data.customerName}*,\n` +
