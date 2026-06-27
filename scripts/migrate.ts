@@ -23,6 +23,10 @@ CREATE TABLE IF NOT EXISTS sport_center.sport_vendors (
 ALTER TABLE sport_center.sport_expenses
   ADD COLUMN IF NOT EXISTS vendor_id integer REFERENCES sport_center.sport_vendors(id) ON DELETE SET NULL;
 
+-- Add vendor_id FK to sport_bookings (idempotent)
+ALTER TABLE sport_center.sport_bookings
+  ADD COLUMN IF NOT EXISTS vendor_id integer REFERENCES sport_center.sport_vendors(id) ON DELETE SET NULL;
+
 
 -- ============================================================
 -- 1. Extend enums (safe, idempotent via IF NOT EXISTS)
