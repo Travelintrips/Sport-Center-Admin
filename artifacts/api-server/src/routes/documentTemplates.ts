@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { db, companyDocumentTemplatesTable, usersTable, bookingsTable } from "@workspace/db";
+import { db, companyDocumentTemplatesTable, usersTable, bookingsTable, facilitiesTable, settingsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { adminMiddleware, adminDocumentPreviewMiddleware } from "../lib/auth";
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
@@ -320,6 +320,61 @@ router.get("/public/kwitansi/:orderNumber", async (req, res) => {
   } catch (err: any) {
     req.log.error({ err }, "Public kwitansi error");
     res.status(500).send("<h2 style='font-family:sans-serif;text-align:center;margin-top:80px;'>Terjadi kesalahan</h2>");
+  }
+});
+
+// ─── GET /public/kwitansi-data/:orderNumber ───────────────────────────────────
+// Lightweight JSON endpoint for React kwitansi page — no auth, no Puppeteer.
+router.get("/public/kwitansi-data/:orderNumber", async (req, res) => {
+  try {
+    const { orderNumber } = req.params;
+
+    const [booking] = await db
+      .select()
+      .from(bookingsTable)
+      .where(eq(bookingsTable.orderNumber, orderNumber))
+      .limit(1);
+
+    if (!booking) {
+      res.status(404).json({ error: "Kwitansi tidak ditemukan" });
+      return;
+    }
+
+    if (!["confirmed", "completed", "checked_in"].includes(booking.status)) {
+      res.status(403).json({ error: "Kwitansi hanya tersedia untuk booking yang sudah dikonfirmasi" });
+      return;
+    }
+
+    const [[facilityRow], [settings]] = await Promise.all([
+      db.select({ name: facilitiesTable.name }).from(facilitiesTable).where(eq(facilitiesTable.id, booking.facilityId)).limit(1).catch(() => [null]),
+      db.select().from(settingsTable).limit(1).catch(() => [null]),
+    ]);
+
+    res.json({
+      orderNumber: booking.orderNumber,
+      customerName: booking.customerName,
+      customerPhone: booking.customerPhone,
+      facilityName: facilityRow?.name ?? "",
+      bookingDate: booking.bookingDate,
+      startTime: booking.startTime,
+      endTime: booking.endTime,
+      durationHours: booking.durationHours,
+      totalPrice: Number(booking.totalPrice ?? 0),
+      ppnRate: booking.ppnRate != null ? Number(booking.ppnRate) : null,
+      ppnAmount: booking.ppnAmount != null ? Number(booking.ppnAmount) : null,
+      grandTotal: booking.grandTotal != null ? Number(booking.grandTotal) : null,
+      status: booking.status,
+      confirmedAt: booking.updatedAt ?? booking.createdAt,
+      centerName: (settings as any)?.centerName ?? "Sport Center Jakarta",
+      centerAddress: (settings as any)?.address ?? "",
+      centerPhone: (settings as any)?.phone ?? "",
+      bankName: (settings as any)?.bankName ?? "",
+      bankAccount: (settings as any)?.bankAccount ?? "",
+      bankAccountName: (settings as any)?.bankAccountName ?? "",
+    });
+  } catch (err: any) {
+    req.log.error({ err }, "Public kwitansi-data error");
+    res.status(500).json({ error: "Terjadi kesalahan" });
   }
 });
 

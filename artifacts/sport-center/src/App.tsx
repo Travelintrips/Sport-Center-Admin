@@ -73,6 +73,7 @@ import WaBookingStatus from "@/pages/wa/BookingStatus";
 import WaProofUpload from "@/pages/wa/ProofUpload";
 import WaAdminAction from "@/pages/wa/AdminAction";
 import WaRegister from "@/pages/wa/Register";
+import WaKwitansi from "@/pages/wa/Kwitansi";
 
 import { removeToken } from "@/lib/auth";
 
@@ -194,6 +195,7 @@ function Router() {
       <Route path="/wa/proof/:token" component={WaProofUpload} />
       <Route path="/wa/action/:token" component={WaAdminAction} />
       <Route path="/wa/register/:token" component={WaRegister} />
+      <Route path="/kwitansi/:orderNumber" component={WaKwitansi} />
 
       {/* Customer Routes */}
       <Route path="*">
