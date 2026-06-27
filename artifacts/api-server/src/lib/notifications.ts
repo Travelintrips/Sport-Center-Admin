@@ -12,6 +12,13 @@ function interpolate(template: string, vars: Record<string, string>): string {
   return template.replace(/\{\{(\w+)\}\}/g, (_, key) => vars[key] ?? "");
 }
 
+function getAppUrl(): string {
+  const isProd = process.env.NODE_ENV === "production";
+  if (isProd) return (process.env.APP_URL ?? "").replace(/\/$/, "");
+  if (process.env.REPLIT_DEV_DOMAIN) return `https://${process.env.REPLIT_DEV_DOMAIN}`;
+  return (process.env.APP_URL ?? "").replace(/\/$/, "");
+}
+
 async function getWaConfig(): Promise<{ token: string; adminPhones: string[] }> {
   try {
     const [s] = await db.select().from(settingsTable).limit(1);
@@ -190,7 +197,7 @@ export async function notifyPaymentConfirmed(data: BookingNotifData): Promise<vo
         let msg = rendered;
         try {
           const [s] = await db.select().from(settingsTable).limit(1).catch(() => [null]);
-          const appUrl = process.env.APP_URL || (s as { appUrl?: string } | null)?.appUrl || "";
+          const appUrl = getAppUrl() || (s as { appUrl?: string } | null)?.appUrl || "";
           if (appUrl && data.orderNumber) msg += `\n\n🧾 Lihat & cetak kwitansi digital:\n${appUrl}/api/public/kwitansi/${data.orderNumber}`;
         } catch { /* non-fatal */ }
         await sendWA(data.customerPhone, msg);
@@ -208,7 +215,7 @@ export async function notifyPaymentConfirmed(data: BookingNotifData): Promise<vo
 
   // Final hardcoded fallback — selalu kirim meski template tidak ada di DB
   const bankInfo = await getBankInfo();
-  const appUrl = process.env.APP_URL || "";
+  const appUrl = getAppUrl();
   const kwitansiUrl = appUrl && data.orderNumber ? `${appUrl}/api/public/kwitansi/${data.orderNumber}` : "";
   const msg =
     `🎉 *Pembayaran Dikonfirmasi!*\n\n` +
@@ -233,7 +240,7 @@ export async function notifyBookingCancelled(data: BookingNotifData): Promise<vo
 
 export async function notifyBookingCompleted(data: BookingNotifData): Promise<void> {
   const [s] = await db.select().from(settingsTable).limit(1).catch(() => [null]);
-  const appUrl = s?.appUrl || process.env.APP_URL || "";
+  const appUrl = s?.appUrl || getAppUrl();
   const tpl = await getTemplate("booking_completed");
   if (tpl) await sendWA(data.customerPhone, interpolate(tpl, { ...data, reviewUrl: `${appUrl}/booking/${data.orderNumber}` }));
 }
