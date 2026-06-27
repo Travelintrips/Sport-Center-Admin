@@ -632,6 +632,90 @@ export interface AuditNotifData {
   auditTimestamp: string;
 }
 
+export async function notifyAdminBookingApprovalRequest(data: {
+  orderNumber: string;
+  customerName: string;
+  customerPhone: string;
+  facilityName: string;
+  bookingDate: string;
+  startTime: string;
+  endTime: string;
+  durationHours: number;
+  totalPrice: string;
+  approvalUrl: string;
+  source?: string;
+}): Promise<void> {
+  const dayOfWeek = new Date(data.bookingDate + "T00:00:00+07:00").getDay();
+  const dayType = (dayOfWeek === 0 || dayOfWeek === 6) ? "Weekend" : "Weekday";
+  const sourceTag = data.source && data.source !== "portal" ? ` [${data.source.toUpperCase()}]` : "";
+  const msg =
+    `🔔 *BOOKING BARU — PERLU APPROVAL*${sourceTag}\n\n` +
+    `Order: *${data.orderNumber}*\n` +
+    `Customer: *${data.customerName}*\n` +
+    `WA: *${data.customerPhone}*\n` +
+    `Fasilitas: *${data.facilityName}*\n` +
+    `Tanggal: *${data.bookingDate}* (${dayType})\n` +
+    `Jam: *${data.startTime} – ${data.endTime}*\n` +
+    `Durasi: *${data.durationHours} jam*\n` +
+    `Total: *Rp ${data.totalPrice}*\n\n` +
+    `👇 *Approve / Reject via link:*\n${data.approvalUrl}`;
+  await sendWAToAdmins(msg);
+}
+
+export async function notifyCustomerBookingApproved(data: {
+  customerPhone: string;
+  customerName: string;
+  orderNumber: string;
+  facilityName: string;
+  bookingDate: string;
+  startTime: string;
+  endTime: string;
+  totalPrice: string;
+  bankName: string;
+  bankAccount: string;
+  bankAccountName: string;
+  uploadProofUrl: string;
+  paymentDeadline?: string;
+  statusUrl: string;
+}): Promise<void> {
+  const msg =
+    `✅ *Booking Disetujui!*\n\n` +
+    `Halo *${data.customerName}*,\n` +
+    `Booking *${data.orderNumber}* sudah *DISETUJUI* admin! 🎉\n\n` +
+    `📋 *${data.facilityName}*\n` +
+    `📅 ${data.bookingDate} | ${data.startTime} – ${data.endTime}\n` +
+    `💰 Total: *Rp ${data.totalPrice}*\n\n` +
+    `💳 *Lakukan pembayaran ke:*\n` +
+    `Bank: *${data.bankName}*\n` +
+    `Rekening: *${data.bankAccount}*\n` +
+    `Atas Nama: *${data.bankAccountName}*\n\n` +
+    `📎 Upload bukti: ${data.uploadProofUrl}\n` +
+    (data.paymentDeadline ? `⏰ Deadline: *${data.paymentDeadline}*\n\n` : "\n") +
+    `🔍 Status: ${data.statusUrl}`;
+  await sendWA(data.customerPhone, msg);
+}
+
+export async function notifyCustomerBookingRejectedByAdmin(data: {
+  customerPhone: string;
+  customerName: string;
+  orderNumber: string;
+  facilityName: string;
+  bookingDate: string;
+  startTime: string;
+  endTime: string;
+  reason?: string;
+}): Promise<void> {
+  const msg =
+    `❌ *Booking Ditolak*\n\n` +
+    `Halo *${data.customerName}*,\n` +
+    `Maaf, booking *${data.orderNumber}* untuk *${data.facilityName}* pada *${data.bookingDate}* ` +
+    `pukul *${data.startTime}–${data.endTime}* tidak dapat disetujui.\n\n` +
+    (data.reason ? `📝 Alasan: _${data.reason}_\n\n` : "") +
+    `Silakan buat booking baru dengan jadwal lain.\n` +
+    `Terima kasih atas pengertiannya. 🙏`;
+  await sendWA(data.customerPhone, msg);
+}
+
 export async function notifyAuditCritical(data: AuditNotifData): Promise<void> {
   const criticalLines = data.findings
     .filter((f) => f.severity === "critical")

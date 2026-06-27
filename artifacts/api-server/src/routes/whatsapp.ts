@@ -33,6 +33,8 @@ import {
   notifyWaAdminNewBooking,
   notifyWaBookingApproved,
   notifyWaBookingRejectedByAdmin,
+  notifyCustomerBookingApproved,
+  notifyCustomerBookingRejectedByAdmin,
 } from "../lib/notifications";
 import { calculatePrice } from "../lib/pricing";
 import { logAudit, logAccountingError } from "../lib/auditLog";
@@ -2929,6 +2931,175 @@ router.post("/wa/fonnte/webhook", async (req, res) => {
     );
   } catch (err) {
     console.error("[wa/fonnte/webhook] error:", err);
+  }
+});
+
+// ─── GET /api/wa/booking-approval/:token — load form data (no auth) ──────────
+router.get("/wa/booking-approval/:token", async (req, res) => {
+  try {
+    const tokenRow = await getWaTokenRow(req.params.token);
+    if (!tokenRow) { res.status(404).json({ error: "Link tidak valid atau sudah kedaluwarsa" }); return; }
+    if (tokenRow.action !== "approve_booking") { res.status(400).json({ error: "Link tidak valid untuk aksi ini" }); return; }
+    if (tokenRow.expiresAt && tokenRow.expiresAt < new Date()) {
+      res.status(410).json({ error: "Link sudah kedaluwarsa (24 jam)" }); return;
+    }
+    if (tokenRow.usedAt) {
+      res.status(409).json({ error: "Link ini sudah digunakan", usedAt: tokenRow.usedAt }); return;
+    }
+
+    const [booking] = await db.select().from(bookingsTable)
+      .where(eq(bookingsTable.id, tokenRow.bookingId)).limit(1);
+    if (!booking) { res.status(404).json({ error: "Booking tidak ditemukan" }); return; }
+
+    const [facility] = await db.select({ name: facilitiesTable.name, category: facilitiesTable.category })
+      .from(facilitiesTable).where(eq(facilitiesTable.id, booking.facilityId)).limit(1);
+
+    await logAudit({
+      action: "WA_APPROVAL_OPENED",
+      entity: "booking",
+      entityId: booking.id,
+      after: { orderNumber: booking.orderNumber, openedAt: new Date().toISOString() },
+      userName: "admin (WhatsApp link)",
+    });
+
+    res.json({
+      booking: {
+        id: booking.id,
+        orderNumber: booking.orderNumber,
+        customerName: booking.customerName,
+        customerPhone: booking.customerPhone,
+        facilityName: facility?.name ?? "-",
+        facilityCategory: facility?.category ?? "-",
+        bookingDate: booking.bookingDate,
+        startTime: booking.startTime,
+        endTime: booking.endTime,
+        durationHours: Number(booking.durationHours),
+        totalPrice: Number(booking.totalPrice),
+        grandTotal: booking.grandTotal != null ? Number(booking.grandTotal) : null,
+        status: booking.status,
+        notes: booking.notes ?? null,
+        source: booking.source ?? null,
+      },
+      expiresAt: tokenRow.expiresAt,
+    });
+  } catch (err) {
+    console.error("[wa/booking-approval GET]", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ─── POST /api/wa/booking-approval — submit approve / reject ─────────────────
+router.post("/wa/booking-approval", async (req, res) => {
+  try {
+    const { token, status, note } = req.body as { token: string; status: "approved" | "rejected"; note?: string };
+
+    if (!token || !status || !["approved", "rejected"].includes(status)) {
+      res.status(400).json({ error: "Parameter tidak valid" }); return;
+    }
+
+    const tokenRow = await getWaTokenRow(token);
+    if (!tokenRow) { res.status(404).json({ error: "Link tidak valid" }); return; }
+    if (tokenRow.action !== "approve_booking") { res.status(400).json({ error: "Link tidak valid untuk aksi ini" }); return; }
+    if (tokenRow.expiresAt && tokenRow.expiresAt < new Date()) {
+      res.status(410).json({ error: "Link sudah kedaluwarsa" }); return;
+    }
+    if (tokenRow.usedAt) {
+      res.status(409).json({ error: "Aksi ini sudah dilakukan sebelumnya" }); return;
+    }
+
+    const [booking] = await db.select().from(bookingsTable)
+      .where(eq(bookingsTable.id, tokenRow.bookingId)).limit(1);
+    if (!booking) { res.status(404).json({ error: "Booking tidak ditemukan" }); return; }
+
+    const [facility] = await db.select({ name: facilitiesTable.name })
+      .from(facilitiesTable).where(eq(facilitiesTable.id, booking.facilityId)).limit(1);
+    const [settings] = await db.select().from(settingsTable).limit(1);
+
+    await consumeWaToken(token);
+
+    if (status === "approved") {
+      await db.update(bookingsTable)
+        .set({ status: "pending_payment", approvedByAdminPhone: "wa-link", approvedAt: new Date(), updatedAt: new Date() })
+        .where(eq(bookingsTable.id, booking.id));
+      await db.insert(bookingHistoryTable).values({
+        bookingId: booking.id,
+        fromStatus: booking.status,
+        toStatus: "pending_payment",
+        changedByName: "admin (WhatsApp approval)",
+        note: note ? `Disetujui. Catatan: ${note}` : "Disetujui via WhatsApp Mini Form",
+      });
+
+      await logAudit({
+        action: "WA_APPROVAL_APPROVED",
+        entity: "booking",
+        entityId: booking.id,
+        before: { status: booking.status },
+        after: { status: "pending_payment", note },
+        userName: "admin (WhatsApp approval)",
+      });
+
+      const uploadToken = await createWaToken(booking.id, "upload_proof", 3);
+      const statusUrl = `${APP_URL}/wa/status/${booking.orderNumber}`;
+      const uploadProofUrl = `${APP_URL}/wa/proof/${uploadToken}`;
+      const deadline = new Date(Date.now() + 24 * 60 * 60 * 1000);
+      const deadlineStr = deadline.toLocaleString("id-ID", { timeZone: "Asia/Jakarta", hour12: false });
+
+      notifyCustomerBookingApproved({
+        customerPhone: booking.customerPhone,
+        customerName: booking.customerName,
+        orderNumber: booking.orderNumber,
+        facilityName: facility?.name ?? "-",
+        bookingDate: booking.bookingDate,
+        startTime: booking.startTime,
+        endTime: booking.endTime,
+        totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
+        bankName: settings?.bankName ?? "",
+        bankAccount: settings?.bankAccount ?? "",
+        bankAccountName: settings?.bankAccountName ?? "",
+        uploadProofUrl,
+        paymentDeadline: deadlineStr,
+        statusUrl,
+      }).catch(() => {});
+
+      res.json({ success: true, message: `Booking ${booking.orderNumber} disetujui. Customer dikirim notifikasi WA.` });
+
+    } else {
+      await db.update(bookingsTable)
+        .set({ status: "cancelled", rejectedReason: note ?? null, updatedAt: new Date() })
+        .where(eq(bookingsTable.id, booking.id));
+      await db.insert(bookingHistoryTable).values({
+        bookingId: booking.id,
+        fromStatus: booking.status,
+        toStatus: "cancelled",
+        changedByName: "admin (WhatsApp approval)",
+        note: note ? `Ditolak. Alasan: ${note}` : "Ditolak via WhatsApp Mini Form",
+      });
+
+      await logAudit({
+        action: "WA_APPROVAL_REJECTED",
+        entity: "booking",
+        entityId: booking.id,
+        before: { status: booking.status },
+        after: { status: "cancelled", note },
+        userName: "admin (WhatsApp approval)",
+      });
+
+      notifyCustomerBookingRejectedByAdmin({
+        customerPhone: booking.customerPhone,
+        customerName: booking.customerName,
+        orderNumber: booking.orderNumber,
+        facilityName: facility?.name ?? "-",
+        bookingDate: booking.bookingDate,
+        startTime: booking.startTime,
+        endTime: booking.endTime,
+        reason: note,
+      }).catch(() => {});
+
+      res.json({ success: true, message: `Booking ${booking.orderNumber} ditolak. Customer diberitahu via WA.` });
+    }
+  } catch (err) {
+    console.error("[wa/booking-approval POST]", err);
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 

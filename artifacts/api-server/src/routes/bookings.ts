@@ -3,7 +3,8 @@ import { db, bookingsTable, facilitiesTable, paymentsTable, promosTable, discoun
 import { eq, and, sql, or, ilike, desc, inArray } from "drizzle-orm";
 import { adminMiddleware, authMiddleware, verifyToken } from "../lib/auth";
 import { broadcastAvailabilityChange } from "../lib/supabase";
-import { notifyBookingCreated, notifyPaymentConfirmed, notifyBookingCancelled, notifyCompanyBookingCreated, notifyDpPaid, notifyWaAdminNewBooking } from "../lib/notifications";
+import { notifyBookingCreated, notifyPaymentConfirmed, notifyBookingCancelled, notifyCompanyBookingCreated, notifyDpPaid, notifyWaAdminNewBooking, notifyAdminBookingApprovalRequest } from "../lib/notifications";
+import { createWaToken } from "../lib/waTokens";
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
 import { syncBookingToBizportal, syncStatusToBizportal } from "../lib/bizportalSync";
 import { calculateTax, recordTaxTransaction, reverseTaxTransaction } from "../lib/tax";
@@ -590,6 +591,27 @@ router.post("/bookings", async (req, res) => {
           statusUrl: `${appUrl}/wa/status/${booking.orderNumber}`,
         }).catch(() => {});
       }
+
+      // ─── Kirim WA approval link ke semua admin untuk setiap booking baru ──────
+      try {
+        const appUrl = (process.env.APP_URL ?? "").replace(/\/$/, "");
+        if (appUrl) {
+          const approvalToken = await createWaToken(booking.id, "approve_booking", 1);
+          notifyAdminBookingApprovalRequest({
+            orderNumber: booking.orderNumber,
+            customerName,
+            customerPhone,
+            facilityName: facility.name,
+            bookingDate,
+            startTime: booking.startTime,
+            endTime: booking.endTime,
+            durationHours: Number(durationHours),
+            totalPrice: totalPrice.toLocaleString("id-ID"),
+            approvalUrl: `${appUrl}/wa/booking-approval/${approvalToken}`,
+            source: bookingSource ?? "portal",
+          }).catch(() => {});
+        }
+      } catch {}
     }
 
     res.status(201).json({
