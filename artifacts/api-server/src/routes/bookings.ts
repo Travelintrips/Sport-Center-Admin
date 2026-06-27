@@ -559,6 +559,26 @@ router.post("/bookings", async (req, res) => {
     } else {
       const deadline = new Date(Date.now() + deadlineHours * 60 * 60 * 1000);
       const deadlineStr = deadline.toLocaleString("id-ID", { timeZone: "Asia/Jakarta", hour12: false });
+      const isProdEnv = process.env.NODE_ENV === "production";
+      const appUrl = isProdEnv
+        ? (process.env.APP_URL ?? "").replace(/\/$/, "")
+        : process.env.REPLIT_DEV_DOMAIN
+          ? `https://${process.env.REPLIT_DEV_DOMAIN}`
+          : (process.env.APP_URL ?? "").replace(/\/$/, "");
+
+      // Buat proof token agar customer dapat link upload bukti langsung dari WA
+      let proofUrl = "";
+      let statusUrl = "";
+      try {
+        if (booking.status === "pending_payment") {
+          const proofToken = await createWaToken(booking.id, "upload_proof", 7);
+          proofUrl = appUrl ? `${appUrl}/wa/proof/${proofToken}` : "";
+          statusUrl = appUrl ? `${appUrl}/wa/status/${booking.orderNumber}` : "";
+        }
+      } catch (err) {
+        console.error("[WA] Gagal buat proof token:", err);
+      }
+
       notifyBookingCreated({
         customerName,
         customerPhone,
@@ -569,13 +589,14 @@ router.post("/bookings", async (req, res) => {
         endTime: booking.endTime,
         totalPrice: totalPrice.toLocaleString("id-ID"),
         paymentDeadline: deadlineStr,
+        uploadProofUrl: proofUrl || undefined,
+        statusUrl: statusUrl || undefined,
       }).catch((err) => console.error("[WA] notifyBookingCreated error:", err));
 
       // Notifikasi admin jika booking berasal dari link Mina AI
       if (bookingSource === "mina") {
         const bookingDow = new Date(bookingDate + "T00:00:00+07:00").getDay();
         const isWeekend = bookingDow === 0 || bookingDow === 6;
-        const appUrl = (process.env.APP_URL ?? "").replace(/\/$/, "");
         notifyWaAdminNewBooking({
           orderNumber: booking.orderNumber,
           customerName,

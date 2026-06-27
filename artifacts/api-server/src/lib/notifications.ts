@@ -140,6 +140,8 @@ export interface BookingNotifData {
   reason?: string;
   reviewUrl?: string;
   bookingId?: number;
+  uploadProofUrl?: string;
+  statusUrl?: string;
 }
 
 export async function notifyBookingCreated(data: BookingNotifData): Promise<void> {
@@ -165,7 +167,9 @@ export async function notifyBookingCreated(data: BookingNotifData): Promise<void
       `Rekening: *${bankInfo.bankAccount}*\n` +
       `Atas Nama: *${bankInfo.bankAccountName}*\n\n` +
       (data.paymentDeadline ? `⏰ Batas pembayaran: *${data.paymentDeadline}*\n\n` : "") +
-      `Setelah transfer, segera upload bukti pembayaran di halaman booking kamu.\n\nTerima kasih! 🏆`;
+      (data.uploadProofUrl ? `📎 Upload bukti transfer:\n${data.uploadProofUrl}\n\n` : "") +
+      (data.statusUrl ? `🔍 Cek status booking:\n${data.statusUrl}\n\n` : "") +
+      `Terima kasih! 🏆`;
     await sendWA(data.customerPhone, msg);
   }
 
