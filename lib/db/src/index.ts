@@ -93,6 +93,17 @@ if (!connectionString) {
   );
 }
 
+// ── AI KERNEL v2: DATABASE LOCK GUARD ─────────────────────────────────────
+// ONLY Supabase PostgreSQL is allowed. Any non-Supabase connection string
+// is treated as a critical configuration error and will prevent startup.
+if (!/supabase\.(co|com|in)/.test(connectionString)) {
+  throw new Error(
+    "[DB] KERNEL VIOLATION: Database must be Supabase PostgreSQL only.\n" +
+    "Non-Supabase connection string detected. Refusing to start.\n" +
+    "Set SUPABASE_DATABASE_URL (prod) or SUPABASE_DATABASE_URL_DEV (dev) to a valid Supabase URL."
+  );
+}
+
 console.info(
   `[DB] Source: ${dbSource} | NODE_ENV=${NODE_ENV} | ` +
   `isDevUsingProdDb=${isDevUsingProdDb} | allowDevOnProd=${ALLOW_DEV_ON_PROD}`

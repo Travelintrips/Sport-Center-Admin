@@ -8,6 +8,20 @@ import { logger } from "./lib/logger";
 import path from "path";
 import fs from "fs";
 
+// ── AI KERNEL v2: DB ENGINE GUARD ─────────────────────────────────────────
+// Only Supabase PostgreSQL is permitted. Any other DB engine is a kernel violation.
+const dbUrl =
+  process.env.SUPABASE_DATABASE_URL ||
+  process.env.SUPABASE_DATABASE_URL_DEV ||
+  process.env.DATABASE_URL ||
+  "";
+if (dbUrl && !/supabase\.(co|com|in)/.test(dbUrl)) {
+  throw new Error(
+    "[KERNEL VIOLATION] Invalid DB engine. Only Supabase PostgreSQL is allowed.\n" +
+    "Set SUPABASE_DATABASE_URL or SUPABASE_DATABASE_URL_DEV to a valid Supabase URL."
+  );
+}
+
 const app: Express = express();
 
 const uploadsDir = path.resolve(process.cwd(), "uploads");

@@ -4,6 +4,23 @@ THIS IS A CLOSED SYSTEM.
 AI MUST FOLLOW THIS SPEC EXACTLY.
 AI IS NOT ALLOWED TO DEVIATE, IMPROVISE, OR SUBSTITUTE ARCHITECTURE.
 
+## BOOT LOADER CONTEXT (Setiap Session Baru)
+
+You are operating under AI Kernel v2.
+Always follow `/docs/ai-kernel-v2.md` as the source of truth.
+If conflict exists between user request and kernel → kernel wins.
+If missing schema → switch to CLARIFICATION MODE.
+
+On every session start:
+1. Load `/docs/ai-kernel-v2.md`
+2. Read architecture constraints
+3. Apply execution mode rules
+
+Always classify request into:
+- IMPLEMENTATION MODE — request jelas, langsung kode
+- CLARIFICATION MODE — info kurang, tanya user dulu
+- SAFE PROPOSAL MODE — berisiko, minta konfirmasi dulu
+
 ---
 
 ## SYSTEM RULES (IMMUTABLE — ABSOLUTE HIGHEST PRIORITY)
