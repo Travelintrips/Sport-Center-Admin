@@ -202,6 +202,10 @@ function Router() {
       <Route path="/wa/register/:token" component={WaRegister} />
       <Route path="/wa/booking-approval/:token" component={WaBookingApproval} />
       <Route path="/kwitansi/:orderNumber" component={WaKwitansi} />
+      {/* Short URL aliases — digunakan di pesan WA agar link lebih ringkas */}
+      <Route path="/bukti/:token" component={WaProofUpload} />
+      <Route path="/status/:orderNumber" component={WaBookingStatus} />
+      <Route path="/ulasan/:token" component={WaAdminReview} />
       {/* Customer Routes */}
       <Route path="*">
         <CustomerLayout>

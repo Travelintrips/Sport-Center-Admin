@@ -11,6 +11,7 @@ import { syncStatusToBizportal } from "../lib/bizportalSync";
 import { BUCKETS, uploadToStorage } from "../lib/supabaseStorage";
 import { createJournalEntry, createPublicAccountingEntry } from "../lib/accounting";
 import { createWaToken } from "../lib/waTokens";
+import { logger } from "../lib/logger";
 
 function getAppUrl(): string {
   const isProd = process.env.NODE_ENV === "production";
@@ -154,7 +155,7 @@ router.post("/payments", async (req, res) => {
       startTime: booking.startTime,
       endTime: booking.endTime,
       totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
-      reviewUrl: `${APP_URL}/wa/review/${reviewToken}`,
+      reviewUrl: `${APP_URL}/ulasan/${reviewToken}`,
     });
     syncStatusToBizportal(booking.orderNumber, "waiting_confirmation", proofUrl).catch(() => {});
 
@@ -251,6 +252,7 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
             .where(eq(facilitiesTable.id, booking.facilityId))
             .limit(1);
 
+          logger.info({ orderNumber: booking.orderNumber, phone: booking.customerPhone }, "[WA] Mengirim notif konfirmasi pembayaran ke customer");
           notifyPaymentConfirmed({
             customerName: booking.customerName,
             customerPhone: booking.customerPhone,
@@ -261,7 +263,7 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
             endTime: booking.endTime,
             totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
             bookingId: booking.id,
-          }).catch((err) => console.error("[WA] notifyPaymentConfirmed error:", err));
+          }).catch((err) => logger.error({ err, orderNumber: booking.orderNumber, phone: booking.customerPhone }, "[WA] notifyPaymentConfirmed error"));
           syncStatusToBizportal(booking.orderNumber, "confirmed", payment.proofUrl, new Date()).catch(() => {});
 
           const today = new Date().toISOString().split("T")[0];

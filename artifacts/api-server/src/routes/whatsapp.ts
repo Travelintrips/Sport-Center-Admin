@@ -483,7 +483,7 @@ router.post("/wa/webhook", async (req, res) => {
         const b = bookings[0];
         const [fac] = await db.select({ name: facilitiesTable.name }).from(facilitiesTable)
           .where(eq(facilitiesTable.id, b.facilityId)).limit(1);
-        const statusUrl = `${APP_URL}/wa/status/${b.orderNumber}`;
+        const statusUrl = `${APP_URL}/status/${b.orderNumber}`;
         await sendWAReply(senderPhone,
           `🔍 *Status Booking Terakhir*\n\n` +
           `Order: *${b.orderNumber}*\n` +
@@ -733,6 +733,10 @@ router.post("/wa/booking", async (req, res) => {
     const amountToPay = taxCalc.taxAmount > 0 ? taxCalc.grandTotal : totalPrice;
     const statusUrl = `${APP_URL}/wa/status/${orderNumber}`;
     const uploadProofUrl = `${APP_URL}/wa/upload/${orderNumber}`;
+
+    const statusUrl = `${APP_URL}/status/${orderNumber}`;
+    const uploadProofUrl = `${APP_URL}/bukti/${proofToken}`;
+
     const deadlineStr = paymentDeadline.toLocaleString("id-ID", { timeZone: "Asia/Jakarta", hour12: false });
 
     notifyWaBookingCreated({
@@ -888,7 +892,7 @@ router.post("/wa/action/:token", async (req, res) => {
           changedByName: "admin (WhatsApp)", note: "Pembayaran dikonfirmasi via WhatsApp",
         });
 
-        const statusUrl = `${APP_URL}/wa/status/${booking.orderNumber}`;
+        const statusUrl = `${APP_URL}/status/${booking.orderNumber}`;
         notifyWaBookingConfirmed({
           customerName: booking.customerName, customerPhone: booking.customerPhone,
           orderNumber: booking.orderNumber, facilityName: facility?.name ?? "",
@@ -1156,7 +1160,7 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
       bookingDate: booking.bookingDate, startTime: booking.startTime, endTime: booking.endTime,
       totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
       proofUrl: fullProofUrl,
-      reviewUrl: `${APP_URL}/wa/review/${reviewToken}`,
+      reviewUrl: `${APP_URL}/ulasan/${reviewToken}`,
     });
 
     await logAudit({
@@ -1238,7 +1242,7 @@ router.post("/wa/review/:token", async (req, res) => {
         changedByName: "admin (WhatsApp)", note: "Pembayaran dikonfirmasi via WA Review Link",
       });
 
-      const statusUrl = `${APP_URL}/wa/status/${booking.orderNumber}`;
+      const statusUrl = `${APP_URL}/status/${booking.orderNumber}`;
       notifyWaBookingConfirmed({
         customerName: booking.customerName, customerPhone: booking.customerPhone,
         orderNumber: booking.orderNumber, facilityName: facility?.name ?? "",
@@ -1297,7 +1301,11 @@ router.post("/wa/review/:token", async (req, res) => {
         orderNumber: booking.orderNumber, facilityName: facility?.name ?? "",
         bookingDate: booking.bookingDate, startTime: booking.startTime, endTime: booking.endTime,
         totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
+
         uploadProofUrl: `${APP_URL}/wa/upload/${booking.orderNumber}`,
+
+        uploadProofUrl: `${APP_URL}/bukti/${newUploadToken}`,
+
         reason: adminNotes,
       });
 
@@ -1563,6 +1571,9 @@ async function execAdminApprove(adminPhone: string, orderNumber: string) {
     const amountToPay = booking.grandTotal ? Number(booking.grandTotal) : Number(booking.totalPrice);
     const statusUrl = `${APP_URL}/wa/status/${booking.orderNumber}`;
     const uploadProofUrl = `${APP_URL}/wa/upload/${booking.orderNumber}`;
+
+    const statusUrl = `${APP_URL}/status/${booking.orderNumber}`;
+    const uploadProofUrl = `${APP_URL}/bukti/${proofToken}`;
     const deadlineStr = paymentDeadline.toLocaleString("id-ID", { timeZone: "Asia/Jakarta", hour12: false });
 
     notifyWaBookingApproved({
@@ -1635,7 +1646,7 @@ async function execAdminApprove(adminPhone: string, orderNumber: string) {
 
   const checkinToken = await createWaToken(booking.id, "checkin", 30);
   const finishToken = await createWaToken(booking.id, "finish", 30);
-  const statusUrl = `${APP_URL}/wa/status/${booking.orderNumber}`;
+  const statusUrl = `${APP_URL}/status/${booking.orderNumber}`;
 
   notifyWaBookingConfirmed({
     customerName: booking.customerName,
@@ -1771,7 +1782,7 @@ async function execAdminStatus(adminPhone: string, orderNumber: string) {
     `Total: *${formatIDR(Number(booking.grandTotal ?? booking.totalPrice))}*\n` +
     `Status: *${booking.status.replace(/_/g, " ").toUpperCase()}*\n` +
     (payment ? `Bukti: ${payment.proofUrl ?? "-"}\n` : "") +
-    `\n🔗 ${APP_URL}/wa/status/${orderNumber}`
+    `\n🔗 ${APP_URL}/status/${orderNumber}`
   );
 }
 
@@ -1828,7 +1839,7 @@ async function execAdminPaid(adminPhone: string, orderNumber: string) {
     startTime: booking.startTime,
     endTime: booking.endTime,
     totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
-    statusUrl: `${APP_URL}/wa/status/${booking.orderNumber}`,
+    statusUrl: `${APP_URL}/status/${booking.orderNumber}`,
   });
 
   notifyWaStaffCheckin({
@@ -1962,6 +1973,8 @@ async function execAdminResend(adminPhone: string, orderNumber: string) {
       paymentDeadline: deadline,
       statusUrl: `${APP_URL}/wa/status/${booking.orderNumber}`,
       uploadProofUrl: `${APP_URL}/wa/upload/${booking.orderNumber}`,
+      statusUrl: `${APP_URL}/status/${booking.orderNumber}`,
+      uploadProofUrl: `${APP_URL}/bukti/${proofToken}`,
       bankName: settings?.bankName ?? "",
       bankAccount: settings?.bankAccount ?? "",
       bankAccountName: settings?.bankAccountName ?? "",
@@ -1977,7 +1990,7 @@ async function execAdminResend(adminPhone: string, orderNumber: string) {
       startTime: booking.startTime,
       endTime: booking.endTime,
       totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
-      statusUrl: `${APP_URL}/wa/status/${booking.orderNumber}`,
+      statusUrl: `${APP_URL}/status/${booking.orderNumber}`,
     });
     await sendWAMsg(adminPhone, `✅ Konfirmasi booking dikirim ulang ke customer *${booking.customerName}*.`);
   } else {
@@ -2823,7 +2836,7 @@ async function execCreateBookingFromSession(session: WaBookingSessionRow, phone:
     },
   });
 
-  const statusUrl = `${APP_URL}/wa/status/${orderNumber}`;
+  const statusUrl = `${APP_URL}/status/${orderNumber}`;
   const weekend = isWeekendDate(session.bookingDate);
 
   // ── 12. Kirim WA ke customer ───────────────────────────────────────────────
@@ -2997,7 +3010,10 @@ router.post("/wa/fonnte/webhook", async (req, res) => {
           .orderBy(desc(waActionTokensTable.createdAt))
           .limit(1);
         const proofToken = tokens[0]?.token;
+
         const uploadUrl = proofToken ? `${APP_URL}/wa/upload/${b.orderNumber}` : null;
+
+        const uploadUrl = proofToken ? `${APP_URL}/bukti/${proofToken}` : null;
         const reply = uploadUrl
           ? `📎 Untuk upload bukti pembayaran *${b.orderNumber}*, silakan gunakan link berikut:\n\n${uploadUrl}\n\n⚠️ Upload hanya bisa melalui link, tidak bisa via WhatsApp langsung.`
           : `📎 Untuk upload bukti pembayaran *${b.orderNumber}*, ketik *status* untuk mendapatkan link upload.`;
@@ -3093,7 +3109,7 @@ router.post("/wa/fonnte/webhook", async (req, res) => {
           `   ${facMap.get(b.facilityId) ?? "-"} — ${b.bookingDate} ${b.startTime}–${b.endTime}\n` +
           `   Status: *${statusLabel}*\n\n`;
       }
-      reply += `Detail: ${APP_URL}/wa/status/${allBookings[0].orderNumber}`;
+      reply += `Detail: ${APP_URL}/status/${allBookings[0].orderNumber}`;
       await sendWAMsg(phone, reply);
       return;
     }
@@ -3227,9 +3243,13 @@ router.post("/wa/booking-approval", async (req, res) => {
         userName: "admin (WhatsApp approval)",
       });
 
+
       await createWaToken(booking.id, "upload_proof", 3);
       const statusUrl = `${APP_URL}/wa/status/${booking.orderNumber}`;
       const uploadProofUrl = `${APP_URL}/wa/upload/${booking.orderNumber}`;
+      const uploadToken = await createWaToken(booking.id, "upload_proof", 3);
+      const statusUrl = `${APP_URL}/status/${booking.orderNumber}`;
+      const uploadProofUrl = `${APP_URL}/bukti/${uploadToken}`;
       const deadline = new Date(Date.now() + 24 * 60 * 60 * 1000);
       const deadlineStr = deadline.toLocaleString("id-ID", { timeZone: "Asia/Jakarta", hour12: false });
 

@@ -572,8 +572,13 @@ router.post("/bookings", async (req, res) => {
       try {
         if (booking.status === "pending_payment") {
           const proofToken = await createWaToken(booking.id, "upload_proof", 7);
+
           proofUrl = appUrl ? `${appUrl}/wa/upload/${booking.orderNumber}` : "";
           statusUrl = appUrl ? `${appUrl}/wa/status/${booking.orderNumber}` : "";
+
+          proofUrl = appUrl ? `${appUrl}/bukti/${proofToken}` : "";
+          statusUrl = appUrl ? `${appUrl}/status/${booking.orderNumber}` : "";
+
         }
       } catch (err) {
         console.error("[WA] Gagal buat proof token:", err);
@@ -609,7 +614,7 @@ router.post("/bookings", async (req, res) => {
           totalPrice: totalPrice.toLocaleString("id-ID"),
           isWeekend,
           appliedRules: "🤖 Booking dari Mina AI",
-          statusUrl: `${appUrl}/wa/status/${booking.orderNumber}`,
+          statusUrl: `${appUrl}/status/${booking.orderNumber}`,
         }).catch(() => {});
       }
 
@@ -1383,7 +1388,7 @@ router.post("/admin/bookings/:id/resend-wa", adminMiddleware, async (req, res) =
       : (process.env.APP_URL ?? "").replace(/\/$/, "");
 
     const reviewToken = await createWaToken(id, "review_payment", 7);
-    const reviewUrl = `${appUrl}/wa/review/${reviewToken}`;
+    const reviewUrl = `${appUrl}/ulasan/${reviewToken}`;
 
     await notifyPaymentProofUploaded({
       customerName: booking.customerName,
