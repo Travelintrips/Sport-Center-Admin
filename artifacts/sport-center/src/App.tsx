@@ -71,6 +71,7 @@ import AdminVendors from "@/pages/admin/Vendors";
 import WaBookingForm from "@/pages/wa/BookingForm";
 import WaBookingStatus from "@/pages/wa/BookingStatus";
 import WaProofUpload from "@/pages/wa/ProofUpload";
+import WaUploadRedirect from "@/pages/wa/UploadRedirect";
 import WaAdminAction from "@/pages/wa/AdminAction";
 import WaAdminReview from "@/pages/wa/AdminReview";
 import WaRegister from "@/pages/wa/Register";
@@ -194,6 +195,7 @@ function Router() {
       {/* WhatsApp Booking Flow — standalone, no layout wrapper */}
       <Route path="/wa/booking/:facilityId" component={WaBookingForm} />
       <Route path="/wa/status/:orderNumber" component={WaBookingStatus} />
+      <Route path="/wa/upload/:orderNumber" component={WaUploadRedirect} />
       <Route path="/wa/proof/:token" component={WaProofUpload} />
       <Route path="/wa/action/:token" component={WaAdminAction} />
       <Route path="/wa/review/:token" component={WaAdminReview} />

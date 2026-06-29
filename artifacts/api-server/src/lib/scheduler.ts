@@ -270,8 +270,8 @@ async function sendPaymentReminder(): Promise<void> {
         .where(and(eq(waActionTokensTable.bookingId, booking.id), eq(waActionTokensTable.action, "upload_proof")))
         .limit(1);
 
-      const proofToken = tokenRow?.token ?? (await createWaToken(booking.id, "upload_proof", 7));
-      const uploadProofUrl = `${APP_URL}/wa/proof/${proofToken}`;
+      if (!tokenRow?.token) await createWaToken(booking.id, "upload_proof", 7);
+      const uploadProofUrl = `${APP_URL}/wa/upload/${booking.orderNumber}`;
 
       await notifyPaymentReminder({
         customerName: booking.customerName,

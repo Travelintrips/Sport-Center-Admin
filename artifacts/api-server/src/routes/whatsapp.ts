@@ -732,7 +732,7 @@ router.post("/wa/booking", async (req, res) => {
     // Send WA to customer — kirim grandTotal (termasuk PPN) sebagai jumlah transfer
     const amountToPay = taxCalc.taxAmount > 0 ? taxCalc.grandTotal : totalPrice;
     const statusUrl = `${APP_URL}/wa/status/${orderNumber}`;
-    const uploadProofUrl = `${APP_URL}/wa/proof/${proofToken}`;
+    const uploadProofUrl = `${APP_URL}/wa/upload/${orderNumber}`;
     const deadlineStr = paymentDeadline.toLocaleString("id-ID", { timeZone: "Asia/Jakarta", hour12: false });
 
     notifyWaBookingCreated({
@@ -818,7 +818,7 @@ router.get("/wa/status/:orderNumber", async (req, res) => {
         proofUrl: payment.proofUrl,
         confirmedAt: payment.confirmedAt,
       } : null,
-      uploadProofUrl: proofToken ? `${APP_URL}/wa/proof/${proofToken}` : null,
+      uploadProofUrl: proofToken ? `${APP_URL}/wa/upload/${booking.orderNumber}` : null,
     });
   } catch (err) {
     res.status(500).json({ error: "Internal server error" });
@@ -954,7 +954,7 @@ router.post("/wa/action/:token", async (req, res) => {
           orderNumber: booking.orderNumber, facilityName: facility?.name ?? "",
           bookingDate: booking.bookingDate, startTime: booking.startTime, endTime: booking.endTime,
           totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
-          uploadProofUrl: `${APP_URL}/wa/proof/${newUploadToken}`,
+          uploadProofUrl: `${APP_URL}/wa/upload/${booking.orderNumber}`,
           reason: adminNotes,
         });
 
@@ -1037,6 +1037,45 @@ router.post("/wa/action/:token", async (req, res) => {
     }
   } catch (err) {
     console.error("[wa/action] error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// GET /api/wa/get-proof-token/:orderNumber — cari token upload bukti aktif untuk order (no auth)
+router.get("/wa/get-proof-token/:orderNumber", async (req, res) => {
+  try {
+    const { orderNumber } = req.params as { orderNumber: string };
+    const [booking] = await db
+      .select({ id: bookingsTable.id, status: bookingsTable.status, orderNumber: bookingsTable.orderNumber })
+      .from(bookingsTable)
+      .where(eq(bookingsTable.orderNumber, orderNumber))
+      .limit(1);
+
+    if (!booking) {
+      res.status(404).json({ error: "Booking tidak ditemukan" });
+      return;
+    }
+
+    const [tokenRow] = await db
+      .select({ token: waActionTokensTable.token, expiresAt: waActionTokensTable.expiresAt })
+      .from(waActionTokensTable)
+      .where(and(eq(waActionTokensTable.bookingId, booking.id), eq(waActionTokensTable.action, "upload_proof")))
+      .orderBy(desc(waActionTokensTable.createdAt))
+      .limit(1);
+
+    if (tokenRow?.token) {
+      res.json({ token: tokenRow.token, orderNumber: booking.orderNumber });
+      return;
+    }
+
+    if (["pending_payment", "waiting_confirmation"].includes(booking.status)) {
+      const newToken = await createWaToken(booking.id, "upload_proof", 7);
+      res.json({ token: newToken, orderNumber: booking.orderNumber });
+      return;
+    }
+
+    res.status(404).json({ error: "Link upload tidak tersedia untuk status booking ini" });
+  } catch (err) {
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -1258,7 +1297,7 @@ router.post("/wa/review/:token", async (req, res) => {
         orderNumber: booking.orderNumber, facilityName: facility?.name ?? "",
         bookingDate: booking.bookingDate, startTime: booking.startTime, endTime: booking.endTime,
         totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
-        uploadProofUrl: `${APP_URL}/wa/proof/${newUploadToken}`,
+        uploadProofUrl: `${APP_URL}/wa/upload/${booking.orderNumber}`,
         reason: adminNotes,
       });
 
@@ -1523,7 +1562,7 @@ async function execAdminApprove(adminPhone: string, orderNumber: string) {
     const settings = settingsRows[0];
     const amountToPay = booking.grandTotal ? Number(booking.grandTotal) : Number(booking.totalPrice);
     const statusUrl = `${APP_URL}/wa/status/${booking.orderNumber}`;
-    const uploadProofUrl = `${APP_URL}/wa/proof/${proofToken}`;
+    const uploadProofUrl = `${APP_URL}/wa/upload/${booking.orderNumber}`;
     const deadlineStr = paymentDeadline.toLocaleString("id-ID", { timeZone: "Asia/Jakarta", hour12: false });
 
     notifyWaBookingApproved({
@@ -1689,7 +1728,7 @@ async function execAdminReject(adminPhone: string, orderNumber: string, reason: 
       startTime: booking.startTime,
       endTime: booking.endTime,
       totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
-      uploadProofUrl: `${APP_URL}/wa/proof/${newUploadToken}`,
+      uploadProofUrl: `${APP_URL}/wa/upload/${booking.orderNumber}`,
       reason,
     });
   }
@@ -1922,7 +1961,7 @@ async function execAdminResend(adminPhone: string, orderNumber: string) {
       totalPrice: amountToPay.toLocaleString("id-ID"),
       paymentDeadline: deadline,
       statusUrl: `${APP_URL}/wa/status/${booking.orderNumber}`,
-      uploadProofUrl: `${APP_URL}/wa/proof/${proofToken}`,
+      uploadProofUrl: `${APP_URL}/wa/upload/${booking.orderNumber}`,
       bankName: settings?.bankName ?? "",
       bankAccount: settings?.bankAccount ?? "",
       bankAccountName: settings?.bankAccountName ?? "",
@@ -2958,7 +2997,7 @@ router.post("/wa/fonnte/webhook", async (req, res) => {
           .orderBy(desc(waActionTokensTable.createdAt))
           .limit(1);
         const proofToken = tokens[0]?.token;
-        const uploadUrl = proofToken ? `${APP_URL}/wa/proof/${proofToken}` : null;
+        const uploadUrl = proofToken ? `${APP_URL}/wa/upload/${b.orderNumber}` : null;
         const reply = uploadUrl
           ? `📎 Untuk upload bukti pembayaran *${b.orderNumber}*, silakan gunakan link berikut:\n\n${uploadUrl}\n\n⚠️ Upload hanya bisa melalui link, tidak bisa via WhatsApp langsung.`
           : `📎 Untuk upload bukti pembayaran *${b.orderNumber}*, ketik *status* untuk mendapatkan link upload.`;
@@ -3188,9 +3227,9 @@ router.post("/wa/booking-approval", async (req, res) => {
         userName: "admin (WhatsApp approval)",
       });
 
-      const uploadToken = await createWaToken(booking.id, "upload_proof", 3);
+      await createWaToken(booking.id, "upload_proof", 3);
       const statusUrl = `${APP_URL}/wa/status/${booking.orderNumber}`;
-      const uploadProofUrl = `${APP_URL}/wa/proof/${uploadToken}`;
+      const uploadProofUrl = `${APP_URL}/wa/upload/${booking.orderNumber}`;
       const deadline = new Date(Date.now() + 24 * 60 * 60 * 1000);
       const deadlineStr = deadline.toLocaleString("id-ID", { timeZone: "Asia/Jakarta", hour12: false });
 
