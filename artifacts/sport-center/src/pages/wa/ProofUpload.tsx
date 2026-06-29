@@ -165,7 +165,6 @@ export default function WaProofUpload() {
                 ref={fileRef}
                 type="file"
                 accept="image/*"
-                capture="environment"
                 className="hidden"
                 onChange={handleFileChange}
               />
