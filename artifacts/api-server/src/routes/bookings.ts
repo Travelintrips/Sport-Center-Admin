@@ -1407,11 +1407,11 @@ router.post("/admin/bookings/:id/resend-wa", adminMiddleware, async (req, res) =
       reviewUrl,
     });
 
-    const { actor } = getUserFromReq(req);
+    const actorInfo = getUserFromReq(req);
     await logAudit({
-      userId: actor?.userId ?? null,
-      userName: actor?.name ?? null,
-      userRole: actor?.role ?? null,
+      userId: actorInfo?.userId ?? null,
+      userName: actorInfo?.userName ?? null,
+      userRole: actorInfo?.userRole ?? null,
       action: "WA_PROOF_NOTIFY_RESENT",
       entity: "booking",
       entityId: id,

@@ -188,7 +188,7 @@ export async function notifyBookingCreated(data: BookingNotifData): Promise<void
 
   const customerTpl = await getTemplate("booking_created");
   if (customerTpl) {
-    let msg = interpolate(customerTpl, vars);
+    let msg = interpolate(customerTpl, vars as unknown as Record<string, string>);
     // Append link jika template tidak menyertakan placeholder-nya
     if (data.uploadProofUrl && !msg.includes(data.uploadProofUrl)) {
       msg += `\n\n📎 Upload bukti transfer:\n${data.uploadProofUrl}`;
@@ -221,7 +221,7 @@ export async function notifyBookingCreated(data: BookingNotifData): Promise<void
 
   const adminTpl = await getTemplate("admin_new_booking");
   if (adminTpl) {
-    await sendWAToAdmins(interpolate(adminTpl, vars));
+    await sendWAToAdmins(interpolate(adminTpl, vars as unknown as Record<string, string>));
   } else {
     // Fallback: notifikasi admin hardcoded
     const adminMsg =
@@ -292,7 +292,7 @@ export async function notifyBookingCompleted(data: BookingNotifData): Promise<vo
   const [s] = await db.select().from(settingsTable).limit(1).catch(() => [null]);
   const appUrl = s?.appUrl || getAppUrl();
   const tpl = await getTemplate("booking_completed");
-  if (tpl) await sendWA(data.customerPhone, interpolate(tpl, { ...data, reviewUrl: `${appUrl}/booking/${data.orderNumber}` }));
+  if (tpl) await sendWA(data.customerPhone, interpolate(tpl, { ...data, reviewUrl: `${appUrl}/booking/${data.orderNumber}` } as unknown as Record<string, string>));
 }
 
 export async function notifyBookingExpired(data: BookingNotifData): Promise<void> {
@@ -333,7 +333,7 @@ export interface PaymentReminderData extends BookingNotifData {
 export async function notifyPaymentReminder(data: PaymentReminderData): Promise<void> {
   const tpl = await getTemplate("payment_reminder");
   if (tpl) {
-    await sendWA(data.customerPhone, interpolate(tpl, { ...data, hoursLeft: String(data.hoursLeft) }));
+    await sendWA(data.customerPhone, interpolate(tpl, { ...data, hoursLeft: String(data.hoursLeft) } as unknown as Record<string, string>));
     return;
   }
   const bankInfo = await getBankInfo();

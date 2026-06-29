@@ -271,7 +271,6 @@ async function sendPaymentReminder(): Promise<void> {
         .limit(1);
 
       if (!tokenRow?.token) await createWaToken(booking.id, "upload_proof", 7);
-      const uploadProofUrl = `${APP_URL}/wa/upload/${booking.orderNumber}`;
       const proofToken = tokenRow?.token ?? (await createWaToken(booking.id, "upload_proof", 7));
       const uploadProofUrl = `${APP_URL}/bukti/${proofToken}`;
       await notifyPaymentReminder({

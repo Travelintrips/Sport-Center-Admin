@@ -1453,7 +1453,7 @@ export default function AdminCompanyBilling() {
                             </div>
                           </td>
                           <td className="py-3 pr-4 text-muted-foreground">{label}</td>
-                          <td className="py-3 pr-4">{formatCurrency(inv.dpp ?? Math.round((inv.totalAmount ?? 0) / 1.11))}</td>
+                          <td className="py-3 pr-4">{formatCurrency(Math.round((inv.totalAmount ?? 0) / 1.11))}</td>
                           <td className="py-3 pr-4 text-muted-foreground">{formatCurrency(inv.ppnAmount)}</td>
                           <td className="py-3 pr-4 font-semibold">{formatCurrency(inv.grandTotal)}</td>
                           <td className="py-3 pr-4"><StatusBadge status={inv.status} /></td>

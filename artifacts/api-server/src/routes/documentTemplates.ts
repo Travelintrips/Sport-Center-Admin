@@ -66,7 +66,7 @@ router.get("/admin/document-templates", adminMiddleware, async (req, res) => {
 
 router.get("/admin/document-templates/:id", adminMiddleware, async (req, res) => {
   try {
-    const id = parseInt(req.params.id);
+    const id = parseInt(String(req.params.id));
     const [tpl] = await db.select().from(companyDocumentTemplatesTable).where(eq(companyDocumentTemplatesTable.id, id)).limit(1);
     if (!tpl) { res.status(404).json({ error: "Template tidak ditemukan" }); return; }
     res.json(tpl);
@@ -115,7 +115,7 @@ router.post("/admin/document-templates", adminMiddleware, async (req, res) => {
 
 router.put("/admin/document-templates/:id", adminMiddleware, async (req, res) => {
   try {
-    const id = parseInt(req.params.id);
+    const id = parseInt(String(req.params.id));
     const [existing] = await db.select().from(companyDocumentTemplatesTable).where(eq(companyDocumentTemplatesTable.id, id)).limit(1);
     if (!existing) { res.status(404).json({ error: "Template tidak ditemukan" }); return; }
 
@@ -157,7 +157,7 @@ router.put("/admin/document-templates/:id", adminMiddleware, async (req, res) =>
 
 router.delete("/admin/document-templates/:id", adminMiddleware, async (req, res) => {
   try {
-    const id = parseInt(req.params.id);
+    const id = parseInt(String(req.params.id));
     const [existing] = await db.select().from(companyDocumentTemplatesTable).where(eq(companyDocumentTemplatesTable.id, id)).limit(1);
     if (!existing) { res.status(404).json({ error: "Template tidak ditemukan" }); return; }
     if (existing.isDefault) { res.status(400).json({ error: "System default template tidak bisa dihapus" }); return; }
@@ -181,7 +181,8 @@ router.delete("/admin/document-templates/:id", adminMiddleware, async (req, res)
 
 router.get("/admin/documents/:documentType/:entityId/preview", adminDocumentPreviewMiddleware, async (req, res) => {
   try {
-    const { documentType, entityId } = req.params;
+    const documentType = String(req.params.documentType);
+    const entityId = String(req.params.entityId);
     const companyId = req.query.companyId ? parseInt(String(req.query.companyId)) : null;
 
     if (!(DOCUMENT_TYPES as readonly string[]).includes(documentType)) {
@@ -211,7 +212,8 @@ router.get("/admin/documents/:documentType/:entityId/preview", adminDocumentPrev
 
 router.get("/admin/documents/:documentType/:entityId/pdf", adminDocumentPreviewMiddleware, async (req, res) => {
   try {
-    const { documentType, entityId } = req.params;
+    const documentType = String(req.params.documentType);
+    const entityId = String(req.params.entityId);
     const companyId = req.query.companyId ? parseInt(String(req.query.companyId)) : null;
 
     if (!(DOCUMENT_TYPES as readonly string[]).includes(documentType)) {
@@ -245,7 +247,7 @@ router.get("/admin/documents/:documentType/:entityId/pdf", adminDocumentPreviewM
       });
 
       const page = await browser.newPage();
-      await page.setContent(html, { waitUntil: "networkidle0" });
+      await page.setContent(html, { waitUntil: "load" });
 
       pdfBuffer = Buffer.from(await page.pdf({
         format: "A4",

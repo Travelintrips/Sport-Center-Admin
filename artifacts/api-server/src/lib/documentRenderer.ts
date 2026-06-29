@@ -432,7 +432,7 @@ export async function renderDocument(params: {
 
   const html = wrapInHtmlPage(bodyContent, tpl?.paperStyle || "A4", printMode, bgTemplateUrl, bgTemplateType);
 
-  return { html, templateId: tpl?.id ?? null, documentNumber, tplVars };
+  return { html, templateId: tpl?.id ?? null, documentNumber };
 }
 
 /**

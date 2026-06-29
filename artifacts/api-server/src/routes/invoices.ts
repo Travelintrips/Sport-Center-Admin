@@ -67,7 +67,7 @@ async function resolveInvoiceData(orderNumber: string): Promise<InvoiceData | nu
       .select()
       .from(taxSettingsTable)
       .where(
-        taxSettingsTable.isActive
+        eq(taxSettingsTable.isActive, true)
       )
       .limit(1);
 
@@ -147,7 +147,7 @@ async function resolveInvoiceData(orderNumber: string): Promise<InvoiceData | nu
 
 router.get("/invoices/booking/:orderNumber", adminMiddleware, async (req, res) => {
   try {
-    const { orderNumber } = req.params;
+    const orderNumber = String(req.params.orderNumber);
     const data = await resolveInvoiceData(orderNumber);
     if (!data) {
       res.status(404).json({ error: "Booking tidak ditemukan" });
@@ -181,7 +181,7 @@ router.get("/invoices/booking/:orderNumber", adminMiddleware, async (req, res) =
 
 router.get("/invoices/booking/:orderNumber/html", adminMiddleware, async (req, res) => {
   try {
-    const { orderNumber } = req.params;
+    const orderNumber = String(req.params.orderNumber);
     const autoPrint = req.query.print === "1";
 
     const data = await resolveInvoiceData(orderNumber);
@@ -221,7 +221,7 @@ router.get("/invoices/booking/:orderNumber/html", adminMiddleware, async (req, r
 
 router.get("/invoices/booking/:orderNumber/pdf", adminMiddleware, async (req, res) => {
   try {
-    const { orderNumber } = req.params;
+    const orderNumber = String(req.params.orderNumber);
 
     const data = await resolveInvoiceData(orderNumber);
     if (!data) {
@@ -258,7 +258,7 @@ router.get("/invoices/booking/:orderNumber/pdf", adminMiddleware, async (req, re
 
 router.post("/invoices/booking/:orderNumber/send-wa", adminMiddleware, async (req, res) => {
   try {
-    const { orderNumber } = req.params;
+    const orderNumber = String(req.params.orderNumber);
     const { customMessage } = req.body ?? {};
 
     const data = await resolveInvoiceData(orderNumber);
@@ -347,7 +347,7 @@ router.post("/invoices/booking/:orderNumber/send-wa", adminMiddleware, async (re
 
 router.post("/invoices/booking/:orderNumber/send-email", adminMiddleware, async (req, res) => {
   try {
-    const { orderNumber } = req.params;
+    const orderNumber = String(req.params.orderNumber);
 
     const data = await resolveInvoiceData(orderNumber);
     if (!data) {
@@ -369,7 +369,8 @@ router.post("/invoices/booking/:orderNumber/send-email", adminMiddleware, async 
     // Use nodemailer if available, else fail gracefully
     let nodemailer: any;
     try {
-      nodemailer = await import("nodemailer");
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      nodemailer = await import("nodemailer" as string);
     } catch {
       res.status(501).json({ error: "nodemailer tidak tersedia. Install dengan: pnpm add nodemailer" });
       return;

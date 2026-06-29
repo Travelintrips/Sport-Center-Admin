@@ -684,7 +684,7 @@ const EVENT_LABEL: Record<string, string> = {
 function WaNotifLogsPanel({ bookingId }: { bookingId: number }) {
   const [expanded, setExpanded] = useState(false);
   const { data: logs, isLoading } = useGetBookingWaLogs(bookingId, {
-    query: { enabled: expanded },
+    query: { enabled: expanded, queryKey: ["booking-wa-logs", bookingId] },
   });
 
   return (
