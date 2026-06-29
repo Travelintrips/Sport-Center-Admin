@@ -395,8 +395,7 @@ export async function notifyWaBookingCreated(data: WaBookingCreatedData): Promis
 
 export interface WaProofUploadedData extends BookingNotifData {
   proofUrl: string;
-  approveUrl: string;
-  rejectUrl: string;
+  reviewUrl: string;
 }
 
 export async function notifyWaProofUploaded(data: WaProofUploadedData): Promise<void> {
@@ -407,9 +406,7 @@ export async function notifyWaProofUploaded(data: WaProofUploadedData): Promise<
     `Fasilitas: *${data.facilityName}*\n` +
     `Tanggal: *${data.bookingDate}* pukul *${data.startTime}–${data.endTime}*\n` +
     `Total: *Rp ${data.totalPrice}*\n\n` +
-    `📎 Bukti: ${data.proofUrl}\n\n` +
-    `✅ Approve: ${data.approveUrl}\n` +
-    `❌ Tolak: ${data.rejectUrl}`;
+    `📎 Tap link untuk lihat bukti & konfirmasi:\n${data.reviewUrl}`;
   await sendWAToAdmins(msg);
 }
 

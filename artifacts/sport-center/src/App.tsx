@@ -72,6 +72,7 @@ import WaBookingForm from "@/pages/wa/BookingForm";
 import WaBookingStatus from "@/pages/wa/BookingStatus";
 import WaProofUpload from "@/pages/wa/ProofUpload";
 import WaAdminAction from "@/pages/wa/AdminAction";
+import WaAdminReview from "@/pages/wa/AdminReview";
 import WaRegister from "@/pages/wa/Register";
 import WaBookingApproval from "@/pages/wa/BookingApproval";
 import WaKwitansi from "@/pages/wa/Kwitansi";
@@ -195,6 +196,7 @@ function Router() {
       <Route path="/wa/status/:orderNumber" component={WaBookingStatus} />
       <Route path="/wa/proof/:token" component={WaProofUpload} />
       <Route path="/wa/action/:token" component={WaAdminAction} />
+      <Route path="/wa/review/:token" component={WaAdminReview} />
       <Route path="/wa/register/:token" component={WaRegister} />
       <Route path="/wa/booking-approval/:token" component={WaBookingApproval} />
       <Route path="/kwitansi/:orderNumber" component={WaKwitansi} />
