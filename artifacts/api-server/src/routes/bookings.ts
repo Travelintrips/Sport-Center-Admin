@@ -6,6 +6,7 @@ import { broadcastAvailabilityChange } from "../lib/supabase";
 import { notifyBookingCreated, notifyPaymentConfirmed, notifyBookingCancelled, notifyCompanyBookingCreated, notifyDpPaid, notifyWaAdminNewBooking, notifyAdminBookingApprovalRequest, notifyPaymentProofUploaded } from "../lib/notifications";
 import { createWaToken } from "../lib/waTokens";
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
+import { logger } from "../lib/logger";
 import { syncBookingToBizportal, syncStatusToBizportal } from "../lib/bizportalSync";
 import { calculateTax, recordTaxTransaction, reverseTaxTransaction } from "../lib/tax";
 import { reverseJournalEntry, reversePublicAccountingEntry } from "../lib/accounting";
@@ -1088,13 +1089,17 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
       const [payment] = await db.select().from(paymentsTable).where(eq(paymentsTable.bookingId, id)).limit(1);
       syncStatusToBizportal(beforeUpdate.orderNumber, status, payment?.proofUrl, status === "confirmed" ? new Date() : null).catch(() => {});
 
-      // Kirim WA notification ke customer saat status berubah ke confirmed
-      if (status === "confirmed" && beforeUpdate.status !== "confirmed") {
+      // Kirim WA notification ke customer saat status berubah ke confirmed ATAU langsung ke completed
+      const isConfirming =
+        (status === "confirmed" && beforeUpdate.status !== "confirmed") ||
+        (status === "completed" && !["confirmed", "completed"].includes(beforeUpdate.status ?? ""));
+      if (isConfirming) {
         const [facility] = await db
           .select({ name: facilitiesTable.name })
           .from(facilitiesTable)
           .where(eq(facilitiesTable.id, beforeUpdate.facilityId))
           .limit(1);
+        logger.info({ orderNumber: beforeUpdate.orderNumber, phone: beforeUpdate.customerPhone, toStatus: status }, "[WA] Mengirim notif konfirmasi pembayaran ke customer");
         notifyPaymentConfirmed({
           customerName: beforeUpdate.customerName,
           customerPhone: beforeUpdate.customerPhone,
@@ -1105,7 +1110,7 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
           endTime: beforeUpdate.endTime,
           totalPrice: Number(beforeUpdate.totalPrice).toLocaleString("id-ID"),
           bookingId: beforeUpdate.id,
-        }).catch((err) => console.error("[WA] notifyPaymentConfirmed (direct) error:", err));
+        }).catch((err) => logger.error({ err, orderNumber: beforeUpdate.orderNumber, phone: beforeUpdate.customerPhone }, "[WA] notifyPaymentConfirmed (direct) error"));
       }
 
       // Kirim WA notification ke customer saat booking dibatalkan
@@ -1125,7 +1130,7 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
           endTime: beforeUpdate.endTime,
           totalPrice: Number(beforeUpdate.totalPrice).toLocaleString("id-ID"),
           reason: adminNotes,
-        }).catch((err) => console.error("[WA] notifyBookingCancelled (direct) error:", err));
+        }).catch((err) => logger.error({ err, orderNumber: beforeUpdate.orderNumber }, "[WA] notifyBookingCancelled (direct) error"));
       }
 
       // FASE 4 & 5: Reversal pajak + jurnal akuntansi saat dibatalkan/refund
