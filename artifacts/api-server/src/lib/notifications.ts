@@ -271,7 +271,19 @@ export async function notifyBookingExpired(data: BookingNotifData): Promise<void
   if (adminTpl) await sendWAToAdmins(interpolate(adminTpl, data as unknown as Record<string, string>));
 }
 
-export async function notifyPaymentProofUploaded(data: BookingNotifData): Promise<void> {
+export async function notifyPaymentProofUploaded(data: BookingNotifData & { reviewUrl?: string }): Promise<void> {
+  if (data.reviewUrl) {
+    const msg =
+      `🔔 *Bukti Pembayaran Masuk*\n\n` +
+      `Booking: *${data.orderNumber}*\n` +
+      `Customer: *${data.customerName}*\n` +
+      `Fasilitas: *${data.facilityName}*\n` +
+      `Tanggal: *${data.bookingDate}* pukul *${data.startTime}–${data.endTime}*\n` +
+      `Total: *Rp ${data.totalPrice}*\n\n` +
+      `📎 Tap link untuk lihat bukti & konfirmasi:\n${data.reviewUrl}`;
+    await sendWAToAdmins(msg);
+    return;
+  }
   const tpl = await getTemplate("admin_payment_proof");
   if (tpl) await sendWAToAdmins(interpolate(tpl, data as unknown as Record<string, string>));
 }

@@ -10,6 +10,14 @@ import { logAudit, getClientInfo, getUserFromReq, logAccountingError } from "../
 import { syncStatusToBizportal } from "../lib/bizportalSync";
 import { BUCKETS, uploadToStorage } from "../lib/supabaseStorage";
 import { createJournalEntry, createPublicAccountingEntry } from "../lib/accounting";
+import { createWaToken } from "../lib/waTokens";
+
+function getAppUrl(): string {
+  const isProd = process.env.NODE_ENV === "production";
+  if (isProd) return (process.env.APP_URL ?? "").replace(/\/$/, "");
+  if (process.env.REPLIT_DEV_DOMAIN) return `https://${process.env.REPLIT_DEV_DOMAIN}`;
+  return (process.env.APP_URL ?? "").replace(/\/$/, "");
+}
 
 const router = Router();
 
@@ -134,6 +142,9 @@ router.post("/payments", async (req, res) => {
       .where(eq(facilitiesTable.id, booking.facilityId))
       .limit(1);
 
+    // Generate single review token so admin gets ONE link (proof + approve/reject in one page)
+    const APP_URL = getAppUrl();
+    const reviewToken = await createWaToken(Number(bookingId), "review_payment", 7);
     notifyPaymentProofUploaded({
       customerName: booking.customerName,
       customerPhone: booking.customerPhone,
@@ -143,6 +154,7 @@ router.post("/payments", async (req, res) => {
       startTime: booking.startTime,
       endTime: booking.endTime,
       totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
+      reviewUrl: `${APP_URL}/wa/review/${reviewToken}`,
     });
     syncStatusToBizportal(booking.orderNumber, "waiting_confirmation", proofUrl).catch(() => {});
 
