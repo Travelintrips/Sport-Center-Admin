@@ -1,4 +1,4 @@
-import { db, notificationTemplatesTable, settingsTable } from "@workspace/db";
+import { db, notificationTemplatesTable, settingsTable, waNotifLogsTable } from "@workspace/db";
 import { renderDocumentText } from "./documentRenderer";
 import { eq } from "drizzle-orm";
 import { trackSentMessage } from "./waSentTracker";
@@ -57,10 +57,15 @@ function isValidPhone(phone: string): boolean {
   return /^62\d{8,13}$/.test(phone);
 }
 
-async function sendWA(phone: string, message: string): Promise<void> {
+async function sendWA(
+  phone: string,
+  message: string,
+  ctx?: { bookingId?: number; orderNumber?: string; event?: string },
+): Promise<void> {
   const cleanPhone = cleanPhoneNumber(phone);
   if (!cleanPhone || !isValidPhone(cleanPhone)) {
     logger.warn({ phone, cleanPhone }, "[WA] sendWA: nomor tidak valid, pesan tidak dikirim");
+    if (ctx) logWaSend(cleanPhone || phone, message, "failed", "Nomor tidak valid", ctx).catch(() => {});
     return;
   }
   // Catat SEGERA sebelum await apapun — Fonnte echo bisa datang saat getWaConfig() pending
@@ -68,6 +73,7 @@ async function sendWA(phone: string, message: string): Promise<void> {
   const { token } = await getWaConfig();
   if (!token) {
     logger.error("[WA] sendWA: FONNTE_TOKEN kosong — pesan tidak dikirim ke " + cleanPhone);
+    if (ctx) logWaSend(cleanPhone, message, "failed", "FONNTE_TOKEN kosong", ctx).catch(() => {});
     return;
   }
   logger.info({ target: cleanPhone }, "[WA] Mengirim pesan WA via Fonnte");
@@ -83,17 +89,21 @@ async function sendWA(phone: string, message: string): Promise<void> {
     const body = await resp.text().catch(() => "(no body)");
     if (!resp.ok) {
       logger.error({ status: resp.status, target: cleanPhone, body }, "[WA] Fonnte HTTP error");
+      if (ctx) logWaSend(cleanPhone, message, "failed", `HTTP ${resp.status}: ${body.slice(0, 200)}`, ctx).catch(() => {});
     } else {
       let json: Record<string, unknown> | null = null;
       try { json = JSON.parse(body); } catch { /* non-json */ }
       if (json && json["status"] === false) {
         logger.error({ target: cleanPhone, response: json }, "[WA] Fonnte gagal kirim pesan");
+        if (ctx) logWaSend(cleanPhone, message, "failed", JSON.stringify(json).slice(0, 200), ctx).catch(() => {});
       } else {
         logger.info({ target: cleanPhone, id: json?.["id"] }, "[WA] Pesan berhasil masuk queue Fonnte");
+        if (ctx) logWaSend(cleanPhone, message, "sent", null, ctx).catch(() => {});
       }
     }
   } catch (err) {
     logger.error({ err: (err as Error).message, target: cleanPhone }, "[WA] sendWA exception");
+    if (ctx) logWaSend(cleanPhone, message, "failed", (err as Error).message, ctx).catch(() => {});
   }
 }
 
@@ -112,6 +122,28 @@ async function getTemplate(key: string): Promise<string | null> {
     .limit(1);
   if (!tpl || !tpl.isActive) return null;
   return tpl.body;
+}
+
+async function logWaSend(
+  phone: string,
+  message: string,
+  status: "sent" | "failed",
+  errorMessage: string | null,
+  ctx?: { bookingId?: number; orderNumber?: string; event?: string },
+): Promise<void> {
+  try {
+    await db.insert(waNotifLogsTable).values({
+      bookingId: ctx?.bookingId ?? null,
+      orderNumber: ctx?.orderNumber ?? null,
+      event: ctx?.event ?? null,
+      recipientPhone: phone,
+      messagePreview: message.slice(0, 300),
+      status,
+      errorMessage,
+    });
+  } catch (err) {
+    logger.warn({ err }, "[WA] Gagal menyimpan WA log");
+  }
 }
 
 async function getBankInfo(): Promise<Record<string, string>> {
@@ -164,7 +196,7 @@ export async function notifyBookingCreated(data: BookingNotifData): Promise<void
     if (data.statusUrl && !msg.includes(data.statusUrl)) {
       msg += `\n🔍 Cek status booking:\n${data.statusUrl}`;
     }
-    await sendWA(data.customerPhone, msg);
+    await sendWA(data.customerPhone, msg, { bookingId: data.bookingId, orderNumber: data.orderNumber, event: "booking_created" });
   } else {
     // Fallback: pesan hardcoded jika template belum di-set
     const msg =
@@ -184,7 +216,7 @@ export async function notifyBookingCreated(data: BookingNotifData): Promise<void
       (data.uploadProofUrl ? `📎 Upload bukti transfer:\n${data.uploadProofUrl}\n\n` : "") +
       (data.statusUrl ? `🔍 Cek status booking:\n${data.statusUrl}\n\n` : "") +
       `Terima kasih! 🏆`;
-    await sendWA(data.customerPhone, msg);
+    await sendWA(data.customerPhone, msg, { bookingId: data.bookingId, orderNumber: data.orderNumber, event: "booking_created" });
   }
 
   const adminTpl = await getTemplate("admin_new_booking");
@@ -218,7 +250,7 @@ export async function notifyPaymentConfirmed(data: BookingNotifData): Promise<vo
           const appUrl = getAppUrl() || (s as { appUrl?: string } | null)?.appUrl || "";
           if (appUrl && data.orderNumber) msg += `\n\n🧾 Lihat & cetak kwitansi digital:\n${appUrl}/api/public/kwitansi/${data.orderNumber}`;
         } catch { /* non-fatal */ }
-        await sendWA(data.customerPhone, msg);
+        await sendWA(data.customerPhone, msg, { bookingId: data.bookingId, orderNumber: data.orderNumber, event: "payment_confirmed" });
         return;
       }
     } catch { /* non-fatal — fall through to legacy template */ }
@@ -227,7 +259,7 @@ export async function notifyPaymentConfirmed(data: BookingNotifData): Promise<vo
   // Fallback: legacy notification template
   const tpl = await getTemplate("payment_confirmed");
   if (tpl) {
-    await sendWA(data.customerPhone, interpolate(tpl, data as unknown as Record<string, string>));
+    await sendWA(data.customerPhone, interpolate(tpl, data as unknown as Record<string, string>), { bookingId: data.bookingId, orderNumber: data.orderNumber, event: "payment_confirmed" });
     return;
   }
 
@@ -248,12 +280,12 @@ export async function notifyPaymentConfirmed(data: BookingNotifData): Promise<vo
     `✅ Pembayaran telah dikonfirmasi\n\n` +
     (kwitansiUrl ? `🧾 Lihat & cetak kwitansi digital:\n${kwitansiUrl}\n\n` : "") +
     `Sampai jumpa di lapangan! 🏆`;
-  await sendWA(data.customerPhone, msg);
+  await sendWA(data.customerPhone, msg, { bookingId: data.bookingId, orderNumber: data.orderNumber, event: "payment_confirmed" });
 }
 
 export async function notifyBookingCancelled(data: BookingNotifData): Promise<void> {
   const tpl = await getTemplate("booking_cancelled");
-  if (tpl) await sendWA(data.customerPhone, interpolate(tpl, { ...data as unknown as Record<string, string>, reason: data.reason ?? "" }));
+  if (tpl) await sendWA(data.customerPhone, interpolate(tpl, { ...data as unknown as Record<string, string>, reason: data.reason ?? "" }), { bookingId: data.bookingId, orderNumber: data.orderNumber, event: "booking_cancelled" });
 }
 
 export async function notifyBookingCompleted(data: BookingNotifData): Promise<void> {

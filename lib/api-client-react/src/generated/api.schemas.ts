@@ -1653,6 +1653,26 @@ export interface DocumentTemplateInput {
   paperStyle?: string;
 }
 
+export type WaNotifLogStatus = typeof WaNotifLogStatus[keyof typeof WaNotifLogStatus];
+
+
+export const WaNotifLogStatus = {
+  sent: 'sent',
+  failed: 'failed',
+} as const;
+
+export interface WaNotifLog {
+  id: number;
+  bookingId?: number | null;
+  orderNumber?: string | null;
+  event?: string | null;
+  recipientPhone: string;
+  messagePreview?: string | null;
+  status: WaNotifLogStatus;
+  errorMessage?: string | null;
+  sentAt: string;
+}
+
 export type SendOtp200 = {
   success?: boolean;
   message?: string;
@@ -1776,6 +1796,11 @@ search?: string;
 
 export type GetReviewsParams = {
 facilityId?: number;
+};
+
+export type ResendBookingWa200 = {
+  success: boolean;
+  message: string;
 };
 
 export type GetVerificationLogsParams = {

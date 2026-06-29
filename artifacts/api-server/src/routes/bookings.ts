@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { db, bookingsTable, facilitiesTable, paymentsTable, promosTable, discountSettingsTable, apMembersTable, bookingHistoryTable, usersTable, verificationLogsTable, companyUsersTable, bookingGroupsTable, settingsTable, waActionTokensTable } from "@workspace/db";
+import { db, bookingsTable, facilitiesTable, paymentsTable, promosTable, discountSettingsTable, apMembersTable, bookingHistoryTable, usersTable, verificationLogsTable, companyUsersTable, bookingGroupsTable, settingsTable, waActionTokensTable, waNotifLogsTable } from "@workspace/db";
 import { eq, and, sql, or, ilike, desc, inArray, notExists } from "drizzle-orm";
 import { adminMiddleware, authMiddleware, verifyToken } from "../lib/auth";
 import { broadcastAvailabilityChange } from "../lib/supabase";
@@ -1348,6 +1348,22 @@ router.get("/admin/bookings/wa-unnotified", adminMiddleware, async (req, res) =>
     res.json(result);
   } catch (err) {
     req.log.error({ err }, "WA unnotified list error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ─── GET /admin/bookings/:id/wa-logs — riwayat pengiriman WA per booking ─────────────────────
+router.get("/admin/bookings/:id/wa-logs", adminMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(String(req.params.id));
+    const logs = await db
+      .select()
+      .from(waNotifLogsTable)
+      .where(eq(waNotifLogsTable.bookingId, id))
+      .orderBy(desc(waNotifLogsTable.sentAt));
+    res.json(logs);
+  } catch (err) {
+    req.log.error({ err }, "WA logs fetch error");
     res.status(500).json({ error: "Internal server error" });
   }
 });

@@ -794,5 +794,20 @@ ALTER TABLE sport_center.sport_expenses
   ADD COLUMN IF NOT EXISTS vendor_id INTEGER
     REFERENCES sport_center.sport_vendors(id)
     ON DELETE SET NULL;
+
+-- ============================================================
+-- wa_notif_logs: log pengiriman notifikasi WhatsApp per booking
+-- ============================================================
+CREATE TABLE IF NOT EXISTS sport_center.wa_notif_logs (
+  id              SERIAL PRIMARY KEY,
+  booking_id      INTEGER,
+  order_number    TEXT,
+  event           TEXT,
+  recipient_phone TEXT NOT NULL,
+  message_preview TEXT,
+  status          TEXT NOT NULL DEFAULT 'sent',
+  error_message   TEXT,
+  sent_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 `;
 

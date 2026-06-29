@@ -2172,6 +2172,40 @@ export const CheckInBookingResponse = zod.object({
 
 
 /**
+ * @summary Get WA notification logs for a booking (admin)
+ */
+export const GetBookingWaLogsParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetBookingWaLogsResponseItem = zod.object({
+  "id": zod.number(),
+  "bookingId": zod.number().nullish(),
+  "orderNumber": zod.string().nullish(),
+  "event": zod.string().nullish(),
+  "recipientPhone": zod.string(),
+  "messagePreview": zod.string().nullish(),
+  "status": zod.enum(['sent', 'failed']),
+  "errorMessage": zod.string().nullish(),
+  "sentAt": zod.string()
+})
+export const GetBookingWaLogsResponse = zod.array(GetBookingWaLogsResponseItem)
+
+
+/**
+ * @summary Resend WA notification to customer based on booking status (admin)
+ */
+export const ResendBookingWaParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const ResendBookingWaResponse = zod.object({
+  "success": zod.boolean(),
+  "message": zod.string()
+})
+
+
+/**
  * @summary Verify Angkasa Pura ID card and apply discount (admin)
  */
 export const VerifyBookingParams = zod.object({

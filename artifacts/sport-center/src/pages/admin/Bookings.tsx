@@ -6,6 +6,7 @@ import {
   useUpdatePayment,
   useCheckInBooking,
   getListBookingsQueryKey,
+  useGetBookingWaLogs,
 } from "@workspace/api-client-react";
 import { useQueryClient, useMutation, useQuery } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -58,6 +59,9 @@ import {
   Send,
   ChevronDown,
   ChevronUp,
+  MessageCircle,
+  CheckCircle,
+  AlertCircle,
 } from "lucide-react";
 import { getToken } from "@/lib/auth";
 import VerifyIdDialog from "@/components/admin/VerifyIdDialog";
@@ -665,6 +669,102 @@ function ProofImage({ proofUrl }: { proofUrl: string }) {
   );
 }
 
+/* ─── WA Notif Logs Panel ───────────────────────────────────────── */
+
+const EVENT_LABEL: Record<string, string> = {
+  booking_created: "Booking Dibuat",
+  payment_confirmed: "Pembayaran Dikonfirmasi",
+  booking_cancelled: "Booking Dibatalkan",
+  booking_expired: "Booking Kedaluwarsa",
+  booking_completed: "Booking Selesai",
+  dp_paid: "DP Dibayar",
+  resend: "Kirim Ulang",
+};
+
+function WaNotifLogsPanel({ bookingId }: { bookingId: number }) {
+  const [expanded, setExpanded] = useState(false);
+  const { data: logs, isLoading } = useGetBookingWaLogs(bookingId, {
+    query: { enabled: expanded },
+  });
+
+  return (
+    <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        className="w-full flex items-center justify-between px-4 py-2.5 bg-slate-50 dark:bg-slate-800/50 hover:bg-slate-100 dark:hover:bg-slate-700/50 transition-colors text-left"
+      >
+        <div className="flex items-center gap-2">
+          <MessageCircle size={13} className="text-emerald-500" />
+          <span className="text-xs font-semibold text-slate-600 dark:text-slate-300 uppercase tracking-wide">Riwayat Notifikasi WA</span>
+          {!expanded && logs && logs.length > 0 && (
+            <span className="bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold px-1.5 py-0.5 rounded-full">{logs.length}</span>
+          )}
+        </div>
+        {expanded ? <ChevronUp size={13} className="text-slate-400" /> : <ChevronDown size={13} className="text-slate-400" />}
+      </button>
+
+      <AnimatePresence>
+        {expanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="overflow-hidden"
+          >
+            <div className="p-3 space-y-2">
+              {isLoading ? (
+                <div className="space-y-2">
+                  {[1, 2].map((i) => <Skeleton key={i} className="h-12 w-full rounded-lg" />)}
+                </div>
+              ) : !logs || logs.length === 0 ? (
+                <div className="flex items-center justify-center gap-2 py-4 text-slate-400 text-xs">
+                  <MessageCircle size={14} />
+                  <span>Belum ada log pengiriman WA</span>
+                </div>
+              ) : (
+                logs.map((log) => (
+                  <div key={log.id} className="rounded-lg border border-slate-100 dark:border-slate-700 p-3 space-y-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5">
+                        {log.status === "sent" ? (
+                          <CheckCircle size={12} className="text-emerald-500 shrink-0" />
+                        ) : (
+                          <AlertCircle size={12} className="text-red-500 shrink-0" />
+                        )}
+                        <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+                          {log.event ? (EVENT_LABEL[log.event] ?? log.event) : "Notifikasi"}
+                        </span>
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${log.status === "sent" ? "bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400" : "bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400"}`}>
+                          {log.status === "sent" ? "Terkirim" : "Gagal"}
+                        </span>
+                      </div>
+                      <span className="text-[10px] text-slate-400 shrink-0">
+                        {new Date(log.sentAt).toLocaleString("id-ID", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-slate-500">📱 {log.recipientPhone}</div>
+                    {log.messagePreview && (
+                      <div className="text-[10px] text-slate-400 bg-slate-50 dark:bg-slate-800 rounded px-2 py-1.5 line-clamp-2 font-mono leading-relaxed">
+                        {log.messagePreview}
+                      </div>
+                    )}
+                    {log.status === "failed" && log.errorMessage && (
+                      <div className="text-[10px] text-red-500 bg-red-50 dark:bg-red-900/10 rounded px-2 py-1">
+                        ⚠ {log.errorMessage}
+                      </div>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
 /* ─── Booking Detail Drawer ─────────────────────────────────────── */
 
 function BookingDetailDrawer({
@@ -1149,6 +1249,9 @@ function BookingDetailDrawer({
               </div>
             </div>
           </div>
+
+          {/* Riwayat Notifikasi WA */}
+          <WaNotifLogsPanel bookingId={booking.id} />
 
           {/* Delete Booking */}
           <div className="rounded-xl border border-red-200 dark:border-red-900/40 overflow-hidden">
