@@ -185,7 +185,7 @@ async function sendDayOfReminder(): Promise<void> {
         .set({ reminderDaySentAt: new Date() })
         .where(eq(bookingsTable.id, booking.id));
 
-      const statusUrl = `${APP_URL}/wa/status/${booking.orderNumber}`;
+      const statusUrl = `${APP_URL}/status/${booking.orderNumber}`;
       const facilityName = facilityMap[booking.facilityId] ?? "";
 
       // Customer reminder
@@ -271,7 +271,7 @@ async function sendPaymentReminder(): Promise<void> {
         .limit(1);
 
       const proofToken = tokenRow?.token ?? (await createWaToken(booking.id, "upload_proof", 7));
-      const uploadProofUrl = `${APP_URL}/wa/proof/${proofToken}`;
+      const uploadProofUrl = `${APP_URL}/bukti/${proofToken}`;
 
       await notifyPaymentReminder({
         customerName: booking.customerName,

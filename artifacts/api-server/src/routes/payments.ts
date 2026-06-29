@@ -155,7 +155,7 @@ router.post("/payments", async (req, res) => {
       startTime: booking.startTime,
       endTime: booking.endTime,
       totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
-      reviewUrl: `${APP_URL}/wa/review/${reviewToken}`,
+      reviewUrl: `${APP_URL}/ulasan/${reviewToken}`,
     });
     syncStatusToBizportal(booking.orderNumber, "waiting_confirmation", proofUrl).catch(() => {});
 
