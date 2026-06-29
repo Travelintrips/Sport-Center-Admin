@@ -3,6 +3,7 @@ import { db, companyDocumentTemplatesTable, usersTable, bookingsTable, facilitie
 import { eq } from "drizzle-orm";
 import { adminMiddleware, adminDocumentPreviewMiddleware } from "../lib/auth";
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
+import { verifyKwitansiToken } from "../lib/kwitansiToken";
 import { renderDocument, type DocumentType } from "../lib/documentRenderer";
 
 const router = Router();
@@ -298,6 +299,11 @@ router.get("/admin/documents/:documentType/:entityId/pdf", adminDocumentPreviewM
 router.get("/public/kwitansi/:orderNumber", async (req, res) => {
   try {
     const { orderNumber } = req.params;
+    const t = String(req.query.t ?? "");
+    if (!verifyKwitansiToken(orderNumber, t)) {
+      res.status(403).send("<!DOCTYPE html><html><head><meta charset='utf-8'><title>Akses Ditolak</title></head><body><h2>❌ Link tidak valid atau sudah kadaluarsa.</h2></body></html>");
+      return;
+    }
 
     const [booking] = await db
       .select()
@@ -491,6 +497,11 @@ router.get("/public/kwitansi/:orderNumber", async (req, res) => {
 router.get("/public/kwitansi-data/:orderNumber", async (req, res) => {
   try {
     const { orderNumber } = req.params;
+    const t = String(req.query.t ?? "");
+    if (!verifyKwitansiToken(orderNumber, t)) {
+      res.status(403).json({ error: "Link tidak valid atau sudah kadaluarsa" });
+      return;
+    }
 
     const [booking] = await db
       .select()

@@ -3,6 +3,7 @@ import { renderDocumentText } from "./documentRenderer";
 import { eq } from "drizzle-orm";
 import { trackSentMessage } from "./waSentTracker";
 import { logger } from "./logger";
+import { signKwitansiToken } from "./kwitansiToken";
 
 const ENV_FONNTE_TOKEN = process.env.FONNTE_TOKEN || "";
 const ENV_FONNTE_ADMIN_WA = process.env.FONNTE_ADMIN_WA || "";
@@ -266,7 +267,7 @@ export async function notifyPaymentConfirmed(data: BookingNotifData): Promise<vo
   // Final hardcoded fallback — selalu kirim meski template tidak ada di DB
   const bankInfo = await getBankInfo();
   const appUrl = getAppUrl();
-  const kwitansiUrl = appUrl && data.orderNumber ? `${appUrl}/kwitansi/${data.orderNumber}` : "";
+  const kwitansiUrl = appUrl && data.orderNumber ? `${appUrl}/kwitansi/${data.orderNumber}?t=${signKwitansiToken(data.orderNumber)}` : "";
   const msg =
     `🎉 *Pembayaran Dikonfirmasi!*\n\n` +
     `Halo *${data.customerName}*,\n` +
@@ -460,7 +461,7 @@ export interface WaBookingConfirmedData extends BookingNotifData {
 
 export async function notifyWaBookingConfirmed(data: WaBookingConfirmedData): Promise<void> {
   const appUrl = getAppUrl();
-  const kwitansiUrl = appUrl && data.orderNumber ? `${appUrl}/kwitansi/${data.orderNumber}` : data.statusUrl;
+  const kwitansiUrl = appUrl && data.orderNumber ? `${appUrl}/kwitansi/${data.orderNumber}?t=${signKwitansiToken(data.orderNumber)}` : data.statusUrl;
   const msg =
     `🎉 *Booking Dikonfirmasi!*\n\n` +
     `Halo *${data.customerName}*,\n` +

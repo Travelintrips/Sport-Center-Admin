@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useParams } from "wouter";
+import { useParams, useSearch } from "wouter";
 import { CheckCircle, AlertCircle, Loader2, Building2, Phone, MapPin, Printer } from "lucide-react";
 
 interface KwitansiData {
@@ -51,12 +51,14 @@ function formatDateTime(s: string) {
 
 export default function WaKwitansi() {
   const params = useParams<{ orderNumber: string }>();
+  const search = useSearch();
   const [data, setData] = useState<KwitansiData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    fetch(`/api/public/kwitansi-data/${params.orderNumber}`)
+    const qs = search ? `?${search}` : "";
+    fetch(`/api/public/kwitansi-data/${params.orderNumber}${qs}`)
       .then((r) => r.json())
       .then((d) => {
         if (d.error) setError(d.error);
@@ -64,7 +66,7 @@ export default function WaKwitansi() {
       })
       .catch(() => setError("Gagal memuat kwitansi. Coba lagi."))
       .finally(() => setLoading(false));
-  }, [params.orderNumber]);
+  }, [params.orderNumber, search]);
 
   if (loading) {
     return (

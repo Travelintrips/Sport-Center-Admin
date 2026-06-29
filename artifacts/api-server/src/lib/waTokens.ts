@@ -5,8 +5,8 @@ import { eq, and } from "drizzle-orm";
 export type WaAction = "approve_payment" | "reject_payment" | "checkin" | "finish" | "upload_proof" | "approve_booking" | "review_payment";
 
 export async function createWaToken(bookingId: number, action: WaAction, expiryDays = 30): Promise<string> {
-  // 12 hex chars (6 bytes = 48-bit entropy) — cukup aman untuk token pendek berumur ≤7 hari
-  const token = randomBytes(6).toString("hex");
+  // 64 hex chars (32 bytes = 256-bit entropy)
+  const token = randomBytes(32).toString("hex");
   const expiresAt = new Date(Date.now() + expiryDays * 24 * 60 * 60 * 1000);
   await db.insert(waActionTokensTable).values({ token, bookingId, action, expiresAt });
   return token;
