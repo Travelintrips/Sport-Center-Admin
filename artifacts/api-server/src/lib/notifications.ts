@@ -415,6 +415,8 @@ export interface WaBookingConfirmedData extends BookingNotifData {
 }
 
 export async function notifyWaBookingConfirmed(data: WaBookingConfirmedData): Promise<void> {
+  const appUrl = getAppUrl();
+  const kwitansiUrl = appUrl && data.orderNumber ? `${appUrl}/kwitansi/${data.orderNumber}` : data.statusUrl;
   const msg =
     `🎉 *Booking Dikonfirmasi!*\n\n` +
     `Halo *${data.customerName}*,\n` +
@@ -425,7 +427,7 @@ export async function notifyWaBookingConfirmed(data: WaBookingConfirmedData): Pr
     `• Tanggal: *${data.bookingDate}*\n` +
     `• Jam: *${data.startTime} – ${data.endTime}*\n\n` +
     `Sampai jumpa di lapangan! 🏆\n\n` +
-    `🔍 Detail booking: ${data.statusUrl}`;
+    `🧾 Kwitansi: ${kwitansiUrl}`;
   await sendWA(data.customerPhone, msg);
 }
 
