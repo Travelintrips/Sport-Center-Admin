@@ -1083,6 +1083,46 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
       const [payment] = await db.select().from(paymentsTable).where(eq(paymentsTable.bookingId, id)).limit(1);
       syncStatusToBizportal(beforeUpdate.orderNumber, status, payment?.proofUrl, status === "confirmed" ? new Date() : null).catch(() => {});
 
+      // Kirim WA notification ke customer saat status berubah ke confirmed
+      if (status === "confirmed" && beforeUpdate.status !== "confirmed") {
+        const [facility] = await db
+          .select({ name: facilitiesTable.name })
+          .from(facilitiesTable)
+          .where(eq(facilitiesTable.id, beforeUpdate.facilityId))
+          .limit(1);
+        notifyPaymentConfirmed({
+          customerName: beforeUpdate.customerName,
+          customerPhone: beforeUpdate.customerPhone,
+          orderNumber: beforeUpdate.orderNumber,
+          facilityName: facility?.name ?? "",
+          bookingDate: beforeUpdate.bookingDate,
+          startTime: beforeUpdate.startTime,
+          endTime: beforeUpdate.endTime,
+          totalPrice: Number(beforeUpdate.totalPrice).toLocaleString("id-ID"),
+          bookingId: beforeUpdate.id,
+        }).catch((err) => console.error("[WA] notifyPaymentConfirmed (direct) error:", err));
+      }
+
+      // Kirim WA notification ke customer saat booking dibatalkan
+      if (status === "cancelled" && beforeUpdate.status !== "cancelled") {
+        const [facility] = await db
+          .select({ name: facilitiesTable.name })
+          .from(facilitiesTable)
+          .where(eq(facilitiesTable.id, beforeUpdate.facilityId))
+          .limit(1);
+        notifyBookingCancelled({
+          customerName: beforeUpdate.customerName,
+          customerPhone: beforeUpdate.customerPhone,
+          orderNumber: beforeUpdate.orderNumber,
+          facilityName: facility?.name ?? "",
+          bookingDate: beforeUpdate.bookingDate,
+          startTime: beforeUpdate.startTime,
+          endTime: beforeUpdate.endTime,
+          totalPrice: Number(beforeUpdate.totalPrice).toLocaleString("id-ID"),
+          reason: adminNotes,
+        }).catch((err) => console.error("[WA] notifyBookingCancelled (direct) error:", err));
+      }
+
       // FASE 4 & 5: Reversal pajak + jurnal akuntansi saat dibatalkan/refund
       const REVERSAL_STATUSES = ["cancelled", "refunded", "rejected"];
       if (REVERSAL_STATUSES.includes(status)) {
