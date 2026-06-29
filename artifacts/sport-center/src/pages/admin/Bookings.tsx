@@ -54,6 +54,10 @@ import {
   Link2,
   Unlink,
   Layers,
+  MessageSquare,
+  Send,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import { getToken } from "@/lib/auth";
 import VerifyIdDialog from "@/components/admin/VerifyIdDialog";
@@ -1779,9 +1783,43 @@ export default function AdminBookings() {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [showMergeDialog, setShowMergeDialog] = useState(false);
   const [dissolvingRef, setDissolvingRef] = useState<string | null>(null);
+  const [waAlertOpen, setWaAlertOpen] = useState(true);
+  const [sendingWaId, setSendingWaId] = useState<number | null>(null);
 
   const { data: rawBookings, isLoading } = useListBookings();
   const bookings = rawBookings ?? [];
+
+  const {
+    data: waUnnotified = [],
+    isLoading: waUnnotifiedLoading,
+    refetch: refetchWaUnnotified,
+  } = useQuery<any[]>({
+    queryKey: ["wa-unnotified"],
+    queryFn: () =>
+      fetch("/api/admin/bookings/wa-unnotified", {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      }).then((r) => r.json()),
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+  });
+
+  const handleResendWa = async (bookingId: number) => {
+    setSendingWaId(bookingId);
+    try {
+      const res = await fetch(`/api/admin/bookings/${bookingId}/resend-wa`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error ?? `HTTP ${res.status}`);
+      toast({ title: "WA berhasil dikirim ke admin" });
+      refetchWaUnnotified();
+    } catch (err: any) {
+      toast({ title: "Gagal kirim WA", description: err?.message, variant: "destructive" });
+    } finally {
+      setSendingWaId(null);
+    }
+  };
 
   const { data: groupsData, refetch: refetchGroups } = useQuery({
     queryKey: ["booking-groups"],
@@ -2050,6 +2088,124 @@ export default function AdminBookings() {
             }, 80);
           }}
         />
+      )}
+
+      {/* WA Belum Terkirim Panel */}
+      {!waUnnotifiedLoading && waUnnotified.length > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: -6 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="rounded-2xl border border-orange-200 dark:border-orange-800/60 bg-orange-50 dark:bg-orange-950/30 overflow-hidden"
+        >
+          {/* Header */}
+          <button
+            onClick={() => setWaAlertOpen((v) => !v)}
+            className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-orange-100/60 dark:hover:bg-orange-900/20 transition-colors"
+          >
+            <div className="flex items-center gap-2.5">
+              <div className="w-7 h-7 rounded-lg bg-orange-500 flex items-center justify-center shrink-0">
+                <MessageSquare size={14} className="text-white" />
+              </div>
+              <div>
+                <span className="font-bold text-sm text-orange-800 dark:text-orange-200">
+                  WA Belum Terkirim
+                </span>
+                <span className="ml-2 text-xs font-semibold px-2 py-0.5 rounded-full bg-orange-500 text-white">
+                  {waUnnotified.length}
+                </span>
+              </div>
+              <span className="text-xs text-orange-600 dark:text-orange-400 hidden sm:block">
+                — Booking menunggu konfirmasi namun notifikasi WA ke admin belum terkirim
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={(e) => { e.stopPropagation(); refetchWaUnnotified(); }}
+                className="p-1.5 rounded-lg text-orange-500 hover:bg-orange-100 dark:hover:bg-orange-900/40 transition-colors"
+                title="Refresh"
+              >
+                <RefreshCw size={13} />
+              </button>
+              {waAlertOpen ? (
+                <ChevronUp size={16} className="text-orange-500 shrink-0" />
+              ) : (
+                <ChevronDown size={16} className="text-orange-500 shrink-0" />
+              )}
+            </div>
+          </button>
+
+          {/* List */}
+          <AnimatePresence>
+            {waAlertOpen && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.2 }}
+                className="overflow-hidden"
+              >
+                <div className="divide-y divide-orange-100 dark:divide-orange-900/40 border-t border-orange-200 dark:border-orange-800/60">
+                  {waUnnotified.map((b: any) => (
+                    <div
+                      key={b.id}
+                      className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-orange-50/80 dark:hover:bg-orange-950/40"
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="shrink-0 w-2 h-2 rounded-full bg-orange-400 animate-pulse" />
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-xs font-black text-slate-800 dark:text-white">
+                              {b.orderNumber}
+                            </span>
+                            <span className="text-xs text-slate-500 dark:text-slate-400">
+                              {b.customerName}
+                            </span>
+                            <span className="text-xs text-slate-400">·</span>
+                            <span className="text-xs text-slate-500 dark:text-slate-400 truncate">
+                              {b.facilityName}
+                            </span>
+                          </div>
+                          <div className="text-xs text-slate-400 mt-0.5">
+                            {b.bookingDate} · {b.startTime}–{b.endTime} ·{" "}
+                            <span className="font-semibold text-slate-600 dark:text-slate-300">
+                              Rp {Number(b.totalPrice).toLocaleString("id-ID")}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          onClick={() => setSelectedBooking(bookings.find((bk: any) => bk.id === b.id) ?? b)}
+                          className="h-7 px-2.5 text-xs font-semibold rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-800 transition-colors flex items-center gap-1"
+                        >
+                          <Eye size={11} />
+                          Detail
+                        </button>
+                        <button
+                          onClick={() => handleResendWa(b.id)}
+                          disabled={sendingWaId === b.id}
+                          className="h-7 px-3 text-xs font-bold rounded-lg bg-orange-500 hover:bg-orange-600 text-white flex items-center gap-1.5 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                        >
+                          {sendingWaId === b.id ? (
+                            <>
+                              <RefreshCw size={11} className="animate-spin" />
+                              Mengirim...
+                            </>
+                          ) : (
+                            <>
+                              <Send size={11} />
+                              Kirim WA
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </motion.div>
       )}
 
       {/* Table Card */}

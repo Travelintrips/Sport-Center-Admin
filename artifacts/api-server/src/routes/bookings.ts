@@ -1,9 +1,9 @@
 import { Router } from "express";
-import { db, bookingsTable, facilitiesTable, paymentsTable, promosTable, discountSettingsTable, apMembersTable, bookingHistoryTable, usersTable, verificationLogsTable, companyUsersTable, bookingGroupsTable, settingsTable } from "@workspace/db";
-import { eq, and, sql, or, ilike, desc, inArray } from "drizzle-orm";
+import { db, bookingsTable, facilitiesTable, paymentsTable, promosTable, discountSettingsTable, apMembersTable, bookingHistoryTable, usersTable, verificationLogsTable, companyUsersTable, bookingGroupsTable, settingsTable, waActionTokensTable } from "@workspace/db";
+import { eq, and, sql, or, ilike, desc, inArray, notExists } from "drizzle-orm";
 import { adminMiddleware, authMiddleware, verifyToken } from "../lib/auth";
 import { broadcastAvailabilityChange } from "../lib/supabase";
-import { notifyBookingCreated, notifyPaymentConfirmed, notifyBookingCancelled, notifyCompanyBookingCreated, notifyDpPaid, notifyWaAdminNewBooking, notifyAdminBookingApprovalRequest } from "../lib/notifications";
+import { notifyBookingCreated, notifyPaymentConfirmed, notifyBookingCancelled, notifyCompanyBookingCreated, notifyDpPaid, notifyWaAdminNewBooking, notifyAdminBookingApprovalRequest, notifyPaymentProofUploaded } from "../lib/notifications";
 import { createWaToken } from "../lib/waTokens";
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
 import { syncBookingToBizportal, syncStatusToBizportal } from "../lib/bizportalSync";
@@ -1248,6 +1248,114 @@ router.post("/bookings/:id/verify", adminMiddleware, async (req, res) => {
     res.json({ ...result, booking: updated });
   } catch (err) {
     req.log.error({ err }, "Verify booking error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ─── GET /admin/bookings/wa-unnotified — bookings waiting_confirmation dengan belum ada WA ────
+router.get("/admin/bookings/wa-unnotified", adminMiddleware, async (req, res) => {
+  try {
+    const unnotified = await db
+      .select({
+        id: bookingsTable.id,
+        orderNumber: bookingsTable.orderNumber,
+        customerName: bookingsTable.customerName,
+        customerPhone: bookingsTable.customerPhone,
+        facilityId: bookingsTable.facilityId,
+        bookingDate: bookingsTable.bookingDate,
+        startTime: bookingsTable.startTime,
+        endTime: bookingsTable.endTime,
+        totalPrice: bookingsTable.totalPrice,
+        status: bookingsTable.status,
+        createdAt: bookingsTable.createdAt,
+      })
+      .from(bookingsTable)
+      .where(
+        and(
+          eq(bookingsTable.status, "waiting_confirmation"),
+          notExists(
+            db
+              .select({ id: waActionTokensTable.id })
+              .from(waActionTokensTable)
+              .where(
+                and(
+                  eq(waActionTokensTable.bookingId, bookingsTable.id),
+                  eq(waActionTokensTable.action, "review_payment"),
+                ),
+              ),
+          ),
+        ),
+      )
+      .orderBy(desc(bookingsTable.createdAt));
+
+    const facilityIds = [...new Set(unnotified.map((b) => b.facilityId))];
+    const facilities =
+      facilityIds.length > 0
+        ? await db
+            .select({ id: facilitiesTable.id, name: facilitiesTable.name })
+            .from(facilitiesTable)
+        : [];
+
+    const result = unnotified.map((b) => {
+      const facility = facilities.find((f) => f.id === b.facilityId);
+      return {
+        ...b,
+        totalPrice: Number(b.totalPrice),
+        facilityName: facility?.name ?? "",
+      };
+    });
+
+    res.json(result);
+  } catch (err) {
+    req.log.error({ err }, "WA unnotified list error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ─── POST /admin/bookings/:id/resend-wa — kirim ulang notifikasi WA ke admin ───────────────
+router.post("/admin/bookings/:id/resend-wa", adminMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(String(req.params.id));
+    const booking = await getBookingWithPayment(id);
+    if (!booking) { res.status(404).json({ error: "Booking tidak ditemukan" }); return; }
+
+    const isProd = process.env.NODE_ENV === "production";
+    const appUrl = isProd
+      ? (process.env.APP_URL ?? "").replace(/\/$/, "")
+      : process.env.REPLIT_DEV_DOMAIN
+      ? `https://${process.env.REPLIT_DEV_DOMAIN}`
+      : (process.env.APP_URL ?? "").replace(/\/$/, "");
+
+    const reviewToken = await createWaToken(id, "review_payment", 7);
+    const reviewUrl = `${appUrl}/wa/review/${reviewToken}`;
+
+    await notifyPaymentProofUploaded({
+      customerName: booking.customerName,
+      customerPhone: booking.customerPhone,
+      orderNumber: booking.orderNumber,
+      facilityName: booking.facilityName,
+      bookingDate: booking.bookingDate,
+      startTime: booking.startTime,
+      endTime: booking.endTime,
+      totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
+      reviewUrl,
+    });
+
+    const { actor } = getUserFromReq(req);
+    await logAudit({
+      userId: actor?.userId ?? null,
+      userName: actor?.name ?? null,
+      userRole: actor?.role ?? null,
+      action: "WA_PROOF_NOTIFY_RESENT",
+      entity: "booking",
+      entityId: id,
+      after: { orderNumber: booking.orderNumber, reviewUrl },
+      ...getClientInfo(req),
+    });
+
+    res.json({ ok: true, reviewUrl });
+  } catch (err) {
+    req.log.error({ err }, "Resend WA error");
     res.status(500).json({ error: "Internal server error" });
   }
 });
