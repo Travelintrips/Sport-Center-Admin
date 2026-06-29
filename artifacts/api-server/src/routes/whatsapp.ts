@@ -54,7 +54,16 @@ import { trackSentMessage, isBotEcho } from "../lib/waSentTracker";
 import { getHistory, appendTurn, clearHistory } from "../lib/aiConversationMemory";
 
 const router = Router();
-const APP_URL = process.env.APP_URL ?? "";
+
+// In development use the Replit dev domain so WA links open on the same dev instance
+// where tokens were created. In production always use APP_URL.
+const _rawAppUrl = process.env.APP_URL ?? "";
+const _replitDevDomain = process.env.REPLIT_DEV_DOMAIN;
+const APP_URL =
+  process.env.NODE_ENV !== "production" && _replitDevDomain
+    ? `https://${_replitDevDomain}`
+    : _rawAppUrl;
+
 const INACTIVE_STATUSES = ["cancelled", "expired", "rejected", "refunded"];
 
 // ─── Registration token helpers (HMAC-signed, 1 hour TTL) ─────────────────────
