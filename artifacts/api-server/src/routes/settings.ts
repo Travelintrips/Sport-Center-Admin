@@ -7,6 +7,7 @@ import path from "path";
 import { randomUUID } from "crypto";
 import { deleteFromStorage } from "../lib/supabaseStorage";
 import { uploadFile, BUCKETS } from "../lib/storage";
+import { invalidateBaseUrlCache } from "../lib/appUrl";
 
 const router = Router();
 
@@ -54,7 +55,7 @@ router.patch("/settings", adminMiddleware, async (req, res) => {
     const allowed = [
       "centerName","address","phone","whatsapp","email",
       "openHour","closeHour","logoUrl","bankName","bankAccount","bankAccountName",
-      "fonnteToken","fonnteAdminWa","adminWaPhones","appUrl","paymentDeadlineHours",
+      "fonnteToken","fonnteAdminWa","adminWaPhones","appUrl","paymentDomain","paymentDeadlineHours",
     ];
     const patch: Record<string, unknown> = {};
     for (const key of allowed) {
@@ -64,6 +65,7 @@ router.patch("/settings", adminMiddleware, async (req, res) => {
     }
     if (Object.keys(patch).length > 0) {
       await db.update(settingsTable).set(patch).where(eq(settingsTable.id, settings.id));
+      invalidateBaseUrlCache();
     }
     const [updated] = await db.select().from(settingsTable).where(eq(settingsTable.id, settings.id)).limit(1);
     res.json(updated);

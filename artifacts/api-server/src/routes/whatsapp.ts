@@ -57,13 +57,26 @@ import { getHistory, appendTurn, clearHistory } from "../lib/aiConversationMemor
 const router = Router();
 
 // In development use the Replit dev domain so WA links open on the same dev instance
-// where tokens were created. In production always use APP_URL.
+// where tokens were created. In production always use APP_URL (or paymentDomain from settings).
 const _rawAppUrl = process.env.APP_URL ?? "";
 const _replitDevDomain = process.env.REPLIT_DEV_DOMAIN;
-const APP_URL =
+let APP_URL =
   process.env.NODE_ENV !== "production" && _replitDevDomain
     ? `https://${_replitDevDomain}`
     : _rawAppUrl;
+
+// Refresh APP_URL from settings DB (paymentDomain > appUrl > env), cached 5 min
+let _urlRefreshedAt = 0;
+async function refreshAppUrl(): Promise<void> {
+  if (Date.now() - _urlRefreshedAt < 5 * 60 * 1000) return;
+  try {
+    const [s] = await db.select({ paymentDomain: settingsTable.paymentDomain, appUrl: settingsTable.appUrl })
+      .from(settingsTable).limit(1);
+    const override = (s?.paymentDomain || s?.appUrl || "").replace(/\/$/, "");
+    if (override) APP_URL = override;
+    _urlRefreshedAt = Date.now();
+  } catch { /* keep current value */ }
+}
 
 const INACTIVE_STATUSES = ["cancelled", "expired", "rejected", "refunded"];
 
@@ -2922,6 +2935,9 @@ function isDuplicateByContent(phone: string, msg: string): boolean {
 router.post("/wa/fonnte/webhook", async (req, res) => {
   // Respond immediately to avoid Fonnte timeout/retry
   res.status(200).json({ status: "ok" });
+
+  // Refresh base URL from settings (paymentDomain > appUrl > env), cached 5 min
+  await refreshAppUrl();
 
   try {
     // Log raw payload (debug — lihat field apa yang Fonnte kirim)

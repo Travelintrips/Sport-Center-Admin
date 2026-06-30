@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { trackSentMessage } from "./waSentTracker";
 import { logger } from "./logger";
 import { signKwitansiToken } from "./kwitansiToken";
+import { getBaseUrl } from "./appUrl";
 
 const ENV_FONNTE_TOKEN = process.env.FONNTE_TOKEN || "";
 const ENV_FONNTE_ADMIN_WA = process.env.FONNTE_ADMIN_WA || "";
@@ -13,12 +14,7 @@ function interpolate(template: string, vars: Record<string, string>): string {
   return template.replace(/\{\{(\w+)\}\}/g, (_, key) => vars[key] ?? "");
 }
 
-function getAppUrl(): string {
-  const isProd = process.env.NODE_ENV === "production";
-  if (isProd) return (process.env.APP_URL ?? "").replace(/\/$/, "");
-  if (process.env.REPLIT_DEV_DOMAIN) return `https://${process.env.REPLIT_DEV_DOMAIN}`;
-  return (process.env.APP_URL ?? "").replace(/\/$/, "");
-}
+// getBaseUrl() imported from ./appUrl — reads paymentDomain from settings DB with 5-min cache
 
 async function getWaConfig(): Promise<{ token: string; adminPhones: string[] }> {
   try {
@@ -248,7 +244,7 @@ export async function notifyPaymentConfirmed(data: BookingNotifData): Promise<vo
         let msg = rendered;
         try {
           const [s] = await db.select().from(settingsTable).limit(1).catch(() => [null]);
-          const appUrl = getAppUrl() || (s as { appUrl?: string } | null)?.appUrl || "";
+          const appUrl = await getBaseUrl() || (s as { appUrl?: string } | null)?.appUrl || "";
           if (appUrl && data.orderNumber) msg += `\n\n🧾 Lihat & cetak kwitansi digital:\n${appUrl}/kwitansi/${data.orderNumber}?t=${signKwitansiToken(data.orderNumber)}`;
         } catch { /* non-fatal */ }
         await sendWA(data.customerPhone, msg, { bookingId: data.bookingId, orderNumber: data.orderNumber, event: "payment_confirmed" });
@@ -266,7 +262,7 @@ export async function notifyPaymentConfirmed(data: BookingNotifData): Promise<vo
 
   // Final hardcoded fallback — selalu kirim meski template tidak ada di DB
   const bankInfo = await getBankInfo();
-  const appUrl = getAppUrl();
+  const appUrl = await getBaseUrl();
   const kwitansiUrl = appUrl && data.orderNumber ? `${appUrl}/kwitansi/${data.orderNumber}?t=${signKwitansiToken(data.orderNumber)}` : "";
   const msg =
     `🎉 *Pembayaran Dikonfirmasi!*\n\n` +
@@ -291,7 +287,7 @@ export async function notifyBookingCancelled(data: BookingNotifData): Promise<vo
 
 export async function notifyBookingCompleted(data: BookingNotifData): Promise<void> {
   const [s] = await db.select().from(settingsTable).limit(1).catch(() => [null]);
-  const appUrl = s?.appUrl || getAppUrl();
+  const appUrl = s?.appUrl || await getBaseUrl();
   const tpl = await getTemplate("booking_completed");
   if (tpl) await sendWA(data.customerPhone, interpolate(tpl, { ...data, reviewUrl: `${appUrl}/booking/${data.orderNumber}` } as unknown as Record<string, string>));
 }
@@ -460,7 +456,7 @@ export interface WaBookingConfirmedData extends BookingNotifData {
 }
 
 export async function notifyWaBookingConfirmed(data: WaBookingConfirmedData): Promise<void> {
-  const appUrl = getAppUrl();
+  const appUrl = await getBaseUrl();
   const kwitansiUrl = appUrl && data.orderNumber ? `${appUrl}/kwitansi/${data.orderNumber}?t=${signKwitansiToken(data.orderNumber)}` : data.statusUrl;
   const msg =
     `🎉 *Booking Dikonfirmasi!*\n\n` +
