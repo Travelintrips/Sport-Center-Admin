@@ -43,6 +43,7 @@ import { hashPassword } from "../lib/auth";
 import { syncStatusToBizportal } from "../lib/bizportalSync";
 import { calculateTax, recordTaxTransaction } from "../lib/tax";
 import { broadcastAvailabilityChange } from "../lib/supabase";
+import { logger } from "../lib/logger";
 import { uploadProofWithFallback } from "./storage";
 import {
   generateAiReply,
@@ -641,7 +642,7 @@ async function sendWAReply(phone: string, message: string): Promise<void> {
     if (!resp.ok || (data as any).status === false) {
       console.error("[wa] sendWAReply Fonnte error:", resp.status, JSON.stringify(data));
     } else {
-      console.log("[wa] sendWAReply OK →", phone, "status:", resp.status);
+      logger.info({ phone, httpStatus: resp.status }, "[wa] sendWAReply OK");
     }
   } catch (err: any) {
     console.error("[wa] sendWAReply exception:", err?.message);
@@ -2137,7 +2138,7 @@ async function continueSession(session: WaBookingSessionRow, phone: string, msg:
   // Hanya kata eksplisit batal/cancel yang boleh cancel di semua step
   // "tidak"/"no"/"ga" saja tidak cukup — terlalu ambigu (bisa jawaban dari pertanyaan opsional)
   if (isExplicitCancel(lower)) {
-    console.log(`[continueSession] explicit cancel — phone=${phone} step=${step} msg="${msg}"`);
+    logger.info({ phone, step }, "[continueSession] explicit cancel");
     await updateSession(session.id, { status: "cancelled" });
     await sendWAMsg(phone, `❌ Booking dibatalkan. Ketik *booking* kapan saja untuk memulai lagi. 🏅`);
     return;
