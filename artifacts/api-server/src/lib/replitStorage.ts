@@ -4,13 +4,17 @@ let _client: Client | null = null;
 
 function getClient(): Client {
   if (!_client) {
-    _client = new Client();
+    const bucketId = process.env.DEFAULT_OBJECT_STORAGE_BUCKET_ID || undefined;
+    _client = new Client({ bucketId });
   }
   return _client;
 }
 
 export function isReplitStorageAvailable(): boolean {
-  return Boolean(process.env.REPL_ID || process.env.REPLIT_DEV_DOMAIN);
+  return Boolean(
+    (process.env.REPL_ID || process.env.REPLIT_DEV_DOMAIN) &&
+    process.env.DEFAULT_OBJECT_STORAGE_BUCKET_ID
+  );
 }
 
 /**
