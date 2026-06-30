@@ -100,6 +100,7 @@ async function buildAll() {
       "xlsx",
       "googleapis",
       "openai",
+      "@replit/object-storage",
       "playwright",
       "puppeteer",
       "puppeteer-core",
