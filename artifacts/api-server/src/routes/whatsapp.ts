@@ -66,9 +66,14 @@ let APP_URL =
     : _rawAppUrl;
 
 // Refresh APP_URL from settings DB (paymentDomain > appUrl > env), cached 5 min
+// In dev mode, ALWAYS use REPLIT_DEV_DOMAIN — never override with prod domain from DB.
 let _urlRefreshedAt = 0;
 async function refreshAppUrl(): Promise<void> {
   if (Date.now() - _urlRefreshedAt < 5 * 60 * 1000) return;
+  if (process.env.NODE_ENV !== "production" && process.env.REPLIT_DEV_DOMAIN) {
+    _urlRefreshedAt = Date.now();
+    return; // Dev: tetap pakai REPLIT_DEV_DOMAIN, tidak perlu refresh dari DB
+  }
   try {
     const [s] = await db.select({ paymentDomain: settingsTable.paymentDomain, appUrl: settingsTable.appUrl })
       .from(settingsTable).limit(1);

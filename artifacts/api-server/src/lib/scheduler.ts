@@ -8,7 +8,13 @@ import { runBankAudit } from "./bankAudit";
 import { runConnectionHealthCheck } from "./connectionHealth";
 import { logger } from "./logger";
 
-const APP_URL = process.env.APP_URL ?? "";
+function getAppUrl(): string {
+  if (process.env.NODE_ENV !== "production" && process.env.REPLIT_DEV_DOMAIN) {
+    return `https://${process.env.REPLIT_DEV_DOMAIN}`;
+  }
+  return (process.env.APP_URL ?? "").replace(/\/$/, "");
+}
+const APP_URL = getAppUrl();
 
 function getWIBNow(): Date {
   return new Date(Date.now() + 7 * 60 * 60 * 1000);
