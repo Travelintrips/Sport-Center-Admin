@@ -11,9 +11,12 @@ const uploadProof = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
-    const allowed = ["image/jpeg", "image/png", "image/webp", "image/gif", "image/heic"];
-    if (allowed.includes(file.mimetype)) cb(null, true);
-    else cb(new Error("Only image files are allowed"));
+    const ok =
+      file.mimetype.startsWith("image/") ||
+      file.mimetype === "application/pdf" ||
+      file.mimetype === "application/octet-stream";
+    if (ok) cb(null, true);
+    else cb(new Error("Only image or PDF files are allowed"));
   },
 });
 

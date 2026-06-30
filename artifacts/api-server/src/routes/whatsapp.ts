@@ -120,12 +120,18 @@ function isDuplicateWebhook(body: Record<string, unknown>): boolean {
   return false;
 }
 
-// ─── Multer for proof upload (memory → Supabase Storage) ─────────────────────
+// ─── Multer for proof upload (memory → Storage) ───────────────────────────────
 const uploadProof = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
-    const ok = /image\/(jpeg|png|webp)|application\/pdf/.test(file.mimetype);
+    // Accept all image types + PDF. Some mobile browsers (especially WhatsApp
+    // on Android/iOS) may send image/heic, image/heif, or even
+    // application/octet-stream for camera photos — accept broadly.
+    const ok =
+      file.mimetype.startsWith("image/") ||
+      file.mimetype === "application/pdf" ||
+      file.mimetype === "application/octet-stream";
     cb(null, ok);
   },
 });
