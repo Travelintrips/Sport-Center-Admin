@@ -5,7 +5,7 @@ import type { DocumentType } from "@workspace/db";
 import { adminMiddleware } from "../lib/auth";
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
 import multer from "multer";
-import { BUCKETS, uploadToStorage } from "../lib/supabaseStorage";
+import { uploadFile, BUCKETS } from "../lib/storage";
 import { randomUUID } from "crypto";
 
 const router = Router();
@@ -155,7 +155,7 @@ router.post(
       if (!req.file) { res.status(400).json({ error: "File diperlukan" }); return; }
       const ext = req.file.originalname.split(".").pop() ?? "png";
       const filename = `doc-logo-${type}-${randomUUID()}.${ext}`;
-      const url = await uploadToStorage(BUCKETS.facility, filename, req.file.buffer, req.file.mimetype);
+      const url = await uploadFile(BUCKETS.facility, filename, req.file.buffer, req.file.mimetype);
 
       const existing = await getDocumentSettings(type);
       const [updated] = await db
@@ -196,7 +196,7 @@ router.post(
       if (!req.file) { res.status(400).json({ error: "File diperlukan" }); return; }
       const ext = req.file.originalname.split(".").pop() ?? "png";
       const filename = `doc-signature-${type}-${randomUUID()}.${ext}`;
-      const url = await uploadToStorage(BUCKETS.facility, filename, req.file.buffer, req.file.mimetype);
+      const url = await uploadFile(BUCKETS.facility, filename, req.file.buffer, req.file.mimetype);
 
       const existing = await getDocumentSettings(type);
       const [updated] = await db
@@ -240,7 +240,7 @@ router.post(
       const templateType = isPdf ? "pdf" : "image";
       const ext = isPdf ? "pdf" : (req.file.originalname.split(".").pop() ?? "png");
       const filename = `doc-bg-template-${type}-${randomUUID()}.${ext}`;
-      const url = await uploadToStorage(BUCKETS.docTemplates, filename, req.file.buffer, req.file.mimetype);
+      const url = await uploadFile(BUCKETS.docTemplates, filename, req.file.buffer, req.file.mimetype);
 
       const existing = await getDocumentSettings(type);
       const [updated] = await db

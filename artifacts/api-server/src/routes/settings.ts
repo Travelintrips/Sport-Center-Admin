@@ -5,11 +5,8 @@ import { adminMiddleware } from "../lib/auth";
 import multer from "multer";
 import path from "path";
 import { randomUUID } from "crypto";
-import {
-  BUCKETS,
-  uploadToStorage,
-  deleteFromStorage,
-} from "../lib/supabaseStorage";
+import { deleteFromStorage } from "../lib/supabaseStorage";
+import { uploadFile, BUCKETS } from "../lib/storage";
 
 const router = Router();
 
@@ -85,7 +82,7 @@ router.post("/settings/qris", adminMiddleware, upload.single("qris"), async (req
     }
     const ext = path.extname(req.file.originalname).toLowerCase() || ".png";
     const objectPath = `qris/qris-${randomUUID()}${ext}`;
-    const qrisImageUrl = await uploadToStorage(
+    const qrisImageUrl = await uploadFile(
       BUCKETS.facility,
       objectPath,
       req.file.buffer,
