@@ -1252,6 +1252,7 @@ async function runApVerification(
   const discountAmount = Math.round((basePrice * discountPct) / 100);
   const finalPrice = basePrice - discountAmount;
 
+  // Terapkan diskon ke booking utama
   await db.update(bookingsTable).set({
     verificationStatus: "verified",
     idCardNumber,
@@ -1269,10 +1270,44 @@ async function runApVerification(
     ipAddress: opts.ipAddress ?? null,
   });
 
+  // Jika booking ini bagian dari grup (recurring), terapkan diskon ke semua booking grup
+  let groupUpdatedCount = 0;
+  if (booking.groupRef) {
+    const siblings = await db.select().from(bookingsTable)
+      .where(and(
+        eq(bookingsTable.groupRef, booking.groupRef),
+        eq(bookingsTable.customerType, "angkasa_pura"),
+        eq(bookingsTable.verificationStatus, "pending"),
+      ));
+
+    for (const sibling of siblings) {
+      const siblingBase = sibling.basePrice == null ? Number(sibling.totalPrice) : Number(sibling.basePrice);
+      const siblingDiscount = Math.round((siblingBase * discountPct) / 100);
+      const siblingFinal = siblingBase - siblingDiscount;
+      await db.update(bookingsTable).set({
+        verificationStatus: "verified",
+        idCardNumber,
+        apDiscountAmount: String(siblingDiscount),
+        totalPrice: String(siblingFinal),
+      }).where(eq(bookingsTable.id, sibling.id));
+      groupUpdatedCount++;
+    }
+
+    // Update totalPayment di booking_groups
+    if (groupUpdatedCount > 0) {
+      const allGroupBookings = await db.select({ totalPrice: bookingsTable.totalPrice })
+        .from(bookingsTable).where(eq(bookingsTable.groupRef, booking.groupRef));
+      const newGroupTotal = allGroupBookings.reduce((sum, b) => sum + Number(b.totalPrice), 0);
+      await db.update(bookingGroupsTable)
+        .set({ totalPayment: String(newGroupTotal) })
+        .where(eq(bookingGroupsTable.groupRef, booking.groupRef));
+    }
+  }
+
   return {
     success: true, result: "verified" as const,
     message: discountEnabled
-      ? `Verifikasi berhasil. Diskon ${discountPct}% diterapkan. Harga akhir Rp ${finalPrice.toLocaleString("id-ID")}.`
+      ? `Verifikasi berhasil. Diskon ${discountPct}% diterapkan${groupUpdatedCount > 0 ? ` ke ${groupUpdatedCount + 1} booking dalam grup` : ""}. Harga akhir Rp ${finalPrice.toLocaleString("id-ID")}.`
       : "ID Card valid. Terverifikasi (diskon Angkasa Pura sedang nonaktif).",
     discountApplied: discountEnabled,
     discountPercentage: discountPct,
@@ -1280,6 +1315,7 @@ async function runApVerification(
     finalPrice,
     memberName: member.name,
     bookingId,
+    groupUpdatedCount,
   };
 }
 
