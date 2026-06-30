@@ -832,6 +832,8 @@ router.post("/bookings/recurring", async (req, res) => {
           bookedForName: bookedForName || customerName,
           bookedForPhone: bookedForPhone || customerPhone,
           paymentRequiredNow: false,
+          paymentDeadline: null,
+          billingStatus: "unbilled",
           status: "confirmed",
         } : {}),
       }).returning();
