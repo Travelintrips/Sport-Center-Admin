@@ -1263,11 +1263,18 @@ async function runApVerification(
   const discountAmount = Math.round((basePrice * discountPct) / 100);
   const finalPrice = basePrice - discountAmount;
 
+  // Recalculate tax on finalPrice (tax is inclusive — grandTotal = finalPrice)
+  const finalTaxCalc = await calculateTax(finalPrice, "sport_booking", booking.bookingDate ?? undefined);
+
   await db.update(bookingsTable).set({
     verificationStatus: "verified",
     idCardNumber,
     apDiscountAmount: String(discountAmount),
+    discountAmount: String(discountAmount),
     totalPrice: String(finalPrice),
+    grandTotal: finalTaxCalc.taxAmount > 0 ? String(finalTaxCalc.grandTotal) : null,
+    dpp: finalTaxCalc.taxAmount > 0 ? String(finalTaxCalc.dpp) : null,
+    ppnAmount: finalTaxCalc.taxAmount > 0 ? String(finalTaxCalc.taxAmount) : null,
   }).where(eq(bookingsTable.id, bookingId));
 
   await db.insert(verificationLogsTable).values({
@@ -1471,8 +1478,32 @@ router.post("/bookings/verify-by-order", async (req, res) => {
     if ("notFound" in result) { res.status(404).json({ error: "Booking tidak ditemukan" }); return; }
     if (!result.success) { res.json(result); return; }
 
+    // Auto-verifikasi semua booking lain dalam grup yang sama dengan ID Card yang sama
+    let groupVerifiedCount = 0;
+    if (booking.groupRef) {
+      const siblings = await db.select().from(bookingsTable).where(
+        and(
+          eq(bookingsTable.groupRef, booking.groupRef),
+          eq(bookingsTable.verificationStatus, "pending"),
+          eq(bookingsTable.customerType, "angkasa_pura"),
+        )
+      );
+      for (const sibling of siblings) {
+        const sibResult = await runApVerification(sibling.id, idCardNumber, { ipAddress, orderNumber: sibling.orderNumber });
+        if ("success" in sibResult && sibResult.success) groupVerifiedCount++;
+      }
+
+      // Recalculate group total_payment dari sum totalPrice terbaru
+      const allInGroup = await db.select({ totalPrice: bookingsTable.totalPrice })
+        .from(bookingsTable).where(eq(bookingsTable.groupRef, booking.groupRef));
+      const newGroupTotal = allInGroup.reduce((sum, b) => sum + Number(b.totalPrice), 0);
+      await db.update(bookingGroupsTable)
+        .set({ totalPayment: String(newGroupTotal) })
+        .where(eq(bookingGroupsTable.groupRef, booking.groupRef));
+    }
+
     const updated = await getBookingWithPayment(booking.id);
-    res.json({ ...result, booking: updated });
+    res.json({ ...result, groupVerifiedCount, booking: updated });
   } catch (err) {
     req.log.error({ err }, "Verify by order error");
     res.status(500).json({ error: "Internal server error" });
