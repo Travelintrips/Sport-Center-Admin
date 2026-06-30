@@ -1558,7 +1558,7 @@ router.post("/bookings/verify-by-order", async (req, res) => {
 // GET /admin/bookings/groups/:groupRef/sessions — semua sesi dalam grup (untuk kwitansi gabungan)
 router.get("/admin/bookings/groups/:groupRef/sessions", adminMiddleware, async (req, res) => {
   try {
-    const { groupRef } = req.params;
+    const groupRef = String(req.params.groupRef);
     const sessions = await db
       .select({
         id: bookingsTable.id,
