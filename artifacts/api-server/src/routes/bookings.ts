@@ -749,6 +749,8 @@ router.post("/bookings/recurring", async (req, res) => {
     const {
       customerName, customerEmail, facilityId, startDate, startTime, durationHours,
       notes, repeatType, repeatCount, specificDates, promoCode, discountAmountPerSession,
+      // AP2 / customer type
+      customerType,
       // Company billing fields (optional)
       payerType, companyCustomerId, customerId: bodyCustomerId, bookedForName, bookedForPhone,
       // AP2 employee fields (optional)
@@ -775,6 +777,7 @@ router.post("/bookings/recurring", async (req, res) => {
 
     const isCompanyPayer = payerType === "company" && companyCustomerId;
     const effectiveCustomerId = bodyCustomerId ?? loggedInUserId;
+    const isAp = customerType === "angkasa_pura";
 
     const [facility] = await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, Number(facilityId))).limit(1);
     if (!facility) { res.status(404).json({ error: "Facility not found" }); return; }
@@ -785,6 +788,8 @@ router.post("/bookings/recurring", async (req, res) => {
       : generateRecurringDates(startDate, repeatType, repeatCount);
     const basePrice = Number(facility.pricePerHour) * durationHours;
     // AP2: diskon belum diterapkan saat create — diterapkan setelah verifikasi admin
+    // AP2 karyawan: tidak ada diskon/promo di sini (diskon diterapkan setelah verifikasi ID Card)
+
     const discount = isAp ? 0 : Math.min(Number(discountAmountPerSession) || 0, basePrice);
     const totalPrice = basePrice - discount;
 
@@ -821,6 +826,8 @@ router.post("/bookings/recurring", async (req, res) => {
         idCardNumber: idCardNumber || null,
         verificationStatus: isAp ? "pending" : "not_required",
         notes,
+        customerType: customerType === "angkasa_pura" ? "angkasa_pura" : "umum",
+        verificationStatus: isAp ? "pending" : "not_required",
         ppnRate: taxCalc.taxRate > 0 ? String(taxCalc.taxRate) : null,
         dpp: taxCalc.taxAmount > 0 ? String(taxCalc.dpp) : null,
         ppnAmount: taxCalc.taxAmount > 0 ? String(taxCalc.taxAmount) : null,
@@ -859,11 +866,17 @@ router.post("/bookings/recurring", async (req, res) => {
         .where(eq(promosTable.code, String(promoCode).toUpperCase()));
     }
 
+
     // Tax system adalah inklusif: grandTotal per booking = totalPrice (PPN sudah di dalam harga).
     // Hitung dari sum actual booking values — jangan tambahkan PPN lagi.
     const grandTotalAmount = created.reduce((sum: number, b: any) => sum + Number(b.grandTotal ?? b.totalPrice), 0);
     const totalDpp = created.reduce((sum: number, b: any) => sum + Number(b.dpp ?? b.totalPrice), 0);
     const totalPpn = created.reduce((sum: number, b: any) => sum + Number(b.ppnAmount ?? 0), 0);
+    // Tax-inclusive: grandTotal = totalPrice (PPN sudah termasuk dalam harga fasilitas)
+    const grandTotalAmount = totalPrice * created.length;
+    const totalPpn = accumulatedPpn;
+    // totalDpp: jumlah DPP dari semua booking (untuk response payload)
+    const totalDpp = created.reduce((sum: number, b: any) => sum + (b.dpp != null ? Number(b.dpp) : Number(b.totalPrice)), 0);
 
     // Auto-group: jika ada 2+ booking berhasil, gabung otomatis ke 1 grup bayar
     let groupRef: string | null = null;
@@ -1266,6 +1279,7 @@ async function runApVerification(
   // Recalculate tax on finalPrice (tax is inclusive — grandTotal = finalPrice)
   const finalTaxCalc = await calculateTax(finalPrice, "sport_booking", booking.bookingDate ?? undefined);
 
+  // Terapkan diskon ke booking utama
   await db.update(bookingsTable).set({
     verificationStatus: "verified",
     idCardNumber,
@@ -1287,10 +1301,44 @@ async function runApVerification(
     ipAddress: opts.ipAddress ?? null,
   });
 
+  // Jika booking ini bagian dari grup (recurring), terapkan diskon ke semua booking grup
+  let groupUpdatedCount = 0;
+  if (booking.groupRef) {
+    const siblings = await db.select().from(bookingsTable)
+      .where(and(
+        eq(bookingsTable.groupRef, booking.groupRef),
+        eq(bookingsTable.customerType, "angkasa_pura"),
+        eq(bookingsTable.verificationStatus, "pending"),
+      ));
+
+    for (const sibling of siblings) {
+      const siblingBase = sibling.basePrice == null ? Number(sibling.totalPrice) : Number(sibling.basePrice);
+      const siblingDiscount = Math.round((siblingBase * discountPct) / 100);
+      const siblingFinal = siblingBase - siblingDiscount;
+      await db.update(bookingsTable).set({
+        verificationStatus: "verified",
+        idCardNumber,
+        apDiscountAmount: String(siblingDiscount),
+        totalPrice: String(siblingFinal),
+      }).where(eq(bookingsTable.id, sibling.id));
+      groupUpdatedCount++;
+    }
+
+    // Update totalPayment di booking_groups
+    if (groupUpdatedCount > 0) {
+      const allGroupBookings = await db.select({ totalPrice: bookingsTable.totalPrice })
+        .from(bookingsTable).where(eq(bookingsTable.groupRef, booking.groupRef));
+      const newGroupTotal = allGroupBookings.reduce((sum, b) => sum + Number(b.totalPrice), 0);
+      await db.update(bookingGroupsTable)
+        .set({ totalPayment: String(newGroupTotal) })
+        .where(eq(bookingGroupsTable.groupRef, booking.groupRef));
+    }
+  }
+
   return {
     success: true, result: "verified" as const,
     message: discountEnabled
-      ? `Verifikasi berhasil. Diskon ${discountPct}% diterapkan. Harga akhir Rp ${finalPrice.toLocaleString("id-ID")}.`
+      ? `Verifikasi berhasil. Diskon ${discountPct}% diterapkan${groupUpdatedCount > 0 ? ` ke ${groupUpdatedCount + 1} booking dalam grup` : ""}. Harga akhir Rp ${finalPrice.toLocaleString("id-ID")}.`
       : "ID Card valid. Terverifikasi (diskon Angkasa Pura sedang nonaktif).",
     discountApplied: discountEnabled,
     discountPercentage: discountPct,
@@ -1298,6 +1346,7 @@ async function runApVerification(
     finalPrice,
     memberName: member.name,
     bookingId,
+    groupUpdatedCount,
   };
 }
 
