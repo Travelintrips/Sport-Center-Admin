@@ -810,6 +810,7 @@ router.post("/bookings/recurring", async (req, res) => {
         discountAmount: String(discount),
         notes,
         customerType: customerType === "angkasa_pura" ? "angkasa_pura" : "umum",
+        verificationStatus: isAp ? "pending" : "not_required",
         ppnRate: taxCalc.taxRate > 0 ? String(taxCalc.taxRate) : null,
         dpp: taxCalc.taxAmount > 0 ? String(taxCalc.dpp) : null,
         ppnAmount: taxCalc.taxAmount > 0 ? String(taxCalc.taxAmount) : null,
