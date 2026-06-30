@@ -574,9 +574,6 @@ router.post("/bookings", async (req, res) => {
         if (booking.status === "pending_payment") {
           const proofToken = await createWaToken(booking.id, "upload_proof", 7);
 
-          proofUrl = appUrl ? `${appUrl}/wa/upload/${booking.orderNumber}` : "";
-          statusUrl = appUrl ? `${appUrl}/wa/status/${booking.orderNumber}` : "";
-
           proofUrl = appUrl ? `${appUrl}/bukti/${proofToken}` : "";
           statusUrl = appUrl ? `${appUrl}/status/${booking.orderNumber}` : "";
 

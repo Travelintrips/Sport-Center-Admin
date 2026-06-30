@@ -347,6 +347,15 @@ router.get("/public/kwitansi/:orderNumber", async (req, res) => {
     const ppnRate = booking.ppnRate != null ? Number(booking.ppnRate) : null;
     const hasPpn = ppnAmount > 0 && ppnRate != null;
 
+    function escapeHtml(str: string): string {
+      return String(str ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+
     function formatIDR(n: number) {
       return "Rp " + n.toLocaleString("id-ID");
     }
@@ -361,6 +370,16 @@ router.get("/public/kwitansi/:orderNumber", async (req, res) => {
 
     const confirmedAt = formatDateTime((booking as any).updatedAt ?? (booking as any).createdAt ?? "");
 
+    const eCenterName = escapeHtml(centerName);
+    const eCenterAddress = escapeHtml(centerAddress);
+    const eCenterPhone = escapeHtml(centerPhone);
+    const eOrderNumber = escapeHtml(orderNumber);
+    const eCustomerName = escapeHtml(booking.customerName ?? "-");
+    const eCustomerPhone = escapeHtml(booking.customerPhone ?? "-");
+    const eFacilityName = escapeHtml(facilityRow?.name ?? "-");
+    const eStartTime = escapeHtml(booking.startTime ?? "");
+    const eEndTime = escapeHtml(booking.endTime ?? "");
+
     const ppnRow = hasPpn ? `<tr><td style="padding:6px 0;color:#6b7280;font-size:.85rem">PPN ${ppnRate}%</td><td style="padding:6px 0;text-align:right;color:#374151;font-size:.85rem">${formatIDR(ppnAmount)}</td></tr>` : "";
 
     const html = `<!DOCTYPE html>
@@ -368,7 +387,7 @@ router.get("/public/kwitansi/:orderNumber", async (req, res) => {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Kwitansi ${orderNumber} — ${centerName}</title>
+  <title>Kwitansi ${eOrderNumber} — ${eCenterName}</title>
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
     body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:linear-gradient(to bottom,#fff7ed,#f9fafb);min-height:100vh;padding-bottom:2.5rem}
@@ -410,9 +429,9 @@ router.get("/public/kwitansi/:orderNumber", async (req, res) => {
   <div class="header">
     <div class="header-inner">
       <div class="badge">✅ Kwitansi Pembayaran</div>
-      <div class="center-name">${centerName}</div>
-      ${centerAddress ? `<div class="center-sub">📍 ${centerAddress}</div>` : ""}
-      ${centerPhone ? `<div class="center-sub">📞 ${centerPhone}</div>` : ""}
+      <div class="center-name">${eCenterName}</div>
+      ${eCenterAddress ? `<div class="center-sub">📍 ${eCenterAddress}</div>` : ""}
+      ${eCenterPhone ? `<div class="center-sub">📞 ${eCenterPhone}</div>` : ""}
     </div>
   </div>
 
@@ -428,18 +447,18 @@ router.get("/public/kwitansi/:orderNumber", async (req, res) => {
     <div class="card">
       <div class="card-header">
         <div class="card-label">Nomor Order</div>
-        <div class="order-num">${orderNumber}</div>
+        <div class="order-num">${eOrderNumber}</div>
       </div>
       <div class="card-body">
         <table>
-          <tr><td class="label-col">Nama Customer</td><td class="val-col val-bold">${booking.customerName ?? "-"}</td></tr>
-          <tr><td class="label-col">No. HP</td><td class="val-col">${booking.customerPhone ?? "-"}</td></tr>
+          <tr><td class="label-col">Nama Customer</td><td class="val-col val-bold">${eCustomerName}</td></tr>
+          <tr><td class="label-col">No. HP</td><td class="val-col">${eCustomerPhone}</td></tr>
         </table>
         <hr class="divider">
         <table>
-          <tr><td class="label-col">Fasilitas</td><td class="val-col val-bold">${facilityRow?.name ?? "-"}</td></tr>
+          <tr><td class="label-col">Fasilitas</td><td class="val-col val-bold">${eFacilityName}</td></tr>
           <tr><td class="label-col">Tanggal</td><td class="val-col">${formatDate(booking.bookingDate)}</td></tr>
-          <tr><td class="label-col">Waktu</td><td class="val-col">${booking.startTime} – ${booking.endTime}</td></tr>
+          <tr><td class="label-col">Waktu</td><td class="val-col">${eStartTime} – ${eEndTime}</td></tr>
           <tr><td class="label-col">Durasi</td><td class="val-col">${booking.durationHours} jam</td></tr>
         </table>
       </div>
@@ -467,8 +486,8 @@ router.get("/public/kwitansi/:orderNumber", async (req, res) => {
         <div class="stamp-area">
           <div>
             <div style="font-size:.75rem;color:#9ca3af;margin-bottom:.3rem">Diterbitkan oleh</div>
-            <div style="font-weight:700;font-size:.9rem;color:#1f2937">🏢 ${centerName}</div>
-            ${centerPhone ? `<div style="font-size:.75rem;color:#9ca3af;margin-top:.15rem">${centerPhone}</div>` : ""}
+            <div style="font-weight:700;font-size:.9rem;color:#1f2937">🏢 ${eCenterName}</div>
+            ${eCenterPhone ? `<div style="font-size:.75rem;color:#9ca3af;margin-top:.15rem">${eCenterPhone}</div>` : ""}
           </div>
           <div class="stamp-circle">
             <div class="stamp-text">LUNAS</div>

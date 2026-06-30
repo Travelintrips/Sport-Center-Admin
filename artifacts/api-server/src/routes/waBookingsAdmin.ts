@@ -211,8 +211,8 @@ router.post("/admin/wa-bookings/:orderNumber/approve", adminMiddleware, async (r
     endTime: booking.endTime,
     totalPrice: amountToPay.toLocaleString("id-ID"),
     paymentDeadline: deadlineStr,
-    statusUrl: `${getAppUrl()}/wa/status/${booking.orderNumber}`,
-    uploadProofUrl: `${getAppUrl()}/wa/upload/${booking.orderNumber}`,
+    statusUrl: `${getAppUrl()}/status/${booking.orderNumber}`,
+    uploadProofUrl: `${getAppUrl()}/bukti/${proofToken}`,
     bankName: settings?.bankName ?? "",
     bankAccount: settings?.bankAccount ?? "",
     bankAccountName: settings?.bankAccountName ?? "",
@@ -420,8 +420,8 @@ router.post("/admin/wa-bookings/:orderNumber/resend", adminMiddleware, async (re
       endTime: booking.endTime,
       totalPrice: amountToPay.toLocaleString("id-ID"),
       paymentDeadline: deadline,
-      statusUrl: `${getAppUrl()}/wa/status/${booking.orderNumber}`,
-      uploadProofUrl: `${getAppUrl()}/wa/upload/${booking.orderNumber}`,
+      statusUrl: `${getAppUrl()}/status/${booking.orderNumber}`,
+      uploadProofUrl: `${getAppUrl()}/bukti/${proofToken}`,
       bankName: settings?.bankName ?? "",
       bankAccount: settings?.bankAccount ?? "",
       bankAccountName: settings?.bankAccountName ?? "",
@@ -437,7 +437,7 @@ router.post("/admin/wa-bookings/:orderNumber/resend", adminMiddleware, async (re
       startTime: booking.startTime,
       endTime: booking.endTime,
       totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
-      statusUrl: `${getAppUrl()}/wa/status/${booking.orderNumber}`,
+      statusUrl: `${getAppUrl()}/status/${booking.orderNumber}`,
     });
     sentTo = "customer (konfirmasi booking)";
   } else {
