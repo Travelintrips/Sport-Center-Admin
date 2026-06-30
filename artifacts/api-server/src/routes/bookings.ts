@@ -751,8 +751,19 @@ router.post("/bookings/recurring", async (req, res) => {
       notes, repeatType, repeatCount, specificDates, promoCode, discountAmountPerSession,
       // Company billing fields (optional)
       payerType, companyCustomerId, customerId: bodyCustomerId, bookedForName, bookedForPhone,
+      // AP2 employee fields (optional)
+      customerType: rawCustomerType, idCardNumber: rawIdCardNumber,
     } = req.body;
     const customerPhone: string = normalizePhone(String(req.body.customerPhone ?? "").trim());
+    const customerType: "umum" | "angkasa_pura" = rawCustomerType === "angkasa_pura" ? "angkasa_pura" : "umum";
+    const idCardNumber: string | null = customerType === "angkasa_pura"
+      ? (String(rawIdCardNumber || "").trim().toUpperCase() || null)
+      : null;
+    const isAp = customerType === "angkasa_pura";
+    if (isAp && !idCardNumber) {
+      res.status(400).json({ error: "Nomor ID Card wajib untuk customer Angkasa Pura" });
+      return;
+    }
 
     // Deteksi user yang sedang login (opsional)
     let loggedInUserId: number | null = null;
@@ -773,7 +784,8 @@ router.post("/bookings/recurring", async (req, res) => {
       ? specificDates
       : generateRecurringDates(startDate, repeatType, repeatCount);
     const basePrice = Number(facility.pricePerHour) * durationHours;
-    const discount = Math.min(Number(discountAmountPerSession) || 0, basePrice);
+    // AP2: diskon belum diterapkan saat create — diterapkan setelah verifikasi admin
+    const discount = isAp ? 0 : Math.min(Number(discountAmountPerSession) || 0, basePrice);
     const totalPrice = basePrice - discount;
 
     const created: any[] = [];
@@ -802,8 +814,12 @@ router.post("/bookings/recurring", async (req, res) => {
         endTime,
         durationHours,
         totalPrice: String(totalPrice),
-        promoCode: promoCode || null,
+        promoCode: isAp ? null : (promoCode || null),
         discountAmount: String(discount),
+        basePrice: String(basePrice),
+        customerType,
+        idCardNumber: idCardNumber || null,
+        verificationStatus: isAp ? "pending" : "not_required",
         notes,
         ppnRate: taxCalc.taxRate > 0 ? String(taxCalc.taxRate) : null,
         dpp: taxCalc.taxAmount > 0 ? String(taxCalc.dpp) : null,

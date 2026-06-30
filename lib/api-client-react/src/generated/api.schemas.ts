@@ -316,6 +316,14 @@ export const RecurringBookingInputRepeatType = {
   monthly: 'monthly',
 } as const;
 
+export type RecurringBookingInputCustomerType = typeof RecurringBookingInputCustomerType[keyof typeof RecurringBookingInputCustomerType];
+
+
+export const RecurringBookingInputCustomerType = {
+  umum: 'umum',
+  angkasa_pura: 'angkasa_pura',
+} as const;
+
 export interface RecurringBookingInput {
   customerName: string;
   customerEmail: string;
@@ -327,6 +335,8 @@ export interface RecurringBookingInput {
   repeatType: RecurringBookingInputRepeatType;
   repeatCount: number;
   notes?: string;
+  customerType?: RecurringBookingInputCustomerType;
+  idCardNumber?: string;
 }
 
 export interface RecurringBookingResult {

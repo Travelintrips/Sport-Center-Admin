@@ -140,6 +140,7 @@ export * from './recurringBookingCheckInput';
 export * from './recurringBookingCheckInputRepeatType';
 export * from './recurringBookingCheckResult';
 export * from './recurringBookingInput';
+export * from './recurringBookingInputCustomerType';
 export * from './recurringBookingInputRepeatType';
 export * from './recurringBookingResult';
 export * from './recurringDateStatus';

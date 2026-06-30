@@ -482,7 +482,9 @@ export const CreateRecurringBookingBody = zod.object({
   "durationHours": zod.number(),
   "repeatType": zod.enum(['weekly', 'monthly']),
   "repeatCount": zod.number(),
-  "notes": zod.string().optional()
+  "notes": zod.string().optional(),
+  "customerType": zod.enum(['umum', 'angkasa_pura']).optional(),
+  "idCardNumber": zod.string().optional()
 })
 
 
