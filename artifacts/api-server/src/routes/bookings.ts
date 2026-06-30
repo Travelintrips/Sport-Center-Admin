@@ -749,8 +749,6 @@ router.post("/bookings/recurring", async (req, res) => {
     const {
       customerName, customerEmail, facilityId, startDate, startTime, durationHours,
       notes, repeatType, repeatCount, specificDates, promoCode, discountAmountPerSession,
-      // AP2 / customer type
-      customerType,
       // Company billing fields (optional)
       payerType, companyCustomerId, customerId: bodyCustomerId, bookedForName, bookedForPhone,
       // AP2 employee fields (optional)
@@ -777,7 +775,6 @@ router.post("/bookings/recurring", async (req, res) => {
 
     const isCompanyPayer = payerType === "company" && companyCustomerId;
     const effectiveCustomerId = bodyCustomerId ?? loggedInUserId;
-    const isAp = customerType === "angkasa_pura";
 
     const [facility] = await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, Number(facilityId))).limit(1);
     if (!facility) { res.status(404).json({ error: "Facility not found" }); return; }
@@ -826,8 +823,6 @@ router.post("/bookings/recurring", async (req, res) => {
         idCardNumber: idCardNumber || null,
         verificationStatus: isAp ? "pending" : "not_required",
         notes,
-        customerType: customerType === "angkasa_pura" ? "angkasa_pura" : "umum",
-        verificationStatus: isAp ? "pending" : "not_required",
         ppnRate: taxCalc.taxRate > 0 ? String(taxCalc.taxRate) : null,
         dpp: taxCalc.taxAmount > 0 ? String(taxCalc.dpp) : null,
         ppnAmount: taxCalc.taxAmount > 0 ? String(taxCalc.taxAmount) : null,
@@ -867,16 +862,10 @@ router.post("/bookings/recurring", async (req, res) => {
     }
 
 
-    // Tax system adalah inklusif: grandTotal per booking = totalPrice (PPN sudah di dalam harga).
-    // Hitung dari sum actual booking values — jangan tambahkan PPN lagi.
+    // Hitung dari sum actual booking values
     const grandTotalAmount = created.reduce((sum: number, b: any) => sum + Number(b.grandTotal ?? b.totalPrice), 0);
     const totalDpp = created.reduce((sum: number, b: any) => sum + Number(b.dpp ?? b.totalPrice), 0);
     const totalPpn = created.reduce((sum: number, b: any) => sum + Number(b.ppnAmount ?? 0), 0);
-    // Tax-inclusive: grandTotal = totalPrice (PPN sudah termasuk dalam harga fasilitas)
-    const grandTotalAmount = totalPrice * created.length;
-    const totalPpn = accumulatedPpn;
-    // totalDpp: jumlah DPP dari semua booking (untuk response payload)
-    const totalDpp = created.reduce((sum: number, b: any) => sum + (b.dpp != null ? Number(b.dpp) : Number(b.totalPrice)), 0);
 
     // Auto-group: jika ada 2+ booking berhasil, gabung otomatis ke 1 grup bayar
     let groupRef: string | null = null;
