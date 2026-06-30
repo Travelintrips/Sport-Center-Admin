@@ -859,9 +859,11 @@ router.post("/bookings/recurring", async (req, res) => {
         .where(eq(promosTable.code, String(promoCode).toUpperCase()));
     }
 
-    const totalDpp = totalPrice * created.length;
-    const totalPpn = accumulatedPpn;
-    const grandTotalAmount = totalDpp + totalPpn;
+    // Tax system adalah inklusif: grandTotal per booking = totalPrice (PPN sudah di dalam harga).
+    // Hitung dari sum actual booking values — jangan tambahkan PPN lagi.
+    const grandTotalAmount = created.reduce((sum: number, b: any) => sum + Number(b.grandTotal ?? b.totalPrice), 0);
+    const totalDpp = created.reduce((sum: number, b: any) => sum + Number(b.dpp ?? b.totalPrice), 0);
+    const totalPpn = created.reduce((sum: number, b: any) => sum + Number(b.ppnAmount ?? 0), 0);
 
     // Auto-group: jika ada 2+ booking berhasil, gabung otomatis ke 1 grup bayar
     let groupRef: string | null = null;

@@ -648,7 +648,7 @@ export default function BookingDetail() {
                             </span>{" "}
                             {(booking as any).groupInfo && (
                               <span className="text-xs text-muted-foreground font-normal">
-                                ({(booking as any).groupInfo.groupSessionCount} {t("sesi", "sessions")} × Rp {booking.totalPrice.toLocaleString("id-ID")})
+                                ({(booking as any).groupInfo.groupSessionCount} {t("sesi", "sessions")} × Rp {Math.round((booking as any).groupInfo.groupTotalPayment / (booking as any).groupInfo.groupSessionCount).toLocaleString("id-ID")})
                               </span>
                             )}{" "}
                             {t("via:", "via:")}
