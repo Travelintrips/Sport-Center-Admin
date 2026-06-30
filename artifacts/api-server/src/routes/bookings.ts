@@ -749,6 +749,8 @@ router.post("/bookings/recurring", async (req, res) => {
     const {
       customerName, customerEmail, facilityId, startDate, startTime, durationHours,
       notes, repeatType, repeatCount, specificDates, promoCode, discountAmountPerSession,
+      // AP2 / customer type
+
       // Company billing fields (optional)
       payerType, companyCustomerId, customerId: bodyCustomerId, bookedForName, bookedForPhone,
       // AP2 employee fields (optional)
@@ -792,8 +794,6 @@ router.post("/bookings/recurring", async (req, res) => {
 
     const created: any[] = [];
     const skipped: string[] = [];
-    let accumulatedPpn = 0;
-
     for (const bookingDate of dates) {
       const conflict = await checkSlotConflict(Number(facilityId), bookingDate, startTime, endTime);
       if (conflict) {
@@ -833,6 +833,8 @@ router.post("/bookings/recurring", async (req, res) => {
           bookedForName: bookedForName || customerName,
           bookedForPhone: bookedForPhone || customerPhone,
           paymentRequiredNow: false,
+          paymentDeadline: null,
+          billingStatus: "unbilled",
           status: "confirmed",
         } : {}),
       }).returning();
@@ -840,7 +842,7 @@ router.post("/bookings/recurring", async (req, res) => {
       if (taxCalc.taxCode) {
         recordTaxTransaction("booking", booking.id, booking.orderNumber, taxCalc, bookingDate).catch(() => {});
       }
-      accumulatedPpn += taxCalc.taxAmount;
+
       created.push({
         ...booking,
         totalPrice: Number(booking.totalPrice),
@@ -1304,11 +1306,16 @@ async function runApVerification(
       const siblingBase = sibling.basePrice == null ? Number(sibling.totalPrice) : Number(sibling.basePrice);
       const siblingDiscount = Math.round((siblingBase * discountPct) / 100);
       const siblingFinal = siblingBase - siblingDiscount;
+      const siblingTaxCalc = await calculateTax(siblingFinal, "sport_booking", sibling.bookingDate ?? undefined);
       await db.update(bookingsTable).set({
         verificationStatus: "verified",
         idCardNumber,
         apDiscountAmount: String(siblingDiscount),
+        discountAmount: String(siblingDiscount),
         totalPrice: String(siblingFinal),
+        grandTotal: siblingTaxCalc.taxAmount > 0 ? String(siblingTaxCalc.grandTotal) : null,
+        dpp: siblingTaxCalc.taxAmount > 0 ? String(siblingTaxCalc.dpp) : null,
+        ppnAmount: siblingTaxCalc.taxAmount > 0 ? String(siblingTaxCalc.taxAmount) : null,
       }).where(eq(bookingsTable.id, sibling.id));
       groupUpdatedCount++;
     }
@@ -1544,6 +1551,55 @@ router.post("/bookings/verify-by-order", async (req, res) => {
     res.json({ ...result, groupVerifiedCount, booking: updated });
   } catch (err) {
     req.log.error({ err }, "Verify by order error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// GET /admin/bookings/groups/:groupRef/sessions — semua sesi dalam grup (untuk kwitansi gabungan)
+router.get("/admin/bookings/groups/:groupRef/sessions", adminMiddleware, async (req, res) => {
+  try {
+    const groupRef = String(req.params.groupRef);
+    const sessions = await db
+      .select({
+        id: bookingsTable.id,
+        orderNumber: bookingsTable.orderNumber,
+        bookingDate: bookingsTable.bookingDate,
+        startTime: bookingsTable.startTime,
+        endTime: bookingsTable.endTime,
+        durationHours: bookingsTable.durationHours,
+        totalPrice: bookingsTable.totalPrice,
+        grandTotal: bookingsTable.grandTotal,
+        ppnRate: bookingsTable.ppnRate,
+        ppnAmount: bookingsTable.ppnAmount,
+        dpp: bookingsTable.dpp,
+        status: bookingsTable.status,
+        facilityId: bookingsTable.facilityId,
+      })
+      .from(bookingsTable)
+      .where(eq(bookingsTable.groupRef, groupRef))
+      .orderBy(bookingsTable.bookingDate);
+
+    if (!sessions.length) {
+      res.status(404).json({ error: "Grup tidak ditemukan" });
+      return;
+    }
+
+    // Ambil nama fasilitas sekali saja
+    const facilityId = sessions[0].facilityId;
+    const [facility] = await db.select({ name: facilitiesTable.name })
+      .from(facilitiesTable).where(eq(facilitiesTable.id, facilityId)).limit(1);
+
+    res.json(sessions.map((s) => ({
+      ...s,
+      totalPrice: Number(s.totalPrice),
+      grandTotal: s.grandTotal != null ? Number(s.grandTotal) : null,
+      ppnRate: s.ppnRate != null ? Number(s.ppnRate) : null,
+      ppnAmount: s.ppnAmount != null ? Number(s.ppnAmount) : null,
+      dpp: s.dpp != null ? Number(s.dpp) : null,
+      facilityName: facility?.name ?? "",
+    })));
+  } catch (err) {
+    req.log.error({ err }, "Group sessions error");
     res.status(500).json({ error: "Internal server error" });
   }
 });

@@ -336,7 +336,7 @@ function terbilang(n: number): string {
   return terbilang(Math.floor(n / 1000000000)) + " Miliar" + (n % 1000000000 !== 0 ? " " + terbilang(n % 1000000000) : "");
 }
 
-function printKwitansi(booking: any, settings?: any) {
+async function printKwitansi(booking: any, settings?: any) {
   const centerName = settings?.centerName ?? "Sport Center";
   const address = settings?.address ?? "";
   const phone = settings?.phone ?? "";
@@ -346,13 +346,6 @@ function printKwitansi(booking: any, settings?: any) {
   const logoUrl = settings?.logoUrl ?? "";
   const now = new Date().toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" });
 
-  const total = booking.grandTotal != null ? Math.round(Number(booking.grandTotal)) : Math.round(Number(booking.totalPrice));
-  const hasPpnK = booking.ppnAmount != null && Number(booking.ppnAmount) > 0;
-  const dpp = hasPpnK ? Math.round(total / 1.11) : total;
-  const dppNilaiLain = hasPpnK ? Math.round(dpp * 11 / 12) : 0;
-  const ppn = hasPpnK ? (total - dpp) : 0;
-  const terbilangText = terbilang(total) + " Rupiah";
-
   const statusLabel = booking.status === "completed" ? "Lunas" :
     booking.status === "confirmed" ? "Dikonfirmasi" :
     booking.status === "cancelled" ? "Dibatalkan" : booking.status;
@@ -360,6 +353,46 @@ function printKwitansi(booking: any, settings?: any) {
   const logoHtml = logoUrl
     ? `<img src="${logoUrl}" style="width:56px;height:56px;border-radius:50%;object-fit:cover;border:2px solid #e5e7eb;" />`
     : `<div style="width:56px;height:56px;border-radius:50%;background:#f97316;display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:900;color:#fff;flex-shrink:0;">SC</div>`;
+
+  // Untuk booking grup/recurring: fetch semua sesi, tampilkan gabungan
+  let sessions: any[] = [];
+  let isGroup = false;
+  if (booking.groupRef) {
+    try {
+      const res = await fetch(`/api/admin/bookings/groups/${booking.groupRef}/sessions`, {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      if (res.ok) {
+        sessions = await res.json();
+        isGroup = sessions.length > 1;
+      }
+    } catch { /* fallback ke single session */ }
+  }
+  if (!isGroup) {
+    sessions = [booking];
+  }
+
+  // Hitung total gabungan dari semua sesi
+  const grandTotalAll = sessions.reduce((sum: number, s: any) => {
+    return sum + (s.grandTotal != null ? Math.round(Number(s.grandTotal)) : Math.round(Number(s.totalPrice)));
+  }, 0);
+  const totalPpnAll = sessions.reduce((sum: number, s: any) => sum + (s.ppnAmount != null ? Math.round(Number(s.ppnAmount)) : 0), 0);
+  const hasPpnK = totalPpnAll > 0;
+  const dppAll = hasPpnK ? (grandTotalAll - totalPpnAll) : grandTotalAll;
+  const dppNilaiLainAll = hasPpnK ? Math.round(dppAll * 11 / 12) : 0;
+  const terbilangText = terbilang(grandTotalAll) + " Rupiah";
+
+  // Baris tabel sesi
+  const sessionRows = sessions.map((s: any, i: number) => {
+    const sTotal = s.grandTotal != null ? Math.round(Number(s.grandTotal)) : Math.round(Number(s.totalPrice));
+    return `<tr>
+      <td>${isGroup ? `Sesi ${i + 1}` : s.facilityName ?? booking.facilityName}</td>
+      <td>${formatDate(s.bookingDate)}</td>
+      <td>${String(s.startTime ?? "").slice(0, 5)} – ${String(s.endTime ?? "").slice(0, 5)}</td>
+      <td>${s.durationHours} Jam</td>
+      <td>${formatCurrency(sTotal)}</td>
+    </tr>`;
+  }).join("\n");
 
   const html = `<!DOCTYPE html>
 <html lang="id">
@@ -394,6 +427,7 @@ function printKwitansi(booking: any, settings?: any) {
     tbody tr:nth-child(even) { background: #ffeee5; }
     td { padding: 9px 10px; font-size: 12px; color: #1a1a1a; }
     td:last-child { text-align: right; font-weight: 600; }
+    .group-label { font-size: 11px; color: #f97316; font-weight: 700; margin-bottom: 6px; }
     .totals-section { display: flex; justify-content: flex-end; margin-top: 8px; margin-bottom: 16px; }
     .totals-table { width: 280px; }
     .totals-table td { padding: 4px 8px; font-size: 12px; border: none; background: transparent; }
@@ -423,7 +457,7 @@ function printKwitansi(booking: any, settings?: any) {
     </div>
     <div class="header-right">
       <div class="kwitansi-title">KWITANSI</div>
-      <div class="kwitansi-num">${booking.orderNumber}</div>
+      <div class="kwitansi-num">${booking.groupRef && isGroup ? booking.groupRef : booking.orderNumber}</div>
       <div class="kwitansi-date">Tanggal Kwitansi</div>
       <div style="font-size:11px;color:#333;margin-top:2px;">${now}</div>
     </div>
@@ -449,13 +483,21 @@ function printKwitansi(booking: any, settings?: any) {
       <div class="info-label">Status</div>
       <div class="info-value">${statusLabel}</div>
     </div>
+    ${isGroup ? `<div class="info-cell">
+      <div class="info-label">Fasilitas</div>
+      <div class="info-value">${booking.facilityName}</div>
+    </div>
+    <div class="info-cell">
+      <div class="info-label">Total Sesi</div>
+      <div class="info-value">${sessions.length} sesi</div>
+    </div>` : ""}
   </div>
 
-  <div class="section-title">Detail Pemesanan</div>
+  <div class="section-title">Detail Pemesanan${isGroup ? ` — ${sessions.length} Sesi (Recurring)` : ""}</div>
   <table>
     <thead>
       <tr>
-        <th>Fasilitas</th>
+        <th>${isGroup ? "Sesi" : "Fasilitas"}</th>
         <th>Tanggal</th>
         <th>Jam</th>
         <th>Durasi</th>
@@ -463,14 +505,7 @@ function printKwitansi(booking: any, settings?: any) {
       </tr>
     </thead>
     <tbody>
-      <tr>
-        <td>${booking.facilityName}</td>
-        <td>${formatDate(booking.bookingDate)}</td>
-        <td>${booking.startTime?.slice(0,5)} – ${booking.endTime?.slice(0,5)}</td>
-        <td>${booking.durationHours} Jam</td>
-        <td>${formatCurrency(dpp)}</td>
-      </tr>
-      <tr><td colspan="5" style="padding:4px;background:#fff7f3;"></td></tr>
+      ${sessionRows}
     </tbody>
   </table>
 
@@ -479,19 +514,19 @@ function printKwitansi(booking: any, settings?: any) {
       ${hasPpnK ? `
       <tr>
         <td>DPP</td>
-        <td>${formatCurrency(dpp)}</td>
+        <td>${formatCurrency(dppAll)}</td>
       </tr>
       <tr>
         <td style="font-size:11px;color:#999;">DPP Nilai Lain (11/12 × DPP)</td>
-        <td style="font-size:11px;color:#999;">${formatCurrency(dppNilaiLain)}</td>
+        <td style="font-size:11px;color:#999;">${formatCurrency(dppNilaiLainAll)}</td>
       </tr>
       <tr>
         <td>PPN 12%</td>
-        <td>${formatCurrency(ppn)}</td>
+        <td>${formatCurrency(totalPpnAll)}</td>
       </tr>` : ""}
       <tr class="grand-total">
-        <td>Total DPP + PPN</td>
-        <td>${formatCurrency(total)}</td>
+        <td>${isGroup ? `Total ${sessions.length} Sesi` : "Total DPP + PPN"}</td>
+        <td>${formatCurrency(grandTotalAll)}</td>
       </tr>
     </table>
   </div>
