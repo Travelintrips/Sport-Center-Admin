@@ -8,7 +8,7 @@ import { randomUUID } from "crypto";
 import { notifyPaymentConfirmed, notifyPaymentProofUploaded } from "../lib/notifications";
 import { logAudit, getClientInfo, getUserFromReq, logAccountingError } from "../lib/auditLog";
 import { syncStatusToBizportal } from "../lib/bizportalSync";
-import { BUCKETS, uploadToStorage } from "../lib/supabaseStorage";
+import { uploadProofWithFallback } from "./storage";
 import { createJournalEntry, createPublicAccountingEntry } from "../lib/accounting";
 import { createWaToken } from "../lib/waTokens";
 import { logger } from "../lib/logger";
@@ -34,14 +34,7 @@ const upload = multer({
 router.post("/payments/proof-upload", upload.single("proof"), async (req, res) => {
   try {
     if (!req.file) { res.status(400).json({ error: "No file provided" }); return; }
-    const ext = path.extname(req.file.originalname).toLowerCase() || ".jpg";
-    const objectName = `proof-${randomUUID()}${ext}`;
-    const url = await uploadToStorage(
-      BUCKETS.proof,
-      objectName,
-      req.file.buffer,
-      req.file.mimetype,
-    );
+    const url = await uploadProofWithFallback(req.file.buffer, req.file.originalname, req.file.mimetype);
     res.json({ objectPath: url, url });
   } catch (err) {
     req.log.error({ err }, "Upload proof error");

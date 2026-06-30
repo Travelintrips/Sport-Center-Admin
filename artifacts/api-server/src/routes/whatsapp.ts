@@ -43,7 +43,7 @@ import { hashPassword } from "../lib/auth";
 import { syncStatusToBizportal } from "../lib/bizportalSync";
 import { calculateTax, recordTaxTransaction } from "../lib/tax";
 import { broadcastAvailabilityChange } from "../lib/supabase";
-import { uploadToStorage, BUCKETS } from "../lib/supabaseStorage";
+import { uploadProofWithFallback } from "./storage";
 import {
   generateAiReply,
   logAiMessageReceived,
@@ -1085,9 +1085,7 @@ router.get("/wa/get-proof-token/:orderNumber", async (req, res) => {
 router.post("/wa/proof/upload", uploadProof.single("proof"), async (req, res) => {
   try {
     if (!req.file) { res.status(400).json({ error: "Tidak ada file" }); return; }
-    const ext = path.extname(req.file.originalname).toLowerCase() || ".jpg";
-    const objectPath = `wa-proof-${randomUUID()}${ext}`;
-    const publicUrl = await uploadToStorage(BUCKETS.proof, objectPath, req.file.buffer, req.file.mimetype);
+    const publicUrl = await uploadProofWithFallback(req.file.buffer, req.file.originalname, req.file.mimetype);
     res.json({ url: publicUrl });
   } catch (err) {
     res.status(500).json({ error: "Upload gagal" });
@@ -1107,9 +1105,7 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
 
     let proofUrl: string | undefined = req.body?.proofUrl;
     if (req.file) {
-      const ext = path.extname(req.file.originalname).toLowerCase() || ".jpg";
-      const objectPath = `wa-proof-${randomUUID()}${ext}`;
-      proofUrl = await uploadToStorage(BUCKETS.proof, objectPath, req.file.buffer, req.file.mimetype);
+      proofUrl = await uploadProofWithFallback(req.file.buffer, req.file.originalname, req.file.mimetype);
     }
     if (!proofUrl) { res.status(400).json({ error: "Tidak ada bukti yang diupload" }); return; }
 
