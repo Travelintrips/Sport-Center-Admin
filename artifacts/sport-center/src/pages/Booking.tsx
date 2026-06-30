@@ -1169,7 +1169,6 @@ export default function Booking() {
           )}
 
           {/* Repeat Booking */}
-          {!isAP && (
           <Card className={isRepeat ? "border-primary/40 bg-primary/5" : ""}>
             <CardHeader className="pb-4">
               <div className="flex items-center gap-3">
@@ -1394,7 +1393,6 @@ export default function Booking() {
               </CardContent>
             )}
           </Card>
-          )}
 
           {/* Down Payment Option */}
           <Card className={paymentType === "dp" ? "border-violet-300 bg-violet-50/50 dark:bg-violet-900/10" : ""}>
