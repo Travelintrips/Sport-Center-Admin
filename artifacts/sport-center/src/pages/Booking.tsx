@@ -536,8 +536,9 @@ export default function Booking() {
           repeatCount,
           notes,
           specificDates: selectedDates,
-          promoCode: couponResult?.code || undefined,
-          discountAmountPerSession: discountPerSession || undefined,
+          customerType: bookingMode === "angkasa_pura" ? "angkasa_pura" : "umum",
+          promoCode: isAP ? undefined : couponResult?.code || undefined,
+          discountAmountPerSession: isAP ? undefined : discountPerSession || undefined,
           vendorId: vendorId ? Number(vendorId) : undefined,
         } as any,
       });

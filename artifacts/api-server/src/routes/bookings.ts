@@ -749,6 +749,8 @@ router.post("/bookings/recurring", async (req, res) => {
     const {
       customerName, customerEmail, facilityId, startDate, startTime, durationHours,
       notes, repeatType, repeatCount, specificDates, promoCode, discountAmountPerSession,
+      // AP2 / customer type
+      customerType,
       // Company billing fields (optional)
       payerType, companyCustomerId, customerId: bodyCustomerId, bookedForName, bookedForPhone,
     } = req.body;
@@ -764,6 +766,7 @@ router.post("/bookings/recurring", async (req, res) => {
 
     const isCompanyPayer = payerType === "company" && companyCustomerId;
     const effectiveCustomerId = bodyCustomerId ?? loggedInUserId;
+    const isAp = customerType === "angkasa_pura";
 
     const [facility] = await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, Number(facilityId))).limit(1);
     if (!facility) { res.status(404).json({ error: "Facility not found" }); return; }
@@ -773,7 +776,8 @@ router.post("/bookings/recurring", async (req, res) => {
       ? specificDates
       : generateRecurringDates(startDate, repeatType, repeatCount);
     const basePrice = Number(facility.pricePerHour) * durationHours;
-    const discount = Math.min(Number(discountAmountPerSession) || 0, basePrice);
+    // AP2 karyawan: tidak ada diskon/promo di sini (diskon diterapkan setelah verifikasi ID Card)
+    const discount = isAp ? 0 : Math.min(Number(discountAmountPerSession) || 0, basePrice);
     const totalPrice = basePrice - discount;
 
     const created: any[] = [];
@@ -805,6 +809,7 @@ router.post("/bookings/recurring", async (req, res) => {
         promoCode: promoCode || null,
         discountAmount: String(discount),
         notes,
+        customerType: customerType === "angkasa_pura" ? "angkasa_pura" : "umum",
         ppnRate: taxCalc.taxRate > 0 ? String(taxCalc.taxRate) : null,
         dpp: taxCalc.taxAmount > 0 ? String(taxCalc.dpp) : null,
         ppnAmount: taxCalc.taxAmount > 0 ? String(taxCalc.taxAmount) : null,
@@ -843,9 +848,11 @@ router.post("/bookings/recurring", async (req, res) => {
         .where(eq(promosTable.code, String(promoCode).toUpperCase()));
     }
 
-    const totalDpp = totalPrice * created.length;
+    // Tax-inclusive: grandTotal = totalPrice (PPN sudah termasuk dalam harga fasilitas)
+    const grandTotalAmount = totalPrice * created.length;
     const totalPpn = accumulatedPpn;
-    const grandTotalAmount = totalDpp + totalPpn;
+    // totalDpp: jumlah DPP dari semua booking (untuk response payload)
+    const totalDpp = created.reduce((sum: number, b: any) => sum + (b.dpp != null ? Number(b.dpp) : Number(b.totalPrice)), 0);
 
     // Auto-group: jika ada 2+ booking berhasil, gabung otomatis ke 1 grup bayar
     let groupRef: string | null = null;
