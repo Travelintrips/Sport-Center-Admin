@@ -160,8 +160,10 @@ export default function BookingDetail() {
     const bPayments = ((booking as any).payments as any[]) ?? [];
     const isDpMode =
       !!(booking as any).isDpPaid && Number((booking as any).downPayment || 0) > 0;
+    const groupInfo = (booking as any).groupInfo as { groupTotalPayment: number; groupSessionCount: number; groupRef: string } | null;
     let detectedType = "full_payment";
-    let detectedAmount: number = booking.totalPrice;
+    // Untuk grup booking: pakai total semua sesi, bukan hanya 1 booking
+    let detectedAmount: number = groupInfo ? groupInfo.groupTotalPayment : booking.totalPrice;
 
     if (isDpMode) {
       const hasDpActive = bPayments.some(

@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db, paymentsTable, bookingsTable, bookingHistoryTable, facilitiesTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { eq, and, ne } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
 import multer from "multer";
 import path from "path";
@@ -133,6 +133,45 @@ router.post("/payments", async (req, res) => {
       note: historyNote,
     });
 
+    // Grup repeat booking: propagasi waiting_confirmation + proof ke semua sibling
+    if (booking.groupRef) {
+      const siblings = await db.select().from(bookingsTable).where(
+        and(
+          eq(bookingsTable.groupRef, booking.groupRef),
+          ne(bookingsTable.id, Number(bookingId)),
+        )
+      );
+      for (const sib of siblings) {
+        // Buat payment record untuk sibling agar bukti transfer tercatat di semua sesi
+        const hasPendingPayment = await db.select({ id: paymentsTable.id })
+          .from(paymentsTable)
+          .where(and(
+            eq(paymentsTable.bookingId, sib.id),
+            eq(paymentsTable.status, "pending"),
+          ));
+        if (hasPendingPayment.length === 0) {
+          await db.insert(paymentsTable).values({
+            bookingId: sib.id,
+            amount: String(sib.totalPrice),
+            proofUrl,
+            notes: `[Grup ${booking.groupRef}] ${notes || ""}`.trim(),
+            paymentType: paymentType as "dp" | "pelunasan" | "full_payment",
+          });
+        }
+        const sibPrev = sib.status;
+        await db.update(bookingsTable)
+          .set({ status: "waiting_confirmation", updatedAt: new Date() })
+          .where(eq(bookingsTable.id, sib.id));
+        await db.insert(bookingHistoryTable).values({
+          bookingId: sib.id,
+          fromStatus: sibPrev,
+          toStatus: "waiting_confirmation",
+          changedByName: booking.customerName,
+          note: `${historyNote} (grup ${booking.groupRef})`,
+        });
+      }
+    }
+
     const [facility] = await db
       .select({ name: facilitiesTable.name })
       .from(facilitiesTable)
@@ -194,6 +233,31 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
     const userInfo = getUserFromReq(req);
     const clientInfo = getClientInfo(req);
 
+    // Helper: propagasi status ke semua sibling dalam grup
+    const propagateGroupStatus = async (targetStatus: string, note: string) => {
+      if (!booking?.groupRef) return;
+      const siblings = await db.select().from(bookingsTable).where(
+        and(eq(bookingsTable.groupRef, booking.groupRef), ne(bookingsTable.id, payment.bookingId))
+      );
+      for (const sib of siblings) {
+        const sibPrev = sib.status;
+        await db.update(bookingsTable)
+          .set({ status: targetStatus as any, updatedAt: new Date() })
+          .where(eq(bookingsTable.id, sib.id));
+        await db.insert(bookingHistoryTable).values({
+          bookingId: sib.id,
+          fromStatus: sibPrev,
+          toStatus: targetStatus,
+          changedByName: userInfo.userName || "admin",
+          note: `${note} (grup ${booking.groupRef})`,
+        });
+        // Update juga sibling payment records ke status yang sama
+        await db.update(paymentsTable)
+          .set({ status: status as any, ...(status === "confirmed" ? { confirmedAt: new Date() } : {}) })
+          .where(and(eq(paymentsTable.bookingId, sib.id), eq(paymentsTable.status, "pending")));
+      }
+    };
+
     if (status === "confirmed") {
       const isDP = payment.paymentType === "dp";
 
@@ -212,6 +276,7 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
             changedByName: userInfo.userName || "admin",
             note: "DP dikonfirmasi oleh admin, menunggu pelunasan",
           });
+          await propagateGroupStatus("pending_payment", "DP dikonfirmasi oleh admin, menunggu pelunasan");
         }
 
         await logAudit({
@@ -241,6 +306,13 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
                 ? "Pelunasan dikonfirmasi oleh admin"
                 : "Pembayaran dikonfirmasi oleh admin",
           });
+
+          // Propagasi confirmed ke semua sibling dalam grup
+          await propagateGroupStatus("confirmed",
+            payment.paymentType === "pelunasan"
+              ? "Pelunasan dikonfirmasi oleh admin"
+              : "Pembayaran dikonfirmasi oleh admin"
+          );
 
           const [facility] = await db
             .select({ name: facilitiesTable.name })
@@ -298,6 +370,8 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
           changedByName: userInfo.userName || "admin",
           note: `Pembayaran ditolak: ${notes ?? ""}`,
         });
+        // Propagasi rejected ke semua sibling dalam grup
+        await propagateGroupStatus("pending_payment", `Pembayaran ditolak: ${notes ?? ""}`);
         syncStatusToBizportal(booking.orderNumber, "pending_payment").catch(() => {});
       }
 
