@@ -540,9 +540,6 @@ export default function Booking() {
           discountAmountPerSession: isAP ? undefined : (discountPerSession || undefined),
           customerType: isAP ? "angkasa_pura" : "umum",
           idCardNumber: isAP ? idCardNumber.trim() : undefined,
-          customerType: bookingMode === "angkasa_pura" ? "angkasa_pura" : "umum",
-          promoCode: isAP ? undefined : couponResult?.code || undefined,
-          discountAmountPerSession: isAP ? undefined : discountPerSession || undefined,
           vendorId: vendorId ? Number(vendorId) : undefined,
         } as any,
       });
