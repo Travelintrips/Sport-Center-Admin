@@ -2645,21 +2645,35 @@ export default function AdminBookings() {
                             </motion.button>
                           )}
                           {b.groupRef && (
-                            <motion.button
-                              whileHover={{ scale: 1.04 }}
-                              whileTap={{ scale: 0.96 }}
-                              onClick={() => dissolveGroup(b.groupRef!)}
-                              disabled={dissolvingRef === b.groupRef}
-                              title="Bubarkan grup bayar"
-                              className="flex items-center gap-1 h-7 px-2 rounded-lg text-xs font-semibold text-violet-600 border border-violet-300 hover:bg-violet-50 dark:border-violet-700 dark:hover:bg-violet-900/20 transition-colors opacity-0 group-hover:opacity-100 whitespace-nowrap disabled:opacity-50"
-                            >
-                              {dissolvingRef === b.groupRef ? (
-                                <span className="w-3 h-3 border border-violet-400 border-t-transparent rounded-full animate-spin" />
-                              ) : (
-                                <Unlink size={12} />
-                              )}
-                              Pisah
-                            </motion.button>
+                            <>
+                              <motion.a
+                                href={`/api/invoices/group/${b.groupRef}/html`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                whileHover={{ scale: 1.04 }}
+                                whileTap={{ scale: 0.96 }}
+                                title={`Invoice Grup ${b.groupRef}`}
+                                className="flex items-center gap-1 h-7 px-2 rounded-lg text-xs font-semibold text-violet-700 border border-violet-400 bg-violet-50 hover:bg-violet-100 dark:border-violet-600 dark:bg-violet-900/30 dark:hover:bg-violet-900/50 transition-colors opacity-0 group-hover:opacity-100 whitespace-nowrap"
+                              >
+                                <FileText size={12} />
+                                Inv. Grup
+                              </motion.a>
+                              <motion.button
+                                whileHover={{ scale: 1.04 }}
+                                whileTap={{ scale: 0.96 }}
+                                onClick={() => dissolveGroup(b.groupRef!)}
+                                disabled={dissolvingRef === b.groupRef}
+                                title="Bubarkan grup bayar"
+                                className="flex items-center gap-1 h-7 px-2 rounded-lg text-xs font-semibold text-violet-600 border border-violet-300 hover:bg-violet-50 dark:border-violet-700 dark:hover:bg-violet-900/20 transition-colors opacity-0 group-hover:opacity-100 whitespace-nowrap disabled:opacity-50"
+                              >
+                                {dissolvingRef === b.groupRef ? (
+                                  <span className="w-3 h-3 border border-violet-400 border-t-transparent rounded-full animate-spin" />
+                                ) : (
+                                  <Unlink size={12} />
+                                )}
+                                Pisah
+                              </motion.button>
+                            </>
                           )}
                           {deleteConfirmId === b.id ? (
                             <div className="flex items-center gap-1">

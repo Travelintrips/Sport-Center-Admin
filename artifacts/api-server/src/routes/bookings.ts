@@ -1290,7 +1290,13 @@ async function runApVerification(
       .where(and(
         eq(bookingsTable.groupRef, booking.groupRef),
         eq(bookingsTable.customerType, "angkasa_pura"),
-        eq(bookingsTable.verificationStatus, "pending"),
+        // Sertakan pending DAN verified yang belum dapat diskon (apDiscountAmount null/0)
+        // agar semua sesi dalam grup mendapat diskon yang sama
+      ))
+      .then(rows => rows.filter(s =>
+        s.id !== bookingId && // jangan update booking yang sudah diproses
+        (s.verificationStatus === "pending" ||
+          (s.verificationStatus === "verified" && (!s.apDiscountAmount || Number(s.apDiscountAmount) === 0)))
       ));
 
     for (const sibling of siblings) {
