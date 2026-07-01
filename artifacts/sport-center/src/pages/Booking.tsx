@@ -536,15 +536,12 @@ export default function Booking() {
           repeatCount,
           notes,
           specificDates: selectedDates,
-
-          promoCode: isAP ? undefined : (couponResult?.code || undefined),
-          discountAmountPerSession: isAP ? undefined : (discountPerSession || undefined),
-          customerType: isAP ? "angkasa_pura" : "umum",
-          idCardNumber: isAP ? idCardNumber.trim() : undefined,
           customerType: bookingMode === "angkasa_pura" ? "angkasa_pura" : "umum",
           idCardNumber: isAP ? idCardNumber.trim() : undefined,
           promoCode: isAP ? undefined : couponResult?.code || undefined,
           discountAmountPerSession: isAP ? undefined : discountPerSession || undefined,
+          payerType: isCompanyBilling ? "company" : "personal",
+          companyCustomerId: isCompanyBilling && billingStatus?.companyId ? billingStatus.companyId : undefined,
           vendorId: vendorId ? Number(vendorId) : undefined,
         } as any,
       });
