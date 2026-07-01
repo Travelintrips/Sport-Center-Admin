@@ -8,6 +8,7 @@ import { createWaToken } from "../lib/waTokens";
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
 import { logger } from "../lib/logger";
 import { syncBookingToBizportal, syncStatusToBizportal, deleteBookingFromBizportal } from "../lib/bizportalSync";
+import { getBaseUrl } from "../lib/appUrl";
 import { calculateTax, recordTaxTransaction, reverseTaxTransaction } from "../lib/tax";
 import { reverseJournalEntry, reversePublicAccountingEntry } from "../lib/accounting";
 
@@ -560,12 +561,7 @@ router.post("/bookings", async (req, res) => {
     } else {
       const deadline = new Date(Date.now() + deadlineHours * 60 * 60 * 1000);
       const deadlineStr = deadline.toLocaleString("id-ID", { timeZone: "Asia/Jakarta", hour12: false });
-      const isProdEnv = process.env.NODE_ENV === "production";
-      const appUrl = isProdEnv
-        ? (process.env.APP_URL ?? "").replace(/\/$/, "")
-        : process.env.REPLIT_DEV_DOMAIN
-          ? `https://${process.env.REPLIT_DEV_DOMAIN}`
-          : (process.env.APP_URL ?? "").replace(/\/$/, "");
+      const appUrl = await getBaseUrl();
 
       // Buat proof token agar customer dapat link upload bukti langsung dari WA
       let proofUrl = "";
@@ -573,10 +569,8 @@ router.post("/bookings", async (req, res) => {
       try {
         if (booking.status === "pending_payment") {
           const proofToken = await createWaToken(booking.id, "upload_proof", 7);
-
           proofUrl = appUrl ? `${appUrl}/bukti/${proofToken}` : "";
           statusUrl = appUrl ? `${appUrl}/status/${booking.orderNumber}` : "";
-
         }
       } catch (err) {
         console.error("[WA] Gagal buat proof token:", err);
@@ -618,12 +612,6 @@ router.post("/bookings", async (req, res) => {
 
       // ─── Kirim WA approval link ke semua admin untuk setiap booking baru ──────
       try {
-        const isProdEnv = process.env.NODE_ENV === "production";
-        const appUrl = isProdEnv
-          ? (process.env.APP_URL ?? "").replace(/\/$/, "")
-          : process.env.REPLIT_DEV_DOMAIN
-            ? `https://${process.env.REPLIT_DEV_DOMAIN}`
-            : (process.env.APP_URL ?? "").replace(/\/$/, "");
         if (appUrl) {
           const approvalToken = await createWaToken(booking.id, "approve_booking", 1);
           notifyAdminBookingApprovalRequest({
@@ -1454,13 +1442,7 @@ router.post("/admin/bookings/:id/resend-wa", adminMiddleware, async (req, res) =
     const booking = await getBookingWithPayment(id);
     if (!booking) { res.status(404).json({ error: "Booking tidak ditemukan" }); return; }
 
-    const isProd = process.env.NODE_ENV === "production";
-    const appUrl = isProd
-      ? (process.env.APP_URL ?? "").replace(/\/$/, "")
-      : process.env.REPLIT_DEV_DOMAIN
-      ? `https://${process.env.REPLIT_DEV_DOMAIN}`
-      : (process.env.APP_URL ?? "").replace(/\/$/, "");
-
+    const appUrl = await getBaseUrl();
     const reviewToken = await createWaToken(id, "review_payment", 7);
     const reviewUrl = `${appUrl}/ulasan/${reviewToken}`;
 

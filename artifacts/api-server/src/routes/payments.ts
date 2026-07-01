@@ -12,13 +12,7 @@ import { uploadProofWithFallback } from "./storage";
 import { createJournalEntry, createPublicAccountingEntry } from "../lib/accounting";
 import { createWaToken } from "../lib/waTokens";
 import { logger } from "../lib/logger";
-
-function getAppUrl(): string {
-  const isProd = process.env.NODE_ENV === "production";
-  if (isProd) return (process.env.APP_URL ?? "").replace(/\/$/, "");
-  if (process.env.REPLIT_DEV_DOMAIN) return `https://${process.env.REPLIT_DEV_DOMAIN}`;
-  return (process.env.APP_URL ?? "").replace(/\/$/, "");
-}
+import { getBaseUrl } from "../lib/appUrl";
 
 const router = Router();
 
@@ -179,7 +173,7 @@ router.post("/payments", async (req, res) => {
       .limit(1);
 
     // Generate single review token so admin gets ONE link (proof + approve/reject in one page)
-    const APP_URL = getAppUrl();
+    const APP_URL = await getBaseUrl();
     const reviewToken = await createWaToken(Number(bookingId), "review_payment", 7);
     notifyPaymentProofUploaded({
       customerName: booking.customerName,
