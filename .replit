@@ -3,7 +3,7 @@ modules = ["nodejs-20", "web"]
 
 [deployment]
 router = "application"
-deploymentTarget = "autoscale"
+deploymentTarget = "vm"
 run = ["bash", "scripts/start-prod.sh"]
 build = ["bash", "scripts/build.sh"]
 
