@@ -270,6 +270,24 @@ export async function syncMembershipToBizportal(membership: GymMembership): Prom
   }
 }
 
+export async function deleteBookingFromBizportal(orderNumber: string): Promise<void> {
+  const pool = getProdPool();
+  if (!pool) return;
+
+  try {
+    await withRetry(async () => {
+      await pool.query(
+        `DELETE FROM sport_center.sport_bookings_sync WHERE booking_code = $1`,
+        [orderNumber]
+      );
+    }, `deleteBooking:${orderNumber}`);
+
+    console.info(`[bizportalSync] ✓ Booking deleted from BizPortal: ${orderNumber}`);
+  } catch (err: any) {
+    console.error(`[bizportalSync] ✗ Booking delete failed: ${orderNumber} — ${err?.message}`);
+  }
+}
+
 export async function syncStatusToBizportal(
   orderNumber: string,
   scStatus: string,

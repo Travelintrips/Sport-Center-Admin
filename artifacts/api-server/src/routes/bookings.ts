@@ -7,7 +7,7 @@ import { notifyBookingCreated, notifyPaymentConfirmed, notifyBookingCancelled, n
 import { createWaToken } from "../lib/waTokens";
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
 import { logger } from "../lib/logger";
-import { syncBookingToBizportal, syncStatusToBizportal } from "../lib/bizportalSync";
+import { syncBookingToBizportal, syncStatusToBizportal, deleteBookingFromBizportal } from "../lib/bizportalSync";
 import { calculateTax, recordTaxTransaction, reverseTaxTransaction } from "../lib/tax";
 import { reverseJournalEntry, reversePublicAccountingEntry } from "../lib/accounting";
 
@@ -1022,8 +1022,11 @@ router.delete("/bookings/:id", adminMiddleware, async (req, res) => {
       res.status(404).json({ error: "Not found" });
       return;
     }
+    const orderNumber = booking.orderNumber;
     await db.delete(paymentsTable).where(eq(paymentsTable.bookingId, id));
     await db.delete(bookingsTable).where(eq(bookingsTable.id, id));
+    // Hapus juga dari BizPortal agar data tetap sinkron
+    deleteBookingFromBizportal(orderNumber).catch(() => {});
     res.json({ success: true });
   } catch (err) {
     req.log.error({ err }, "Delete booking error");
