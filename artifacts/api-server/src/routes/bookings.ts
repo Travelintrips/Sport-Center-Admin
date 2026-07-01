@@ -1320,15 +1320,14 @@ async function runApVerification(
       groupUpdatedCount++;
     }
 
-    // Update totalPayment di booking_groups
-    if (groupUpdatedCount > 0) {
-      const allGroupBookings = await db.select({ totalPrice: bookingsTable.totalPrice })
-        .from(bookingsTable).where(eq(bookingsTable.groupRef, booking.groupRef));
-      const newGroupTotal = allGroupBookings.reduce((sum, b) => sum + Number(b.totalPrice), 0);
-      await db.update(bookingGroupsTable)
-        .set({ totalPayment: String(newGroupTotal) })
-        .where(eq(bookingGroupsTable.groupRef, booking.groupRef));
-    }
+    // Update totalPayment di booking_groups — selalu recalculate ketika ada groupRef,
+    // termasuk ketika groupUpdatedCount=0 (booking ini adalah satu-satunya / terakhir yang pending)
+    const allGroupBookings = await db.select({ totalPrice: bookingsTable.totalPrice })
+      .from(bookingsTable).where(eq(bookingsTable.groupRef, booking.groupRef));
+    const newGroupTotal = allGroupBookings.reduce((sum, b) => sum + Number(b.totalPrice), 0);
+    await db.update(bookingGroupsTable)
+      .set({ totalPayment: String(newGroupTotal) })
+      .where(eq(bookingGroupsTable.groupRef, booking.groupRef));
   }
 
   return {

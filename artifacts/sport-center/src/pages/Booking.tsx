@@ -1572,6 +1572,12 @@ export default function Booking() {
                     </div>
                   </>
                 )}
+                {isAP && (
+                  <div className="flex items-start gap-1.5 text-xs text-orange-600 bg-orange-50 border border-orange-200 rounded-md px-2.5 py-2">
+                    <AlertTriangle size={12} className="shrink-0 mt-0.5" />
+                    <span>{t("Diskon AP2 diterapkan setelah verifikasi ID Card.", "AP2 discount applied after ID Card verification.")}</span>
+                  </div>
+                )}
                 {couponResult && (
                   <div className="flex justify-between text-green-700 font-medium">
                     <span className="flex items-center gap-1">
