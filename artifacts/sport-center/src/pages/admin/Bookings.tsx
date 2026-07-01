@@ -1921,6 +1921,7 @@ export default function AdminBookings() {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [showMergeDialog, setShowMergeDialog] = useState(false);
   const [dissolvingRef, setDissolvingRef] = useState<string | null>(null);
+  const [reapplyingRef, setReapplyingRef] = useState<string | null>(null);
   const [waAlertOpen, setWaAlertOpen] = useState(true);
   const [sendingWaId, setSendingWaId] = useState<number | null>(null);
 
@@ -1990,6 +1991,27 @@ export default function AdminBookings() {
       toast({ title: "Gagal", description: err.message, variant: "destructive" });
     } finally {
       setDissolvingRef(null);
+    }
+  };
+
+  const reapplyGroupDiscount = async (groupRef: string) => {
+    setReapplyingRef(groupRef);
+    try {
+      const res = await fetch(`/api/bookings/groups/${groupRef}/reapply-discount`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error ?? `HTTP ${res.status}`);
+      await queryClient.invalidateQueries({ queryKey: getListBookingsQueryKey() });
+      toast({
+        title: `Diskon diterapkan ke ${data.updatedCount} sesi`,
+        description: data.message,
+      });
+    } catch (err: any) {
+      toast({ title: "Gagal re-apply diskon", description: err.message, variant: "destructive" });
+    } finally {
+      setReapplyingRef(null);
     }
   };
 
@@ -2658,6 +2680,23 @@ export default function AdminBookings() {
                                 <FileText size={12} />
                                 Inv. Grup
                               </motion.a>
+                              {b.customerType === "angkasa_pura" && (
+                                <motion.button
+                                  whileHover={{ scale: 1.04 }}
+                                  whileTap={{ scale: 0.96 }}
+                                  onClick={() => reapplyGroupDiscount(b.groupRef!)}
+                                  disabled={reapplyingRef === b.groupRef}
+                                  title="Terapkan ulang diskon AP ke semua sesi grup"
+                                  className="flex items-center gap-1 h-7 px-2 rounded-lg text-xs font-semibold text-emerald-700 border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 dark:border-emerald-700 dark:bg-emerald-900/20 dark:hover:bg-emerald-900/40 transition-colors opacity-0 group-hover:opacity-100 whitespace-nowrap disabled:opacity-50"
+                                >
+                                  {reapplyingRef === b.groupRef ? (
+                                    <span className="w-3 h-3 border border-emerald-500 border-t-transparent rounded-full animate-spin" />
+                                  ) : (
+                                    <ShieldCheck size={12} />
+                                  )}
+                                  Fix Diskon
+                                </motion.button>
+                              )}
                               <motion.button
                                 whileHover={{ scale: 1.04 }}
                                 whileTap={{ scale: 0.96 }}

@@ -1365,6 +1365,96 @@ router.post("/bookings/:id/verify", adminMiddleware, async (req, res) => {
   }
 });
 
+// ─── POST /bookings/groups/:groupRef/reapply-discount — paksa ulang diskon AP ke semua sesi ──
+router.post("/bookings/groups/:groupRef/reapply-discount", adminMiddleware, async (req, res) => {
+  try {
+    const { groupRef } = req.params;
+
+    // Ambil semua booking dalam grup yang merupakan AP
+    const allBookings = await db.select().from(bookingsTable)
+      .where(and(
+        eq(bookingsTable.groupRef, groupRef),
+        eq(bookingsTable.customerType, "angkasa_pura"),
+      ));
+
+    if (!allBookings.length) {
+      res.status(404).json({ error: "Tidak ada booking AP dalam grup ini" });
+      return;
+    }
+
+    // Ambil setting diskon AP
+    const [setting] = await db.select().from(discountSettingsTable)
+      .where(eq(discountSettingsTable.customerType, "angkasa_pura")).limit(1);
+    const discountEnabled = !!setting && setting.isActive;
+    const discountPct = discountEnabled ? setting.discountPercentage : 0;
+
+    if (!discountEnabled || discountPct <= 0) {
+      res.status(400).json({ error: "Diskon AP sedang tidak aktif atau 0%" });
+      return;
+    }
+
+    let updatedCount = 0;
+    const details: { orderNumber: string; before: number; after: number; discount: number }[] = [];
+
+    for (const booking of allBookings) {
+      const basePrice = booking.basePrice == null ? Number(booking.totalPrice) : Number(booking.basePrice);
+      const discountAmount = Math.round((basePrice * discountPct) / 100);
+      const finalPrice = basePrice - discountAmount;
+      const taxCalc = await calculateTax(finalPrice, "sport_booking", booking.bookingDate ?? undefined);
+
+      const before = Number(booking.grandTotal ?? booking.totalPrice);
+
+      await db.update(bookingsTable).set({
+        verificationStatus: "verified",
+        apDiscountAmount: String(discountAmount),
+        discountAmount: String(discountAmount),
+        totalPrice: String(finalPrice),
+        grandTotal: taxCalc.taxAmount > 0 ? String(taxCalc.grandTotal) : null,
+        dpp: taxCalc.taxAmount > 0 ? String(taxCalc.dpp) : null,
+        ppnAmount: taxCalc.taxAmount > 0 ? String(taxCalc.taxAmount) : null,
+      }).where(eq(bookingsTable.id, booking.id));
+
+      details.push({
+        orderNumber: booking.orderNumber,
+        before,
+        after: taxCalc.taxAmount > 0 ? taxCalc.grandTotal : finalPrice,
+        discount: discountAmount,
+      });
+      updatedCount++;
+    }
+
+    // Update group total
+    const newGroupTotal = details.reduce((sum, d) => sum + d.after, 0);
+    await db.update(bookingGroupsTable)
+      .set({ totalPayment: String(newGroupTotal) })
+      .where(eq(bookingGroupsTable.groupRef, groupRef));
+
+    const { ipAddress, userAgent } = getClientInfo(req);
+    const userInfo = getUserFromReq(req);
+    await logAudit({
+      ...userInfo,
+      action: "AP_GROUP_DISCOUNT_REAPPLIED",
+      entity: "booking_group",
+      after: { groupRef, discountPct, updatedCount, newGroupTotal },
+      ipAddress,
+      userAgent,
+    });
+
+    res.json({
+      success: true,
+      groupRef,
+      discountPercentage: discountPct,
+      updatedCount,
+      newGroupTotal,
+      details,
+      message: `Diskon ${discountPct}% berhasil diterapkan ulang ke ${updatedCount} sesi dalam grup ${groupRef}.`,
+    });
+  } catch (err) {
+    req.log.error({ err }, "Reapply group discount error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 // ─── GET /admin/bookings/wa-unnotified — bookings waiting_confirmation dengan belum ada WA ────
 router.get("/admin/bookings/wa-unnotified", adminMiddleware, async (req, res) => {
   try {

@@ -237,17 +237,26 @@ async function resolveGroupInvoiceData(groupRef: string): Promise<InvoiceData | 
     facilityNames[firstBooking.facilityId] = facility?.name ?? "—";
   }
 
-  const sessions: InvoiceSession[] = groupBookings.map(b => ({
-    orderNumber: b.orderNumber,
-    facilityName: facilityNames[b.facilityId] ?? facility?.name ?? "—",
-    bookingDate: b.bookingDate,
-    startTime: b.startTime,
-    endTime: b.endTime,
-    durationHours: b.durationHours,
-    grandTotal: b.grandTotal != null ? Number(b.grandTotal) : Number(b.totalPrice),
-    discountAmount: Number(b.discountAmount ?? 0),
-    status: b.status,
-  }));
+  const sessions: InvoiceSession[] = groupBookings.map(b => {
+    const discountAmt = Number(b.discountAmount ?? 0);
+    const grandTotalVal = b.grandTotal != null ? Number(b.grandTotal) : Number(b.totalPrice);
+    // basePrice: harga asli sebelum diskon
+    const basePriceVal = b.basePrice != null
+      ? Number(b.basePrice)
+      : (discountAmt > 0 ? Number(b.totalPrice) + discountAmt : grandTotalVal);
+    return {
+      orderNumber: b.orderNumber,
+      facilityName: facilityNames[b.facilityId] ?? facility?.name ?? "—",
+      bookingDate: b.bookingDate,
+      startTime: b.startTime,
+      endTime: b.endTime,
+      durationHours: b.durationHours,
+      basePrice: basePriceVal,
+      grandTotal: grandTotalVal,
+      discountAmount: discountAmt,
+      status: b.status,
+    };
+  });
 
   const totalDiscount = sessions.reduce((sum, s) => sum + (s.discountAmount ?? 0), 0);
 
