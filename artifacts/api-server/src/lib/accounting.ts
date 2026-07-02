@@ -94,10 +94,11 @@ export async function createPublicAccountingEntry(
     return;
   }
 
-  // PPN inklusif: grandTotal = subtotal (harga sudah termasuk PPN)
-  // Pendapatan bersih = subtotal - ppnAmount
-  const grandTotal = subtotal;
-  const netRevenue = subtotal - ppnAmount;
+  // subtotal = DPP (harga sebelum PPN), ppnAmount = PPN 11%
+  // grandTotal = jumlah yang diterima dari customer (masuk ke Bank Mandiri CST)
+  // netRevenue = DPP = subtotal (pendapatan bersih, tidak termasuk PPN)
+  const grandTotal = subtotal + ppnAmount;
+  const netRevenue = subtotal;
   const hasPpn = ppnAmount > 0;
   const year = new Date(journalDate).getFullYear();
   const period = journalDate.slice(0, 7);
@@ -156,7 +157,7 @@ export async function createPublicAccountingEntry(
       taxRate: "11",
       dpp: String(subtotal),
       dppNilaiLain: String(Math.round((subtotal * 11) / 12 * 100) / 100),
-      grandTotal: String(subtotal),
+      grandTotal: String(grandTotal),
       taxAmount: String(ppnAmount),
       transactionDate: period,
       status: "posted",
@@ -299,8 +300,9 @@ export async function createJournalEntry(
   ppnAmount: number,
   journalDate: string,
 ): Promise<void> {
-  const grandTotal = subtotal;
-  const netRevenue = subtotal - ppnAmount;
+  // subtotal = DPP (sebelum PPN), grandTotal = DPP + PPN = jumlah yang masuk ke bank
+  const grandTotal = subtotal + ppnAmount;
+  const netRevenue = subtotal;
 
   const [journal] = await db
     .insert(accountingJournalsTable)
