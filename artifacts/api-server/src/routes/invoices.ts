@@ -2,12 +2,14 @@ import { Router } from "express";
 import {
   db,
   bookingsTable,
+  bookingGroupsTable,
   facilitiesTable,
   settingsTable,
   taxSettingsTable,
   companyDocumentSettingsTable,
 } from "@workspace/db";
 import { eq, and, inArray } from "drizzle-orm";
+import type { InvoiceSession } from "../lib/invoiceTemplate";
 import { adminMiddleware } from "../lib/auth";
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
 import { buildInvoiceHtml, type InvoiceData } from "../lib/invoiceTemplate";
@@ -67,7 +69,7 @@ async function resolveInvoiceData(orderNumber: string): Promise<InvoiceData | nu
       .select()
       .from(taxSettingsTable)
       .where(
-        taxSettingsTable.isActive
+        eq(taxSettingsTable.isActive, true)
       )
       .limit(1);
 
@@ -143,11 +145,177 @@ async function resolveInvoiceData(orderNumber: string): Promise<InvoiceData | nu
   };
 }
 
+// ─── Group invoice resolver ───────────────────────────────────────────────────
+
+async function resolveGroupInvoiceData(groupRef: string): Promise<InvoiceData | null> {
+  const [group] = await db
+    .select()
+    .from(bookingGroupsTable)
+    .where(eq(bookingGroupsTable.groupRef, groupRef))
+    .limit(1);
+  if (!group) return null;
+
+  // Ambil semua booking dalam grup, urutkan berdasarkan tanggal
+  const groupBookings = await db
+    .select()
+    .from(bookingsTable)
+    .where(eq(bookingsTable.groupRef, groupRef));
+
+  if (!groupBookings.length) return null;
+
+  groupBookings.sort((a, b) => a.bookingDate.localeCompare(b.bookingDate));
+
+  const firstBooking = groupBookings[0]!;
+
+  const [facility] = await db
+    .select()
+    .from(facilitiesTable)
+    .where(eq(facilitiesTable.id, firstBooking.facilityId))
+    .limit(1);
+
+  const [settings] = await db.select().from(settingsTable).limit(1);
+
+  const docRows = await db
+    .select()
+    .from(companyDocumentSettingsTable)
+    .where(inArray(companyDocumentSettingsTable.documentType, ["invoice", "general"]));
+  const invoiceDoc = docRows.find(r => r.documentType === "invoice");
+  const generalDoc = docRows.find(r => r.documentType === "general");
+
+  function pick<T>(invoice: T | null | undefined, general: T | null | undefined, fallback: T): T {
+    return (invoice !== null && invoice !== undefined && invoice !== "" as unknown as T)
+      ? invoice as T
+      : (general !== null && general !== undefined && general !== "" as unknown as T)
+        ? general as T
+        : fallback;
+  }
+
+  // Hitung total dari semua sesi (grandTotal masing-masing sesi)
+  const totalGrandTotal = groupBookings.reduce((sum, b) => {
+    const gt = b.grandTotal != null ? Number(b.grandTotal) : Number(b.totalPrice);
+    return sum + gt;
+  }, 0);
+
+  // Tax rate dari booking pertama atau settings
+  let ppnRate = firstBooking.ppnRate ? Number(firstBooking.ppnRate) : 0;
+  if (!ppnRate) {
+    const [taxSetting] = await db
+      .select()
+      .from(taxSettingsTable)
+      .where(eq(taxSettingsTable.isActive, true))
+      .limit(1);
+    ppnRate = taxSetting ? Number(taxSetting.taxRate) : 11;
+  }
+
+  // DPP Nilai Lain formula (PMK-131/2024) pada total grup
+  let dpp: number;
+  let dppNilaiLain: number;
+  let ppnAmount: number;
+  let grandTotal = totalGrandTotal;
+
+  if (ppnRate > 0) {
+    const rate = ppnRate / 100;
+    dpp = Math.round(grandTotal / (1 + rate));
+    dppNilaiLain = Math.round(dpp * 11 / 12);
+    ppnAmount = Math.round(dppNilaiLain * 0.12);
+    grandTotal = dpp + ppnAmount;
+  } else {
+    dpp = grandTotal;
+    dppNilaiLain = 0;
+    ppnAmount = 0;
+  }
+
+  // Buat sessions array untuk ditampilkan di template
+  const facilityNames: Record<number, string> = {};
+  const facilityIds = [...new Set(groupBookings.map(b => b.facilityId))];
+  if (facilityIds.length > 1) {
+    const facilities = await db.select({ id: facilitiesTable.id, name: facilitiesTable.name })
+      .from(facilitiesTable)
+      .where(inArray(facilitiesTable.id, facilityIds));
+    for (const f of facilities) facilityNames[f.id] = f.name;
+  } else {
+    facilityNames[firstBooking.facilityId] = facility?.name ?? "—";
+  }
+
+  const sessions: InvoiceSession[] = groupBookings.map(b => {
+    const discountAmt = Number(b.discountAmount ?? 0);
+    const grandTotalVal = b.grandTotal != null ? Number(b.grandTotal) : Number(b.totalPrice);
+    // basePrice: harga asli sebelum diskon
+    const basePriceVal = b.basePrice != null
+      ? Number(b.basePrice)
+      : (discountAmt > 0 ? Number(b.totalPrice) + discountAmt : grandTotalVal);
+    return {
+      orderNumber: b.orderNumber,
+      facilityName: facilityNames[b.facilityId] ?? facility?.name ?? "—",
+      bookingDate: b.bookingDate,
+      startTime: b.startTime,
+      endTime: b.endTime,
+      durationHours: b.durationHours,
+      basePrice: basePriceVal,
+      grandTotal: grandTotalVal,
+      discountAmount: discountAmt,
+      status: b.status,
+    };
+  });
+
+  const totalDiscount = sessions.reduce((sum, s) => sum + (s.discountAmount ?? 0), 0);
+
+  // Nomor invoice grup
+  const datePart = firstBooking.bookingDate.replace(/-/g, "").substring(0, 8);
+  const groupSeq = groupRef.replace(/[^0-9]/g, "").padStart(6, "0");
+  const invoiceNumber = `INV/SC/GRP/${datePart}/${groupSeq}`;
+
+  return {
+    invoiceNumber,
+    invoiceDate: new Date().toISOString().split("T")[0]!,
+    orderNumber: groupRef,
+    status: firstBooking.status,
+
+    customerName: firstBooking.customerName,
+    customerPhone: firstBooking.customerPhone,
+    customerEmail: firstBooking.customerEmail ?? "",
+
+    facilityName: facility?.name ?? "—",
+    bookingDate: firstBooking.bookingDate,
+    startTime: firstBooking.startTime,
+    endTime: firstBooking.endTime,
+    durationHours: firstBooking.durationHours,
+
+    pricePerHour: facility ? Number(facility.pricePerHour) : 0,
+    dpp,
+    dppNilaiLain,
+    ppnRate,
+    ppnAmount,
+    grandTotal,
+
+    promoCode: firstBooking.promoCode ?? null,
+    discountAmount: totalDiscount,
+
+    groupRef,
+    sessions,
+
+    centerName: settings?.centerName || "Sport Center Soekarno-Hatta",
+    centerAddress: settings?.address || "Kawasan Bandara Soekarno-Hatta, Tangerang 19110",
+    centerPhone: settings?.phone || "",
+    bankName: pick(invoiceDoc?.bankName, generalDoc?.bankName, settings?.bankName || "Bank Mandiri"),
+    bankAccount: pick(invoiceDoc?.bankAccount, generalDoc?.bankAccount, settings?.bankAccount || ""),
+    bankAccountName: pick(invoiceDoc?.bankHolder, generalDoc?.bankHolder, settings?.bankAccountName || "Sport Center Soekarno-Hatta"),
+
+    logoUrl: invoiceDoc?.logoUrl ?? generalDoc?.logoUrl ?? (settings as any)?.logoUrl ?? null,
+    kopSuratHtml: invoiceDoc?.kopSuratHtml ?? generalDoc?.kopSuratHtml ?? null,
+    financeName: pick(invoiceDoc?.financeName, generalDoc?.financeName, ""),
+    financeTitle: pick(invoiceDoc?.financeTitle, generalDoc?.financeTitle, "Finance Manager"),
+    signatureUrl: invoiceDoc?.signatureUrl ?? generalDoc?.signatureUrl ?? null,
+    footerText: invoiceDoc?.footerHtml ?? generalDoc?.footerHtml ?? null,
+    invoicePrefix: pick(invoiceDoc?.prefixNumber, generalDoc?.prefixNumber, "INV"),
+  };
+}
+
 // ─── GET /invoices/booking/:orderNumber (JSON) ────────────────────────────────
 
 router.get("/invoices/booking/:orderNumber", adminMiddleware, async (req, res) => {
   try {
-    const { orderNumber } = req.params;
+    const orderNumber = String(req.params.orderNumber);
     const data = await resolveInvoiceData(orderNumber);
     if (!data) {
       res.status(404).json({ error: "Booking tidak ditemukan" });
@@ -181,7 +349,7 @@ router.get("/invoices/booking/:orderNumber", adminMiddleware, async (req, res) =
 
 router.get("/invoices/booking/:orderNumber/html", adminMiddleware, async (req, res) => {
   try {
-    const { orderNumber } = req.params;
+    const orderNumber = String(req.params.orderNumber);
     const autoPrint = req.query.print === "1";
 
     const data = await resolveInvoiceData(orderNumber);
@@ -221,7 +389,7 @@ router.get("/invoices/booking/:orderNumber/html", adminMiddleware, async (req, r
 
 router.get("/invoices/booking/:orderNumber/pdf", adminMiddleware, async (req, res) => {
   try {
-    const { orderNumber } = req.params;
+    const orderNumber = String(req.params.orderNumber);
 
     const data = await resolveInvoiceData(orderNumber);
     if (!data) {
@@ -254,11 +422,69 @@ router.get("/invoices/booking/:orderNumber/pdf", adminMiddleware, async (req, re
   }
 });
 
+// ─── GET /invoices/group/:groupRef (JSON) ────────────────────────────────────
+
+router.get("/invoices/group/:groupRef", adminMiddleware, async (req, res) => {
+  try {
+    const groupRef = String(req.params.groupRef);
+    const data = await resolveGroupInvoiceData(groupRef);
+    if (!data) {
+      res.status(404).json({ error: "Grup booking tidak ditemukan" });
+      return;
+    }
+    res.json(data);
+  } catch (err) {
+    req.log.error({ err }, "Get group invoice data error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ─── GET /invoices/group/:groupRef/html ──────────────────────────────────────
+
+router.get("/invoices/group/:groupRef/html", adminMiddleware, async (req, res) => {
+  try {
+    const groupRef = String(req.params.groupRef);
+    const autoPrint = req.query.print === "1";
+
+    const data = await resolveGroupInvoiceData(groupRef);
+    if (!data) {
+      res.status(404).send("<h2>Grup booking tidak ditemukan</h2>");
+      return;
+    }
+
+    const html = buildInvoiceHtml(data, { autoPrint });
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.send(html);
+  } catch (err) {
+    req.log.error({ err }, "Get group invoice HTML error");
+    res.status(500).send("<h2>Terjadi kesalahan</h2>");
+  }
+});
+
+// ─── GET /invoices/group/:groupRef/pdf ───────────────────────────────────────
+
+router.get("/invoices/group/:groupRef/pdf", adminMiddleware, async (req, res) => {
+  try {
+    const groupRef = String(req.params.groupRef);
+    const data = await resolveGroupInvoiceData(groupRef);
+    if (!data) {
+      res.status(404).send("<h2>Grup booking tidak ditemukan</h2>");
+      return;
+    }
+    const html = buildInvoiceHtml(data, { autoPrint: true });
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.send(html);
+  } catch (err) {
+    req.log.error({ err }, "Get group invoice PDF error");
+    res.status(500).send("<h2>Terjadi kesalahan</h2>");
+  }
+});
+
 // ─── POST /invoices/booking/:orderNumber/send-wa ──────────────────────────────
 
 router.post("/invoices/booking/:orderNumber/send-wa", adminMiddleware, async (req, res) => {
   try {
-    const { orderNumber } = req.params;
+    const orderNumber = String(req.params.orderNumber);
     const { customMessage } = req.body ?? {};
 
     const data = await resolveInvoiceData(orderNumber);
@@ -347,7 +573,7 @@ router.post("/invoices/booking/:orderNumber/send-wa", adminMiddleware, async (re
 
 router.post("/invoices/booking/:orderNumber/send-email", adminMiddleware, async (req, res) => {
   try {
-    const { orderNumber } = req.params;
+    const orderNumber = String(req.params.orderNumber);
 
     const data = await resolveInvoiceData(orderNumber);
     if (!data) {
@@ -369,7 +595,8 @@ router.post("/invoices/booking/:orderNumber/send-email", adminMiddleware, async 
     // Use nodemailer if available, else fail gracefully
     let nodemailer: any;
     try {
-      nodemailer = await import("nodemailer");
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      nodemailer = await import("nodemailer" as string);
     } catch {
       res.status(501).json({ error: "nodemailer tidak tersedia. Install dengan: pnpm add nodemailer" });
       return;

@@ -1,8 +1,10 @@
-import { db, notificationTemplatesTable, settingsTable } from "@workspace/db";
+import { db, notificationTemplatesTable, settingsTable, waNotifLogsTable } from "@workspace/db";
 import { renderDocumentText } from "./documentRenderer";
 import { eq } from "drizzle-orm";
 import { trackSentMessage } from "./waSentTracker";
 import { logger } from "./logger";
+import { signKwitansiToken } from "./kwitansiToken";
+import { getBaseUrl } from "./appUrl";
 
 const ENV_FONNTE_TOKEN = process.env.FONNTE_TOKEN || "";
 const ENV_FONNTE_ADMIN_WA = process.env.FONNTE_ADMIN_WA || "";
@@ -11,6 +13,8 @@ const ENV_ADMIN_WA_PHONES = process.env.ADMIN_WA_PHONES || "";
 function interpolate(template: string, vars: Record<string, string>): string {
   return template.replace(/\{\{(\w+)\}\}/g, (_, key) => vars[key] ?? "");
 }
+
+// getBaseUrl() imported from ./appUrl — reads paymentDomain from settings DB with 5-min cache
 
 async function getWaConfig(): Promise<{ token: string; adminPhones: string[] }> {
   try {
@@ -50,10 +54,15 @@ function isValidPhone(phone: string): boolean {
   return /^62\d{8,13}$/.test(phone);
 }
 
-async function sendWA(phone: string, message: string): Promise<void> {
+async function sendWA(
+  phone: string,
+  message: string,
+  ctx?: { bookingId?: number; orderNumber?: string; event?: string },
+): Promise<void> {
   const cleanPhone = cleanPhoneNumber(phone);
   if (!cleanPhone || !isValidPhone(cleanPhone)) {
     logger.warn({ phone, cleanPhone }, "[WA] sendWA: nomor tidak valid, pesan tidak dikirim");
+    if (ctx) logWaSend(cleanPhone || phone, message, "failed", "Nomor tidak valid", ctx).catch(() => {});
     return;
   }
   // Catat SEGERA sebelum await apapun — Fonnte echo bisa datang saat getWaConfig() pending
@@ -61,6 +70,7 @@ async function sendWA(phone: string, message: string): Promise<void> {
   const { token } = await getWaConfig();
   if (!token) {
     logger.error("[WA] sendWA: FONNTE_TOKEN kosong — pesan tidak dikirim ke " + cleanPhone);
+    if (ctx) logWaSend(cleanPhone, message, "failed", "FONNTE_TOKEN kosong", ctx).catch(() => {});
     return;
   }
   logger.info({ target: cleanPhone }, "[WA] Mengirim pesan WA via Fonnte");
@@ -76,17 +86,21 @@ async function sendWA(phone: string, message: string): Promise<void> {
     const body = await resp.text().catch(() => "(no body)");
     if (!resp.ok) {
       logger.error({ status: resp.status, target: cleanPhone, body }, "[WA] Fonnte HTTP error");
+      if (ctx) logWaSend(cleanPhone, message, "failed", `HTTP ${resp.status}: ${body.slice(0, 200)}`, ctx).catch(() => {});
     } else {
       let json: Record<string, unknown> | null = null;
       try { json = JSON.parse(body); } catch { /* non-json */ }
       if (json && json["status"] === false) {
         logger.error({ target: cleanPhone, response: json }, "[WA] Fonnte gagal kirim pesan");
+        if (ctx) logWaSend(cleanPhone, message, "failed", JSON.stringify(json).slice(0, 200), ctx).catch(() => {});
       } else {
         logger.info({ target: cleanPhone, id: json?.["id"] }, "[WA] Pesan berhasil masuk queue Fonnte");
+        if (ctx) logWaSend(cleanPhone, message, "sent", null, ctx).catch(() => {});
       }
     }
   } catch (err) {
     logger.error({ err: (err as Error).message, target: cleanPhone }, "[WA] sendWA exception");
+    if (ctx) logWaSend(cleanPhone, message, "failed", (err as Error).message, ctx).catch(() => {});
   }
 }
 
@@ -105,6 +119,28 @@ async function getTemplate(key: string): Promise<string | null> {
     .limit(1);
   if (!tpl || !tpl.isActive) return null;
   return tpl.body;
+}
+
+async function logWaSend(
+  phone: string,
+  message: string,
+  status: "sent" | "failed",
+  errorMessage: string | null,
+  ctx?: { bookingId?: number; orderNumber?: string; event?: string },
+): Promise<void> {
+  try {
+    await db.insert(waNotifLogsTable).values({
+      bookingId: ctx?.bookingId ?? null,
+      orderNumber: ctx?.orderNumber ?? null,
+      event: ctx?.event ?? null,
+      recipientPhone: phone,
+      messagePreview: message.slice(0, 300),
+      status,
+      errorMessage,
+    });
+  } catch (err) {
+    logger.warn({ err }, "[WA] Gagal menyimpan WA log");
+  }
 }
 
 async function getBankInfo(): Promise<Record<string, string>> {
@@ -133,15 +169,31 @@ export interface BookingNotifData {
   reason?: string;
   reviewUrl?: string;
   bookingId?: number;
+  uploadProofUrl?: string;
+  statusUrl?: string;
 }
 
 export async function notifyBookingCreated(data: BookingNotifData): Promise<void> {
   const bankInfo = await getBankInfo();
-  const vars = { ...data, ...bankInfo, paymentDeadline: data.paymentDeadline ?? "" };
+  const vars = {
+    ...data,
+    ...bankInfo,
+    paymentDeadline: data.paymentDeadline ?? "",
+    uploadProofUrl: data.uploadProofUrl ?? "",
+    statusUrl: data.statusUrl ?? "",
+  };
 
   const customerTpl = await getTemplate("booking_created");
   if (customerTpl) {
-    await sendWA(data.customerPhone, interpolate(customerTpl, vars));
+    let msg = interpolate(customerTpl, vars as unknown as Record<string, string>);
+    // Append link jika template tidak menyertakan placeholder-nya
+    if (data.uploadProofUrl && !msg.includes(data.uploadProofUrl)) {
+      msg += `\n\n📎 Upload bukti transfer:\n${data.uploadProofUrl}`;
+    }
+    if (data.statusUrl && !msg.includes(data.statusUrl)) {
+      msg += `\n🔍 Cek status booking:\n${data.statusUrl}`;
+    }
+    await sendWA(data.customerPhone, msg, { bookingId: data.bookingId, orderNumber: data.orderNumber, event: "booking_created" });
   } else {
     // Fallback: pesan hardcoded jika template belum di-set
     const msg =
@@ -158,13 +210,15 @@ export async function notifyBookingCreated(data: BookingNotifData): Promise<void
       `Rekening: *${bankInfo.bankAccount}*\n` +
       `Atas Nama: *${bankInfo.bankAccountName}*\n\n` +
       (data.paymentDeadline ? `⏰ Batas pembayaran: *${data.paymentDeadline}*\n\n` : "") +
-      `Setelah transfer, segera upload bukti pembayaran di halaman booking kamu.\n\nTerima kasih! 🏆`;
-    await sendWA(data.customerPhone, msg);
+      (data.uploadProofUrl ? `📎 Upload bukti transfer:\n${data.uploadProofUrl}\n\n` : "") +
+      (data.statusUrl ? `🔍 Cek status booking:\n${data.statusUrl}\n\n` : "") +
+      `Terima kasih! 🏆`;
+    await sendWA(data.customerPhone, msg, { bookingId: data.bookingId, orderNumber: data.orderNumber, event: "booking_created" });
   }
 
   const adminTpl = await getTemplate("admin_new_booking");
   if (adminTpl) {
-    await sendWAToAdmins(interpolate(adminTpl, vars));
+    await sendWAToAdmins(interpolate(adminTpl, vars as unknown as Record<string, string>));
   } else {
     // Fallback: notifikasi admin hardcoded
     const adminMsg =
@@ -190,10 +244,10 @@ export async function notifyPaymentConfirmed(data: BookingNotifData): Promise<vo
         let msg = rendered;
         try {
           const [s] = await db.select().from(settingsTable).limit(1).catch(() => [null]);
-          const appUrl = process.env.APP_URL || (s as { appUrl?: string } | null)?.appUrl || "";
-          if (appUrl && data.orderNumber) msg += `\n\n🔗 Lihat kwitansi digital:\n${appUrl}/api/public/kwitansi/${data.orderNumber}`;
+          const appUrl = await getBaseUrl() || (s as { appUrl?: string } | null)?.appUrl || "";
+          if (appUrl && data.orderNumber) msg += `\n\n🧾 Lihat & cetak kwitansi digital:\n${appUrl}/kwitansi/${data.orderNumber}?t=${signKwitansiToken(data.orderNumber)}`;
         } catch { /* non-fatal */ }
-        await sendWA(data.customerPhone, msg);
+        await sendWA(data.customerPhone, msg, { bookingId: data.bookingId, orderNumber: data.orderNumber, event: "payment_confirmed" });
         return;
       }
     } catch { /* non-fatal — fall through to legacy template */ }
@@ -201,20 +255,41 @@ export async function notifyPaymentConfirmed(data: BookingNotifData): Promise<vo
 
   // Fallback: legacy notification template
   const tpl = await getTemplate("payment_confirmed");
-  if (!tpl) return;
-  await sendWA(data.customerPhone, interpolate(tpl, data as unknown as Record<string, string>));
+  if (tpl) {
+    await sendWA(data.customerPhone, interpolate(tpl, data as unknown as Record<string, string>), { bookingId: data.bookingId, orderNumber: data.orderNumber, event: "payment_confirmed" });
+    return;
+  }
+
+  // Final hardcoded fallback — selalu kirim meski template tidak ada di DB
+  const bankInfo = await getBankInfo();
+  const appUrl = await getBaseUrl();
+  const kwitansiUrl = appUrl && data.orderNumber ? `${appUrl}/kwitansi/${data.orderNumber}?t=${signKwitansiToken(data.orderNumber)}` : "";
+  const msg =
+    `🎉 *Pembayaran Dikonfirmasi!*\n\n` +
+    `Halo *${data.customerName}*,\n` +
+    `Pembayaran booking *${data.orderNumber}* untuk *${data.facilityName}* sudah kami verifikasi dan booking *DIKONFIRMASI* ✅\n\n` +
+    `📋 *Detail Booking:*\n` +
+    `• Tanggal: *${data.bookingDate}*\n` +
+    `• Jam: *${data.startTime} – ${data.endTime}*\n` +
+    `• Total: *Rp ${data.totalPrice}*\n\n` +
+    `📄 *Kwitansi Pembayaran*\n` +
+    `Fasilitas: ${data.facilityName}\n` +
+    `✅ Pembayaran telah dikonfirmasi\n\n` +
+    (kwitansiUrl ? `🧾 Lihat & cetak kwitansi digital:\n${kwitansiUrl}\n\n` : "") +
+    `Sampai jumpa di lapangan! 🏆`;
+  await sendWA(data.customerPhone, msg, { bookingId: data.bookingId, orderNumber: data.orderNumber, event: "payment_confirmed" });
 }
 
 export async function notifyBookingCancelled(data: BookingNotifData): Promise<void> {
   const tpl = await getTemplate("booking_cancelled");
-  if (tpl) await sendWA(data.customerPhone, interpolate(tpl, { ...data as unknown as Record<string, string>, reason: data.reason ?? "" }));
+  if (tpl) await sendWA(data.customerPhone, interpolate(tpl, { ...data as unknown as Record<string, string>, reason: data.reason ?? "" }), { bookingId: data.bookingId, orderNumber: data.orderNumber, event: "booking_cancelled" });
 }
 
 export async function notifyBookingCompleted(data: BookingNotifData): Promise<void> {
   const [s] = await db.select().from(settingsTable).limit(1).catch(() => [null]);
-  const appUrl = s?.appUrl || process.env.APP_URL || "";
+  const appUrl = s?.appUrl || await getBaseUrl();
   const tpl = await getTemplate("booking_completed");
-  if (tpl) await sendWA(data.customerPhone, interpolate(tpl, { ...data, reviewUrl: `${appUrl}/booking/${data.orderNumber}` }));
+  if (tpl) await sendWA(data.customerPhone, interpolate(tpl, { ...data, reviewUrl: `${appUrl}/booking/${data.orderNumber}` } as unknown as Record<string, string>));
 }
 
 export async function notifyBookingExpired(data: BookingNotifData): Promise<void> {
@@ -225,7 +300,19 @@ export async function notifyBookingExpired(data: BookingNotifData): Promise<void
   if (adminTpl) await sendWAToAdmins(interpolate(adminTpl, data as unknown as Record<string, string>));
 }
 
-export async function notifyPaymentProofUploaded(data: BookingNotifData): Promise<void> {
+export async function notifyPaymentProofUploaded(data: BookingNotifData & { reviewUrl?: string }): Promise<void> {
+  if (data.reviewUrl) {
+    const msg =
+      `🔔 *Bukti Pembayaran Masuk*\n\n` +
+      `Booking: *${data.orderNumber}*\n` +
+      `Customer: *${data.customerName}*\n` +
+      `Fasilitas: *${data.facilityName}*\n` +
+      `Tanggal: *${data.bookingDate}* pukul *${data.startTime}–${data.endTime}*\n` +
+      `Total: *Rp ${data.totalPrice}*\n\n` +
+      `📎 Tap link untuk lihat bukti & konfirmasi:\n${data.reviewUrl}`;
+    await sendWAToAdmins(msg);
+    return;
+  }
   const tpl = await getTemplate("admin_payment_proof");
   if (tpl) await sendWAToAdmins(interpolate(tpl, data as unknown as Record<string, string>));
 }
@@ -243,7 +330,7 @@ export interface PaymentReminderData extends BookingNotifData {
 export async function notifyPaymentReminder(data: PaymentReminderData): Promise<void> {
   const tpl = await getTemplate("payment_reminder");
   if (tpl) {
-    await sendWA(data.customerPhone, interpolate(tpl, { ...data, hoursLeft: String(data.hoursLeft) }));
+    await sendWA(data.customerPhone, interpolate(tpl, { ...data, hoursLeft: String(data.hoursLeft) } as unknown as Record<string, string>));
     return;
   }
   const bankInfo = await getBankInfo();
@@ -349,8 +436,7 @@ export async function notifyWaBookingCreated(data: WaBookingCreatedData): Promis
 
 export interface WaProofUploadedData extends BookingNotifData {
   proofUrl: string;
-  approveUrl: string;
-  rejectUrl: string;
+  reviewUrl: string;
 }
 
 export async function notifyWaProofUploaded(data: WaProofUploadedData): Promise<void> {
@@ -361,9 +447,7 @@ export async function notifyWaProofUploaded(data: WaProofUploadedData): Promise<
     `Fasilitas: *${data.facilityName}*\n` +
     `Tanggal: *${data.bookingDate}* pukul *${data.startTime}–${data.endTime}*\n` +
     `Total: *Rp ${data.totalPrice}*\n\n` +
-    `📎 Bukti: ${data.proofUrl}\n\n` +
-    `✅ Approve: ${data.approveUrl}\n` +
-    `❌ Tolak: ${data.rejectUrl}`;
+    `📎 Tap link untuk lihat bukti & konfirmasi:\n${data.reviewUrl}`;
   await sendWAToAdmins(msg);
 }
 
@@ -372,6 +456,8 @@ export interface WaBookingConfirmedData extends BookingNotifData {
 }
 
 export async function notifyWaBookingConfirmed(data: WaBookingConfirmedData): Promise<void> {
+  const appUrl = await getBaseUrl();
+  const kwitansiUrl = appUrl && data.orderNumber ? `${appUrl}/kwitansi/${data.orderNumber}?t=${signKwitansiToken(data.orderNumber)}` : data.statusUrl;
   const msg =
     `🎉 *Booking Dikonfirmasi!*\n\n` +
     `Halo *${data.customerName}*,\n` +
@@ -382,7 +468,7 @@ export async function notifyWaBookingConfirmed(data: WaBookingConfirmedData): Pr
     `• Tanggal: *${data.bookingDate}*\n` +
     `• Jam: *${data.startTime} – ${data.endTime}*\n\n` +
     `Sampai jumpa di lapangan! 🏆\n\n` +
-    `🔍 Detail booking: ${data.statusUrl}`;
+    `🧾 Kwitansi: ${kwitansiUrl}`;
   await sendWA(data.customerPhone, msg);
 }
 
@@ -610,6 +696,90 @@ export interface AuditNotifData {
   info: number;
   findings: Array<{ severity: string; category: string; message: string; count: number }>;
   auditTimestamp: string;
+}
+
+export async function notifyAdminBookingApprovalRequest(data: {
+  orderNumber: string;
+  customerName: string;
+  customerPhone: string;
+  facilityName: string;
+  bookingDate: string;
+  startTime: string;
+  endTime: string;
+  durationHours: number;
+  totalPrice: string;
+  approvalUrl: string;
+  source?: string;
+}): Promise<void> {
+  const dayOfWeek = new Date(data.bookingDate + "T00:00:00+07:00").getDay();
+  const dayType = (dayOfWeek === 0 || dayOfWeek === 6) ? "Weekend" : "Weekday";
+  const sourceTag = data.source && data.source !== "portal" ? ` [${data.source.toUpperCase()}]` : "";
+  const msg =
+    `🔔 *BOOKING BARU — PERLU APPROVAL*${sourceTag}\n\n` +
+    `Order: *${data.orderNumber}*\n` +
+    `Customer: *${data.customerName}*\n` +
+    `WA: *${data.customerPhone}*\n` +
+    `Fasilitas: *${data.facilityName}*\n` +
+    `Tanggal: *${data.bookingDate}* (${dayType})\n` +
+    `Jam: *${data.startTime} – ${data.endTime}*\n` +
+    `Durasi: *${data.durationHours} jam*\n` +
+    `Total: *Rp ${data.totalPrice}*\n\n` +
+    `👇 *Approve / Reject via link:*\n${data.approvalUrl}`;
+  await sendWAToAdmins(msg);
+}
+
+export async function notifyCustomerBookingApproved(data: {
+  customerPhone: string;
+  customerName: string;
+  orderNumber: string;
+  facilityName: string;
+  bookingDate: string;
+  startTime: string;
+  endTime: string;
+  totalPrice: string;
+  bankName: string;
+  bankAccount: string;
+  bankAccountName: string;
+  uploadProofUrl: string;
+  paymentDeadline?: string;
+  statusUrl: string;
+}): Promise<void> {
+  const msg =
+    `✅ *Booking Disetujui!*\n\n` +
+    `Halo *${data.customerName}*,\n` +
+    `Booking *${data.orderNumber}* sudah *DISETUJUI* admin! 🎉\n\n` +
+    `📋 *${data.facilityName}*\n` +
+    `📅 ${data.bookingDate} | ${data.startTime} – ${data.endTime}\n` +
+    `💰 Total: *Rp ${data.totalPrice}*\n\n` +
+    `💳 *Lakukan pembayaran ke:*\n` +
+    `Bank: *${data.bankName}*\n` +
+    `Rekening: *${data.bankAccount}*\n` +
+    `Atas Nama: *${data.bankAccountName}*\n\n` +
+    `📎 Upload bukti: ${data.uploadProofUrl}\n` +
+    (data.paymentDeadline ? `⏰ Deadline: *${data.paymentDeadline}*\n\n` : "\n") +
+    `🔍 Status: ${data.statusUrl}`;
+  await sendWA(data.customerPhone, msg);
+}
+
+export async function notifyCustomerBookingRejectedByAdmin(data: {
+  customerPhone: string;
+  customerName: string;
+  orderNumber: string;
+  facilityName: string;
+  bookingDate: string;
+  startTime: string;
+  endTime: string;
+  reason?: string;
+}): Promise<void> {
+  const msg =
+    `❌ *Booking Ditolak*\n\n` +
+    `Halo *${data.customerName}*,\n` +
+    `Maaf, booking *${data.orderNumber}* untuk *${data.facilityName}* pada *${data.bookingDate}* ` +
+    `pukul *${data.startTime}–${data.endTime}* tidak dapat disetujui.\n\n` +
+    (data.reason ? `📝 Alasan: _${data.reason}_\n\n` : "") +
+    `Silakan buat booking baru dengan jadwal lain.\n` +
+    `Terima kasih atas pengertiannya. 🙏`;
+  await sendWA(data.customerPhone, msg);
 }
 
 export async function notifyAuditCritical(data: AuditNotifData): Promise<void> {

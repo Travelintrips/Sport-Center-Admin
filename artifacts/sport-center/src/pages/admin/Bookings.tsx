@@ -6,6 +6,7 @@ import {
   useUpdatePayment,
   useCheckInBooking,
   getListBookingsQueryKey,
+  useGetBookingWaLogs,
 } from "@workspace/api-client-react";
 import { useQueryClient, useMutation, useQuery } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -54,6 +55,13 @@ import {
   Link2,
   Unlink,
   Layers,
+  MessageSquare,
+  Send,
+  ChevronDown,
+  ChevronUp,
+  MessageCircle,
+  CheckCircle,
+  AlertCircle,
 } from "lucide-react";
 import { getToken } from "@/lib/auth";
 import VerifyIdDialog from "@/components/admin/VerifyIdDialog";
@@ -328,7 +336,7 @@ function terbilang(n: number): string {
   return terbilang(Math.floor(n / 1000000000)) + " Miliar" + (n % 1000000000 !== 0 ? " " + terbilang(n % 1000000000) : "");
 }
 
-function printKwitansi(booking: any, settings?: any) {
+async function printKwitansi(booking: any, settings?: any) {
   const centerName = settings?.centerName ?? "Sport Center";
   const address = settings?.address ?? "";
   const phone = settings?.phone ?? "";
@@ -338,13 +346,6 @@ function printKwitansi(booking: any, settings?: any) {
   const logoUrl = settings?.logoUrl ?? "";
   const now = new Date().toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" });
 
-  const total = booking.grandTotal != null ? Math.round(Number(booking.grandTotal)) : Math.round(Number(booking.totalPrice));
-  const hasPpnK = booking.ppnAmount != null && Number(booking.ppnAmount) > 0;
-  const dpp = hasPpnK ? Math.round(total / 1.11) : total;
-  const dppNilaiLain = hasPpnK ? Math.round(dpp * 11 / 12) : 0;
-  const ppn = hasPpnK ? (total - dpp) : 0;
-  const terbilangText = terbilang(total) + " Rupiah";
-
   const statusLabel = booking.status === "completed" ? "Lunas" :
     booking.status === "confirmed" ? "Dikonfirmasi" :
     booking.status === "cancelled" ? "Dibatalkan" : booking.status;
@@ -352,6 +353,46 @@ function printKwitansi(booking: any, settings?: any) {
   const logoHtml = logoUrl
     ? `<img src="${logoUrl}" style="width:56px;height:56px;border-radius:50%;object-fit:cover;border:2px solid #e5e7eb;" />`
     : `<div style="width:56px;height:56px;border-radius:50%;background:#f97316;display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:900;color:#fff;flex-shrink:0;">SC</div>`;
+
+  // Untuk booking grup/recurring: fetch semua sesi, tampilkan gabungan
+  let sessions: any[] = [];
+  let isGroup = false;
+  if (booking.groupRef) {
+    try {
+      const res = await fetch(`/api/admin/bookings/groups/${booking.groupRef}/sessions`, {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      if (res.ok) {
+        sessions = await res.json();
+        isGroup = sessions.length > 1;
+      }
+    } catch { /* fallback ke single session */ }
+  }
+  if (!isGroup) {
+    sessions = [booking];
+  }
+
+  // Hitung total gabungan dari semua sesi
+  const grandTotalAll = sessions.reduce((sum: number, s: any) => {
+    return sum + (s.grandTotal != null ? Math.round(Number(s.grandTotal)) : Math.round(Number(s.totalPrice)));
+  }, 0);
+  const totalPpnAll = sessions.reduce((sum: number, s: any) => sum + (s.ppnAmount != null ? Math.round(Number(s.ppnAmount)) : 0), 0);
+  const hasPpnK = totalPpnAll > 0;
+  const dppAll = hasPpnK ? (grandTotalAll - totalPpnAll) : grandTotalAll;
+  const dppNilaiLainAll = hasPpnK ? Math.round(dppAll * 11 / 12) : 0;
+  const terbilangText = terbilang(grandTotalAll) + " Rupiah";
+
+  // Baris tabel sesi
+  const sessionRows = sessions.map((s: any, i: number) => {
+    const sTotal = s.grandTotal != null ? Math.round(Number(s.grandTotal)) : Math.round(Number(s.totalPrice));
+    return `<tr>
+      <td>${isGroup ? `Sesi ${i + 1}` : s.facilityName ?? booking.facilityName}</td>
+      <td>${formatDate(s.bookingDate)}</td>
+      <td>${String(s.startTime ?? "").slice(0, 5)} – ${String(s.endTime ?? "").slice(0, 5)}</td>
+      <td>${s.durationHours} Jam</td>
+      <td>${formatCurrency(sTotal)}</td>
+    </tr>`;
+  }).join("\n");
 
   const html = `<!DOCTYPE html>
 <html lang="id">
@@ -386,6 +427,7 @@ function printKwitansi(booking: any, settings?: any) {
     tbody tr:nth-child(even) { background: #ffeee5; }
     td { padding: 9px 10px; font-size: 12px; color: #1a1a1a; }
     td:last-child { text-align: right; font-weight: 600; }
+    .group-label { font-size: 11px; color: #f97316; font-weight: 700; margin-bottom: 6px; }
     .totals-section { display: flex; justify-content: flex-end; margin-top: 8px; margin-bottom: 16px; }
     .totals-table { width: 280px; }
     .totals-table td { padding: 4px 8px; font-size: 12px; border: none; background: transparent; }
@@ -415,7 +457,7 @@ function printKwitansi(booking: any, settings?: any) {
     </div>
     <div class="header-right">
       <div class="kwitansi-title">KWITANSI</div>
-      <div class="kwitansi-num">${booking.orderNumber}</div>
+      <div class="kwitansi-num">${booking.groupRef && isGroup ? booking.groupRef : booking.orderNumber}</div>
       <div class="kwitansi-date">Tanggal Kwitansi</div>
       <div style="font-size:11px;color:#333;margin-top:2px;">${now}</div>
     </div>
@@ -441,13 +483,21 @@ function printKwitansi(booking: any, settings?: any) {
       <div class="info-label">Status</div>
       <div class="info-value">${statusLabel}</div>
     </div>
+    ${isGroup ? `<div class="info-cell">
+      <div class="info-label">Fasilitas</div>
+      <div class="info-value">${booking.facilityName}</div>
+    </div>
+    <div class="info-cell">
+      <div class="info-label">Total Sesi</div>
+      <div class="info-value">${sessions.length} sesi</div>
+    </div>` : ""}
   </div>
 
-  <div class="section-title">Detail Pemesanan</div>
+  <div class="section-title">Detail Pemesanan${isGroup ? ` — ${sessions.length} Sesi (Recurring)` : ""}</div>
   <table>
     <thead>
       <tr>
-        <th>Fasilitas</th>
+        <th>${isGroup ? "Sesi" : "Fasilitas"}</th>
         <th>Tanggal</th>
         <th>Jam</th>
         <th>Durasi</th>
@@ -455,14 +505,7 @@ function printKwitansi(booking: any, settings?: any) {
       </tr>
     </thead>
     <tbody>
-      <tr>
-        <td>${booking.facilityName}</td>
-        <td>${formatDate(booking.bookingDate)}</td>
-        <td>${booking.startTime?.slice(0,5)} – ${booking.endTime?.slice(0,5)}</td>
-        <td>${booking.durationHours} Jam</td>
-        <td>${formatCurrency(dpp)}</td>
-      </tr>
-      <tr><td colspan="5" style="padding:4px;background:#fff7f3;"></td></tr>
+      ${sessionRows}
     </tbody>
   </table>
 
@@ -471,19 +514,19 @@ function printKwitansi(booking: any, settings?: any) {
       ${hasPpnK ? `
       <tr>
         <td>DPP</td>
-        <td>${formatCurrency(dpp)}</td>
+        <td>${formatCurrency(dppAll)}</td>
       </tr>
       <tr>
         <td style="font-size:11px;color:#999;">DPP Nilai Lain (11/12 × DPP)</td>
-        <td style="font-size:11px;color:#999;">${formatCurrency(dppNilaiLain)}</td>
+        <td style="font-size:11px;color:#999;">${formatCurrency(dppNilaiLainAll)}</td>
       </tr>
       <tr>
         <td>PPN 12%</td>
-        <td>${formatCurrency(ppn)}</td>
+        <td>${formatCurrency(totalPpnAll)}</td>
       </tr>` : ""}
       <tr class="grand-total">
-        <td>Total DPP + PPN</td>
-        <td>${formatCurrency(total)}</td>
+        <td>${isGroup ? `Total ${sessions.length} Sesi` : "Total DPP + PPN"}</td>
+        <td>${formatCurrency(grandTotalAll)}</td>
       </tr>
     </table>
   </div>
@@ -657,6 +700,102 @@ function ProofImage({ proofUrl }: { proofUrl: string }) {
           </a>
         </div>
       )}
+    </div>
+  );
+}
+
+/* ─── WA Notif Logs Panel ───────────────────────────────────────── */
+
+const EVENT_LABEL: Record<string, string> = {
+  booking_created: "Booking Dibuat",
+  payment_confirmed: "Pembayaran Dikonfirmasi",
+  booking_cancelled: "Booking Dibatalkan",
+  booking_expired: "Booking Kedaluwarsa",
+  booking_completed: "Booking Selesai",
+  dp_paid: "DP Dibayar",
+  resend: "Kirim Ulang",
+};
+
+function WaNotifLogsPanel({ bookingId }: { bookingId: number }) {
+  const [expanded, setExpanded] = useState(false);
+  const { data: logs, isLoading } = useGetBookingWaLogs(bookingId, {
+    query: { enabled: expanded, queryKey: ["booking-wa-logs", bookingId] },
+  });
+
+  return (
+    <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        className="w-full flex items-center justify-between px-4 py-2.5 bg-slate-50 dark:bg-slate-800/50 hover:bg-slate-100 dark:hover:bg-slate-700/50 transition-colors text-left"
+      >
+        <div className="flex items-center gap-2">
+          <MessageCircle size={13} className="text-emerald-500" />
+          <span className="text-xs font-semibold text-slate-600 dark:text-slate-300 uppercase tracking-wide">Riwayat Notifikasi WA</span>
+          {!expanded && logs && logs.length > 0 && (
+            <span className="bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold px-1.5 py-0.5 rounded-full">{logs.length}</span>
+          )}
+        </div>
+        {expanded ? <ChevronUp size={13} className="text-slate-400" /> : <ChevronDown size={13} className="text-slate-400" />}
+      </button>
+
+      <AnimatePresence>
+        {expanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="overflow-hidden"
+          >
+            <div className="p-3 space-y-2">
+              {isLoading ? (
+                <div className="space-y-2">
+                  {[1, 2].map((i) => <Skeleton key={i} className="h-12 w-full rounded-lg" />)}
+                </div>
+              ) : !logs || logs.length === 0 ? (
+                <div className="flex items-center justify-center gap-2 py-4 text-slate-400 text-xs">
+                  <MessageCircle size={14} />
+                  <span>Belum ada log pengiriman WA</span>
+                </div>
+              ) : (
+                logs.map((log) => (
+                  <div key={log.id} className="rounded-lg border border-slate-100 dark:border-slate-700 p-3 space-y-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5">
+                        {log.status === "sent" ? (
+                          <CheckCircle size={12} className="text-emerald-500 shrink-0" />
+                        ) : (
+                          <AlertCircle size={12} className="text-red-500 shrink-0" />
+                        )}
+                        <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+                          {log.event ? (EVENT_LABEL[log.event] ?? log.event) : "Notifikasi"}
+                        </span>
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${log.status === "sent" ? "bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400" : "bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400"}`}>
+                          {log.status === "sent" ? "Terkirim" : "Gagal"}
+                        </span>
+                      </div>
+                      <span className="text-[10px] text-slate-400 shrink-0">
+                        {new Date(log.sentAt).toLocaleString("id-ID", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-slate-500">📱 {log.recipientPhone}</div>
+                    {log.messagePreview && (
+                      <div className="text-[10px] text-slate-400 bg-slate-50 dark:bg-slate-800 rounded px-2 py-1.5 line-clamp-2 font-mono leading-relaxed">
+                        {log.messagePreview}
+                      </div>
+                    )}
+                    {log.status === "failed" && log.errorMessage && (
+                      <div className="text-[10px] text-red-500 bg-red-50 dark:bg-red-900/10 rounded px-2 py-1">
+                        ⚠ {log.errorMessage}
+                      </div>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -1145,6 +1284,9 @@ function BookingDetailDrawer({
               </div>
             </div>
           </div>
+
+          {/* Riwayat Notifikasi WA */}
+          <WaNotifLogsPanel bookingId={booking.id} />
 
           {/* Delete Booking */}
           <div className="rounded-xl border border-red-200 dark:border-red-900/40 overflow-hidden">
@@ -1779,9 +1921,44 @@ export default function AdminBookings() {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [showMergeDialog, setShowMergeDialog] = useState(false);
   const [dissolvingRef, setDissolvingRef] = useState<string | null>(null);
+  const [reapplyingRef, setReapplyingRef] = useState<string | null>(null);
+  const [waAlertOpen, setWaAlertOpen] = useState(true);
+  const [sendingWaId, setSendingWaId] = useState<number | null>(null);
 
   const { data: rawBookings, isLoading } = useListBookings();
   const bookings = rawBookings ?? [];
+
+  const {
+    data: waUnnotified = [],
+    isLoading: waUnnotifiedLoading,
+    refetch: refetchWaUnnotified,
+  } = useQuery<any[]>({
+    queryKey: ["wa-unnotified"],
+    queryFn: () =>
+      fetch("/api/admin/bookings/wa-unnotified", {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      }).then((r) => r.json()),
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+  });
+
+  const handleResendWa = async (bookingId: number) => {
+    setSendingWaId(bookingId);
+    try {
+      const res = await fetch(`/api/admin/bookings/${bookingId}/resend-wa`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error ?? `HTTP ${res.status}`);
+      toast({ title: "WA berhasil dikirim ke admin" });
+      refetchWaUnnotified();
+    } catch (err: any) {
+      toast({ title: "Gagal kirim WA", description: err?.message, variant: "destructive" });
+    } finally {
+      setSendingWaId(null);
+    }
+  };
 
   const { data: groupsData, refetch: refetchGroups } = useQuery({
     queryKey: ["booking-groups"],
@@ -1814,6 +1991,27 @@ export default function AdminBookings() {
       toast({ title: "Gagal", description: err.message, variant: "destructive" });
     } finally {
       setDissolvingRef(null);
+    }
+  };
+
+  const reapplyGroupDiscount = async (groupRef: string) => {
+    setReapplyingRef(groupRef);
+    try {
+      const res = await fetch(`/api/bookings/groups/${groupRef}/reapply-discount`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error ?? `HTTP ${res.status}`);
+      await queryClient.invalidateQueries({ queryKey: getListBookingsQueryKey() });
+      toast({
+        title: `Diskon diterapkan ke ${data.updatedCount} sesi`,
+        description: data.message,
+      });
+    } catch (err: any) {
+      toast({ title: "Gagal re-apply diskon", description: err.message, variant: "destructive" });
+    } finally {
+      setReapplyingRef(null);
     }
   };
 
@@ -2050,6 +2248,124 @@ export default function AdminBookings() {
             }, 80);
           }}
         />
+      )}
+
+      {/* WA Belum Terkirim Panel */}
+      {!waUnnotifiedLoading && waUnnotified.length > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: -6 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="rounded-2xl border border-orange-200 dark:border-orange-800/60 bg-orange-50 dark:bg-orange-950/30 overflow-hidden"
+        >
+          {/* Header */}
+          <button
+            onClick={() => setWaAlertOpen((v) => !v)}
+            className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-orange-100/60 dark:hover:bg-orange-900/20 transition-colors"
+          >
+            <div className="flex items-center gap-2.5">
+              <div className="w-7 h-7 rounded-lg bg-orange-500 flex items-center justify-center shrink-0">
+                <MessageSquare size={14} className="text-white" />
+              </div>
+              <div>
+                <span className="font-bold text-sm text-orange-800 dark:text-orange-200">
+                  WA Belum Terkirim
+                </span>
+                <span className="ml-2 text-xs font-semibold px-2 py-0.5 rounded-full bg-orange-500 text-white">
+                  {waUnnotified.length}
+                </span>
+              </div>
+              <span className="text-xs text-orange-600 dark:text-orange-400 hidden sm:block">
+                — Booking menunggu konfirmasi namun notifikasi WA ke admin belum terkirim
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={(e) => { e.stopPropagation(); refetchWaUnnotified(); }}
+                className="p-1.5 rounded-lg text-orange-500 hover:bg-orange-100 dark:hover:bg-orange-900/40 transition-colors"
+                title="Refresh"
+              >
+                <RefreshCw size={13} />
+              </button>
+              {waAlertOpen ? (
+                <ChevronUp size={16} className="text-orange-500 shrink-0" />
+              ) : (
+                <ChevronDown size={16} className="text-orange-500 shrink-0" />
+              )}
+            </div>
+          </button>
+
+          {/* List */}
+          <AnimatePresence>
+            {waAlertOpen && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.2 }}
+                className="overflow-hidden"
+              >
+                <div className="divide-y divide-orange-100 dark:divide-orange-900/40 border-t border-orange-200 dark:border-orange-800/60">
+                  {waUnnotified.map((b: any) => (
+                    <div
+                      key={b.id}
+                      className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-orange-50/80 dark:hover:bg-orange-950/40"
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="shrink-0 w-2 h-2 rounded-full bg-orange-400 animate-pulse" />
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-xs font-black text-slate-800 dark:text-white">
+                              {b.orderNumber}
+                            </span>
+                            <span className="text-xs text-slate-500 dark:text-slate-400">
+                              {b.customerName}
+                            </span>
+                            <span className="text-xs text-slate-400">·</span>
+                            <span className="text-xs text-slate-500 dark:text-slate-400 truncate">
+                              {b.facilityName}
+                            </span>
+                          </div>
+                          <div className="text-xs text-slate-400 mt-0.5">
+                            {b.bookingDate} · {b.startTime}–{b.endTime} ·{" "}
+                            <span className="font-semibold text-slate-600 dark:text-slate-300">
+                              Rp {Number(b.totalPrice).toLocaleString("id-ID")}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          onClick={() => setSelectedBooking(bookings.find((bk: any) => bk.id === b.id) ?? b)}
+                          className="h-7 px-2.5 text-xs font-semibold rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-800 transition-colors flex items-center gap-1"
+                        >
+                          <Eye size={11} />
+                          Detail
+                        </button>
+                        <button
+                          onClick={() => handleResendWa(b.id)}
+                          disabled={sendingWaId === b.id}
+                          className="h-7 px-3 text-xs font-bold rounded-lg bg-orange-500 hover:bg-orange-600 text-white flex items-center gap-1.5 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                        >
+                          {sendingWaId === b.id ? (
+                            <>
+                              <RefreshCw size={11} className="animate-spin" />
+                              Mengirim...
+                            </>
+                          ) : (
+                            <>
+                              <Send size={11} />
+                              Kirim WA
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </motion.div>
       )}
 
       {/* Table Card */}
@@ -2351,21 +2667,52 @@ export default function AdminBookings() {
                             </motion.button>
                           )}
                           {b.groupRef && (
-                            <motion.button
-                              whileHover={{ scale: 1.04 }}
-                              whileTap={{ scale: 0.96 }}
-                              onClick={() => dissolveGroup(b.groupRef!)}
-                              disabled={dissolvingRef === b.groupRef}
-                              title="Bubarkan grup bayar"
-                              className="flex items-center gap-1 h-7 px-2 rounded-lg text-xs font-semibold text-violet-600 border border-violet-300 hover:bg-violet-50 dark:border-violet-700 dark:hover:bg-violet-900/20 transition-colors opacity-0 group-hover:opacity-100 whitespace-nowrap disabled:opacity-50"
-                            >
-                              {dissolvingRef === b.groupRef ? (
-                                <span className="w-3 h-3 border border-violet-400 border-t-transparent rounded-full animate-spin" />
-                              ) : (
-                                <Unlink size={12} />
+                            <>
+                              <motion.a
+                                href={`/api/invoices/group/${b.groupRef}/html`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                whileHover={{ scale: 1.04 }}
+                                whileTap={{ scale: 0.96 }}
+                                title={`Invoice Grup ${b.groupRef}`}
+                                className="flex items-center gap-1 h-7 px-2 rounded-lg text-xs font-semibold text-violet-700 border border-violet-400 bg-violet-50 hover:bg-violet-100 dark:border-violet-600 dark:bg-violet-900/30 dark:hover:bg-violet-900/50 transition-colors opacity-0 group-hover:opacity-100 whitespace-nowrap"
+                              >
+                                <FileText size={12} />
+                                Inv. Grup
+                              </motion.a>
+                              {b.customerType === "angkasa_pura" && (
+                                <motion.button
+                                  whileHover={{ scale: 1.04 }}
+                                  whileTap={{ scale: 0.96 }}
+                                  onClick={() => reapplyGroupDiscount(b.groupRef!)}
+                                  disabled={reapplyingRef === b.groupRef}
+                                  title="Terapkan ulang diskon AP ke semua sesi grup"
+                                  className="flex items-center gap-1 h-7 px-2 rounded-lg text-xs font-semibold text-emerald-700 border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 dark:border-emerald-700 dark:bg-emerald-900/20 dark:hover:bg-emerald-900/40 transition-colors opacity-0 group-hover:opacity-100 whitespace-nowrap disabled:opacity-50"
+                                >
+                                  {reapplyingRef === b.groupRef ? (
+                                    <span className="w-3 h-3 border border-emerald-500 border-t-transparent rounded-full animate-spin" />
+                                  ) : (
+                                    <ShieldCheck size={12} />
+                                  )}
+                                  Fix Diskon
+                                </motion.button>
                               )}
-                              Pisah
-                            </motion.button>
+                              <motion.button
+                                whileHover={{ scale: 1.04 }}
+                                whileTap={{ scale: 0.96 }}
+                                onClick={() => dissolveGroup(b.groupRef!)}
+                                disabled={dissolvingRef === b.groupRef}
+                                title="Bubarkan grup bayar"
+                                className="flex items-center gap-1 h-7 px-2 rounded-lg text-xs font-semibold text-violet-600 border border-violet-300 hover:bg-violet-50 dark:border-violet-700 dark:hover:bg-violet-900/20 transition-colors opacity-0 group-hover:opacity-100 whitespace-nowrap disabled:opacity-50"
+                              >
+                                {dissolvingRef === b.groupRef ? (
+                                  <span className="w-3 h-3 border border-violet-400 border-t-transparent rounded-full animate-spin" />
+                                ) : (
+                                  <Unlink size={12} />
+                                )}
+                                Pisah
+                              </motion.button>
+                            </>
                           )}
                           {deleteConfirmId === b.id ? (
                             <div className="flex items-center gap-1">

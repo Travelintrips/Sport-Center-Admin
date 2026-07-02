@@ -138,31 +138,23 @@ export async function validateBuckets(): Promise<void> {
     try {
       const { data, error } = await supabase.storage.getBucket(bucket);
       if (error || !data) {
-        if (isProd) {
-          console.error(
-            `[Storage] ❌ Bucket "${bucket}" not found in production. ` +
-            `Create it manually in Supabase Dashboard → Storage. Error: ${error?.message}`
-          );
-          bucketStatus[bucket] = { ok: false, checkedAt: now, error: error?.message ?? "Not found" };
+        // Auto-create in both dev and prod — idempotent, safe
+        const mimeTypes = bucket === BUCKETS.facility
+          ? ["image/jpeg", "image/png", "image/webp"]
+          : ["image/jpeg", "image/png", "image/webp", "application/pdf", "application/octet-stream"];
+        const sizeLimit = bucket === BUCKETS.facility ? 5 * 1024 * 1024 : 10 * 1024 * 1024;
+        const { error: createErr } = await supabase.storage.createBucket(bucket, {
+          public: true,
+          allowedMimeTypes: mimeTypes,
+          fileSizeLimit: sizeLimit,
+        });
+        if (createErr && !createErr.message.toLowerCase().includes("already exists")) {
+          console.error(`[Storage] ❌ Failed to create bucket "${bucket}": ${createErr.message}`);
+          bucketStatus[bucket] = { ok: false, checkedAt: now, error: createErr.message };
         } else {
-          const mimeTypes = bucket === BUCKETS.facility
-            ? ["image/jpeg", "image/png", "image/webp"]
-            : bucket === BUCKETS.docTemplates
-              ? ["image/jpeg", "image/png", "image/webp", "application/pdf"]
-              : ["image/jpeg", "image/png", "image/webp", "application/pdf"];
-          const sizeLimit = bucket === BUCKETS.facility ? 5 * 1024 * 1024 : 10 * 1024 * 1024;
-          const { error: createErr } = await supabase.storage.createBucket(bucket, {
-            public: true,
-            allowedMimeTypes: mimeTypes,
-            fileSizeLimit: sizeLimit,
-          });
-          if (createErr && !createErr.message.includes("already exists")) {
-            console.error(`[Storage] ❌ Failed to create bucket "${bucket}": ${createErr.message}`);
-            bucketStatus[bucket] = { ok: false, checkedAt: now, error: createErr.message };
-          } else {
-            console.info(`[Storage] ✓ Bucket "${bucket}" exists/created (dev).`);
-            bucketStatus[bucket] = { ok: true, checkedAt: now, error: null };
-          }
+          const env = IS_DEV ? "dev" : "prod";
+          console.info(`[Storage] ✓ Bucket "${bucket}" created/ensured (${env}).`);
+          bucketStatus[bucket] = { ok: true, checkedAt: now, error: null };
         }
       } else {
         const source = IS_DEV ? "dev" : "prod";
@@ -183,9 +175,23 @@ export async function uploadToStorage(
   contentType: string,
 ): Promise<string> {
   const supabase = getClient();
-  const { error } = await supabase.storage
+  let { error } = await supabase.storage
     .from(bucket)
     .upload(objectPath, body, { contentType, upsert: true });
+
+  // If bucket not found, create it on-the-fly and retry once
+  if (error && (error.message?.toLowerCase().includes("bucket") || (error as any).statusCode === 404)) {
+    await supabase.storage.createBucket(bucket, {
+      public: true,
+      allowedMimeTypes: ["image/jpeg", "image/png", "image/webp", "application/pdf", "application/octet-stream"],
+      fileSizeLimit: 10 * 1024 * 1024,
+    }).catch(() => {});
+    const retry = await supabase.storage
+      .from(bucket)
+      .upload(objectPath, body, { contentType, upsert: true });
+    error = retry.error;
+  }
+
   if (error) throw error;
   const { data } = supabase.storage.from(bucket).getPublicUrl(objectPath);
   return data.publicUrl;

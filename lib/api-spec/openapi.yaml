@@ -1679,6 +1679,62 @@ paths:
         "404":
           description: Booking not found
 
+  /bookings/{id}/wa-logs:
+    get:
+      operationId: getBookingWaLogs
+      tags: [bookings]
+      summary: Get WA notification logs for a booking (admin)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: WA notification logs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/WaNotifLog"
+        "404":
+          description: Booking not found
+
+  /bookings/{id}/resend-wa:
+    post:
+      operationId: resendBookingWa
+      tags: [bookings]
+      summary: Resend WA notification to customer based on booking status (admin)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: WA sent
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, message]
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+        "400":
+          description: Cannot resend for this status
+        "404":
+          description: Booking not found
+
   /bookings/{id}/verify:
     post:
       operationId: verifyBooking
@@ -3002,6 +3058,11 @@ components:
         repeatCount:
           type: integer
         notes:
+          type: string
+        customerType:
+          type: string
+          enum: [umum, angkasa_pura]
+        idCardNumber:
           type: string
 
     RecurringBookingResult:
@@ -4868,4 +4929,33 @@ components:
         numberFormatPattern:
           type: string
         paperStyle:
+          type: string
+
+    WaNotifLog:
+      type: object
+      required: [id, recipientPhone, status, sentAt]
+      properties:
+        id:
+          type: integer
+        bookingId:
+          type: integer
+          nullable: true
+        orderNumber:
+          type: string
+          nullable: true
+        event:
+          type: string
+          nullable: true
+        recipientPhone:
+          type: string
+        messagePreview:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [sent, failed]
+        errorMessage:
+          type: string
+          nullable: true
+        sentAt:
           type: string

@@ -6,8 +6,15 @@ import { reverseTaxTransaction } from "./tax";
 import { reverseJournalEntry } from "./accounting";
 import { runBankAudit } from "./bankAudit";
 import { runConnectionHealthCheck } from "./connectionHealth";
+import { logger } from "./logger";
 
-const APP_URL = process.env.APP_URL ?? "";
+function getAppUrl(): string {
+  if (process.env.NODE_ENV !== "production" && process.env.REPLIT_DEV_DOMAIN) {
+    return `https://${process.env.REPLIT_DEV_DOMAIN}`;
+  }
+  return (process.env.APP_URL ?? "").replace(/\/$/, "");
+}
+const APP_URL = getAppUrl();
 
 function getWIBNow(): Date {
   return new Date(Date.now() + 7 * 60 * 60 * 1000);
@@ -63,7 +70,7 @@ async function expireOverdueBookings(): Promise<void> {
     for (const booking of overdue) {
       // Skip booking yang ada kandidat rekonsiliasi aktif — biarkan admin konfirmasi dulu
       if (reconProtectedIds.has(booking.id)) {
-        console.log(`[scheduler] Booking ${booking.orderNumber} overdue tapi punya kandidat rekon aktif — dilewati`);
+        logger.info(`[scheduler] Booking ${booking.orderNumber} overdue tapi punya kandidat rekon aktif — dilewati`);
         continue;
       }
 
@@ -95,7 +102,7 @@ async function expireOverdueBookings(): Promise<void> {
         totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
       });
 
-      console.log(`[scheduler] Expired booking ${booking.orderNumber}`);
+      logger.info(`[scheduler] Expired booking ${booking.orderNumber}`);
     }
   } catch (err) {
     console.error("[scheduler] expireOverdueBookings error:", err);
@@ -145,7 +152,7 @@ async function sendReminderH1(): Promise<void> {
         totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
       });
 
-      console.log(`[scheduler] H-1 reminder sent for ${booking.orderNumber}`);
+      logger.info(`[scheduler] H-1 reminder sent for ${booking.orderNumber}`);
     }
   } catch (err) {
     console.error("[scheduler] sendReminderH1 error:", err);
@@ -185,7 +192,7 @@ async function sendDayOfReminder(): Promise<void> {
         .set({ reminderDaySentAt: new Date() })
         .where(eq(bookingsTable.id, booking.id));
 
-      const statusUrl = `${APP_URL}/wa/status/${booking.orderNumber}`;
+      const statusUrl = `${APP_URL}/status/${booking.orderNumber}`;
       const facilityName = facilityMap[booking.facilityId] ?? "";
 
       // Customer reminder
@@ -217,7 +224,7 @@ async function sendDayOfReminder(): Promise<void> {
         });
       }
 
-      console.log(`[scheduler] Day-of reminder sent for ${booking.orderNumber}`);
+      logger.info(`[scheduler] Day-of reminder sent for ${booking.orderNumber}`);
     }
   } catch (err) {
     console.error("[scheduler] sendDayOfReminder error:", err);
@@ -270,9 +277,9 @@ async function sendPaymentReminder(): Promise<void> {
         .where(and(eq(waActionTokensTable.bookingId, booking.id), eq(waActionTokensTable.action, "upload_proof")))
         .limit(1);
 
+      if (!tokenRow?.token) await createWaToken(booking.id, "upload_proof", 7);
       const proofToken = tokenRow?.token ?? (await createWaToken(booking.id, "upload_proof", 7));
-      const uploadProofUrl = `${APP_URL}/wa/proof/${proofToken}`;
-
+      const uploadProofUrl = `${APP_URL}/bukti/${proofToken}`;
       await notifyPaymentReminder({
         customerName: booking.customerName,
         customerPhone: booking.customerPhone,
@@ -287,7 +294,7 @@ async function sendPaymentReminder(): Promise<void> {
         hoursLeft,
       });
 
-      console.log(`[scheduler] Payment reminder sent for ${booking.orderNumber} (${hoursLeft}h left)`);
+      logger.info(`[scheduler] Payment reminder sent for ${booking.orderNumber} (${hoursLeft}h left)`);
     }
   } catch (err) {
     console.error("[scheduler] sendPaymentReminder error:", err);
@@ -317,7 +324,7 @@ async function autoCompleteBookings(): Promise<void> {
           .update(bookingsTable)
           .set({ status: "completed", completedAt: new Date(), updatedAt: new Date() })
           .where(eq(bookingsTable.id, booking.id));
-        console.log(`[scheduler] Auto-completed booking ${booking.orderNumber}`);
+        logger.info(`[scheduler] Auto-completed booking ${booking.orderNumber}`);
       }
     }
   } catch (err) {
@@ -345,9 +352,9 @@ async function runNightlyBankAudit(): Promise<void> {
         findings: result.findings,
         auditTimestamp: result.auditTimestamp,
       });
-      console.log(`[scheduler] Nightly bank audit: ${result.summary.critical} critical, ${result.summary.warning} warning — WA notif sent`);
+      logger.info(`[scheduler] Nightly bank audit: ${result.summary.critical} critical, ${result.summary.warning} warning — WA notif sent`);
     } else {
-      console.log("[scheduler] Nightly bank audit: ✅ production ready, no issues");
+      logger.info("[scheduler] Nightly bank audit: ✅ production ready, no issues");
     }
   } catch (err) {
     console.error("[scheduler] runNightlyBankAudit error:", err);
@@ -363,7 +370,7 @@ async function checkConnections(): Promise<void> {
 }
 
 export function startScheduler(): void {
-  console.log("[scheduler] Starting background scheduler...");
+  logger.info("[scheduler] Starting background scheduler...");
 
   // Run immediately on startup
   expireOverdueBookings();

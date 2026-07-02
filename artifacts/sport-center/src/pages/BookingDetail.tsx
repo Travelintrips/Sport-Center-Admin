@@ -160,8 +160,10 @@ export default function BookingDetail() {
     const bPayments = ((booking as any).payments as any[]) ?? [];
     const isDpMode =
       !!(booking as any).isDpPaid && Number((booking as any).downPayment || 0) > 0;
+    const groupInfo = (booking as any).groupInfo as { groupTotalPayment: number; groupSessionCount: number; groupRef: string } | null;
     let detectedType = "full_payment";
-    let detectedAmount: number = booking.totalPrice;
+    // Untuk grup booking: pakai total semua sesi, bukan hanya 1 booking
+    let detectedAmount: number = groupInfo ? groupInfo.groupTotalPayment : booking.totalPrice;
 
     if (isDpMode) {
       const hasDpActive = bPayments.some(
@@ -648,7 +650,7 @@ export default function BookingDetail() {
                             </span>{" "}
                             {(booking as any).groupInfo && (
                               <span className="text-xs text-muted-foreground font-normal">
-                                ({(booking as any).groupInfo.groupSessionCount} {t("sesi", "sessions")} × Rp {booking.totalPrice.toLocaleString("id-ID")})
+                                ({(booking as any).groupInfo.groupSessionCount} {t("sesi", "sessions")} × Rp {Math.round((booking as any).groupInfo.groupTotalPayment / (booking as any).groupInfo.groupSessionCount).toLocaleString("id-ID")})
                               </span>
                             )}{" "}
                             {t("via:", "via:")}

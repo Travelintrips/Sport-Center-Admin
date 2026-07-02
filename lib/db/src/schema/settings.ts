@@ -21,6 +21,7 @@ export const settingsTable = scSchema.table("sport_settings", {
   fonnteAdminWa: text("fonnte_admin_wa"),
   adminWaPhones: text("admin_wa_phones"),
   appUrl: text("app_url"),
+  paymentDomain: text("payment_domain"),
   paymentDeadlineHours: text("payment_deadline_hours").default("24"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),

@@ -2,9 +2,10 @@ import { randomBytes } from "crypto";
 import { db, waActionTokensTable } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
 
-export type WaAction = "approve_payment" | "reject_payment" | "checkin" | "finish" | "upload_proof";
+export type WaAction = "approve_payment" | "reject_payment" | "checkin" | "finish" | "upload_proof" | "approve_booking" | "review_payment";
 
 export async function createWaToken(bookingId: number, action: WaAction, expiryDays = 30): Promise<string> {
+  // 64 hex chars (32 bytes = 256-bit entropy)
   const token = randomBytes(32).toString("hex");
   const expiresAt = new Date(Date.now() + expiryDays * 24 * 60 * 60 * 1000);
   await db.insert(waActionTokensTable).values({ token, bookingId, action, expiresAt });

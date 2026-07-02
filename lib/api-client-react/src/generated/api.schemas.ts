@@ -316,6 +316,14 @@ export const RecurringBookingInputRepeatType = {
   monthly: 'monthly',
 } as const;
 
+export type RecurringBookingInputCustomerType = typeof RecurringBookingInputCustomerType[keyof typeof RecurringBookingInputCustomerType];
+
+
+export const RecurringBookingInputCustomerType = {
+  umum: 'umum',
+  angkasa_pura: 'angkasa_pura',
+} as const;
+
 export interface RecurringBookingInput {
   customerName: string;
   customerEmail: string;
@@ -327,6 +335,8 @@ export interface RecurringBookingInput {
   repeatType: RecurringBookingInputRepeatType;
   repeatCount: number;
   notes?: string;
+  customerType?: RecurringBookingInputCustomerType;
+  idCardNumber?: string;
 }
 
 export interface RecurringBookingResult {
@@ -1653,6 +1663,26 @@ export interface DocumentTemplateInput {
   paperStyle?: string;
 }
 
+export type WaNotifLogStatus = typeof WaNotifLogStatus[keyof typeof WaNotifLogStatus];
+
+
+export const WaNotifLogStatus = {
+  sent: 'sent',
+  failed: 'failed',
+} as const;
+
+export interface WaNotifLog {
+  id: number;
+  bookingId?: number | null;
+  orderNumber?: string | null;
+  event?: string | null;
+  recipientPhone: string;
+  messagePreview?: string | null;
+  status: WaNotifLogStatus;
+  errorMessage?: string | null;
+  sentAt: string;
+}
+
 export type SendOtp200 = {
   success?: boolean;
   message?: string;
@@ -1776,6 +1806,11 @@ search?: string;
 
 export type GetReviewsParams = {
 facilityId?: number;
+};
+
+export type ResendBookingWa200 = {
+  success: boolean;
+  message: string;
 };
 
 export type GetVerificationLogsParams = {

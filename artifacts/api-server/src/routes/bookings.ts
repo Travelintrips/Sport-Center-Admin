@@ -1,11 +1,14 @@
 import { Router } from "express";
-import { db, bookingsTable, facilitiesTable, paymentsTable, promosTable, discountSettingsTable, apMembersTable, bookingHistoryTable, usersTable, verificationLogsTable, companyUsersTable, bookingGroupsTable, settingsTable } from "@workspace/db";
-import { eq, and, sql, or, ilike, desc, inArray } from "drizzle-orm";
+import { db, bookingsTable, facilitiesTable, paymentsTable, promosTable, discountSettingsTable, apMembersTable, bookingHistoryTable, usersTable, verificationLogsTable, companyUsersTable, bookingGroupsTable, settingsTable, waActionTokensTable, waNotifLogsTable } from "@workspace/db";
+import { eq, and, sql, or, ilike, desc, inArray, notExists } from "drizzle-orm";
 import { adminMiddleware, authMiddleware, verifyToken } from "../lib/auth";
 import { broadcastAvailabilityChange } from "../lib/supabase";
-import { notifyBookingCreated, notifyPaymentConfirmed, notifyBookingCancelled, notifyCompanyBookingCreated, notifyDpPaid, notifyWaAdminNewBooking } from "../lib/notifications";
+import { notifyBookingCreated, notifyPaymentConfirmed, notifyBookingCancelled, notifyCompanyBookingCreated, notifyDpPaid, notifyWaAdminNewBooking, notifyAdminBookingApprovalRequest, notifyPaymentProofUploaded } from "../lib/notifications";
+import { createWaToken } from "../lib/waTokens";
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
-import { syncBookingToBizportal, syncStatusToBizportal } from "../lib/bizportalSync";
+import { logger } from "../lib/logger";
+import { syncBookingToBizportal, syncStatusToBizportal, deleteBookingFromBizportal } from "../lib/bizportalSync";
+import { getBaseUrl } from "../lib/appUrl";
 import { calculateTax, recordTaxTransaction, reverseTaxTransaction } from "../lib/tax";
 import { reverseJournalEntry, reversePublicAccountingEntry } from "../lib/accounting";
 
@@ -558,6 +561,21 @@ router.post("/bookings", async (req, res) => {
     } else {
       const deadline = new Date(Date.now() + deadlineHours * 60 * 60 * 1000);
       const deadlineStr = deadline.toLocaleString("id-ID", { timeZone: "Asia/Jakarta", hour12: false });
+      const appUrl = await getBaseUrl();
+
+      // Buat proof token agar customer dapat link upload bukti langsung dari WA
+      let proofUrl = "";
+      let statusUrl = "";
+      try {
+        if (booking.status === "pending_payment") {
+          const proofToken = await createWaToken(booking.id, "upload_proof", 7);
+          proofUrl = appUrl ? `${appUrl}/bukti/${proofToken}` : "";
+          statusUrl = appUrl ? `${appUrl}/status/${booking.orderNumber}` : "";
+        }
+      } catch (err) {
+        console.error("[WA] Gagal buat proof token:", err);
+      }
+
       notifyBookingCreated({
         customerName,
         customerPhone,
@@ -568,13 +586,14 @@ router.post("/bookings", async (req, res) => {
         endTime: booking.endTime,
         totalPrice: totalPrice.toLocaleString("id-ID"),
         paymentDeadline: deadlineStr,
+        uploadProofUrl: proofUrl || undefined,
+        statusUrl: statusUrl || undefined,
       }).catch((err) => console.error("[WA] notifyBookingCreated error:", err));
 
       // Notifikasi admin jika booking berasal dari link Mina AI
       if (bookingSource === "mina") {
         const bookingDow = new Date(bookingDate + "T00:00:00+07:00").getDay();
         const isWeekend = bookingDow === 0 || bookingDow === 6;
-        const appUrl = (process.env.APP_URL ?? "").replace(/\/$/, "");
         notifyWaAdminNewBooking({
           orderNumber: booking.orderNumber,
           customerName,
@@ -587,9 +606,29 @@ router.post("/bookings", async (req, res) => {
           totalPrice: totalPrice.toLocaleString("id-ID"),
           isWeekend,
           appliedRules: "🤖 Booking dari Mina AI",
-          statusUrl: `${appUrl}/wa/status/${booking.orderNumber}`,
+          statusUrl: `${appUrl}/status/${booking.orderNumber}`,
         }).catch(() => {});
       }
+
+      // ─── Kirim WA approval link ke semua admin untuk setiap booking baru ──────
+      try {
+        if (appUrl) {
+          const approvalToken = await createWaToken(booking.id, "approve_booking", 1);
+          notifyAdminBookingApprovalRequest({
+            orderNumber: booking.orderNumber,
+            customerName,
+            customerPhone,
+            facilityName: facility.name,
+            bookingDate,
+            startTime: booking.startTime,
+            endTime: booking.endTime,
+            durationHours: Number(durationHours),
+            totalPrice: totalPrice.toLocaleString("id-ID"),
+            approvalUrl: `${appUrl}/wa/booking-approval/${approvalToken}`,
+            source: bookingSource ?? "portal",
+          }).catch(() => {});
+        }
+      } catch {}
     }
 
     res.status(201).json({
@@ -698,10 +737,23 @@ router.post("/bookings/recurring", async (req, res) => {
     const {
       customerName, customerEmail, facilityId, startDate, startTime, durationHours,
       notes, repeatType, repeatCount, specificDates, promoCode, discountAmountPerSession,
+      // AP2 / customer type
+
       // Company billing fields (optional)
       payerType, companyCustomerId, customerId: bodyCustomerId, bookedForName, bookedForPhone,
+      // AP2 employee fields (optional)
+      customerType: rawCustomerType, idCardNumber: rawIdCardNumber,
     } = req.body;
     const customerPhone: string = normalizePhone(String(req.body.customerPhone ?? "").trim());
+    const customerType: "umum" | "angkasa_pura" = rawCustomerType === "angkasa_pura" ? "angkasa_pura" : "umum";
+    const idCardNumber: string | null = customerType === "angkasa_pura"
+      ? (String(rawIdCardNumber || "").trim().toUpperCase() || null)
+      : null;
+    const isAp = customerType === "angkasa_pura";
+    if (isAp && !idCardNumber) {
+      res.status(400).json({ error: "Nomor ID Card wajib untuk customer Angkasa Pura" });
+      return;
+    }
 
     // Deteksi user yang sedang login (opsional)
     let loggedInUserId: number | null = null;
@@ -722,13 +774,14 @@ router.post("/bookings/recurring", async (req, res) => {
       ? specificDates
       : generateRecurringDates(startDate, repeatType, repeatCount);
     const basePrice = Number(facility.pricePerHour) * durationHours;
-    const discount = Math.min(Number(discountAmountPerSession) || 0, basePrice);
+    // AP2: diskon belum diterapkan saat create — diterapkan setelah verifikasi admin
+    // AP2 karyawan: tidak ada diskon/promo di sini (diskon diterapkan setelah verifikasi ID Card)
+
+    const discount = isAp ? 0 : Math.min(Number(discountAmountPerSession) || 0, basePrice);
     const totalPrice = basePrice - discount;
 
     const created: any[] = [];
     const skipped: string[] = [];
-    let accumulatedPpn = 0;
-
     for (const bookingDate of dates) {
       const conflict = await checkSlotConflict(Number(facilityId), bookingDate, startTime, endTime);
       if (conflict) {
@@ -751,8 +804,12 @@ router.post("/bookings/recurring", async (req, res) => {
         endTime,
         durationHours,
         totalPrice: String(totalPrice),
-        promoCode: promoCode || null,
+        promoCode: isAp ? null : (promoCode || null),
         discountAmount: String(discount),
+        basePrice: String(basePrice),
+        customerType,
+        idCardNumber: idCardNumber || null,
+        verificationStatus: isAp ? "pending" : "not_required",
         notes,
         ppnRate: taxCalc.taxRate > 0 ? String(taxCalc.taxRate) : null,
         dpp: taxCalc.taxAmount > 0 ? String(taxCalc.dpp) : null,
@@ -764,6 +821,8 @@ router.post("/bookings/recurring", async (req, res) => {
           bookedForName: bookedForName || customerName,
           bookedForPhone: bookedForPhone || customerPhone,
           paymentRequiredNow: false,
+          paymentDeadline: null,
+          billingStatus: "unbilled",
           status: "confirmed",
         } : {}),
       }).returning();
@@ -771,7 +830,7 @@ router.post("/bookings/recurring", async (req, res) => {
       if (taxCalc.taxCode) {
         recordTaxTransaction("booking", booking.id, booking.orderNumber, taxCalc, bookingDate).catch(() => {});
       }
-      accumulatedPpn += taxCalc.taxAmount;
+
       created.push({
         ...booking,
         totalPrice: Number(booking.totalPrice),
@@ -792,9 +851,11 @@ router.post("/bookings/recurring", async (req, res) => {
         .where(eq(promosTable.code, String(promoCode).toUpperCase()));
     }
 
-    const totalDpp = totalPrice * created.length;
-    const totalPpn = accumulatedPpn;
-    const grandTotalAmount = totalDpp + totalPpn;
+
+    // Hitung dari sum actual booking values
+    const grandTotalAmount = created.reduce((sum: number, b: any) => sum + Number(b.grandTotal ?? b.totalPrice), 0);
+    const totalDpp = created.reduce((sum: number, b: any) => sum + Number(b.dpp ?? b.totalPrice), 0);
+    const totalPpn = created.reduce((sum: number, b: any) => sum + Number(b.ppnAmount ?? 0), 0);
 
     // Auto-group: jika ada 2+ booking berhasil, gabung otomatis ke 1 grup bayar
     let groupRef: string | null = null;
@@ -949,8 +1010,11 @@ router.delete("/bookings/:id", adminMiddleware, async (req, res) => {
       res.status(404).json({ error: "Not found" });
       return;
     }
+    const orderNumber = booking.orderNumber;
     await db.delete(paymentsTable).where(eq(paymentsTable.bookingId, id));
     await db.delete(bookingsTable).where(eq(bookingsTable.id, id));
+    // Hapus juga dari BizPortal agar data tetap sinkron
+    deleteBookingFromBizportal(orderNumber).catch(() => {});
     res.json({ success: true });
   } catch (err) {
     req.log.error({ err }, "Delete booking error");
@@ -1034,6 +1098,50 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
     if (status && beforeUpdate) {
       const [payment] = await db.select().from(paymentsTable).where(eq(paymentsTable.bookingId, id)).limit(1);
       syncStatusToBizportal(beforeUpdate.orderNumber, status, payment?.proofUrl, status === "confirmed" ? new Date() : null).catch(() => {});
+
+      // Kirim WA notification ke customer saat status berubah ke confirmed ATAU langsung ke completed
+      const isConfirming =
+        (status === "confirmed" && beforeUpdate.status !== "confirmed") ||
+        (status === "completed" && !["confirmed", "completed"].includes(beforeUpdate.status ?? ""));
+      if (isConfirming) {
+        const [facility] = await db
+          .select({ name: facilitiesTable.name })
+          .from(facilitiesTable)
+          .where(eq(facilitiesTable.id, beforeUpdate.facilityId))
+          .limit(1);
+        logger.info({ orderNumber: beforeUpdate.orderNumber, phone: beforeUpdate.customerPhone, toStatus: status }, "[WA] Mengirim notif konfirmasi pembayaran ke customer");
+        notifyPaymentConfirmed({
+          customerName: beforeUpdate.customerName,
+          customerPhone: beforeUpdate.customerPhone,
+          orderNumber: beforeUpdate.orderNumber,
+          facilityName: facility?.name ?? "",
+          bookingDate: beforeUpdate.bookingDate,
+          startTime: beforeUpdate.startTime,
+          endTime: beforeUpdate.endTime,
+          totalPrice: Number(beforeUpdate.totalPrice).toLocaleString("id-ID"),
+          bookingId: beforeUpdate.id,
+        }).catch((err) => logger.error({ err, orderNumber: beforeUpdate.orderNumber, phone: beforeUpdate.customerPhone }, "[WA] notifyPaymentConfirmed (direct) error"));
+      }
+
+      // Kirim WA notification ke customer saat booking dibatalkan
+      if (status === "cancelled" && beforeUpdate.status !== "cancelled") {
+        const [facility] = await db
+          .select({ name: facilitiesTable.name })
+          .from(facilitiesTable)
+          .where(eq(facilitiesTable.id, beforeUpdate.facilityId))
+          .limit(1);
+        notifyBookingCancelled({
+          customerName: beforeUpdate.customerName,
+          customerPhone: beforeUpdate.customerPhone,
+          orderNumber: beforeUpdate.orderNumber,
+          facilityName: facility?.name ?? "",
+          bookingDate: beforeUpdate.bookingDate,
+          startTime: beforeUpdate.startTime,
+          endTime: beforeUpdate.endTime,
+          totalPrice: Number(beforeUpdate.totalPrice).toLocaleString("id-ID"),
+          reason: adminNotes,
+        }).catch((err) => logger.error({ err, orderNumber: beforeUpdate.orderNumber }, "[WA] notifyBookingCancelled (direct) error"));
+      }
 
       // FASE 4 & 5: Reversal pajak + jurnal akuntansi saat dibatalkan/refund
       const REVERSAL_STATUSES = ["cancelled", "refunded", "rejected"];
@@ -1150,11 +1258,19 @@ async function runApVerification(
   const discountAmount = Math.round((basePrice * discountPct) / 100);
   const finalPrice = basePrice - discountAmount;
 
+  // Recalculate tax on finalPrice (tax is inclusive — grandTotal = finalPrice)
+  const finalTaxCalc = await calculateTax(finalPrice, "sport_booking", booking.bookingDate ?? undefined);
+
+  // Terapkan diskon ke booking utama
   await db.update(bookingsTable).set({
     verificationStatus: "verified",
     idCardNumber,
     apDiscountAmount: String(discountAmount),
+    discountAmount: String(discountAmount),
     totalPrice: String(finalPrice),
+    grandTotal: finalTaxCalc.taxAmount > 0 ? String(finalTaxCalc.grandTotal) : null,
+    dpp: finalTaxCalc.taxAmount > 0 ? String(finalTaxCalc.dpp) : null,
+    ppnAmount: finalTaxCalc.taxAmount > 0 ? String(finalTaxCalc.taxAmount) : null,
   }).where(eq(bookingsTable.id, bookingId));
 
   await db.insert(verificationLogsTable).values({
@@ -1167,10 +1283,54 @@ async function runApVerification(
     ipAddress: opts.ipAddress ?? null,
   });
 
+  // Jika booking ini bagian dari grup (recurring), terapkan diskon ke semua booking grup
+  let groupUpdatedCount = 0;
+  if (booking.groupRef) {
+    const siblings = await db.select().from(bookingsTable)
+      .where(and(
+        eq(bookingsTable.groupRef, booking.groupRef),
+        eq(bookingsTable.customerType, "angkasa_pura"),
+        // Sertakan pending DAN verified yang belum dapat diskon (apDiscountAmount null/0)
+        // agar semua sesi dalam grup mendapat diskon yang sama
+      ))
+      .then(rows => rows.filter(s =>
+        s.id !== bookingId && // jangan update booking yang sudah diproses
+        (s.verificationStatus === "pending" ||
+          (s.verificationStatus === "verified" && (!s.apDiscountAmount || Number(s.apDiscountAmount) === 0)))
+      ));
+
+    for (const sibling of siblings) {
+      const siblingBase = sibling.basePrice == null ? Number(sibling.totalPrice) : Number(sibling.basePrice);
+      const siblingDiscount = Math.round((siblingBase * discountPct) / 100);
+      const siblingFinal = siblingBase - siblingDiscount;
+      const siblingTaxCalc = await calculateTax(siblingFinal, "sport_booking", sibling.bookingDate ?? undefined);
+      await db.update(bookingsTable).set({
+        verificationStatus: "verified",
+        idCardNumber,
+        apDiscountAmount: String(siblingDiscount),
+        discountAmount: String(siblingDiscount),
+        totalPrice: String(siblingFinal),
+        grandTotal: siblingTaxCalc.taxAmount > 0 ? String(siblingTaxCalc.grandTotal) : null,
+        dpp: siblingTaxCalc.taxAmount > 0 ? String(siblingTaxCalc.dpp) : null,
+        ppnAmount: siblingTaxCalc.taxAmount > 0 ? String(siblingTaxCalc.taxAmount) : null,
+      }).where(eq(bookingsTable.id, sibling.id));
+      groupUpdatedCount++;
+    }
+
+    // Update totalPayment di booking_groups — selalu recalculate ketika ada groupRef,
+    // termasuk ketika groupUpdatedCount=0 (booking ini adalah satu-satunya / terakhir yang pending)
+    const allGroupBookings = await db.select({ totalPrice: bookingsTable.totalPrice })
+      .from(bookingsTable).where(eq(bookingsTable.groupRef, booking.groupRef));
+    const newGroupTotal = allGroupBookings.reduce((sum, b) => sum + Number(b.totalPrice), 0);
+    await db.update(bookingGroupsTable)
+      .set({ totalPayment: String(newGroupTotal) })
+      .where(eq(bookingGroupsTable.groupRef, booking.groupRef));
+  }
+
   return {
     success: true, result: "verified" as const,
     message: discountEnabled
-      ? `Verifikasi berhasil. Diskon ${discountPct}% diterapkan. Harga akhir Rp ${finalPrice.toLocaleString("id-ID")}.`
+      ? `Verifikasi berhasil. Diskon ${discountPct}% diterapkan${groupUpdatedCount > 0 ? ` ke ${groupUpdatedCount + 1} booking dalam grup` : ""}. Harga akhir Rp ${finalPrice.toLocaleString("id-ID")}.`
       : "ID Card valid. Terverifikasi (diskon Angkasa Pura sedang nonaktif).",
     discountApplied: discountEnabled,
     discountPercentage: discountPct,
@@ -1178,6 +1338,7 @@ async function runApVerification(
     finalPrice,
     memberName: member.name,
     bookingId,
+    groupUpdatedCount,
   };
 }
 
@@ -1200,6 +1361,214 @@ router.post("/bookings/:id/verify", adminMiddleware, async (req, res) => {
     res.json({ ...result, booking: updated });
   } catch (err) {
     req.log.error({ err }, "Verify booking error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ─── POST /bookings/groups/:groupRef/reapply-discount — paksa ulang diskon AP ke semua sesi ──
+router.post("/bookings/groups/:groupRef/reapply-discount", adminMiddleware, async (req, res) => {
+  try {
+    const { groupRef } = req.params;
+
+    // Ambil semua booking dalam grup yang merupakan AP
+    const allBookings = await db.select().from(bookingsTable)
+      .where(and(
+        eq(bookingsTable.groupRef, groupRef),
+        eq(bookingsTable.customerType, "angkasa_pura"),
+      ));
+
+    if (!allBookings.length) {
+      res.status(404).json({ error: "Tidak ada booking AP dalam grup ini" });
+      return;
+    }
+
+    // Ambil setting diskon AP
+    const [setting] = await db.select().from(discountSettingsTable)
+      .where(eq(discountSettingsTable.customerType, "angkasa_pura")).limit(1);
+    const discountEnabled = !!setting && setting.isActive;
+    const discountPct = discountEnabled ? setting.discountPercentage : 0;
+
+    if (!discountEnabled || discountPct <= 0) {
+      res.status(400).json({ error: "Diskon AP sedang tidak aktif atau 0%" });
+      return;
+    }
+
+    let updatedCount = 0;
+    const details: { orderNumber: string; before: number; after: number; discount: number }[] = [];
+
+    for (const booking of allBookings) {
+      const basePrice = booking.basePrice == null ? Number(booking.totalPrice) : Number(booking.basePrice);
+      const discountAmount = Math.round((basePrice * discountPct) / 100);
+      const finalPrice = basePrice - discountAmount;
+      const taxCalc = await calculateTax(finalPrice, "sport_booking", booking.bookingDate ?? undefined);
+
+      const before = Number(booking.grandTotal ?? booking.totalPrice);
+
+      await db.update(bookingsTable).set({
+        verificationStatus: "verified",
+        apDiscountAmount: String(discountAmount),
+        discountAmount: String(discountAmount),
+        totalPrice: String(finalPrice),
+        grandTotal: taxCalc.taxAmount > 0 ? String(taxCalc.grandTotal) : null,
+        dpp: taxCalc.taxAmount > 0 ? String(taxCalc.dpp) : null,
+        ppnAmount: taxCalc.taxAmount > 0 ? String(taxCalc.taxAmount) : null,
+      }).where(eq(bookingsTable.id, booking.id));
+
+      details.push({
+        orderNumber: booking.orderNumber,
+        before,
+        after: taxCalc.taxAmount > 0 ? taxCalc.grandTotal : finalPrice,
+        discount: discountAmount,
+      });
+      updatedCount++;
+    }
+
+    // Update group total
+    const newGroupTotal = details.reduce((sum, d) => sum + d.after, 0);
+    await db.update(bookingGroupsTable)
+      .set({ totalPayment: String(newGroupTotal) })
+      .where(eq(bookingGroupsTable.groupRef, groupRef));
+
+    const { ipAddress, userAgent } = getClientInfo(req);
+    const userInfo = getUserFromReq(req);
+    await logAudit({
+      ...userInfo,
+      action: "AP_GROUP_DISCOUNT_REAPPLIED",
+      entity: "booking_group",
+      after: { groupRef, discountPct, updatedCount, newGroupTotal },
+      ipAddress,
+      userAgent,
+    });
+
+    res.json({
+      success: true,
+      groupRef,
+      discountPercentage: discountPct,
+      updatedCount,
+      newGroupTotal,
+      details,
+      message: `Diskon ${discountPct}% berhasil diterapkan ulang ke ${updatedCount} sesi dalam grup ${groupRef}.`,
+    });
+  } catch (err) {
+    req.log.error({ err }, "Reapply group discount error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ─── GET /admin/bookings/wa-unnotified — bookings waiting_confirmation dengan belum ada WA ────
+router.get("/admin/bookings/wa-unnotified", adminMiddleware, async (req, res) => {
+  try {
+    const unnotified = await db
+      .select({
+        id: bookingsTable.id,
+        orderNumber: bookingsTable.orderNumber,
+        customerName: bookingsTable.customerName,
+        customerPhone: bookingsTable.customerPhone,
+        facilityId: bookingsTable.facilityId,
+        bookingDate: bookingsTable.bookingDate,
+        startTime: bookingsTable.startTime,
+        endTime: bookingsTable.endTime,
+        totalPrice: bookingsTable.totalPrice,
+        status: bookingsTable.status,
+        createdAt: bookingsTable.createdAt,
+      })
+      .from(bookingsTable)
+      .where(
+        and(
+          eq(bookingsTable.status, "waiting_confirmation"),
+          notExists(
+            db
+              .select({ id: waActionTokensTable.id })
+              .from(waActionTokensTable)
+              .where(
+                and(
+                  eq(waActionTokensTable.bookingId, bookingsTable.id),
+                  eq(waActionTokensTable.action, "review_payment"),
+                ),
+              ),
+          ),
+        ),
+      )
+      .orderBy(desc(bookingsTable.createdAt));
+
+    const facilityIds = [...new Set(unnotified.map((b) => b.facilityId))];
+    const facilities =
+      facilityIds.length > 0
+        ? await db
+            .select({ id: facilitiesTable.id, name: facilitiesTable.name })
+            .from(facilitiesTable)
+        : [];
+
+    const result = unnotified.map((b) => {
+      const facility = facilities.find((f) => f.id === b.facilityId);
+      return {
+        ...b,
+        totalPrice: Number(b.totalPrice),
+        facilityName: facility?.name ?? "",
+      };
+    });
+
+    res.json(result);
+  } catch (err) {
+    req.log.error({ err }, "WA unnotified list error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ─── GET /admin/bookings/:id/wa-logs — riwayat pengiriman WA per booking ─────────────────────
+router.get("/admin/bookings/:id/wa-logs", adminMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(String(req.params.id));
+    const logs = await db
+      .select()
+      .from(waNotifLogsTable)
+      .where(eq(waNotifLogsTable.bookingId, id))
+      .orderBy(desc(waNotifLogsTable.sentAt));
+    res.json(logs);
+  } catch (err) {
+    req.log.error({ err }, "WA logs fetch error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ─── POST /admin/bookings/:id/resend-wa — kirim ulang notifikasi WA ke admin ───────────────
+router.post("/admin/bookings/:id/resend-wa", adminMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(String(req.params.id));
+    const booking = await getBookingWithPayment(id);
+    if (!booking) { res.status(404).json({ error: "Booking tidak ditemukan" }); return; }
+
+    const appUrl = await getBaseUrl();
+    const reviewToken = await createWaToken(id, "review_payment", 7);
+    const reviewUrl = `${appUrl}/ulasan/${reviewToken}`;
+
+    await notifyPaymentProofUploaded({
+      customerName: booking.customerName,
+      customerPhone: booking.customerPhone,
+      orderNumber: booking.orderNumber,
+      facilityName: booking.facilityName,
+      bookingDate: booking.bookingDate,
+      startTime: booking.startTime,
+      endTime: booking.endTime,
+      totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
+      reviewUrl,
+    });
+
+    const actorInfo = getUserFromReq(req);
+    await logAudit({
+      userId: actorInfo?.userId ?? null,
+      userName: actorInfo?.userName ?? null,
+      userRole: actorInfo?.userRole ?? null,
+      action: "WA_PROOF_NOTIFY_RESENT",
+      entity: "booking",
+      entityId: id,
+      after: { orderNumber: booking.orderNumber, reviewUrl },
+      ...getClientInfo(req),
+    });
+
+    res.json({ ok: true, reviewUrl });
+  } catch (err) {
+    req.log.error({ err }, "Resend WA error");
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -1234,10 +1603,83 @@ router.post("/bookings/verify-by-order", async (req, res) => {
     if ("notFound" in result) { res.status(404).json({ error: "Booking tidak ditemukan" }); return; }
     if (!result.success) { res.json(result); return; }
 
+    // Auto-verifikasi semua booking lain dalam grup yang sama dengan ID Card yang sama
+    let groupVerifiedCount = 0;
+    if (booking.groupRef) {
+      const siblings = await db.select().from(bookingsTable).where(
+        and(
+          eq(bookingsTable.groupRef, booking.groupRef),
+          eq(bookingsTable.verificationStatus, "pending"),
+          eq(bookingsTable.customerType, "angkasa_pura"),
+        )
+      );
+      for (const sibling of siblings) {
+        const sibResult = await runApVerification(sibling.id, idCardNumber, { ipAddress, orderNumber: sibling.orderNumber });
+        if ("success" in sibResult && sibResult.success) groupVerifiedCount++;
+      }
+
+      // Recalculate group total_payment dari sum totalPrice terbaru
+      const allInGroup = await db.select({ totalPrice: bookingsTable.totalPrice })
+        .from(bookingsTable).where(eq(bookingsTable.groupRef, booking.groupRef));
+      const newGroupTotal = allInGroup.reduce((sum, b) => sum + Number(b.totalPrice), 0);
+      await db.update(bookingGroupsTable)
+        .set({ totalPayment: String(newGroupTotal) })
+        .where(eq(bookingGroupsTable.groupRef, booking.groupRef));
+    }
+
     const updated = await getBookingWithPayment(booking.id);
-    res.json({ ...result, booking: updated });
+    res.json({ ...result, groupVerifiedCount, booking: updated });
   } catch (err) {
     req.log.error({ err }, "Verify by order error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// GET /admin/bookings/groups/:groupRef/sessions — semua sesi dalam grup (untuk kwitansi gabungan)
+router.get("/admin/bookings/groups/:groupRef/sessions", adminMiddleware, async (req, res) => {
+  try {
+    const groupRef = String(req.params.groupRef);
+    const sessions = await db
+      .select({
+        id: bookingsTable.id,
+        orderNumber: bookingsTable.orderNumber,
+        bookingDate: bookingsTable.bookingDate,
+        startTime: bookingsTable.startTime,
+        endTime: bookingsTable.endTime,
+        durationHours: bookingsTable.durationHours,
+        totalPrice: bookingsTable.totalPrice,
+        grandTotal: bookingsTable.grandTotal,
+        ppnRate: bookingsTable.ppnRate,
+        ppnAmount: bookingsTable.ppnAmount,
+        dpp: bookingsTable.dpp,
+        status: bookingsTable.status,
+        facilityId: bookingsTable.facilityId,
+      })
+      .from(bookingsTable)
+      .where(eq(bookingsTable.groupRef, groupRef))
+      .orderBy(bookingsTable.bookingDate);
+
+    if (!sessions.length) {
+      res.status(404).json({ error: "Grup tidak ditemukan" });
+      return;
+    }
+
+    // Ambil nama fasilitas sekali saja
+    const facilityId = sessions[0].facilityId;
+    const [facility] = await db.select({ name: facilitiesTable.name })
+      .from(facilitiesTable).where(eq(facilitiesTable.id, facilityId)).limit(1);
+
+    res.json(sessions.map((s) => ({
+      ...s,
+      totalPrice: Number(s.totalPrice),
+      grandTotal: s.grandTotal != null ? Number(s.grandTotal) : null,
+      ppnRate: s.ppnRate != null ? Number(s.ppnRate) : null,
+      ppnAmount: s.ppnAmount != null ? Number(s.ppnAmount) : null,
+      dpp: s.dpp != null ? Number(s.dpp) : null,
+      facilityName: facility?.name ?? "",
+    })));
+  } catch (err) {
+    req.log.error({ err }, "Group sessions error");
     res.status(500).json({ error: "Internal server error" });
   }
 });

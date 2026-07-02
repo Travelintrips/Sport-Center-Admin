@@ -9,7 +9,7 @@ import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { Save, Upload, Trash2, QrCode, ImageIcon, Plane, MessageCircle, Eye, EyeOff, CheckCircle2, AlertCircle, Receipt, FlaskConical, RefreshCw } from "lucide-react";
+import { Save, Upload, Trash2, QrCode, ImageIcon, Plane, MessageCircle, Eye, EyeOff, CheckCircle2, AlertCircle, Receipt, FlaskConical, RefreshCw, Link2 } from "lucide-react";
 import { getToken } from "@/lib/auth";
 
 function ApDiscountCard() {
@@ -351,6 +351,7 @@ export default function AdminSettings() {
   const [waForm, setWaForm] = useState({
     fonnteToken: "", fonnteAdminWa: "", adminWaPhones: "", appUrl: "",
   });
+  const [paymentDomain, setPaymentDomain] = useState("");
   const [showToken, setShowToken] = useState(false);
   const [qrisPreview, setQrisPreview] = useState<string | null>(null);
   const [qrisUploading, setQrisUploading] = useState(false);
@@ -378,6 +379,7 @@ export default function AdminSettings() {
         adminWaPhones: (settings as any).adminWaPhones ?? "",
         appUrl: (settings as any).appUrl ?? "",
       });
+      setPaymentDomain((settings as any).paymentDomain ?? "");
       setQrisPreview((settings as any).qrisImageUrl ?? null);
     }
   }, [settings]);
@@ -404,6 +406,11 @@ export default function AdminSettings() {
     const payload: any = { ...waForm };
     Object.keys(payload).forEach(k => { if (!payload[k]) delete payload[k]; });
     updateMutation.mutate({ data: payload });
+  };
+
+  const handlePaymentDomainSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    updateMutation.mutate({ data: { paymentDomain: paymentDomain.trim() || null } as any });
   };
 
   const handleQrisUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -666,6 +673,53 @@ export default function AdminSettings() {
               <Button type="submit" disabled={updateMutation.isPending}>
                 <Save size={16} className="mr-2" />
                 {updateMutation.isPending ? "Menyimpan..." : "Simpan Pengaturan WA"}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </form>
+
+      {/* ─── Domain Link Pembayaran ─────────────────────────────── */}
+      <form onSubmit={handlePaymentDomainSubmit}>
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base font-bold flex items-center gap-2">
+              <Link2 size={18} className="text-blue-600" />
+              Domain Link Pembayaran Tenant
+            </CardTitle>
+            <p className="text-xs text-muted-foreground mt-1">
+              Domain yang digunakan pada link bayar yang dikirim via WhatsApp ke customer.
+              Jika diisi, akan menimpa konfigurasi server secara otomatis.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="payment-domain">URL Domain</Label>
+              <Input
+                id="payment-domain"
+                type="url"
+                value={paymentDomain}
+                onChange={(e) => setPaymentDomain(e.target.value)}
+                placeholder="https://sportcenter.domain.co.id"
+                className="font-mono text-sm"
+              />
+              <p className="text-xs text-muted-foreground">
+                Format: <code className="bg-muted px-1 rounded">https://domain.anda.com</code> — tanpa garis miring di akhir.
+                {paymentDomain ? (
+                  <span className="block mt-1 text-blue-700 bg-blue-50 border border-blue-200 rounded px-2 py-1">
+                    Link bukti bayar akan menjadi: <strong>{paymentDomain.replace(/\/$/, "")}/bukti/&#123;token&#125;</strong>
+                  </span>
+                ) : (
+                  <span className="block mt-1">
+                    Jika kosong, sistem menggunakan URL dari environment variable server.
+                  </span>
+                )}
+              </p>
+            </div>
+            <div className="flex justify-end">
+              <Button type="submit" disabled={updateMutation.isPending}>
+                <Save size={16} className="mr-2" />
+                {updateMutation.isPending ? "Menyimpan..." : "Simpan Domain"}
               </Button>
             </div>
           </CardContent>

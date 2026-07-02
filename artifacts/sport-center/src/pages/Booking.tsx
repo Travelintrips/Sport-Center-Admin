@@ -536,8 +536,12 @@ export default function Booking() {
           repeatCount,
           notes,
           specificDates: selectedDates,
-          promoCode: couponResult?.code || undefined,
-          discountAmountPerSession: discountPerSession || undefined,
+          customerType: bookingMode === "angkasa_pura" ? "angkasa_pura" : "umum",
+          idCardNumber: isAP ? idCardNumber.trim() : undefined,
+          promoCode: isAP ? undefined : couponResult?.code || undefined,
+          discountAmountPerSession: isAP ? undefined : discountPerSession || undefined,
+          payerType: isCompanyBilling ? "company" : "personal",
+          companyCustomerId: isCompanyBilling && billingStatus?.companyId ? billingStatus.companyId : undefined,
           vendorId: vendorId ? Number(vendorId) : undefined,
         } as any,
       });
@@ -1169,7 +1173,6 @@ export default function Booking() {
           )}
 
           {/* Repeat Booking */}
-          {!isAP && (
           <Card className={isRepeat ? "border-primary/40 bg-primary/5" : ""}>
             <CardHeader className="pb-4">
               <div className="flex items-center gap-3">
@@ -1394,7 +1397,6 @@ export default function Booking() {
               </CardContent>
             )}
           </Card>
-          )}
 
           {/* Down Payment Option */}
           <Card className={paymentType === "dp" ? "border-violet-300 bg-violet-50/50 dark:bg-violet-900/10" : ""}>
@@ -1569,6 +1571,12 @@ export default function Booking() {
                       </span>
                     </div>
                   </>
+                )}
+                {isAP && (
+                  <div className="flex items-start gap-1.5 text-xs text-orange-600 bg-orange-50 border border-orange-200 rounded-md px-2.5 py-2">
+                    <AlertTriangle size={12} className="shrink-0 mt-0.5" />
+                    <span>{t("Diskon AP2 diterapkan setelah verifikasi ID Card.", "AP2 discount applied after ID Card verification.")}</span>
+                  </div>
                 )}
                 {couponResult && (
                   <div className="flex justify-between text-green-700 font-medium">

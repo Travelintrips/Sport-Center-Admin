@@ -55,15 +55,14 @@ export default function AdminDiscountSettings() {
   };
 
   const setFormVal = (ct: string, field: string, value: unknown, setting?: DiscountSetting) => {
+    const defaults = {
+      discountPercentage: Number(getFormVal(ct, "discountPercentage", setting)),
+      description: String(getFormVal(ct, "description", setting)),
+      isActive: Boolean(getFormVal(ct, "isActive", setting)),
+    };
     setForm(prev => ({
       ...prev,
-      [ct]: {
-        discountPercentage: Number(getFormVal(ct, "discountPercentage", setting)),
-        description: String(getFormVal(ct, "description", setting)),
-        isActive: Boolean(getFormVal(ct, "isActive", setting)),
-        ...prev[ct],
-        [field]: value,
-      },
+      [ct]: { ...defaults, ...prev[ct], [field]: value },
     }));
   };
 
