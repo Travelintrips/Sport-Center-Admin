@@ -933,7 +933,7 @@ router.post("/wa/action/:token", async (req, res) => {
           finishUrl: `${APP_URL}/wa/action/${finishToken}`,
         });
 
-        syncStatusToBizportal(booking.orderNumber, "confirmed", payment.proofUrl, new Date()).catch(() => {});
+        syncStatusToBizportal(booking.orderNumber, "confirmed", payment.proofUrl, new Date(), booking).catch(() => {});
 
         await logAudit({
           action: "wa_approve_payment",
@@ -1188,7 +1188,7 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
       after: { proofUrl, status: "waiting_confirmation" },
     });
 
-    syncStatusToBizportal(booking.orderNumber, "waiting_confirmation", proofUrl).catch(() => {});
+    syncStatusToBizportal(booking.orderNumber, "waiting_confirmation", proofUrl, null, booking).catch(() => {});
 
     res.json({ success: true, orderNumber: booking.orderNumber });
   } catch (err) {
@@ -1278,7 +1278,7 @@ router.post("/wa/review/:token", async (req, res) => {
         finishUrl: `${APP_URL}/wa/action/${finishToken}`,
       }).catch(() => {});
 
-      syncStatusToBizportal(booking.orderNumber, "confirmed", payment.proofUrl, new Date()).catch(() => {});
+      syncStatusToBizportal(booking.orderNumber, "confirmed", payment.proofUrl, new Date(), booking).catch(() => {});
 
       await logAudit({
         action: "wa_approve_payment",

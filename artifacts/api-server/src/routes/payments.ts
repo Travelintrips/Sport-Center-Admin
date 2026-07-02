@@ -96,6 +96,38 @@ router.post("/payments", async (req, res) => {
       }
     }
 
+    // ── Validasi nominal pembayaran ───────────────────────────────────────────
+    const grandTotalVal = booking.grandTotal != null ? Number(booking.grandTotal) : Number(booking.totalPrice);
+    const amountNum = Number(amount);
+    const PAYMENT_TOLERANCE = 1000;
+
+    if (!amount || isNaN(amountNum) || amountNum <= 0) {
+      res.status(400).json({ error: "Nominal pembayaran harus lebih dari 0" });
+      return;
+    }
+
+    if (paymentType === "full_payment") {
+      if (amountNum > grandTotalVal + PAYMENT_TOLERANCE) {
+        res.status(400).json({
+          error: `Nominal pembayaran (Rp ${amountNum.toLocaleString("id-ID")}) melebihi total tagihan (Rp ${grandTotalVal.toLocaleString("id-ID")})`,
+        });
+        return;
+      }
+    }
+
+    if (paymentType === "pelunasan") {
+      const confirmedDpTotal = existingPayments
+        .filter((p) => p.paymentType === "dp" && p.status === "confirmed")
+        .reduce((sum, p) => sum + Number(p.amount), 0);
+      const remainingAmount = grandTotalVal - confirmedDpTotal;
+      if (amountNum > remainingAmount + PAYMENT_TOLERANCE) {
+        res.status(400).json({
+          error: `Nominal pelunasan (Rp ${amountNum.toLocaleString("id-ID")}) melebihi sisa tagihan (Rp ${remainingAmount.toLocaleString("id-ID")})`,
+        });
+        return;
+      }
+    }
+
     // Insert payment record baru (no upsert)
     const [payment] = await db.insert(paymentsTable)
       .values({
@@ -163,6 +195,8 @@ router.post("/payments", async (req, res) => {
           changedByName: booking.customerName,
           note: `${historyNote} (grup ${booking.groupRef})`,
         });
+        // Sync sibling ke BizPortal
+        syncStatusToBizportal(sib.orderNumber, "waiting_confirmation", proofUrl, null, sib).catch(() => {});
       }
     }
 
@@ -186,7 +220,7 @@ router.post("/payments", async (req, res) => {
       totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
       reviewUrl: `${APP_URL}/ulasan/${reviewToken}`,
     });
-    syncStatusToBizportal(booking.orderNumber, "waiting_confirmation", proofUrl).catch(() => {});
+    syncStatusToBizportal(booking.orderNumber, "waiting_confirmation", proofUrl, null, booking).catch(() => {});
 
     const auditAction =
       paymentType === "dp" ? "DP_PAYMENT_CREATED" : "FINAL_PAYMENT_CREATED";
@@ -228,7 +262,12 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
     const clientInfo = getClientInfo(req);
 
     // Helper: propagasi status ke semua sibling dalam grup
-    const propagateGroupStatus = async (targetStatus: string, note: string) => {
+    const propagateGroupStatus = async (
+      targetStatus: string,
+      note: string,
+      proofUrl?: string | null,
+      paidAt?: Date | null,
+    ) => {
       if (!booking?.groupRef) return;
       const siblings = await db.select().from(bookingsTable).where(
         and(eq(bookingsTable.groupRef, booking.groupRef), ne(bookingsTable.id, payment.bookingId))
@@ -249,6 +288,8 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
         await db.update(paymentsTable)
           .set({ status: status as any, ...(status === "confirmed" ? { confirmedAt: new Date() } : {}) })
           .where(and(eq(paymentsTable.bookingId, sib.id), eq(paymentsTable.status, "pending")));
+        // Sync sibling ke BizPortal
+        syncStatusToBizportal(sib.orderNumber, targetStatus, proofUrl, paidAt, sib).catch(() => {});
       }
     };
 
@@ -270,7 +311,7 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
             changedByName: userInfo.userName || "admin",
             note: "DP dikonfirmasi oleh admin, menunggu pelunasan",
           });
-          await propagateGroupStatus("pending_payment", "DP dikonfirmasi oleh admin, menunggu pelunasan");
+          await propagateGroupStatus("pending_payment", "DP dikonfirmasi oleh admin, menunggu pelunasan", null, null);
         }
 
         await logAudit({
@@ -302,10 +343,13 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
           });
 
           // Propagasi confirmed ke semua sibling dalam grup
-          await propagateGroupStatus("confirmed",
+          await propagateGroupStatus(
+            "confirmed",
             payment.paymentType === "pelunasan"
               ? "Pelunasan dikonfirmasi oleh admin"
-              : "Pembayaran dikonfirmasi oleh admin"
+              : "Pembayaran dikonfirmasi oleh admin",
+            payment.proofUrl,
+            new Date(),
           );
 
           const [facility] = await db
@@ -326,7 +370,7 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
             totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
             bookingId: booking.id,
           }).catch((err) => logger.error({ err, orderNumber: booking.orderNumber, phone: booking.customerPhone }, "[WA] notifyPaymentConfirmed error"));
-          syncStatusToBizportal(booking.orderNumber, "confirmed", payment.proofUrl, new Date()).catch(() => {});
+          syncStatusToBizportal(booking.orderNumber, "confirmed", payment.proofUrl, new Date(), booking).catch(() => {});
 
           const today = new Date().toISOString().split("T")[0];
           const subtotal = Number(booking.totalPrice);
@@ -365,8 +409,8 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
           note: `Pembayaran ditolak: ${notes ?? ""}`,
         });
         // Propagasi rejected ke semua sibling dalam grup
-        await propagateGroupStatus("pending_payment", `Pembayaran ditolak: ${notes ?? ""}`);
-        syncStatusToBizportal(booking.orderNumber, "pending_payment").catch(() => {});
+        await propagateGroupStatus("pending_payment", `Pembayaran ditolak: ${notes ?? ""}`, null, null);
+        syncStatusToBizportal(booking.orderNumber, "pending_payment", null, null, booking).catch(() => {});
       }
 
       const auditAction =

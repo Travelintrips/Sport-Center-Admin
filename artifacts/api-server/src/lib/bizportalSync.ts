@@ -292,10 +292,13 @@ export async function syncStatusToBizportal(
   orderNumber: string,
   scStatus: string,
   paymentProofUrl?: string | null,
-  paidAt?: Date | null
+  paidAt?: Date | null,
+  booking?: Booking
 ): Promise<void> {
   const pool = getProdPool();
   if (!pool) return;
+
+  const tax = booking ? calcTaxBreakdown(booking) : null;
 
   try {
     await withRetry(async () => {
@@ -305,6 +308,11 @@ export async function syncStatusToBizportal(
              payment_status    = $3,
              payment_proof_url = COALESCE($4, payment_proof_url),
              payment_proof_at  = COALESCE($5, payment_proof_at),
+             ppn_rate          = COALESCE($6, ppn_rate),
+             dpp               = COALESCE($7, dpp),
+             dpp_nilai_lain    = COALESCE($8, dpp_nilai_lain),
+             ppn_amount        = COALESCE($9, ppn_amount),
+             grand_total       = COALESCE($10, grand_total),
              updated_at        = NOW()
          WHERE booking_code    = $1`,
         [
@@ -313,6 +321,11 @@ export async function syncStatusToBizportal(
           toPaymentStatus(scStatus),
           paymentProofUrl || null,
           paidAt || null,
+          tax?.ppnRate ?? null,
+          tax?.dpp ?? null,
+          tax?.dppNilaiLain ?? null,
+          tax?.ppnAmount ?? null,
+          tax?.grandTotal ?? null,
         ]
       );
     }, `syncStatus:${orderNumber}`);

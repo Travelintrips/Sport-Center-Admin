@@ -1097,7 +1097,7 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
 
     if (status && beforeUpdate) {
       const [payment] = await db.select().from(paymentsTable).where(eq(paymentsTable.bookingId, id)).limit(1);
-      syncStatusToBizportal(beforeUpdate.orderNumber, status, payment?.proofUrl, status === "confirmed" ? new Date() : null).catch(() => {});
+      syncStatusToBizportal(beforeUpdate.orderNumber, status, payment?.proofUrl, status === "confirmed" ? new Date() : null, beforeUpdate).catch(() => {});
 
       // Kirim WA notification ke customer saat status berubah ke confirmed ATAU langsung ke completed
       const isConfirming =

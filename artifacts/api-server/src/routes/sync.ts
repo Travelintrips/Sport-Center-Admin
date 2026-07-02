@@ -1,6 +1,6 @@
 import { Router, Request, Response, NextFunction } from "express";
 import { db, bookingsTable, facilitiesTable, paymentsTable, usersTable, gymMembershipsTable } from "@workspace/db";
-import { desc, gte, and, lte, eq } from "drizzle-orm";
+import { desc, gte, and, lte, eq, inArray } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
 import { syncBookingToBizportal, syncMembershipToBizportal, bizportalSyncConfigured } from "../lib/bizportalSync";
 
@@ -100,7 +100,7 @@ router.get("/sync/bookings", apiKeyMiddleware, async (req, res) => {
 
     const bookingIds = paged.map((b) => b.id);
     const payments = bookingIds.length
-      ? await db.select().from(paymentsTable)
+      ? await db.select().from(paymentsTable).where(inArray(paymentsTable.bookingId, bookingIds))
       : [];
 
     const customerIds = [...new Set(paged.map((b) => b.customerId).filter(Boolean))] as number[];
@@ -280,11 +280,11 @@ router.get("/sync/stats", apiKeyMiddleware, async (req, res) => {
 
     const totalRevenue = allBookings
       .filter((b) => confirmedStatuses.includes(b.status))
-      .reduce((sum, b) => sum + Number(b.totalPrice), 0);
+      .reduce((sum, b) => sum + (b.grandTotal != null ? Number(b.grandTotal) : Number(b.totalPrice)), 0);
 
     const monthRevenue = monthBookings
       .filter((b) => confirmedStatuses.includes(b.status))
-      .reduce((sum, b) => sum + Number(b.totalPrice), 0);
+      .reduce((sum, b) => sum + (b.grandTotal != null ? Number(b.grandTotal) : Number(b.totalPrice)), 0);
 
     const byStatus = allBookings.reduce<Record<string, number>>((acc, b) => {
       acc[b.status] = (acc[b.status] || 0) + 1;
