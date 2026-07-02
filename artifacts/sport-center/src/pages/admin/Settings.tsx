@@ -349,10 +349,11 @@ export default function AdminSettings() {
     paymentDeadlineHours: "24",
   });
   const [waForm, setWaForm] = useState({
-    fonnteToken: "", fonnteAdminWa: "", adminWaPhones: "", appUrl: "",
+    fonnteToken: "", fonnteCustomerToken: "", fonnteAdminWa: "", adminWaPhones: "", appUrl: "",
   });
   const [paymentDomain, setPaymentDomain] = useState("");
   const [showToken, setShowToken] = useState(false);
+  const [showCustomerToken, setShowCustomerToken] = useState(false);
   const [qrisPreview, setQrisPreview] = useState<string | null>(null);
   const [qrisUploading, setQrisUploading] = useState(false);
   const [qrisDeleting, setQrisDeleting] = useState(false);
@@ -375,6 +376,7 @@ export default function AdminSettings() {
       });
       setWaForm({
         fonnteToken: (settings as any).fonnteToken ?? "",
+        fonnteCustomerToken: (settings as any).fonnteCustomerToken ?? "",
         fonnteAdminWa: (settings as any).fonnteAdminWa ?? "",
         adminWaPhones: (settings as any).adminWaPhones ?? "",
         appUrl: (settings as any).appUrl ?? "",
@@ -589,7 +591,7 @@ export default function AdminSettings() {
           <CardContent className="space-y-4">
             <div className="grid md:grid-cols-2 gap-4">
               <div className="md:col-span-2 space-y-2">
-                <Label>Fonnte API Token</Label>
+                <Label>Token Fonnte — Nomor Admin (085121073537)</Label>
                 <div className="relative">
                   <Input
                     type={showToken ? "text" : "password"}
@@ -607,11 +609,35 @@ export default function AdminSettings() {
                   </button>
                 </div>
                 <p className="text-xs text-muted-foreground">
+                  Token nomor WhatsApp admin (<strong>085121073537</strong>). Digunakan untuk mengirim notifikasi ke admin.
                   Dapatkan token di{" "}
                   <a href="https://fonnte.com" target="_blank" rel="noreferrer" className="text-primary underline">
                     fonnte.com
-                  </a>
-                  . Token digunakan untuk mengirim pesan WA ke customer dan admin.
+                  </a>.
+                </p>
+              </div>
+
+              <div className="md:col-span-2 space-y-2">
+                <Label>Token Fonnte — Nomor Customer (081216104734)</Label>
+                <div className="relative">
+                  <Input
+                    type={showCustomerToken ? "text" : "password"}
+                    value={waForm.fonnteCustomerToken}
+                    onChange={(e) => setWaForm(f => ({ ...f, fonnteCustomerToken: e.target.value }))}
+                    placeholder="Token dari dashboard.fonnte.com untuk nomor customer"
+                    className="pr-10 font-mono text-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowCustomerToken(v => !v)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  >
+                    {showCustomerToken ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Token nomor WhatsApp customer (<strong>081216104734</strong>). Digunakan untuk mengirim notifikasi ke customer (booking, konfirmasi, reminder, dll).
+                  Jika kosong, sistem pakai token admin di atas.
                 </p>
               </div>
 

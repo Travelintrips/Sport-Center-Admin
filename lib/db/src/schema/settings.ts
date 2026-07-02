@@ -18,6 +18,7 @@ export const settingsTable = scSchema.table("sport_settings", {
   bankAccountName: text("bank_account_name"),
   qrisImageUrl: text("qris_image_url"),
   fonnteToken: text("fonnte_token"),
+  fonnteCustomerToken: text("fonnte_customer_token"),
   fonnteAdminWa: text("fonnte_admin_wa"),
   adminWaPhones: text("admin_wa_phones"),
   appUrl: text("app_url"),
