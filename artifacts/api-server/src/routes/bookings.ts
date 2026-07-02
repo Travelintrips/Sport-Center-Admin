@@ -1368,7 +1368,7 @@ router.post("/bookings/:id/verify", adminMiddleware, async (req, res) => {
 // ─── POST /bookings/groups/:groupRef/reapply-discount — paksa ulang diskon AP ke semua sesi ──
 router.post("/bookings/groups/:groupRef/reapply-discount", adminMiddleware, async (req, res) => {
   try {
-    const { groupRef } = req.params;
+    const groupRef = String(req.params.groupRef);
 
     // Ambil semua booking dalam grup yang merupakan AP
     const allBookings = await db.select().from(bookingsTable)
@@ -1427,7 +1427,7 @@ router.post("/bookings/groups/:groupRef/reapply-discount", adminMiddleware, asyn
     const newGroupTotal = details.reduce((sum, d) => sum + d.after, 0);
     await db.update(bookingGroupsTable)
       .set({ totalPayment: String(newGroupTotal) })
-      .where(eq(bookingGroupsTable.groupRef, groupRef));
+      .where(eq(bookingGroupsTable.groupRef, String(groupRef)));
 
     const { ipAddress, userAgent } = getClientInfo(req);
     const userInfo = getUserFromReq(req);
