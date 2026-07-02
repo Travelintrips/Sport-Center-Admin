@@ -696,9 +696,20 @@ export default function BookingDetail() {
                       </button>
                     )}
                     {!hasBankInfo && !hasQris && (
-                      <div className="col-span-2 text-center py-4 text-sm text-muted-foreground">
-                        {t("Hubungi admin untuk info pembayaran.", "Contact admin for payment information.")}
-                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setPaymentMethod("transfer")}
+                        className="col-span-2 flex flex-col items-center gap-3 p-5 rounded-2xl border-2 border-border hover:border-primary hover:bg-primary/5 transition-all group"
+                      >
+                        <div className="w-12 h-12 rounded-xl bg-green-100 flex items-center justify-center group-hover:bg-green-200 transition-colors">
+                          <Upload size={22} className="text-green-600" />
+                        </div>
+                        <div className="text-center">
+                          <div className="font-semibold text-sm">{t("Upload Bukti Pembayaran", "Upload Payment Proof")}</div>
+                          <div className="text-xs text-muted-foreground mt-0.5">{t("Hubungi admin untuk info rekening", "Contact admin for account info")}</div>
+                        </div>
+                        <ChevronRight size={14} className="text-muted-foreground group-hover:text-primary transition-colors" />
+                      </button>
                     )}
                   </div>
                 )}
@@ -715,25 +726,27 @@ export default function BookingDetail() {
                       {t("Pilih metode lain", "Choose another method")}
                     </button>
 
-                    <div className="bg-muted rounded-xl p-4 relative group">
-                      <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">
-                        {settings?.bankName}
+                    {hasBankInfo && (
+                      <div className="bg-muted rounded-xl p-4 relative group">
+                        <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">
+                          {settings?.bankName}
+                        </div>
+                        <div className="text-2xl font-mono tracking-wider mb-1">
+                          {settings?.bankAccount}
+                        </div>
+                        <div className="text-sm font-medium">
+                          {t("a.n", "a/n")} {settings?.bankAccountName}
+                        </div>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="absolute top-2 right-2 opacity-50 group-hover:opacity-100 transition-opacity"
+                          onClick={() => copyToClipboard(settings?.bankAccount ?? "")}
+                        >
+                          <Copy size={16} />
+                        </Button>
                       </div>
-                      <div className="text-2xl font-mono tracking-wider mb-1">
-                        {settings?.bankAccount}
-                      </div>
-                      <div className="text-sm font-medium">
-                        {t("a.n", "a/n")} {settings?.bankAccountName}
-                      </div>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="absolute top-2 right-2 opacity-50 group-hover:opacity-100 transition-opacity"
-                        onClick={() => copyToClipboard(settings?.bankAccount ?? "")}
-                      >
-                        <Copy size={16} />
-                      </Button>
-                    </div>
+                    )}
 
                     <UploadProofForm
                       selectedFile={selectedFile}
