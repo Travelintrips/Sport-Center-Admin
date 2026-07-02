@@ -42,8 +42,8 @@ async function getPublicIds() {
   if (!pool) throw new Error("[accounting] Tidak ada Supabase URL — tidak bisa write ke public.accounting_entries");
 
   const [journal, kas, pendapatan, ppn, tax] = await Promise.all([
-    pool.query(`SELECT id FROM public.accounting_journals WHERE code = 'CSH-CST' LIMIT 1`),
-    pool.query(`SELECT id FROM public.chart_of_accounts WHERE code = '1-1010-CST' AND is_active = true LIMIT 1`),
+    pool.query(`SELECT id FROM public.accounting_journals WHERE code = 'BNK-CST' LIMIT 1`),
+    pool.query(`SELECT id FROM public.chart_of_accounts WHERE code = '1-1020-CST' AND is_active = true LIMIT 1`),
     pool.query(`SELECT id FROM public.chart_of_accounts WHERE code = '4-1017-CST' AND is_active = true LIMIT 1`),
     pool.query(`SELECT id FROM public.chart_of_accounts WHERE code = '2-1020-CST' AND is_active = true LIMIT 1`),
     pool.query(`SELECT id FROM public.accounting_taxes WHERE name ILIKE '%PPN Keluaran%' AND company_id = $1 ORDER BY id LIMIT 1`, [COMPANY_ID]),
@@ -59,7 +59,7 @@ async function getPublicIds() {
     throw new Error(
       `[accounting] Public COA/journal lookup gagal. ` +
       `journalId=${journalId} coaKas=${coaKas} coaPendapatan=${coaPendapatan} coaPpnKeluaran=${coaPpnKeluaran}. ` +
-      `Pastikan public.accounting_journals code=CSH-CST dan chart_of_accounts 1-1010-CST, 4-1017-CST, 2-1020-CST ada.`
+      `Pastikan public.accounting_journals code=BNK-CST dan chart_of_accounts 1-1020-CST, 4-1017-CST, 2-1020-CST ada.`
     );
   }
 
@@ -70,14 +70,14 @@ async function getPublicIds() {
 async function nextPublicEntryNumber(pool: pg.Pool, year: number): Promise<string> {
   const result = await pool.query(
     `SELECT COALESCE(MAX(
-      NULLIF(REGEXP_REPLACE(entry_number, '^SC-CSH/[0-9]+/', ''), '')::integer
+      NULLIF(REGEXP_REPLACE(entry_number, '^SC-BNK/[0-9]+/', ''), '')::integer
     ), 0) + 1 AS seq
     FROM public.accounting_entries
     WHERE entry_number LIKE $1 AND source = 'sport_center_booking'`,
-    [`SC-CSH/${year}/%`]
+    [`SC-BNK/${year}/%`]
   );
   const seq = Number(result.rows[0]?.seq ?? 1);
-  return `SC-CSH/${year}/${String(seq).padStart(4, "0")}`;
+  return `SC-BNK/${year}/${String(seq).padStart(4, "0")}`;
 }
 
 export async function createPublicAccountingEntry(
