@@ -660,25 +660,23 @@ export default function BookingDetail() {
 
                       {/* Payment Method Selector */}
                       {!paymentMethod && (
-                  <div className="grid grid-cols-2 gap-3">
-                    {hasBankInfo && (
-                      <button
-                        type="button"
-                        onClick={() => setPaymentMethod("transfer")}
-                        className="flex flex-col items-center gap-3 p-5 rounded-2xl border-2 border-border hover:border-primary hover:bg-primary/5 transition-all group"
-                      >
-                        <div className="w-12 h-12 rounded-xl bg-blue-100 flex items-center justify-center group-hover:bg-blue-200 transition-colors">
-                          <Building2 size={22} className="text-blue-600" />
+                  <div className={`grid gap-3 ${hasQris ? "grid-cols-2" : "grid-cols-1"}`}>
+                    <button
+                      type="button"
+                      onClick={() => setPaymentMethod("transfer")}
+                      className="flex flex-col items-center gap-3 p-5 rounded-2xl border-2 border-border hover:border-primary hover:bg-primary/5 transition-all group"
+                    >
+                      <div className="w-12 h-12 rounded-xl bg-blue-100 flex items-center justify-center group-hover:bg-blue-200 transition-colors">
+                        <Building2 size={22} className="text-blue-600" />
+                      </div>
+                      <div className="text-center">
+                        <div className="font-semibold text-sm">{t("Transfer Bank", "Bank Transfer")}</div>
+                        <div className="text-xs text-muted-foreground mt-0.5">
+                          {settings?.bankName ?? t("Bank Transfer", "Bank Transfer")}
                         </div>
-                        <div className="text-center">
-                          <div className="font-semibold text-sm">{t("Transfer Bank", "Bank Transfer")}</div>
-                          <div className="text-xs text-muted-foreground mt-0.5">
-                            {settings?.bankName}
-                          </div>
-                        </div>
-                        <ChevronRight size={14} className="text-muted-foreground group-hover:text-primary transition-colors" />
-                      </button>
-                    )}
+                      </div>
+                      <ChevronRight size={14} className="text-muted-foreground group-hover:text-primary transition-colors" />
+                    </button>
                     {hasQris && (
                       <button
                         type="button"
@@ -691,22 +689,6 @@ export default function BookingDetail() {
                         <div className="text-center">
                           <div className="font-semibold text-sm">QRIS</div>
                           <div className="text-xs text-muted-foreground mt-0.5">{t("Scan & Pay", "Scan & Pay")}</div>
-                        </div>
-                        <ChevronRight size={14} className="text-muted-foreground group-hover:text-primary transition-colors" />
-                      </button>
-                    )}
-                    {!hasBankInfo && !hasQris && (
-                      <button
-                        type="button"
-                        onClick={() => setPaymentMethod("transfer")}
-                        className="col-span-2 flex flex-col items-center gap-3 p-5 rounded-2xl border-2 border-border hover:border-primary hover:bg-primary/5 transition-all group"
-                      >
-                        <div className="w-12 h-12 rounded-xl bg-green-100 flex items-center justify-center group-hover:bg-green-200 transition-colors">
-                          <Upload size={22} className="text-green-600" />
-                        </div>
-                        <div className="text-center">
-                          <div className="font-semibold text-sm">{t("Upload Bukti Pembayaran", "Upload Payment Proof")}</div>
-                          <div className="text-xs text-muted-foreground mt-0.5">{t("Hubungi admin untuk info rekening", "Contact admin for account info")}</div>
                         </div>
                         <ChevronRight size={14} className="text-muted-foreground group-hover:text-primary transition-colors" />
                       </button>
