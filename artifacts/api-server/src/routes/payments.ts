@@ -7,7 +7,7 @@ import path from "path";
 import { randomUUID } from "crypto";
 import { notifyPaymentConfirmed, notifyPaymentProofUploaded } from "../lib/notifications";
 import { logAudit, getClientInfo, getUserFromReq, logAccountingError } from "../lib/auditLog";
-import { syncStatusToBizportal } from "../lib/bizportalSync";
+import { syncStatusToBizportal, pushConfirmedPaymentAsBankMutation } from "../lib/bizportalSync";
 import { uploadProofWithFallback } from "./storage";
 import { createJournalEntry, createPublicAccountingEntry } from "../lib/accounting";
 import { createWaToken } from "../lib/waTokens";
@@ -371,6 +371,7 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
             bookingId: booking.id,
           }).catch((err) => logger.error({ err, orderNumber: booking.orderNumber, phone: booking.customerPhone }, "[WA] notifyPaymentConfirmed error"));
           syncStatusToBizportal(booking.orderNumber, "confirmed", payment.proofUrl, new Date(), booking).catch(() => {});
+          pushConfirmedPaymentAsBankMutation(booking, new Date()).catch(() => {});
 
           const today = new Date().toISOString().split("T")[0];
           const subtotal = Number(booking.totalPrice);

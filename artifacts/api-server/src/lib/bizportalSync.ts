@@ -288,6 +288,75 @@ export async function deleteBookingFromBizportal(orderNumber: string): Promise<v
   }
 }
 
+// ── Bank Mutation Push ──────────────────────────────────────────────────────
+// Saat booking payment dikonfirmasi, otomatis buat entry bank_mutations
+// dengan bankAccountId = nomor rekening dari settings (Mandiri CST).
+// Idempotent: mutationKey 'SC-{orderNumber}' dicek sebelum insert.
+export async function pushConfirmedPaymentAsBankMutation(
+  booking: Booking,
+  confirmedAt?: Date | null,
+): Promise<void> {
+  const pool = getProdPool();
+  if (!pool) return;
+
+  const amount =
+    booking.grandTotal != null && Number(booking.grandTotal) > 0
+      ? Math.round(Number(booking.grandTotal))
+      : Math.round(Number(booking.totalPrice));
+  if (amount <= 0) return;
+
+  const mutationKey = `SC-${booking.orderNumber}`;
+  const transactionDate = confirmedAt
+    ? confirmedAt.toISOString().split("T")[0]!
+    : new Date().toISOString().split("T")[0]!;
+  const description = `SPORT CENTER | ${booking.orderNumber} | ${booking.customerName}`;
+  const normalizedDescription = description
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  try {
+    // Ambil bankAccountId (nomor rekening Mandiri CST) dari settings
+    let bankAccountId: string | null = null;
+    try {
+      const { rows } = await pool.query(
+        `SELECT bank_account FROM sport_center.settings LIMIT 1`,
+      );
+      if (rows[0]?.bank_account) bankAccountId = String(rows[0].bank_account);
+    } catch {
+      // non-fatal — lanjut tanpa bankAccountId
+    }
+
+    await withRetry(async () => {
+      await pool.query(
+        `INSERT INTO sport_center.bank_mutations
+           (bank_account_id, transaction_date, description, credit_amount, debit_amount,
+            amount, direction, mutation_key, normalized_description, provider_order_id,
+            status, matched_order_id, created_at, updated_at)
+         SELECT $1,$2,$3,$4,'0',$4,'IN',$5,$6,$7,'auto_matched',$8,NOW(),NOW()
+         WHERE NOT EXISTS (
+           SELECT 1 FROM sport_center.bank_mutations WHERE mutation_key = $5
+         )`,
+        [
+          bankAccountId,
+          transactionDate,
+          description,
+          String(amount),
+          mutationKey,
+          normalizedDescription,
+          booking.orderNumber,
+          booking.id,
+        ],
+      );
+    }, `pushBankMutation:${booking.orderNumber}`);
+
+    console.info(`[bizportalSync] ✓ Bank mutation created: ${booking.orderNumber} → Rp ${amount.toLocaleString("id-ID")}`);
+  } catch (err: any) {
+    console.error(`[bizportalSync] ✗ Bank mutation push failed: ${booking.orderNumber} — ${err?.message}`);
+  }
+}
+
 export async function syncStatusToBizportal(
   orderNumber: string,
   scStatus: string,

@@ -40,7 +40,7 @@ import { calculatePrice } from "../lib/pricing";
 import { logAudit, logAccountingError } from "../lib/auditLog";
 import { createJournalEntry, createPublicAccountingEntry } from "../lib/accounting";
 import { hashPassword } from "../lib/auth";
-import { syncStatusToBizportal } from "../lib/bizportalSync";
+import { syncStatusToBizportal, pushConfirmedPaymentAsBankMutation } from "../lib/bizportalSync";
 import { calculateTax, recordTaxTransaction } from "../lib/tax";
 import { broadcastAvailabilityChange } from "../lib/supabase";
 import { logger } from "../lib/logger";
@@ -934,6 +934,7 @@ router.post("/wa/action/:token", async (req, res) => {
         });
 
         syncStatusToBizportal(booking.orderNumber, "confirmed", payment.proofUrl, new Date(), booking).catch(() => {});
+        pushConfirmedPaymentAsBankMutation(booking, new Date()).catch(() => {});
 
         await logAudit({
           action: "wa_approve_payment",
@@ -1279,6 +1280,7 @@ router.post("/wa/review/:token", async (req, res) => {
       }).catch(() => {});
 
       syncStatusToBizportal(booking.orderNumber, "confirmed", payment.proofUrl, new Date(), booking).catch(() => {});
+      pushConfirmedPaymentAsBankMutation(booking, new Date()).catch(() => {});
 
       await logAudit({
         action: "wa_approve_payment",
@@ -1683,6 +1685,9 @@ async function execAdminApprove(adminPhone: string, orderNumber: string) {
     checkinUrl: `${APP_URL}/wa/action/${checkinToken}`,
     finishUrl: `${APP_URL}/wa/action/${finishToken}`,
   });
+
+  syncStatusToBizportal(booking.orderNumber, "confirmed", null, new Date(), booking).catch(() => {});
+  pushConfirmedPaymentAsBankMutation(booking, new Date()).catch(() => {});
 
   await logAudit({
     action: "wa_admin_approve",
