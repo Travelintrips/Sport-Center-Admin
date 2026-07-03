@@ -2,7 +2,7 @@ import { Router } from "express";
 import { db, gymMembershipsTable, publicMembershipsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
-import { syncMembershipToBizportal } from "../lib/bizportalSync";
+import { syncMembershipToBizportal, pushMembershipPaymentAsBankMutation } from "../lib/bizportalSync";
 
 const router = Router();
 
@@ -152,12 +152,17 @@ router.post("/memberships/:id/payment-proof", async (req, res) => {
 router.patch("/memberships/:id", adminMiddleware, async (req, res) => {
   try {
     const id = parseInt(String(req.params.id));
+    const [existing] = await db.select().from(gymMembershipsTable).where(eq(gymMembershipsTable.id, id)).limit(1);
+    if (!existing) { res.status(404).json({ error: "Not found" }); return; }
     const data = { ...req.body };
     if (data.totalPrice !== undefined) data.totalPrice = String(data.totalPrice);
     await db.update(gymMembershipsTable).set(data).where(eq(gymMembershipsTable.id, id));
     const [membership] = await db.select().from(gymMembershipsTable).where(eq(gymMembershipsTable.id, id)).limit(1);
     if (!membership) { res.status(404).json({ error: "Not found" }); return; }
     syncMembershipToBizportal(membership).catch(() => {});
+    if (membership.status === "active" && existing.status !== "active") {
+      pushMembershipPaymentAsBankMutation(membership, new Date()).catch(() => {});
+    }
     await syncToPublic(membership);
     res.json({ ...membership, totalPrice: Number(membership.totalPrice) });
   } catch (err) {

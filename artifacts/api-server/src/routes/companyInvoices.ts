@@ -3,6 +3,7 @@ import { db, usersTable, bookingsTable, companyInvoicesTable, companyInvoiceItem
 import { eq, and, gte, lt, inArray, isNull, or } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
+import { pushInvoicePaymentAsBankMutation } from "../lib/bizportalSync";
 
 const router = Router();
 
@@ -509,6 +510,11 @@ router.patch("/company-invoices/:id", adminMiddleware, async (req, res) => {
 
     const [company] = await db.select().from(usersTable).where(eq(usersTable.id, updated.companyCustomerId)).limit(1);
     const items = await db.select().from(companyInvoiceItemsTable).where(eq(companyInvoiceItemsTable.invoiceId, id));
+
+    if (status === "paid" && inv.status !== "paid") {
+      pushInvoicePaymentAsBankMutation(updated, company?.companyName ?? company?.name, updated.paidAt ?? new Date()).catch(() => {});
+    }
+
     res.json(mapInvoice(updated, company?.companyName ?? company?.name, items, company));
   } catch (err) {
     req.log.error({ err }, "Update company invoice error");

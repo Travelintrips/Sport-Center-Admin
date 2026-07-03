@@ -1,5 +1,5 @@
 import pg from "pg";
-import type { Booking, GymMembership } from "@workspace/db";
+import type { Booking, GymMembership, CompanyInvoice } from "@workspace/db";
 
 const { Pool } = pg;
 
@@ -354,6 +354,135 @@ export async function pushConfirmedPaymentAsBankMutation(
     console.info(`[bizportalSync] ✓ Bank mutation created: ${booking.orderNumber} → Rp ${amount.toLocaleString("id-ID")}`);
   } catch (err: any) {
     console.error(`[bizportalSync] ✗ Bank mutation push failed: ${booking.orderNumber} — ${err?.message}`);
+  }
+}
+
+async function getBankAccountId(pool: pg.Pool): Promise<string | null> {
+  try {
+    const { rows } = await pool.query(
+      `SELECT bank_account FROM sport_center.settings LIMIT 1`,
+    );
+    return rows[0]?.bank_account ? String(rows[0].bank_account) : null;
+  } catch {
+    return null;
+  }
+}
+
+// ── Membership Bank Mutation Push ───────────────────────────────────────────
+// Saat membership gym berstatus "active" (lunas), otomatis buat entry
+// bank_mutations dengan bankAccountId = nomor rekening dari settings (Mandiri CST).
+// Idempotent: mutationKey 'SC-MB-{id}' dicek sebelum insert.
+export async function pushMembershipPaymentAsBankMutation(
+  membership: GymMembership,
+  confirmedAt?: Date | null,
+): Promise<void> {
+  const pool = getProdPool();
+  if (!pool) return;
+
+  const amount = Math.round(Number(membership.totalPrice));
+  if (amount <= 0) return;
+
+  const mutationKey = `SC-MB-${membership.id}`;
+  const transactionDate = confirmedAt
+    ? confirmedAt.toISOString().split("T")[0]!
+    : new Date().toISOString().split("T")[0]!;
+  const description = `SPORT CENTER MEMBER GYM | MB-${membership.id} | ${membership.name}`;
+  const normalizedDescription = description
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  try {
+    const bankAccountId = await getBankAccountId(pool);
+
+    await withRetry(async () => {
+      await pool.query(
+        `INSERT INTO sport_center.bank_mutations
+           (bank_account_id, transaction_date, description, credit_amount, debit_amount,
+            amount, direction, mutation_key, normalized_description, provider_order_id,
+            status, matched_order_id, created_at, updated_at)
+         SELECT $1,$2,$3,$4,'0',$4,'IN',$5,$6,$7,'auto_matched',$8,NOW(),NOW()
+         WHERE NOT EXISTS (
+           SELECT 1 FROM sport_center.bank_mutations WHERE mutation_key = $5
+         )`,
+        [
+          bankAccountId,
+          transactionDate,
+          description,
+          String(amount),
+          mutationKey,
+          normalizedDescription,
+          mutationKey,
+          null,
+        ],
+      );
+    }, `pushMembershipMutation:${membership.id}`);
+
+    console.info(`[bizportalSync] ✓ Bank mutation created (membership): MB-${membership.id} → Rp ${amount.toLocaleString("id-ID")}`);
+  } catch (err: any) {
+    console.error(`[bizportalSync] ✗ Bank mutation push failed (membership): MB-${membership.id} — ${err?.message}`);
+  }
+}
+
+// ── Company Invoice Bank Mutation Push ──────────────────────────────────────
+// Saat invoice perusahaan ditandai "paid" (lunas), otomatis buat entry
+// bank_mutations dengan bankAccountId = nomor rekening dari settings (Mandiri CST).
+// Idempotent: mutationKey 'SC-INV-{invoiceNumber}' dicek sebelum insert.
+export async function pushInvoicePaymentAsBankMutation(
+  invoice: CompanyInvoice,
+  companyName?: string | null,
+  confirmedAt?: Date | null,
+): Promise<void> {
+  const pool = getProdPool();
+  if (!pool) return;
+
+  const amount =
+    invoice.grandTotal != null && Number(invoice.grandTotal) > 0
+      ? Math.round(Number(invoice.grandTotal))
+      : Math.round(Number(invoice.totalAmount));
+  if (amount <= 0) return;
+
+  const mutationKey = `SC-INV-${invoice.invoiceNumber}`;
+  const transactionDate = confirmedAt
+    ? confirmedAt.toISOString().split("T")[0]!
+    : new Date().toISOString().split("T")[0]!;
+  const description = `SPORT CENTER INVOICE PERUSAHAAN | ${invoice.invoiceNumber} | ${companyName || ""}`.trim();
+  const normalizedDescription = description
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  try {
+    const bankAccountId = await getBankAccountId(pool);
+
+    await withRetry(async () => {
+      await pool.query(
+        `INSERT INTO sport_center.bank_mutations
+           (bank_account_id, transaction_date, description, credit_amount, debit_amount,
+            amount, direction, mutation_key, normalized_description, provider_order_id,
+            status, matched_order_id, created_at, updated_at)
+         SELECT $1,$2,$3,$4,'0',$4,'IN',$5,$6,$7,'auto_matched',$8,NOW(),NOW()
+         WHERE NOT EXISTS (
+           SELECT 1 FROM sport_center.bank_mutations WHERE mutation_key = $5
+         )`,
+        [
+          bankAccountId,
+          transactionDate,
+          description,
+          String(amount),
+          mutationKey,
+          normalizedDescription,
+          mutationKey,
+          null,
+        ],
+      );
+    }, `pushInvoiceMutation:${invoice.invoiceNumber}`);
+
+    console.info(`[bizportalSync] ✓ Bank mutation created (invoice): ${invoice.invoiceNumber} → Rp ${amount.toLocaleString("id-ID")}`);
+  } catch (err: any) {
+    console.error(`[bizportalSync] ✗ Bank mutation push failed (invoice): ${invoice.invoiceNumber} — ${err?.message}`);
   }
 }
 
