@@ -316,7 +316,8 @@ export default function BookingDetail() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-        {/* Booking Details */}
+        {/* Left column: Booking Details + AP2 Verification */}
+        <div className="space-y-4">
         <Card className="border-border">
           <CardHeader className="bg-muted/30 pb-4 border-b">
             <CardTitle>{t("Detail Booking", "Booking Details")}</CardTitle>
@@ -468,8 +469,9 @@ export default function BookingDetail() {
             </CardContent>
           </Card>
         )}
+        </div>{/* end left column */}
 
-        {/* Payment Section */}
+        {/* Right column: Payment Section */}
         <div className="space-y-6">
           {booking.status === "pending_payment" && (
             <Card className="border-primary/30 shadow-md">
