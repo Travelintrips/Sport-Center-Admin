@@ -190,36 +190,83 @@ function formatDate(d: string) {
 
 /* ─── Invoice / Kwitansi Print ──────────────────────────────────── */
 
-function printInvoice(booking: any, settings?: any) {
+async function printInvoice(booking: any, settings?: any) {
   const centerName = settings?.centerName ?? "Sport Center";
   const address = settings?.address ?? "";
   const phone = settings?.phone ?? "";
+
+  // Untuk booking grup: fetch semua sesi, tampilkan gabungan dalam satu invoice
+  let sessions: any[] = [];
+  let isGroup = false;
+  if (booking.groupRef) {
+    try {
+      const res = await fetch(`/api/admin/bookings/groups/${booking.groupRef}/sessions`, {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      if (res.ok) {
+        sessions = await res.json();
+        isGroup = sessions.length > 1;
+      }
+    } catch { /* fallback ke sesi tunggal */ }
+  }
+  if (!isGroup) sessions = [booking];
+
+  // Hitung total dari semua sesi
+  const grandTotalAll = sessions.reduce((sum: number, s: any) =>
+    sum + (s.grandTotal != null ? Math.round(Number(s.grandTotal)) : Math.round(Number(s.totalPrice))), 0);
+  const totalPpnAll = sessions.reduce((sum: number, s: any) =>
+    sum + (s.ppnAmount != null ? Math.round(Number(s.ppnAmount)) : 0), 0);
+  const hasPpn = totalPpnAll > 0;
+  const dppAll = hasPpn ? (grandTotalAll - totalPpnAll) : grandTotalAll;
+  const dppNilaiLainAll = hasPpn ? Math.round(dppAll * 11 / 12) : 0;
+
+  // Baris sesi
+  const sessionRows = sessions.map((s: any, i: number) => {
+    const sTotal = s.grandTotal != null ? Math.round(Number(s.grandTotal)) : Math.round(Number(s.totalPrice));
+    return `<tr>
+      <td>${isGroup ? `Sesi ${i + 1} – ${s.facilityName ?? booking.facilityName}` : s.facilityName ?? booking.facilityName}</td>
+      <td>${formatDate(s.bookingDate)}</td>
+      <td>${String(s.startTime ?? "").slice(0, 5)} – ${String(s.endTime ?? "").slice(0, 5)}</td>
+      <td>${s.durationHours} jam</td>
+      <td style="text-align:right;font-weight:600">${formatCurrency(sTotal)}</td>
+    </tr>`;
+  }).join("\n");
+
+  const docTitle = isGroup ? booking.groupRef : booking.orderNumber;
+
   const html = `<!DOCTYPE html>
 <html lang="id">
 <head>
   <meta charset="UTF-8"/>
-  <title>Invoice ${booking.orderNumber}</title>
+  <title>Invoice ${docTitle}</title>
   <style>
     * { margin:0; padding:0; box-sizing:border-box; }
-    body { font-family: 'Segoe UI', Arial, sans-serif; color: #1a1a1a; background: #fff; padding: 40px; max-width: 680px; margin: auto; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; color: #1a1a1a; background: #fff; padding: 40px; max-width: 720px; margin: auto; }
     .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid #f97316; padding-bottom: 20px; margin-bottom: 28px; }
     .brand { font-size: 24px; font-weight: 900; color: #f97316; letter-spacing: -0.5px; }
     .brand-sub { font-size: 12px; color: #777; margin-top: 2px; }
     .invoice-meta { text-align: right; }
     .invoice-title { font-size: 28px; font-weight: 900; color: #111; letter-spacing: -1px; }
-    .invoice-num { font-size: 13px; color: #555; margin-top: 4px; font-family: monospace; }
+    .invoice-num { font-size: 13px; color: #f97316; margin-top: 4px; font-family: monospace; font-weight: 700; }
     .invoice-date { font-size: 12px; color: #777; margin-top: 2px; }
     .section { margin-bottom: 22px; }
     .section-title { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #999; margin-bottom: 8px; }
     .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 24px; }
     .info-item label { font-size: 11px; color: #888; display: block; margin-bottom: 1px; }
-    .info-item value, .info-item span { font-size: 13px; font-weight: 600; color: #222; }
-    table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
-    thead tr { background: #f8f8f8; }
-    th { padding: 10px 12px; text-align: left; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: #666; border-bottom: 2px solid #eee; }
-    td { padding: 12px; font-size: 13px; border-bottom: 1px solid #f0f0f0; }
-    .total-row { background: #fff8f4; }
-    .total-row td { font-weight: 900; font-size: 15px; color: #f97316; border-top: 2px solid #f97316; border-bottom: none; }
+    .info-item span { font-size: 13px; font-weight: 600; color: #222; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 0; }
+    thead tr { background: #f97316; }
+    th { padding: 10px 12px; text-align: left; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: #fff; }
+    th:last-child { text-align: right; }
+    tbody tr:nth-child(odd) { background: #fff7f3; }
+    tbody tr:nth-child(even) { background: #ffeee5; }
+    td { padding: 10px 12px; font-size: 13px; border-bottom: 1px solid #f0f0f0; }
+    .totals-section { display: flex; justify-content: flex-end; margin-top: 10px; margin-bottom: 16px; }
+    .totals-table { width: 300px; }
+    .totals-table td { padding: 4px 8px; font-size: 12px; border: none; background: transparent; }
+    .totals-table td:first-child { color: #555; text-align: left; }
+    .totals-table td:last-child { color: #555; text-align: right; font-weight: 600; }
+    .totals-table tr.grand-total td { font-size: 15px; font-weight: 900; color: #f97316; border-top: 2px solid #f97316; padding-top: 8px; }
     .status-badge { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 700; }
     .status-completed { background: #d1fae5; color: #065f46; }
     .status-pending { background: #fef3c7; color: #92400e; }
@@ -237,7 +284,7 @@ function printInvoice(booking: any, settings?: any) {
     </div>
     <div class="invoice-meta">
       <div class="invoice-title">INVOICE</div>
-      <div class="invoice-num">${booking.orderNumber}</div>
+      <div class="invoice-num">${docTitle}</div>
       <div class="invoice-date">Tanggal: ${new Date().toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" })}</div>
     </div>
   </div>
@@ -245,7 +292,9 @@ function printInvoice(booking: any, settings?: any) {
   <div class="section">
     <div class="section-title">Informasi Customer</div>
     <div class="info-grid">
-      ${booking.bookerName && booking.bookerName !== booking.customerName ? `<div class="info-item"><label>Pemesan</label><span>${booking.bookerName}</span></div><div class="info-item"><label>Yang Akan Main</label><span>${booking.customerName}</span></div>` : `<div class="info-item"><label>Nama</label><span>${booking.customerName}</span></div>`}
+      ${booking.bookerName && booking.bookerName !== booking.customerName
+        ? `<div class="info-item"><label>Pemesan</label><span>${booking.bookerName}</span></div><div class="info-item"><label>Yang Akan Main</label><span>${booking.customerName}</span></div>`
+        : `<div class="info-item"><label>Nama</label><span>${booking.customerName}</span></div>`}
       <div class="info-item"><label>No. HP</label><span>${booking.customerPhone || "-"}</span></div>
       <div class="info-item"><label>Email</label><span>${booking.customerEmail || "-"}</span></div>
       <div class="info-item"><label>Status</label><span class="status-badge ${
@@ -256,7 +305,7 @@ function printInvoice(booking: any, settings?: any) {
   </div>
 
   <div class="section">
-    <div class="section-title">Detail Pemesanan</div>
+    <div class="section-title">Detail Pemesanan${isGroup ? ` (${sessions.length} Sesi)` : ""}</div>
     <table>
       <thead>
         <tr>
@@ -268,44 +317,21 @@ function printInvoice(booking: any, settings?: any) {
         </tr>
       </thead>
       <tbody>
-        ${(() => {
-          const gt = Number(booking.grandTotal ?? booking.totalPrice);
-          const hasPpn = booking.ppnAmount != null && Number(booking.ppnAmount) > 0;
-          const dpp = hasPpn ? Math.round(gt / 1.11) : gt;
-          const dppNilaiLain = hasPpn ? Math.round(dpp * 11 / 12) : 0;
-          const ppn = hasPpn ? (gt - dpp) : 0;
-          return `
-        <tr>
-          <td>${booking.facilityName}</td>
-          <td>${formatDate(booking.bookingDate)}</td>
-          <td>${booking.startTime?.slice(0,5)} – ${booking.endTime?.slice(0,5)}</td>
-          <td>${booking.durationHours} jam</td>
-          <td style="text-align:right;font-weight:600">${formatCurrency(gt)}</td>
-        </tr>
-        ${hasPpn ? `
-        <tr>
-          <td colspan="4" style="text-align:right;padding-right:16px;font-size:12px;color:#555">DPP</td>
-          <td style="text-align:right;font-size:12px;color:#555">${formatCurrency(dpp)}</td>
-        </tr>
-        <tr>
-          <td colspan="4" style="text-align:right;padding-right:16px;font-size:12px;color:#888">DPP Nilai Lain (11/12 × DPP)</td>
-          <td style="text-align:right;font-size:12px;color:#888">${formatCurrency(dppNilaiLain)}</td>
-        </tr>
-        <tr>
-          <td colspan="4" style="text-align:right;padding-right:16px;font-size:12px;color:#555">PPN 12%</td>
-          <td style="text-align:right;font-size:12px;color:#555">${formatCurrency(ppn)}</td>
-        </tr>
-        <tr class="total-row">
-          <td colspan="4" style="text-align:right;padding-right:16px">Total DPP + PPN</td>
-          <td style="text-align:right">${formatCurrency(gt)}</td>
-        </tr>` : `
-        <tr class="total-row">
-          <td colspan="4" style="text-align:right;padding-right:16px">Total</td>
-          <td style="text-align:right">${formatCurrency(gt)}</td>
-        </tr>`}`;
-        })()}
+        ${sessionRows}
       </tbody>
     </table>
+    <div class="totals-section">
+      <table class="totals-table">
+        ${hasPpn ? `
+        <tr><td>DPP</td><td>${formatCurrency(dppAll)}</td></tr>
+        <tr><td>DPP Nilai Lain (11/12 × DPP)</td><td>${formatCurrency(dppNilaiLainAll)}</td></tr>
+        <tr><td>PPN 11%</td><td>${formatCurrency(totalPpnAll)}</td></tr>
+        <tr class="grand-total"><td>TOTAL</td><td>${formatCurrency(grandTotalAll)}</td></tr>
+        ` : `
+        <tr class="grand-total"><td>TOTAL</td><td>${formatCurrency(grandTotalAll)}</td></tr>
+        `}
+      </table>
+    </div>
   </div>
 
   ${booking.notes ? `<div class="section"><div class="section-title">Catatan</div><p style="font-size:13px;color:#555">${booking.notes}</p></div>` : ""}
