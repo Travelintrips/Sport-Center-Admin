@@ -191,6 +191,10 @@ function formatDate(d: string) {
 /* ─── Invoice / Kwitansi Print ──────────────────────────────────── */
 
 async function printInvoice(booking: any, settings?: any) {
+  // Buka window PERTAMA (sinkron) agar tidak diblokir popup blocker
+  const w = window.open("about:blank", "_blank");
+  if (!w) return;
+
   const centerName = settings?.centerName ?? "Sport Center";
   const address = settings?.address ?? "";
   const phone = settings?.phone ?? "";
@@ -198,6 +202,7 @@ async function printInvoice(booking: any, settings?: any) {
   // Untuk booking grup: fetch semua sesi, tampilkan gabungan dalam satu invoice
   let sessions: any[] = [];
   let isGroup = false;
+  let groupFetchFailed = false;
   if (booking.groupRef) {
     try {
       const res = await fetch(`/api/admin/bookings/groups/${booking.groupRef}/sessions`, {
@@ -206,8 +211,15 @@ async function printInvoice(booking: any, settings?: any) {
       if (res.ok) {
         sessions = await res.json();
         isGroup = sessions.length > 1;
+      } else {
+        groupFetchFailed = true;
       }
-    } catch { /* fallback ke sesi tunggal */ }
+    } catch { groupFetchFailed = true; }
+  }
+  if (groupFetchFailed) {
+    w.document.write("<h2 style='font-family:sans-serif;padding:40px;color:#dc2626'>Gagal mengambil data sesi grup. Silakan coba lagi.</h2>");
+    w.document.close();
+    return;
   }
   if (!isGroup) sessions = [booking];
 
@@ -342,8 +354,11 @@ async function printInvoice(booking: any, settings?: any) {
   <script>window.onload = function(){ window.print(); }<\/script>
 </body>
 </html>`;
-  const w = window.open("", "_blank");
-  if (w) { w.document.write(html); w.document.close(); }
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
+  // Hapus referensi opener untuk cegah reverse-tabnabbing
+  try { w.opener = null; } catch { /* cross-origin, abaikan */ }
 }
 
 function terbilang(n: number): string {
@@ -2694,18 +2709,36 @@ export default function AdminBookings() {
                           )}
                           {b.groupRef && (
                             <>
-                              <motion.a
-                                href={`/api/invoices/group/${b.groupRef}/html`}
-                                target="_blank"
-                                rel="noopener noreferrer"
+                              <motion.button
                                 whileHover={{ scale: 1.04 }}
                                 whileTap={{ scale: 0.96 }}
                                 title={`Invoice Grup ${b.groupRef}`}
                                 className="flex items-center gap-1 h-7 px-2 rounded-lg text-xs font-semibold text-violet-700 border border-violet-400 bg-violet-50 hover:bg-violet-100 dark:border-violet-600 dark:bg-violet-900/30 dark:hover:bg-violet-900/50 transition-colors opacity-0 group-hover:opacity-100 whitespace-nowrap"
+                                onClick={() => {
+                                  const win = window.open("about:blank", "_blank");
+                                  if (!win) return;
+                                  fetch(`/api/invoices/group/${b.groupRef}/html`, {
+                                    headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+                                  })
+                                    .then(r => {
+                                      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                                      return r.text();
+                                    })
+                                    .then(html => {
+                                      win.document.open();
+                                      win.document.write(html);
+                                      win.document.close();
+                                      try { win.opener = null; } catch { /* abaikan */ }
+                                    })
+                                    .catch(() => {
+                                      win.document.write("<h2 style='font-family:sans-serif;padding:40px;color:#dc2626'>Gagal memuat invoice. Silakan coba lagi.</h2>");
+                                      win.document.close();
+                                    });
+                                }}
                               >
                                 <FileText size={12} />
                                 Inv. Grup
-                              </motion.a>
+                              </motion.button>
                               {b.customerType === "angkasa_pura" && (
                                 <motion.button
                                   whileHover={{ scale: 1.04 }}

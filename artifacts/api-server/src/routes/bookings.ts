@@ -1664,10 +1664,13 @@ router.get("/admin/bookings/groups/:groupRef/sessions", adminMiddleware, async (
       return;
     }
 
-    // Ambil nama fasilitas sekali saja
-    const facilityId = sessions[0].facilityId;
-    const [facility] = await db.select({ name: facilitiesTable.name })
-      .from(facilitiesTable).where(eq(facilitiesTable.id, facilityId)).limit(1);
+    // Ambil nama fasilitas per sesi (mendukung grup multi-fasilitas)
+    const uniqueFacilityIds = [...new Set(sessions.map((s) => s.facilityId))];
+    const facilities = await db
+      .select({ id: facilitiesTable.id, name: facilitiesTable.name })
+      .from(facilitiesTable)
+      .where(inArray(facilitiesTable.id, uniqueFacilityIds));
+    const facilityMap = Object.fromEntries(facilities.map((f) => [f.id, f.name]));
 
     res.json(sessions.map((s) => ({
       ...s,
@@ -1676,7 +1679,7 @@ router.get("/admin/bookings/groups/:groupRef/sessions", adminMiddleware, async (
       ppnRate: s.ppnRate != null ? Number(s.ppnRate) : null,
       ppnAmount: s.ppnAmount != null ? Number(s.ppnAmount) : null,
       dpp: s.dpp != null ? Number(s.dpp) : null,
-      facilityName: facility?.name ?? "",
+      facilityName: facilityMap[s.facilityId] ?? "",
     })));
   } catch (err) {
     req.log.error({ err }, "Group sessions error");
