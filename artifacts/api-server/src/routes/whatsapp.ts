@@ -5,6 +5,7 @@ import { randomUUID, randomBytes, createHmac, timingSafeEqual } from "crypto";
 import { db, bookingsTable, facilitiesTable, paymentsTable, bookingHistoryTable, waActionTokensTable, settingsTable, usersTable, blockedSchedulesTable, waBookingSessionsTable } from "@workspace/db";
 import { eq, and, desc, isNotNull, inArray, or, lt, gt, sql } from "drizzle-orm";
 import { createWaToken, verifyWaToken, consumeWaToken, getWaTokenRow } from "../lib/waTokens";
+import { getBaseUrl } from "../lib/appUrl";
 import {
   parseIntent,
   parseName,
@@ -56,32 +57,10 @@ import { getHistory, appendTurn, clearHistory } from "../lib/aiConversationMemor
 
 const router = Router();
 
-// In development use the Replit dev domain so WA links open on the same dev instance
-// where tokens were created. In production always use APP_URL (or paymentDomain from settings).
-const _rawAppUrl = process.env.APP_URL ?? "";
-const _replitDevDomain = process.env.REPLIT_DEV_DOMAIN;
-let APP_URL =
-  process.env.NODE_ENV !== "production" && _replitDevDomain
-    ? `https://${_replitDevDomain}`
-    : _rawAppUrl;
-
-// Refresh APP_URL from settings DB (paymentDomain > appUrl > env), cached 5 min
-// In dev mode, ALWAYS use REPLIT_DEV_DOMAIN — never override with prod domain from DB.
-let _urlRefreshedAt = 0;
-async function refreshAppUrl(): Promise<void> {
-  if (Date.now() - _urlRefreshedAt < 5 * 60 * 1000) return;
-  if (process.env.NODE_ENV !== "production" && process.env.REPLIT_DEV_DOMAIN) {
-    _urlRefreshedAt = Date.now();
-    return; // Dev: tetap pakai REPLIT_DEV_DOMAIN, tidak perlu refresh dari DB
-  }
-  try {
-    const [s] = await db.select({ paymentDomain: settingsTable.paymentDomain, appUrl: settingsTable.appUrl })
-      .from(settingsTable).limit(1);
-    const override = (s?.paymentDomain || s?.appUrl || "").replace(/\/$/, "");
-    if (override) APP_URL = override;
-    _urlRefreshedAt = Date.now();
-  } catch { /* keep current value */ }
-}
+// Base URL for WA links is always resolved fresh via getBaseUrl():
+// dev environments always use the Replit dev domain (never a prod domain
+// saved in settings), production uses APP_URL / settings.paymentDomain / settings.appUrl.
+// See lib/appUrl.ts — single source of truth, shared with bookings.ts, payments.ts, notifications.ts.
 
 const INACTIVE_STATUSES = ["cancelled", "expired", "rejected", "refunded"];
 
@@ -378,7 +357,7 @@ router.post("/wa/customer/register", async (req, res) => {
       customerName: user.name,
       customerPhone: cleanedPhone,
       customerCode,
-      facilitiesUrl: `${APP_URL}/facilities`,
+      facilitiesUrl: `${await getBaseUrl()}/facilities`,
     });
 
     // Audit log
@@ -508,7 +487,7 @@ router.post("/wa/webhook", async (req, res) => {
         const b = bookings[0];
         const [fac] = await db.select({ name: facilitiesTable.name }).from(facilitiesTable)
           .where(eq(facilitiesTable.id, b.facilityId)).limit(1);
-        const statusUrl = `${APP_URL}/status/${b.orderNumber}`;
+        const statusUrl = `${await getBaseUrl()}/status/${b.orderNumber}`;
         await sendWAReply(senderPhone,
           `🔍 *Status Booking Terakhir*\n\n` +
           `Order: *${b.orderNumber}*\n` +
@@ -544,7 +523,7 @@ router.post("/wa/webhook", async (req, res) => {
 
       if (!registeredUser) {
         const regToken = generateRegToken(senderPhone);
-        const registerUrl = `${APP_URL}/wa/register/${regToken}`;
+        const registerUrl = `${await getBaseUrl()}/wa/register/${regToken}`;
         await sendWAReply(senderPhone,
           `👋 Halo! Untuk booking fasilitas, kamu perlu *daftar dulu* sebagai customer.\n\n` +
           `📝 *Daftar gratis sekarang (hanya 1 menit):*\n${registerUrl}\n\n` +
@@ -570,7 +549,7 @@ router.post("/wa/webhook", async (req, res) => {
         );
 
         if (matched) {
-          const formUrl = `${APP_URL}/wa/booking/${matched.id}?phone=${senderPhone}`;
+          const formUrl = `${await getBaseUrl()}/wa/booking/${matched.id}?phone=${senderPhone}`;
           const reply =
             `🏅 *Booking ${matched.name}*\n\n` +
             `Harga: *Rp ${Number(matched.pricePerHour).toLocaleString("id-ID")}/jam*\n` +
@@ -631,7 +610,7 @@ router.post("/wa/webhook", async (req, res) => {
         `🕐 *Jam Operasional:* 06:00 – 22:00 WIB\n` +
         `📍 *Lokasi:* Kawasan Bandara Soekarno-Hatta\n\n` +
         `Untuk info fasilitas & booking, kunjungi:\n` +
-        `🔗 ${APP_URL}/facilities\n\n` +
+        `🔗 ${await getBaseUrl()}/facilities\n\n` +
         `Atau ketik:\n` +
         `• *booking* — untuk pesan lapangan\n` +
         `• *status* — untuk cek status pesanan\n\n` +
@@ -756,8 +735,8 @@ router.post("/wa/booking", async (req, res) => {
 
     // Send WA to customer — kirim grandTotal (termasuk PPN) sebagai jumlah transfer
     const amountToPay = taxCalc.taxAmount > 0 ? taxCalc.grandTotal : totalPrice;
-    const statusUrl = `${APP_URL}/status/${orderNumber}`;
-    const uploadProofUrl = `${APP_URL}/bukti/${proofToken}`;
+    const statusUrl = `${await getBaseUrl()}/status/${orderNumber}`;
+    const uploadProofUrl = `${await getBaseUrl()}/bukti/${proofToken}`;
 
     const deadlineStr = paymentDeadline.toLocaleString("id-ID", { timeZone: "Asia/Jakarta", hour12: false });
 
@@ -844,7 +823,7 @@ router.get("/wa/status/:orderNumber", async (req, res) => {
         proofUrl: payment.proofUrl,
         confirmedAt: payment.confirmedAt,
       } : null,
-      uploadProofUrl: proofToken ? `${APP_URL}/bukti/${proofToken}` : null,
+      uploadProofUrl: proofToken ? `${await getBaseUrl()}/bukti/${proofToken}` : null,
     });
   } catch (err) {
     res.status(500).json({ error: "Internal server error" });
@@ -914,7 +893,7 @@ router.post("/wa/action/:token", async (req, res) => {
           changedByName: "admin (WhatsApp)", note: "Pembayaran dikonfirmasi via WhatsApp",
         });
 
-        const statusUrl = `${APP_URL}/status/${booking.orderNumber}`;
+        const statusUrl = `${await getBaseUrl()}/status/${booking.orderNumber}`;
         notifyWaBookingConfirmed({
           customerName: booking.customerName, customerPhone: booking.customerPhone,
           orderNumber: booking.orderNumber, facilityName: facility?.name ?? "",
@@ -929,8 +908,8 @@ router.post("/wa/action/:token", async (req, res) => {
           orderNumber: booking.orderNumber, customerName: booking.customerName,
           facilityName: facility?.name ?? "", bookingDate: booking.bookingDate,
           startTime: booking.startTime, endTime: booking.endTime,
-          checkinUrl: `${APP_URL}/wa/action/${checkinToken}`,
-          finishUrl: `${APP_URL}/wa/action/${finishToken}`,
+          checkinUrl: `${await getBaseUrl()}/wa/action/${checkinToken}`,
+          finishUrl: `${await getBaseUrl()}/wa/action/${finishToken}`,
         });
 
         syncStatusToBizportal(booking.orderNumber, "confirmed", payment.proofUrl, new Date(), booking).catch(() => {});
@@ -981,7 +960,7 @@ router.post("/wa/action/:token", async (req, res) => {
           orderNumber: booking.orderNumber, facilityName: facility?.name ?? "",
           bookingDate: booking.bookingDate, startTime: booking.startTime, endTime: booking.endTime,
           totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
-          uploadProofUrl: `${APP_URL}/bukti/${newUploadToken}`,
+          uploadProofUrl: `${await getBaseUrl()}/bukti/${newUploadToken}`,
           reason: adminNotes,
         });
 
@@ -1179,7 +1158,7 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
       bookingDate: booking.bookingDate, startTime: booking.startTime, endTime: booking.endTime,
       totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
       proofUrl: fullProofUrl,
-      reviewUrl: `${APP_URL}/ulasan/${reviewToken}`,
+      reviewUrl: `${await getBaseUrl()}/ulasan/${reviewToken}`,
     });
 
     await logAudit({
@@ -1261,7 +1240,7 @@ router.post("/wa/review/:token", async (req, res) => {
         changedByName: "admin (WhatsApp)", note: "Pembayaran dikonfirmasi via WA Review Link",
       });
 
-      const statusUrl = `${APP_URL}/status/${booking.orderNumber}`;
+      const statusUrl = `${await getBaseUrl()}/status/${booking.orderNumber}`;
       notifyWaBookingConfirmed({
         customerName: booking.customerName, customerPhone: booking.customerPhone,
         orderNumber: booking.orderNumber, facilityName: facility?.name ?? "",
@@ -1275,8 +1254,8 @@ router.post("/wa/review/:token", async (req, res) => {
         orderNumber: booking.orderNumber, customerName: booking.customerName,
         facilityName: facility?.name ?? "", bookingDate: booking.bookingDate,
         startTime: booking.startTime, endTime: booking.endTime,
-        checkinUrl: `${APP_URL}/wa/action/${checkinToken}`,
-        finishUrl: `${APP_URL}/wa/action/${finishToken}`,
+        checkinUrl: `${await getBaseUrl()}/wa/action/${checkinToken}`,
+        finishUrl: `${await getBaseUrl()}/wa/action/${finishToken}`,
       }).catch(() => {});
 
       syncStatusToBizportal(booking.orderNumber, "confirmed", payment.proofUrl, new Date(), booking).catch(() => {});
@@ -1322,7 +1301,7 @@ router.post("/wa/review/:token", async (req, res) => {
         bookingDate: booking.bookingDate, startTime: booking.startTime, endTime: booking.endTime,
         totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
 
-        uploadProofUrl: `${APP_URL}/bukti/${newUploadToken}`,
+        uploadProofUrl: `${await getBaseUrl()}/bukti/${newUploadToken}`,
 
         reason: adminNotes,
       });
@@ -1587,8 +1566,8 @@ async function execAdminApprove(adminPhone: string, orderNumber: string) {
     const settingsRows = await db.select().from(settingsTable).limit(1);
     const settings = settingsRows[0];
     const amountToPay = booking.grandTotal ? Number(booking.grandTotal) : Number(booking.totalPrice);
-    const statusUrl = `${APP_URL}/status/${booking.orderNumber}`;
-    const uploadProofUrl = `${APP_URL}/bukti/${proofToken}`;
+    const statusUrl = `${await getBaseUrl()}/status/${booking.orderNumber}`;
+    const uploadProofUrl = `${await getBaseUrl()}/bukti/${proofToken}`;
     const deadlineStr = paymentDeadline.toLocaleString("id-ID", { timeZone: "Asia/Jakarta", hour12: false });
 
     notifyWaBookingApproved({
@@ -1661,7 +1640,7 @@ async function execAdminApprove(adminPhone: string, orderNumber: string) {
 
   const checkinToken = await createWaToken(booking.id, "checkin", 30);
   const finishToken = await createWaToken(booking.id, "finish", 30);
-  const statusUrl = `${APP_URL}/status/${booking.orderNumber}`;
+  const statusUrl = `${await getBaseUrl()}/status/${booking.orderNumber}`;
 
   notifyWaBookingConfirmed({
     customerName: booking.customerName,
@@ -1682,8 +1661,8 @@ async function execAdminApprove(adminPhone: string, orderNumber: string) {
     bookingDate: booking.bookingDate,
     startTime: booking.startTime,
     endTime: booking.endTime,
-    checkinUrl: `${APP_URL}/wa/action/${checkinToken}`,
-    finishUrl: `${APP_URL}/wa/action/${finishToken}`,
+    checkinUrl: `${await getBaseUrl()}/wa/action/${checkinToken}`,
+    finishUrl: `${await getBaseUrl()}/wa/action/${finishToken}`,
   });
 
   syncStatusToBizportal(booking.orderNumber, "confirmed", null, new Date(), booking).catch(() => {});
@@ -1757,7 +1736,7 @@ async function execAdminReject(adminPhone: string, orderNumber: string, reason: 
       startTime: booking.startTime,
       endTime: booking.endTime,
       totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
-      uploadProofUrl: `${APP_URL}/bukti/${newUploadToken}`,
+      uploadProofUrl: `${await getBaseUrl()}/bukti/${newUploadToken}`,
       reason,
     });
   }
@@ -1800,7 +1779,7 @@ async function execAdminStatus(adminPhone: string, orderNumber: string) {
     `Total: *${formatIDR(Number(booking.grandTotal ?? booking.totalPrice))}*\n` +
     `Status: *${booking.status.replace(/_/g, " ").toUpperCase()}*\n` +
     (payment ? `Bukti: ${payment.proofUrl ?? "-"}\n` : "") +
-    `\n🔗 ${APP_URL}/status/${orderNumber}`
+    `\n🔗 ${await getBaseUrl()}/status/${orderNumber}`
   );
 }
 
@@ -1857,7 +1836,7 @@ async function execAdminPaid(adminPhone: string, orderNumber: string) {
     startTime: booking.startTime,
     endTime: booking.endTime,
     totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
-    statusUrl: `${APP_URL}/status/${booking.orderNumber}`,
+    statusUrl: `${await getBaseUrl()}/status/${booking.orderNumber}`,
   });
 
   notifyWaStaffCheckin({
@@ -1867,8 +1846,8 @@ async function execAdminPaid(adminPhone: string, orderNumber: string) {
     bookingDate: booking.bookingDate,
     startTime: booking.startTime,
     endTime: booking.endTime,
-    checkinUrl: `${APP_URL}/wa/action/${checkinToken}`,
-    finishUrl: `${APP_URL}/wa/action/${finishToken}`,
+    checkinUrl: `${await getBaseUrl()}/wa/action/${checkinToken}`,
+    finishUrl: `${await getBaseUrl()}/wa/action/${finishToken}`,
   });
 
   await logAudit({
@@ -1989,8 +1968,8 @@ async function execAdminResend(adminPhone: string, orderNumber: string) {
       endTime: booking.endTime,
       totalPrice: amountToPay.toLocaleString("id-ID"),
       paymentDeadline: deadline,
-      statusUrl: `${APP_URL}/status/${booking.orderNumber}`,
-      uploadProofUrl: `${APP_URL}/bukti/${proofToken}`,
+      statusUrl: `${await getBaseUrl()}/status/${booking.orderNumber}`,
+      uploadProofUrl: `${await getBaseUrl()}/bukti/${proofToken}`,
       bankName: settings?.bankName ?? "",
       bankAccount: settings?.bankAccount ?? "",
       bankAccountName: settings?.bankAccountName ?? "",
@@ -2006,7 +1985,7 @@ async function execAdminResend(adminPhone: string, orderNumber: string) {
       startTime: booking.startTime,
       endTime: booking.endTime,
       totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
-      statusUrl: `${APP_URL}/status/${booking.orderNumber}`,
+      statusUrl: `${await getBaseUrl()}/status/${booking.orderNumber}`,
     });
     await sendWAMsg(adminPhone, `✅ Konfirmasi booking dikirim ulang ke customer *${booking.customerName}*.`);
   } else {
@@ -2039,7 +2018,7 @@ async function startBookingSession(phone: string, msg: string, waName: string): 
 
     if (isFirstTime) {
       const regToken = generateRegToken(phone);
-      const regUrl = `${APP_URL}/wa/register/${regToken}`;
+      const regUrl = `${await getBaseUrl()}/wa/register/${regToken}`;
 
       const session = await createSession({
         phone,
@@ -2171,7 +2150,7 @@ async function continueSession(session: WaBookingSessionRow, phone: string, msg:
     case "wait_registration": {
       // Kirim ulang link registrasi — belum selesai mengisi form
       const regToken = generateRegToken(phone);
-      const regUrl = `${APP_URL}/wa/register/${regToken}`;
+      const regUrl = `${await getBaseUrl()}/wa/register/${regToken}`;
       const reply = [
         `📋 Silakan isi formulir pendaftaran terlebih dahulu:`,
         ``,
@@ -2852,7 +2831,7 @@ async function execCreateBookingFromSession(session: WaBookingSessionRow, phone:
     },
   });
 
-  const statusUrl = `${APP_URL}/status/${orderNumber}`;
+  const statusUrl = `${await getBaseUrl()}/status/${orderNumber}`;
   const weekend = isWeekendDate(session.bookingDate);
 
   // ── 12. Kirim WA ke customer ───────────────────────────────────────────────
@@ -2946,9 +2925,6 @@ router.post("/wa/fonnte/webhook", async (req, res) => {
   // Respond immediately to avoid Fonnte timeout/retry
   res.status(200).json({ status: "ok" });
 
-  // Refresh base URL from settings (paymentDomain > appUrl > env), cached 5 min
-  await refreshAppUrl();
-
   try {
     // Log raw payload (debug — lihat field apa yang Fonnte kirim)
     req.log?.debug?.({ body: req.body }, "[wa-webhook] raw payload");
@@ -3030,7 +3006,7 @@ router.post("/wa/fonnte/webhook", async (req, res) => {
           .limit(1);
         const proofToken = tokens[0]?.token;
 
-        const uploadUrl = proofToken ? `${APP_URL}/bukti/${proofToken}` : null;
+        const uploadUrl = proofToken ? `${await getBaseUrl()}/bukti/${proofToken}` : null;
         const reply = uploadUrl
           ? `📎 Untuk upload bukti pembayaran *${b.orderNumber}*, silakan gunakan link berikut:\n\n${uploadUrl}\n\n⚠️ Upload hanya bisa melalui link, tidak bisa via WhatsApp langsung.`
           : `📎 Untuk upload bukti pembayaran *${b.orderNumber}*, ketik *status* untuk mendapatkan link upload.`;
@@ -3064,7 +3040,7 @@ router.post("/wa/fonnte/webhook", async (req, res) => {
         const adminContact = settingsRow?.whatsapp || settingsRow?.phone || (await getAdminPhones())[0] || "";
         const reply = adminContact
           ? `👋 Baik, saya hubungkan Anda dengan admin kami.\n\n📞 *Admin WhatsApp:* ${adminContact}\n\nSilakan hubungi admin langsung untuk bantuan lebih lanjut. Jam operasional: *${settingsRow?.openHour ?? "06:00"}–${settingsRow?.closeHour ?? "22:00"}*. 🙏`
-          : `👋 Untuk berbicara langsung dengan admin, ketik *status* atau kunjungi ${APP_URL}/contact.\n\nKami siap membantu! 🏅`;
+          : `👋 Untuk berbicara langsung dengan admin, ketik *status* atau kunjungi ${await getBaseUrl()}/contact.\n\nKami siap membantu! 🏅`;
         await sendWAMsg(phone, reply);
         await logAudit({ action: "ai_talk_to_admin_handled", entity: "wa_ai", after: { phone, adminContact } });
         return;
@@ -3126,7 +3102,7 @@ router.post("/wa/fonnte/webhook", async (req, res) => {
           `   ${facMap.get(b.facilityId) ?? "-"} — ${b.bookingDate} ${b.startTime}–${b.endTime}\n` +
           `   Status: *${statusLabel}*\n\n`;
       }
-      reply += `Detail: ${APP_URL}/status/${allBookings[0].orderNumber}`;
+      reply += `Detail: ${await getBaseUrl()}/status/${allBookings[0].orderNumber}`;
       await sendWAMsg(phone, reply);
       return;
     }
@@ -3149,7 +3125,7 @@ router.post("/wa/fonnte/webhook", async (req, res) => {
       `Ketik:\n` +
       `• *booking* — pesan fasilitas olahraga\n` +
       `• *status* — cek status pesanan\n\n` +
-      `Atau kunjungi: ${APP_URL}/facilities`
+      `Atau kunjungi: ${await getBaseUrl()}/facilities`
     );
   } catch (err) {
     console.error("[wa/fonnte/webhook] error:", err);
@@ -3262,8 +3238,8 @@ router.post("/wa/booking-approval", async (req, res) => {
 
 
       const uploadToken = await createWaToken(booking.id, "upload_proof", 3);
-      const statusUrl = `${APP_URL}/status/${booking.orderNumber}`;
-      const uploadProofUrl = `${APP_URL}/bukti/${uploadToken}`;
+      const statusUrl = `${await getBaseUrl()}/status/${booking.orderNumber}`;
+      const uploadProofUrl = `${await getBaseUrl()}/bukti/${uploadToken}`;
       const deadline = new Date(Date.now() + 24 * 60 * 60 * 1000);
       const deadlineStr = deadline.toLocaleString("id-ID", { timeZone: "Asia/Jakarta", hour12: false });
 

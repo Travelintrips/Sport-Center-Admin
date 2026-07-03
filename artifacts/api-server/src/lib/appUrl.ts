@@ -13,6 +13,13 @@ function envFallback(): string {
 }
 
 export async function getBaseUrl(): Promise<string> {
+  // In dev mode, ALWAYS use the Replit dev domain — never let a prod
+  // domain saved in settings (paymentDomain/appUrl) leak into dev-generated links.
+  const isProd = process.env.NODE_ENV === "production";
+  if (!isProd && process.env.REPLIT_DEV_DOMAIN) {
+    return `https://${process.env.REPLIT_DEV_DOMAIN}`;
+  }
+
   const now = Date.now();
   if (_cachedUrl !== null && now < _cacheExpiry) return _cachedUrl;
   try {
