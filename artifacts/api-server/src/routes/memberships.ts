@@ -3,6 +3,8 @@ import { db, gymMembershipsTable, publicMembershipsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
 import { syncMembershipToBizportal, pushMembershipPaymentAsBankMutation } from "../lib/bizportalSync";
+import { createMembershipJournalEntry, createPublicMembershipAccountingEntry } from "../lib/accounting";
+import { logAccountingError } from "../lib/auditLog";
 
 const router = Router();
 
@@ -161,7 +163,16 @@ router.patch("/memberships/:id", adminMiddleware, async (req, res) => {
     if (!membership) { res.status(404).json({ error: "Not found" }); return; }
     syncMembershipToBizportal(membership).catch(() => {});
     if (membership.status === "active" && existing.status !== "active") {
+      const refNumber = `MB-${membership.id}`;
+      const today = new Date().toISOString().split("T")[0]!;
+      const amount = Number(membership.totalPrice);
       pushMembershipPaymentAsBankMutation(membership, new Date()).catch(() => {});
+      createMembershipJournalEntry(membership.id, refNumber, amount, today).catch((err) =>
+        logAccountingError({ operation: "createMembershipJournalEntry", orderNumber: refNumber, bookingId: membership.id, error: err }),
+      );
+      createPublicMembershipAccountingEntry(membership.id, refNumber, amount, today).catch((err) =>
+        logAccountingError({ operation: "createPublicMembershipAccountingEntry", orderNumber: refNumber, bookingId: membership.id, error: err }),
+      );
     }
     await syncToPublic(membership);
     res.json({ ...membership, totalPrice: Number(membership.totalPrice) });

@@ -4,6 +4,8 @@ import { eq, and, gte, lt, inArray, isNull, or } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
 import { pushInvoicePaymentAsBankMutation } from "../lib/bizportalSync";
+import { createInvoiceJournalEntry, createPublicInvoiceAccountingEntry } from "../lib/accounting";
+import { logAccountingError } from "../lib/auditLog";
 
 const router = Router();
 
@@ -512,7 +514,17 @@ router.patch("/company-invoices/:id", adminMiddleware, async (req, res) => {
     const items = await db.select().from(companyInvoiceItemsTable).where(eq(companyInvoiceItemsTable.invoiceId, id));
 
     if (status === "paid" && inv.status !== "paid") {
-      pushInvoicePaymentAsBankMutation(updated, company?.companyName ?? company?.name, updated.paidAt ?? new Date()).catch(() => {});
+      const paidDate = updated.paidAt ?? new Date();
+      const today = paidDate.toISOString().split("T")[0]!;
+      const subtotal = Number(updated.totalAmount);
+      const ppnAmount = Number(updated.ppnAmount);
+      pushInvoicePaymentAsBankMutation(updated, company?.companyName ?? company?.name, paidDate).catch(() => {});
+      createInvoiceJournalEntry(updated.id, updated.invoiceNumber, subtotal, ppnAmount, today).catch((err) =>
+        logAccountingError({ operation: "createInvoiceJournalEntry", orderNumber: updated.invoiceNumber, bookingId: updated.id, error: err }),
+      );
+      createPublicInvoiceAccountingEntry(updated.id, updated.invoiceNumber, subtotal, ppnAmount, today).catch((err) =>
+        logAccountingError({ operation: "createPublicInvoiceAccountingEntry", orderNumber: updated.invoiceNumber, bookingId: updated.id, error: err }),
+      );
     }
 
     res.json(mapInvoice(updated, company?.companyName ?? company?.name, items, company));

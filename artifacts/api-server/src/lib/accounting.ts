@@ -73,7 +73,7 @@ async function nextPublicEntryNumber(pool: pg.Pool, year: number): Promise<strin
       NULLIF(REGEXP_REPLACE(entry_number, '^SC-BNK/[0-9]+/', ''), '')::integer
     ), 0) + 1 AS seq
     FROM public.accounting_entries
-    WHERE entry_number LIKE $1 AND source = 'sport_center_booking'`,
+    WHERE entry_number LIKE $1`,
     [`SC-BNK/${year}/%`]
   );
   const seq = Number(result.rows[0]?.seq ?? 1);
@@ -175,6 +175,142 @@ export async function createPublicAccountingEntry(
   }
 
   console.info(`[accounting] ✓ Public accounting entry created: ${entryNumber} (${orderNumber})`);
+}
+
+// ─── Public Accounting: Member Gym & Invoice Perusahaan ──────────────────────
+// Sama seperti createPublicAccountingEntry (booking), tapi untuk sumber
+// pendapatan lain yang juga masuk ke Bank Mandiri CST: membership gym & invoice
+// perusahaan. Tidak terkait facilityId (null).
+
+export async function createPublicMembershipAccountingEntry(
+  membershipId: number,
+  refNumber: string,
+  amount: number,
+  journalDate: string,
+): Promise<void> {
+  const pool = getPublicPool();
+  if (!pool) {
+    console.warn("[accounting] Tidak ada Supabase URL — skip createPublicMembershipAccountingEntry");
+    return;
+  }
+
+  const year = new Date(journalDate).getFullYear();
+  const entryNumber = await nextPublicEntryNumber(pool, year);
+  const ids = await getPublicIds();
+
+  const entryResult = await pool.query(
+    `INSERT INTO public.accounting_entries
+      (entry_number, journal_id, date, ref, description, status, source, source_id,
+       total_debit, total_credit, company_id, facility_id, correlation_id, governance_flags)
+    VALUES ($1,$2,$3::date,$4,$5,'draft','sport_center_membership',$6,$7,$7,$8,NULL,$9,'{}')
+    RETURNING id`,
+    [
+      entryNumber, ids.journalId, journalDate, refNumber,
+      `Pembayaran Member Gym Sport Center (${refNumber})`,
+      membershipId, amount, COMPANY_ID,
+      `sc_membership_${refNumber}`,
+    ]
+  );
+  const entryId = Number(entryResult.rows[0]?.id);
+
+  await pool.query(
+    `INSERT INTO public.accounting_entry_lines (entry_id, account_id, description, debit, credit) VALUES
+      ($1,$2,$3,$4,0),
+      ($1,$5,$6,0,$4)`,
+    [entryId, ids.coaKas, `Penerimaan member gym ${refNumber}`, amount, ids.coaPendapatan, `Pendapatan member gym ${refNumber}`]
+  );
+
+  await pool.query(`UPDATE public.accounting_entries SET status = 'posted' WHERE id = $1`, [entryId]);
+
+  console.info(`[accounting] ✓ Public accounting entry created (membership): ${entryNumber} (${refNumber})`);
+}
+
+export async function createPublicInvoiceAccountingEntry(
+  invoiceId: number,
+  invoiceNumber: string,
+  subtotal: number,
+  ppnAmount: number,
+  journalDate: string,
+): Promise<void> {
+  const pool = getPublicPool();
+  if (!pool) {
+    console.warn("[accounting] Tidak ada Supabase URL — skip createPublicInvoiceAccountingEntry");
+    return;
+  }
+
+  const grandTotal = subtotal + ppnAmount;
+  const netRevenue = subtotal;
+  const hasPpn = ppnAmount > 0;
+  const year = new Date(journalDate).getFullYear();
+  const period = journalDate.slice(0, 7);
+  const entryNumber = await nextPublicEntryNumber(pool, year);
+  const ids = await getPublicIds();
+
+  const entryResult = await pool.query(
+    `INSERT INTO public.accounting_entries
+      (entry_number, journal_id, date, ref, description, status, source, source_id,
+       total_debit, total_credit, company_id, facility_id, correlation_id, governance_flags)
+    VALUES ($1,$2,$3::date,$4,$5,'draft','sport_center_invoice',$6,$7,$7,$8,NULL,$9,'{}')
+    RETURNING id`,
+    [
+      entryNumber, ids.journalId, journalDate, invoiceNumber,
+      `Pembayaran Invoice Perusahaan (${invoiceNumber})`,
+      invoiceId, grandTotal, COMPANY_ID,
+      `sc_invoice_${invoiceNumber}`,
+    ]
+  );
+  const entryId = Number(entryResult.rows[0]?.id);
+
+  if (hasPpn) {
+    await pool.query(
+      `INSERT INTO public.accounting_entry_lines (entry_id, account_id, description, debit, credit) VALUES
+        ($1,$2,$3,$4,0),
+        ($1,$5,$6,0,$7),
+        ($1,$8,$9,0,$10)`,
+      [
+        entryId,
+        ids.coaKas,         `Penerimaan invoice ${invoiceNumber}`, grandTotal,
+        ids.coaPendapatan,  `Pendapatan invoice ${invoiceNumber}`, netRevenue,
+        ids.coaPpnKeluaran, `PPN Keluaran invoice ${invoiceNumber}`, ppnAmount,
+      ]
+    );
+  } else {
+    await pool.query(
+      `INSERT INTO public.accounting_entry_lines (entry_id, account_id, description, debit, credit) VALUES
+        ($1,$2,$3,$4,0),
+        ($1,$5,$6,0,$4)`,
+      [entryId, ids.coaKas, `Penerimaan invoice ${invoiceNumber}`, grandTotal, ids.coaPendapatan, `Pendapatan invoice ${invoiceNumber}`]
+    );
+  }
+
+  await pool.query(`UPDATE public.accounting_entries SET status = 'posted' WHERE id = $1`, [entryId]);
+
+  if (hasPpn) {
+    await db.insert(taxTransactionsTable).values({
+      referenceType: "sport_center_invoice",
+      referenceId: invoiceId,
+      referenceNumber: invoiceNumber,
+      taxCode: "PPN_OUT_11",
+      taxRate: "11",
+      dpp: String(subtotal),
+      dppNilaiLain: String(Math.round((subtotal * 11) / 12 * 100) / 100),
+      grandTotal: String(grandTotal),
+      taxAmount: String(ppnAmount),
+      transactionDate: period,
+      status: "posted",
+      transactionType: "original",
+    });
+
+    await pool.query(
+      `INSERT INTO public.gl_tax_lines
+        (company_id, accounting_entry_id, tax_type, rate,
+         base_amount, tax_amount, direction, period, entity_type, entity_id, is_reported, created_at)
+      VALUES ($1,$2,'PPN_OUT',11,$3,$4,'out',$5,'company_invoice',$6,false,NOW())`,
+      [COMPANY_ID, entryId, subtotal, ppnAmount, period, invoiceNumber]
+    );
+  }
+
+  console.info(`[accounting] ✓ Public accounting entry created (invoice): ${entryNumber} (${invoiceNumber})`);
 }
 
 export async function reversePublicAccountingEntry(
@@ -330,6 +466,81 @@ export async function createJournalEntry(
   ];
   if (ppnAmount > 0) {
     lines.push({ lineType: "credit", accountCode: "2-1101", accountName: "PPN Keluaran", amount: ppnAmount, description: `PPN 11% booking ${orderNumber}` });
+  }
+
+  await postJournalLines(journal.id, lines);
+}
+
+// ─── Sport Center Internal Journal: Member Gym & Invoice Perusahaan ──────────
+
+export async function createMembershipJournalEntry(
+  membershipId: number,
+  refNumber: string,
+  amount: number,
+  journalDate: string,
+): Promise<void> {
+  const [journal] = await db
+    .insert(accountingJournalsTable)
+    .values({
+      bookingId: null,
+      orderNumber: refNumber,
+      journalType: "membership_payment_confirmed",
+      debitAccount: "Kas/Bank",
+      debitAmount: String(amount),
+      creditRevenueAccount: "Pendapatan Sport Center",
+      creditRevenueAmount: String(amount),
+      creditPpnAccount: "",
+      creditPpnAmount: "0",
+      journalDate,
+      isReversal: false,
+      notes: `Pembayaran dikonfirmasi untuk member gym ${refNumber}`,
+    })
+    .returning();
+
+  if (!journal) return;
+
+  await postJournalLines(journal.id, [
+    { lineType: "debit",  accountCode: "1-1001", accountName: "Kas/Bank",               amount, description: `Penerimaan member gym ${refNumber}` },
+    { lineType: "credit", accountCode: "4-1001", accountName: "Pendapatan Sport Center", amount, description: `Pendapatan member gym ${refNumber}` },
+  ]);
+}
+
+export async function createInvoiceJournalEntry(
+  invoiceId: number,
+  invoiceNumber: string,
+  subtotal: number,
+  ppnAmount: number,
+  journalDate: string,
+): Promise<void> {
+  const grandTotal = subtotal + ppnAmount;
+  const netRevenue = subtotal;
+
+  const [journal] = await db
+    .insert(accountingJournalsTable)
+    .values({
+      bookingId: null,
+      orderNumber: invoiceNumber,
+      journalType: "invoice_payment_confirmed",
+      debitAccount: "Kas/Bank",
+      debitAmount: String(grandTotal),
+      creditRevenueAccount: "Pendapatan Sport Center",
+      creditRevenueAmount: String(ppnAmount > 0 ? netRevenue : grandTotal),
+      creditPpnAccount: ppnAmount > 0 ? "PPN Keluaran" : "",
+      creditPpnAmount: String(ppnAmount),
+      journalDate,
+      isReversal: false,
+      notes: `Pembayaran dikonfirmasi untuk invoice perusahaan ${invoiceNumber}`,
+    })
+    .returning();
+
+  if (!journal) return;
+
+  const lines: Array<{ lineType: string; accountCode: string; accountName: string; amount: number; description?: string }> = [
+    { lineType: "debit",  accountCode: "1-1001", accountName: "Kas/Bank",               amount: grandTotal,  description: `Penerimaan invoice ${invoiceNumber}` },
+    { lineType: "credit", accountCode: "4-1001", accountName: "Pendapatan Sport Center", amount: ppnAmount > 0 ? netRevenue : grandTotal, description: `Pendapatan invoice ${invoiceNumber}` },
+  ];
+  if (ppnAmount > 0) {
+    lines.push({ lineType: "credit", accountCode: "2-1101", accountName: "PPN Keluaran", amount: ppnAmount, description: `PPN 11% invoice ${invoiceNumber}` });
   }
 
   await postJournalLines(journal.id, lines);
