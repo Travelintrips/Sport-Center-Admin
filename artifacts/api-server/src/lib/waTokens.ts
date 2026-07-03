@@ -5,9 +5,9 @@ import { eq, and } from "drizzle-orm";
 export type WaAction = "approve_payment" | "reject_payment" | "checkin" | "finish" | "upload_proof" | "approve_booking" | "review_payment";
 
 export async function createWaToken(bookingId: number, action: WaAction, expiryDays = 30): Promise<string> {
-  // 16 chars, URL-safe base64 (12 bytes = 96-bit entropy) — short enough to keep
-  // WA links simple, still practically unguessable for a booking-scoped token.
-  const token = randomBytes(12).toString("base64url");
+  // 8 chars, URL-safe base64 (6 bytes = 48-bit entropy) — short WA links,
+  // still practically unguessable for short-lived booking-scoped tokens.
+  const token = randomBytes(6).toString("base64url");
   const expiresAt = new Date(Date.now() + expiryDays * 24 * 60 * 60 * 1000);
   await db.insert(waActionTokensTable).values({ token, bookingId, action, expiresAt });
   return token;
