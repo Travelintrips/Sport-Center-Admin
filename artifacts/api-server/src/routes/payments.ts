@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { db, paymentsTable, bookingsTable, bookingHistoryTable, facilitiesTable } from "@workspace/db";
+import { db, paymentsTable, bookingsTable, bookingHistoryTable, facilitiesTable, bookingGroupsTable } from "@workspace/db";
 import { eq, and, ne } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
 import multer from "multer";
@@ -97,7 +97,13 @@ router.post("/payments", async (req, res) => {
     }
 
     // ── Validasi nominal pembayaran ───────────────────────────────────────────
-    const grandTotalVal = booking.grandTotal != null ? Number(booking.grandTotal) : Number(booking.totalPrice);
+    // For group bookings, use the group's total payment as the ceiling, not the per-session price
+    let grandTotalVal = booking.grandTotal != null ? Number(booking.grandTotal) : Number(booking.totalPrice);
+    if (booking.groupRef) {
+      const [group] = await db.select().from(bookingGroupsTable)
+        .where(eq(bookingGroupsTable.groupRef, booking.groupRef)).limit(1);
+      if (group) grandTotalVal = Number(group.totalPayment);
+    }
     const amountNum = Number(amount);
     const PAYMENT_TOLERANCE = 1000;
 
