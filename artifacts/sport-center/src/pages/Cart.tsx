@@ -17,7 +17,12 @@ import { id as idLocale, enUS } from "date-fns/locale";
 import {
   ShoppingCart, Trash2, ChevronLeft, CheckCircle2, Loader2,
   Calendar, Clock, ShieldCheck, AlertCircle, Plane, Building2, User,
+  ChevronsUpDown, Check,
 } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList,
+} from "@/components/ui/command";
 
 function formatCurrency(n: number) {
   return "Rp " + n.toLocaleString("id-ID");
@@ -57,6 +62,24 @@ export default function Cart() {
   });
   const isLoggedIn = !!currentUser && currentUser.role !== "admin";
   const isCompanyAccount = (currentUser as any)?.accountType === "company";
+  // Operator: bisa booking atas nama customer lain
+  const isAdminBooking = currentUser?.role === "admin_booking";
+
+  // Customer list untuk operator
+  const [customers, setCustomers] = useState<{ id: number; name: string; email: string | null; phone: string | null }[]>([]);
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string>("");
+  const [comboOpen, setComboOpen] = useState(false);
+  const [comboQuery, setComboQuery] = useState("");
+
+  useEffect(() => {
+    if (!isAdminBooking) return;
+    const token = getToken();
+    if (!token) return;
+    fetch("/api/customers/simple", { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => r.json())
+      .then((data) => { if (Array.isArray(data)) setCustomers(data); })
+      .catch(() => {});
+  }, [isAdminBooking]);
 
   // Cek status tagihan perusahaan (karyawan yang terhubung)
   const { data: billingStatus } = useQuery({
@@ -105,14 +128,26 @@ export default function Cart() {
   const [isSuccess, setIsSuccess] = useState(false);
   const [createdOrders, setCreatedOrders] = useState<string[]>([]);
 
-  // Auto-fill dari user yang login
+  // Auto-fill dari user yang login (skip jika operator — mereka isi data customer)
   useEffect(() => {
-    if (currentUser) {
+    if (!currentUser) return;
+    if (isAdminBooking) {
+      // Operator: auto-fill dari customer yang dipilih di dropdown
+      if (selectedCustomerId) {
+        const picked = customers.find((c) => String(c.id) === selectedCustomerId);
+        if (picked) {
+          setName(picked.name);
+          setEmail(picked.email ?? "");
+          setPhone(picked.phone ?? "");
+        }
+      }
+      // Jika belum pilih customer, biarkan fields kosong (operator isi manual)
+    } else {
       setName(currentUser.name ?? "");
       setEmail(currentUser.email ?? "");
       setPhone((currentUser as any).phone ?? "");
     }
-  }, [currentUser]);
+  }, [currentUser, isAdminBooking, selectedCustomerId, customers]);
 
   // Redirect ke login jika belum login
   useEffect(() => {
@@ -479,40 +514,165 @@ export default function Cart() {
             </CardHeader>
             <form onSubmit={handleCheckout} id="cart-checkout-form">
               <CardContent className="space-y-4">
-                {isLoggedIn && (
-                  <div className="space-y-2">
-                    <Label>{t("Nama Akun", "Account Name")}</Label>
-                    <div className="flex items-center gap-2 h-10 px-3 rounded-md border bg-muted/50 text-foreground font-medium text-sm cursor-not-allowed select-none">
-                      <ShieldCheck size={14} className="text-primary shrink-0" />
-                      <span>{currentUser?.name}</span>
-                    </div>
-                    <p className="text-xs text-muted-foreground">{t("Nama akun tidak dapat diubah.", "Account name cannot be changed.")}</p>
-                  </div>
-                )}
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="email">{t("Email", "Email")} <span className="text-destructive">*</span></Label>
-                    <Input
-                      id="email"
-                      type="email"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      placeholder="email@kamu.com"
-                      readOnly={isLoggedIn}
-                      className={isLoggedIn ? "bg-muted/50 cursor-not-allowed" : ""}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="phone">{t("No. WhatsApp", "WhatsApp No.")} <span className="text-destructive">*</span></Label>
-                    <Input
-                      id="phone"
-                      value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
-                      placeholder="08123456789"
-                    />
-                  </div>
-                </div>
+                {/* Operator: selector customer + form nama manual */}
+                {isAdminBooking ? (
+                  <>
+                    <div className="space-y-2">
+                      <Label>{t("Nama Customer", "Customer Name")} <span className="text-destructive">*</span></Label>
+                      <Popover open={comboOpen} onOpenChange={(open) => { setComboOpen(open); if (!open) setComboQuery(""); }}>
+                        <PopoverTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            role="combobox"
+                            aria-expanded={comboOpen}
+                            className="w-full justify-between font-normal h-10"
+                          >
+                            <span className="truncate">
+                              {selectedCustomerId
+                                ? (() => {
+                                    const c = customers.find((c) => String(c.id) === selectedCustomerId);
+                                    return c ? `${c.name}${c.phone ? ` — ${c.phone}` : ""}` : name || t("Pilih customer...", "Select customer...");
+                                  })()
+                                : name
+                                  ? <span className="flex items-center gap-1.5"><span className="text-xs bg-primary/15 text-primary rounded px-1.5 py-0.5 font-medium">Baru</span>{name}</span>
+                                  : t("Pilih atau ketik nama customer baru...", "Select or type new customer...")}
+                            </span>
+                            <ChevronsUpDown size={14} className="ml-2 shrink-0 opacity-50" />
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                          <Command filter={(value, search) => {
+                            if (value === "__create__") return 1;
+                            return value.toLowerCase().includes(search.toLowerCase()) ? 1 : 0;
+                          }}>
+                            <CommandInput
+                              placeholder={t("Cari nama / nomor, atau ketik nama baru...", "Search name/phone or type new name...")}
+                              value={comboQuery}
+                              onValueChange={setComboQuery}
+                            />
+                            <CommandList>
+                              <CommandEmpty>{t("Tidak ditemukan", "No results found")}</CommandEmpty>
+                              <CommandGroup>
+                                {customers
+                                  .filter((c) => !comboQuery.trim() || `${c.name} ${c.phone ?? ""}`.toLowerCase().includes(comboQuery.toLowerCase()))
+                                  .map((c) => (
+                                    <CommandItem
+                                      key={c.id}
+                                      value={`${c.name} ${c.phone ?? ""}`}
+                                      onSelect={() => {
+                                        setSelectedCustomerId(String(c.id));
+                                        setComboQuery("");
+                                        setComboOpen(false);
+                                      }}
+                                    >
+                                      <Check size={14} className={`mr-2 shrink-0 ${String(c.id) === selectedCustomerId ? "opacity-100" : "opacity-0"}`} />
+                                      <span>{c.name}{c.phone ? ` — ${c.phone}` : ""}</span>
+                                    </CommandItem>
+                                  ))}
+                              </CommandGroup>
+                              {comboQuery.trim() && (
+                                <CommandGroup>
+                                  <CommandItem
+                                    value="__create__"
+                                    onSelect={() => {
+                                      setSelectedCustomerId("");
+                                      setName(comboQuery.trim());
+                                      setEmail("");
+                                      setPhone("");
+                                      setComboQuery("");
+                                      setComboOpen(false);
+                                    }}
+                                    className="text-primary font-medium"
+                                  >
+                                    <span className="mr-2 text-base">＋</span>
+                                    {t(`Buat customer baru: "${comboQuery.trim()}"`, `Create new customer: "${comboQuery.trim()}"`)}
+                                  </CommandItem>
+                                </CommandGroup>
+                              )}
+                            </CommandList>
+                          </Command>
+                        </PopoverContent>
+                      </Popover>
+                    </div>
+
+                    {/* Jika customer baru (belum terdaftar), tampilkan input nama yang bisa diedit */}
+                    {!selectedCustomerId && name && (
+                      <Input
+                        value={name}
+                        onChange={(e) => setName(e.target.value)}
+                        placeholder={t("Nama lengkap customer", "Customer full name")}
+                      />
+                    )}
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="email">{t("Email", "Email")}</Label>
+                        <Input
+                          id="email"
+                          type="email"
+                          value={email}
+                          onChange={(e) => setEmail(e.target.value)}
+                          placeholder="email@customer.com"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="phone">{t("No. WhatsApp", "WhatsApp No.")} <span className="text-destructive">*</span></Label>
+                        <Input
+                          id="phone"
+                          value={phone}
+                          onChange={(e) => setPhone(e.target.value)}
+                          placeholder="08123456789"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Nama operator yang sedang login (sebagai info) */}
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground bg-muted/30 border rounded-lg px-3 py-2">
+                      <ShieldCheck size={13} className="text-primary shrink-0" />
+                      <span>{t(`Diinput oleh operator: ${currentUser?.name}`, `Entered by operator: ${currentUser?.name}`)}</span>
+                    </div>
+                  </>
+                ) : (
+                  /* Customer biasa */
+                  <>
+                    {isLoggedIn && (
+                      <div className="space-y-2">
+                        <Label>{t("Nama Akun", "Account Name")}</Label>
+                        <div className="flex items-center gap-2 h-10 px-3 rounded-md border bg-muted/50 text-foreground font-medium text-sm cursor-not-allowed select-none">
+                          <ShieldCheck size={14} className="text-primary shrink-0" />
+                          <span>{currentUser?.name}</span>
+                        </div>
+                        <p className="text-xs text-muted-foreground">{t("Nama akun tidak dapat diubah.", "Account name cannot be changed.")}</p>
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="email">{t("Email", "Email")} <span className="text-destructive">*</span></Label>
+                        <Input
+                          id="email"
+                          type="email"
+                          value={email}
+                          onChange={(e) => setEmail(e.target.value)}
+                          placeholder="email@kamu.com"
+                          readOnly={isLoggedIn}
+                          className={isLoggedIn ? "bg-muted/50 cursor-not-allowed" : ""}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="phone">{t("No. WhatsApp", "WhatsApp No.")} <span className="text-destructive">*</span></Label>
+                        <Input
+                          id="phone"
+                          value={phone}
+                          onChange={(e) => setPhone(e.target.value)}
+                          placeholder="08123456789"
+                        />
+                      </div>
+                    </div>
+                  </>
+                )}
 
                 {/* Field khusus Angkasa Pura: ID Card */}
                 {isAP && (
