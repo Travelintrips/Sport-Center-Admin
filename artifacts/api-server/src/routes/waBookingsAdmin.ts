@@ -22,6 +22,7 @@ import {
   notifyPaymentConfirmed,
   sendWAToAdmins,
 } from "../lib/notifications";
+import { sendRekapPemakaianToAdmin } from "../lib/rekapPemakaian";
 import { getBaseUrl } from "../lib/appUrl";
 
 const router = Router();
@@ -200,6 +201,16 @@ router.post("/admin/wa-bookings/:orderNumber/approve", adminMiddleware, async (r
     bankAccount: settings?.bankAccount ?? "",
     bankAccountName: settings?.bankAccountName ?? "",
   });
+
+  // ─── Kirim rekap pemakaian Sport Center ke grup admin setelah approve ───
+  (async () => {
+    try {
+      await sendRekapPemakaianToAdmin(booking.bookingDate);
+      console.log("[SPORT CENTER REKAP] Rekap pemakaian berhasil dikirim");
+    } catch (err) {
+      console.error("[SPORT CENTER REKAP] Gagal kirim rekap pemakaian", err);
+    }
+  })();
 
   await logAudit({
     action: "admin_approved_via_wa",
