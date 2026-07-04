@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
 import { useLocation, Link } from "wouter";
+import { useQuery } from "@tanstack/react-query";
 import { useCart } from "@/lib/cart";
-import { useGetMe, getGetMeQueryKey, useGetFacility } from "@workspace/api-client-react";
+import { useGetMe, getGetMeQueryKey } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,7 +16,7 @@ import { format, parseISO } from "date-fns";
 import { id as idLocale, enUS } from "date-fns/locale";
 import {
   ShoppingCart, Trash2, ChevronLeft, CheckCircle2, Loader2,
-  Calendar, Clock, MapPin, ShieldCheck, AlertCircle
+  Calendar, Clock, ShieldCheck, AlertCircle, Plane, Building2, User,
 } from "lucide-react";
 
 function formatCurrency(n: number) {
@@ -38,6 +39,13 @@ function addHours(time: string, hours: number): string {
   return `${endH.toString().padStart(2, "0")}:${endM.toString().padStart(2, "0")}`;
 }
 
+function normalizePhone(raw: string) {
+  let p = raw.replace(/\D/g, "");
+  if (p.startsWith("0")) p = "62" + p.slice(1);
+  else if (!p.startsWith("62")) p = p ? "62" + p : "";
+  return p;
+}
+
 export default function Cart() {
   const { t, lang } = useLang();
   const { items, removeItem, clearCart, totalPrice } = useCart();
@@ -48,12 +56,51 @@ export default function Cart() {
     query: { retry: false, queryKey: getGetMeQueryKey(), staleTime: 60_000 },
   });
   const isLoggedIn = !!currentUser && currentUser.role !== "admin";
+  const isCompanyAccount = (currentUser as any)?.accountType === "company";
+
+  // Cek status tagihan perusahaan (karyawan yang terhubung)
+  const { data: billingStatus } = useQuery({
+    queryKey: ["billing-status"],
+    queryFn: async () => {
+      const token = getToken();
+      const res = await fetch("/api/company-verifications/billing-status", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return { eligible: false } as { eligible: boolean; companyId?: number; companyName?: string };
+      return res.json() as Promise<{ eligible: boolean; companyId?: number; companyName?: string }>;
+    },
+    enabled: isLoggedIn && !isCompanyAccount,
+    staleTime: 60_000,
+  });
+
+  // Apakah user bisa tagih ke perusahaan?
+  const canCompanyBilling = isCompanyAccount || (billingStatus?.eligible === true);
+  const companyId = isCompanyAccount
+    ? (currentUser as any)?.id
+    : billingStatus?.companyId;
+  const companyName = isCompanyAccount
+    ? ((currentUser as any)?.companyName ?? currentUser?.name)
+    : billingStatus?.companyName;
+
+  // Mode booking
+  type BookingMode = "umum" | "angkasa_pura" | "perusahaan";
+  const [bookingMode, setBookingMode] = useState<BookingMode>("umum");
+  const isAP = bookingMode === "angkasa_pura";
+  const isCompanyMode = bookingMode === "perusahaan";
+
+  // Auto-set mode perusahaan jika company account
+  useEffect(() => {
+    if (isCompanyAccount) setBookingMode("perusahaan");
+  }, [isCompanyAccount]);
 
   // Form state
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [notes, setNotes] = useState("");
+  const [idCardNumber, setIdCardNumber] = useState("");
+  const [bookedForName, setBookedForName] = useState("");
+  const [bookedForPhone, setBookedForPhone] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [createdOrders, setCreatedOrders] = useState<string[]>([]);
@@ -79,13 +126,6 @@ export default function Cart() {
     }
   }, [isLoadingUser, currentUser, setLocation, toast, t]);
 
-  function normalizePhone(raw: string) {
-    let p = raw.replace(/\D/g, "");
-    if (p.startsWith("0")) p = "62" + p.slice(1);
-    else if (!p.startsWith("62")) p = p ? "62" + p : "";
-    return p;
-  }
-
   const handleCheckout = async (e: React.FormEvent) => {
     e.preventDefault();
     if (items.length === 0) return;
@@ -104,40 +144,51 @@ export default function Cart() {
       return;
     }
 
+    if (isAP && !idCardNumber.trim()) {
+      toast({
+        title: t("Nomor ID Card wajib", "ID Card number required"),
+        description: t("Masukkan nomor ID Card Angkasa Pura kamu.", "Enter your Angkasa Pura ID Card number."),
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Guard: company mode tapi companyId tidak tersedia (data belum load / session bermasalah)
+    if (isCompanyMode && !companyId) {
+      toast({
+        title: t("Data perusahaan tidak ditemukan", "Company data not found"),
+        description: t(
+          "Tidak dapat memproses tagihan perusahaan saat ini. Coba refresh halaman atau pilih tipe Umum.",
+          "Cannot process company billing right now. Try refreshing the page or select General type."
+        ),
+        variant: "destructive",
+      });
+      return;
+    }
+
     setIsSubmitting(true);
     const token = getToken();
     const orders: string[] = [];
     const successItemIds: string[] = [];
 
-    // Generate a shared group ref untuk semua booking dari sesi keranjang ini
+    // Group ref untuk semua booking dari satu keranjang
     const cartRef = items.length > 1
       ? `CART-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`
       : null;
 
+    // Tentukan nama & phone pemesan efektif (untuk company: bookedForName/Phone bisa berbeda)
+    const effBookedForName = isCompanyMode && bookedForName.trim() ? bookedForName.trim() : name.trim();
+    const effBookedForPhone = isCompanyMode && bookedForPhone.trim()
+      ? normalizePhone(bookedForPhone.trim())
+      : normalizedPhone;
+
     for (const item of items) {
       try {
-        const body: {
-          customerName: string;
-          customerEmail?: string;
-          customerPhone: string;
-          facilityId: number;
-          bookingDate: string;
-          notes?: string;
-          customerType: string;
-          payerType: string;
-          source: string;
-          groupRef?: string;
-          startTime?: string;
-          durationHours?: number;
-          activityType?: string;
-          numberOfPeople?: number;
-        } = {
+        const body: Record<string, unknown> = {
           customerName: name.trim(),
           customerPhone: normalizedPhone,
           facilityId: item.facilityId,
           bookingDate: item.date,
-          customerType: "umum",
-          payerType: "personal",
           source: "cart",
           ...(cartRef ? { groupRef: cartRef } : {}),
         };
@@ -151,6 +202,25 @@ export default function Cart() {
           if (item.activityType) body.activityType = item.activityType;
         } else {
           body.numberOfPeople = 1;
+        }
+
+        // ── Tipe Booking ────────────────────────────────────────────
+        if (isAP) {
+          // Angkasa Pura: customerType angkasa_pura + ID card
+          body.customerType = "angkasa_pura";
+          body.payerType = "personal";
+          body.idCardNumber = idCardNumber.trim();
+        } else if (isCompanyMode && companyId) {
+          // Tagihan perusahaan
+          body.customerType = "umum";
+          body.payerType = "company";
+          body.companyCustomerId = companyId;
+          body.bookedForName = effBookedForName;
+          body.bookedForPhone = effBookedForPhone;
+        } else {
+          // Umum
+          body.customerType = "umum";
+          body.payerType = "personal";
         }
 
         const res = await fetch("/api/bookings", {
@@ -329,6 +399,79 @@ export default function Cart() {
             </CardContent>
           </Card>
 
+          {/* Pilih Tipe Pembayaran */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">{t("Tipe Booking", "Booking Type")}</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex flex-wrap gap-2">
+                {/* Umum */}
+                <button
+                  type="button"
+                  onClick={() => setBookingMode("umum")}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-full border text-sm font-semibold transition-colors ${
+                    bookingMode === "umum"
+                      ? "bg-primary text-primary-foreground border-primary"
+                      : "border-border text-foreground hover:border-primary/50"
+                  }`}
+                >
+                  <User size={14} />
+                  {t("Umum", "General")}
+                </button>
+
+                {/* Angkasa Pura */}
+                <button
+                  type="button"
+                  onClick={() => setBookingMode("angkasa_pura")}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-full border text-sm font-semibold transition-colors ${
+                    bookingMode === "angkasa_pura"
+                      ? "bg-blue-600 text-white border-blue-600"
+                      : "border-border text-foreground hover:border-blue-400"
+                  }`}
+                >
+                  <Plane size={14} />
+                  {t("Angkasa Pura", "Angkasa Pura")}
+                </button>
+
+                {/* Tagihan Perusahaan — tampil hanya jika eligible */}
+                {canCompanyBilling && (
+                  <button
+                    type="button"
+                    onClick={() => setBookingMode("perusahaan")}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-full border text-sm font-semibold transition-colors ${
+                      bookingMode === "perusahaan"
+                        ? "bg-emerald-600 text-white border-emerald-600"
+                        : "border-border text-foreground hover:border-emerald-400"
+                    }`}
+                  >
+                    <Building2 size={14} />
+                    {t("Tagihan Perusahaan", "Company Billing")}
+                  </button>
+                )}
+              </div>
+
+              {/* Info per mode */}
+              {isAP && (
+                <div className="mt-3 flex items-start gap-2 text-xs text-blue-700 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-xl p-3">
+                  <Plane className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>{t("Tarif khusus karyawan Angkasa Pura berlaku. ID Card wajib diisi.", "Special Angkasa Pura employee rate applies. ID Card is required.")}</span>
+                </div>
+              )}
+              {isCompanyMode && companyName && (
+                <div className="mt-3 flex items-start gap-2 text-xs text-emerald-700 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 rounded-xl p-3">
+                  <Building2 className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>
+                    {t(
+                      `Booking akan ditagihkan ke perusahaan: ${companyName}. Tidak perlu bayar sekarang.`,
+                      `Booking will be billed to: ${companyName}. No payment required now.`
+                    )}
+                  </span>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
           {/* Form Data Pemesan */}
           <Card>
             <CardHeader>
@@ -338,7 +481,7 @@ export default function Cart() {
               <CardContent className="space-y-4">
                 {isLoggedIn && (
                   <div className="space-y-2">
-                    <Label>{t("Nama Pemesan", "Account Holder")}</Label>
+                    <Label>{t("Nama Akun", "Account Name")}</Label>
                     <div className="flex items-center gap-2 h-10 px-3 rounded-md border bg-muted/50 text-foreground font-medium text-sm cursor-not-allowed select-none">
                       <ShieldCheck size={14} className="text-primary shrink-0" />
                       <span>{currentUser?.name}</span>
@@ -370,6 +513,52 @@ export default function Cart() {
                     />
                   </div>
                 </div>
+
+                {/* Field khusus Angkasa Pura: ID Card */}
+                {isAP && (
+                  <div className="space-y-2">
+                    <Label htmlFor="idCard">
+                      {t("Nomor ID Card Angkasa Pura", "Angkasa Pura ID Card No.")} <span className="text-destructive">*</span>
+                    </Label>
+                    <Input
+                      id="idCard"
+                      value={idCardNumber}
+                      onChange={(e) => setIdCardNumber(e.target.value.toUpperCase())}
+                      placeholder={t("Contoh: AP-12345", "e.g. AP-12345")}
+                      className="font-mono tracking-wider"
+                    />
+                  </div>
+                )}
+
+                {/* Field khusus Perusahaan: Booking atas nama siapa */}
+                {isCompanyMode && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 rounded-xl bg-emerald-50/50 dark:bg-emerald-950/10 border border-emerald-200/60 dark:border-emerald-800/40">
+                    <div className="space-y-2">
+                      <Label htmlFor="bookedForName">
+                        {t("Nama Pengguna Lapangan", "Court User's Name")}
+                        <span className="text-xs text-muted-foreground ml-1">({t("opsional", "optional")})</span>
+                      </Label>
+                      <Input
+                        id="bookedForName"
+                        value={bookedForName}
+                        onChange={(e) => setBookedForName(e.target.value)}
+                        placeholder={t("Kosongkan jika sama dengan pemesan", "Leave blank if same as booker")}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="bookedForPhone">
+                        {t("No. WA Pengguna Lapangan", "Court User's WhatsApp")}
+                        <span className="text-xs text-muted-foreground ml-1">({t("opsional", "optional")})</span>
+                      </Label>
+                      <Input
+                        id="bookedForPhone"
+                        value={bookedForPhone}
+                        onChange={(e) => setBookedForPhone(e.target.value)}
+                        placeholder="08123456789"
+                      />
+                    </div>
+                  </div>
+                )}
 
                 <div className="space-y-2">
                   <Label htmlFor="notes">{t("Catatan (Opsional)", "Notes (Optional)")}</Label>
@@ -420,9 +609,19 @@ export default function Cart() {
                 <span className="text-primary">{formatCurrency(totalPrice)}</span>
               </div>
 
-              <p className="text-xs text-muted-foreground">
-                {t("*Belum termasuk pajak dan diskon yang berlaku.", "*Before applicable taxes and discounts.")}
-              </p>
+              {isCompanyMode && companyId ? (
+                <p className="text-xs text-emerald-700 font-semibold">
+                  ✓ {t("Ditagihkan ke perusahaan — tidak perlu bayar sekarang.", "Billed to company — no payment needed now.")}
+                </p>
+              ) : isCompanyMode && !companyId ? (
+                <p className="text-xs text-destructive font-semibold">
+                  ⚠ {t("Data perusahaan tidak ditemukan. Coba refresh halaman.", "Company data not found. Try refreshing the page.")}
+                </p>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  {t("*Belum termasuk pajak dan diskon yang berlaku.", "*Before applicable taxes and discounts.")}
+                </p>
+              )}
 
               <Button
                 className="w-full h-12 font-bold rounded-full mt-2"
