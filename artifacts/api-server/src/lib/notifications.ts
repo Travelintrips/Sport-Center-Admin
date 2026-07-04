@@ -149,7 +149,7 @@ async function logWaSend(
       orderNumber: ctx?.orderNumber ?? null,
       event: ctx?.event ?? null,
       recipientPhone: phone,
-      messagePreview: message.slice(0, 300),
+      messagePreview: message.slice(0, 4000),
       status,
       errorMessage,
     });

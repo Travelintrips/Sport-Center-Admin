@@ -13,13 +13,8 @@ function envFallback(): string {
 }
 
 export async function getBaseUrl(): Promise<string> {
-  // In dev mode, ALWAYS use the Replit dev domain — never let a prod
-  // domain saved in settings (paymentDomain/appUrl) leak into dev-generated links.
-  const isProd = process.env.NODE_ENV === "production";
-  if (!isProd && process.env.REPLIT_DEV_DOMAIN) {
-    return `https://${process.env.REPLIT_DEV_DOMAIN}`;
-  }
-
+  // Domain dari settings (paymentDomain/appUrl) selalu diprioritaskan jika di-set,
+  // baik di dev maupun production — supaya link WA pendek & konsisten di semua mode.
   const now = Date.now();
   if (_cachedUrl !== null && now < _cacheExpiry) return _cachedUrl;
   try {
