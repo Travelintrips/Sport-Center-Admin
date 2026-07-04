@@ -1,4 +1,4 @@
-import { db, notificationTemplatesTable, settingsTable, waNotifLogsTable } from "@workspace/db";
+import { db, notificationTemplatesTable, settingsTable, waNotifLogsTable, bookingsTable, bookingGroupsTable, facilitiesTable } from "@workspace/db";
 import { renderDocumentText } from "./documentRenderer";
 import { eq } from "drizzle-orm";
 import { trackSentMessage } from "./waSentTracker";
@@ -186,6 +186,48 @@ export interface BookingNotifData {
   bookingId?: number;
   uploadProofUrl?: string;
   statusUrl?: string;
+  groupRef?: string | null;
+}
+
+// Jika booking ini bagian dari keranjang multi-lapangan (groupRef), rangkum semua sesi
+// lain dalam grup supaya customer tahu bookingan lain yang menyertai — bukan cuma 1 link.
+async function buildGroupSummary(groupRef: string | null | undefined, currentOrderNumber: string): Promise<string> {
+  if (!groupRef) return "";
+  try {
+    const rows = await db
+      .select({
+        orderNumber: bookingsTable.orderNumber,
+        bookingDate: bookingsTable.bookingDate,
+        startTime: bookingsTable.startTime,
+        endTime: bookingsTable.endTime,
+        totalPrice: bookingsTable.totalPrice,
+        facilityName: facilitiesTable.name,
+      })
+      .from(bookingsTable)
+      .leftJoin(facilitiesTable, eq(bookingsTable.facilityId, facilitiesTable.id))
+      .where(eq(bookingsTable.groupRef, groupRef));
+
+    if (rows.length <= 1) return "";
+
+    const [group] = await db.select().from(bookingGroupsTable).where(eq(bookingGroupsTable.groupRef, groupRef)).limit(1);
+
+    const lines = rows
+      .map((r) => {
+        const marker = r.orderNumber === currentOrderNumber ? "👉" : "•";
+        return `${marker} *${r.orderNumber}* — ${r.facilityName ?? "-"} | ${r.bookingDate} ${r.startTime}–${r.endTime} | Rp ${Number(r.totalPrice).toLocaleString("id-ID")}`;
+      })
+      .join("\n");
+
+    const totalStr = group ? `Rp ${Number(group.totalPayment).toLocaleString("id-ID")}` : "";
+
+    return (
+      `\n\n📦 *Booking ini bagian dari keranjang ${rows.length} lapangan:*\n${lines}` +
+      (totalStr ? `\n\n💰 *Total Semua Sesi: ${totalStr}*` : "")
+    );
+  } catch (err) {
+    logger.error({ err, groupRef }, "[WA] buildGroupSummary failed");
+    return "";
+  }
 }
 
 export async function notifyBookingCreated(data: BookingNotifData): Promise<void> {
@@ -198,6 +240,8 @@ export async function notifyBookingCreated(data: BookingNotifData): Promise<void
     statusUrl: data.statusUrl ?? "",
   };
 
+  const groupSummary = await buildGroupSummary(data.groupRef, data.orderNumber);
+
   const customerTpl = await getTemplate("booking_created");
   if (customerTpl) {
     let msg = interpolate(customerTpl, vars as unknown as Record<string, string>);
@@ -208,6 +252,7 @@ export async function notifyBookingCreated(data: BookingNotifData): Promise<void
     if (data.statusUrl && !msg.includes(data.statusUrl)) {
       msg += `\n🔍 Cek status booking:\n${data.statusUrl}`;
     }
+    msg += groupSummary;
     await sendWAToCustomer(data.customerPhone, msg, { bookingId: data.bookingId, orderNumber: data.orderNumber, event: "booking_created" });
   } else {
     // Fallback: pesan hardcoded jika template belum di-set
@@ -227,7 +272,8 @@ export async function notifyBookingCreated(data: BookingNotifData): Promise<void
       (data.paymentDeadline ? `⏰ Batas pembayaran: *${data.paymentDeadline}*\n\n` : "") +
       (data.uploadProofUrl ? `📎 Upload bukti transfer:\n${data.uploadProofUrl}\n\n` : "") +
       (data.statusUrl ? `🔍 Cek status booking:\n${data.statusUrl}\n\n` : "") +
-      `Terima kasih! 🏆`;
+      groupSummary +
+      `\n\nTerima kasih! 🏆`;
     await sendWAToCustomer(data.customerPhone, msg, { bookingId: data.bookingId, orderNumber: data.orderNumber, event: "booking_created" });
   }
 
@@ -250,6 +296,8 @@ export async function notifyBookingCreated(data: BookingNotifData): Promise<void
 }
 
 export async function notifyPaymentConfirmed(data: BookingNotifData): Promise<void> {
+  const groupSummary = await buildGroupSummary(data.groupRef, data.orderNumber);
+
   // Attempt to render WA message from company document template engine (kwitansi)
   if (data.bookingId) {
     try {
@@ -262,6 +310,7 @@ export async function notifyPaymentConfirmed(data: BookingNotifData): Promise<vo
           const appUrl = await getBaseUrl() || (s as { appUrl?: string } | null)?.appUrl || "";
           if (appUrl && data.orderNumber) msg += `\n\n🧾 Lihat & cetak kwitansi digital:\n${appUrl}/kwitansi/${data.orderNumber}?t=${signKwitansiToken(data.orderNumber)}`;
         } catch { /* non-fatal */ }
+        msg += groupSummary;
         await sendWAToCustomer(data.customerPhone, msg, { bookingId: data.bookingId, orderNumber: data.orderNumber, event: "payment_confirmed" });
         return;
       }
@@ -271,7 +320,8 @@ export async function notifyPaymentConfirmed(data: BookingNotifData): Promise<vo
   // Fallback: legacy notification template
   const tpl = await getTemplate("payment_confirmed");
   if (tpl) {
-    await sendWAToCustomer(data.customerPhone, interpolate(tpl, data as unknown as Record<string, string>), { bookingId: data.bookingId, orderNumber: data.orderNumber, event: "payment_confirmed" });
+    const tplMsg = interpolate(tpl, data as unknown as Record<string, string>) + groupSummary;
+    await sendWAToCustomer(data.customerPhone, tplMsg, { bookingId: data.bookingId, orderNumber: data.orderNumber, event: "payment_confirmed" });
     return;
   }
 
@@ -291,6 +341,7 @@ export async function notifyPaymentConfirmed(data: BookingNotifData): Promise<vo
     `Fasilitas: ${data.facilityName}\n` +
     `✅ Pembayaran telah dikonfirmasi\n\n` +
     (kwitansiUrl ? `🧾 Lihat & cetak kwitansi digital:\n${kwitansiUrl}\n\n` : "") +
+    groupSummary +
     `Sampai jumpa di lapangan! 🏆`;
   await sendWAToCustomer(data.customerPhone, msg, { bookingId: data.bookingId, orderNumber: data.orderNumber, event: "payment_confirmed" });
 }

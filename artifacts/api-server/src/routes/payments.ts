@@ -375,6 +375,7 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
             endTime: booking.endTime,
             totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
             bookingId: booking.id,
+            groupRef: booking.groupRef,
           }).catch((err) => logger.error({ err, orderNumber: booking.orderNumber, phone: booking.customerPhone }, "[WA] notifyPaymentConfirmed error"));
           syncStatusToBizportal(booking.orderNumber, "confirmed", payment.proofUrl, new Date(), booking).catch(() => {});
           pushConfirmedPaymentAsBankMutation(booking, new Date()).catch(() => {});

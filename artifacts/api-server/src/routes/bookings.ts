@@ -631,6 +631,7 @@ router.post("/bookings", async (req, res) => {
         paymentDeadline: deadlineStr,
         uploadProofUrl: proofUrl || undefined,
         statusUrl: statusUrl || undefined,
+        groupRef: incomingGroupRef,
       }).catch((err) => console.error("[WA] notifyBookingCreated error:", err));
 
       // Notifikasi admin jika booking berasal dari link Mina AI
@@ -1163,6 +1164,7 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
           endTime: beforeUpdate.endTime,
           totalPrice: Number(beforeUpdate.totalPrice).toLocaleString("id-ID"),
           bookingId: beforeUpdate.id,
+          groupRef: beforeUpdate.groupRef,
         }).catch((err) => logger.error({ err, orderNumber: beforeUpdate.orderNumber, phone: beforeUpdate.customerPhone }, "[WA] notifyPaymentConfirmed (direct) error"));
       }
 
