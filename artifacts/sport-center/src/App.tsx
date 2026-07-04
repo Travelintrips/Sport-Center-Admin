@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider, MutationCache } from "@tanstack/react
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { LanguageProvider } from "@/lib/i18n";
+import { CartProvider } from "@/lib/cart";
 import NotFound from "@/pages/not-found";
 
 import "./lib/auth";
@@ -27,6 +28,7 @@ import MyBookings from "@/pages/MyBookings";
 import MyProfile from "@/pages/MyProfile";
 import VerifyId from "@/pages/VerifyId";
 import Membership from "@/pages/Membership";
+import Cart from "@/pages/Cart";
 // Admin Pages
 import AdminLogin from "@/pages/admin/Login";
 import AdminDashboard from "@/pages/admin/Dashboard";
@@ -213,6 +215,7 @@ function Router() {
             <Route path="/facilities/:id" component={FacilityDetail} />
             <Route path="/booking" component={Booking} />
             <Route path="/booking/:orderNumber" component={BookingDetail} />
+            <Route path="/cart" component={Cart} />
             <Route path="/login" component={Login} />
             <Route path="/register" component={Register} />
             <Route path="/my-bookings" component={MyBookings} />
@@ -235,12 +238,14 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <LanguageProvider>
-        <TooltipProvider>
-          <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-            <Router />
-          </WouterRouter>
-          <Toaster />
-        </TooltipProvider>
+        <CartProvider>
+          <TooltipProvider>
+            <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
+              <Router />
+            </WouterRouter>
+            <Toaster />
+          </TooltipProvider>
+        </CartProvider>
       </LanguageProvider>
     </QueryClientProvider>
   );

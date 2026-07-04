@@ -32,12 +32,15 @@ import {
   CheckCircle2,
   AlertCircle,
   Star,
-  MessageCircle
+  MessageCircle,
+  ShoppingCart,
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import AvailabilityCalendar from "@/components/AvailabilityCalendar";
 import { getFacilityImage } from "@/lib/utils";
 import { useLang } from "@/lib/i18n";
+import { useCart } from "@/lib/cart";
+import { useToast } from "@/hooks/use-toast";
 
 const MULTIGUNA_ACTIVITIES = [
   { value: "futsal", label: "Futsal", icon: "⚽" },
@@ -47,6 +50,8 @@ const MULTIGUNA_ACTIVITIES = [
 
 export default function FacilityDetail() {
   const { t, lang } = useLang();
+  const { addItem, items } = useCart();
+  const { toast } = useToast();
   const [, params] = useRoute("/facilities/:id");
   const [, setLocation] = useLocation();
   const facilityId = params?.id ? parseInt(params.id) : 0;
@@ -153,6 +158,38 @@ export default function FacilityDetail() {
     
     setLocation(`/booking?${searchParams.toString()}`);
   };
+
+  const handleAddToCart = () => {
+    if (!facility || !date) return;
+    if (!isWalkIn && (!selectedTime || (isMultiguna && !activityType))) return;
+
+    addItem({
+      facilityId: facility.id,
+      facilityName: facility.name,
+      facilityCategory: facility.category,
+      facilityPricePerHour: facility.pricePerHour,
+      date: formattedDate,
+      startTime: isWalkIn ? "" : selectedTime,
+      duration: parseInt(duration),
+      activityType: isMultiguna && activityType ? activityType : undefined,
+      mode: isWalkIn ? "walk_in" : "time_slot",
+    });
+
+    toast({
+      title: t("Ditambahkan ke Keranjang!", "Added to Cart!"),
+      description: t(
+        `${facility.name} berhasil ditambahkan. Lanjut pilih lapangan lain atau checkout sekarang.`,
+        `${facility.name} added. Keep selecting or checkout now.`
+      ),
+    });
+  };
+
+  const isInCart = items.some(
+    (item) =>
+      item.facilityId === facilityId &&
+      item.date === formattedDate &&
+      (isWalkIn ? item.mode === "walk_in" : item.startTime === selectedTime && item.mode === "time_slot")
+  );
 
   if (isLoadingFacility) {
     return (
@@ -458,25 +495,55 @@ export default function FacilityDetail() {
                       </span>
                     </div>
                     
-                    <Button 
-                      size="lg" 
-                      className="w-full text-base font-bold h-14 rounded-full shadow-lg shadow-primary/20 transition-all hover:-translate-y-1" 
-                      onClick={handleBook}
-                      disabled={
-                        !date || 
-                        (!isWalkIn && !selectedTime) ||
-                        (isMultiguna && !activityType)
-                      }
-                    >
-                      {isWalkIn
-                        ? (date ? t("Booking Masuk Gym", "Book Gym Entry") : t("Pilih Tanggal Dulu", "Choose Date First"))
-                        : (!selectedTime
-                          ? t("Lengkapi Jadwal Dulu", "Complete the Schedule First")
-                          : (isMultiguna && !activityType)
-                            ? t("Pilih Jenis Olahraga", "Choose Sport Type")
-                            : t("Lanjut ke Pembayaran", "Continue to Payment"))
-                      }
-                    </Button>
+                    <div className="space-y-3">
+                      {/* Tombol langsung checkout */}
+                      <Button 
+                        size="lg" 
+                        className="w-full text-base font-bold h-14 rounded-full shadow-lg shadow-primary/20 transition-all hover:-translate-y-1" 
+                        onClick={handleBook}
+                        disabled={
+                          !date || 
+                          (!isWalkIn && !selectedTime) ||
+                          (isMultiguna && !activityType)
+                        }
+                      >
+                        {isWalkIn
+                          ? (date ? t("Booking Masuk Gym", "Book Gym Entry") : t("Pilih Tanggal Dulu", "Choose Date First"))
+                          : (!selectedTime
+                            ? t("Lengkapi Jadwal Dulu", "Complete the Schedule First")
+                            : (isMultiguna && !activityType)
+                              ? t("Pilih Jenis Olahraga", "Choose Sport Type")
+                              : t("Lanjut ke Pembayaran", "Continue to Payment"))
+                        }
+                      </Button>
+
+                      {/* Tombol tambah ke keranjang (hanya untuk time_slot) */}
+                      {!isWalkIn && (
+                        <Button
+                          size="lg"
+                          variant="outline"
+                          className={`w-full text-base font-bold h-14 rounded-full transition-all hover:-translate-y-1 flex items-center justify-center gap-2 ${
+                            isInCart
+                              ? "border-green-500 text-green-600 bg-green-50 dark:bg-green-950/20 hover:bg-green-100"
+                              : "border-primary/50 text-primary hover:bg-primary/5"
+                          }`}
+                          onClick={() => {
+                            if (isInCart) {
+                              setLocation("/cart");
+                            } else {
+                              handleAddToCart();
+                            }
+                          }}
+                          disabled={!date || !selectedTime || (isMultiguna && !activityType)}
+                        >
+                          <ShoppingCart className="w-4 h-4" />
+                          {isInCart
+                            ? t("Sudah di Keranjang → Lihat", "In Cart → View Cart")
+                            : t("Tambah ke Keranjang", "Add to Cart")
+                          }
+                        </Button>
+                      )}
+                    </div>
 
                     {/* WhatsApp Booking Button */}
                     {settings?.whatsapp && (
