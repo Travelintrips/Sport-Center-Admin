@@ -411,6 +411,43 @@ router.post("/bookings", async (req, res) => {
       ? String(req.body.groupRef).trim().slice(0, 64) || null
       : null;
 
+    // Upsert booking_groups jika ada groupRef dari cart — HARUS sebelum insert booking
+    // karena kolom bookings.group_ref punya FK ke booking_groups.group_ref (baris induk harus ada dulu)
+    if (incomingGroupRef) {
+      // Payable amount: pakai grandTotal bila ada PPN, fallback ke totalPrice
+      const payableAmount = taxCalc.taxAmount > 0 ? taxCalc.grandTotal : totalPrice;
+
+      const [existingGroup] = await db.select().from(bookingGroupsTable)
+        .where(eq(bookingGroupsTable.groupRef, incomingGroupRef)).limit(1);
+
+      if (existingGroup) {
+        // Validasi kepemilikan: phone harus cocok (cart selalu kirim phone yang sama)
+        const ownerPhone = normalizePhone(String(customerPhone));
+        if (existingGroup.customerPhone && existingGroup.customerPhone !== ownerPhone) {
+          // Biarkan booking tetap dibuat, tapi jangan update grup orang lain
+          req.log.warn({ groupRef: incomingGroupRef }, "groupRef ownership mismatch — skipping group upsert");
+        } else {
+          // Akumulasi pakai grandTotal (bukan totalPrice) supaya PPN masuk
+          await db.update(bookingGroupsTable)
+            .set({
+              totalPayment: String(Number(existingGroup.totalPayment) + payableAmount),
+              updatedAt: new Date(),
+            })
+            .where(eq(bookingGroupsTable.groupRef, incomingGroupRef));
+        }
+      } else {
+        // Buat grup baru
+        await db.insert(bookingGroupsTable).values({
+          groupRef: incomingGroupRef,
+          customerName: String(customerName),
+          customerPhone: normalizePhone(String(customerPhone)),
+          totalPayment: String(payableAmount),
+          status: "pending",
+          notes: `Dari keranjang booking`,
+        });
+      }
+    }
+
     const [booking] = await db.insert(bookingsTable).values({
       orderNumber,
       customerId: effectiveCustomerId,
