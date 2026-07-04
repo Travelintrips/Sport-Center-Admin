@@ -406,6 +406,11 @@ router.post("/bookings", async (req, res) => {
     // customerId: admin → bodyCustomerId atau null; admin_booking/customer → bodyCustomerId atau loggedInUserId
     const effectiveCustomerId = bodyCustomerId ?? (loggedInRole !== "admin" ? loggedInUserId : null);
 
+    // groupRef dari cart checkout (frontend kirim saat multi-lapangan)
+    const incomingGroupRef: string | null = req.body.groupRef
+      ? String(req.body.groupRef).trim().slice(0, 64) || null
+      : null;
+
     const [booking] = await db.insert(bookingsTable).values({
       orderNumber,
       customerId: effectiveCustomerId,
@@ -428,6 +433,7 @@ router.post("/bookings", async (req, res) => {
       activityType,
       numberOfPeople,
       notes,
+      groupRef: incomingGroupRef,
       // Company billing: auto-confirm KECUALI company punya requirePerBookingApproval = true
       // Pending company: waiting_confirmation (menunggu verifikasi admin perusahaan)
       status: isCompanyBilling
@@ -446,6 +452,42 @@ router.post("/bookings", async (req, res) => {
       grandTotal: taxCalc.taxAmount > 0 ? String(taxCalc.grandTotal) : null,
       vendorId: req.body.vendorId ? Number(req.body.vendorId) : null,
     }).returning();
+
+    // Upsert booking_groups jika ada groupRef dari cart
+    if (incomingGroupRef) {
+      // Payable amount: pakai grandTotal bila ada PPN, fallback ke totalPrice
+      const payableAmount = taxCalc.taxAmount > 0 ? taxCalc.grandTotal : totalPrice;
+
+      const [existingGroup] = await db.select().from(bookingGroupsTable)
+        .where(eq(bookingGroupsTable.groupRef, incomingGroupRef)).limit(1);
+
+      if (existingGroup) {
+        // Validasi kepemilikan: phone harus cocok (cart selalu kirim phone yang sama)
+        const ownerPhone = normalizePhone(String(customerPhone));
+        if (existingGroup.customerPhone && existingGroup.customerPhone !== ownerPhone) {
+          // Biarkan booking tetap dibuat, tapi jangan update grup orang lain
+          req.log.warn({ groupRef: incomingGroupRef }, "groupRef ownership mismatch — skipping group upsert");
+        } else {
+          // Akumulasi pakai grandTotal (bukan totalPrice) supaya PPN masuk
+          await db.update(bookingGroupsTable)
+            .set({
+              totalPayment: String(Number(existingGroup.totalPayment) + payableAmount),
+              updatedAt: new Date(),
+            })
+            .where(eq(bookingGroupsTable.groupRef, incomingGroupRef));
+        }
+      } else {
+        // Buat grup baru
+        await db.insert(bookingGroupsTable).values({
+          groupRef: incomingGroupRef,
+          customerName: String(customerName),
+          customerPhone: normalizePhone(String(customerPhone)),
+          totalPayment: String(payableAmount),
+          status: "pending",
+          notes: `Dari keranjang booking`,
+        });
+      }
+    }
 
     if (promoCode && !isAp) {
       await db.update(promosTable)

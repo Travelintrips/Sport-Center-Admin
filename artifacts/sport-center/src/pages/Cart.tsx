@@ -109,6 +109,11 @@ export default function Cart() {
     const orders: string[] = [];
     const successItemIds: string[] = [];
 
+    // Generate a shared group ref untuk semua booking dari sesi keranjang ini
+    const cartRef = items.length > 1
+      ? `CART-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`
+      : null;
+
     for (const item of items) {
       try {
         const body: {
@@ -121,6 +126,7 @@ export default function Cart() {
           customerType: string;
           payerType: string;
           source: string;
+          groupRef?: string;
           startTime?: string;
           durationHours?: number;
           activityType?: string;
@@ -133,6 +139,7 @@ export default function Cart() {
           customerType: "umum",
           payerType: "personal",
           source: "cart",
+          ...(cartRef ? { groupRef: cartRef } : {}),
         };
 
         if (email.trim()) body.customerEmail = email.trim();

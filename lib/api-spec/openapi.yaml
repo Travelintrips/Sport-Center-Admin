@@ -3764,6 +3764,12 @@ components:
         createdAt:
           type: string
           nullable: true
+        groupRef:
+          type: string
+          nullable: true
+        customerName:
+          type: string
+          nullable: true
 
     Review:
       type: object

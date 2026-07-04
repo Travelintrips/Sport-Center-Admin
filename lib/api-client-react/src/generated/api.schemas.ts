@@ -816,6 +816,8 @@ export interface MyBookingItem {
   paymentProofUrl?: string | null;
   notes?: string | null;
   createdAt: string | null;
+  groupRef?: string | null;
+  customerName?: string | null;
 }
 
 export interface Review {
