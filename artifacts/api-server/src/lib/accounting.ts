@@ -446,7 +446,7 @@ export async function createJournalEntry(
       bookingId,
       orderNumber,
       journalType: "payment_confirmed",
-      debitAccount: "Kas/Bank",
+      debitAccount: "Bank Mandiri",
       debitAmount: String(grandTotal),
       creditRevenueAccount: "Pendapatan Sport Center",
       creditRevenueAmount: String(ppnAmount > 0 ? netRevenue : grandTotal),
@@ -461,7 +461,7 @@ export async function createJournalEntry(
   if (!journal) return;
 
   const lines: Array<{ lineType: string; accountCode: string; accountName: string; amount: number; description?: string }> = [
-    { lineType: "debit",  accountCode: "1-1001", accountName: "Kas/Bank",               amount: grandTotal,  description: `Penerimaan booking ${orderNumber}` },
+    { lineType: "debit",  accountCode: "1104", accountName: "Bank Mandiri",              amount: grandTotal,  description: `Penerimaan booking ${orderNumber}` },
     { lineType: "credit", accountCode: "4-1001", accountName: "Pendapatan Sport Center", amount: ppnAmount > 0 ? netRevenue : grandTotal, description: `Pendapatan booking ${orderNumber}` },
   ];
   if (ppnAmount > 0) {
@@ -485,7 +485,7 @@ export async function createMembershipJournalEntry(
       bookingId: null,
       orderNumber: refNumber,
       journalType: "membership_payment_confirmed",
-      debitAccount: "Kas/Bank",
+      debitAccount: "Bank Mandiri",
       debitAmount: String(amount),
       creditRevenueAccount: "Pendapatan Sport Center",
       creditRevenueAmount: String(amount),
@@ -500,7 +500,7 @@ export async function createMembershipJournalEntry(
   if (!journal) return;
 
   await postJournalLines(journal.id, [
-    { lineType: "debit",  accountCode: "1-1001", accountName: "Kas/Bank",               amount, description: `Penerimaan member gym ${refNumber}` },
+    { lineType: "debit",  accountCode: "1104", accountName: "Bank Mandiri",              amount, description: `Penerimaan member gym ${refNumber}` },
     { lineType: "credit", accountCode: "4-1001", accountName: "Pendapatan Sport Center", amount, description: `Pendapatan member gym ${refNumber}` },
   ]);
 }
@@ -521,7 +521,7 @@ export async function createInvoiceJournalEntry(
       bookingId: null,
       orderNumber: invoiceNumber,
       journalType: "invoice_payment_confirmed",
-      debitAccount: "Kas/Bank",
+      debitAccount: "Bank Mandiri",
       debitAmount: String(grandTotal),
       creditRevenueAccount: "Pendapatan Sport Center",
       creditRevenueAmount: String(ppnAmount > 0 ? netRevenue : grandTotal),
@@ -536,7 +536,7 @@ export async function createInvoiceJournalEntry(
   if (!journal) return;
 
   const lines: Array<{ lineType: string; accountCode: string; accountName: string; amount: number; description?: string }> = [
-    { lineType: "debit",  accountCode: "1-1001", accountName: "Kas/Bank",               amount: grandTotal,  description: `Penerimaan invoice ${invoiceNumber}` },
+    { lineType: "debit",  accountCode: "1104", accountName: "Bank Mandiri",              amount: grandTotal,  description: `Penerimaan invoice ${invoiceNumber}` },
     { lineType: "credit", accountCode: "4-1001", accountName: "Pendapatan Sport Center", amount: ppnAmount > 0 ? netRevenue : grandTotal, description: `Pendapatan invoice ${invoiceNumber}` },
   ];
   if (ppnAmount > 0) {

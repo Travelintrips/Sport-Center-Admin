@@ -195,7 +195,7 @@ async function settleInvoice(
 
 // Peta akun akuntansi double-entry
 const ACCOUNT_MAP = {
-  BANK:        { code: "1001", name: "Kas/Bank" },
+  BANK:        { code: "1104", name: "Bank Mandiri" },
   BOOKING_REV: { code: "4001", name: "Pendapatan Booking" },
   ADVANCE:     { code: "2001", name: "Uang Muka Diterima" },
   BANK_FEE:    { code: "6001", name: "Biaya Administrasi Bank" },
