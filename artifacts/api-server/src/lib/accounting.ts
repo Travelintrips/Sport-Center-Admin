@@ -630,6 +630,192 @@ export async function createExpenseJournalEntry(
   return journal.id;
 }
 
+// ─── Public Accounting: Expense (Pengeluaran) ────────────────────────────────
+// Debit: akun expense COA → Kredit: akun bank berdasarkan payment method
+// Ini memastikan Bank Mandiri CST HANYA di sisi kredit untuk pengeluaran,
+// tidak pernah muncul sebagai debit.
+
+const EXP_JOURNAL_CODE = "EXP-CST";
+let _expJournalId: number | null = null;
+
+async function getExpJournalId(pool: pg.Pool): Promise<number> {
+  if (_expJournalId) return _expJournalId;
+  const r = await pool.query(
+    `SELECT id FROM public.accounting_journals WHERE code = $1 LIMIT 1`,
+    [EXP_JOURNAL_CODE],
+  );
+  _expJournalId = Number(r.rows[0]?.id ?? 0);
+  return _expJournalId;
+}
+
+async function nextPublicExpEntryNumber(pool: pg.Pool, year: number): Promise<string> {
+  const result = await pool.query(
+    `SELECT COALESCE(MAX(
+      NULLIF(REGEXP_REPLACE(entry_number, '^SC-EXP/[0-9]+/', ''), '')::integer
+    ), 0) + 1 AS seq
+    FROM public.accounting_entries
+    WHERE entry_number LIKE $1`,
+    [`SC-EXP/${year}/%`],
+  );
+  const seq = Number(result.rows[0]?.seq ?? 1);
+  return `SC-EXP/${year}/${String(seq).padStart(4, "0")}`;
+}
+
+function mapPaymentMethodToBankCoaCode(paymentMethod: string): string {
+  const pm = (paymentMethod ?? "").toLowerCase();
+  if (pm.includes("bca")) return "1-1021-CST";
+  if (pm.includes("bni")) return "1-1022-CST";
+  if (pm.includes("kas") || pm.includes("cash") || pm.includes("tunai")) return "1-1010-CST";
+  // Default: Bank Mandiri CST (transfer / bank_mandiri / kosong)
+  return "1-1020-CST";
+}
+
+// Cache lookup COA by code
+async function getPublicCoaId(pool: pg.Pool, code: string): Promise<number | null> {
+  const r = await pool.query(
+    `SELECT id FROM public.chart_of_accounts WHERE code = $1 AND is_active = true LIMIT 1`,
+    [code],
+  );
+  return r.rows[0]?.id ? Number(r.rows[0].id) : null;
+}
+
+export async function createPublicExpenseAccountingEntry(
+  expenseId: number,
+  expenseNo: string,
+  description: string,
+  expenseCoaCode: string | null | undefined, // kode COA akun expense (sisi DEBIT)
+  amount: number,                            // DPP
+  ppnAmount: number,                         // PPN Masukan (0 jika tidak ada)
+  totalAmount: number,                       // total dibayar
+  paymentMethod: string,                     // menentukan akun bank kredit
+  journalDate: string,
+): Promise<void> {
+  const pool = getPublicPool();
+  if (!pool) {
+    console.warn("[accounting] Tidak ada Supabase URL — skip createPublicExpenseAccountingEntry");
+    return;
+  }
+
+  const correlationId = `sc_expense_${expenseNo}`;
+
+  // Idempotent: skip jika sudah ada
+  const exists = await pool.query(
+    `SELECT id FROM public.accounting_entries WHERE correlation_id = $1 LIMIT 1`,
+    [correlationId],
+  );
+  if (exists.rows.length > 0) {
+    console.info(`[accounting] Expense entry sudah ada untuk ${expenseNo}, skip.`);
+    return;
+  }
+
+  const bankCoaCode = mapPaymentMethodToBankCoaCode(paymentMethod);
+  const fallbackExpenseCode = "5-2040-CST"; // Beban Operasional Lain CST
+  const effectiveExpenseCode = expenseCoaCode || fallbackExpenseCode;
+
+  const [expenseAccountId, bankAccountId] = await Promise.all([
+    getPublicCoaId(pool, effectiveExpenseCode),
+    getPublicCoaId(pool, bankCoaCode),
+  ]);
+
+  if (!expenseAccountId) {
+    console.warn(`[accounting] COA expense '${effectiveExpenseCode}' tidak ditemukan di public schema, skip.`);
+    return;
+  }
+  if (!bankAccountId) {
+    console.warn(`[accounting] COA bank '${bankCoaCode}' tidak ditemukan di public schema, skip.`);
+    return;
+  }
+
+  const year = new Date(journalDate).getFullYear();
+  const [entryNumber, journalId] = await Promise.all([
+    nextPublicExpEntryNumber(pool, year),
+    getExpJournalId(pool),
+  ]);
+
+  if (!journalId) {
+    console.warn(`[accounting] Journal '${EXP_JOURNAL_CODE}' tidak ditemukan di public schema, skip.`);
+    return;
+  }
+
+  // Gunakan transaksi: insert sebagai draft → insert lines → update ke posted
+  // Jika lines gagal, entry tetap draft (tidak orphan sebagai posted)
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    // Idempotent di level DB: jika correlation_id sudah ada, rollback & skip
+    const existsInTx = await client.query(
+      `SELECT id FROM public.accounting_entries WHERE correlation_id = $1 LIMIT 1 FOR UPDATE`,
+      [correlationId],
+    );
+    if (existsInTx.rows.length > 0) {
+      await client.query("ROLLBACK");
+      console.info(`[accounting] Expense entry sudah ada untuk ${expenseNo}, skip.`);
+      return;
+    }
+
+    const entryResult = await client.query(
+      `INSERT INTO public.accounting_entries
+        (entry_number, journal_id, date, ref, description, status, source, source_id,
+         total_debit, total_credit, company_id, correlation_id, governance_flags)
+      VALUES ($1,$2,$3::date,$4,$5,'draft','sport_center_expense',$6,$7,$7,$8,$9,'{}')
+      RETURNING id`,
+      [
+        entryNumber, journalId, journalDate, expenseNo,
+        `Pengeluaran Sport Center: ${description} (${expenseNo})`,
+        expenseId, totalAmount, COMPANY_ID, correlationId,
+      ],
+    );
+    const entryId = Number(entryResult.rows[0]?.id);
+    if (!entryId) { await client.query("ROLLBACK"); return; }
+
+    if (ppnAmount > 0) {
+      const ppnId = await getPublicCoaId(pool, "2-1201-CST").catch(() => null)
+        ?? await getPublicCoaId(pool, "1-1201-CST").catch(() => null);
+
+      if (ppnId) {
+        await client.query(
+          `INSERT INTO public.accounting_entry_lines (entry_id, account_id, description, debit, credit) VALUES
+            ($1,$2,$3,$4,0),
+            ($1,$5,$6,$7,0),
+            ($1,$8,$9,0,$10)`,
+          [
+            entryId,
+            expenseAccountId, `Beban ${expenseNo}`, amount,
+            ppnId,            `PPN Masukan ${expenseNo}`, ppnAmount,
+            bankAccountId,    `Pembayaran ${expenseNo} via ${paymentMethod}`, totalAmount,
+          ],
+        );
+      } else {
+        await client.query(
+          `INSERT INTO public.accounting_entry_lines (entry_id, account_id, description, debit, credit) VALUES
+            ($1,$2,$3,$4,0),
+            ($1,$5,$6,0,$4)`,
+          [entryId, expenseAccountId, `Beban ${expenseNo}`, totalAmount, bankAccountId, `Pembayaran ${expenseNo} via ${paymentMethod}`],
+        );
+      }
+    } else {
+      await client.query(
+        `INSERT INTO public.accounting_entry_lines (entry_id, account_id, description, debit, credit) VALUES
+          ($1,$2,$3,$4,0),
+          ($1,$5,$6,0,$4)`,
+        [entryId, expenseAccountId, `Beban ${expenseNo}`, totalAmount, bankAccountId, `Pembayaran ${expenseNo} via ${paymentMethod}`],
+      );
+    }
+
+    // Semua lines berhasil → ubah ke posted
+    await client.query(`UPDATE public.accounting_entries SET status = 'posted' WHERE id = $1`, [entryId]);
+    await client.query("COMMIT");
+
+    console.info(`[accounting] ✓ Public expense entry created: ${entryNumber} (${expenseNo}) — DEBIT ${effectiveExpenseCode} / CREDIT ${bankCoaCode}`);
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 export async function reverseJournalEntry(
   bookingId: number,
   orderNumber: string,
