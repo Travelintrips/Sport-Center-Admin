@@ -32,14 +32,14 @@ function validateProductionEnv(): void {
   const fatal: string[] = [];
   const warn: string[] = [];
 
-  // Critical — DB
-  if (!process.env.SUPABASE_DATABASE_URL) {
-    fatal.push("SUPABASE_DATABASE_URL is not set — production DB unreachable");
+  // Critical — DB (accept either Supabase or Replit PostgreSQL)
+  if (!process.env.SUPABASE_DATABASE_URL && !process.env.DATABASE_URL) {
+    fatal.push("No database URL configured — set DATABASE_URL or SUPABASE_DATABASE_URL");
   }
 
-  // Critical — Storage
+  // Soft — Storage (Replit Object Storage or local FS fallback available)
   if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    fatal.push("SUPABASE_SERVICE_ROLE_KEY is not set — file uploads will fail");
+    warn.push("SUPABASE_SERVICE_ROLE_KEY not set — Supabase storage unavailable, using Replit Object Storage or local FS fallback");
   }
 
   // Soft — Realtime (no-op allowed, but must be explicit)

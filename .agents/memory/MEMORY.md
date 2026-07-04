@@ -1,3 +1,4 @@
+- [Replit DB migration fix](replit-db-migration.md) — DB client had a Supabase-only lock guard; removed it so Replit's built-in PostgreSQL (DATABASE_URL) works alongside Supabase URLs.
 - [Supabase shared instance & schema isolation](supabase-shared-instance.md) — DB is shared; our tables live in dedicated `sport_center` schema; `drizzle-kit push` hangs, generate+apply via pg on port 5432.
 - [Booking PII & access control](booking-pii-access.md) — GET /bookings list is admin-only; public booking reads must redact idCardNumber; normalize ID cards to uppercase/trim.
 - [Migration runner setup](migration-runner.md) — scripts/migrate.ts needs `pg` in scripts/package.json; run via scripts/node_modules/.bin/tsx scripts/migrate.ts (not npx/pnpm tsx which can't find pg).
