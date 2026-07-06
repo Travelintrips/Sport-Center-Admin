@@ -1,6 +1,6 @@
 import { Router } from "express";
-import { db, gymMembershipsTable, publicMembershipsTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { db, gymMembershipsTable, publicMembershipsTable, gymCheckinsTable } from "@workspace/db";
+import { eq, and } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
 import { syncMembershipToBizportal, pushMembershipPaymentAsBankMutation } from "../lib/bizportalSync";
 import { createMembershipJournalEntry, createPublicMembershipAccountingEntry } from "../lib/accounting";
@@ -60,6 +60,71 @@ async function deleteFromPublic(sourceId: number) {
     console.warn("[sync-public-memberships] Non-fatal delete error:", err);
   }
 }
+
+// ─── Gym Check-in Endpoints ───────────────────────────────────────────────────
+
+// GET /memberships/checkins?date=YYYY-MM-DD
+router.get("/memberships/checkins", adminMiddleware, async (req, res) => {
+  try {
+    const date = String(req.query.date || new Date().toISOString().split("T")[0]);
+    const checkins = await db
+      .select({
+        id: gymCheckinsTable.id,
+        membershipId: gymCheckinsTable.membershipId,
+        checkinDate: gymCheckinsTable.checkinDate,
+        checkedInAt: gymCheckinsTable.checkedInAt,
+        notes: gymCheckinsTable.notes,
+        memberName: gymMembershipsTable.name,
+        memberPhone: gymMembershipsTable.phone,
+      })
+      .from(gymCheckinsTable)
+      .leftJoin(gymMembershipsTable, eq(gymCheckinsTable.membershipId, gymMembershipsTable.id))
+      .where(eq(gymCheckinsTable.checkinDate, date));
+    res.json(checkins);
+  } catch (err) {
+    req.log.error({ err }, "List checkins error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// POST /memberships/:id/checkin
+router.post("/memberships/:id/checkin", adminMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(String(req.params.id));
+    const today = new Date().toISOString().split("T")[0]!;
+    const checkinDate = String(req.body.checkinDate || today);
+    const notes = req.body.notes ?? null;
+
+    const [member] = await db.select().from(gymMembershipsTable).where(eq(gymMembershipsTable.id, id)).limit(1);
+    if (!member) { res.status(404).json({ error: "Member tidak ditemukan" }); return; }
+    if (member.status !== "active") { res.status(400).json({ error: "Member tidak aktif" }); return; }
+
+    const [existing] = await db.select().from(gymCheckinsTable)
+      .where(and(eq(gymCheckinsTable.membershipId, id), eq(gymCheckinsTable.checkinDate, checkinDate)))
+      .limit(1);
+    if (existing) { res.status(409).json({ error: "Sudah check-in pada tanggal ini", checkin: existing }); return; }
+
+    const [checkin] = await db.insert(gymCheckinsTable).values({ membershipId: id, checkinDate, notes }).returning();
+    res.status(201).json(checkin);
+  } catch (err) {
+    req.log.error({ err }, "Check-in member error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// DELETE /memberships/checkins/:checkinId  — undo check-in (harus sebelum /:id)
+router.delete("/memberships/checkins/:checkinId", adminMiddleware, async (req, res) => {
+  try {
+    const checkinId = parseInt(String(req.params.checkinId));
+    await db.delete(gymCheckinsTable).where(eq(gymCheckinsTable.id, checkinId));
+    res.status(204).send();
+  } catch (err) {
+    req.log.error({ err }, "Delete checkin error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 router.get("/memberships", adminMiddleware, async (req, res) => {
   try {

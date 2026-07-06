@@ -809,5 +809,19 @@ CREATE TABLE IF NOT EXISTS sport_center.wa_notif_logs (
   error_message   TEXT,
   sent_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- ============================================================
+-- gym_checkins: rekam check-in harian member gym
+-- ============================================================
+CREATE TABLE IF NOT EXISTS sport_center.gym_checkins (
+  id              SERIAL PRIMARY KEY,
+  membership_id   INTEGER NOT NULL REFERENCES sport_center.sport_memberships(id) ON DELETE CASCADE,
+  checkin_date    TEXT NOT NULL,
+  checked_in_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  notes           TEXT,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS gym_checkins_date_idx       ON sport_center.gym_checkins(checkin_date);
+CREATE INDEX IF NOT EXISTS gym_checkins_membership_idx ON sport_center.gym_checkins(membership_id);
 `;
 

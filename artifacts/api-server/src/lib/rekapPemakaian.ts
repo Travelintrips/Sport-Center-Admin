@@ -1,4 +1,4 @@
-import { db, bookingsTable, facilitiesTable } from "@workspace/db";
+import { db, bookingsTable, facilitiesTable, gymCheckinsTable, gymMembershipsTable } from "@workspace/db";
 import { eq, and, or } from "drizzle-orm";
 import { sendWAToAdmins } from "./notifications";
 import { logger } from "./logger";
@@ -124,6 +124,36 @@ export async function generateRekapPemakaian(
       if (diff !== 0) return diff;
       return a.startTime.localeCompare(b.startTime);
     });
+  }
+
+  // ── Gym member check-ins ──────────────────────────────────────────────────
+  // Ambil check-in member gym untuk tanggal ini dan masukkan ke group GYM
+  try {
+    const checkinRows = await db
+      .select({
+        name: gymMembershipsTable.name,
+        checkedInAt: gymCheckinsTable.checkedInAt,
+      })
+      .from(gymCheckinsTable)
+      .leftJoin(gymMembershipsTable, eq(gymCheckinsTable.membershipId, gymMembershipsTable.id))
+      .where(eq(gymCheckinsTable.checkinDate, tanggalBooking));
+
+    for (const row of checkinRows) {
+      if (!grouped["GYM"]) grouped["GYM"] = [];
+      const checkinTime = row.checkedInAt
+        ? row.checkedInAt.toISOString().substring(11, 16)
+        : "00:00";
+      grouped["GYM"]!.push({
+        customerName: row.name ?? "Member Gym",
+        startTime: checkinTime,
+        endTime: checkinTime,
+        kategori: "GYM",
+        status: "confirmed", // member gym = sudah bayar iuran
+        customerLabel: "m",  // member gym selalu (m)
+      });
+    }
+  } catch (err) {
+    logger.warn({ err }, "[rekap] Gagal mengambil gym check-ins, dilewati");
   }
 
   return grouped;
