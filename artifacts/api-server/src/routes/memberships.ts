@@ -5,6 +5,7 @@ import { adminMiddleware } from "../lib/auth";
 import { syncMembershipToBizportal, pushMembershipPaymentAsBankMutation } from "../lib/bizportalSync";
 import { createMembershipJournalEntry, createPublicMembershipAccountingEntry } from "../lib/accounting";
 import { logAccountingError } from "../lib/auditLog";
+import { sendRekapPemakaianToAdmin } from "../lib/rekapPemakaian";
 
 const router = Router();
 
@@ -106,6 +107,11 @@ router.post("/memberships/:id/checkin", adminMiddleware, async (req, res) => {
 
     const [checkin] = await db.insert(gymCheckinsTable).values({ membershipId: id, checkinDate, notes }).returning();
     res.status(201).json(checkin);
+
+    // Fire-and-forget: kirim rekap WA hari ini ke grup admin
+    sendRekapPemakaianToAdmin(checkinDate).catch((err) =>
+      req.log.error({ err }, "[checkin] Gagal kirim rekap WA setelah check-in")
+    );
   } catch (err) {
     req.log.error({ err }, "Check-in member error");
     res.status(500).json({ error: "Internal server error" });
@@ -116,8 +122,17 @@ router.post("/memberships/:id/checkin", adminMiddleware, async (req, res) => {
 router.delete("/memberships/checkins/:checkinId", adminMiddleware, async (req, res) => {
   try {
     const checkinId = parseInt(String(req.params.checkinId));
+
+    // Ambil tanggal dulu sebelum dihapus, untuk rekap
+    const [existing] = await db.select().from(gymCheckinsTable).where(eq(gymCheckinsTable.id, checkinId)).limit(1);
     await db.delete(gymCheckinsTable).where(eq(gymCheckinsTable.id, checkinId));
     res.status(204).send();
+
+    // Fire-and-forget: kirim rekap WA hari ini ke grup admin
+    const checkinDate = existing?.checkinDate ?? new Date().toISOString().split("T")[0]!;
+    sendRekapPemakaianToAdmin(checkinDate).catch((err) =>
+      req.log.error({ err }, "[checkin] Gagal kirim rekap WA setelah batal check-in")
+    );
   } catch (err) {
     req.log.error({ err }, "Delete checkin error");
     res.status(500).json({ error: "Internal server error" });
