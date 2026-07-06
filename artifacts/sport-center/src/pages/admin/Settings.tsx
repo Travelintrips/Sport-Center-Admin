@@ -382,23 +382,26 @@ function RekapPemakaianCard() {
 {`PEMAKAIAN SPORT CENTER
 Senin 7 Juli 2026
 
-GYM
+Ket: ✅ Lunas  ⏳ Verifikasi  ❌ Belum Bayar
+
+*GYM*
 1. Oce (m) ✅
-2. Cahyo (m) ✅
+2. Cahyo (m) ⏳
+3. Budi (m) ❌
 
-BASKET/VOLI/FUTSAL
+*BASKET/VOLI/FUTSAL*
+1. Tim A 08:00-10:00 (m) ✅
+
+*TENIS*
 1.
 
-TENIS
+*BADMINTON*
+1. Rudi 09:00-10:00 (m) ❌
+
+*BILIARD*
 1.
 
-BADMINTON
-1.
-
-BILIARD
-1.
-
-SELAMAT BEROLAHRAGA`}
+SELAMAT BEROLAHRAGA 🏆`}
           </pre>
         </div>
 

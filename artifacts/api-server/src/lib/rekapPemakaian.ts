@@ -33,18 +33,29 @@ function mapKategori(facilityName: string, facilityCategory: string): string {
     cat.includes("biliar") || name.includes("biliar")
   ) return "BILIARD";
 
-  // Default fallback
   return "BASKET/VOLI/FUTSAL";
 }
 
 // Urutan tampilan kategori
 const KATEGORI_ORDER = ["GYM", "BASKET/VOLI/FUTSAL", "TENIS", "BADMINTON", "BILIARD"] as const;
 
+// ─── Ikon status pembayaran ────────────────────────────────────────────────
+// ✅ = confirmed / completed  (sudah bayar & dikonfirmasi)
+// ⏳ = paid / waiting_confirmation  (bukti masuk, menunggu konfirmasi)
+// ❌ = pending_payment  (belum bayar)
+
+function paymentIcon(status: string): string {
+  if (status === "confirmed" || status === "completed") return "✅";
+  if (status === "paid" || status === "waiting_confirmation") return "⏳";
+  return "❌";
+}
+
 export interface RekapBookingRow {
   customerName: string;
   startTime: string;
   endTime: string;
   kategori: string;
+  status: string;
 }
 
 export type RekapPerKategori = Record<string, RekapBookingRow[]>;
@@ -59,6 +70,7 @@ export async function generateRekapPemakaian(
       customerName: bookingsTable.customerName,
       startTime: bookingsTable.startTime,
       endTime: bookingsTable.endTime,
+      status: bookingsTable.status,
       facilityName: facilitiesTable.name,
       facilityCategory: facilitiesTable.category,
     })
@@ -88,12 +100,23 @@ export async function generateRekapPemakaian(
       startTime: row.startTime,
       endTime: row.endTime,
       kategori,
+      status: row.status,
     });
   }
 
-  // Sort setiap kategori berdasarkan startTime
+  // Sort setiap kategori: confirmed/completed dulu, lalu paid/waiting, lalu pending
+  const statusOrder = (s: string) => {
+    if (s === "confirmed" || s === "completed") return 0;
+    if (s === "paid" || s === "waiting_confirmation") return 1;
+    return 2; // pending_payment
+  };
+
   for (const cat of Object.keys(grouped)) {
-    grouped[cat]!.sort((a, b) => a.startTime.localeCompare(b.startTime));
+    grouped[cat]!.sort((a, b) => {
+      const diff = statusOrder(a.status) - statusOrder(b.status);
+      if (diff !== 0) return diff;
+      return a.startTime.localeCompare(b.startTime);
+    });
   }
 
   return grouped;
@@ -102,12 +125,10 @@ export async function generateRekapPemakaian(
 // ─── formatRekapWhatsapp ───────────────────────────────────────────────────
 
 function formatTanggalIndonesia(tanggal: string): string {
-  // tanggal format "YYYY-MM-DD"
   const parts = tanggal.split("-");
   const year = Number(parts[0]);
   const month = Number(parts[1]);
   const day = Number(parts[2]);
-  // Gunakan UTC noon agar tidak terkena offset timezone
   const date = new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
   const DAYS = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
   const MONTHS = [
@@ -125,28 +146,31 @@ export function formatRekapWhatsapp(
   const lines: string[] = [
     `PEMAKAIAN SPORT CENTER`,
     tanggalStr,
+    ``,
+    `Ket: ✅ Lunas  ⏳ Verifikasi  ❌ Belum Bayar`,
   ];
 
   for (const kategori of KATEGORI_ORDER) {
     lines.push("");
-    lines.push(kategori);
+    lines.push(`*${kategori}*`);
 
     const items = dataBooking[kategori] ?? [];
     if (items.length === 0) {
       lines.push("1.");
     } else {
       items.forEach((item, idx) => {
+        const icon = paymentIcon(item.status);
         if (kategori === "GYM") {
-          lines.push(`${idx + 1}. ${item.customerName} (m) ✅`);
+          lines.push(`${idx + 1}. ${item.customerName} (m) ${icon}`);
         } else {
-          lines.push(`${idx + 1}. ${item.customerName} ${item.startTime} - ${item.endTime} (m) ✅`);
+          lines.push(`${idx + 1}. ${item.customerName} ${item.startTime.substring(0,5)}-${item.endTime.substring(0,5)} (m) ${icon}`);
         }
       });
     }
   }
 
   lines.push("");
-  lines.push("SELAMAT BEROLAHRAGA");
+  lines.push("SELAMAT BEROLAHRAGA 🏆");
 
   return lines.join("\n");
 }
@@ -160,11 +184,9 @@ export async function sendRekapPemakaianToAdmin(tanggalBooking: string): Promise
   // Kirim ke semua admin phones (termasuk grup WA jika sudah ada di adminWaPhones settings)
   await sendWAToAdmins(msg);
 
-  // Jika ADMIN_WA_GROUP di-set dan belum dicakup oleh sendWAToAdmins, kirim eksplisit
+  // Jika ADMIN_WA_GROUP di-set, kirim eksplisit ke grup
   const adminGroup = process.env.ADMIN_WA_GROUP?.trim();
   if (adminGroup && adminGroup.endsWith("@g.us")) {
-    // sendWAToAdmins sudah menggunakan adminPhones dari DB; grup mungkin belum masuk.
-    // Kirim langsung via Fonnte menggunakan token admin.
     const fonnteToken = process.env.FONNTE_TOKEN;
     if (fonnteToken) {
       try {
