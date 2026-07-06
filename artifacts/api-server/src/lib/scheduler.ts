@@ -6,6 +6,7 @@ import { reverseTaxTransaction } from "./tax";
 import { reverseJournalEntry } from "./accounting";
 import { runBankAudit } from "./bankAudit";
 import { runConnectionHealthCheck } from "./connectionHealth";
+import { sendRekapPemakaianToAdmin } from "./rekapPemakaian";
 import { logger } from "./logger";
 
 function getAppUrl(): string {
@@ -369,6 +370,29 @@ async function checkConnections(): Promise<void> {
   }
 }
 
+// ─── Daily Rekap Pemakaian ke Grup WA Admin ────────────────────────────────
+// Dikirim setiap hari jam 08:00 WIB (01:00 UTC), sekali per hari.
+let lastRekapSentDate = "";
+
+async function sendDailyRekap(): Promise<void> {
+  try {
+    const now = getWIBNow();
+    const hourUTC = now.getUTCHours();
+    // 08:00–09:00 WIB = 01:00–02:00 UTC
+    if (hourUTC !== 1) return;
+
+    const today = getTodayWIB();
+    if (lastRekapSentDate === today) return; // sudah terkirim hari ini
+
+    lastRekapSentDate = today; // tandai dulu, cegah double-send
+    await sendRekapPemakaianToAdmin(today);
+    logger.info({ date: today }, "[scheduler] Daily rekap pemakaian terkirim ke admin WA");
+  } catch (err) {
+    lastRekapSentDate = ""; // reset agar bisa retry di interval berikutnya
+    console.error("[scheduler] sendDailyRekap error:", err);
+  }
+}
+
 export function startScheduler(): void {
   logger.info("[scheduler] Starting background scheduler...");
 
@@ -377,7 +401,7 @@ export function startScheduler(): void {
   autoCompleteBookings();
   checkConnections();
 
-  // Every 5 minutes: expire overdue bookings + auto-complete + reminders + nightly audit + connection health
+  // Every 5 minutes: expire overdue bookings + auto-complete + reminders + nightly audit + connection health + daily rekap
   setInterval(async () => {
     await expireOverdueBookings();
     await autoCompleteBookings();
@@ -385,6 +409,7 @@ export function startScheduler(): void {
     await sendReminderH1();
     await sendDayOfReminder();
     await runNightlyBankAudit();
+    await sendDailyRekap();
     await checkConnections();
   }, 5 * 60 * 1000);
 }

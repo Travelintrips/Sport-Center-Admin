@@ -4,6 +4,7 @@ import { eq, and, sql, or, ilike, desc, inArray, notExists } from "drizzle-orm";
 import { adminMiddleware, authMiddleware, verifyToken } from "../lib/auth";
 import { broadcastAvailabilityChange } from "../lib/supabase";
 import { notifyBookingCreated, notifyPaymentConfirmed, notifyBookingCancelled, notifyCompanyBookingCreated, notifyDpPaid, notifyWaAdminNewBooking, notifyAdminBookingApprovalRequest, notifyPaymentProofUploaded } from "../lib/notifications";
+import { sendRekapPemakaianToAdmin } from "../lib/rekapPemakaian";
 import { createWaToken } from "../lib/waTokens";
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
 import { logger } from "../lib/logger";
@@ -674,6 +675,16 @@ router.post("/bookings", async (req, res) => {
         }
       } catch {}
     }
+
+    // ─── Kirim rekap pemakaian Sport Center ke grup admin ──────────────────
+    (async () => {
+      try {
+        await sendRekapPemakaianToAdmin(bookingDate);
+        console.log("[SPORT CENTER REKAP] Rekap pemakaian berhasil dikirim");
+      } catch (err) {
+        console.error("[SPORT CENTER REKAP] Gagal kirim rekap pemakaian", err);
+      }
+    })();
 
     res.status(201).json({
       ...booking,

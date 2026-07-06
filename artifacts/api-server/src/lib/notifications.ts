@@ -21,8 +21,15 @@ async function getWaConfig(): Promise<{ token: string; customerToken: string; ad
   try {
     const [s] = await db.select().from(settingsTable).limit(1);
     const token = s?.fonnteToken || ENV_FONNTE_TOKEN;
-    // customerToken: token khusus pengirim ke customer (081216104734), fallback ke token admin
-    const customerToken = (s as any)?.fonnteCustomerToken || ENV_FONNTE_CUSTOMER_TOKEN || token;
+    const rawCustomerToken = (s as any)?.fonnteCustomerToken || ENV_FONNTE_CUSTOMER_TOKEN;
+    // Warning #3: jika customer token tidak dikonfigurasi, fallback ke token admin
+    if (!rawCustomerToken) {
+      logger.warn(
+        "[WA] ⚠️  FONNTE_CUSTOMER_TOKEN tidak di-set. Pesan ke customer menggunakan token admin sebagai fallback. " +
+        "Set FONNTE_CUSTOMER_TOKEN di env atau settings DB untuk pengirim terpisah ke customer.",
+      );
+    }
+    const customerToken = rawCustomerToken || token;
     const phonesRaw = s?.adminWaPhones || ENV_ADMIN_WA_PHONES;
     const adminWa = s?.fonnteAdminWa || ENV_FONNTE_ADMIN_WA;
     const adminPhones = phonesRaw
@@ -71,6 +78,20 @@ async function sendWA(
     if (ctx) logWaSend(cleanPhone || phone, message, "failed", "Nomor tidak valid", ctx).catch(() => {});
     return;
   }
+  // Warning #4 guard: jika NODE_ENV bukan production, log peringatan
+  if (process.env.NODE_ENV !== "production") {
+    logger.warn(
+      { target: cleanPhone, event: ctx?.event },
+      "[WA] ⚠️  PERINGATAN: Mengirim WA di lingkungan non-production. Set WA_DRY_RUN=true di env DEV untuk mencegah pengiriman nyata.",
+    );
+  }
+  // Dry-run mode: log pesan tapi tidak kirim ke Fonnte (set WA_DRY_RUN=true di env DEV)
+  if (process.env.WA_DRY_RUN === "true") {
+    logger.warn({ target: cleanPhone, event: ctx?.event }, "[WA] DRY RUN — pesan tidak dikirim ke Fonnte");
+    logger.info({ target: cleanPhone, preview: message.slice(0, 200) }, "[WA] DRY RUN message preview");
+    if (ctx) logWaSend(cleanPhone, message, "sent", "DRY RUN — tidak dikirim ke Fonnte", ctx).catch(() => {});
+    return;
+  }
   // Catat SEGERA sebelum await apapun — Fonnte echo bisa datang saat getWaConfig() pending
   trackSentMessage(message);
   const config = await getWaConfig();
@@ -111,7 +132,7 @@ async function sendWA(
   }
 }
 
-async function sendWAToAdmins(message: string): Promise<void> {
+export async function sendWAToAdmins(message: string): Promise<void> {
   const { adminPhones } = await getWaConfig();
   for (const phone of adminPhones) {
     await sendWA(phone, message);

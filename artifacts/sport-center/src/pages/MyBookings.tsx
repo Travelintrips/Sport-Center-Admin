@@ -10,7 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { useLang } from "@/lib/i18n";
-import { CalendarDays, Clock, ChevronRight, LogOut, ReceiptText, Star, Trophy, MessageCircle, CalendarClock, UserCheck, Link2, ShoppingCart, ChevronDown } from "lucide-react";
+import { CalendarDays, Clock, ChevronRight, LogOut, ReceiptText, Star, Trophy, MessageCircle, CalendarClock, UserCheck, Link2, ShoppingCart, ChevronDown, Search, X } from "lucide-react";
 import RescheduleDialog from "@/components/RescheduleDialog";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
@@ -283,6 +283,7 @@ export default function MyBookings() {
 
   const [reviewState, setReviewState] = useState<Record<number, { rating: number; comment: string; hover: number }>>({});
   const [rescheduleTarget, setRescheduleTarget] = useState<BookingItem | null>(null);
+  const [customerSearch, setCustomerSearch] = useState("");
   const [claimOpen, setClaimOpen] = useState(false);
   const [claimOrder, setClaimOrder] = useState("");
   const [claimLoading, setClaimLoading] = useState(false);
@@ -347,8 +348,16 @@ export default function MyBookings() {
   if (isError || !user) return null;
   if (user.role === "tenant") return null;
 
+  // Filter berdasarkan nama customer (untuk akun operator)
+  const isOperator = user.role === "admin" || user.role === "super_admin" || user.role === "admin_booking" || user.role === "staff";
+  const searchQuery = customerSearch.trim().toLowerCase();
+
   // Pisahkan booking individual dan grup
-  const allBookings = bookings ?? [];
+  const allBookings = (bookings ?? []).filter((b) => {
+    if (!searchQuery) return true;
+    const name = (b.customerName ?? "").toLowerCase();
+    return name.includes(searchQuery);
+  });
 
   // Kelompokkan berdasarkan groupRef
   const groupMap = new Map<string, BookingItem[]>();
@@ -421,6 +430,36 @@ export default function MyBookings() {
         </CardContent></Card>
       </div>
 
+      {/* Filter Nama Customer — hanya untuk operator */}
+      {isOperator && (
+        <div className="mb-6">
+          <div className="relative">
+            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              className="pl-9 pr-9"
+              placeholder={t("Cari nama customer...", "Search customer name...")}
+              value={customerSearch}
+              onChange={(e) => setCustomerSearch(e.target.value)}
+            />
+            {customerSearch && (
+              <button
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                onClick={() => setCustomerSearch("")}
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
+          {searchQuery && (
+            <p className="text-xs text-muted-foreground mt-1.5">
+              {allBookings.length === 0
+                ? t("Tidak ada booking untuk nama ini", "No bookings found for this name")
+                : t(`Menampilkan ${allBookings.length} booking untuk "${customerSearch}"`, `Showing ${allBookings.length} bookings for "${customerSearch}"`)}
+            </p>
+          )}
+        </div>
+      )}
+
       {/* Booking List */}
       {bookingsLoading ? (
         <div className="space-y-4">{[1,2,3].map((i) => <Skeleton key={i} className="h-32" />)}</div>
@@ -431,6 +470,15 @@ export default function MyBookings() {
           <p className="text-muted-foreground text-sm mb-6">{t("Mulai pesan fasilitas favoritmu sekarang!", "Start booking your favorite facility now!")}</p>
           <Button asChild className="bg-primary hover:bg-primary/90">
             <Link href="/facilities">{t("Lihat Fasilitas", "View Facilities")}</Link>
+          </Button>
+        </CardContent></Card>
+      ) : allBookings.length === 0 && searchQuery ? (
+        <Card><CardContent className="py-12 text-center">
+          <Search size={36} className="mx-auto text-muted-foreground/30 mb-3" />
+          <h3 className="font-bold text-base mb-1">{t("Tidak ditemukan", "No results found")}</h3>
+          <p className="text-muted-foreground text-sm">{t(`Tidak ada booking dengan nama "${customerSearch}"`, `No bookings found for "${customerSearch}"`)}</p>
+          <Button variant="ghost" size="sm" className="mt-3 text-primary" onClick={() => setCustomerSearch("")}>
+            <X size={13} className="mr-1" /> {t("Hapus filter", "Clear filter")}
           </Button>
         </CardContent></Card>
       ) : (
