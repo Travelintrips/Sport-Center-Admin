@@ -3302,4 +3302,32 @@ router.post("/wa/booking-approval", async (req, res) => {
   }
 });
 
+// ─── Manual trigger: kirim rekap pemakaian ke grup WA admin ────────────────
+router.post("/api/admin/rekap-pemakaian/send", async (req, res) => {
+  try {
+    const authHeader = req.headers["authorization"];
+    const token = authHeader?.replace("Bearer ", "");
+    if (!token) return res.status(401).json({ error: "Unauthorized" });
+
+    const { verifyToken, adminMiddleware: _adm } = await import("../lib/auth");
+    const payload = verifyToken(token);
+    if (!payload || !["admin", "super_admin", "admin_booking", "staff"].includes(payload.role)) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    const { sendRekapPemakaianToAdmin } = await import("../lib/rekapPemakaian");
+
+    // Gunakan tanggal dari body, default hari ini WIB
+    const wibNow = new Date(Date.now() + 7 * 60 * 60 * 1000);
+    const todayWIB = wibNow.toISOString().split("T")[0];
+    const tanggal: string = (req.body as any)?.date ?? todayWIB;
+
+    await sendRekapPemakaianToAdmin(tanggal);
+    return res.json({ success: true, message: `Rekap pemakaian untuk ${tanggal} berhasil dikirim ke grup WA admin.` });
+  } catch (err) {
+    console.error("[rekap-pemakaian/send]", err);
+    return res.status(500).json({ error: "Gagal mengirim rekap pemakaian" });
+  }
+});
+
 export default router;
