@@ -122,11 +122,6 @@ export default function AdminMemberships() {
       (m.name ?? "").toLowerCase().includes(search.toLowerCase()) ||
       (m.email ?? "").toLowerCase().includes(search.toLowerCase()) ||
       (m.phone ?? "").includes(search);
-    const matchSearch =
-      !search ||
-      m.name.toLowerCase().includes(search.toLowerCase()) ||
-      m.email.toLowerCase().includes(search.toLowerCase()) ||
-      m.phone.includes(search);
     const matchStatus = filterStatus === "all" || m.status === filterStatus;
     return matchSearch && matchStatus;
   });
