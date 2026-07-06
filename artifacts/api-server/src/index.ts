@@ -679,6 +679,68 @@ async function runStartupMigrations() {
        ADD COLUMN IF NOT EXISTS bg_template_type text`,
     `ALTER TABLE sport_center.company_document_settings
        ADD COLUMN IF NOT EXISTS bg_template_active boolean NOT NULL DEFAULT false`,
+    // ── sport_memberships (gym member bulanan) ─────────────────────────────
+    // membership_status enum (idempotent)
+    "DO $body$ BEGIN " +
+      "CREATE TYPE sport_center.membership_status AS ENUM " +
+      "('pending_payment','waiting_confirmation','active','expired','cancelled'); " +
+      "EXCEPTION WHEN duplicate_object THEN null; END $body$",
+    // enum values idempotently (required for pre-existing enums)
+    "DO $body$ BEGIN ALTER TYPE sport_center.membership_status ADD VALUE IF NOT EXISTS 'pending_payment'; EXCEPTION WHEN others THEN null; END $body$",
+    "DO $body$ BEGIN ALTER TYPE sport_center.membership_status ADD VALUE IF NOT EXISTS 'waiting_confirmation'; EXCEPTION WHEN others THEN null; END $body$",
+    "DO $body$ BEGIN ALTER TYPE sport_center.membership_status ADD VALUE IF NOT EXISTS 'active'; EXCEPTION WHEN others THEN null; END $body$",
+    "DO $body$ BEGIN ALTER TYPE sport_center.membership_status ADD VALUE IF NOT EXISTS 'expired'; EXCEPTION WHEN others THEN null; END $body$",
+    "DO $body$ BEGIN ALTER TYPE sport_center.membership_status ADD VALUE IF NOT EXISTS 'cancelled'; EXCEPTION WHEN others THEN null; END $body$",
+    `CREATE TABLE IF NOT EXISTS sport_center.sport_memberships (
+       id                serial PRIMARY KEY,
+       name              text NOT NULL,
+       email             text NOT NULL,
+       phone             text NOT NULL,
+       start_date        text NOT NULL,
+       end_date          text NOT NULL,
+       months            integer NOT NULL DEFAULT 1,
+       total_price       numeric(12,2) NOT NULL,
+       status            sport_center.membership_status NOT NULL DEFAULT 'active',
+       notes             text,
+       payment_method    text,
+       payment_proof_url text,
+       created_at        timestamptz NOT NULL DEFAULT NOW(),
+       updated_at        timestamptz NOT NULL DEFAULT NOW()
+     )`,
+    // ── ap_members (Angkasa Pura member list) ─────────────────────────────
+    `CREATE TABLE IF NOT EXISTS sport_center.ap_members (
+       id             serial PRIMARY KEY,
+       name           text NOT NULL,
+       phone          text,
+       email          text,
+       id_card_number text NOT NULL,
+       is_active      boolean NOT NULL DEFAULT true,
+       created_at     timestamptz NOT NULL DEFAULT NOW(),
+       updated_at     timestamptz NOT NULL DEFAULT NOW()
+     )`,
+    "DO $body$ BEGIN ALTER TABLE sport_center.ap_members ADD CONSTRAINT ap_members_id_card_number_unique UNIQUE (id_card_number); EXCEPTION WHEN others THEN null; END $body$",
+    // ── verification_logs ────────────────────────────────────────────────
+    `CREATE TABLE IF NOT EXISTS sport_center.verification_logs (
+       id                   serial PRIMARY KEY,
+       booking_id           integer REFERENCES sport_center.sport_bookings(id) ON DELETE CASCADE,
+       order_number         text,
+       verified_by_user_id  integer,
+       id_card_number_input text NOT NULL,
+       status               text NOT NULL,
+       notes                text,
+       ip_address           text,
+       created_at           timestamptz NOT NULL DEFAULT NOW()
+     )`,
+    // ── discount_settings ────────────────────────────────────────────────
+    `CREATE TABLE IF NOT EXISTS sport_center.discount_settings (
+       id                  serial PRIMARY KEY,
+       customer_type       text NOT NULL,
+       discount_percentage integer NOT NULL DEFAULT 0,
+       description         text,
+       is_active           boolean NOT NULL DEFAULT true,
+       updated_at          timestamptz NOT NULL DEFAULT NOW()
+     )`,
+    "DO $body$ BEGIN ALTER TABLE sport_center.discount_settings ADD CONSTRAINT discount_settings_customer_type_unique UNIQUE (customer_type); EXCEPTION WHEN others THEN null; END $body$",
   ];
 
   for (const stmt of migrations) {

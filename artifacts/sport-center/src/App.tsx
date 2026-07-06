@@ -5,6 +5,38 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { LanguageProvider } from "@/lib/i18n";
 import { CartProvider } from "@/lib/cart";
 import NotFound from "@/pages/not-found";
+import { Component, type ReactNode, type ErrorInfo } from "react";
+
+class AdminErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+  constructor(props: { children: ReactNode }) {
+    super(props);
+    this.state = { error: null };
+  }
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error("[AdminErrorBoundary] Render error:", error, info);
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="flex flex-col items-center justify-center min-h-screen gap-4 p-8 text-center">
+          <div className="text-4xl">⚠️</div>
+          <h1 className="text-xl font-bold">Terjadi Kesalahan</h1>
+          <p className="text-muted-foreground text-sm max-w-md">{this.state.error.message}</p>
+          <button
+            className="mt-2 px-4 py-2 text-sm bg-primary text-primary-foreground rounded-lg"
+            onClick={() => { this.setState({ error: null }); window.location.reload(); }}
+          >
+            Muat Ulang
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 import "./lib/auth";
 
@@ -145,7 +177,7 @@ function AdminRouter() {
     return <NotFound />;
   })();
 
-  return <AdminLayout>{content}</AdminLayout>;
+  return <AdminLayout><AdminErrorBoundary>{content}</AdminErrorBoundary></AdminLayout>;
 }
 
 function Router() {
