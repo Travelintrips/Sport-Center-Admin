@@ -56,6 +56,8 @@ export interface RekapBookingRow {
   endTime: string;
   kategori: string;
   status: string;
+  /** "m" = member (company billing atau karyawan AP2), "v" = visit (umum) */
+  customerLabel: "m" | "v";
 }
 
 export type RekapPerKategori = Record<string, RekapBookingRow[]>;
@@ -73,6 +75,8 @@ export async function generateRekapPemakaian(
       status: bookingsTable.status,
       facilityName: facilitiesTable.name,
       facilityCategory: facilitiesTable.category,
+      payerType: bookingsTable.payerType,
+      customerType: bookingsTable.customerType,
     })
     .from(bookingsTable)
     .leftJoin(facilitiesTable, eq(bookingsTable.facilityId, facilitiesTable.id))
@@ -95,12 +99,14 @@ export async function generateRekapPemakaian(
   for (const row of rows) {
     const kategori = mapKategori(row.facilityName ?? "", row.facilityCategory ?? "");
     if (!grouped[kategori]) grouped[kategori] = [];
+    const isMember = row.payerType === "company" || row.customerType === "angkasa_pura";
     grouped[kategori]!.push({
       customerName: row.customerName,
       startTime: row.startTime,
       endTime: row.endTime,
       kategori,
       status: row.status,
+      customerLabel: isMember ? "m" : "v",
     });
   }
 
@@ -160,10 +166,11 @@ export function formatRekapWhatsapp(
     } else {
       items.forEach((item, idx) => {
         const icon = paymentIcon(item.status);
+        const label = `(${item.customerLabel})`;
         if (kategori === "GYM") {
-          lines.push(`${idx + 1}. ${item.customerName} (m) ${icon}`);
+          lines.push(`${idx + 1}. ${item.customerName} ${label} ${icon}`);
         } else {
-          lines.push(`${idx + 1}. ${item.customerName} ${item.startTime.substring(0,5)}-${item.endTime.substring(0,5)} (m) ${icon}`);
+          lines.push(`${idx + 1}. ${item.customerName} ${item.startTime.substring(0,5)}-${item.endTime.substring(0,5)} ${label} ${icon}`);
         }
       });
     }
