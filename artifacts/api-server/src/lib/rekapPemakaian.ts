@@ -99,7 +99,8 @@ export async function generateRekapPemakaian(
   for (const row of rows) {
     const kategori = mapKategori(row.facilityName ?? "", row.facilityCategory ?? "");
     if (!grouped[kategori]) grouped[kategori] = [];
-    const isMember = row.payerType === "company" || row.customerType === "angkasa_pura";
+    // GYM selalu member; selain GYM: company billing atau karyawan AP2 = member, lainnya = visit
+    const isMember = kategori === "GYM" || row.payerType === "company" || row.customerType === "angkasa_pura";
     grouped[kategori]!.push({
       customerName: row.customerName,
       startTime: row.startTime,
