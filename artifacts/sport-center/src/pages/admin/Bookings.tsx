@@ -2232,6 +2232,32 @@ export default function AdminBookings() {
     return phones.size === 1;
   }, [mergeSelectedBookings]);
 
+  const revenueStats = useMemo(() => {
+    const getAmount = (b: any) =>
+      b.grandTotal != null ? Number(b.grandTotal) : Number(b.totalPrice);
+    const lunasBookings = filtered.filter((b: any) =>
+      b.status === "confirmed" || b.status === "completed"
+    );
+    const menungguBookings = filtered.filter((b: any) =>
+      b.status === "waiting_confirmation" || b.status === "paid"
+    );
+    const belumBayarBookings = filtered.filter((b: any) =>
+      b.status === "pending_payment"
+    );
+    const totalLunas = lunasBookings.reduce((s: number, b: any) => s + getAmount(b), 0);
+    const totalMenunggu = menungguBookings.reduce((s: number, b: any) => s + getAmount(b), 0);
+    const totalBelumBayar = belumBayarBookings.reduce((s: number, b: any) => s + getAmount(b), 0);
+    return {
+      lunas: totalLunas,
+      menunggu: totalMenunggu,
+      belumBayar: totalBelumBayar,
+      total: totalLunas + totalMenunggu + totalBelumBayar,
+      lunasCount: lunasBookings.length,
+      menungguCount: menungguBookings.length,
+      belumBayarCount: belumBayarBookings.length,
+    };
+  }, [filtered]);
+
   return (
     <div className="space-y-5 pb-10">
       {/* Header */}
@@ -2289,6 +2315,79 @@ export default function AdminBookings() {
             }, 80);
           }}
         />
+      )}
+
+      {/* Revenue Summary */}
+      {!isLoading && filtered.length > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: -6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.08 }}
+          className="rounded-2xl border border-emerald-200/70 dark:border-emerald-800/50 bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/40 dark:to-teal-950/30 px-5 py-4"
+        >
+          <div className="flex flex-wrap items-center gap-4 justify-between">
+            {/* Total utama */}
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-xl bg-emerald-500/15 dark:bg-emerald-500/20">
+                <Receipt size={18} className="text-emerald-600 dark:text-emerald-400" />
+              </div>
+              <div>
+                <div className="text-xs font-semibold text-emerald-700 dark:text-emerald-400 uppercase tracking-wide">
+                  Total Revenue ({filtered.length} booking)
+                </div>
+                <div className="text-2xl font-black text-emerald-800 dark:text-emerald-300">
+                  {formatCurrency(revenueStats.total)}
+                </div>
+              </div>
+            </div>
+
+            {/* Breakdown */}
+            <div className="flex flex-wrap items-center gap-3 text-xs">
+              {revenueStats.lunas > 0 && (
+                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-100 dark:bg-emerald-900/40 border border-emerald-200 dark:border-emerald-800">
+                  <CheckCircle2 size={12} className="text-emerald-600 dark:text-emerald-400 shrink-0" />
+                  <span className="text-emerald-700 dark:text-emerald-300 font-medium">
+                    Lunas
+                  </span>
+                  <span className="font-black text-emerald-800 dark:text-emerald-200">
+                    {formatCurrency(revenueStats.lunas)}
+                  </span>
+                  <span className="text-emerald-500 dark:text-emerald-500">
+                    ({revenueStats.lunasCount})
+                  </span>
+                </div>
+              )}
+              {revenueStats.menunggu > 0 && (
+                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-100 dark:bg-amber-900/40 border border-amber-200 dark:border-amber-800">
+                  <Clock size={12} className="text-amber-600 dark:text-amber-400 shrink-0" />
+                  <span className="text-amber-700 dark:text-amber-300 font-medium">
+                    Menunggu Konfirmasi
+                  </span>
+                  <span className="font-black text-amber-800 dark:text-amber-200">
+                    {formatCurrency(revenueStats.menunggu)}
+                  </span>
+                  <span className="text-amber-500 dark:text-amber-500">
+                    ({revenueStats.menungguCount})
+                  </span>
+                </div>
+              )}
+              {revenueStats.belumBayar > 0 && (
+                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
+                  <CreditCard size={12} className="text-slate-500 dark:text-slate-400 shrink-0" />
+                  <span className="text-slate-600 dark:text-slate-400 font-medium">
+                    Belum Bayar
+                  </span>
+                  <span className="font-black text-slate-700 dark:text-slate-300">
+                    {formatCurrency(revenueStats.belumBayar)}
+                  </span>
+                  <span className="text-slate-400">
+                    ({revenueStats.belumBayarCount})
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+        </motion.div>
       )}
 
       {/* WA Belum Terkirim Panel */}
