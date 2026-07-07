@@ -21,9 +21,17 @@ router.get("/admin/dashboard", adminMiddleware, async (req, res) => {
     const paidMemberships = memberships.filter((m) => PAID_MEMBERSHIP_STATUSES.includes(m.status));
 
     const totalBookings = bookings.length;
-    const bookingRevenue = bookings
-      .filter((b) => !["cancelled", "expired", "rejected"].includes(b.status))
-      .reduce((sum, b) => sum + Number(b.totalPrice), 0);
+
+    // Hanya hitung booking yang sudah LUNAS:
+    // - Pribadi (non-company): status confirmed atau completed
+    // - Perusahaan (company): billingStatus = paid (invoice sudah lunas)
+    const isPaidBooking = (b: typeof bookings[number]) =>
+      b.payerType === "company"
+        ? b.billingStatus === "paid"
+        : ["confirmed", "completed"].includes(b.status);
+
+    const paidBookings = bookings.filter(isPaidBooking);
+    const bookingRevenue = paidBookings.reduce((sum, b) => sum + Number(b.totalPrice), 0);
     const membershipRevenue = paidMemberships.reduce((sum, m) => sum + Number(m.totalPrice), 0);
     const totalRevenue = bookingRevenue + membershipRevenue;
 
@@ -38,7 +46,7 @@ router.get("/admin/dashboard", adminMiddleware, async (req, res) => {
     }));
 
     const facilityStats: Record<number, { facilityId: number; facilityName: string; bookingCount: number; revenue: number }> = {};
-    bookings.filter((b) => !["cancelled", "expired", "rejected"].includes(b.status)).forEach((b) => {
+    paidBookings.forEach((b) => {
       if (!facilityStats[b.facilityId]) {
         const fac = facilities.find((f) => f.id === b.facilityId);
         facilityStats[b.facilityId] = { facilityId: b.facilityId, facilityName: fac?.name ?? "", bookingCount: 0, revenue: 0 };
@@ -48,9 +56,9 @@ router.get("/admin/dashboard", adminMiddleware, async (req, res) => {
     });
     const topFacilities = Object.values(facilityStats).sort((a, b) => b.bookingCount - a.bookingCount).slice(0, 5);
 
-    // Gabung revenue booking + membership per bulan
+    // Gabung revenue booking + membership per bulan (hanya yang sudah lunas)
     const monthlyData: Record<string, { month: string; revenue: number; bookings: number; membershipRevenue: number }> = {};
-    bookings.filter((b) => !["cancelled", "expired", "rejected"].includes(b.status)).forEach((b) => {
+    paidBookings.forEach((b) => {
       const month = b.bookingDate.slice(0, 7);
       if (!monthlyData[month]) monthlyData[month] = { month, revenue: 0, bookings: 0, membershipRevenue: 0 };
       monthlyData[month].revenue += Number(b.totalPrice);
