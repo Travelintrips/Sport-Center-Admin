@@ -13,6 +13,19 @@ import { createJournalEntry, createPublicAccountingEntry } from "../lib/accounti
 import { createWaToken } from "../lib/waTokens";
 import { logger } from "../lib/logger";
 import { getBaseUrl } from "../lib/appUrl";
+import { sendRekapPemakaianToAdmin } from "../lib/rekapPemakaian";
+
+// Helper: kirim rekap ke admin WA hanya jika tanggal booking = hari ini (WIB)
+function todayWIB(): string {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" });
+}
+function triggerRekapIfToday(bookingDate: string): void {
+  if (bookingDate === todayWIB()) {
+    sendRekapPemakaianToAdmin(bookingDate).catch((err) =>
+      logger.error({ err }, "[REKAP] Gagal kirim rekap pemakaian (payments)"),
+    );
+  }
+}
 
 const router = Router();
 
@@ -228,6 +241,9 @@ router.post("/payments", async (req, res) => {
     });
     syncStatusToBizportal(booking.orderNumber, "waiting_confirmation", proofUrl, null, booking).catch(() => {});
 
+    // Rekap otomatis jika booking hari ini
+    triggerRekapIfToday(booking.bookingDate);
+
     const auditAction =
       paymentType === "dp" ? "DP_PAYMENT_CREATED" : "FINAL_PAYMENT_CREATED";
     const clientInfo = getClientInfo(req);
@@ -442,6 +458,11 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
         after: { status },
         ...clientInfo,
       });
+    }
+
+    // Rekap otomatis hanya jika status BENAR-BENAR berubah & booking hari ini
+    if (booking && (status === "confirmed" || status === "rejected") && before.status !== status) {
+      triggerRekapIfToday(booking.bookingDate);
     }
 
     res.json({ ...payment, amount: Number(payment.amount) });

@@ -15,6 +15,18 @@ import { reverseJournalEntry, reversePublicAccountingEntry } from "../lib/accoun
 
 const INACTIVE_STATUSES = ["cancelled", "expired", "rejected", "refunded"];
 
+// Helper: kirim rekap hanya jika tanggal booking = hari ini (WIB)
+function todayWIB(): string {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" });
+}
+function triggerRekapIfToday(bookingDate: string): void {
+  if (bookingDate === todayWIB()) {
+    sendRekapPemakaianToAdmin(bookingDate).catch((err) =>
+      logger.error({ err }, "[REKAP] Gagal kirim rekap pemakaian (bookings)"),
+    );
+  }
+}
+
 const router = Router();
 
 // ─── POST /bookings/track-payer-selection — log when customer toggles payer type ──
@@ -942,6 +954,12 @@ router.post("/bookings/recurring", async (req, res) => {
       for (const b of created) b.groupRef = groupRef;
     }
 
+    // Rekap otomatis jika ada booking yang jatuh hari ini
+    const today = todayWIB();
+    if (created.some((b: any) => b.bookingDate === today)) {
+      triggerRekapIfToday(today);
+    }
+
     res.status(201).json({ created, skipped, totalBookings: created.length, grandTotal: grandTotalAmount, totalDpp, totalPpnAmount: totalPpn, groupRef });
   } catch (err) {
     req.log.error({ err }, "Create recurring booking error");
@@ -1210,6 +1228,11 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
       }
     }
 
+    // Rekap otomatis hanya jika status BENAR-BENAR berubah & booking hari ini
+    if (status && beforeUpdate && beforeUpdate.status !== status) {
+      triggerRekapIfToday(beforeUpdate.bookingDate);
+    }
+
     res.json(result);
   } catch (err) {
     req.log.error({ err }, "Update booking error");
@@ -1236,6 +1259,8 @@ router.post("/bookings/:id/check-in", adminMiddleware, async (req, res) => {
       changedByName: "admin",
       note: `Check-in pukul ${now.toLocaleTimeString("id-ID", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit" })} WIB`,
     });
+    // Check-in selalu hari ini (divalidasi di atas) — trigger rekap otomatis
+    triggerRekapIfToday(booking.bookingDate);
     const result = await getBookingWithPayment(id);
     res.json(result);
   } catch (err) {

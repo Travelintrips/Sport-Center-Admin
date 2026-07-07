@@ -225,7 +225,21 @@ export function formatRekapWhatsapp(
 
 // ─── sendRekapPemakaianToAdmin ────────────────────────────────────────────
 
+// ─── Debounce: satu rekap per tanggal per 60 detik ───────────────────────────
+// Mencegah burst pengiriman saat banyak event terjadi bersamaan di hari yang sama
+const _rekapLastSentAt = new Map<string, number>(); // tanggal → timestamp ms
+const REKAP_DEBOUNCE_MS = 60_000; // 60 detik
+
 export async function sendRekapPemakaianToAdmin(tanggalBooking: string): Promise<void> {
+  const now = Date.now();
+  const lastSent = _rekapLastSentAt.get(tanggalBooking) ?? 0;
+  if (now - lastSent < REKAP_DEBOUNCE_MS) {
+    logger.info({ tanggalBooking, sisaDetik: Math.ceil((REKAP_DEBOUNCE_MS - (now - lastSent)) / 1000) },
+      "[REKAP] Dilewati — rekap baru saja dikirim (debounce 60 detik)");
+    return;
+  }
+  _rekapLastSentAt.set(tanggalBooking, now);
+
   const dataBooking = await generateRekapPemakaian(tanggalBooking);
   const msg = formatRekapWhatsapp(dataBooking, tanggalBooking);
 
