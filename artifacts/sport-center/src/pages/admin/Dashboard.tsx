@@ -186,10 +186,14 @@ export default function AdminDashboard() {
 
   // Revenue split dengan bucket yang tepat:
   // Pribadi Lunas = payerType != company DAN status confirmed/completed (sudah settled)
+  // Pribadi Belum Lunas = payerType != company DAN status pending_payment/waiting_confirmation
   // Perusahaan Belum Ditagih = payerType company DAN billingStatus = unbilled
   // Perusahaan Sudah Lunas = payerType company DAN billingStatus = paid
   const revenuePersonal = (allBookingsData ?? []).filter((b: any) =>
     b.payerType !== "company" && ["confirmed", "completed"].includes(b.status)
+  ).reduce((s: number, b: any) => s + Number(b.totalPrice), 0);
+  const revenuePersonalUnpaid = (allBookingsData ?? []).filter((b: any) =>
+    b.payerType !== "company" && ["pending_payment", "waiting_confirmation"].includes(b.status)
   ).reduce((s: number, b: any) => s + Number(b.totalPrice), 0);
   const revenueCompanyUnbilled = (allBookingsData ?? []).filter((b: any) =>
     b.payerType === "company" && b.billingStatus === "unbilled"
@@ -303,16 +307,20 @@ export default function AdminDashboard() {
       </div>
 
       {/* Revenue split */}
-      {(revenuePersonal > 0 || revenueCompanyUnbilled > 0 || revenueCompanyPaid > 0 || (data?.membershipRevenue ?? 0) > 0) && (
+      {(revenuePersonal > 0 || revenuePersonalUnpaid > 0 || revenueCompanyUnbilled > 0 || revenueCompanyPaid > 0 || (data?.membershipRevenue ?? 0) > 0) && (
         <div className="rounded-xl border border-border bg-card p-4">
           <div className="flex items-center gap-2 mb-3">
             <Building2 size={15} className="text-primary" />
             <span className="text-xs font-bold text-muted-foreground uppercase tracking-wide">Rincian Revenue</span>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
             <div className="rounded-lg bg-emerald-50 dark:bg-emerald-900/20 p-3">
               <div className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold uppercase mb-1">Pribadi · Lunas</div>
               <div className="text-sm font-black text-emerald-700 dark:text-emerald-300">{formatCurrency(revenuePersonal)}</div>
+            </div>
+            <div className="rounded-lg bg-orange-50 dark:bg-orange-900/20 p-3">
+              <div className="text-[10px] text-orange-600 dark:text-orange-400 font-semibold uppercase mb-1">Pribadi · Belum Lunas</div>
+              <div className="text-sm font-black text-orange-700 dark:text-orange-300">{formatCurrency(revenuePersonalUnpaid)}</div>
             </div>
             <div className="rounded-lg bg-amber-50 dark:bg-amber-900/20 p-3">
               <div className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold uppercase mb-1">Perusahaan · Belum Ditagih</div>
