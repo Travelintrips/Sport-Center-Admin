@@ -360,7 +360,8 @@ router.post("/admin/wa-bookings/:orderNumber/paid", adminMiddleware, async (req,
   });
 
   const today = new Date().toISOString().split("T")[0];
-  const subtotal = Number(booking.totalPrice);
+  // totalPrice inklusif PPN — gunakan DPP agar tidak double-count PPN
+  const subtotal = booking.dpp != null ? Number(booking.dpp) : Number(booking.totalPrice);
   const ppnAmount = booking.ppnAmount != null ? Number(booking.ppnAmount) : 0;
   createJournalEntry(booking.id, booking.orderNumber, subtotal, ppnAmount, today).catch((err) =>
     logAccountingError({ operation: "createJournalEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
