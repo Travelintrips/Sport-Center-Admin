@@ -925,7 +925,8 @@ router.post("/wa/action/:token", async (req, res) => {
         });
 
         const _today = new Date().toISOString().split("T")[0];
-        const _subtotal = Number(booking.totalPrice);
+        // totalPrice inklusif PPN — gunakan DPP agar tidak double-count PPN
+        const _subtotal = booking.dpp != null ? Number(booking.dpp) : Number(booking.totalPrice);
         const _ppnAmount = booking.ppnAmount != null ? Number(booking.ppnAmount) : 0;
         createJournalEntry(booking.id, booking.orderNumber, _subtotal, _ppnAmount, _today).catch((err) =>
           logAccountingError({ operation: "createJournalEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
@@ -1271,7 +1272,8 @@ router.post("/wa/review/:token", async (req, res) => {
       });
 
       const _today = new Date().toISOString().split("T")[0];
-      const _subtotal = Number(booking.totalPrice);
+      // totalPrice inklusif PPN — gunakan DPP agar tidak double-count PPN
+      const _subtotal = booking.dpp != null ? Number(booking.dpp) : Number(booking.totalPrice);
       const _ppnAmount = booking.ppnAmount != null ? Number(booking.ppnAmount) : 0;
       createJournalEntry(booking.id, booking.orderNumber, _subtotal, _ppnAmount, _today).catch((err) =>
         logAccountingError({ operation: "createJournalEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
@@ -1860,7 +1862,8 @@ async function execAdminPaid(adminPhone: string, orderNumber: string) {
   });
 
   const _paidToday = new Date().toISOString().split("T")[0];
-  const _paidSubtotal = Number(booking.totalPrice);
+  // totalPrice inklusif PPN — gunakan DPP agar tidak double-count PPN
+  const _paidSubtotal = booking.dpp != null ? Number(booking.dpp) : Number(booking.totalPrice);
   const _paidPpnAmount = booking.ppnAmount != null ? Number(booking.ppnAmount) : 0;
   createJournalEntry(booking.id, booking.orderNumber, _paidSubtotal, _paidPpnAmount, _paidToday).catch((err) =>
     logAccountingError({ operation: "createJournalEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),

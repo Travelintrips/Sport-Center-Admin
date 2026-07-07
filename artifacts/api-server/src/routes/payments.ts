@@ -397,7 +397,8 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
           pushConfirmedPaymentAsBankMutation(booking, new Date()).catch(() => {});
 
           const today = new Date().toISOString().split("T")[0];
-          const subtotal = Number(booking.totalPrice);
+          // totalPrice sudah inklusif PPN — gunakan DPP (dpp) sebagai subtotal agar tidak double-count PPN
+          const subtotal = booking.dpp != null ? Number(booking.dpp) : Number(booking.totalPrice);
           const ppnAmount = booking.ppnAmount != null ? Number(booking.ppnAmount) : 0;
           createJournalEntry(booking.id, booking.orderNumber, subtotal, ppnAmount, today).catch((err) =>
             logAccountingError({ operation: "createJournalEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
