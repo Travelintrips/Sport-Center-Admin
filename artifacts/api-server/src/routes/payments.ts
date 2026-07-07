@@ -9,7 +9,7 @@ import { notifyPaymentConfirmed, notifyPaymentProofUploaded } from "../lib/notif
 import { logAudit, getClientInfo, getUserFromReq, logAccountingError } from "../lib/auditLog";
 import { syncStatusToBizportal, pushConfirmedPaymentAsBankMutation } from "../lib/bizportalSync";
 import { uploadProofWithFallback } from "./storage";
-import { createJournalEntry, createPublicAccountingEntry } from "../lib/accounting";
+import { createJournalEntry, createPublicAccountingEntry, extractBookingDpp } from "../lib/accounting";
 import { createWaToken } from "../lib/waTokens";
 import { logger } from "../lib/logger";
 import { getBaseUrl } from "../lib/appUrl";
@@ -397,16 +397,7 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
           pushConfirmedPaymentAsBankMutation(booking, new Date()).catch(() => {});
 
           const today = new Date().toISOString().split("T")[0];
-          // Harga di booking sudah inklusif PPN (grandTotal = harga yang customer bayar).
-          // Fungsi journal/accounting menerima DPP (sebelum PPN) sebagai subtotal,
-          // lalu menghitung grandTotal = DPP + ppnAmount secara internal.
-          // Jangan kirim totalPrice (inklusif) — akan double-count PPN.
-          const ppnAmount = booking.ppnAmount != null ? Number(booking.ppnAmount) : 0;
-          const grandTotalAmt = booking.grandTotal != null ? Number(booking.grandTotal) : Number(booking.totalPrice);
-          // DPP: gunakan kolom dpp yang tersimpan, atau hitung dari grandTotal - ppnAmount
-          const dpp = booking.dpp != null && Number(booking.dpp) > 0
-            ? Number(booking.dpp)
-            : ppnAmount > 0 ? grandTotalAmt - ppnAmount : grandTotalAmt;
+          const { dpp, ppnAmount } = extractBookingDpp(booking);
           createJournalEntry(booking.id, booking.orderNumber, dpp, ppnAmount, today).catch((err) =>
             logAccountingError({ operation: "createJournalEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
           );

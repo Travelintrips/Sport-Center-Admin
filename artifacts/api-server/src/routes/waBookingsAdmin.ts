@@ -12,7 +12,7 @@ import {
 import { eq, and, desc, or, sql, ilike } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
 import { logAudit, logAccountingError } from "../lib/auditLog";
-import { createJournalEntry, createPublicAccountingEntry } from "../lib/accounting";
+import { createJournalEntry, createPublicAccountingEntry, extractBookingDpp } from "../lib/accounting";
 import { createWaToken } from "../lib/waTokens";
 import {
   notifyWaBookingApproved,
@@ -360,12 +360,11 @@ router.post("/admin/wa-bookings/:orderNumber/paid", adminMiddleware, async (req,
   });
 
   const today = new Date().toISOString().split("T")[0];
-  const subtotal = Number(booking.totalPrice);
-  const ppnAmount = booking.ppnAmount != null ? Number(booking.ppnAmount) : 0;
-  createJournalEntry(booking.id, booking.orderNumber, subtotal, ppnAmount, today).catch((err) =>
+  const { dpp, ppnAmount } = extractBookingDpp(booking);
+  createJournalEntry(booking.id, booking.orderNumber, dpp, ppnAmount, today).catch((err) =>
     logAccountingError({ operation: "createJournalEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
   );
-  createPublicAccountingEntry(booking.id, booking.orderNumber, subtotal, ppnAmount, booking.facilityId, today).catch((err) =>
+  createPublicAccountingEntry(booking.id, booking.orderNumber, dpp, ppnAmount, booking.facilityId, today).catch((err) =>
     logAccountingError({ operation: "createPublicAccountingEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
   );
 

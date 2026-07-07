@@ -26,6 +26,30 @@ function getPublicPool(): pg.Pool | null {
 const TAX_ID_PPN_11 = 1;
 const COMPANY_ID = 1;
 
+// ─── Helper: ekstrak DPP dari booking ────────────────────────────────────────
+// Harga fasilitas di sport center sudah inklusif PPN (grandTotal = totalPrice).
+// Fungsi journal menerima DPP (sebelum PPN) sebagai subtotal.
+// Gunakan helper ini di semua caller agar tidak double-count PPN.
+//
+// Contoh: badminton 100.000 (inklusif 11%)
+//   → dpp = 90.090, ppnAmount = 9.910, grandTotal = 100.000 ✅
+export function extractBookingDpp(booking: {
+  totalPrice: string | number | null;
+  dpp?: string | number | null;
+  ppnAmount?: string | number | null;
+  grandTotal?: string | number | null;
+}): { dpp: number; ppnAmount: number } {
+  const ppnAmount = booking.ppnAmount != null ? Number(booking.ppnAmount) : 0;
+  const grandTotalAmt = booking.grandTotal != null
+    ? Number(booking.grandTotal)
+    : Number(booking.totalPrice);
+  // Prioritaskan kolom dpp yang tersimpan; fallback: grandTotal - ppnAmount
+  const dpp = booking.dpp != null && Number(booking.dpp) > 0
+    ? Number(booking.dpp)
+    : ppnAmount > 0 ? grandTotalAmt - ppnAmount : grandTotalAmt;
+  return { dpp, ppnAmount };
+}
+
 // Cache COA/journal IDs dari public schema
 let _publicIds: {
   journalId: number;

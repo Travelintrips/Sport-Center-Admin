@@ -39,7 +39,7 @@ import {
 } from "../lib/notifications";
 import { calculatePrice } from "../lib/pricing";
 import { logAudit, logAccountingError } from "../lib/auditLog";
-import { createJournalEntry, createPublicAccountingEntry } from "../lib/accounting";
+import { createJournalEntry, createPublicAccountingEntry, extractBookingDpp } from "../lib/accounting";
 import { hashPassword } from "../lib/auth";
 import { syncStatusToBizportal, pushConfirmedPaymentAsBankMutation } from "../lib/bizportalSync";
 import { calculateTax, recordTaxTransaction } from "../lib/tax";
@@ -925,12 +925,11 @@ router.post("/wa/action/:token", async (req, res) => {
         });
 
         const _today = new Date().toISOString().split("T")[0];
-        const _subtotal = Number(booking.totalPrice);
-        const _ppnAmount = booking.ppnAmount != null ? Number(booking.ppnAmount) : 0;
-        createJournalEntry(booking.id, booking.orderNumber, _subtotal, _ppnAmount, _today).catch((err) =>
+        const { dpp: _dpp, ppnAmount: _ppnAmount } = extractBookingDpp(booking);
+        createJournalEntry(booking.id, booking.orderNumber, _dpp, _ppnAmount, _today).catch((err) =>
           logAccountingError({ operation: "createJournalEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
         );
-        createPublicAccountingEntry(booking.id, booking.orderNumber, _subtotal, _ppnAmount, booking.facilityId, _today).catch((err) =>
+        createPublicAccountingEntry(booking.id, booking.orderNumber, _dpp, _ppnAmount, booking.facilityId, _today).catch((err) =>
           logAccountingError({ operation: "createPublicAccountingEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
         );
 
@@ -1271,12 +1270,11 @@ router.post("/wa/review/:token", async (req, res) => {
       });
 
       const _today = new Date().toISOString().split("T")[0];
-      const _subtotal = Number(booking.totalPrice);
-      const _ppnAmount = booking.ppnAmount != null ? Number(booking.ppnAmount) : 0;
-      createJournalEntry(booking.id, booking.orderNumber, _subtotal, _ppnAmount, _today).catch((err) =>
+      const { dpp: _dpp, ppnAmount: _ppnAmount } = extractBookingDpp(booking);
+      createJournalEntry(booking.id, booking.orderNumber, _dpp, _ppnAmount, _today).catch((err) =>
         logAccountingError({ operation: "createJournalEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
       );
-      createPublicAccountingEntry(booking.id, booking.orderNumber, _subtotal, _ppnAmount, booking.facilityId, _today).catch((err) =>
+      createPublicAccountingEntry(booking.id, booking.orderNumber, _dpp, _ppnAmount, booking.facilityId, _today).catch((err) =>
         logAccountingError({ operation: "createPublicAccountingEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
       );
 
@@ -1860,12 +1858,11 @@ async function execAdminPaid(adminPhone: string, orderNumber: string) {
   });
 
   const _paidToday = new Date().toISOString().split("T")[0];
-  const _paidSubtotal = Number(booking.totalPrice);
-  const _paidPpnAmount = booking.ppnAmount != null ? Number(booking.ppnAmount) : 0;
-  createJournalEntry(booking.id, booking.orderNumber, _paidSubtotal, _paidPpnAmount, _paidToday).catch((err) =>
+  const { dpp: _paidDpp, ppnAmount: _paidPpnAmount } = extractBookingDpp(booking);
+  createJournalEntry(booking.id, booking.orderNumber, _paidDpp, _paidPpnAmount, _paidToday).catch((err) =>
     logAccountingError({ operation: "createJournalEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
   );
-  createPublicAccountingEntry(booking.id, booking.orderNumber, _paidSubtotal, _paidPpnAmount, booking.facilityId, _paidToday).catch((err) =>
+  createPublicAccountingEntry(booking.id, booking.orderNumber, _paidDpp, _paidPpnAmount, booking.facilityId, _paidToday).catch((err) =>
     logAccountingError({ operation: "createPublicAccountingEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
   );
 
