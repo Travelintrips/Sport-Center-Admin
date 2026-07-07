@@ -516,7 +516,8 @@ router.patch("/company-invoices/:id", adminMiddleware, async (req, res) => {
     if (status === "paid" && inv.status !== "paid") {
       const paidDate = updated.paidAt ?? new Date();
       const today = paidDate.toISOString().split("T")[0]!;
-      const subtotal = Number(updated.totalAmount);
+      // totalAmount adalah harga inklusif PPN — gunakan DPP agar tidak double-count PPN
+      const { dpp: subtotal } = calcTaxBreakdown(Number(updated.totalAmount));
       const ppnAmount = Number(updated.ppnAmount);
       pushInvoicePaymentAsBankMutation(updated, company?.companyName ?? company?.name, paidDate).catch(() => {});
       createInvoiceJournalEntry(updated.id, updated.invoiceNumber, subtotal, ppnAmount, today).catch((err) =>
