@@ -245,12 +245,15 @@ router.patch("/memberships/:id", adminMiddleware, async (req, res) => {
     if (membership.status === "active" && existing.status !== "active") {
       const refNumber = `MB-${membership.id}`;
       const today = new Date().toISOString().split("T")[0]!;
-      const amount = Number(membership.totalPrice);
+      // totalPrice sudah inklusif PPN — hitung DPP dan PPN agar tidak double-count
+      const totalPrice = Number(membership.totalPrice);
+      const membershipDpp = Math.round(totalPrice / 1.11);
+      const membershipPpn = totalPrice - membershipDpp;
       pushMembershipPaymentAsBankMutation(membership, new Date()).catch(() => {});
-      createMembershipJournalEntry(membership.id, refNumber, amount, today).catch((err) =>
+      createMembershipJournalEntry(membership.id, refNumber, membershipDpp, membershipPpn, today).catch((err) =>
         logAccountingError({ operation: "createMembershipJournalEntry", orderNumber: refNumber, bookingId: membership.id, error: err }),
       );
-      createPublicMembershipAccountingEntry(membership.id, refNumber, amount, today).catch((err) =>
+      createPublicMembershipAccountingEntry(membership.id, refNumber, membershipDpp, membershipPpn, today).catch((err) =>
         logAccountingError({ operation: "createPublicMembershipAccountingEntry", orderNumber: refNumber, bookingId: membership.id, error: err }),
       );
     }
