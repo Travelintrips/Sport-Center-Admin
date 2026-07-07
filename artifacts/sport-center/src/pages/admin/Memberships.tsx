@@ -58,12 +58,13 @@ export default function AdminMemberships() {
   const { data: memberships, isLoading } = useListMemberships({});
 
   // Check-in hari ini
-  const { data: checkins = [] } = useQuery<Checkin[]>({
+  const { data: rawCheckins } = useQuery<Checkin[]>({
     queryKey: ["gym-checkins", today],
     queryFn: () =>
       fetch(`${API}/memberships/checkins?date=${today}`, { headers: authHeaders() }).then((r) => r.json()),
     refetchInterval: 30000,
   });
+  const checkins: Checkin[] = Array.isArray(rawCheckins) ? rawCheckins : [];
 
   const checkedInIds = new Set(checkins.map((c) => c.membershipId));
   const checkinById = new Map(checkins.map((c) => [c.membershipId, c]));
