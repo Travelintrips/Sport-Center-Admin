@@ -134,7 +134,12 @@ async function sendWA(
 
 export async function sendWAToAdmins(message: string): Promise<void> {
   const { adminPhones } = await getWaConfig();
+  // Deduplikasi: normalize nomor lalu kirim sekali per nomor unik
+  const seen = new Set<string>();
   for (const phone of adminPhones) {
+    const clean = cleanPhoneNumber(phone);
+    if (!clean || seen.has(clean)) continue;
+    seen.add(clean);
     await sendWA(phone, message);
   }
 }

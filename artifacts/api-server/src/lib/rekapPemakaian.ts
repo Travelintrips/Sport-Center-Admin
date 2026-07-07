@@ -141,8 +141,12 @@ export async function generateRekapPemakaian(
 
     for (const row of checkinRows) {
       if (!grouped["GYM"]) grouped["GYM"] = [];
+      // Konversi ke WIB (UTC+7) agar jam tampil dan sort akurat secara lokal
       const checkinTime = row.checkedInAt
-        ? row.checkedInAt.toISOString().substring(11, 16)
+        ? (() => {
+            const wib = new Date(row.checkedInAt!.getTime() + 7 * 60 * 60 * 1000);
+            return wib.toISOString().substring(11, 16);
+          })()
         : "00:00";
       grouped["GYM"]!.push({
         customerName: row.name ?? "Member Gym",
@@ -152,6 +156,11 @@ export async function generateRekapPemakaian(
         status: "confirmed", // member gym = sudah bayar iuran
         customerLabel: "m",  // member gym selalu (m)
       });
+    }
+
+    // Sort ulang GYM setelah menambahkan check-ins member (agar urut waktu)
+    if (grouped["GYM"]) {
+      grouped["GYM"].sort((a, b) => a.startTime.localeCompare(b.startTime));
     }
   } catch (err) {
     logger.warn({ err }, "[rekap] Gagal mengambil gym check-ins, dilewati");
@@ -220,32 +229,7 @@ export async function sendRekapPemakaianToAdmin(tanggalBooking: string): Promise
   const dataBooking = await generateRekapPemakaian(tanggalBooking);
   const msg = formatRekapWhatsapp(dataBooking, tanggalBooking);
 
-  // Kirim ke semua admin phones (termasuk grup WA jika sudah ada di adminWaPhones settings)
+  // Kirim ke semua admin phones + grup WA (grup bisa dimasukkan ke adminWaPhones di settings DB)
+  // Format grup: XXXXXXXX@g.us — cukup tambahkan ke kolom adminWaPhones di halaman settings
   await sendWAToAdmins(msg);
-
-  // Jika ADMIN_WA_GROUP di-set, kirim eksplisit ke grup
-  const adminGroup = process.env.ADMIN_WA_GROUP?.trim();
-  if (adminGroup && adminGroup.endsWith("@g.us")) {
-    const fonnteToken = process.env.FONNTE_TOKEN;
-    if (fonnteToken) {
-      try {
-        const resp = await fetch("https://api.fonnte.com/send", {
-          method: "POST",
-          headers: {
-            Authorization: fonnteToken,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ target: adminGroup, message: msg }),
-        });
-        const body = await resp.text().catch(() => "(no body)");
-        if (!resp.ok) {
-          logger.error({ status: resp.status, body }, "[REKAP] Gagal kirim rekap ke grup WA admin");
-        } else {
-          logger.info({ target: adminGroup }, "[REKAP] Rekap berhasil dikirim ke grup WA admin");
-        }
-      } catch (err) {
-        logger.error({ err }, "[REKAP] Exception kirim rekap ke grup WA admin");
-      }
-    }
-  }
 }
