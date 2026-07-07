@@ -516,13 +516,14 @@ router.patch("/company-invoices/:id", adminMiddleware, async (req, res) => {
     if (status === "paid" && inv.status !== "paid") {
       const paidDate = updated.paidAt ?? new Date();
       const today = paidDate.toISOString().split("T")[0]!;
-      const subtotal = Number(updated.totalAmount);
-      const ppnAmount = Number(updated.ppnAmount);
+      // totalAmount = harga inklusif PPN. Fungsi journal menerima DPP (sebelum PPN).
+      // Gunakan calcTaxBreakdown (sama seperti mapInvoice) untuk ekstrak DPP & ppnAmount.
+      const { dpp: invDpp, ppnAmount: invPpn } = calcTaxBreakdown(Number(updated.totalAmount));
       pushInvoicePaymentAsBankMutation(updated, company?.companyName ?? company?.name, paidDate).catch(() => {});
-      createInvoiceJournalEntry(updated.id, updated.invoiceNumber, subtotal, ppnAmount, today).catch((err) =>
+      createInvoiceJournalEntry(updated.id, updated.invoiceNumber, invDpp, invPpn, today).catch((err) =>
         logAccountingError({ operation: "createInvoiceJournalEntry", orderNumber: updated.invoiceNumber, bookingId: updated.id, error: err }),
       );
-      createPublicInvoiceAccountingEntry(updated.id, updated.invoiceNumber, subtotal, ppnAmount, today).catch((err) =>
+      createPublicInvoiceAccountingEntry(updated.id, updated.invoiceNumber, invDpp, invPpn, today).catch((err) =>
         logAccountingError({ operation: "createPublicInvoiceAccountingEntry", orderNumber: updated.invoiceNumber, bookingId: updated.id, error: err }),
       );
     }

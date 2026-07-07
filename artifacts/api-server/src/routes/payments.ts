@@ -397,12 +397,20 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
           pushConfirmedPaymentAsBankMutation(booking, new Date()).catch(() => {});
 
           const today = new Date().toISOString().split("T")[0];
-          const subtotal = Number(booking.totalPrice);
+          // Harga di booking sudah inklusif PPN (grandTotal = harga yang customer bayar).
+          // Fungsi journal/accounting menerima DPP (sebelum PPN) sebagai subtotal,
+          // lalu menghitung grandTotal = DPP + ppnAmount secara internal.
+          // Jangan kirim totalPrice (inklusif) — akan double-count PPN.
           const ppnAmount = booking.ppnAmount != null ? Number(booking.ppnAmount) : 0;
-          createJournalEntry(booking.id, booking.orderNumber, subtotal, ppnAmount, today).catch((err) =>
+          const grandTotalAmt = booking.grandTotal != null ? Number(booking.grandTotal) : Number(booking.totalPrice);
+          // DPP: gunakan kolom dpp yang tersimpan, atau hitung dari grandTotal - ppnAmount
+          const dpp = booking.dpp != null && Number(booking.dpp) > 0
+            ? Number(booking.dpp)
+            : ppnAmount > 0 ? grandTotalAmt - ppnAmount : grandTotalAmt;
+          createJournalEntry(booking.id, booking.orderNumber, dpp, ppnAmount, today).catch((err) =>
             logAccountingError({ operation: "createJournalEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
           );
-          createPublicAccountingEntry(booking.id, booking.orderNumber, subtotal, ppnAmount, booking.facilityId, today).catch((err) =>
+          createPublicAccountingEntry(booking.id, booking.orderNumber, dpp, ppnAmount, booking.facilityId, today).catch((err) =>
             logAccountingError({ operation: "createPublicAccountingEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
           );
         }

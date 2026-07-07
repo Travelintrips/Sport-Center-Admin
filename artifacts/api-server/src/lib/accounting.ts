@@ -94,9 +94,12 @@ export async function createPublicAccountingEntry(
     return;
   }
 
-  // subtotal = DPP (harga sebelum PPN), ppnAmount = PPN 11%
-  // grandTotal = jumlah yang diterima dari customer (masuk ke Bank Mandiri CST)
-  // netRevenue = DPP = subtotal (pendapatan bersih, tidak termasuk PPN)
+  // subtotal  = DPP (harga SEBELUM PPN — bukan totalPrice inklusif).
+  //             Caller wajib mengekstrak DPP terlebih dahulu:
+  //               dpp = grandTotalInklusif - ppnAmount
+  //             Jangan kirim booking.totalPrice langsung — akan double-count PPN.
+  // ppnAmount = PPN yang sudah dihitung (terpisah dari DPP)
+  // grandTotal = DPP + PPN = jumlah yang diterima dari customer (masuk ke Bank Mandiri CST)
   const grandTotal = subtotal + ppnAmount;
   const netRevenue = subtotal;
   const hasPpn = ppnAmount > 0;
@@ -508,7 +511,7 @@ export async function createMembershipJournalEntry(
 export async function createInvoiceJournalEntry(
   invoiceId: number,
   invoiceNumber: string,
-  subtotal: number,
+  subtotal: number,   // DPP (sebelum PPN) — bukan totalAmount inklusif
   ppnAmount: number,
   journalDate: string,
 ): Promise<void> {
