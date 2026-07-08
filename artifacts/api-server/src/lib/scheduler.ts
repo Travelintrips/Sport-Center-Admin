@@ -393,6 +393,31 @@ async function sendDailyRekap(): Promise<void> {
   }
 }
 
+// ─── Nightly Rekap Update 23:30 WIB ───────────────────────────────────────
+// Kirim ulang rekap hari ini jam 23:30 WIB agar status pembayaran ter-update.
+// 23:30 WIB = 16:30 UTC
+let lastNightRekapSentDate = "";
+
+async function sendNightlyRekap(): Promise<void> {
+  try {
+    const now = getWIBNow();
+    const hourUTC = now.getUTCHours();
+    const minuteUTC = now.getUTCMinutes();
+    // 23:30–23:35 WIB = 16:30–16:35 UTC
+    if (hourUTC !== 16 || minuteUTC < 30 || minuteUTC >= 35) return;
+
+    const today = getTodayWIB();
+    if (lastNightRekapSentDate === today) return; // sudah terkirim malam ini
+
+    lastNightRekapSentDate = today; // tandai dulu, cegah double-send
+    await sendRekapPemakaianToAdmin(today);
+    logger.info({ date: today }, "[scheduler] Nightly rekap 23:30 terkirim ke admin WA");
+  } catch (err) {
+    lastNightRekapSentDate = ""; // reset agar bisa retry
+    console.error("[scheduler] sendNightlyRekap error:", err);
+  }
+}
+
 export function startScheduler(): void {
   logger.info("[scheduler] Starting background scheduler...");
 
@@ -410,6 +435,7 @@ export function startScheduler(): void {
     await sendDayOfReminder();
     await runNightlyBankAudit();
     await sendDailyRekap();
+    await sendNightlyRekap();
     await checkConnections();
   }, 5 * 60 * 1000);
 }
