@@ -187,7 +187,9 @@ export default function AdminDashboard() {
   // Revenue split dengan bucket yang tepat:
   // Pribadi Lunas = payerType != company DAN status confirmed/completed (sudah settled)
   // Pribadi Belum Lunas = payerType != company DAN status pending_payment/waiting_confirmation
-  // Perusahaan Belum Ditagih = payerType company DAN billingStatus = unbilled
+  // Perusahaan Belum Lunas = payerType company DAN billingStatus unbilled ATAU billed
+  //   (unbilled = belum dibuatkan invoice; billed = invoice sudah dikirim tapi belum dibayar)
+  //   Keduanya belum menghasilkan uang masuk → digabung jadi satu bucket "belum lunas"
   // Perusahaan Sudah Lunas = payerType company DAN billingStatus = paid
   // Pakai grandTotal (DPP+PPN) bila ada, fallback ke totalPrice — konsisten dengan BizPortal
   const gtOrPrice = (b: any) => b.grandTotal != null ? Number(b.grandTotal) : Number(b.totalPrice);
@@ -197,8 +199,9 @@ export default function AdminDashboard() {
   const revenuePersonalUnpaid = (allBookingsData ?? []).filter((b: any) =>
     b.payerType !== "company" && ["pending_payment", "waiting_confirmation"].includes(b.status)
   ).reduce((s: number, b: any) => s + gtOrPrice(b), 0);
-  const revenueCompanyUnbilled = (allBookingsData ?? []).filter((b: any) =>
-    b.payerType === "company" && b.billingStatus === "unbilled"
+  // Gabungkan unbilled + billed — keduanya belum lunas; pisahkan hanya paid yang benar-benar masuk kas
+  const revenueCompanyUnpaid = (allBookingsData ?? []).filter((b: any) =>
+    b.payerType === "company" && ["unbilled", "billed"].includes(b.billingStatus)
   ).reduce((s: number, b: any) => s + gtOrPrice(b), 0);
   const revenueCompanyPaid = (allBookingsData ?? []).filter((b: any) =>
     b.payerType === "company" && b.billingStatus === "paid"
@@ -309,7 +312,7 @@ export default function AdminDashboard() {
       </div>
 
       {/* Revenue split */}
-      {(revenuePersonal > 0 || revenuePersonalUnpaid > 0 || revenueCompanyUnbilled > 0 || revenueCompanyPaid > 0 || (data?.membershipRevenue ?? 0) > 0) && (
+      {(revenuePersonal > 0 || revenuePersonalUnpaid > 0 || revenueCompanyUnpaid > 0 || revenueCompanyPaid > 0 || (data?.membershipRevenue ?? 0) > 0) && (
         <div className="rounded-xl border border-border bg-card p-4">
           <div className="flex items-center gap-2 mb-3">
             <Building2 size={15} className="text-primary" />
@@ -325,8 +328,8 @@ export default function AdminDashboard() {
               <div className="text-sm font-black text-orange-700 dark:text-orange-300">{formatCurrency(revenuePersonalUnpaid)}</div>
             </div>
             <div className="rounded-lg bg-amber-50 dark:bg-amber-900/20 p-3">
-              <div className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold uppercase mb-1">Perusahaan · Belum Ditagih</div>
-              <div className="text-sm font-black text-amber-700 dark:text-amber-300">{formatCurrency(revenueCompanyUnbilled)}</div>
+              <div className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold uppercase mb-1">Perusahaan · Belum Lunas</div>
+              <div className="text-sm font-black text-amber-700 dark:text-amber-300">{formatCurrency(revenueCompanyUnpaid)}</div>
             </div>
             <div className="rounded-lg bg-blue-50 dark:bg-blue-900/20 p-3">
               <div className="text-[10px] text-blue-600 dark:text-blue-400 font-semibold uppercase mb-1">Perusahaan · Sudah Lunas</div>
