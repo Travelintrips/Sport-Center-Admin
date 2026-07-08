@@ -93,6 +93,12 @@ router.get("/sync/bookings", apiKeyMiddleware, async (req, res) => {
     const total = allBookings.length;
     const paged = allBookings.slice(offset, offset + limit);
 
+    // Hitung total revenue seluruh halaman (bukan hanya halaman ini)
+    const confirmedStatuses = ["confirmed", "completed", "waiting_confirmation", "paid"];
+    const totalRevenue = allBookings
+      .filter((b) => confirmedStatuses.includes(b.status))
+      .reduce((sum, b) => sum + (b.grandTotal != null ? Number(b.grandTotal) : Number(b.totalPrice)), 0);
+
     const facilityIds = [...new Set(paged.map((b) => b.facilityId))];
     const facilities = facilityIds.length
       ? await db.select({ id: facilitiesTable.id, name: facilitiesTable.name, category: facilitiesTable.category }).from(facilitiesTable)
@@ -176,6 +182,7 @@ router.get("/sync/bookings", apiKeyMiddleware, async (req, res) => {
         offset,
         from: fromDate,
         to: toDate,
+        totalRevenue,
         syncedAt: new Date().toISOString(),
         source: "sport-center",
       },
