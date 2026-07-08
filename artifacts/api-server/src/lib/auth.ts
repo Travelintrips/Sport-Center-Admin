@@ -1,7 +1,10 @@
 import { Request, Response, NextFunction } from "express";
 import crypto from "crypto";
 
-const SECRET = process.env.SESSION_SECRET || "sport-center-secret-key-2024";
+const SECRET = process.env.SESSION_SECRET;
+if (!SECRET) {
+  throw new Error("[auth] SESSION_SECRET environment variable is required but not set. Set it before starting the server.");
+}
 const TOKEN_EXPIRY = 7 * 24 * 60 * 60 * 1000;
 
 export function createToken(userId: number, role: string, tenantId?: number | null): string {
