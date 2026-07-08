@@ -6,6 +6,8 @@ import { syncMembershipToBizportal, pushMembershipPaymentAsBankMutation } from "
 import { createMembershipJournalEntry, createPublicMembershipAccountingEntry } from "../lib/accounting";
 import { logAccountingError } from "../lib/auditLog";
 import { sendRekapPemakaianToAdmin } from "../lib/rekapPemakaian";
+import { notifyMembershipPaymentProofUploaded } from "../lib/notifications";
+import { getBaseUrl } from "../lib/appUrl";
 
 const router = Router();
 
@@ -224,6 +226,17 @@ router.post("/memberships/:id/payment-proof", async (req, res) => {
     const [membership] = await db.select().from(gymMembershipsTable).where(eq(gymMembershipsTable.id, id)).limit(1);
     syncMembershipToBizportal(membership).catch(() => {});
     await syncToPublic(membership!);
+
+    const appUrl = await getBaseUrl();
+    notifyMembershipPaymentProofUploaded({
+      membershipId: membership!.id,
+      customerName: membership!.name,
+      startDate: membership!.startDate,
+      endDate: membership!.endDate,
+      totalPrice: Number(membership!.totalPrice).toLocaleString("id-ID"),
+      reviewUrl: appUrl ? `${appUrl}/admin/memberships` : undefined,
+    }).catch((err) => req.log.error({ err }, "[WA] notifyMembershipPaymentProofUploaded error"));
+
     res.json({ ...membership, totalPrice: Number(membership!.totalPrice) });
   } catch (err) {
     req.log.error({ err }, "Submit payment proof error");

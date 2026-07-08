@@ -409,6 +409,28 @@ export async function notifyPaymentProofUploaded(data: BookingNotifData & { revi
   if (tpl) await sendWAToAdmins(interpolate(tpl, data as unknown as Record<string, string>));
 }
 
+export interface MembershipPaymentProofData {
+  membershipId: number;
+  customerName: string;
+  startDate: string;
+  endDate: string;
+  totalPrice: string;
+  reviewUrl?: string;
+}
+
+export async function notifyMembershipPaymentProofUploaded(data: MembershipPaymentProofData): Promise<void> {
+  const msg =
+    `🔔 *Bukti Pembayaran Masuk*\n\n` +
+    `Booking: *MB-${data.membershipId}*\n` +
+    `Customer: *${data.customerName}*\n` +
+    `Fasilitas: *Gym Member*\n` +
+    `Tanggal mulai : *${data.startDate}*\n` +
+    `tanggal akhir : *${data.endDate}*\n` +
+    `Total: *Rp ${data.totalPrice}*` +
+    (data.reviewUrl ? `\n\n📎 Tap link untuk cek & konfirmasi:\n${data.reviewUrl}` : "");
+  await sendWAToAdmins(msg);
+}
+
 export async function notifyReminderH1(data: BookingNotifData): Promise<void> {
   const tpl = await getTemplate("reminder_h1");
   if (tpl) await sendWAToCustomer(data.customerPhone, interpolate(tpl, data as unknown as Record<string, string>));
