@@ -93,10 +93,14 @@ router.get("/sync/bookings", apiKeyMiddleware, async (req, res) => {
     const total = allBookings.length;
     const paged = allBookings.slice(offset, offset + limit);
 
-    // Hitung total revenue seluruh halaman (bukan hanya halaman ini)
-    const confirmedStatuses = ["confirmed", "completed", "waiting_confirmation", "paid"];
+    // Hitung total revenue — konsisten dengan dashboard.ts:
+    // Pribadi: confirmed/completed; Perusahaan: billingStatus=paid
     const totalRevenue = allBookings
-      .filter((b) => confirmedStatuses.includes(b.status))
+      .filter((b) =>
+        b.payerType === "company"
+          ? b.billingStatus === "paid"
+          : ["confirmed", "completed"].includes(b.status),
+      )
       .reduce((sum, b) => sum + (b.grandTotal != null ? Number(b.grandTotal) : Number(b.totalPrice)), 0);
 
     const facilityIds = [...new Set(paged.map((b) => b.facilityId))];
@@ -283,14 +287,18 @@ router.get("/sync/stats", apiKeyMiddleware, async (req, res) => {
     const todayBookings = allBookings.filter((b) => b.bookingDate === today);
     const monthBookings = allBookings.filter((b) => b.bookingDate.startsWith(thisMonth));
 
-    const confirmedStatuses = ["confirmed", "completed", "waiting_confirmation", "paid"];
+    // Filter konsisten dengan dashboard.ts: pribadi=confirmed/completed, perusahaan=billingStatus paid
+    const isPaidBooking = (b: typeof allBookings[number]) =>
+      b.payerType === "company"
+        ? b.billingStatus === "paid"
+        : ["confirmed", "completed"].includes(b.status);
 
     const totalRevenue = allBookings
-      .filter((b) => confirmedStatuses.includes(b.status))
+      .filter(isPaidBooking)
       .reduce((sum, b) => sum + (b.grandTotal != null ? Number(b.grandTotal) : Number(b.totalPrice)), 0);
 
     const monthRevenue = monthBookings
-      .filter((b) => confirmedStatuses.includes(b.status))
+      .filter(isPaidBooking)
       .reduce((sum, b) => sum + (b.grandTotal != null ? Number(b.grandTotal) : Number(b.totalPrice)), 0);
 
     const byStatus = allBookings.reduce<Record<string, number>>((acc, b) => {
