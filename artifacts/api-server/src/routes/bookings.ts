@@ -1400,9 +1400,9 @@ async function runApVerification(
 
     // Update totalPayment di booking_groups — selalu recalculate ketika ada groupRef,
     // termasuk ketika groupUpdatedCount=0 (booking ini adalah satu-satunya / terakhir yang pending)
-    const allGroupBookings = await db.select({ totalPrice: bookingsTable.totalPrice })
+    const allGroupBookings = await db.select({ totalPrice: bookingsTable.totalPrice, grandTotal: bookingsTable.grandTotal })
       .from(bookingsTable).where(eq(bookingsTable.groupRef, booking.groupRef));
-    const newGroupTotal = allGroupBookings.reduce((sum, b) => sum + Number(b.totalPrice), 0);
+    const newGroupTotal = allGroupBookings.reduce((sum, b) => sum + (b.grandTotal != null ? Number(b.grandTotal) : Number(b.totalPrice)), 0);
     await db.update(bookingGroupsTable)
       .set({ totalPayment: String(newGroupTotal) })
       .where(eq(bookingGroupsTable.groupRef, booking.groupRef));
@@ -1700,9 +1700,9 @@ router.post("/bookings/verify-by-order", async (req, res) => {
       }
 
       // Recalculate group total_payment dari sum totalPrice terbaru
-      const allInGroup = await db.select({ totalPrice: bookingsTable.totalPrice })
+      const allInGroup = await db.select({ totalPrice: bookingsTable.totalPrice, grandTotal: bookingsTable.grandTotal })
         .from(bookingsTable).where(eq(bookingsTable.groupRef, booking.groupRef));
-      const newGroupTotal = allInGroup.reduce((sum, b) => sum + Number(b.totalPrice), 0);
+      const newGroupTotal = allInGroup.reduce((sum, b) => sum + (b.grandTotal != null ? Number(b.grandTotal) : Number(b.totalPrice)), 0);
       await db.update(bookingGroupsTable)
         .set({ totalPayment: String(newGroupTotal) })
         .where(eq(bookingGroupsTable.groupRef, booking.groupRef));

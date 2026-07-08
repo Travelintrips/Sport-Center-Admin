@@ -17,7 +17,7 @@ async function generateCustomerCode(): Promise<string> {
 function mapUser(u: typeof usersTable.$inferSelect, userBookings: (typeof bookingsTable.$inferSelect)[]) {
   const totalSpent = userBookings
     .filter((b) => b.status !== "cancelled" && b.status !== "expired" && b.status !== "rejected" && b.status !== "refunded")
-    .reduce((sum, b) => sum + Number(b.totalPrice), 0);
+    .reduce((sum, b) => sum + (b.grandTotal != null ? Number(b.grandTotal) : Number(b.totalPrice)), 0);
   return {
     id: u.id,
     name: u.name,
@@ -116,7 +116,7 @@ router.get("/customers", adminMiddleware, async (req, res) => {
         const guestBookings = bookings.filter((bk) => bk.customerPhone === phone);
         const totalSpent = guestBookings
           .filter((bk) => !INACTIVE.includes(bk.status))
-          .reduce((sum, bk) => sum + Number(bk.totalPrice), 0);
+          .reduce((sum, bk) => sum + (bk.grandTotal != null ? Number(bk.grandTotal) : Number(bk.totalPrice)), 0);
         guestEntries.push({
           id: -(guestEntries.length + 1),
           name: b.customerName,
