@@ -466,7 +466,7 @@ export default function Membership() {
                   </div>
                   <div>
                     <Label htmlFor="startDate">{t("Tanggal Mulai", "Start Date")} <span className="text-destructive">*</span></Label>
-                    <Input id="startDate" type="date" value={form.startDate} min={today} onChange={(e) => setForm((f) => ({ ...f, startDate: e.target.value }))} required className="mt-1.5" />
+                    <Input id="startDate" type="date" value={form.startDate} onChange={(e) => setForm((f) => ({ ...f, startDate: e.target.value }))} required className="mt-1.5" />
                   </div>
                   <div>
                     <Label>{t("Durasi Membership", "Membership Duration")}</Label>
