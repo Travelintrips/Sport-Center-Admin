@@ -189,18 +189,20 @@ export default function AdminDashboard() {
   // Pribadi Belum Lunas = payerType != company DAN status pending_payment/waiting_confirmation
   // Perusahaan Belum Ditagih = payerType company DAN billingStatus = unbilled
   // Perusahaan Sudah Lunas = payerType company DAN billingStatus = paid
+  // Pakai grandTotal (DPP+PPN) bila ada, fallback ke totalPrice — konsisten dengan BizPortal
+  const gtOrPrice = (b: any) => b.grandTotal != null ? Number(b.grandTotal) : Number(b.totalPrice);
   const revenuePersonal = (allBookingsData ?? []).filter((b: any) =>
     b.payerType !== "company" && ["confirmed", "completed"].includes(b.status)
-  ).reduce((s: number, b: any) => s + Number(b.totalPrice), 0);
+  ).reduce((s: number, b: any) => s + gtOrPrice(b), 0);
   const revenuePersonalUnpaid = (allBookingsData ?? []).filter((b: any) =>
     b.payerType !== "company" && ["pending_payment", "waiting_confirmation"].includes(b.status)
-  ).reduce((s: number, b: any) => s + Number(b.totalPrice), 0);
+  ).reduce((s: number, b: any) => s + gtOrPrice(b), 0);
   const revenueCompanyUnbilled = (allBookingsData ?? []).filter((b: any) =>
     b.payerType === "company" && b.billingStatus === "unbilled"
-  ).reduce((s: number, b: any) => s + Number(b.totalPrice), 0);
+  ).reduce((s: number, b: any) => s + gtOrPrice(b), 0);
   const revenueCompanyPaid = (allBookingsData ?? []).filter((b: any) =>
     b.payerType === "company" && b.billingStatus === "paid"
-  ).reduce((s: number, b: any) => s + Number(b.totalPrice), 0);
+  ).reduce((s: number, b: any) => s + gtOrPrice(b), 0);
 
   const allBookings: StatModalBooking[] = (allBookingsData ?? []).map((b: any) => ({
     id: b.id,

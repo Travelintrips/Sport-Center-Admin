@@ -31,7 +31,8 @@ router.get("/admin/dashboard", adminMiddleware, async (req, res) => {
         : ["confirmed", "completed"].includes(b.status);
 
     const paidBookings = bookings.filter(isPaidBooking);
-    const bookingRevenue = paidBookings.reduce((sum, b) => sum + Number(b.totalPrice), 0);
+    // Pakai grandTotal (DPP + PPN) bila ada, fallback ke totalPrice — konsisten dengan BizPortal
+    const bookingRevenue = paidBookings.reduce((sum, b) => sum + (b.grandTotal != null ? Number(b.grandTotal) : Number(b.totalPrice)), 0);
     const membershipRevenue = paidMemberships.reduce((sum, m) => sum + Number(m.totalPrice), 0);
     const totalRevenue = bookingRevenue + membershipRevenue;
 
@@ -52,7 +53,7 @@ router.get("/admin/dashboard", adminMiddleware, async (req, res) => {
         facilityStats[b.facilityId] = { facilityId: b.facilityId, facilityName: fac?.name ?? "", bookingCount: 0, revenue: 0 };
       }
       facilityStats[b.facilityId].bookingCount++;
-      facilityStats[b.facilityId].revenue += Number(b.totalPrice);
+      facilityStats[b.facilityId].revenue += b.grandTotal != null ? Number(b.grandTotal) : Number(b.totalPrice);
     });
     const topFacilities = Object.values(facilityStats).sort((a, b) => b.bookingCount - a.bookingCount).slice(0, 5);
 
@@ -61,7 +62,7 @@ router.get("/admin/dashboard", adminMiddleware, async (req, res) => {
     paidBookings.forEach((b) => {
       const month = b.bookingDate.slice(0, 7);
       if (!monthlyData[month]) monthlyData[month] = { month, revenue: 0, bookings: 0, membershipRevenue: 0 };
-      monthlyData[month].revenue += Number(b.totalPrice);
+      monthlyData[month].revenue += b.grandTotal != null ? Number(b.grandTotal) : Number(b.totalPrice);
       monthlyData[month].bookings++;
     });
     paidMemberships.forEach((m) => {
