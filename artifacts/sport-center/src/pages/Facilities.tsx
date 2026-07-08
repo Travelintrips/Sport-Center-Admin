@@ -338,7 +338,7 @@ function MembershipDialog({ open, onClose }: { open: boolean; onClose: () => voi
                 </div>
                 <div className="space-y-1.5">
                   <Label htmlFor="m-start" className="font-bold text-foreground/80">{t("Mulai Tanggal", "Start Date")} <span className="text-destructive">*</span></Label>
-                  <Input id="m-start" type="date" value={form.startDate} min={today} onChange={(e) => setForm(f => ({ ...f, startDate: e.target.value }))} required className="h-12 rounded-xl bg-[#F8FAFC] dark:bg-slate-900 border-border font-medium" />
+                  <Input id="m-start" type="date" value={form.startDate} onChange={(e) => setForm(f => ({ ...f, startDate: e.target.value }))} required className="h-12 rounded-xl bg-[#F8FAFC] dark:bg-slate-900 border-border font-medium" />
                 </div>
               </div>
               <div className="space-y-2 pt-2">
