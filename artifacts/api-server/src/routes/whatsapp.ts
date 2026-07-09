@@ -2923,8 +2923,7 @@ router.post("/wa/fonnte/webhook", async (req, res) => {
   res.status(200).json({ status: "ok" });
 
   try {
-    // Log raw payload (temporarily elevated to info to capture WA group ID for setup)
-    req.log?.info?.({ body: req.body }, "[wa-webhook] raw payload");
+    req.log?.debug?.({ body: req.body }, "[wa-webhook] raw payload");
 
     if (isDuplicateWebhook(req.body)) return;
     const { sender, message = "", name = "" } = req.body;
