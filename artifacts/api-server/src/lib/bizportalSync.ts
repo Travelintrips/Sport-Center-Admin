@@ -15,7 +15,7 @@ function getProdPool(): pg.Pool | null {
     _prodPool = new Pool({
       connectionString: PROD_URL,
       ssl: { rejectUnauthorized: false },
-      max: 3,
+      max: 10,
       options: "-c search_path=sport_center,public",
     });
   }
@@ -216,6 +216,10 @@ export async function syncBookingToBizportal(payload: SyncBookingPayload): Promi
   } catch (err: any) {
     lastSyncState.booking = { at: new Date().toISOString(), success: false, error: err?.message };
     console.error(`[bizportalSync] ✗ Booking sync failed: ${booking.orderNumber} — ${err?.message}`);
+    // Rethrow so callers that await this (e.g. the manual full-resync endpoint)
+    // can correctly count failures. Fire-and-forget call sites already use
+    // `.catch(() => {})`, so this is safe for them.
+    throw err;
   }
 }
 
@@ -267,6 +271,7 @@ export async function syncMembershipToBizportal(membership: GymMembership): Prom
   } catch (err: any) {
     lastSyncState.membership = { at: new Date().toISOString(), success: false, error: err?.message };
     console.error(`[bizportalSync] ✗ Membership sync failed: ID=${membership.id} — ${err?.message}`);
+    throw err;
   }
 }
 
