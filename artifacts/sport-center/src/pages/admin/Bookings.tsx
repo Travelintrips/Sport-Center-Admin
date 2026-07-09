@@ -2235,8 +2235,19 @@ export default function AdminBookings() {
   const revenueStats = useMemo(() => {
     const getAmount = (b: any) =>
       b.grandTotal != null ? Number(b.grandTotal) : Number(b.totalPrice);
+    // Konsisten dengan dashboard: lunas = uang sudah diterima
+    // - Pribadi: status confirmed/completed
+    // - Perusahaan: billingStatus = paid (invoice sudah lunas)
     const lunasBookings = filtered.filter((b: any) =>
-      b.status === "confirmed" || b.status === "completed"
+      b.payerType === "company"
+        ? b.billingStatus === "paid"
+        : b.status === "confirmed" || b.status === "completed"
+    );
+    // Perusahaan: sudah confirmed/completed tapi invoice belum lunas
+    const companyBelumInvoiceBookings = filtered.filter((b: any) =>
+      b.payerType === "company" &&
+      (b.status === "confirmed" || b.status === "completed") &&
+      b.billingStatus !== "paid"
     );
     const menungguBookings = filtered.filter((b: any) =>
       b.status === "waiting_confirmation" || b.status === "paid"
@@ -2245,14 +2256,17 @@ export default function AdminBookings() {
       b.status === "pending_payment"
     );
     const totalLunas = lunasBookings.reduce((s: number, b: any) => s + getAmount(b), 0);
+    const totalCompanyBelumInvoice = companyBelumInvoiceBookings.reduce((s: number, b: any) => s + getAmount(b), 0);
     const totalMenunggu = menungguBookings.reduce((s: number, b: any) => s + getAmount(b), 0);
     const totalBelumBayar = belumBayarBookings.reduce((s: number, b: any) => s + getAmount(b), 0);
     return {
       lunas: totalLunas,
+      companyBelumInvoice: totalCompanyBelumInvoice,
       menunggu: totalMenunggu,
       belumBayar: totalBelumBayar,
-      total: totalLunas + totalMenunggu + totalBelumBayar,
+      total: totalLunas + totalMenunggu + totalBelumBayar + totalCompanyBelumInvoice,
       lunasCount: lunasBookings.length,
+      companyBelumInvoiceCount: companyBelumInvoiceBookings.length,
       menungguCount: menungguBookings.length,
       belumBayarCount: belumBayarBookings.length,
     };
@@ -2354,6 +2368,20 @@ export default function AdminBookings() {
                   </span>
                   <span className="text-emerald-500 dark:text-emerald-500">
                     ({revenueStats.lunasCount})
+                  </span>
+                </div>
+              )}
+              {revenueStats.companyBelumInvoice > 0 && (
+                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-100 dark:bg-blue-900/40 border border-blue-200 dark:border-blue-800">
+                  <CreditCard size={12} className="text-blue-600 dark:text-blue-400 shrink-0" />
+                  <span className="text-blue-700 dark:text-blue-300 font-medium">
+                    Perusahaan Belum Invoice
+                  </span>
+                  <span className="font-black text-blue-800 dark:text-blue-200">
+                    {formatCurrency(revenueStats.companyBelumInvoice)}
+                  </span>
+                  <span className="text-blue-500 dark:text-blue-500">
+                    ({revenueStats.companyBelumInvoiceCount})
                   </span>
                 </div>
               )}
