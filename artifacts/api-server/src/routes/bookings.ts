@@ -8,7 +8,7 @@ import { sendRekapPemakaianToAdmin } from "../lib/rekapPemakaian";
 import { createWaToken } from "../lib/waTokens";
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
 import { logger } from "../lib/logger";
-import { syncBookingToBizportal, syncStatusToBizportal, deleteBookingFromBizportal } from "../lib/bizportalSync";
+import { syncBookingToBizportal, syncStatusToBizportal, deleteBookingFromBizportal, pushConfirmedPaymentAsBankMutation } from "../lib/bizportalSync";
 import { getBaseUrl } from "../lib/appUrl";
 import { calculateTax, recordTaxTransaction, reverseTaxTransaction } from "../lib/tax";
 import { reverseJournalEntry, reversePublicAccountingEntry } from "../lib/accounting";
@@ -1171,6 +1171,10 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
     if (status && beforeUpdate) {
       const [payment] = await db.select().from(paymentsTable).where(eq(paymentsTable.bookingId, id)).limit(1);
       syncStatusToBizportal(beforeUpdate.orderNumber, status, payment?.proofUrl, status === "confirmed" ? new Date() : null, beforeUpdate).catch(() => {});
+      // Push bank mutation saat admin langsung override status ke "confirmed" (idempotent via mutationKey)
+      if (status === "confirmed" && !["confirmed", "completed"].includes(beforeUpdate.status ?? "")) {
+        pushConfirmedPaymentAsBankMutation(beforeUpdate, new Date()).catch(() => {});
+      }
 
       // Kirim WA notification ke customer saat status berubah ke confirmed ATAU langsung ke completed
       const isConfirming =
