@@ -193,19 +193,23 @@ export default function AdminDashboard() {
   // Perusahaan Sudah Lunas = payerType company DAN billingStatus = paid
   // Pakai grandTotal (DPP+PPN) bila ada, fallback ke totalPrice — konsisten dengan BizPortal
   const gtOrPrice = (b: any) => b.grandTotal != null ? Number(b.grandTotal) : Number(b.totalPrice);
-  const revenuePersonal = (allBookingsData ?? []).filter((b: any) =>
+  const revenuePersonalBookings = (allBookingsData ?? []).filter((b: any) =>
     b.payerType !== "company" && ["confirmed", "completed"].includes(b.status)
-  ).reduce((s: number, b: any) => s + gtOrPrice(b), 0);
-  const revenuePersonalUnpaid = (allBookingsData ?? []).filter((b: any) =>
+  );
+  const revenuePersonal = revenuePersonalBookings.reduce((s: number, b: any) => s + gtOrPrice(b), 0);
+  const revenuePersonalUnpaidBookings = (allBookingsData ?? []).filter((b: any) =>
     b.payerType !== "company" && ["pending_payment", "waiting_confirmation"].includes(b.status)
-  ).reduce((s: number, b: any) => s + gtOrPrice(b), 0);
+  );
+  const revenuePersonalUnpaid = revenuePersonalUnpaidBookings.reduce((s: number, b: any) => s + gtOrPrice(b), 0);
   // Gabungkan unbilled + billed — keduanya belum lunas; pisahkan hanya paid yang benar-benar masuk kas
-  const revenueCompanyUnpaid = (allBookingsData ?? []).filter((b: any) =>
+  const revenueCompanyUnpaidBookings = (allBookingsData ?? []).filter((b: any) =>
     b.payerType === "company" && ["unbilled", "billed"].includes(b.billingStatus)
-  ).reduce((s: number, b: any) => s + gtOrPrice(b), 0);
-  const revenueCompanyPaid = (allBookingsData ?? []).filter((b: any) =>
+  );
+  const revenueCompanyUnpaid = revenueCompanyUnpaidBookings.reduce((s: number, b: any) => s + gtOrPrice(b), 0);
+  const revenueCompanyPaidBookings = (allBookingsData ?? []).filter((b: any) =>
     b.payerType === "company" && b.billingStatus === "paid"
-  ).reduce((s: number, b: any) => s + gtOrPrice(b), 0);
+  );
+  const revenueCompanyPaid = revenueCompanyPaidBookings.reduce((s: number, b: any) => s + gtOrPrice(b), 0);
 
   const allBookings: StatModalBooking[] = (allBookingsData ?? []).map((b: any) => ({
     id: b.id,
@@ -322,18 +326,34 @@ export default function AdminDashboard() {
             <div className="rounded-lg bg-emerald-50 dark:bg-emerald-900/20 p-3">
               <div className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold uppercase mb-1">Pribadi · Lunas</div>
               <div className="text-sm font-black text-emerald-700 dark:text-emerald-300">{formatCurrency(revenuePersonal)}</div>
+              <div className="flex items-center gap-1 mt-0.5">
+                <CalendarDays size={9} className="text-emerald-500" />
+                <div className="text-[10px] text-emerald-500">{revenuePersonalBookings.length} booking</div>
+              </div>
             </div>
             <div className="rounded-lg bg-orange-50 dark:bg-orange-900/20 p-3">
               <div className="text-[10px] text-orange-600 dark:text-orange-400 font-semibold uppercase mb-1">Pribadi · Belum Lunas</div>
               <div className="text-sm font-black text-orange-700 dark:text-orange-300">{formatCurrency(revenuePersonalUnpaid)}</div>
+              <div className="flex items-center gap-1 mt-0.5">
+                <CalendarDays size={9} className="text-orange-500" />
+                <div className="text-[10px] text-orange-500">{revenuePersonalUnpaidBookings.length} booking</div>
+              </div>
             </div>
             <div className="rounded-lg bg-amber-50 dark:bg-amber-900/20 p-3">
               <div className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold uppercase mb-1">Perusahaan · Belum Lunas</div>
               <div className="text-sm font-black text-amber-700 dark:text-amber-300">{formatCurrency(revenueCompanyUnpaid)}</div>
+              <div className="flex items-center gap-1 mt-0.5">
+                <CalendarDays size={9} className="text-amber-500" />
+                <div className="text-[10px] text-amber-500">{revenueCompanyUnpaidBookings.length} booking</div>
+              </div>
             </div>
             <div className="rounded-lg bg-blue-50 dark:bg-blue-900/20 p-3">
               <div className="text-[10px] text-blue-600 dark:text-blue-400 font-semibold uppercase mb-1">Perusahaan · Sudah Lunas</div>
               <div className="text-sm font-black text-blue-700 dark:text-blue-300">{formatCurrency(revenueCompanyPaid)}</div>
+              <div className="flex items-center gap-1 mt-0.5">
+                <CalendarDays size={9} className="text-blue-500" />
+                <div className="text-[10px] text-blue-500">{revenueCompanyPaidBookings.length} booking</div>
+              </div>
             </div>
             <div className="rounded-lg bg-purple-50 dark:bg-purple-900/20 p-3">
               <div className="flex items-center gap-1 mb-1">
@@ -342,7 +362,10 @@ export default function AdminDashboard() {
               </div>
               <div className="text-sm font-black text-purple-700 dark:text-purple-300">{formatCurrency(data?.membershipRevenue ?? 0)}</div>
               {(data?.activeMemberships ?? 0) > 0 && (
-                <div className="text-[10px] text-purple-500 mt-0.5">{data?.activeMemberships} aktif</div>
+                <div className="flex items-center gap-1 mt-0.5">
+                  <CalendarDays size={9} className="text-purple-500" />
+                  <div className="text-[10px] text-purple-500">{data?.activeMemberships} aktif</div>
+                </div>
               )}
             </div>
           </div>
