@@ -2,7 +2,7 @@ import { Router, Request, Response, NextFunction } from "express";
 import { db, bookingsTable, facilitiesTable, paymentsTable, usersTable, gymMembershipsTable } from "@workspace/db";
 import { desc, gte, and, lte, eq, inArray } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
-import { syncBookingToBizportal, syncMembershipToBizportal, bizportalSyncConfigured } from "../lib/bizportalSync";
+import { syncBookingToBizportal, syncMembershipToBizportal, bizportalSyncConfigured, bulkPushPaymentsToBizportal, type BulkPaymentPushResult } from "../lib/bizportalSync";
 
 const router = Router();
 
@@ -496,6 +496,72 @@ router.post("/admin/sync-bizportal-memberships", adminMiddleware, async (req, re
  */
 router.get("/admin/sync-bizportal-memberships/status", adminMiddleware, (_req, res) => {
   res.json(bulkSyncStatus.memberships);
+});
+
+// In-memory status untuk payment sync
+type PaymentSyncStatus = {
+  running: boolean;
+  startedAt: string | null;
+  finishedAt: string | null;
+  total: number;
+  pushed: number;
+  skipped: number;
+  failed: number;
+  errors: string[];
+};
+
+let paymentSyncStatus: PaymentSyncStatus = {
+  running: false, startedAt: null, finishedAt: null,
+  total: 0, pushed: 0, skipped: 0, failed: 0, errors: [],
+};
+
+/**
+ * POST /api/admin/sync-bizportal-payments
+ * Push semua SC payment confirmed ke public.sport_payments BizPortal.
+ * Berjalan di background — pantau lewat GET /api/admin/sync-bizportal-payments/status.
+ */
+router.post("/admin/sync-bizportal-payments", adminMiddleware, async (req, res) => {
+  if (paymentSyncStatus.running) {
+    res.status(409).json({ error: "Sync payment sedang berjalan, tunggu sampai selesai." });
+    return;
+  }
+
+  paymentSyncStatus = {
+    running: true,
+    startedAt: new Date().toISOString(),
+    finishedAt: null,
+    total: 0, pushed: 0, skipped: 0, failed: 0, errors: [],
+  };
+
+  res.json({ success: true, started: true, statusUrl: "/api/admin/sync-bizportal-payments/status" });
+
+  try {
+    const result = await bulkPushPaymentsToBizportal();
+    paymentSyncStatus = {
+      ...paymentSyncStatus,
+      running: false,
+      finishedAt: new Date().toISOString(),
+      ...result,
+      errors: result.errors.slice(0, 20),
+    };
+    req.log.info(
+      { pushed: result.pushed, skipped: result.skipped, failed: result.failed, total: result.total },
+      "[sync] Payment sync to BizPortal finished",
+    );
+  } catch (err: any) {
+    paymentSyncStatus.running = false;
+    paymentSyncStatus.finishedAt = new Date().toISOString();
+    paymentSyncStatus.errors.push(`Fatal: ${err?.message}`);
+    req.log.error({ err }, "Payment sync to BizPortal error");
+  }
+});
+
+/**
+ * GET /api/admin/sync-bizportal-payments/status
+ * Cek progress payment sync terakhir.
+ */
+router.get("/admin/sync-bizportal-payments/status", adminMiddleware, (_req, res) => {
+  res.json(paymentSyncStatus);
 });
 
 export default router;

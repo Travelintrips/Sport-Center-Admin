@@ -2198,6 +2198,54 @@ export default function AdminBookings() {
     }
   };
 
+  const [isSyncingPayments, setIsSyncingPayments] = useState(false);
+  const handleSyncPayments = async () => {
+    setIsSyncingPayments(true);
+    try {
+      const token = getToken();
+      // Trigger background sync
+      const res = await fetch("/api/admin/sync-bizportal-payments", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Sync gagal");
+
+      // Poll status sampai selesai (max 60 detik)
+      let done = false;
+      for (let i = 0; i < 30 && !done; i++) {
+        await new Promise((r) => setTimeout(r, 2000));
+        const statusRes = await fetch("/api/admin/sync-bizportal-payments/status", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const status = await statusRes.json();
+        if (!status.running) {
+          done = true;
+          const hasErrors = status.failed > 0 || (status.errors?.length ?? 0) > 0;
+          if (hasErrors) {
+            toast({
+              title: "Sync payment selesai dengan error",
+              description: `${status.pushed} berhasil, ${status.skipped} skip, ${status.failed} gagal.`,
+              variant: "destructive",
+            });
+          } else {
+            toast({
+              title: "Sync payment ke Bizportal selesai",
+              description: `${status.pushed} payment baru dikirim, ${status.skipped} sudah ada.`,
+            });
+          }
+        }
+      }
+      if (!done) {
+        toast({ title: "Sync berjalan di background", description: "Proses masih berjalan, cek kembali sebentar lagi." });
+      }
+    } catch (err: any) {
+      toast({ title: "Sync payment gagal", description: err.message, variant: "destructive" });
+    } finally {
+      setIsSyncingPayments(false);
+    }
+  };
+
   const extendMutation = useMutation({
     mutationFn: ({ id, extraHours }: { id: number; extraHours: number }) =>
       fetch(`/api/bookings/${id}/extend-direct`, {
@@ -2306,6 +2354,14 @@ export default function AdminBookings() {
           >
             <RefreshCw size={13} className={isSyncing ? "animate-spin" : ""} />
             {isSyncing ? "Syncing..." : "Sync Bizportal"}
+          </button>
+          <button
+            onClick={handleSyncPayments}
+            disabled={isSyncingPayments}
+            className="flex items-center gap-1.5 h-9 px-3 rounded-xl border border-emerald-200 dark:border-emerald-700 text-xs font-semibold text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <RefreshCw size={13} className={isSyncingPayments ? "animate-spin" : ""} />
+            {isSyncingPayments ? "Sync Payment..." : "Sync Payment"}
           </button>
           <button
             onClick={handleExport}

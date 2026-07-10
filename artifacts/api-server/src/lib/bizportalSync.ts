@@ -491,6 +491,125 @@ export async function pushInvoicePaymentAsBankMutation(
   }
 }
 
+// ── Bulk Payment Push ────────────────────────────────────────────────────────
+// Push semua payment confirmed dari Sport Center ke public.sport_payments BizPortal.
+// Idempotent: payment_number 'SCPAY-SC-{sc_payment_id}' dicek sebelum insert.
+// Juga update payment_status di public.sport_bookings agar konsisten.
+export interface BulkPaymentPushResult {
+  total: number;
+  pushed: number;
+  skipped: number;
+  failed: number;
+  errors: string[];
+}
+
+export async function bulkPushPaymentsToBizportal(): Promise<BulkPaymentPushResult> {
+  const pool = getProdPool();
+  if (!pool) return { total: 0, pushed: 0, skipped: 0, failed: 0, errors: [] };
+
+  const result: BulkPaymentPushResult = { total: 0, pushed: 0, skipped: 0, failed: 0, errors: [] };
+
+  try {
+    // Ambil semua SC payments confirmed beserta data booking-nya.
+    // Tidak menggunakan grand_total booking — setiap baris payment punya amount-nya
+    // sendiri (penting untuk flow DP/pelunasan agar tidak double-count).
+    const { rows: scPayments } = await pool.query(`
+      SELECT
+        sp.id             AS sc_payment_id,
+        sp.amount         AS payment_amount,
+        sp.payment_method,
+        sp.payment_type,
+        sp.confirmed_at,
+        sp.created_at     AS payment_created_at,
+        sb.order_number,
+        sb.ppn_rate,
+        sb.ppn_amount,
+        pb.id             AS biz_booking_id
+      FROM sport_center.sport_payments sp
+      JOIN sport_center.sport_bookings sb ON sb.id = sp.booking_id
+      LEFT JOIN public.sport_bookings pb ON pb.sc_booking_id = sb.id
+      WHERE sp.status = 'confirmed'
+      ORDER BY sp.id
+    `);
+
+    result.total = scPayments.length;
+
+    for (const p of scPayments) {
+      const paymentNumber = `SCPAY-SC-${p.sc_payment_id}`;
+      try {
+        if (!p.biz_booking_id) {
+          // Booking SC belum ada di BizPortal — skip
+          result.skipped++;
+          continue;
+        }
+
+        // Gunakan jumlah yang benar-benar dibayar per payment record (bukan grand_total booking)
+        const amount  = Math.round(Number(p.payment_amount));
+        const taxRate = p.ppn_rate   != null ? Number(p.ppn_rate)   : 0;
+        // Distribusikan PPN secara proporsional tidak diperlukan untuk pencatatan BizPortal;
+        // masukkan 0 agar tidak salah alokasi — BizPortal menghitung ulang dari tarifnya sendiri.
+        const taxAmount = 0;
+
+        // INSERT ... ON CONFLICT DO NOTHING — atomik dan idempotent tanpa race condition
+        const { rowCount } = await pool.query(
+          `INSERT INTO public.sport_payments
+             (booking_id, payment_number, amount, method, status, paid_at,
+              payment_type, tax_rate, tax_amount, source, posting_status, created_at, updated_at)
+           VALUES ($1,$2,$3,$4,'paid',$5,$6,$7,$8,'SPORT_CENTER_SUPABASE','unposted',$9,NOW())
+           ON CONFLICT (payment_number) DO NOTHING`,
+          [
+            p.biz_booking_id,
+            paymentNumber,
+            String(amount),
+            p.payment_method || 'Transfer Bank',
+            p.confirmed_at || p.payment_created_at,
+            p.payment_type || 'booking',
+            taxRate,
+            taxAmount,
+            p.payment_created_at,
+          ]
+        );
+
+        if ((rowCount ?? 0) === 0) {
+          // Sudah ada sebelumnya (ON CONFLICT DO NOTHING)
+          result.skipped++;
+          continue;
+        }
+
+        // Update payment_status di public.sport_bookings hanya jika semua payment booking ini sudah confirmed
+        await pool.query(
+          `UPDATE public.sport_bookings pb
+           SET payment_status = 'paid', updated_at = NOW()
+           WHERE pb.id = $1
+             AND pb.payment_status != 'paid'
+             AND NOT EXISTS (
+               SELECT 1 FROM sport_center.sport_payments sp2
+               JOIN sport_center.sport_bookings sb2 ON sb2.id = sp2.booking_id
+               WHERE sb2.id = (SELECT sc_booking_id FROM public.sport_bookings WHERE id = $1)
+                 AND sp2.status != 'confirmed'
+                 AND sp2.payment_type != 'dp'
+             )`,
+          [p.biz_booking_id]
+        );
+
+        result.pushed++;
+        console.info(`[bizportalSync] ✓ Payment pushed: ${p.order_number} (${paymentNumber}) → Rp ${amount.toLocaleString('id-ID')}`);
+      } catch (err: any) {
+        result.failed++;
+        result.errors.push(`${p.order_number} (SC-PAY-${p.sc_payment_id}): ${err?.message ?? 'unknown'}`);
+        console.error(`[bizportalSync] ✗ Payment push failed: ${p.order_number} — ${err?.message}`);
+      }
+    }
+  } catch (err: any) {
+    // Fatal error (e.g. DB query gagal sebelum loop) — hitung sebagai failure
+    result.failed++;
+    result.errors.push(`Fatal: ${err?.message}`);
+    console.error(`[bizportalSync] ✗ bulkPushPaymentsToBizportal fatal: ${err?.message}`);
+  }
+
+  return result;
+}
+
 export async function syncStatusToBizportal(
   orderNumber: string,
   scStatus: string,
