@@ -17,12 +17,13 @@ import { id as idLocale, enUS } from "date-fns/locale";
 import {
   ShoppingCart, Trash2, ChevronLeft, CheckCircle2, Loader2,
   Calendar, Clock, ShieldCheck, AlertCircle, Plane, Building2, User,
-  ChevronsUpDown, Check,
+  ChevronsUpDown, Check, RefreshCw,
 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList,
 } from "@/components/ui/command";
+import { Checkbox } from "@/components/ui/checkbox";
 
 function formatCurrency(n: number) {
   return "Rp " + n.toLocaleString("id-ID");
@@ -61,12 +62,11 @@ export default function Cart() {
     query: { retry: false, queryKey: getGetMeQueryKey(), staleTime: 60_000 },
   });
   const isLoggedIn = !!currentUser && currentUser.role !== "admin";
-  const isCompanyAccount = (currentUser as any)?.accountType === "company";
   // Operator: bisa booking atas nama customer lain
   const isAdminBooking = currentUser?.role === "admin_booking";
 
   // Customer list untuk operator
-  const [customers, setCustomers] = useState<{ id: number; name: string; email: string | null; phone: string | null }[]>([]);
+  const [customers, setCustomers] = useState<{ id: number; name: string; email: string | null; phone: string | null; accountType?: string | null }[]>([]);
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>("");
   const [comboOpen, setComboOpen] = useState(false);
   const [comboQuery, setComboQuery] = useState("");
@@ -81,28 +81,43 @@ export default function Cart() {
       .catch(() => {});
   }, [isAdminBooking]);
 
-  // Cek status tagihan perusahaan (karyawan yang terhubung)
+  // Operator memilih customer: apakah customer itu sendiri sudah berupa akun perusahaan?
+  const selectedCustomer = isAdminBooking
+    ? customers.find((c) => String(c.id) === selectedCustomerId)
+    : undefined;
+  const isCompanyAccount = isAdminBooking
+    ? selectedCustomer?.accountType === "company"
+    : (currentUser as any)?.accountType === "company";
+
+  // Cek status tagihan perusahaan (karyawan yang terhubung) — untuk operator,
+  // cek eligibility milik customer yang dipilih, bukan akun operator sendiri.
+  const billingCustomerId = isAdminBooking
+    ? (selectedCustomerId && parseInt(selectedCustomerId) > 0 ? selectedCustomerId : undefined)
+    : undefined;
   const { data: billingStatus } = useQuery({
-    queryKey: ["billing-status"],
+    queryKey: ["billing-status", isAdminBooking ? billingCustomerId : "self"],
     queryFn: async () => {
       const token = getToken();
-      const res = await fetch("/api/company-verifications/billing-status", {
+      const url = billingCustomerId
+        ? `/api/company-verifications/billing-status?customerId=${billingCustomerId}`
+        : "/api/company-verifications/billing-status";
+      const res = await fetch(url, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) return { eligible: false } as { eligible: boolean; companyId?: number; companyName?: string };
       return res.json() as Promise<{ eligible: boolean; companyId?: number; companyName?: string }>;
     },
-    enabled: isLoggedIn && !isCompanyAccount,
+    enabled: isLoggedIn && !isCompanyAccount && (!isAdminBooking || !!billingCustomerId),
     staleTime: 60_000,
   });
 
   // Apakah user bisa tagih ke perusahaan?
   const canCompanyBilling = isCompanyAccount || (billingStatus?.eligible === true);
   const companyId = isCompanyAccount
-    ? (currentUser as any)?.id
+    ? (isAdminBooking ? selectedCustomer?.id : (currentUser as any)?.id)
     : billingStatus?.companyId;
   const companyName = isCompanyAccount
-    ? ((currentUser as any)?.companyName ?? currentUser?.name)
+    ? (isAdminBooking ? selectedCustomer?.name : ((currentUser as any)?.companyName ?? currentUser?.name))
     : billingStatus?.companyName;
 
   // Mode booking
@@ -127,6 +142,12 @@ export default function Cart() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [createdOrders, setCreatedOrders] = useState<string[]>([]);
+
+  // Repeat booking — ulangi semua lapangan di keranjang secara mingguan/bulanan
+  type RepeatType = "weekly" | "monthly";
+  const [isRepeat, setIsRepeat] = useState(false);
+  const [repeatType, setRepeatType] = useState<RepeatType>("weekly");
+  const [repeatCount, setRepeatCount] = useState(4);
 
   // Auto-fill dari user yang login (skip jika operator — mereka isi data customer)
   useEffect(() => {
@@ -217,15 +238,17 @@ export default function Cart() {
       ? normalizePhone(bookedForPhone.trim())
       : normalizedPhone;
 
+    // Repeat booking hanya berlaku untuk item dengan slot waktu (butuh startTime + durasi)
+    const useRepeat = isRepeat && items.every((it) => it.mode === "time_slot");
+
     for (const item of items) {
       try {
         const body: Record<string, unknown> = {
           customerName: name.trim(),
           customerPhone: normalizedPhone,
           facilityId: item.facilityId,
-          bookingDate: item.date,
           source: "cart",
-          ...(cartRef ? { groupRef: cartRef } : {}),
+          ...(cartRef && !useRepeat ? { groupRef: cartRef } : {}),
         };
 
         if (email.trim()) body.customerEmail = email.trim();
@@ -258,6 +281,42 @@ export default function Cart() {
           body.payerType = "personal";
         }
 
+        if (useRepeat) {
+          // Booking berulang: satu request /bookings/recurring per lapangan di keranjang
+          body.startDate = item.date;
+          body.repeatType = repeatType;
+          body.repeatCount = repeatCount;
+
+          const res = await fetch("/api/bookings/recurring", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+            body: JSON.stringify(body),
+          });
+
+          const data = await res.json() as { created?: { orderNumber: string }[]; skipped?: string[]; error?: string };
+          if (res.ok && data.created) {
+            orders.push(...data.created.map((b) => b.orderNumber));
+            successItemIds.push(item.id);
+            if (data.skipped && data.skipped.length > 0) {
+              toast({
+                title: t(`${data.skipped.length} sesi dilewati: ${item.facilityName}`, `${data.skipped.length} session(s) skipped: ${item.facilityName}`),
+                description: t("Sudah ada booking lain pada tanggal tersebut.", "Another booking already exists on those dates."),
+              });
+            }
+          } else {
+            toast({
+              title: t(`Gagal: ${item.facilityName}`, `Failed: ${item.facilityName}`),
+              description: data.error || t("Terjadi kesalahan", "An error occurred"),
+              variant: "destructive",
+            });
+          }
+          continue;
+        }
+
+        body.bookingDate = item.date;
         const res = await fetch("/api/bookings", {
           method: "POST",
           headers: {
@@ -505,6 +564,85 @@ export default function Cart() {
                 </div>
               )}
             </CardContent>
+          </Card>
+
+          {/* Repeat Booking — ulangi semua lapangan di keranjang */}
+          <Card className={isRepeat ? "border-primary/40 bg-primary/5" : ""}>
+            <CardHeader className="pb-4">
+              <div className="flex items-center gap-3">
+                <Checkbox
+                  id="cart-repeat-check"
+                  checked={isRepeat}
+                  onCheckedChange={(v) => setIsRepeat(!!v)}
+                />
+                <Label htmlFor="cart-repeat-check" className="text-base font-semibold cursor-pointer flex items-center gap-2">
+                  <RefreshCw size={16} className={isRepeat ? "text-primary" : "text-muted-foreground"} />
+                  {t("Repeat Booking", "Repeat Booking")}
+                  {isRepeat && <Badge className="bg-primary/10 text-primary border-primary/20 text-xs">{t("Aktif", "Active")}</Badge>}
+                </Label>
+              </div>
+              {!isRepeat && (
+                <p className="text-xs text-muted-foreground ml-7">
+                  {t("Aktifkan untuk mengulang semua lapangan di keranjang secara mingguan/bulanan.", "Enable to repeat all facilities in the cart weekly/monthly.")}
+                </p>
+              )}
+              {isRepeat && items.some((it) => it.mode !== "time_slot") && (
+                <p className="text-xs text-amber-600 ml-7">
+                  {t("Hanya berlaku untuk lapangan dengan slot waktu.", "Only applies to facilities with a time slot.")}
+                </p>
+              )}
+            </CardHeader>
+
+            {isRepeat && (
+              <CardContent className="space-y-5 pt-0">
+                <div>
+                  <Label className="text-sm font-semibold mb-2 block">{t("Tipe Pengulangan", "Repeat Type")}</Label>
+                  <div className="flex gap-2">
+                    {(["weekly", "monthly"] as RepeatType[]).map((rt) => (
+                      <button
+                        key={rt}
+                        type="button"
+                        onClick={() => setRepeatType(rt)}
+                        className={`flex-1 py-2.5 rounded-lg text-sm font-medium border transition-colors ${repeatType === rt ? "bg-primary text-primary-foreground border-primary" : "bg-background border-border hover:border-primary/50"}`}
+                      >
+                        {rt === "weekly" ? t("🗓 Weekly (Mingguan)", "🗓 Weekly") : t("📅 Monthly (Bulanan)", "📅 Monthly")}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <Label htmlFor="cart-repeat-count" className="text-sm font-semibold mb-2 block">
+                    {t("Jumlah Pengulangan", "Number of Repeats")}
+                    <span className="text-muted-foreground font-normal ml-1">{t("(maks. 52)", "(max. 52)")}</span>
+                  </Label>
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setRepeatCount(Math.max(1, repeatCount - 1))}
+                      className="w-10 h-10 rounded-lg border border-border hover:bg-accent flex items-center justify-center text-lg font-bold"
+                    >−</button>
+                    <Input
+                      id="cart-repeat-count"
+                      type="number"
+                      min={1}
+                      max={52}
+                      value={repeatCount}
+                      onChange={e => setRepeatCount(Math.min(52, Math.max(1, parseInt(e.target.value) || 1)))}
+                      className="w-20 text-center font-bold text-lg"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setRepeatCount(Math.min(52, repeatCount + 1))}
+                      className="w-10 h-10 rounded-lg border border-border hover:bg-accent flex items-center justify-center text-lg font-bold"
+                    >+</button>
+                    <span className="text-sm text-muted-foreground">
+                      {repeatType === "weekly" ? t("minggu", "weeks") : t("bulan", "months")}
+                    </span>
+                  </div>
+                </div>
+              </CardContent>
+            )}
           </Card>
 
           {/* Form Data Pemesan */}

@@ -47,7 +47,7 @@ router.get("/customers/simple", authMiddleware, async (req, res) => {
   try {
     // 1. Registered customers
     const registeredUsers = await db
-      .select({ id: usersTable.id, name: usersTable.name, email: usersTable.email, phone: usersTable.phone })
+      .select({ id: usersTable.id, name: usersTable.name, email: usersTable.email, phone: usersTable.phone, accountType: usersTable.accountType })
       .from(usersTable)
       .where(eq(usersTable.role, "customer"));
 
@@ -70,6 +70,7 @@ router.get("/customers/simple", authMiddleware, async (req, res) => {
         name: b.customerName,
         email: b.customerEmail,
         phone: b.customerPhone,
+        accountType: "personal" as const,
       }));
 
     res.json([...registeredUsers, ...pastCustomers]);

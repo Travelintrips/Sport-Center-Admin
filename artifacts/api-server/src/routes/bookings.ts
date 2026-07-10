@@ -822,16 +822,54 @@ router.post("/bookings/recurring", async (req, res) => {
       return;
     }
 
-    // Deteksi user yang sedang login (opsional)
+    // Deteksi user yang sedang login (opsional) — sama seperti POST /bookings
     let loggedInUserId: number | null = null;
+    let loggedInUser: (typeof usersTable.$inferSelect) | null = null;
+    let loggedInRole: string | null = null;
     const authHeader = req.headers.authorization;
     if (authHeader?.startsWith("Bearer ")) {
       const payload = verifyToken(authHeader.slice(7));
-      if (payload?.userId) loggedInUserId = payload.userId;
+      if (payload?.userId) {
+        loggedInUserId = payload.userId;
+        loggedInRole = payload.role ?? null;
+        const [u] = await db.select().from(usersTable).where(eq(usersTable.id, payload.userId)).limit(1);
+        if (u) loggedInUser = u;
+      }
     }
+    const isAdminRequest = !!loggedInRole && loggedInRole !== "customer";
 
-    const isCompanyPayer = payerType === "company" && companyCustomerId;
-    const effectiveCustomerId = bodyCustomerId ?? loggedInUserId;
+    // customerId hanya boleh dipercaya dari body ketika request datang dari admin/operator.
+    const effectiveCustomerId = (isAdminRequest && bodyCustomerId) ? Number(bodyCustomerId) : loggedInUserId;
+
+    // ── Verifikasi company billing (mirror logika di POST /bookings) ──
+    const explicitCompanyId = companyCustomerId ? Number(companyCustomerId) : null;
+    let companyBillingUser: (typeof usersTable.$inferSelect) | null = null;
+    if (explicitCompanyId && isAdminRequest) {
+      const [cu] = await db.select().from(usersTable).where(eq(usersTable.id, explicitCompanyId)).limit(1);
+      if (cu?.accountType === "company" && cu.allowMonthlyBilling) companyBillingUser = cu;
+    } else if (explicitCompanyId && !isAdminRequest && loggedInUserId) {
+      const [companyUserRecord] = await db.select().from(companyUsersTable)
+        .where(and(
+          eq(companyUsersTable.customerId, loggedInUserId),
+          eq(companyUsersTable.companyId, explicitCompanyId),
+          eq(companyUsersTable.verificationStatus, "approved"),
+          eq(companyUsersTable.corporateBillingEnabled, true),
+        ))
+        .limit(1);
+      if (companyUserRecord) {
+        const [companyAccount] = await db.select().from(usersTable).where(eq(usersTable.id, explicitCompanyId)).limit(1);
+        if (companyAccount) companyBillingUser = companyAccount;
+      }
+    }
+    // ── Security: hanya admin/operator atau karyawan terverifikasi yang boleh payerType=company ──
+    if (payerType === "company" && !companyBillingUser) {
+      res.status(403).json({
+        error: "Booking Corporate tidak diizinkan. Anda harus menjadi karyawan terverifikasi perusahaan terlebih dahulu.",
+      });
+      return;
+    }
+    const isCompanyPayer = payerType === "company" && !!companyBillingUser;
+    const verifiedCompanyCustomerId = companyBillingUser?.id ?? null;
 
     const [facility] = await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, Number(facilityId))).limit(1);
     if (!facility) { res.status(404).json({ error: "Facility not found" }); return; }
@@ -884,7 +922,7 @@ router.post("/bookings/recurring", async (req, res) => {
         grandTotal: taxCalc.taxAmount > 0 ? String(taxCalc.grandTotal) : null,
         ...(isCompanyPayer ? {
           payerType: "company",
-          companyCustomerId: Number(companyCustomerId),
+          companyCustomerId: verifiedCompanyCustomerId as number,
           bookedForName: bookedForName || customerName,
           bookedForPhone: bookedForPhone || customerPhone,
           paymentRequiredNow: false,
