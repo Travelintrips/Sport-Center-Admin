@@ -10,6 +10,7 @@ const ENV_FONNTE_TOKEN = process.env.FONNTE_TOKEN || "";
 const ENV_FONNTE_CUSTOMER_TOKEN = process.env.FONNTE_CUSTOMER_TOKEN || "";
 const ENV_FONNTE_ADMIN_WA = process.env.FONNTE_ADMIN_WA || "";
 const ENV_ADMIN_WA_PHONES = process.env.ADMIN_WA_PHONES || "";
+const ENV_ADMIN_WA_GROUP = process.env.ADMIN_WA_GROUP || "";
 
 function interpolate(template: string, vars: Record<string, string>): string {
   return template.replace(/\{\{(\w+)\}\}/g, (_, key) => vars[key] ?? "");
@@ -37,6 +38,10 @@ async function getWaConfig(): Promise<{ token: string; customerToken: string; ad
       : adminWa
       ? [adminWa]
       : [];
+    // Tambahkan grup WA admin jika dikonfigurasi via env dan belum ada di daftar
+    if (ENV_ADMIN_WA_GROUP && !adminPhones.includes(ENV_ADMIN_WA_GROUP)) {
+      adminPhones.push(ENV_ADMIN_WA_GROUP);
+    }
     return { token, customerToken, adminPhones };
   } catch {
     const adminPhones = ENV_ADMIN_WA_PHONES
@@ -44,6 +49,10 @@ async function getWaConfig(): Promise<{ token: string; customerToken: string; ad
       : ENV_FONNTE_ADMIN_WA
       ? [ENV_FONNTE_ADMIN_WA]
       : [];
+    // Tambahkan grup WA admin jika dikonfigurasi via env dan belum ada di daftar
+    if (ENV_ADMIN_WA_GROUP && !adminPhones.includes(ENV_ADMIN_WA_GROUP)) {
+      adminPhones.push(ENV_ADMIN_WA_GROUP);
+    }
     const fallbackToken = ENV_FONNTE_TOKEN;
     const fallbackCustomerToken = ENV_FONNTE_CUSTOMER_TOKEN || fallbackToken;
     return { token: fallbackToken, customerToken: fallbackCustomerToken, adminPhones };
