@@ -63,6 +63,9 @@ export interface InvoiceData {
   signatureUrl?: string | null;
   footerText?: string | null;
   invoicePrefix?: string | null;
+
+  // Dokumentasi kegiatan (corporate booking)
+  documentation?: Array<{ fileUrl: string; fileName: string | null; caption: string | null }>;
 }
 
 // ─── Terbilang Converter (Indonesian number to words) ────────────────────────
@@ -649,6 +652,34 @@ export function buildInvoiceHtml(data: InvoiceData, opts: BuildOptions = {}): st
   <div class="sc-terbilang">
     <strong>Terbilang:</strong> ${terbilangStr}
   </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       E2. DOKUMENTASI KEGIATAN (corporate booking)
+  ═══════════════════════════════════════════════════════════════ -->
+  ${(data.documentation && data.documentation.length > 0) ? `
+  <div class="sc-section-title" style="margin-top:24px;">Dokumentasi Kegiatan</div>
+  <table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:8px;">
+    <thead>
+      <tr style="background:#f8fafc;">
+        <th style="padding:6px 10px;text-align:left;border-bottom:1px solid #e2e8f0;color:#64748b;font-weight:600;">No</th>
+        <th style="padding:6px 10px;text-align:left;border-bottom:1px solid #e2e8f0;color:#64748b;font-weight:600;">Nama File</th>
+        <th style="padding:6px 10px;text-align:left;border-bottom:1px solid #e2e8f0;color:#64748b;font-weight:600;">Keterangan</th>
+        <th style="padding:6px 10px;text-align:left;border-bottom:1px solid #e2e8f0;color:#64748b;font-weight:600;">Link</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${data.documentation.map((doc, i) => `
+      <tr style="border-bottom:1px solid #f1f5f9;">
+        <td style="padding:6px 10px;color:#374151;">${i + 1}</td>
+        <td style="padding:6px 10px;color:#374151;">${doc.fileName ?? "—"}</td>
+        <td style="padding:6px 10px;color:#374151;">${doc.caption ?? "—"}</td>
+        <td style="padding:6px 10px;">
+          <a href="${doc.fileUrl}" style="color:#0369a1;text-decoration:underline;font-size:11px;" target="_blank">Buka File ↗</a>
+        </td>
+      </tr>`).join("")}
+    </tbody>
+  </table>
+  ` : ""}
 
   <!-- ═══════════════════════════════════════════════════════════════
        F. PAYMENT INFO

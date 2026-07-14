@@ -7,6 +7,7 @@ import {
   settingsTable,
   taxSettingsTable,
   companyDocumentSettingsTable,
+  corporateBookingDocumentationTable,
 } from "@workspace/db";
 import { eq, and, inArray } from "drizzle-orm";
 import type { InvoiceSession } from "../lib/invoiceTemplate";
@@ -142,6 +143,18 @@ async function resolveInvoiceData(orderNumber: string): Promise<InvoiceData | nu
     signatureUrl: invoiceDoc?.signatureUrl ?? generalDoc?.signatureUrl ?? null,
     footerText: invoiceDoc?.footerHtml ?? generalDoc?.footerHtml ?? null,
     invoicePrefix: pick(invoiceDoc?.prefixNumber, generalDoc?.prefixNumber, "INV"),
+
+    // Dokumentasi kegiatan (corporate booking saja)
+    documentation: booking.payerType === "company"
+      ? await db
+          .select({
+            fileUrl: corporateBookingDocumentationTable.fileUrl,
+            fileName: corporateBookingDocumentationTable.fileName,
+            caption: corporateBookingDocumentationTable.caption,
+          })
+          .from(corporateBookingDocumentationTable)
+          .where(eq(corporateBookingDocumentationTable.bookingId, booking.id))
+      : undefined,
   };
 }
 
