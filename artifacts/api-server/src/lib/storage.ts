@@ -20,6 +20,7 @@ const BUCKET_TO_FOLDER: Record<string, string> = {
   [BUCKETS.facility]: "facility-images",
   [BUCKETS.proof]: "payment-proofs",
   [BUCKETS.docTemplates]: "doc-templates",
+  [BUCKETS.corporateDocs]: "corporate-docs",
 };
 
 /**

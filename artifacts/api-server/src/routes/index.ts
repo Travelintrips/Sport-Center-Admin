@@ -57,6 +57,7 @@ import invoiceSettingsRouter from "./invoiceSettings";
 import documentSettingsRouter from "./documentSettings";
 import dataConnectionsRouter from "./dataConnections";
 import rekapRouter from "./rekap";
+import corporateDocumentationRouter from "./corporateDocumentation";
 
 const router: IRouter = Router();
 
@@ -117,5 +118,6 @@ router.use(invoiceSettingsRouter);
 router.use(documentSettingsRouter);
 router.use(dataConnectionsRouter);
 router.use(rekapRouter);
+router.use(corporateDocumentationRouter);
 
 export default router;

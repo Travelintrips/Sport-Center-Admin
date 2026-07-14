@@ -41,6 +41,7 @@ import { Link } from "wouter";
 import RescheduleDialog from "@/components/RescheduleDialog";
 import ExtendBookingDialog from "@/components/ExtendBookingDialog";
 import { useLang } from "@/lib/i18n";
+import CorporateDocUpload from "@/components/CorporateDocUpload";
 
 const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "") || "";
 
@@ -468,6 +469,14 @@ export default function BookingDetail() {
               </div>
             </CardContent>
           </Card>
+        )}
+        {/* Upload Dokumentasi — hanya untuk booking corporate yang aktif */}
+        {(booking as any).payerType === "company" && (
+          <CorporateDocUpload
+            bookingId={(booking as any).id}
+            isAdmin={false}
+            canUpload={["confirmed", "completed", "paid", "waiting_confirmation"].includes(booking.status)}
+          />
         )}
         </div>{/* end left column */}
 

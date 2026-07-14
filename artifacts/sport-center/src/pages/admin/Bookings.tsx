@@ -65,6 +65,7 @@ import {
 } from "lucide-react";
 import { getToken } from "@/lib/auth";
 import VerifyIdDialog from "@/components/admin/VerifyIdDialog";
+import CorporateDocUpload from "@/components/CorporateDocUpload";
 
 /* ─── Helpers ───────────────────────────────────────────────────── */
 
@@ -991,6 +992,15 @@ function BookingDetailDrawer({
                 </div>
               </div>
             </div>
+          )}
+
+          {/* Dokumentasi Corporate */}
+          {booking.payerType === "company" && (
+            <CorporateDocUpload
+              bookingId={booking.id}
+              isAdmin={true}
+              canUpload={true}
+            />
           )}
 
           {/* Customer Info */}

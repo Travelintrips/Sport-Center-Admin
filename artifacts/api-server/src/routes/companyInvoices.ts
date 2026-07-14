@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { db, usersTable, bookingsTable, companyInvoicesTable, companyInvoiceItemsTable, facilitiesTable, auditLogsTable } from "@workspace/db";
+import { db, usersTable, bookingsTable, companyInvoicesTable, companyInvoiceItemsTable, facilitiesTable, auditLogsTable, corporateBookingDocumentationTable } from "@workspace/db";
 import { eq, and, gte, lt, inArray, isNull, or } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
@@ -429,7 +429,28 @@ router.get("/company-invoices/:id", adminMiddleware, async (req, res) => {
     const [company] = await db.select().from(usersTable).where(eq(usersTable.id, inv.companyCustomerId)).limit(1);
     const items = await resolveInvoiceItems(id, inv);
 
-    res.json(mapInvoice(inv, company?.companyName ?? company?.name, items, company));
+    // Ambil dokumentasi corporate untuk setiap booking dalam invoice
+    const bookingIds = items.map((i) => i.bookingId).filter(Boolean) as number[];
+    let docsByBookingId: Record<number, any[]> = {};
+    if (bookingIds.length > 0) {
+      const allDocs = await db
+        .select()
+        .from(corporateBookingDocumentationTable)
+        .where(inArray(corporateBookingDocumentationTable.bookingId, bookingIds));
+      for (const doc of allDocs) {
+        if (!docsByBookingId[doc.bookingId]) docsByBookingId[doc.bookingId] = [];
+        docsByBookingId[doc.bookingId].push(doc);
+      }
+    }
+
+    const invoiceData = mapInvoice(inv, company?.companyName ?? company?.name, items, company);
+    // Sisipkan dokumentasi ke setiap item
+    const itemsWithDocs = invoiceData.items.map((item) => ({
+      ...item,
+      documentation: docsByBookingId[item.bookingId] ?? [],
+    }));
+
+    res.json({ ...invoiceData, items: itemsWithDocs });
   } catch (err) {
     req.log.error({ err }, "Get company invoice error");
     res.status(500).json({ error: "Internal server error" });

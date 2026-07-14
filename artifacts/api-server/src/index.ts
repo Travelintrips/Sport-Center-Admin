@@ -741,6 +741,17 @@ async function runStartupMigrations() {
        updated_at          timestamptz NOT NULL DEFAULT NOW()
      )`,
     "DO $body$ BEGIN ALTER TABLE sport_center.discount_settings ADD CONSTRAINT discount_settings_customer_type_unique UNIQUE (customer_type); EXCEPTION WHEN others THEN null; END $body$",
+    // ── corporate_booking_documentation ──────────────────────────────────────
+    `CREATE TABLE IF NOT EXISTS sport_center.corporate_booking_documentation (
+       id          serial PRIMARY KEY,
+       booking_id  int NOT NULL REFERENCES sport_center.sport_bookings(id) ON DELETE CASCADE,
+       company_id  int REFERENCES sport_center.users(id) ON DELETE SET NULL,
+       uploaded_by text NOT NULL DEFAULT 'customer',
+       file_url    text NOT NULL,
+       file_name   text,
+       caption     text,
+       created_at  timestamptz NOT NULL DEFAULT NOW()
+     )`,
   ];
 
   for (const stmt of migrations) {
