@@ -1,5 +1,6 @@
-import { db, bookingsTable, facilitiesTable, gymCheckinsTable, gymMembershipsTable } from "@workspace/db";
+import { db, bookingsTable, facilitiesTable, gymCheckinsTable, gymMembershipsTable, usersTable } from "@workspace/db";
 import { eq, and, or } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { sendWAToAdmins } from "./notifications";
 import { logger } from "./logger";
 
@@ -58,6 +59,8 @@ export interface RekapBookingRow {
   status: string;
   /** "m" = member (company billing atau karyawan AP2), "v" = visit (umum) */
   customerLabel: "m" | "v";
+  /** Nama perusahaan — hanya terisi untuk booking company billing */
+  companyName?: string;
 }
 
 export type RekapPerKategori = Record<string, RekapBookingRow[]>;
@@ -67,6 +70,8 @@ export type RekapPerKategori = Record<string, RekapBookingRow[]>;
 export async function generateRekapPemakaian(
   tanggalBooking: string, // format "YYYY-MM-DD"
 ): Promise<RekapPerKategori> {
+  const companyUsers = alias(usersTable, "company_users");
+
   const rows = await db
     .select({
       customerName: bookingsTable.customerName,
@@ -77,9 +82,11 @@ export async function generateRekapPemakaian(
       facilityCategory: facilitiesTable.category,
       payerType: bookingsTable.payerType,
       customerType: bookingsTable.customerType,
+      companyName: companyUsers.companyName,
     })
     .from(bookingsTable)
     .leftJoin(facilitiesTable, eq(bookingsTable.facilityId, facilitiesTable.id))
+    .leftJoin(companyUsers, eq(bookingsTable.companyCustomerId, companyUsers.id))
     .where(
       and(
         eq(bookingsTable.bookingDate, tanggalBooking),
@@ -102,6 +109,7 @@ export async function generateRekapPemakaian(
     // GYM booking harian (pay-per-visit) selalu (v) — bukan member bulanan
     // company billing atau karyawan AP2 di fasilitas lain = (m)
     const isMember = kategori !== "GYM" && (row.payerType === "company" || row.customerType === "angkasa_pura");
+    const isCompanyBilling = row.payerType === "company";
     grouped[kategori]!.push({
       customerName: row.customerName,
       startTime: row.startTime,
@@ -109,6 +117,7 @@ export async function generateRekapPemakaian(
       kategori,
       status: row.status,
       customerLabel: isMember ? "m" : "v",
+      companyName: isCompanyBilling && row.companyName ? row.companyName : undefined,
     });
   }
 
@@ -208,10 +217,11 @@ export function formatRekapWhatsapp(
       items.forEach((item, idx) => {
         const icon = paymentIcon(item.status);
         const label = `(${item.customerLabel})`;
+        const companyTag = item.companyName ? ` (${item.companyName})` : "";
         if (kategori === "GYM") {
-          lines.push(`${idx + 1}. ${item.customerName} ${label} ${icon}`);
+          lines.push(`${idx + 1}. ${item.customerName}${companyTag} ${label} ${icon}`);
         } else {
-          lines.push(`${idx + 1}. ${item.customerName} ${item.startTime.substring(0,5)}-${item.endTime.substring(0,5)} ${label} ${icon}`);
+          lines.push(`${idx + 1}. ${item.customerName}${companyTag} ${item.startTime.substring(0,5)}-${item.endTime.substring(0,5)} ${label} ${icon}`);
         }
       });
     }
