@@ -20,3 +20,4 @@
 - [Prod schema sync approach](prod-schema-sync.md) — drizzle-kit push hangs on shared Supabase (150+ tables); use targeted ALTER TABLE script via scripts/src/ instead.
 - [COA Accounts feature](coa-accounts-feature.md) — coa_accounts table in sport_center schema; expenses FK to coa_accounts; journal type auto-detected from accountType (expense→operational, asset→kasbon, liability→bayar hutang).
 - [Workflow waitForPort config](workflow-port-config.md) — restart_workflow tool fails "DIDNT_OPEN_A_PORT" if workflow not configured with waitForPort; fix via configureWorkflow({waitForPort:8080,outputType:"console"}).
+- [Re-import recovery](reimport-recovery.md) — Sport Center is a mature project, not a fresh import; on re-import just pnpm install + restart workflows, secrets/replit.md already cover setup.
