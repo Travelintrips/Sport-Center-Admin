@@ -411,7 +411,32 @@ router.post("/bookings", async (req, res) => {
 
     const endTime = addHours(startTime, durationHours);
     const basePrice = Number(facility.pricePerHour) * (isWalkIn ? 1 : durationHours);
-    const discount = isAp ? 0 : Math.min(Number(discountAmount) || 0, basePrice);
+
+    // ── Auto-verifikasi & diskon member AP2 ─────────────────────────────────
+    // Jika customer adalah angkasa_pura dan ID card ditemukan di ap_members (aktif),
+    // diskon langsung diterapkan saat booking dibuat (verificationStatus → "verified").
+    // Jika tidak ditemukan → tetap "pending" untuk verifikasi manual admin.
+    let apAutoVerified = false;
+    let apAutoDiscountAmount = 0;
+    if (isAp && idCardNumber) {
+      const [apMember] = await db.select().from(apMembersTable)
+        .where(and(eq(apMembersTable.idCardNumber, idCardNumber), eq(apMembersTable.isActive, true)))
+        .limit(1);
+      if (apMember) {
+        const [apSetting] = await db.select().from(discountSettingsTable)
+          .where(and(eq(discountSettingsTable.customerType, "angkasa_pura"), eq(discountSettingsTable.isActive, true)))
+          .limit(1);
+        if (apSetting && apSetting.discountPercentage > 0) {
+          apAutoDiscountAmount = Math.round((basePrice * apSetting.discountPercentage) / 100);
+          apAutoVerified = true;
+        } else {
+          // Member valid tapi diskon nonaktif → tetap auto-verified
+          apAutoVerified = true;
+        }
+      }
+    }
+
+    const discount = isAp ? apAutoDiscountAmount : Math.min(Number(discountAmount) || 0, basePrice);
     const totalPrice = basePrice - discount;
     const taxCalc = await calculateTax(totalPrice, "sport_booking", bookingDate);
     const orderNumber = await generateOrderNumber();
@@ -476,9 +501,10 @@ router.post("/bookings", async (req, res) => {
       totalPrice: String(totalPrice),
       promoCode: isAp ? null : (promoCode || null),
       discountAmount: String(discount),
+      apDiscountAmount: isAp ? String(apAutoDiscountAmount) : "0",
       customerType: isAp ? "angkasa_pura" : "umum",
       idCardNumber: idCardNumber || null,
-      verificationStatus: isAp ? "pending" : "not_required",
+      verificationStatus: isAp ? (apAutoVerified ? "verified" : "pending") : "not_required",
       basePrice: String(basePrice),
       activityType,
       numberOfPeople,
@@ -879,10 +905,28 @@ router.post("/bookings/recurring", async (req, res) => {
       ? specificDates
       : generateRecurringDates(startDate, repeatType, repeatCount);
     const basePrice = Number(facility.pricePerHour) * durationHours;
-    // AP2: diskon belum diterapkan saat create — diterapkan setelah verifikasi admin
-    // AP2 karyawan: tidak ada diskon/promo di sini (diskon diterapkan setelah verifikasi ID Card)
 
-    const discount = isAp ? 0 : Math.min(Number(discountAmountPerSession) || 0, basePrice);
+    // ── Auto-verifikasi & diskon member AP2 (recurring) ─────────────────────
+    let apAutoVerifiedR = false;
+    let apAutoDiscountAmountR = 0;
+    if (isAp && idCardNumber) {
+      const [apMemberR] = await db.select().from(apMembersTable)
+        .where(and(eq(apMembersTable.idCardNumber, idCardNumber), eq(apMembersTable.isActive, true)))
+        .limit(1);
+      if (apMemberR) {
+        const [apSettingR] = await db.select().from(discountSettingsTable)
+          .where(and(eq(discountSettingsTable.customerType, "angkasa_pura"), eq(discountSettingsTable.isActive, true)))
+          .limit(1);
+        if (apSettingR && apSettingR.discountPercentage > 0) {
+          apAutoDiscountAmountR = Math.round((basePrice * apSettingR.discountPercentage) / 100);
+          apAutoVerifiedR = true;
+        } else {
+          apAutoVerifiedR = true;
+        }
+      }
+    }
+
+    const discount = isAp ? apAutoDiscountAmountR : Math.min(Number(discountAmountPerSession) || 0, basePrice);
     const totalPrice = basePrice - discount;
 
     const created: any[] = [];
@@ -911,10 +955,11 @@ router.post("/bookings/recurring", async (req, res) => {
         totalPrice: String(totalPrice),
         promoCode: isAp ? null : (promoCode || null),
         discountAmount: String(discount),
+        apDiscountAmount: isAp ? String(apAutoDiscountAmountR) : "0",
         basePrice: String(basePrice),
         customerType,
         idCardNumber: idCardNumber || null,
-        verificationStatus: isAp ? "pending" : "not_required",
+        verificationStatus: isAp ? (apAutoVerifiedR ? "verified" : "pending") : "not_required",
         notes,
         ppnRate: taxCalc.taxRate > 0 ? String(taxCalc.taxRate) : null,
         dpp: taxCalc.taxAmount > 0 ? String(taxCalc.dpp) : null,
