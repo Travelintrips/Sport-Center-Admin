@@ -823,5 +823,14 @@ CREATE TABLE IF NOT EXISTS sport_center.gym_checkins (
 );
 CREATE INDEX IF NOT EXISTS gym_checkins_date_idx       ON sport_center.gym_checkins(checkin_date);
 CREATE INDEX IF NOT EXISTS gym_checkins_membership_idx ON sport_center.gym_checkins(membership_id);
+
+-- ============================================================
+-- Event booking: booking_type + event_discount_amount
+-- ============================================================
+ALTER TABLE sport_center.sport_bookings
+  ADD COLUMN IF NOT EXISTS booking_type TEXT NOT NULL DEFAULT 'regular';
+
+ALTER TABLE sport_center.sport_bookings
+  ADD COLUMN IF NOT EXISTS event_discount_amount NUMERIC(12,2);
 `;
 

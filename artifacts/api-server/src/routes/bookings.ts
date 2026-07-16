@@ -235,6 +235,10 @@ router.post("/bookings", async (req, res) => {
     const { customerName, customerEmail, facilityId, bookingDate, notes, promoCode, discountAmount, customerType } = req.body;
     const customerPhone: string = normalizePhone(String(req.body.customerPhone ?? "").trim());
     const bookingSource: string = req.body.source || "";
+    const rawBookingType = req.body.bookingType;
+    const bookingType: "regular" | "event" = rawBookingType === "event" ? "event" : "regular";
+    const isEvent = bookingType === "event";
+    const EVENT_DISCOUNT_RATE = 0.214;
     let { startTime, durationHours } = req.body;
 
     // Deteksi user yang sedang login (opsional — tidak wajib)
@@ -436,7 +440,14 @@ router.post("/bookings", async (req, res) => {
       }
     }
 
-    const discount = isAp ? apAutoDiscountAmount : Math.min(Number(discountAmount) || 0, basePrice);
+    // ── Diskon Event 21,4% ───────────────────────────────────────────────────
+    const eventDiscountAmountCalc = isEvent ? Math.round(basePrice * EVENT_DISCOUNT_RATE) : 0;
+
+    const discount = isAp
+      ? apAutoDiscountAmount
+      : isEvent
+        ? eventDiscountAmountCalc
+        : Math.min(Number(discountAmount) || 0, basePrice);
     const totalPrice = basePrice - discount;
     const taxCalc = await calculateTax(totalPrice, "sport_booking", bookingDate);
     const orderNumber = await generateOrderNumber();
@@ -499,9 +510,11 @@ router.post("/bookings", async (req, res) => {
       endTime,
       durationHours: isWalkIn ? 1 : durationHours,
       totalPrice: String(totalPrice),
-      promoCode: isAp ? null : (promoCode || null),
+      promoCode: isAp || isEvent ? null : (promoCode || null),
       discountAmount: String(discount),
       apDiscountAmount: isAp ? String(apAutoDiscountAmount) : "0",
+      bookingType,
+      eventDiscountAmount: isEvent ? String(eventDiscountAmountCalc) : null,
       customerType: isAp ? "angkasa_pura" : "umum",
       idCardNumber: idCardNumber || null,
       verificationStatus: isAp ? (apAutoVerified ? "verified" : "pending") : "not_required",
@@ -581,13 +594,15 @@ router.post("/bookings", async (req, res) => {
       }
     }
 
-    const auditAction = isAp
-      ? "ANGKASAPURA_BOOKING_CREATED"
-      : isCompanyBilling
-        ? "CORPORATE_BOOKING_CREATED"
-        : isPendingCompany
-          ? "CORPORATE_BOOKING_PENDING_CREATED"
-          : "PERSONAL_BOOKING_CREATED";
+    const auditAction = isEvent
+      ? "EVENT_BOOKING_CREATED"
+      : isAp
+        ? "ANGKASAPURA_BOOKING_CREATED"
+        : isCompanyBilling
+          ? "CORPORATE_BOOKING_CREATED"
+          : isPendingCompany
+            ? "CORPORATE_BOOKING_PENDING_CREATED"
+            : "PERSONAL_BOOKING_CREATED";
     logAudit({
       action: auditAction,
       entity: "booking",
@@ -836,7 +851,11 @@ router.post("/bookings/recurring", async (req, res) => {
       payerType, companyCustomerId, customerId: bodyCustomerId, bookedForName, bookedForPhone,
       // AP2 employee fields (optional)
       customerType: rawCustomerType, idCardNumber: rawIdCardNumber,
+      bookingType: rawBookingTypeR,
     } = req.body;
+    const bookingTypeR: "regular" | "event" = rawBookingTypeR === "event" ? "event" : "regular";
+    const isEventR = bookingTypeR === "event";
+    const EVENT_DISCOUNT_RATE_R = 0.214;
     const customerPhone: string = normalizePhone(String(req.body.customerPhone ?? "").trim());
     const customerType: "umum" | "angkasa_pura" = rawCustomerType === "angkasa_pura" ? "angkasa_pura" : "umum";
     const idCardNumber: string | null = customerType === "angkasa_pura"
@@ -906,6 +925,9 @@ router.post("/bookings/recurring", async (req, res) => {
       : generateRecurringDates(startDate, repeatType, repeatCount);
     const basePrice = Number(facility.pricePerHour) * durationHours;
 
+    // ── Diskon Event 21,4% (recurring) ──────────────────────────────────────
+    const eventDiscountAmountCalcR = isEventR ? Math.round(basePrice * EVENT_DISCOUNT_RATE_R) : 0;
+
     // ── Auto-verifikasi & diskon member AP2 (recurring) ─────────────────────
     let apAutoVerifiedR = false;
     let apAutoDiscountAmountR = 0;
@@ -926,7 +948,11 @@ router.post("/bookings/recurring", async (req, res) => {
       }
     }
 
-    const discount = isAp ? apAutoDiscountAmountR : Math.min(Number(discountAmountPerSession) || 0, basePrice);
+    const discount = isAp
+      ? apAutoDiscountAmountR
+      : isEventR
+        ? eventDiscountAmountCalcR
+        : Math.min(Number(discountAmountPerSession) || 0, basePrice);
     const totalPrice = basePrice - discount;
 
     const created: any[] = [];
@@ -953,9 +979,11 @@ router.post("/bookings/recurring", async (req, res) => {
         endTime,
         durationHours,
         totalPrice: String(totalPrice),
-        promoCode: isAp ? null : (promoCode || null),
+        promoCode: isAp || isEventR ? null : (promoCode || null),
         discountAmount: String(discount),
         apDiscountAmount: isAp ? String(apAutoDiscountAmountR) : "0",
+        bookingType: bookingTypeR,
+        eventDiscountAmount: isEventR ? String(eventDiscountAmountCalcR) : null,
         basePrice: String(basePrice),
         customerType,
         idCardNumber: idCardNumber || null,

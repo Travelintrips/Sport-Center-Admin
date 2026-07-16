@@ -49,6 +49,7 @@ import {
   FileText,
   Receipt,
   Plane,
+  PartyPopper,
   ShieldCheck,
   RefreshCw,
   LogIn,
@@ -2699,6 +2700,13 @@ export default function AdminBookings() {
                                 {b.verificationStatus === "verified" && <span className="text-[9px] text-green-600 font-semibold">✓ Terverifikasi</span>}
                                 {b.verificationStatus === "pending" && <span className="text-[9px] text-amber-600 font-semibold">Menunggu</span>}
                                 {b.verificationStatus === "rejected" && <span className="text-[9px] text-red-500 font-semibold">Ditolak</span>}
+                              </div>
+                            )}
+                            {(b as any).bookingType === "event" && (
+                              <div className="mt-0.5 flex items-center gap-1">
+                                <Badge className="bg-purple-100 text-purple-700 border-purple-200 text-[9px] px-1 py-0 gap-0.5 font-semibold">
+                                  <PartyPopper size={9} /> Event
+                                </Badge>
                               </div>
                             )}
                             {b.payerType === "company" && (

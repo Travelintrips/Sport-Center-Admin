@@ -36,6 +36,8 @@ import {
   ShieldX,
   ShieldAlert,
   ExternalLink,
+  PartyPopper,
+  Tag,
 } from "lucide-react";
 import { Link } from "wouter";
 import RescheduleDialog from "@/components/RescheduleDialog";
@@ -470,6 +472,29 @@ export default function BookingDetail() {
             </CardContent>
           </Card>
         )}
+        {/* Event Discount Info */}
+        {(booking as any).bookingType === "event" && (
+          <Card className="border-2 border-purple-200 bg-purple-50/50 mt-4">
+            <CardContent className="p-5">
+              <div className="flex items-start gap-3">
+                <PartyPopper size={22} className="text-purple-600 mt-0.5 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <div className="font-bold text-sm text-purple-900">{t("Booking Event — Diskon 21,4% Diterapkan", "Event Booking — 21.4% Discount Applied")}</div>
+                  <div className="text-xs mt-0.5 text-purple-700">
+                    {t("Harga fasilitas mendapat diskon khusus event.", "Facility price has been discounted for this event booking.")}
+                  </div>
+                  {(booking as any).eventDiscountAmount && Number((booking as any).eventDiscountAmount) > 0 && (
+                    <div className="mt-2 inline-flex items-center gap-1.5 rounded-md bg-purple-100 border border-purple-200 px-2.5 py-1 text-xs font-semibold text-purple-800">
+                      <Tag size={11} />
+                      {t("Diskon", "Discount")}: Rp {Number((booking as any).eventDiscountAmount).toLocaleString("id-ID")}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Upload Dokumentasi — hanya untuk booking corporate yang aktif */}
         {(booking as any).payerType === "company" && (
           <CorporateDocUpload

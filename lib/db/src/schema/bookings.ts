@@ -61,6 +61,8 @@ export const bookingsTable = scSchema.table("sport_bookings", {
   verificationStatus: verificationStatusEnum("verification_status").notNull().default("not_required"),
   basePrice: numeric("base_price", { precision: 12, scale: 2 }),
   apDiscountAmount: numeric("ap_discount_amount", { precision: 12, scale: 2 }).notNull().default("0"),
+  bookingType: text("booking_type").notNull().default("regular"), // 'regular' | 'event'
+  eventDiscountAmount: numeric("event_discount_amount", { precision: 12, scale: 2 }),
   status: bookingStatusEnum("status").notNull().default("pending_payment"),
   activityType: text("activity_type"),
   numberOfPeople: integer("number_of_people"),
