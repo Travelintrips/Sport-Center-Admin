@@ -55,7 +55,7 @@ async function expireOverdueBookings(): Promise<void> {
       SELECT DISTINCT bp.booking_id
       FROM sport_center.bank_mutations bm
       JOIN sport_center.bank_reconciliation_matches brm ON brm.mutation_id = bm.id
-      JOIN sport_center.payments bp ON bp.id = brm.candidate_id AND brm.candidate_type = 'payment'
+      JOIN sport_center.sport_payments bp ON bp.id = brm.candidate_id AND brm.candidate_type = 'payment'
       WHERE bm.status IN ('auto_matched','need_review','duplicate_need_review')
         AND bp.booking_id = ANY(${idsLiteral})
       UNION
