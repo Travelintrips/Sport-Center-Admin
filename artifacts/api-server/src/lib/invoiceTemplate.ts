@@ -44,6 +44,7 @@ export interface InvoiceData {
 
   promoCode?: string | null;
   discountAmount?: number;
+  bookingType?: string;
 
   // Group invoice support
   groupRef?: string | null;
@@ -206,7 +207,7 @@ export function buildInvoiceHtml(data: InvoiceData, opts: BuildOptions = {}): st
     ${hasDiscount ? `
     <tr style="background:#fff7ed;">
       <td></td>
-      <td colspan="4" style="padding:6px 12px;font-size:12px;color:#92400e;">Diskon${data.promoCode ? ` (${data.promoCode})` : ""}</td>
+      <td colspan="4" style="padding:6px 12px;font-size:12px;color:#92400e;">${data.bookingType === "event" ? "Diskon Event" : data.bookingType === "angkasa_pura" || (data.discountAmount && data.discountAmount > 0 && !data.promoCode) ? "Diskon AP2" : "Diskon"}${data.promoCode ? ` (${data.promoCode})` : ""}</td>
       <td style="padding:6px 12px;font-size:12px;text-align:right;color:#92400e;">-Rp ${rp(data.discountAmount ?? 0)}</td>
     </tr>` : ""}
   `;
