@@ -906,17 +906,19 @@ export default function Booking() {
                     <div className={`text-xs ${isAP ? "text-primary-foreground/80" : "text-muted-foreground"}`}>{t("Diskon khusus", "Discount")}</div>
                   </div>
                 </button>
-                <button
-                  type="button"
-                  onClick={() => { setBookingMode("event"); if (isLoggedIn) trackPayerSelection("personal"); }}
-                  className={`flex flex-col items-center gap-2 p-3 rounded-lg border text-center transition-colors ${isEvent ? "bg-purple-600 text-white border-purple-600" : "bg-background border-border hover:border-purple-400/50"}`}
-                >
-                  <PartyPopper size={18} className="shrink-0" />
-                  <div>
-                    <div className="font-semibold text-xs">{t("Event", "Event")}</div>
-                    <div className={`text-xs ${isEvent ? "text-purple-100" : "text-muted-foreground"}`}>{t("Diskon 21,43%", "21.43% off")}</div>
-                  </div>
-                </button>
+                {isAdminBooking && (
+                  <button
+                    type="button"
+                    onClick={() => { setBookingMode("event"); trackPayerSelection("personal"); }}
+                    className={`flex flex-col items-center gap-2 p-3 rounded-lg border text-center transition-colors ${isEvent ? "bg-purple-600 text-white border-purple-600" : "bg-background border-border hover:border-purple-400/50"}`}
+                  >
+                    <PartyPopper size={18} className="shrink-0" />
+                    <div>
+                      <div className="font-semibold text-xs">{t("Event", "Event")}</div>
+                      <div className={`text-xs ${isEvent ? "text-purple-100" : "text-muted-foreground"}`}>{t("Diskon 21,43%", "21.43% off")}</div>
+                    </div>
+                  </button>
+                )}
                 {isLoggedIn && (
                   <button
                     type="button"
