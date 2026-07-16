@@ -175,6 +175,8 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
         discountAmount: Number(b.discountAmount),
         basePrice: b.basePrice == null ? null : Number(b.basePrice),
         apDiscountAmount: Number(b.apDiscountAmount),
+        bookingType: b.bookingType ?? "regular",
+        eventDiscountAmount: b.eventDiscountAmount == null ? null : Number(b.eventDiscountAmount),
         ppnRate: b.ppnRate == null ? null : Number(b.ppnRate),
         dpp: b.dpp == null ? null : Number(b.dpp),
         ppnAmount: b.ppnAmount == null ? null : Number(b.ppnAmount),
