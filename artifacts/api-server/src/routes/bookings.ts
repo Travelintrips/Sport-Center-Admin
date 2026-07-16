@@ -238,7 +238,7 @@ router.post("/bookings", async (req, res) => {
     const rawBookingType = req.body.bookingType;
     const bookingType: "regular" | "event" = rawBookingType === "event" ? "event" : "regular";
     const isEvent = bookingType === "event";
-    const EVENT_DISCOUNT_RATE = 0.214;
+    const EVENT_DISCOUNT_RATE = 3 / 14; // ≈ 21.43% — 350.000 → 275.000 tepat
     let { startTime, durationHours } = req.body;
 
     // Deteksi user yang sedang login (opsional — tidak wajib)
@@ -855,7 +855,7 @@ router.post("/bookings/recurring", async (req, res) => {
     } = req.body;
     const bookingTypeR: "regular" | "event" = rawBookingTypeR === "event" ? "event" : "regular";
     const isEventR = bookingTypeR === "event";
-    const EVENT_DISCOUNT_RATE_R = 0.214;
+    const EVENT_DISCOUNT_RATE_R = 3 / 14; // ≈ 21.43% — 350.000 → 275.000 tepat
     const customerPhone: string = normalizePhone(String(req.body.customerPhone ?? "").trim());
     const customerType: "umum" | "angkasa_pura" = rawCustomerType === "angkasa_pura" ? "angkasa_pura" : "umum";
     const idCardNumber: string | null = customerType === "angkasa_pura"

@@ -134,7 +134,7 @@ export default function Booking() {
   const isAP = bookingMode === "angkasa_pura";
   const isCompanyMode = bookingMode === "perusahaan";
   const isEvent = bookingMode === "event";
-  const EVENT_DISCOUNT_RATE = 0.214;
+  const EVENT_DISCOUNT_RATE = 3 / 14; // ≈ 21.43% — 350.000 → 275.000 tepat
   const [idCardNumber, setIdCardNumber] = useState("");
 
   // --- Company mode state ---
@@ -914,7 +914,7 @@ export default function Booking() {
                   <PartyPopper size={18} className="shrink-0" />
                   <div>
                     <div className="font-semibold text-xs">{t("Event", "Event")}</div>
-                    <div className={`text-xs ${isEvent ? "text-purple-100" : "text-muted-foreground"}`}>{t("Diskon 21,4%", "21.4% off")}</div>
+                    <div className={`text-xs ${isEvent ? "text-purple-100" : "text-muted-foreground"}`}>{t("Diskon 21,43%", "21.43% off")}</div>
                   </div>
                 </button>
                 {isLoggedIn && (
@@ -943,7 +943,7 @@ export default function Booking() {
                   <Tag size={14} className="shrink-0 text-purple-600" />
                   <div>
                     <span className="font-semibold text-purple-800">{t("Diskon Event 21,4% sudah diterapkan", "21.4% Event Discount Applied")}</span>
-                    <div className="text-xs text-purple-600 mt-0.5">{t("Harga otomatis dikalkulasi dengan diskon khusus event.", "Price automatically calculated with event discount.")}</div>
+                    <div className="text-xs text-purple-600 mt-0.5">{t("Diskon 21,43% otomatis diterapkan untuk booking event.", "21.43% discount automatically applied for event bookings.")}</div>
                   </div>
                 </div>
               )}
@@ -1615,7 +1615,7 @@ export default function Booking() {
                         <span className="line-through">{isRepeat ? (isChecking ? "..." : formatCurrency(checkResult ? effectiveTotalPrice : totalPrice * repeatCount)) : formatCurrency(totalPrice)}</span>
                       </div>
                       <div className="flex justify-between text-purple-700 font-medium">
-                        <span className="flex items-center gap-1"><Tag size={12} /> {t("Diskon Event 21,4%", "Event Discount 21.4%")}</span>
+                        <span className="flex items-center gap-1"><Tag size={12} /> {t("Diskon Event 21,43%", "Event Discount 21.43%")}</span>
                         <span>−{isRepeat ? (isChecking ? "..." : formatCurrency(eventDiscRepeat)) : formatCurrency(eventDisc)}</span>
                       </div>
                     </>

@@ -479,7 +479,7 @@ export default function BookingDetail() {
               <div className="flex items-start gap-3">
                 <PartyPopper size={22} className="text-purple-600 mt-0.5 shrink-0" />
                 <div className="flex-1 min-w-0">
-                  <div className="font-bold text-sm text-purple-900">{t("Booking Event — Diskon 21,4% Diterapkan", "Event Booking — 21.4% Discount Applied")}</div>
+                  <div className="font-bold text-sm text-purple-900">{t("Booking Event — Diskon 21,43% Diterapkan", "Event Booking — 21.43% Discount Applied")}</div>
                   <div className="text-xs mt-0.5 text-purple-700">
                     {t("Harga fasilitas mendapat diskon khusus event.", "Facility price has been discounted for this event booking.")}
                   </div>
