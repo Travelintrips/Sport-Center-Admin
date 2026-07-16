@@ -267,6 +267,7 @@ async function resolveGroupInvoiceData(groupRef: string): Promise<InvoiceData | 
       basePrice: basePriceVal,
       grandTotal: grandTotalVal,
       discountAmount: discountAmt,
+      bookingType: b.bookingType ?? "regular",
       status: b.status,
     };
   });

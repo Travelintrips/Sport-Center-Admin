@@ -15,6 +15,7 @@ export interface InvoiceSession {
   basePrice: number;       // harga asli sebelum diskon
   grandTotal: number;      // harga final setelah diskon+pajak
   discountAmount?: number;
+  bookingType?: string;
   status: string;
 }
 
@@ -183,7 +184,7 @@ export function buildInvoiceHtml(data: InvoiceData, opts: BuildOptions = {}): st
           ${hasSessionDiscount ? `
           <tr style="background:#fff7ed;">
             <td></td>
-            <td colspan="4" style="padding:4px 12px;font-size:11.5px;color:#92400e;">Diskon AP2${data.promoCode ? ` (${data.promoCode})` : ""}</td>
+            <td colspan="4" style="padding:4px 12px;font-size:11.5px;color:#92400e;">${s.bookingType === "event" ? "Diskon Event" : "Diskon AP2"}${data.promoCode ? ` (${data.promoCode})` : ""}</td>
             <td style="padding:4px 12px;font-size:11.5px;text-align:right;color:#92400e;">-Rp ${rp(s.discountAmount ?? 0)}</td>
           </tr>
           <tr style="background:#f0fdf4;">
