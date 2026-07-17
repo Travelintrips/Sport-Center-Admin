@@ -26,7 +26,12 @@ function mapKategori(facilityName: string, facilityCategory: string): string {
     cat.includes("tennis") || name.includes("tennis")
   ) return "TENIS";
 
-  if (cat.includes("badminton") || name.includes("badminton")) return "BADMINTON";
+  if (cat.includes("badminton") || name.includes("badminton")) {
+    // Pisahkan Badminton A dan B berdasarkan nama fasilitas
+    if (name.includes(" b") || name.endsWith("b") || name.includes("badminton b")) return "BADMINTON B";
+    if (name.includes(" a") || name.endsWith("a") || name.includes("badminton a")) return "BADMINTON A";
+    return "BADMINTON A"; // fallback jika hanya 1 lapangan
+  }
 
   if (
     cat.includes("biliard") || name.includes("biliard") ||
@@ -38,7 +43,7 @@ function mapKategori(facilityName: string, facilityCategory: string): string {
 }
 
 // Urutan tampilan kategori
-const KATEGORI_ORDER = ["GYM", "BASKET/VOLI/FUTSAL", "TENIS", "BADMINTON", "BILIARD"] as const;
+const KATEGORI_ORDER = ["GYM", "BASKET/VOLI/FUTSAL", "TENIS", "BADMINTON A", "BADMINTON B", "BILIARD"] as const;
 
 // ─── Ikon status pembayaran ────────────────────────────────────────────────
 // ✅ = confirmed / completed  (sudah bayar & dikonfirmasi)
