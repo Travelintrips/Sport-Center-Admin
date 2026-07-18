@@ -918,6 +918,19 @@ export default function BookingDetail() {
                   <p className="text-xs text-green-600 mt-2">{t("Tunjukkan kode ini kepada petugas saat tiba", "Show this code to staff upon arrival")}</p>
                 </div>
 
+                {/* Download Invoice PDF */}
+                <div className="border-t border-green-200 pt-4 mt-2">
+                  <a
+                    href={`/api/public/invoices/${booking.orderNumber}/pdf`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center justify-center gap-2 w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-3 px-4 rounded-xl text-sm transition-colors"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                    {t("Download Invoice PDF", "Download Invoice PDF")}
+                  </a>
+                </div>
+
                 {/* Reschedule + Tambah Waktu — only for confirmed */}
                 {booking.status === "confirmed" && (
                   <div className="border-t border-green-200 pt-4 mt-2 space-y-2">

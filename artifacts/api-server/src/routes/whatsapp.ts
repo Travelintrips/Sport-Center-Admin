@@ -797,6 +797,7 @@ router.get("/wa/status/:orderNumber", async (req, res) => {
       .limit(1);
     const proofToken = tokens[0]?.token ?? null;
 
+    const baseUrl = await getBaseUrl();
     res.json({
       orderNumber: booking.orderNumber,
       customerName: booking.customerName,
@@ -823,7 +824,10 @@ router.get("/wa/status/:orderNumber", async (req, res) => {
         proofUrl: payment.proofUrl,
         confirmedAt: payment.confirmedAt,
       } : null,
-      uploadProofUrl: proofToken ? `${await getBaseUrl()}/bukti/${proofToken}` : null,
+      uploadProofUrl: proofToken ? `${baseUrl}/bukti/${proofToken}` : null,
+      invoicePdfUrl: ["confirmed", "completed"].includes(booking.status)
+        ? `${baseUrl}/api/public/invoices/${booking.orderNumber}/pdf`
+        : null,
     });
   } catch (err) {
     res.status(500).json({ error: "Internal server error" });

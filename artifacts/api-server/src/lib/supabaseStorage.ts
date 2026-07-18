@@ -90,6 +90,7 @@ export const BUCKETS = {
   proof: "payment-proofs",
   docTemplates: "doc-templates",
   corporateDocs: "corporate-docs",
+  invoicePdfs: "invoice-pdfs",
 } as const;
 
 // In-memory bucket health for diagnostic endpoint
@@ -98,6 +99,7 @@ export const bucketStatus: Record<string, { ok: boolean; checkedAt: string | nul
   [BUCKETS.proof]: { ok: false, checkedAt: null, error: null },
   [BUCKETS.docTemplates]: { ok: false, checkedAt: null, error: null },
   [BUCKETS.corporateDocs]: { ok: false, checkedAt: null, error: null },
+  [BUCKETS.invoicePdfs]: { ok: false, checkedAt: null, error: null },
 };
 
 let client: SupabaseClient | null = null;

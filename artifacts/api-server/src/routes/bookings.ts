@@ -4,6 +4,7 @@ import { eq, and, sql, or, ilike, desc, inArray, notExists } from "drizzle-orm";
 import { adminMiddleware, authMiddleware, verifyToken } from "../lib/auth";
 import { broadcastAvailabilityChange } from "../lib/supabase";
 import { notifyBookingCreated, notifyPaymentConfirmed, notifyBookingCancelled, notifyCompanyBookingCreated, notifyDpPaid, notifyWaAdminNewBooking, notifyAdminBookingApprovalRequest, notifyPaymentProofUploaded } from "../lib/notifications";
+import { sendInvoiceToCustomer } from "../lib/invoiceDelivery";
 import { sendRekapPemakaianToAdmin } from "../lib/rekapPemakaian";
 import { createWaToken } from "../lib/waTokens";
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
@@ -1312,6 +1313,10 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
           bookingId: beforeUpdate.id,
           groupRef: beforeUpdate.groupRef,
         }).catch((err) => logger.error({ err, orderNumber: beforeUpdate.orderNumber, phone: beforeUpdate.customerPhone }, "[WA] notifyPaymentConfirmed (direct) error"));
+
+        // Kirim invoice PDF ke customer via email & WA (fire-and-forget)
+        sendInvoiceToCustomer(beforeUpdate.orderNumber, { userName: "admin-direct" })
+          .catch((err) => logger.error({ err, orderNumber: beforeUpdate.orderNumber }, "[InvoiceDelivery] Gagal kirim invoice PDF setelah admin confirm"));
       }
 
       // Kirim WA notification ke customer saat booking dibatalkan

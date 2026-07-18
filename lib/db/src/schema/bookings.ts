@@ -98,6 +98,7 @@ export const bookingsTable = scSchema.table("sport_bookings", {
   approvedAt: timestamp("approved_at", { withTimezone: true }),
   rejectedReason: text("rejected_reason"),
   paidAt: timestamp("paid_at", { withTimezone: true }),
+  invoicePdfUrl: text("invoice_pdf_url"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });
