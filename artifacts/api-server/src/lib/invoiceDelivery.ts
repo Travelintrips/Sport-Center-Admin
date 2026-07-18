@@ -1,9 +1,9 @@
 /**
  * invoiceDelivery.ts
  * Orkestrasi pengiriman invoice PDF ke customer:
- *   1. Resolve data invoice dari DB
- *   2. Generate PDF via puppeteer
- *   3. Upload ke storage & simpan URL di bookings.invoicePdfUrl
+ *   1. Puppeteer navigate ke endpoint internal server — identik 100% dengan admin portal
+ *   2. Generate PDF buffer (font Inter, gambar, semua CSS ter-render sempurna)
+ *   3. Upload ke Supabase storage & simpan URL di bookings.invoicePdfUrl
  *   4. Kirim email dengan lampiran PDF
  *   5. Kirim WA dengan link PDF
  *   6. Catat audit log setiap langkah
@@ -14,11 +14,11 @@
  *   - routes/invoices.ts  → endpoint manual trigger
  */
 
-import { db, bookingsTable, settingsTable } from "@workspace/db";
+import { db, bookingsTable, settingsTable, facilitiesTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
-import { buildInvoiceHtml } from "./invoiceTemplate";
-import { resolveInvoiceData } from "./invoiceResolver";
-import { generateAndStorePdf } from "./pdfGenerator";
+import { generatePdfBufferFromUrl } from "./pdfGenerator";
+import { uploadFile } from "./storage";
+import { getInternalPdfToken } from "./internalPdfToken";
 import { logAudit } from "./auditLog";
 import { logger } from "./logger";
 import { getBaseUrl } from "./appUrl";
@@ -52,6 +52,12 @@ function fmt(n: number) {
   return new Intl.NumberFormat("id-ID").format(n);
 }
 
+/** URL internal server (puppeteer akses via localhost — bukan domain publik) */
+function getLocalServerUrl(): string {
+  const port = process.env.PORT ?? "8080";
+  return `http://127.0.0.1:${port}`;
+}
+
 // ─── sendInvoicePdfEmail ──────────────────────────────────────────────────────
 
 async function sendInvoicePdfEmail(params: {
@@ -61,7 +67,7 @@ async function sendInvoicePdfEmail(params: {
   facilityName: string;
   grandTotal: number;
   pdfBuffer: Buffer;
-  pdfUrl: string;
+  publicPdfLink: string;
   orderNumber: string;
 }): Promise<void> {
   const { smtpFrom, smtpPass, configured } = await getEmailConfig();
@@ -96,7 +102,7 @@ async function sendInvoicePdfEmail(params: {
       <div style="background:#fff;padding:30px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 12px 12px">
         <p style="color:#374151">Halo <strong>${params.customerName}</strong>,</p>
         <p style="color:#374151">Terima kasih telah melakukan pembayaran. Berikut adalah invoice booking Anda yang telah <strong>dikonfirmasi</strong>.</p>
-        
+
         <table style="width:100%;border-collapse:collapse;margin:20px 0">
           <tr style="background:#f9fafb">
             <td style="padding:10px;border:1px solid #e5e7eb;font-weight:bold;color:#6b7280;font-size:13px">No Invoice</td>
@@ -113,7 +119,7 @@ async function sendInvoicePdfEmail(params: {
         </table>
 
         <div style="text-align:center;margin:24px 0">
-          <a href="${params.pdfUrl}" 
+          <a href="${params.publicPdfLink}"
              style="display:inline-block;background:#ea580c;color:white;padding:14px 32px;border-radius:8px;text-decoration:none;font-weight:bold;font-size:15px">
             📄 Lihat Invoice PDF
           </a>
@@ -128,20 +134,24 @@ async function sendInvoicePdfEmail(params: {
     </div>
   `;
 
-  await transporter.sendMail({
+  const mailOptions: any = {
     from: `"Sport Center Soekarno-Hatta" <${smtpFrom}>`,
     to: params.toEmail,
     subject: `Invoice ${params.invoiceNumber} – ${params.facilityName} [Terkonfirmasi]`,
     html: htmlBody,
-    attachments: [
+  };
+
+  if (params.pdfBuffer.length > 0) {
+    mailOptions.attachments = [
       {
         filename: `Invoice-${params.invoiceNumber.replace(/\//g, "-")}.pdf`,
         content: params.pdfBuffer,
         contentType: "application/pdf",
       },
-    ],
-  });
+    ];
+  }
 
+  await transporter.sendMail(mailOptions);
   logger.info({ to: params.toEmail, invoiceNumber: params.invoiceNumber }, "[InvoiceDelivery] Email invoice terkirim");
 }
 
@@ -156,7 +166,7 @@ async function sendInvoicePdfWA(params: {
   startTime: string;
   endTime: string;
   grandTotal: number;
-  pdfUrl: string;
+  publicPdfLink: string;
   orderNumber: string;
 }): Promise<void> {
   const phone = cleanPhone(params.customerPhone);
@@ -180,7 +190,7 @@ async function sendInvoicePdfWA(params: {
     `📅 *Tanggal:* ${params.bookingDate}\n` +
     `⏰ *Jam:* ${params.startTime} – ${params.endTime}\n` +
     `💰 *Total:* Rp ${fmt(params.grandTotal)}\n\n` +
-    `📄 *Download Invoice PDF:*\n${params.pdfUrl}\n\n` +
+    `📄 *Download Invoice PDF:*\n${params.publicPdfLink}\n\n` +
     `Terima kasih telah memilih Sport Center Soekarno-Hatta! 🙏`;
 
   const resp = await fetch("https://api.fonnte.com/send", {
@@ -222,59 +232,112 @@ export async function sendInvoiceToCustomer(
   let emailSent = false;
   let waSent = false;
 
-  // ── 1. Resolve data invoice ──────────────────────────────────────────────
-  const data = await resolveInvoiceData(orderNumber);
-  if (!data) throw new Error(`Invoice data tidak ditemukan untuk order: ${orderNumber}`);
+  // ── 1. Siapkan URL internal server untuk puppeteer ───────────────────────
+  const localBase = getLocalServerUrl();
+  const internalToken = getInternalPdfToken();
+  const internalUrl = `${localBase}/api/invoices/internal/${encodeURIComponent(orderNumber)}/html`;
+  const headers = { "x-internal-pdf-token": internalToken };
 
-  // ── 2. Build HTML & Generate PDF ─────────────────────────────────────────
-  const html = buildInvoiceHtml(data, { autoPrint: false });
-  const safeFilename = `invoice-${orderNumber.replace(/[^a-zA-Z0-9-]/g, "-")}`;
+  // ── 2. Generate PDF buffer via puppeteer → navigate ke URL internal ──────
+  // Hasilnya identik 100% dengan tampilan admin portal (font, logo, CSS sama)
+  logger.info({ orderNumber, internalUrl }, "[InvoiceDelivery] Generate PDF via URL internal server");
+  let pdfBuffer: Buffer;
+  try {
+    pdfBuffer = await generatePdfBufferFromUrl(internalUrl, headers);
+  } catch (err) {
+    logger.error({ err, orderNumber }, "[InvoiceDelivery] Puppeteer gagal — fallback ke HTML setContent");
+    // Fallback: resolve data dari DB dan generate dari HTML string
+    const { resolveInvoiceData } = await import("./invoiceResolver");
+    const { buildInvoiceHtml } = await import("./invoiceTemplate");
+    const { generatePdfBufferFromHtml } = await import("./pdfGenerator");
+    const data = await resolveInvoiceData(orderNumber);
+    if (!data) throw new Error(`Invoice data tidak ditemukan untuk order: ${orderNumber}`);
+    const html = buildInvoiceHtml(data, { autoPrint: false });
+    pdfBuffer = await generatePdfBufferFromHtml(html);
+  }
 
-  logger.info({ orderNumber }, "[InvoiceDelivery] Mulai generate dan simpan PDF invoice");
-  const pdfUrl = await generateAndStorePdf(html, safeFilename);
+  // ── 3. Upload ke storage ─────────────────────────────────────────────────
+  const safeFilename = `invoice-${orderNumber.replace(/[^a-zA-Z0-9-]/g, "-")}.pdf`;
+  logger.info({ orderNumber, sizeBytes: pdfBuffer.length }, "[InvoiceDelivery] Upload PDF ke storage");
+  const pdfStorageUrl = await uploadFile("invoice-pdfs", safeFilename, pdfBuffer, "application/pdf");
 
-  // ── 3. Simpan pdfUrl ke database ─────────────────────────────────────────
+  // ── 4. Simpan URL ke database ────────────────────────────────────────────
   await db
     .update(bookingsTable)
-    .set({ invoicePdfUrl: pdfUrl, updatedAt: new Date() })
+    .set({ invoicePdfUrl: pdfStorageUrl, updatedAt: new Date() })
     .where(eq(bookingsTable.orderNumber, orderNumber));
+
+  // URL publik untuk customer — melalui endpoint publik server (bukan Supabase langsung)
+  const appBase = await getBaseUrl();
+  const publicPdfLink = `${appBase}/api/public/invoices/${orderNumber}/pdf`;
+
+  // Ambil data booking + nama fasilitas untuk email/WA params
+  const rows = await db
+    .select({
+      customerName: bookingsTable.customerName,
+      customerPhone: bookingsTable.customerPhone,
+      customerEmail: bookingsTable.customerEmail,
+      facilityId: bookingsTable.facilityId,
+      facilityName: facilitiesTable.name,
+      bookingDate: bookingsTable.bookingDate,
+      startTime: bookingsTable.startTime,
+      endTime: bookingsTable.endTime,
+      grandTotal: bookingsTable.grandTotal,
+      totalPrice: bookingsTable.totalPrice,
+    })
+    .from(bookingsTable)
+    .leftJoin(facilitiesTable, eq(bookingsTable.facilityId, facilitiesTable.id))
+    .where(eq(bookingsTable.orderNumber, orderNumber))
+    .limit(1);
+  const booking = rows[0];
+
+  // Resolve invoice number for audit/email
+  let invoiceNumber = orderNumber;
+  let facilityName = "";
+  let grandTotal = 0;
+  let customerName = "";
+  let customerPhone = "";
+  let customerEmail = "";
+  let bookingDate = "";
+  let startTime = "";
+  let endTime = "";
+
+  if (booking) {
+    customerName = booking.customerName;
+    customerPhone = booking.customerPhone;
+    customerEmail = booking.customerEmail ?? "";
+    facilityName = (booking as any).facilityName ?? "";
+    bookingDate = booking.bookingDate;
+    startTime = booking.startTime;
+    endTime = booking.endTime;
+    grandTotal = booking.grandTotal != null ? Number(booking.grandTotal) : Number(booking.totalPrice ?? 0);
+
+    // Build invoice number
+    const datePart = bookingDate.replace(/-/g, "").substring(0, 8);
+    const seq = orderNumber.replace(/[^0-9]/g, "").slice(-6).padStart(6, "0");
+    invoiceNumber = `INV/SC/${datePart}/${seq}`;
+  }
 
   await logAudit({
     userId: audit?.userId,
     userName: audit?.userName ?? "system",
     action: "INVOICE_PDF_GENERATED",
     entity: "booking",
-    after: { orderNumber, invoiceNumber: data.invoiceNumber, pdfUrl },
+    after: { orderNumber, invoiceNumber, pdfStorageUrl, publicPdfLink },
     ipAddress: audit?.ipAddress,
     userAgent: audit?.userAgent,
   });
 
-  // ── 4. Generate PDF buffer (untuk lampiran email) ─────────────────────────
-  // PDF sudah dibuat di generateAndStorePdf — re-generate buffer untuk attachment email
-  // (agar tidak perlu fetch ulang dari storage)
-  let pdfBuffer: Buffer | null = null;
-  try {
-    const { generatePdfBuffer } = await import("./pdfGenerator");
-    pdfBuffer = await generatePdfBuffer(html);
-  } catch (err) {
-    logger.warn({ err }, "[InvoiceDelivery] Gagal buat buffer PDF untuk email — kirim tanpa lampiran");
-    errors.push(`Buffer PDF gagal: ${(err as Error).message}`);
-  }
-
-  // URL publik untuk customer (link di WA / tombol di email)
-  const appUrl = await getBaseUrl();
-  const publicPdfLink = `${appUrl}/api/public/invoices/${orderNumber}/pdf`;
-
   // ── 5. Kirim Email ────────────────────────────────────────────────────────
   try {
     await sendInvoicePdfEmail({
-      toEmail: data.customerEmail,
-      customerName: data.customerName,
-      invoiceNumber: data.invoiceNumber,
-      facilityName: data.facilityName,
-      grandTotal: data.grandTotal,
-      pdfBuffer: pdfBuffer ?? Buffer.alloc(0),
-      pdfUrl: publicPdfLink,
+      toEmail: customerEmail,
+      customerName,
+      invoiceNumber,
+      facilityName,
+      grandTotal,
+      pdfBuffer,
+      publicPdfLink,
       orderNumber,
     });
     emailSent = true;
@@ -283,7 +346,7 @@ export async function sendInvoiceToCustomer(
       userName: audit?.userName ?? "system",
       action: "INVOICE_PDF_SENT_EMAIL",
       entity: "booking",
-      after: { orderNumber, invoiceNumber: data.invoiceNumber, to: data.customerEmail },
+      after: { orderNumber, invoiceNumber, to: customerEmail },
       ipAddress: audit?.ipAddress,
       userAgent: audit?.userAgent,
     });
@@ -296,15 +359,15 @@ export async function sendInvoiceToCustomer(
   // ── 6. Kirim WhatsApp ─────────────────────────────────────────────────────
   try {
     await sendInvoicePdfWA({
-      customerPhone: data.customerPhone,
-      customerName: data.customerName,
-      invoiceNumber: data.invoiceNumber,
-      facilityName: data.facilityName,
-      bookingDate: data.bookingDate,
-      startTime: data.startTime,
-      endTime: data.endTime,
-      grandTotal: data.grandTotal,
-      pdfUrl: publicPdfLink,
+      customerPhone,
+      customerName,
+      invoiceNumber,
+      facilityName,
+      bookingDate,
+      startTime,
+      endTime,
+      grandTotal,
+      publicPdfLink,
       orderNumber,
     });
     waSent = true;
@@ -313,7 +376,7 @@ export async function sendInvoiceToCustomer(
       userName: audit?.userName ?? "system",
       action: "INVOICE_PDF_SENT_WA",
       entity: "booking",
-      after: { orderNumber, invoiceNumber: data.invoiceNumber, phone: data.customerPhone },
+      after: { orderNumber, invoiceNumber, phone: customerPhone },
       ipAddress: audit?.ipAddress,
       userAgent: audit?.userAgent,
     });
@@ -323,6 +386,6 @@ export async function sendInvoiceToCustomer(
     logger.error({ err, orderNumber }, "[InvoiceDelivery] Gagal kirim WA invoice");
   }
 
-  logger.info({ orderNumber, pdfUrl, emailSent, waSent, errors }, "[InvoiceDelivery] Selesai");
-  return { pdfUrl, emailSent, waSent, errors };
+  logger.info({ orderNumber, pdfStorageUrl, emailSent, waSent, errors }, "[InvoiceDelivery] Selesai");
+  return { pdfUrl: pdfStorageUrl, emailSent, waSent, errors };
 }

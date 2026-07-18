@@ -6,9 +6,56 @@ import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
 import { buildInvoiceHtml } from "../lib/invoiceTemplate";
 import { resolveInvoiceData, resolveGroupInvoiceData } from "../lib/invoiceResolver";
 import { sendInvoiceToCustomer } from "../lib/invoiceDelivery";
+import { getInternalPdfToken } from "../lib/internalPdfToken";
 import { logger } from "../lib/logger";
 
+// ─── Internal PDF middleware ───────────────────────────────────────────────────
+// Digunakan oleh endpoint yang di-akses puppeteer saat generate PDF.
+// Token di-derive dari SESSION_SECRET — tidak perlu auth admin.
+
+function internalPdfMiddleware(req: any, res: any, next: any) {
+  const token = req.headers["x-internal-pdf-token"];
+  if (token && token === getInternalPdfToken()) return next();
+  res.status(401).json({ error: "Unauthorized" });
+}
+
 const router = Router();
+
+// ─── GET /invoices/internal/:orderNumber/html — puppeteer endpoint (no admin auth) ──
+// Di-akses puppeteer dari localhost saat generate PDF.
+// Dilindungi X-Internal-Pdf-Token header — bukan untuk akses publik.
+
+router.get("/invoices/internal/:orderNumber/html", internalPdfMiddleware, async (req, res) => {
+  try {
+    const orderNumber = String(req.params.orderNumber);
+    const data = await resolveInvoiceData(orderNumber);
+    if (!data) { res.status(404).send("<h2>Invoice tidak ditemukan</h2>"); return; }
+    const html = buildInvoiceHtml(data, { autoPrint: false });
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.setHeader("Cache-Control", "no-store");
+    res.send(html);
+  } catch (err) {
+    logger.error({ err }, "Internal invoice HTML error");
+    res.status(500).send("<h2>Terjadi kesalahan</h2>");
+  }
+});
+
+// ─── GET /invoices/internal/group/:groupRef/html — grup invoice puppeteer endpoint ──
+
+router.get("/invoices/internal/group/:groupRef/html", internalPdfMiddleware, async (req, res) => {
+  try {
+    const groupRef = String(req.params.groupRef);
+    const data = await resolveGroupInvoiceData(groupRef);
+    if (!data) { res.status(404).send("<h2>Grup booking tidak ditemukan</h2>"); return; }
+    const html = buildInvoiceHtml(data, { autoPrint: false });
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.setHeader("Cache-Control", "no-store");
+    res.send(html);
+  } catch (err) {
+    logger.error({ err }, "Internal group invoice HTML error");
+    res.status(500).send("<h2>Terjadi kesalahan</h2>");
+  }
+});
 
 // ─── GET /invoices/booking/:orderNumber (JSON) ────────────────────────────────
 
