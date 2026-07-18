@@ -68,10 +68,6 @@ localPort = 8080
 externalPort = 8080
 
 [[ports]]
-localPort = 8081
-externalPort = 8081
-
-[[ports]]
 localPort = 21089
 externalPort = 3000
 
@@ -109,14 +105,14 @@ FONNTE_CUSTOMER_TOKEN = ""
 ADMIN_WA_GROUP = "120363367856918086@g.us"
 
 [userenv.development]
-SUPABASE_URL_DEV = "https://nzdweipzckfszczzqtuw.supabase.co"
+SUPABASE_URL_DEV = "https://xssrfshdrtdfupgqwfdw.supabase.co"
 SUPABASE_ANON_KEY_DEV = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im56ZHdlaXB6Y2tmc3pjenpxdHV3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg0MDI4NDQsImV4cCI6MjA5Mzk3ODg0NH0.p9k3-qyRjPuXsHLizUrSRMyS-0yJAatUyjQU9NIIu1U"
 SUPABASE_SERVICE_ROLE_KEY_DEV = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im56ZHdlaXB6Y2tmc3pjenpxdHV3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3ODQwMjg0NCwiZXhwIjoyMDkzOTc4ODQ0fQ.W0uM_UzGfF8Zy4PFQKhz6dKpEVDHS6_k9FtqoM9iGms"
-VITE_SUPABASE_URL_DEV = "https://nzdweipzckfszczzqtuw.supabase.co"
+VITE_SUPABASE_URL_DEV = "https://xssrfshdrtdfupgqwfdw.supabase.co"
 VITE_SUPABASE_ANON_KEY_DEV = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im56ZHdlaXB6Y2tmc3pjenpxdHV3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg0MDI4NDQsImV4cCI6MjA5Mzk3ODg0NH0.p9k3-qyRjPuXsHLizUrSRMyS-0yJAatUyjQU9NIIu1U"
-SUPABASE_STORAGE_BUCKET_DEV = "https://nzdweipzckfszczzqtuw.storage.supabase.co/storage/v1/s3"
-SUPABASE_DATABASE_URL_DEV = "postgresql://postgres.nzdweipzckfszczzqtuw:AnTXXOl0t1ArQOEU@aws-1-ap-southeast-2.pooler.supabase.com:6543/postgres"
-SUPABASE_PG_URL_DEV = "postgresql://postgres.nzdweipzckfszczzqtuw:AnTXXOl0t1ArQOEU@aws-1-ap-southeast-2.pooler.supabase.com:5432/postgres"
+SUPABASE_STORAGE_BUCKET_DEV = "https://xssrfshdrtdfupgqwfdw.storage.supabase.co/storage/v1/s3"
+SUPABASE_DATABASE_URL_DEV = "postgresql://postgres.xssrfshdrtdfupgqwfdw:nvVEWjiHruxen4cE@aws-1-ap-southeast-2.pooler.supabase.com:6543/postgres"
+SUPABASE_PG_URL_DEV = "postgresql://postgres.xssrfshdrtdfupgqwfdw:nvVEWjiHruxen4cE@aws-1-ap-southeast-2.pooler.supabase.com:6543/postgres"
 
 [userenv.production]
 SUPABASE_PG_URL = "postgresql://postgres.nzdweipzckfszczzqtuw:AnTXXOl0t1ArQOEU@aws-1-ap-southeast-2.pooler.supabase.com:6543/postgres"
