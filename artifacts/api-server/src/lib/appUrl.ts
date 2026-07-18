@@ -13,10 +13,22 @@ function envFallback(): string {
 }
 
 export async function getBaseUrl(): Promise<string> {
-  // Domain dari settings (paymentDomain/appUrl) selalu diprioritaskan jika di-set,
-  // baik di dev maupun production — supaya link WA pendek & konsisten di semua mode.
   const now = Date.now();
   if (_cachedUrl !== null && now < _cacheExpiry) return _cachedUrl;
+
+  const isProd = process.env.NODE_ENV === "production";
+
+  if (!isProd) {
+    // Di dev: selalu gunakan REPLIT_DEV_DOMAIN sehingga link WA/email bisa diakses
+    // (domain prod belum tentu live, apalagi selama testing)
+    _cachedUrl = process.env.REPLIT_DEV_DOMAIN
+      ? `https://${process.env.REPLIT_DEV_DOMAIN}`
+      : (process.env.APP_URL ?? "").replace(/\/$/, "");
+    _cacheExpiry = now + CACHE_TTL_MS;
+    return _cachedUrl!;
+  }
+
+  // Di production: DB settings (paymentDomain/appUrl) diprioritaskan jika di-set
   try {
     const [s] = await db
       .select({ paymentDomain: settingsTable.paymentDomain, appUrl: settingsTable.appUrl })
