@@ -452,6 +452,8 @@ export default function FacilityDetail() {
                           <SelectItem value="8" className="font-medium py-3">{t("8 Jam", "8 Hours")}</SelectItem>
                           <SelectItem value="9" className="font-medium py-3">{t("9 Jam", "9 Hours")}</SelectItem>
                           <SelectItem value="10" className="font-medium py-3">{t("10 Jam", "10 Hours")}</SelectItem>
+                          <SelectItem value="11" className="font-medium py-3">{t("11 Jam", "11 Hours")}</SelectItem>
+                          <SelectItem value="12" className="font-medium py-3">{t("12 Jam", "12 Hours")}</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
