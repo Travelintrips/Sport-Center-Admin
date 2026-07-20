@@ -144,10 +144,34 @@ export default function Cart() {
   const [createdOrders, setCreatedOrders] = useState<string[]>([]);
 
   // Repeat booking — ulangi semua lapangan di keranjang secara mingguan/bulanan
+  // State di-persist ke localStorage agar tidak hilang saat navigasi "+ Tambah Lapangan Lagi"
   type RepeatType = "weekly" | "monthly";
-  const [isRepeat, setIsRepeat] = useState(false);
-  const [repeatType, setRepeatType] = useState<RepeatType>("weekly");
-  const [repeatCount, setRepeatCount] = useState(4);
+  const [isRepeat, setIsRepeat] = useState<boolean>(() => {
+    try { return localStorage.getItem("sc_cart_repeat_on") === "1"; } catch { return false; }
+  });
+  const [repeatType, setRepeatType] = useState<RepeatType>(() => {
+    try {
+      const v = localStorage.getItem("sc_cart_repeat_type");
+      return (v === "monthly" ? "monthly" : "weekly") as RepeatType;
+    } catch { return "weekly"; }
+  });
+  const [repeatCount, setRepeatCount] = useState<number>(() => {
+    try {
+      const v = parseInt(localStorage.getItem("sc_cart_repeat_count") ?? "4");
+      return isNaN(v) ? 4 : Math.min(52, Math.max(1, v));
+    } catch { return 4; }
+  });
+
+  // Sync repeat booking state ke localStorage setiap kali berubah
+  useEffect(() => {
+    try { localStorage.setItem("sc_cart_repeat_on", isRepeat ? "1" : "0"); } catch {}
+  }, [isRepeat]);
+  useEffect(() => {
+    try { localStorage.setItem("sc_cart_repeat_type", repeatType); } catch {}
+  }, [repeatType]);
+  useEffect(() => {
+    try { localStorage.setItem("sc_cart_repeat_count", String(repeatCount)); } catch {}
+  }, [repeatCount]);
 
   // Auto-fill dari user yang login (skip jika operator — mereka isi data customer)
   useEffect(() => {
