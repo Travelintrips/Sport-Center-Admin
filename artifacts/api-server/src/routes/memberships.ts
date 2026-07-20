@@ -66,6 +66,37 @@ async function deleteFromPublic(sourceId: number) {
 
 // ─── Gym Check-in Endpoints ───────────────────────────────────────────────────
 
+// POST /memberships/lookup — public, cari membership by phone
+router.post("/memberships/lookup", async (req, res) => {
+  try {
+    const phone = String(req.body?.phone || "").trim();
+    if (!phone) { res.status(400).json({ error: "phone wajib diisi" }); return; }
+
+    const all = await db.select().from(gymMembershipsTable).where(eq(gymMembershipsTable.phone, phone));
+    const candidates = all
+      .filter((m) => m.status !== "cancelled")
+      .sort((a, b) => new Date(b.endDate).getTime() - new Date(a.endDate).getTime());
+
+    if (candidates.length === 0) { res.status(404).json({ error: "Membership tidak ditemukan" }); return; }
+
+    const m = candidates[0]!;
+    res.json({
+      id: m.id,
+      name: m.name,
+      phone: m.phone,
+      email: m.email,
+      status: m.status,
+      startDate: m.startDate,
+      endDate: m.endDate,
+      months: m.months,
+      totalPrice: Number(m.totalPrice),
+    });
+  } catch (err) {
+    req.log.error({ err }, "Lookup membership error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 // GET /memberships/checkins?date=YYYY-MM-DD
 router.get("/memberships/checkins", adminMiddleware, async (req, res) => {
   try {

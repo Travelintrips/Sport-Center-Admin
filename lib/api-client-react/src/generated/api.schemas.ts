@@ -969,6 +969,33 @@ export interface GymMembershipUpdate {
   notes?: string;
 }
 
+export interface MembershipLookupInput {
+  phone: string;
+}
+
+export type MembershipLookupResultStatus = typeof MembershipLookupResultStatus[keyof typeof MembershipLookupResultStatus];
+
+
+export const MembershipLookupResultStatus = {
+  pending_payment: 'pending_payment',
+  waiting_confirmation: 'waiting_confirmation',
+  active: 'active',
+  expired: 'expired',
+  cancelled: 'cancelled',
+} as const;
+
+export interface MembershipLookupResult {
+  id: number;
+  name: string;
+  phone: string;
+  email: string;
+  status: MembershipLookupResultStatus;
+  startDate: string;
+  endDate: string;
+  months: number;
+  totalPrice: number;
+}
+
 export type MembershipPaymentProofInputPaymentMethod = typeof MembershipPaymentProofInputPaymentMethod[keyof typeof MembershipPaymentProofInputPaymentMethod];
 
 
