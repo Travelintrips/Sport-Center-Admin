@@ -941,73 +941,107 @@ export default function Cart() {
               <CardTitle className="text-base">{t("Ringkasan", "Summary")}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              {items.map((item) => {
-                const itemPrice = item.mode === "walk_in"
-                  ? item.facilityPricePerHour
-                  : item.facilityPricePerHour * item.duration;
+              {(() => {
+                // Repeat multiplier: berlaku hanya jika semua item adalah time_slot
+                const useRepeatSummary = isRepeat && items.every((it) => it.mode === "time_slot");
+                const multiplier = useRepeatSummary ? repeatCount : 1;
+                const unitLabel = useRepeatSummary
+                  ? (repeatType === "weekly"
+                      ? t(`× ${repeatCount} minggu`, `× ${repeatCount} wks`)
+                      : t(`× ${repeatCount} bulan`, `× ${repeatCount} mo`))
+                  : null;
+                const subtotal = totalPrice * multiplier;
+                const eventDiscount = isEvent ? Math.round(subtotal * EVENT_DISCOUNT_RATE) : 0;
+                const grandTotal = subtotal - eventDiscount;
+
                 return (
-                  <div key={item.id} className="flex justify-between text-sm gap-2">
-                    <span className="text-muted-foreground truncate">{item.facilityName}</span>
-                    <span className="font-semibold shrink-0">{formatCurrency(itemPrice)}</span>
-                  </div>
-                );
-              })}
-
-              {isEvent && (
-                <div className="flex justify-between text-purple-700 text-sm font-medium">
-                  <span className="flex items-center gap-1"><Tag size={12} /> {t("Diskon Event 21,43%", "Event Discount 21.43%")}</span>
-                  <span>−{formatCurrency(Math.round(totalPrice * EVENT_DISCOUNT_RATE))}</span>
-                </div>
-              )}
-
-              <div className="border-t pt-3 flex justify-between font-black text-lg">
-                <span>{t("Total", "Total")}</span>
-                <span className="text-primary">
-                  {isEvent
-                    ? formatCurrency(Math.round(totalPrice * (1 - EVENT_DISCOUNT_RATE)))
-                    : formatCurrency(totalPrice)}
-                </span>
-              </div>
-
-              {isCompanyMode && companyId ? (
-                <p className="text-xs text-emerald-700 font-semibold">
-                  ✓ {t("Ditagihkan ke perusahaan — tidak perlu bayar sekarang.", "Billed to company — no payment needed now.")}
-                </p>
-              ) : isCompanyMode && !companyId ? (
-                <p className="text-xs text-destructive font-semibold">
-                  ⚠ {t("Data perusahaan tidak ditemukan. Coba refresh halaman.", "Company data not found. Try refreshing the page.")}
-                </p>
-              ) : isEvent ? (
-                <p className="text-xs text-purple-700 font-semibold">
-                  ✓ {t("Harga sudah termasuk diskon event 21,43%.", "Price includes 21.43% event discount.")}
-                </p>
-              ) : (
-                <p className="text-xs text-muted-foreground">
-                  {t("*Belum termasuk pajak dan diskon yang berlaku.", "*Before applicable taxes and discounts.")}
-                </p>
-              )}
-
-              <Button
-                className="w-full h-12 font-bold rounded-full mt-2"
-                form="cart-checkout-form"
-                type="submit"
-                disabled={isSubmitting || items.length === 0}
-              >
-                {isSubmitting ? (
                   <>
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    {t("Memproses...", "Processing...")}
-                  </>
-                ) : (
-                  t(`Checkout ${items.length} Lapangan`, `Checkout ${items.length} Court(s)`)
-                )}
-              </Button>
+                    {items.map((item) => {
+                      const basePrice = item.mode === "walk_in"
+                        ? item.facilityPricePerHour
+                        : item.facilityPricePerHour * item.duration;
+                      const lineTotal = basePrice * multiplier;
+                      return (
+                        <div key={item.id} className="flex justify-between text-sm gap-2">
+                          <span className="text-muted-foreground truncate">
+                            {item.facilityName}
+                            {unitLabel && (
+                              <span className="ml-1 text-primary font-medium">{unitLabel}</span>
+                            )}
+                          </span>
+                          <span className="font-semibold shrink-0">{formatCurrency(lineTotal)}</span>
+                        </div>
+                      );
+                    })}
 
-              <Button variant="outline" className="w-full" asChild>
-                <Link href="/facilities">
-                  {t("+ Tambah Lapangan Lagi", "+ Add More Courts")}
-                </Link>
-              </Button>
+                    {useRepeatSummary && (
+                      <p className="text-xs text-primary/80 bg-primary/5 border border-primary/20 rounded-lg px-3 py-2">
+                        <RefreshCw size={11} className="inline mr-1" />
+                        {repeatType === "weekly"
+                          ? t(`Setiap lapangan diulang ${repeatCount}× setiap minggu`, `Each court repeated ${repeatCount}× weekly`)
+                          : t(`Setiap lapangan diulang ${repeatCount}× setiap bulan`, `Each court repeated ${repeatCount}× monthly`)}
+                      </p>
+                    )}
+
+                    {isEvent && (
+                      <div className="flex justify-between text-purple-700 text-sm font-medium">
+                        <span className="flex items-center gap-1"><Tag size={12} /> {t("Diskon Event 21,43%", "Event Discount 21.43%")}</span>
+                        <span>−{formatCurrency(eventDiscount)}</span>
+                      </div>
+                    )}
+
+                    <div className="border-t pt-3 flex justify-between font-black text-lg">
+                      <span>{t("Total", "Total")}</span>
+                      <span className="text-primary">{formatCurrency(grandTotal)}</span>
+                    </div>
+
+                    {isCompanyMode && companyId ? (
+                      <p className="text-xs text-emerald-700 font-semibold">
+                        ✓ {t("Ditagihkan ke perusahaan — tidak perlu bayar sekarang.", "Billed to company — no payment needed now.")}
+                      </p>
+                    ) : isCompanyMode && !companyId ? (
+                      <p className="text-xs text-destructive font-semibold">
+                        ⚠ {t("Data perusahaan tidak ditemukan. Coba refresh halaman.", "Company data not found. Try refreshing the page.")}
+                      </p>
+                    ) : isEvent ? (
+                      <p className="text-xs text-purple-700 font-semibold">
+                        ✓ {t("Harga sudah termasuk diskon event 21,43%.", "Price includes 21.43% event discount.")}
+                      </p>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">
+                        {t("*Belum termasuk pajak dan diskon yang berlaku.", "*Before applicable taxes and discounts.")}
+                      </p>
+                    )}
+
+                    <Button
+                      className="w-full h-12 font-bold rounded-full mt-2"
+                      form="cart-checkout-form"
+                      type="submit"
+                      disabled={isSubmitting || items.length === 0}
+                    >
+                      {isSubmitting ? (
+                        <>
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          {t("Memproses...", "Processing...")}
+                        </>
+                      ) : useRepeatSummary ? (
+                        t(
+                          `Checkout ${items.length} Lapangan × ${repeatCount} Sesi`,
+                          `Checkout ${items.length} Court(s) × ${repeatCount} Sessions`
+                        )
+                      ) : (
+                        t(`Checkout ${items.length} Lapangan`, `Checkout ${items.length} Court(s)`)
+                      )}
+                    </Button>
+
+                    <Button variant="outline" className="w-full" asChild>
+                      <Link href="/facilities">
+                        {t("+ Tambah Lapangan Lagi", "+ Add More Courts")}
+                      </Link>
+                    </Button>
+                  </>
+                );
+              })()}
             </CardContent>
           </Card>
         </div>
