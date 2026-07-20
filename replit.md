@@ -249,6 +249,7 @@ Web app untuk manajemen dan pemesanan fasilitas olahraga — customer-facing boo
 - `/admin/settings` — Edit center info, contact details, operating hours, bank account for transfers
 
 ## User preferences
+- Gunakan bahasa Indonesia dalam semua respons.
 
 - Default output: code-first. Explanation only if required for debugging or explicitly requested.
 - Indonesian language content for demo data and facility names
