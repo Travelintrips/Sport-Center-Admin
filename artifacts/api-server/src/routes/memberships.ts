@@ -233,6 +233,56 @@ router.post("/memberships", async (req, res) => {
   }
 });
 
+// POST /memberships/:id/renew — public, perpanjang membership yang ada (update record, bukan buat baru)
+router.post("/memberships/:id/renew", async (req, res) => {
+  try {
+    const id = parseInt(String(req.params.id));
+    const months = Math.max(1, parseInt(String(req.body?.months || 1)));
+
+    const [existing] = await db.select().from(gymMembershipsTable).where(eq(gymMembershipsTable.id, id)).limit(1);
+    if (!existing) { res.status(404).json({ error: "Membership tidak ditemukan" }); return; }
+    if (existing.status === "pending_payment") {
+      res.status(400).json({ error: "Selesaikan pembayaran yang ada sebelum memperpanjang" }); return;
+    }
+
+    const todayStr = new Date().toISOString().split("T")[0]!;
+    let newStartDate: string;
+    if (existing.status === "active" && existing.endDate >= todayStr) {
+      // Masih aktif — mulai setelah endDate lama
+      const d = new Date(existing.endDate);
+      d.setDate(d.getDate() + 1);
+      newStartDate = d.toISOString().split("T")[0]!;
+    } else {
+      newStartDate = todayStr;
+    }
+
+    const endD = new Date(newStartDate);
+    endD.setMonth(endD.getMonth() + months);
+    const newEndDate = endD.toISOString().split("T")[0]!;
+    const totalPrice = String(months * 300000);
+
+    const [updated] = await db
+      .update(gymMembershipsTable)
+      .set({
+        startDate: newStartDate,
+        endDate: newEndDate,
+        months,
+        totalPrice,
+        status: "pending_payment",
+        paymentMethod: null,
+        paymentProofUrl: null,
+      })
+      .where(eq(gymMembershipsTable.id, id))
+      .returning();
+
+    await syncToPublic(updated!);
+    res.json({ ...updated, totalPrice: Number(updated!.totalPrice) });
+  } catch (err) {
+    req.log.error({ err }, "Renew membership error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 router.post("/memberships/:id/payment-proof", async (req, res) => {
   try {
     const id = parseInt(String(req.params.id));

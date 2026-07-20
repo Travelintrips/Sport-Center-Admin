@@ -175,18 +175,30 @@ export default function Membership() {
     }
   }
 
-  function handleRenew() {
+  const [renewLoading, setRenewLoading] = useState(false);
+
+  async function handleRenew() {
     if (!lookupResult) return;
-    const startDate = getRenewalStartDate(lookupResult);
-    createMutation.mutate({
-      data: {
-        name: lookupResult.name,
-        email: lookupResult.email,
-        phone: lookupResult.phone,
-        startDate,
-        months: renewMonths,
-      },
-    });
+    setRenewLoading(true);
+    try {
+      const res = await fetch(`/api/memberships/${lookupResult.id}/renew`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ months: renewMonths }),
+      });
+      if (!res.ok) {
+        const e = await res.json();
+        toast({ title: t("Gagal memperpanjang", "Renewal failed"), description: e.error || t("Terjadi kesalahan.", "An error occurred."), variant: "destructive" });
+        return;
+      }
+      const data = await res.json();
+      setCreated({ id: data.id, name: data.name, endDate: data.endDate, totalPrice: data.totalPrice, months: data.months, startDate: data.startDate });
+      setStep("payment");
+    } catch {
+      toast({ title: t("Gagal terhubung", "Connection failed"), description: t("Coba lagi.", "Please try again."), variant: "destructive" });
+    } finally {
+      setRenewLoading(false);
+    }
   }
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -766,9 +778,9 @@ export default function Membership() {
                             <Button
                               className="w-full h-12 text-base"
                               onClick={handleRenew}
-                              disabled={createMutation.isPending}
+                              disabled={renewLoading}
                             >
-                              {createMutation.isPending ? (
+                              {renewLoading ? (
                                 <><Loader2 size={16} className="mr-2 animate-spin" />{t("Memproses...", "Processing...")}</>
                               ) : (
                                 <><RefreshCw size={16} className="mr-2" />{t("Perpanjang Membership", "Renew Membership")} <ArrowRight size={16} className="ml-2" /></>
