@@ -17,7 +17,7 @@ import { id as idLocale, enUS } from "date-fns/locale";
 import {
   ShoppingCart, Trash2, ChevronLeft, CheckCircle2, Loader2,
   Calendar, Clock, ShieldCheck, AlertCircle, Plane, Building2, User,
-  ChevronsUpDown, Check, RefreshCw,
+  ChevronsUpDown, Check, RefreshCw, Tag,
 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
@@ -121,10 +121,12 @@ export default function Cart() {
     : billingStatus?.companyName;
 
   // Mode booking
-  type BookingMode = "umum" | "angkasa_pura" | "perusahaan";
+  type BookingMode = "umum" | "angkasa_pura" | "perusahaan" | "event";
+  const EVENT_DISCOUNT_RATE = 3 / 14; // ≈ 21.43%
   const [bookingMode, setBookingMode] = useState<BookingMode>("umum");
   const isAP = bookingMode === "angkasa_pura";
   const isCompanyMode = bookingMode === "perusahaan";
+  const isEvent = bookingMode === "event";
 
   // Auto-set mode perusahaan jika company account
   useEffect(() => {
@@ -292,6 +294,11 @@ export default function Cart() {
           body.customerType = "angkasa_pura";
           body.payerType = "personal";
           body.idCardNumber = idCardNumber.trim();
+        } else if (isEvent) {
+          // Event: diskon 21,43%
+          body.customerType = "umum";
+          body.payerType = "personal";
+          body.bookingType = "event";
         } else if (isCompanyMode && companyId) {
           // Tagihan perusahaan
           body.customerType = "umum";
@@ -552,8 +559,22 @@ export default function Cart() {
                   {t("Angkasa Pura", "Angkasa Pura")}
                 </button>
 
-                {/* Tagihan Perusahaan — tampil hanya jika eligible */}
-                {canCompanyBilling && (
+                {/* Event — diskon 21,43% */}
+                <button
+                  type="button"
+                  onClick={() => setBookingMode("event")}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-full border text-sm font-semibold transition-colors ${
+                    isEvent
+                      ? "bg-purple-600 text-white border-purple-600"
+                      : "border-border text-foreground hover:border-purple-400"
+                  }`}
+                >
+                  <Tag size={14} />
+                  {t("Event", "Event")}
+                </button>
+
+                {/* Tagihan Perusahaan — tampil jika eligible ATAU operator */}
+                {(canCompanyBilling || isAdminBooking) && (
                   <button
                     type="button"
                     onClick={() => setBookingMode("perusahaan")}
@@ -574,6 +595,12 @@ export default function Cart() {
                 <div className="mt-3 flex items-start gap-2 text-xs text-blue-700 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-xl p-3">
                   <Plane className="w-4 h-4 shrink-0 mt-0.5" />
                   <span>{t("Tarif khusus karyawan Angkasa Pura berlaku. ID Card wajib diisi.", "Special Angkasa Pura employee rate applies. ID Card is required.")}</span>
+                </div>
+              )}
+              {isEvent && (
+                <div className="mt-3 flex items-start gap-2 text-xs text-purple-700 bg-purple-50 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800 rounded-xl p-3">
+                  <Tag className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>{t("Diskon Event 21,43% otomatis diterapkan pada semua lapangan di keranjang.", "21.43% Event discount automatically applied to all courts in the cart.")}</span>
                 </div>
               )}
               {isCompanyMode && companyName && (
@@ -926,9 +953,20 @@ export default function Cart() {
                 );
               })}
 
+              {isEvent && (
+                <div className="flex justify-between text-purple-700 text-sm font-medium">
+                  <span className="flex items-center gap-1"><Tag size={12} /> {t("Diskon Event 21,43%", "Event Discount 21.43%")}</span>
+                  <span>−{formatCurrency(Math.round(totalPrice * EVENT_DISCOUNT_RATE))}</span>
+                </div>
+              )}
+
               <div className="border-t pt-3 flex justify-between font-black text-lg">
                 <span>{t("Total", "Total")}</span>
-                <span className="text-primary">{formatCurrency(totalPrice)}</span>
+                <span className="text-primary">
+                  {isEvent
+                    ? formatCurrency(Math.round(totalPrice * (1 - EVENT_DISCOUNT_RATE)))
+                    : formatCurrency(totalPrice)}
+                </span>
               </div>
 
               {isCompanyMode && companyId ? (
@@ -938,6 +976,10 @@ export default function Cart() {
               ) : isCompanyMode && !companyId ? (
                 <p className="text-xs text-destructive font-semibold">
                   ⚠ {t("Data perusahaan tidak ditemukan. Coba refresh halaman.", "Company data not found. Try refreshing the page.")}
+                </p>
+              ) : isEvent ? (
+                <p className="text-xs text-purple-700 font-semibold">
+                  ✓ {t("Harga sudah termasuk diskon event 21,43%.", "Price includes 21.43% event discount.")}
                 </p>
               ) : (
                 <p className="text-xs text-muted-foreground">
