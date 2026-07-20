@@ -12,7 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { useLang } from "@/lib/i18n";
 import { getToken } from "@/lib/auth";
-import { format, parseISO } from "date-fns";
+import { format, parseISO, addWeeks, addMonths } from "date-fns";
 import { id as idLocale, enUS } from "date-fns/locale";
 import {
   ShoppingCart, Trash2, ChevronLeft, CheckCircle2, Loader2,
@@ -43,6 +43,18 @@ function addHours(time: string, hours: number): string {
   const endH = Math.floor(totalMin / 60) % 24;
   const endM = totalMin % 60;
   return `${endH.toString().padStart(2, "0")}:${endM.toString().padStart(2, "0")}`;
+}
+
+/** Hasilkan daftar tanggal berulang dari startDateStr sebanyak count kali */
+function buildRepeatDates(startDateStr: string, type: "weekly" | "monthly", count: number): Date[] {
+  try {
+    const base = parseISO(startDateStr);
+    return Array.from({ length: count }, (_, i) =>
+      type === "weekly" ? addWeeks(base, i) : addMonths(base, i)
+    );
+  } catch {
+    return [];
+  }
 }
 
 function normalizePhone(raw: string) {
@@ -961,15 +973,46 @@ export default function Cart() {
                         ? item.facilityPricePerHour
                         : item.facilityPricePerHour * item.duration;
                       const lineTotal = basePrice * multiplier;
+
+                      // Daftar tanggal repeat per lapangan
+                      const repeatDates = useRepeatSummary
+                        ? buildRepeatDates(item.date, repeatType, repeatCount)
+                        : [];
+                      const SHOW_MAX = 5;
+                      const visibleDates = repeatDates.slice(0, SHOW_MAX);
+                      const hiddenCount = repeatDates.length - visibleDates.length;
+
                       return (
-                        <div key={item.id} className="flex justify-between text-sm gap-2">
-                          <span className="text-muted-foreground truncate">
-                            {item.facilityName}
-                            {unitLabel && (
-                              <span className="ml-1 text-primary font-medium">{unitLabel}</span>
-                            )}
-                          </span>
-                          <span className="font-semibold shrink-0">{formatCurrency(lineTotal)}</span>
+                        <div key={item.id} className="space-y-1">
+                          <div className="flex justify-between text-sm gap-2">
+                            <span className="text-muted-foreground font-medium truncate">
+                              {item.facilityName}
+                              {unitLabel && (
+                                <span className="ml-1 text-primary font-medium">{unitLabel}</span>
+                              )}
+                            </span>
+                            <span className="font-semibold shrink-0">{formatCurrency(lineTotal)}</span>
+                          </div>
+
+                          {/* Daftar tanggal sesi */}
+                          {repeatDates.length > 0 && (
+                            <div className="pl-2 border-l-2 border-primary/20 space-y-0.5">
+                              {visibleDates.map((d, i) => (
+                                <div key={i} className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                                  <Calendar size={10} className="shrink-0 text-primary/60" />
+                                  <span>
+                                    {format(d, "EEE, d MMM yyyy", { locale: lang === "en" ? enUS : idLocale })}
+                                    {item.startTime ? ` · ${item.startTime}–${addHours(item.startTime, item.duration)}` : ""}
+                                  </span>
+                                </div>
+                              ))}
+                              {hiddenCount > 0 && (
+                                <div className="text-xs text-primary/70 font-medium pl-3.5">
+                                  +{hiddenCount} {t("sesi lagi", "more sessions")}
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </div>
                       );
                     })}
