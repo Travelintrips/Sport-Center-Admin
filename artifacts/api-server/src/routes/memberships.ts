@@ -201,6 +201,29 @@ router.get("/memberships/:id", adminMiddleware, async (req, res) => {
 router.post("/memberships", async (req, res) => {
   try {
     const { name, email, phone, startDate, months, notes } = req.body;
+    if (!name || !email || !phone || !startDate) {
+      res.status(400).json({ error: "name, email, phone, dan startDate wajib diisi" });
+      return;
+    }
+
+    // ── Cegah duplikat: tolak jika phone sudah punya membership aktif/pending ──
+    const phoneNorm = String(phone).trim().toUpperCase();
+    const BLOCK_STATUSES = ["active", "pending_payment", "waiting_confirmation"];
+    const existingAll = await db
+      .select()
+      .from(gymMembershipsTable)
+      .where(eq(gymMembershipsTable.phone, String(phone).trim()));
+
+    const conflict = existingAll.find((m) => BLOCK_STATUSES.includes(m.status));
+    if (conflict) {
+      res.status(409).json({
+        error: "Nomor HP ini sudah terdaftar sebagai member aktif atau sedang menunggu konfirmasi. Gunakan fitur Perpanjang untuk memperpanjang membership Anda.",
+        conflictStatus: conflict.status,
+        conflictId: conflict.id,
+      });
+      return;
+    }
+
     const monthsNum = Number(months) || 1;
     const totalPrice = PRICE_PER_MONTH * monthsNum;
 
@@ -214,7 +237,7 @@ router.post("/memberships", async (req, res) => {
       .values({
         name,
         email,
-        phone,
+        phone: String(phone).trim(),
         startDate,
         endDate,
         months: monthsNum,
@@ -241,8 +264,8 @@ router.post("/memberships/:id/renew", async (req, res) => {
 
     const [existing] = await db.select().from(gymMembershipsTable).where(eq(gymMembershipsTable.id, id)).limit(1);
     if (!existing) { res.status(404).json({ error: "Membership tidak ditemukan" }); return; }
-    if (existing.status === "pending_payment") {
-      res.status(400).json({ error: "Selesaikan pembayaran yang ada sebelum memperpanjang" }); return;
+    if (existing.status === "pending_payment" || existing.status === "waiting_confirmation") {
+      res.status(400).json({ error: "Selesaikan pembayaran yang sedang berjalan sebelum memperpanjang. Status saat ini: " + existing.status }); return;
     }
 
     const todayStr = new Date().toISOString().split("T")[0]!;

@@ -1,6 +1,6 @@
 import { useState, useMemo, useRef } from "react";
 import { Link } from "wouter";
-import { useListFacilities, useCreateMembership, useSubmitMembershipPaymentProof, useGetSettings } from "@workspace/api-client-react";
+import { useListFacilities, useSubmitMembershipPaymentProof, useGetSettings } from "@workspace/api-client-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -65,17 +65,7 @@ function MembershipDialog({ open, onClose, initialMode = "register" }: { open: b
   const [renewMonths, setRenewMonths] = useState(1);
   const [renewLoading, setRenewLoading] = useState(false);
 
-  const createMutation = useCreateMembership({
-    mutation: {
-      onSuccess: (data) => {
-        setCreated({ id: data.id, name: data.name, endDate: data.endDate, totalPrice: data.totalPrice, months: data.months });
-        setStep("payment");
-      },
-      onError: () => {
-        toast({ title: t("Gagal mendaftar", "Registration failed"), description: t("Terjadi kesalahan. Silakan coba lagi.", "An error occurred. Please try again."), variant: "destructive" });
-      },
-    },
-  });
+  const [registerLoading, setRegisterLoading] = useState(false);
 
   const proofMutation = useSubmitMembershipPaymentProof({
     mutation: {
@@ -86,13 +76,42 @@ function MembershipDialog({ open, onClose, initialMode = "register" }: { open: b
     },
   });
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!form.name || !form.email || !form.phone || !form.startDate) {
       toast({ title: t("Form tidak lengkap", "Incomplete form"), description: t("Harap isi semua field yang wajib.", "Please fill in all required fields."), variant: "destructive" });
       return;
     }
-    createMutation.mutate({ data: { ...form, months } });
+    setRegisterLoading(true);
+    try {
+      const res = await fetch("/api/memberships", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...form, months }),
+      });
+      const data = await res.json();
+      if (res.status === 409) {
+        toast({
+          title: t("Sudah terdaftar", "Already registered"),
+          description: t(
+            "Nomor HP ini sudah memiliki membership aktif. Gunakan tombol Perpanjang untuk memperpanjang.",
+            "This phone number already has an active membership. Use the Renew button."
+          ),
+          variant: "destructive",
+        });
+        return;
+      }
+      if (!res.ok) {
+        toast({ title: t("Gagal mendaftar", "Registration failed"), description: data.error || t("Terjadi kesalahan.", "An error occurred."), variant: "destructive" });
+        return;
+      }
+      setCreated({ id: data.id, name: data.name, endDate: data.endDate, totalPrice: data.totalPrice, months: data.months });
+      setStep("payment");
+    } catch {
+      toast({ title: t("Gagal terhubung", "Connection failed"), description: t("Coba lagi.", "Please try again."), variant: "destructive" });
+    } finally {
+      setRegisterLoading(false);
+    }
   }
 
   async function handleLookup() {
@@ -511,8 +530,8 @@ function MembershipDialog({ open, onClose, initialMode = "register" }: { open: b
                   <span className="text-2xl font-black text-primary">{formatCurrency(PRICE_PER_MONTH * months)}</span>
                 </div>
               </div>
-              <Button type="submit" size="lg" className="w-full h-14 rounded-full font-bold shadow-lg shadow-primary/20 text-base" disabled={createMutation.isPending}>
-                {createMutation.isPending
+              <Button type="submit" size="lg" className="w-full h-14 rounded-full font-bold shadow-lg shadow-primary/20 text-base" disabled={registerLoading}>
+                {registerLoading
                   ? <><Loader2 size={16} className="mr-2 animate-spin" />{t("Memproses...", "Processing...")}</>
                   : <>{t("Lanjut ke Pembayaran", "Continue to Payment")} <ArrowRight size={16} className="ml-2" /></>}
               </Button>
