@@ -133,6 +133,13 @@ router.post("/memberships/:id/checkin", adminMiddleware, async (req, res) => {
     if (!member) { res.status(404).json({ error: "Member tidak ditemukan" }); return; }
     if (member.status !== "active") { res.status(400).json({ error: "Member tidak aktif" }); return; }
 
+    // Safety guard: endDate sudah lewat → otomatis expire dan tolak check-in
+    const todayStr = new Date(Date.now() + 7 * 60 * 60 * 1000).toISOString().split("T")[0]!;
+    if (member.endDate < todayStr) {
+      await db.update(gymMembershipsTable).set({ status: "expired", updatedAt: new Date() }).where(eq(gymMembershipsTable.id, id));
+      res.status(400).json({ error: "Membership sudah kadaluarsa, tidak bisa check-in" }); return;
+    }
+
     const [existing] = await db.select().from(gymCheckinsTable)
       .where(and(eq(gymCheckinsTable.membershipId, id), eq(gymCheckinsTable.checkinDate, checkinDate)))
       .limit(1);

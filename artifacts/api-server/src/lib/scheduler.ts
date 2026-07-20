@@ -1,4 +1,4 @@
-import { db, bookingsTable, facilitiesTable, bankReconciliationMatchesTable, waActionTokensTable } from "@workspace/db";
+import { db, bookingsTable, facilitiesTable, bankReconciliationMatchesTable, waActionTokensTable, gymMembershipsTable } from "@workspace/db";
 import { eq, and, lt, lte, isNotNull, isNull, inArray, sql } from "drizzle-orm";
 import { notifyBookingExpired, notifyReminderH1, notifyWaDayReminder, notifyWaStaffCheckin, notifyAuditCritical, notifyPaymentReminder } from "./notifications";
 import { createWaToken } from "./waTokens";
@@ -29,6 +29,29 @@ function getTomorrowWIB(): string {
 
 function getTodayWIB(): string {
   return getWIBNow().toISOString().split("T")[0];
+}
+
+async function expireOverdueMemberships(): Promise<void> {
+  try {
+    const todayWIB = getTodayWIB();
+    // Find active memberships whose endDate is before today (WIB)
+    const expired = await db
+      .select({ id: gymMembershipsTable.id, name: gymMembershipsTable.name, endDate: gymMembershipsTable.endDate })
+      .from(gymMembershipsTable)
+      .where(and(eq(gymMembershipsTable.status, "active"), lt(gymMembershipsTable.endDate, todayWIB)));
+
+    if (expired.length === 0) return;
+
+    await db
+      .update(gymMembershipsTable)
+      .set({ status: "expired", updatedAt: new Date() })
+      .where(and(eq(gymMembershipsTable.status, "active"), lt(gymMembershipsTable.endDate, todayWIB)));
+
+    logger.info({ count: expired.length, members: expired.map(m => `${m.name} (s/d ${m.endDate})`) },
+      "[scheduler] expireOverdueMemberships: set expired");
+  } catch (err) {
+    logger.error({ err }, "[scheduler] expireOverdueMemberships error");
+  }
 }
 
 async function expireOverdueBookings(): Promise<void> {
@@ -422,12 +445,14 @@ export function startScheduler(): void {
   logger.info("[scheduler] Starting background scheduler...");
 
   // Run immediately on startup
+  expireOverdueMemberships();
   expireOverdueBookings();
   autoCompleteBookings();
   checkConnections();
 
-  // Every 5 minutes: expire overdue bookings + auto-complete + reminders + nightly audit + connection health + daily rekap
+  // Every 5 minutes: expire overdue bookings + memberships + auto-complete + reminders + nightly audit + connection health + daily rekap
   setInterval(async () => {
+    await expireOverdueMemberships();
     await expireOverdueBookings();
     await autoCompleteBookings();
     await sendPaymentReminder();
