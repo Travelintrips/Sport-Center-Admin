@@ -354,6 +354,15 @@ router.post("/invoices/booking/:orderNumber/send-email", adminMiddleware, async 
       return;
     }
 
+    // Optional override: admin dapat kirim ke email berbeda (misal untuk test)
+    const overrideTo = (req.body?.overrideTo as string | undefined)?.trim() || undefined;
+    const recipientEmail = overrideTo || data.customerEmail;
+
+    if (!recipientEmail) {
+      res.status(400).json({ error: "Email tujuan kosong. Gunakan field 'overrideTo' atau pastikan booking memiliki email customer." });
+      return;
+    }
+
     const html = buildInvoiceHtml(data, { autoPrint: false });
     let nodemailer: any;
     try {
@@ -370,7 +379,7 @@ router.post("/invoices/booking/:orderNumber/send-email", adminMiddleware, async 
 
     await transporter.sendMail({
       from: `"Sport Center Soekarno-Hatta" <${smtpFrom}>`,
-      to: data.customerEmail,
+      to: recipientEmail,
       subject: `Invoice ${data.invoiceNumber} – ${data.facilityName}`,
       html,
     });
@@ -381,12 +390,17 @@ router.post("/invoices/booking/:orderNumber/send-email", adminMiddleware, async 
       ...userInfo,
       action: "INVOICE_EMAIL_SENT",
       entity: "booking",
-      after: { orderNumber, invoiceNumber: data.invoiceNumber, to: data.customerEmail },
+      after: {
+        orderNumber,
+        invoiceNumber: data.invoiceNumber,
+        to: recipientEmail,
+        ...(overrideTo ? { overrideTo, originalEmail: data.customerEmail } : {}),
+      },
       ipAddress,
       userAgent,
     });
 
-    res.json({ success: true, to: data.customerEmail, invoiceNumber: data.invoiceNumber });
+    res.json({ success: true, to: recipientEmail, invoiceNumber: data.invoiceNumber, ...(overrideTo ? { note: "Dikirim ke override email, bukan email customer asli" } : {}) });
   } catch (err) {
     req.log.error({ err }, "Send invoice email error");
     res.status(500).json({ error: "Internal server error" });
