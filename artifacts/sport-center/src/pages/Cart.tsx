@@ -265,15 +265,10 @@ export default function Cart() {
     const orders: string[] = [];
     const successItemIds: string[] = [];
 
-<<<<<<< HEAD
-    // Group ref untuk semua booking dari satu keranjang (termasuk repeat booking)
-    const cartRef = items.length > 1
-=======
     // Group ref untuk semua booking dari satu keranjang.
     // Dibuat juga saat repeat agar semua lapangan × semua sesi masuk 1 Invoice Grup.
     const useRepeat = isRepeat && items.every((it) => it.mode === "time_slot");
     const cartRef = (items.length > 1 || useRepeat)
->>>>>>> bb91daabb15653079cf181a252367c1916dadee1
       ? `CART-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`
       : null;
 
@@ -290,10 +285,7 @@ export default function Cart() {
           customerPhone: normalizedPhone,
           facilityId: item.facilityId,
           source: "cart",
-<<<<<<< HEAD
-=======
           // Selalu sertakan cartRef agar semua lapangan + sesi repeat masuk 1 grup invoice
->>>>>>> bb91daabb15653079cf181a252367c1916dadee1
           ...(cartRef ? { groupRef: cartRef } : {}),
         };
 
