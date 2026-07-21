@@ -290,12 +290,13 @@ router.post("/invoices/booking/:orderNumber/send-wa", adminMiddleware, async (re
     const appUrl =
       process.env.APP_URL ??
       `https://${process.env.REPLIT_DEV_DOMAIN ?? "localhost:5000"}`;
-    const invoiceLink = `${appUrl}/admin/invoice/${orderNumber}`;
+    const pdfLink = `${appUrl}/api/public/invoices/${orderNumber}/pdf`;
 
     const message =
       customMessage ||
-      `Halo ${data.customerName},\n\n` +
-        `Berikut adalah invoice pemesanan Anda:\n\n` +
+      `✅ *Pembayaran Dikonfirmasi!*\n\n` +
+        `Halo *${data.customerName}*,\n\n` +
+        `Invoice booking Anda sudah siap:\n\n` +
         `📋 *No Invoice:* ${data.invoiceNumber}\n` +
         `🏟️ *Fasilitas:* ${data.facilityName}\n` +
         `📅 *Tanggal:* ${data.bookingDate}\n` +
@@ -304,11 +305,8 @@ router.post("/invoices/booking/:orderNumber/send-wa", adminMiddleware, async (re
         `💰 *DPP:* Rp ${new Intl.NumberFormat("id-ID").format(data.dpp)}\n` +
         `🧾 *PPN ${data.ppnRate}%:* Rp ${new Intl.NumberFormat("id-ID").format(data.ppnAmount)}\n` +
         `✅ *Total:* Rp ${new Intl.NumberFormat("id-ID").format(data.grandTotal)}\n\n` +
-        `🏦 *Pembayaran:*\n` +
-        `Bank: ${data.bankName}\n` +
-        `No Rek: ${data.bankAccount}\n` +
-        `A/N: ${data.bankAccountName}\n\n` +
-        `Terima kasih telah memilih Sport Center Soekarno-Hatta. 🙏`;
+        `📄 *Download Invoice PDF:*\n${pdfLink}\n\n` +
+        `Terima kasih telah memilih Sport Center Soekarno-Hatta! 🙏`;
 
     const token =
       req.body?.fonnteToken ??
