@@ -389,3 +389,171 @@ export async function sendInvoiceToCustomer(
   logger.info({ orderNumber, pdfStorageUrl, emailSent, waSent, errors }, "[InvoiceDelivery] Selesai");
   return { pdfUrl: pdfStorageUrl, emailSent, waSent, errors };
 }
+
+// ─── sendGroupInvoiceToCustomer — invoice gabungan untuk group booking ────────
+
+export async function sendGroupInvoiceToCustomer(
+  groupRef: string,
+  audit?: AuditContext,
+): Promise<InvoiceDeliveryResult> {
+  const errors: string[] = [];
+  let emailSent = false;
+  let waSent = false;
+
+  // ── 1. Siapkan URL internal server untuk puppeteer ───────────────────────
+  const localBase = getLocalServerUrl();
+  const internalToken = getInternalPdfToken();
+  const internalUrl = `${localBase}/api/invoices/internal/group/${encodeURIComponent(groupRef)}/html`;
+  const headers = { "x-internal-pdf-token": internalToken };
+
+  // ── 2. Generate PDF buffer via puppeteer (identik 100% dengan admin portal) ─
+  logger.info({ groupRef, internalUrl }, "[InvoiceDelivery] Generate group PDF via URL internal server");
+  let pdfBuffer: Buffer;
+  try {
+    pdfBuffer = await generatePdfBufferFromUrl(internalUrl, headers);
+  } catch (err) {
+    logger.error({ err, groupRef }, "[InvoiceDelivery] Puppeteer gagal group invoice — fallback ke HTML");
+    const { resolveGroupInvoiceData } = await import("./invoiceResolver");
+    const { buildInvoiceHtml } = await import("./invoiceTemplate");
+    const { generatePdfBufferFromHtml } = await import("./pdfGenerator");
+    const data = await resolveGroupInvoiceData(groupRef);
+    if (!data) throw new Error(`Group invoice data tidak ditemukan untuk groupRef: ${groupRef}`);
+    const html = buildInvoiceHtml(data, { autoPrint: false });
+    pdfBuffer = await generatePdfBufferFromHtml(html);
+  }
+
+  // ── 3. Upload ke storage ─────────────────────────────────────────────────
+  const safeFilename = `invoice-group-${groupRef.replace(/[^a-zA-Z0-9-]/g, "-")}.pdf`;
+  logger.info({ groupRef, sizeBytes: pdfBuffer.length }, "[InvoiceDelivery] Upload group PDF ke storage");
+  const pdfStorageUrl = await uploadFile("invoice-pdfs", safeFilename, pdfBuffer, "application/pdf");
+
+  // ── 4. Simpan URL ke semua booking dalam grup ────────────────────────────
+  const groupBookings = await db
+    .select({
+      id: bookingsTable.id,
+      orderNumber: bookingsTable.orderNumber,
+      customerName: bookingsTable.customerName,
+      customerPhone: bookingsTable.customerPhone,
+      customerEmail: bookingsTable.customerEmail,
+      bookingDate: bookingsTable.bookingDate,
+      startTime: bookingsTable.startTime,
+      endTime: bookingsTable.endTime,
+      durationHours: bookingsTable.durationHours,
+      grandTotal: bookingsTable.grandTotal,
+      totalPrice: bookingsTable.totalPrice,
+    })
+    .from(bookingsTable)
+    .where(eq(bookingsTable.groupRef, groupRef));
+
+  if (!groupBookings.length) throw new Error(`Tidak ada booking untuk groupRef: ${groupRef}`);
+
+  for (const b of groupBookings) {
+    await db.update(bookingsTable).set({ invoicePdfUrl: pdfStorageUrl, updatedAt: new Date() }).where(eq(bookingsTable.id, b.id));
+  }
+
+  const sorted = [...groupBookings].sort((a, b) => a.bookingDate.localeCompare(b.bookingDate));
+  const firstBooking = sorted[0]!;
+  const customerName = firstBooking.customerName;
+  const customerPhone = firstBooking.customerPhone;
+  const customerEmail = firstBooking.customerEmail ?? "";
+
+  const datePart = firstBooking.bookingDate.replace(/-/g, "").substring(0, 8);
+  const groupSeq = groupRef.replace(/[^0-9]/g, "").padStart(6, "0");
+  const invoiceNumber = `INV/SC/GRP/${datePart}/${groupSeq}`;
+
+  const totalGrandTotal = groupBookings.reduce((sum, b) => {
+    return sum + (b.grandTotal != null ? Number(b.grandTotal) : Number(b.totalPrice ?? 0));
+  }, 0);
+
+  const appBase = await getBaseUrl();
+  const publicPdfLink = `${appBase}/api/public/invoices/group/${groupRef}/pdf`;
+
+  await logAudit({
+    userId: audit?.userId,
+    userName: audit?.userName ?? "system",
+    action: "INVOICE_PDF_GENERATED",
+    entity: "booking_group",
+    after: { groupRef, invoiceNumber, pdfStorageUrl, publicPdfLink, bookingCount: groupBookings.length },
+    ipAddress: audit?.ipAddress,
+    userAgent: audit?.userAgent,
+  });
+
+  // ── 5. Kirim Email ────────────────────────────────────────────────────────
+  try {
+    await sendInvoicePdfEmail({
+      toEmail: customerEmail,
+      customerName,
+      invoiceNumber,
+      facilityName: `Booking Gabungan (${groupBookings.length} sesi)`,
+      grandTotal: totalGrandTotal,
+      pdfBuffer,
+      publicPdfLink,
+      orderNumber: groupRef,
+    });
+    emailSent = true;
+    await logAudit({
+      userId: audit?.userId,
+      userName: audit?.userName ?? "system",
+      action: "INVOICE_PDF_SENT_EMAIL",
+      entity: "booking_group",
+      after: { groupRef, invoiceNumber, to: customerEmail },
+      ipAddress: audit?.ipAddress,
+      userAgent: audit?.userAgent,
+    });
+  } catch (err) {
+    errors.push(`Email gagal: ${(err as Error).message}`);
+    logger.error({ err, groupRef }, "[InvoiceDelivery] Gagal kirim email group invoice");
+  }
+
+  // ── 6. Kirim WhatsApp — pesan khusus multi-sesi ───────────────────────────
+  try {
+    const phone = cleanPhone(customerPhone);
+    if (!phone) throw new Error("Nomor HP customer kosong");
+
+    const token = await getFonnteToken();
+    if (!token) throw new Error("FONNTE_TOKEN tidak tersedia");
+
+    const fmtNum = (n: number) => new Intl.NumberFormat("id-ID").format(n);
+    const sessionLines = sorted.slice(0, 8)
+      .map((b) => `• ${b.bookingDate}, ${b.startTime}–${b.endTime}`)
+      .join("\n");
+    const moreNote = sorted.length > 8 ? `\n_(+${sorted.length - 8} sesi lainnya)_` : "";
+
+    const message =
+      `✅ *Pembayaran Dikonfirmasi!*\n\n` +
+      `Halo *${customerName}*,\n\n` +
+      `Invoice booking gabungan Anda sudah siap:\n\n` +
+      `📅 *${sorted.length} Sesi Booking:*\n${sessionLines}${moreNote}\n\n` +
+      `✅ *Total: Rp ${fmtNum(totalGrandTotal)}*\n\n` +
+      `📄 *Download Invoice PDF:*\n${publicPdfLink}\n\n` +
+      `Terima kasih telah memilih Sport Center Soekarno-Hatta! 🙏`;
+
+    const resp = await fetch("https://api.fonnte.com/send", {
+      method: "POST",
+      headers: { Authorization: token, "Content-Type": "application/json" },
+      body: JSON.stringify({ target: phone, message }),
+    });
+    const body = await resp.json().catch(() => ({}));
+    if (!resp.ok || (body as any).status === false) {
+      throw new Error(`Fonnte error: ${JSON.stringify(body)}`);
+    }
+
+    waSent = true;
+    logger.info({ phone, groupRef }, "[InvoiceDelivery] WA group invoice terkirim");
+    await logAudit({
+      userId: audit?.userId,
+      userName: audit?.userName ?? "system",
+      action: "INVOICE_PDF_SENT_WA",
+      entity: "booking_group",
+      after: { groupRef, invoiceNumber, phone: customerPhone },
+      ipAddress: audit?.ipAddress,
+      userAgent: audit?.userAgent,
+    });
+  } catch (err) {
+    errors.push(`WA gagal: ${(err as Error).message}`);
+    logger.error({ err, groupRef }, "[InvoiceDelivery] Gagal kirim WA group invoice");
+  }
+
+  logger.info({ groupRef, pdfStorageUrl, emailSent, waSent, errors }, "[InvoiceDelivery] Group invoice selesai");
+  return { pdfUrl: pdfStorageUrl, emailSent, waSent, errors };
+}
