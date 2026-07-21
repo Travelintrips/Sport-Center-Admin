@@ -297,13 +297,10 @@ router.post("/invoices/booking/:orderNumber/send-wa", adminMiddleware, async (re
       `✅ *Pembayaran Dikonfirmasi!*\n\n` +
         `Halo *${data.customerName}*,\n\n` +
         `Invoice booking Anda sudah siap:\n\n` +
-        `📋 *No Invoice:* ${data.invoiceNumber}\n` +
         `🏟️ *Fasilitas:* ${data.facilityName}\n` +
         `📅 *Tanggal:* ${data.bookingDate}\n` +
         `⏰ *Jam:* ${data.startTime} – ${data.endTime}\n` +
         `⏱️ *Durasi:* ${data.durationHours} jam\n\n` +
-        `💰 *DPP:* Rp ${new Intl.NumberFormat("id-ID").format(data.dpp)}\n` +
-        `🧾 *PPN ${data.ppnRate}%:* Rp ${new Intl.NumberFormat("id-ID").format(data.ppnAmount)}\n` +
         `✅ *Total:* Rp ${new Intl.NumberFormat("id-ID").format(data.grandTotal)}\n\n` +
         `📄 *Download Invoice PDF:*\n${pdfLink}\n\n` +
         `Terima kasih telah memilih Sport Center Soekarno-Hatta! 🙏`;
