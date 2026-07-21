@@ -143,11 +143,17 @@ async function sendWA(
 
 export async function sendWAToAdmins(message: string): Promise<void> {
   const { adminPhones } = await getWaConfig();
+  const isDev = process.env.NODE_ENV !== "production";
   // Deduplikasi: normalize nomor lalu kirim sekali per nomor unik
   const seen = new Set<string>();
   for (const phone of adminPhones) {
     const clean = cleanPhoneNumber(phone);
     if (!clean || seen.has(clean)) continue;
+    // Di non-production: skip grup WA (format XXXXXXXX@g.us) agar notif dev tidak masuk grup produksi
+    if (isDev && clean.endsWith("@g.us")) {
+      logger.info({ target: clean }, "[WA] DEV — skip kirim ke grup WA (hanya production)");
+      continue;
+    }
     seen.add(clean);
     await sendWA(phone, message);
   }
