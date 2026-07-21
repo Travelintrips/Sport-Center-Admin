@@ -855,7 +855,12 @@ router.post("/bookings/recurring", async (req, res) => {
       // AP2 employee fields (optional)
       customerType: rawCustomerType, idCardNumber: rawIdCardNumber,
       bookingType: rawBookingTypeR,
+      // External groupRef dari cart checkout (agar semua lapangan + sesi repeat masuk 1 grup)
+      groupRef: externalGroupRefRaw,
     } = req.body;
+    const externalGroupRef: string | null = externalGroupRefRaw
+      ? String(externalGroupRefRaw).trim().slice(0, 64) || null
+      : null;
     const bookingTypeR: "regular" | "event" = rawBookingTypeR === "event" ? "event" : "regular";
     const isEventR = bookingTypeR === "event";
     const EVENT_DISCOUNT_RATE_R = 3 / 14; // ≈ 21.43% — 350.000 → 275.000 tepat
@@ -1038,34 +1043,67 @@ router.post("/bookings/recurring", async (req, res) => {
     const totalDpp = created.reduce((sum: number, b: any) => sum + Number(b.dpp ?? b.totalPrice), 0);
     const totalPpn = created.reduce((sum: number, b: any) => sum + Number(b.ppnAmount ?? 0), 0);
 
-    // Auto-group: jika ada 2+ booking berhasil, gabung otomatis ke 1 grup bayar
+    // ── Grouping logic ──────────────────────────────────────────────────────
+    // Prioritas: gunakan externalGroupRef dari cart (agar multi-lapangan + repeat → 1 grup invoice).
+    // Fallback: auto-generate groupRef jika ada 2+ sesi (satu lapangan berulang).
     let groupRef: string | null = null;
-    if (created.length >= 2) {
-      // Generate unique groupRef
-      for (let attempt = 0; attempt < 10; attempt++) {
-        const candidate = `GRP-${String(Math.floor(Math.random() * 99999) + 1).padStart(5, "0")}`;
-        const existing = await db.select({ groupRef: bookingGroupsTable.groupRef })
-          .from(bookingGroupsTable).where(eq(bookingGroupsTable.groupRef, candidate)).limit(1);
-        if (!existing.length) { groupRef = candidate; break; }
+
+    if (created.length > 0) {
+      if (externalGroupRef) {
+        // Cart meneruskan groupRef bersama — gabungkan semua sesi ke grup yang sama
+        const ownerPhone = normalizePhone(String(customerPhone));
+        const [existingGroup] = await db.select()
+          .from(bookingGroupsTable).where(eq(bookingGroupsTable.groupRef, externalGroupRef)).limit(1);
+
+        if (existingGroup) {
+          // Grup sudah ada (lapangan lain dari keranjang yang sama) — akumulasi totalPayment
+          if (!existingGroup.customerPhone || existingGroup.customerPhone === ownerPhone) {
+            await db.update(bookingGroupsTable)
+              .set({
+                totalPayment: String(Number(existingGroup.totalPayment) + grandTotalAmount),
+                updatedAt: new Date(),
+              })
+              .where(eq(bookingGroupsTable.groupRef, externalGroupRef));
+          }
+        } else {
+          // Buat grup baru dengan groupRef dari cart
+          await db.insert(bookingGroupsTable).values({
+            groupRef: externalGroupRef,
+            customerPhone: ownerPhone,
+            customerName: String(customerName),
+            totalPayment: String(grandTotalAmount),
+            status: "pending",
+            notes: `Dari keranjang booking (${created.length} sesi berulang)`,
+          });
+        }
+        groupRef = externalGroupRef;
+      } else if (created.length >= 2) {
+        // Tanpa groupRef eksternal: auto-generate untuk sesi berulang satu lapangan
+        for (let attempt = 0; attempt < 10; attempt++) {
+          const candidate = `GRP-${String(Math.floor(Math.random() * 99999) + 1).padStart(5, "0")}`;
+          const existing = await db.select({ groupRef: bookingGroupsTable.groupRef })
+            .from(bookingGroupsTable).where(eq(bookingGroupsTable.groupRef, candidate)).limit(1);
+          if (!existing.length) { groupRef = candidate; break; }
+        }
+        if (!groupRef) groupRef = `GRP-${Date.now()}`;
+
+        await db.insert(bookingGroupsTable).values({
+          groupRef,
+          customerPhone: String(customerPhone),
+          customerName: String(customerName),
+          totalPayment: String(grandTotalAmount),
+          status: "pending",
+          notes: `Auto-dibuat dari booking berulang (${created.length} sesi)`,
+        });
       }
-      if (!groupRef) groupRef = `GRP-${Date.now()}`;
 
-      await db.insert(bookingGroupsTable).values({
-        groupRef,
-        customerPhone: String(customerPhone),
-        customerName: String(customerName),
-        totalPayment: String(grandTotalAmount),
-        status: "pending",
-        notes: `Auto-dibuat dari booking berulang (${created.length} sesi)`,
-      });
-
-      const orderNumbers = created.map((b: any) => b.orderNumber as string);
-      await db.update(bookingsTable)
-        .set({ groupRef })
-        .where(inArray(bookingsTable.orderNumber, orderNumbers));
-
-      // Update created array dengan groupRef
-      for (const b of created) b.groupRef = groupRef;
+      if (groupRef) {
+        const orderNumbers = created.map((b: any) => b.orderNumber as string);
+        await db.update(bookingsTable)
+          .set({ groupRef })
+          .where(inArray(bookingsTable.orderNumber, orderNumbers));
+        for (const b of created) b.groupRef = groupRef;
+      }
     }
 
     // Rekap otomatis jika ada booking yang jatuh hari ini
