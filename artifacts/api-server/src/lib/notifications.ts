@@ -644,7 +644,7 @@ export async function notifyWaCustomerRegistered(data: WaCustomerRegisteredData)
   const msg =
     `🎉 *Registrasi Berhasil!*\n\n` +
     `Halo *${data.customerName}*,\n` +
-    `Akun kamu di *Sport Center Jakarta* sudah aktif ✅\n\n` +
+    `Akun kamu di *Sport Center Bandara Soekarno Hatta* sudah aktif ✅\n\n` +
     `👤 *Kode Customer:* \`${data.customerCode}\`\n\n` +
     `Simpan kode ini untuk referensi ya!\n\n` +
     `Sekarang kamu bisa langsung booking fasilitas:\n` +

@@ -512,7 +512,7 @@ router.post("/wa/webhook", async (req, res) => {
     if (!isBookingIntent(msg)) {
       // Fallback: balas semua pesan dengan menu utama
       await sendWAReply(senderPhone,
-        `👋 Halo! Selamat datang di *Sport Center Jakarta*.\n\n` +
+        `👋 Halo! Selamat datang di *Sport Center Bandara Soekarno Hatta*.\n\n` +
         `Ketik salah satu perintah berikut:\n` +
         `🏅 *booking* — Buat booking fasilitas\n` +
         `🔍 *status* — Cek status booking\n\n` +
@@ -2028,7 +2028,7 @@ async function startBookingSession(phone: string, msg: string, waName: string): 
       });
 
       const reply = [
-        `👋 Halo${waName ? `, *${waName}*` : ""}! Selamat datang di *Sport Center Jakarta*! 🏅`,
+        `👋 Halo${waName ? `, *${waName}*` : ""}! Selamat datang di *Sport Center Bandara Soekarno Hatta*! 🏅`,
         ``,
         `Karena ini pertama kali Anda booking, kami butuh sedikit data Anda. Isi formulir singkat berikut (hanya 1 menit):`,
         ``,

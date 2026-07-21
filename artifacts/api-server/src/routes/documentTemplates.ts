@@ -337,7 +337,7 @@ router.get("/public/kwitansi/:orderNumber", async (req, res) => {
     ]);
 
     const s = settings as any;
-    const centerName = s?.centerName ?? "Sport Center Jakarta";
+    const centerName = s?.centerName ?? "Sport Center Bandara Soekarno Hatta";
     const centerAddress = s?.address ?? "";
     const centerPhone = s?.phone ?? "";
 
@@ -558,7 +558,7 @@ router.get("/public/kwitansi-data/:orderNumber", async (req, res) => {
       grandTotal: booking.grandTotal != null ? Number(booking.grandTotal) : null,
       status: booking.status,
       confirmedAt: booking.updatedAt ?? booking.createdAt,
-      centerName: (settings as any)?.centerName ?? "Sport Center Jakarta",
+      centerName: (settings as any)?.centerName ?? "Sport Center Bandara Soekarno Hatta",
       centerAddress: (settings as any)?.address ?? "",
       centerPhone: (settings as any)?.phone ?? "",
       bankName: (settings as any)?.bankName ?? "",

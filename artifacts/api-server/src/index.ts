@@ -606,7 +606,7 @@ async function runStartupMigrations() {
     // Seed system default document templates
     `INSERT INTO sport_center.company_document_templates
        (company_id, document_type, is_default, company_display_name, finance_name, finance_title, number_format_prefix, paper_style)
-     SELECT NULL, t.dt, true, 'Sport Center Jakarta', 'Kepala Keuangan', 'Finance Manager', t.prefix, 'A4'
+     SELECT NULL, t.dt, true, 'Sport Center Bandara Soekarno Hatta', 'Kepala Keuangan', 'Finance Manager', t.prefix, 'A4'
      FROM (VALUES
        ('invoice','INV'), ('spp','SPP'), ('faktur','FAKTUR'),
        ('kwitansi','KWT'), ('lampiran','LMP'), ('berita_acara','BA')
