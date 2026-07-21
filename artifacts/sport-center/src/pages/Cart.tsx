@@ -265,7 +265,7 @@ export default function Cart() {
     const orders: string[] = [];
     const successItemIds: string[] = [];
 
-    // Group ref untuk semua booking dari satu keranjang
+    // Group ref untuk semua booking dari satu keranjang (termasuk repeat booking)
     const cartRef = items.length > 1
       ? `CART-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`
       : null;
@@ -286,7 +286,7 @@ export default function Cart() {
           customerPhone: normalizedPhone,
           facilityId: item.facilityId,
           source: "cart",
-          ...(cartRef && !useRepeat ? { groupRef: cartRef } : {}),
+          ...(cartRef ? { groupRef: cartRef } : {}),
         };
 
         if (email.trim()) body.customerEmail = email.trim();
