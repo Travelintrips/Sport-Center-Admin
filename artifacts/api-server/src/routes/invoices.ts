@@ -283,7 +283,10 @@ router.post("/invoices/booking/:orderNumber/send-wa", adminMiddleware, async (re
     const data = await resolveInvoiceData(orderNumber);
     if (!data) { res.status(404).json({ error: "Booking tidak ditemukan" }); return; }
 
-    const phone = data.customerPhone.replace(/^\+/, "").replace(/^0/, "62");
+    // Optional override: admin dapat kirim ke nomor WA berbeda (misal untuk test)
+    const overridePhone = (req.body?.overridePhone as string | undefined)?.trim() || undefined;
+    const rawPhone = overridePhone || data.customerPhone;
+    const phone = rawPhone.replace(/^\+/, "").replace(/^0/, "62");
     const appUrl =
       process.env.APP_URL ??
       `https://${process.env.REPLIT_DEV_DOMAIN ?? "localhost:5000"}`;
@@ -327,12 +330,24 @@ router.post("/invoices/booking/:orderNumber/send-wa", adminMiddleware, async (re
       ...userInfo,
       action: "INVOICE_WA_SENT",
       entity: "booking",
-      after: { orderNumber, invoiceNumber: data.invoiceNumber, phone: data.customerPhone, fonnteStatus: result },
+      after: {
+        orderNumber,
+        invoiceNumber: data.invoiceNumber,
+        phone: rawPhone,
+        fonnteStatus: result,
+        ...(overridePhone ? { overridePhone, originalPhone: data.customerPhone } : {}),
+      },
       ipAddress,
       userAgent,
     });
 
-    res.json({ success: true, phone: data.customerPhone, invoiceNumber: data.invoiceNumber, fonnteResponse: result });
+    res.json({
+      success: true,
+      phone: rawPhone,
+      invoiceNumber: data.invoiceNumber,
+      fonnteResponse: result,
+      ...(overridePhone ? { note: "Dikirim ke override phone, bukan nomor customer asli" } : {}),
+    });
   } catch (err) {
     req.log.error({ err }, "Send invoice WA error");
     res.status(500).json({ error: "Internal server error" });
