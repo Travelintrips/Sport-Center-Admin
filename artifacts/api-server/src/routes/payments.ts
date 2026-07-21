@@ -14,7 +14,7 @@ import { createWaToken } from "../lib/waTokens";
 import { logger } from "../lib/logger";
 import { getBaseUrl } from "../lib/appUrl";
 import { sendRekapPemakaianToAdmin } from "../lib/rekapPemakaian";
-import { sendInvoiceToCustomer } from "../lib/invoiceDelivery";
+import { sendInvoiceToCustomer, sendGroupInvoiceToCustomer } from "../lib/invoiceDelivery";
 
 // Helper: kirim rekap ke admin WA hanya jika tanggal booking = hari ini (WIB)
 function todayWIB(): string {
@@ -396,11 +396,15 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
           }).catch((err) => logger.error({ err, orderNumber: booking.orderNumber, phone: booking.customerPhone }, "[WA] notifyPaymentConfirmed error"));
 
           // Kirim invoice PDF ke customer via email & WA (fire-and-forget)
-          sendInvoiceToCustomer(booking.orderNumber, {
-            userId: userInfo.userId,
-            userName: userInfo.userName ?? "admin",
-            ...clientInfo,
-          }).catch((err) => logger.error({ err, orderNumber: booking.orderNumber }, "[InvoiceDelivery] Gagal kirim invoice PDF setelah payment confirmed"));
+          // Jika booking bagian dari grup, kirim invoice gabungan
+          const invoiceAudit = { userId: userInfo.userId, userName: userInfo.userName ?? "admin", ...clientInfo };
+          if (booking.groupRef) {
+            sendGroupInvoiceToCustomer(booking.groupRef, invoiceAudit)
+              .catch((err) => logger.error({ err, groupRef: booking.groupRef }, "[InvoiceDelivery] Gagal kirim invoice grup setelah payment confirmed"));
+          } else {
+            sendInvoiceToCustomer(booking.orderNumber, invoiceAudit)
+              .catch((err) => logger.error({ err, orderNumber: booking.orderNumber }, "[InvoiceDelivery] Gagal kirim invoice PDF setelah payment confirmed"));
+          }
           syncStatusToBizportal(booking.orderNumber, "confirmed", payment.proofUrl, new Date(), booking).catch(() => {});
           pushConfirmedPaymentAsBankMutation(booking, new Date()).catch(() => {});
 
