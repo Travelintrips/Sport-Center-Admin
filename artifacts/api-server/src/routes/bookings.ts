@@ -855,9 +855,17 @@ router.post("/bookings/recurring", async (req, res) => {
       // AP2 employee fields (optional)
       customerType: rawCustomerType, idCardNumber: rawIdCardNumber,
       bookingType: rawBookingTypeR,
+<<<<<<< HEAD
       // groupRef dari cart checkout (agar semua fasilitas di keranjang satu grup)
       groupRef: externalGroupRef,
+=======
+      // External groupRef dari cart checkout (agar semua lapangan + sesi repeat masuk 1 grup)
+      groupRef: externalGroupRefRaw,
+>>>>>>> bb91daabb15653079cf181a252367c1916dadee1
     } = req.body;
+    const externalGroupRef: string | null = externalGroupRefRaw
+      ? String(externalGroupRefRaw).trim().slice(0, 64) || null
+      : null;
     const bookingTypeR: "regular" | "event" = rawBookingTypeR === "event" ? "event" : "regular";
     const isEventR = bookingTypeR === "event";
     const EVENT_DISCOUNT_RATE_R = 3 / 14; // ≈ 21.43% — 350.000 → 275.000 tepat
@@ -1040,6 +1048,7 @@ router.post("/bookings/recurring", async (req, res) => {
     const totalDpp = created.reduce((sum: number, b: any) => sum + Number(b.dpp ?? b.totalPrice), 0);
     const totalPpn = created.reduce((sum: number, b: any) => sum + Number(b.ppnAmount ?? 0), 0);
 
+<<<<<<< HEAD
     // Auto-group: jika ada 1+ booking berhasil, gabung ke grup bayar
     // Prioritas: gunakan groupRef dari cart (externalGroupRef) jika ada, baru generate baru
     let groupRef: string | null = null;
@@ -1073,21 +1082,57 @@ router.post("/bookings/recurring", async (req, res) => {
               })
               .where(eq(bookingGroupsTable.groupRef, incomingCartGroupRef));
             groupRef = incomingCartGroupRef;
+=======
+    // ── Grouping logic ──────────────────────────────────────────────────────
+    // Prioritas: gunakan externalGroupRef dari cart (agar multi-lapangan + repeat → 1 grup invoice).
+    // Fallback: auto-generate groupRef jika ada 2+ sesi (satu lapangan berulang).
+    let groupRef: string | null = null;
+
+    if (created.length > 0) {
+      if (externalGroupRef) {
+        // Cart meneruskan groupRef bersama — gabungkan semua sesi ke grup yang sama
+        const ownerPhone = normalizePhone(String(customerPhone));
+        const [existingGroup] = await db.select()
+          .from(bookingGroupsTable).where(eq(bookingGroupsTable.groupRef, externalGroupRef)).limit(1);
+
+        if (existingGroup) {
+          // Grup sudah ada (lapangan lain dari keranjang yang sama) — akumulasi totalPayment
+          if (!existingGroup.customerPhone || existingGroup.customerPhone === ownerPhone) {
+            await db.update(bookingGroupsTable)
+              .set({
+                totalPayment: String(Number(existingGroup.totalPayment) + grandTotalAmount),
+                updatedAt: new Date(),
+              })
+              .where(eq(bookingGroupsTable.groupRef, externalGroupRef));
+>>>>>>> bb91daabb15653079cf181a252367c1916dadee1
           }
         } else {
           // Buat grup baru dengan groupRef dari cart
           await db.insert(bookingGroupsTable).values({
+<<<<<<< HEAD
             groupRef: incomingCartGroupRef,
+=======
+            groupRef: externalGroupRef,
+>>>>>>> bb91daabb15653079cf181a252367c1916dadee1
             customerPhone: ownerPhone,
             customerName: String(customerName),
             totalPayment: String(grandTotalAmount),
             status: "pending",
+<<<<<<< HEAD
             notes: `Dari keranjang booking (multi-fasilitas, ${created.length} sesi)`,
           });
           groupRef = incomingCartGroupRef;
         }
       } else if (created.length >= 2) {
         // Tidak ada groupRef dari luar — generate baru (booking berulang 1 fasilitas)
+=======
+            notes: `Dari keranjang booking (${created.length} sesi berulang)`,
+          });
+        }
+        groupRef = externalGroupRef;
+      } else if (created.length >= 2) {
+        // Tanpa groupRef eksternal: auto-generate untuk sesi berulang satu lapangan
+>>>>>>> bb91daabb15653079cf181a252367c1916dadee1
         for (let attempt = 0; attempt < 10; attempt++) {
           const candidate = `GRP-${String(Math.floor(Math.random() * 99999) + 1).padStart(5, "0")}`;
           const existing = await db.select({ groupRef: bookingGroupsTable.groupRef })
@@ -1111,8 +1156,11 @@ router.post("/bookings/recurring", async (req, res) => {
         await db.update(bookingsTable)
           .set({ groupRef })
           .where(inArray(bookingsTable.orderNumber, orderNumbers));
+<<<<<<< HEAD
 
         // Update created array dengan groupRef
+=======
+>>>>>>> bb91daabb15653079cf181a252367c1916dadee1
         for (const b of created) b.groupRef = groupRef;
       }
     }
