@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db, bookingsTable, facilitiesTable, paymentsTable, promosTable, discountSettingsTable, apMembersTable, bookingHistoryTable, usersTable, verificationLogsTable, companyUsersTable, bookingGroupsTable, settingsTable, waActionTokensTable, waNotifLogsTable } from "@workspace/db";
-import { eq, and, sql, or, ilike, desc, inArray, notExists } from "drizzle-orm";
+import { eq, and, sql, or, ilike, desc, inArray, notExists, gte } from "drizzle-orm";
 import { adminMiddleware, authMiddleware, verifyToken } from "../lib/auth";
 import { broadcastAvailabilityChange } from "../lib/supabase";
 import { notifyBookingCreated, notifyPaymentConfirmed, notifyBookingCancelled, notifyCompanyBookingCreated, notifyDpPaid, notifyWaAdminNewBooking, notifyAdminBookingApprovalRequest, notifyPaymentProofUploaded } from "../lib/notifications";
@@ -1938,6 +1938,35 @@ router.get("/admin/bookings/groups/:groupRef/sessions", adminMiddleware, async (
     })));
   } catch (err) {
     req.log.error({ err }, "Group sessions error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ─── POST /admin/bookings/recover-expired — endpoint sementara, hapus setelah dipakai ───
+// Pulihkan booking yang di-expire terlalu cepat (aturan lama paymentDeadline).
+// Aturan baru: expire 7 hari setelah tanggal bermain + belum bayar.
+router.post("/admin/bookings/recover-expired", adminMiddleware, async (req, res) => {
+  try {
+    const now = new Date();
+    const candidates = await db
+      .select({ id: bookingsTable.id, orderNumber: bookingsTable.orderNumber, bookingDate: bookingsTable.bookingDate, customerName: bookingsTable.customerName, groupRef: bookingsTable.groupRef })
+      .from(bookingsTable)
+      .where(and(eq(bookingsTable.status, "expired"), gte(sql`(${bookingsTable.bookingDate}::date + interval '7 days')`, now)));
+
+    if (!candidates.length) {
+      res.json({ message: "Tidak ada booking yang perlu dipulihkan.", recovered: [] });
+      return;
+    }
+
+    const updated = await db
+      .update(bookingsTable)
+      .set({ status: "pending_payment", updatedAt: new Date() })
+      .where(and(eq(bookingsTable.status, "expired"), gte(sql`(${bookingsTable.bookingDate}::date + interval '7 days')`, now)))
+      .returning({ id: bookingsTable.id, orderNumber: bookingsTable.orderNumber });
+
+    res.json({ message: `${updated.length} booking dipulihkan ke pending_payment.`, recovered: candidates });
+  } catch (err) {
+    req.log.error({ err }, "recover-expired error");
     res.status(500).json({ error: "Internal server error" });
   }
 });
