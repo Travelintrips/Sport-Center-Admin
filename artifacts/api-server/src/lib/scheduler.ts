@@ -57,14 +57,16 @@ async function expireOverdueMemberships(): Promise<void> {
 async function expireOverdueBookings(): Promise<void> {
   try {
     const now = new Date();
+    // Expire booking yang belum bayar (pending_payment) dan sudah lewat 7 hari
+    // setelah tanggal bermain. booking_date adalah text "YYYY-MM-DD" sehingga
+    // di-cast ke date lalu ditambah 7 hari sebelum dibandingkan dengan now.
     const overdue = await db
       .select()
       .from(bookingsTable)
       .where(
         and(
           eq(bookingsTable.status, "pending_payment"),
-          isNotNull(bookingsTable.paymentDeadline),
-          lt(bookingsTable.paymentDeadline, now)
+          lt(sql`(${bookingsTable.bookingDate}::date + interval '7 days')`, now)
         )
       );
 
