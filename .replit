@@ -107,6 +107,7 @@ OPENAI_API_KEY = "sk-proj-bft8FOm4XZCO3t5kgmMPpZCTnN3BBEEo50WDzwfkhYZXy6sBT_Z4_L
 OPENAI_BASE_URL = "https://api.openai.com/v1"
 FONNTE_CUSTOMER_TOKEN = ""
 ADMIN_WA_GROUP = "120363367856918086@g.us"
+GITHUB_PERSONAL_ACCESS_TOKEN = "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"
 
 [userenv.development]
 SUPABASE_URL_DEV = "https://xssrfshdrtdfupgqwfdw.supabase.co"
