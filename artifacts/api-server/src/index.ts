@@ -679,7 +679,7 @@ async function runStartupMigrations() {
        ADD COLUMN IF NOT EXISTS bg_template_type text`,
     `ALTER TABLE sport_center.company_document_settings
        ADD COLUMN IF NOT EXISTS bg_template_active boolean NOT NULL DEFAULT false`,
-    // ── sport_memberships (gym member bulanan) ─────────────────────────────
+    // ── gym_memberships (gym member bulanan) ─────────────────────────────
     // membership_status enum (idempotent)
     "DO $body$ BEGIN " +
       "CREATE TYPE sport_center.membership_status AS ENUM " +
