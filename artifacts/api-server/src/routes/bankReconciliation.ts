@@ -195,7 +195,7 @@ async function settleInvoice(
 
 // Peta akun akuntansi double-entry
 const ACCOUNT_MAP = {
-  BANK:        { code: "1001", name: "Kas/Bank" },
+  BANK:        { code: "1104", name: "Bank Mandiri" },
   BOOKING_REV: { code: "4001", name: "Pendapatan Booking" },
   ADVANCE:     { code: "2001", name: "Uang Muka Diterima" },
   BANK_FEE:    { code: "6001", name: "Biaya Administrasi Bank" },
@@ -892,7 +892,7 @@ router.post("/bank-reconciliation/:mutationId/reject", adminMiddleware, async (r
     if (isNaN(mutationId)) { res.status(400).json({ error: "Invalid mutation ID" }); return; }
 
     const [mutation] = await db
-      .select({ status: bankMutationsTable.status })
+      .select({ status: bankMutationsTable.status, transactionDate: bankMutationsTable.transactionDate, bankAccountId: bankMutationsTable.bankAccountId })
       .from(bankMutationsTable)
       .where(eq(bankMutationsTable.id, mutationId))
       .limit(1);
@@ -1173,7 +1173,7 @@ router.post("/bank-reconciliation/scan-ocr", adminMiddleware, async (req, res) =
 // GET /bank-reconciliation/mutations/:id/journal — detail baris jurnal (COA debit & kredit)
 router.get("/bank-reconciliation/mutations/:id/journal", financeMiddleware, async (req, res) => {
   try {
-    const mutationId = parseInt(req.params.id);
+    const mutationId = parseInt(req.params.id as string);
     if (isNaN(mutationId)) { res.status(400).json({ error: "ID tidak valid" }); return; }
     const entries = await db.select().from(bankJournalEntriesTable)
       .where(eq(bankJournalEntriesTable.mutationId, mutationId))
@@ -1187,7 +1187,7 @@ router.get("/bank-reconciliation/mutations/:id/journal", financeMiddleware, asyn
 // PATCH /bank-reconciliation/mutations/:id/journal — koreksi COA tanpa void & repost
 router.patch("/bank-reconciliation/mutations/:id/journal", superAdminMiddleware, async (req, res) => {
   try {
-    const mutationId = parseInt(req.params.id);
+    const mutationId = parseInt(req.params.id as string);
     if (isNaN(mutationId)) { res.status(400).json({ error: "ID tidak valid" }); return; }
 
     const { debitAccountCode, debitAccountName, creditAccountCode, creditAccountName, correctionNote } = req.body as {
@@ -1233,7 +1233,7 @@ router.patch("/bank-reconciliation/mutations/:id/journal", superAdminMiddleware,
 // GET /bank-reconciliation/mutations/:id/candidates
 router.get("/bank-reconciliation/mutations/:id/candidates", adminMiddleware, async (req, res) => {
   try {
-    const mutationId = parseInt(req.params.id);
+    const mutationId = parseInt(req.params.id as string);
     if (isNaN(mutationId)) { res.status(400).json({ error: "ID tidak valid" }); return; }
 
     const [mutation] = await db.select().from(bankMutationsTable).where(eq(bankMutationsTable.id, mutationId)).limit(1);
@@ -1333,7 +1333,7 @@ router.get("/bank-reconciliation/mutations/:id/candidates", adminMiddleware, asy
 // POST /bank-reconciliation/mutations/:id/approve-candidate
 router.post("/bank-reconciliation/mutations/:id/approve-candidate", adminMiddleware, async (req, res) => {
   try {
-    const mutationId = parseInt(req.params.id);
+    const mutationId = parseInt(req.params.id as string);
     if (isNaN(mutationId)) { res.status(400).json({ error: "ID tidak valid" }); return; }
     const { candidateType, candidateId, note } = req.body as { candidateType: "payment" | "order" | "expense"; candidateId: number; note?: string };
     if (!candidateType || !candidateId) { res.status(400).json({ error: "candidateType dan candidateId diperlukan" }); return; }
@@ -1425,7 +1425,7 @@ router.post("/bank-reconciliation/mutations/:id/approve-candidate", adminMiddlew
 // POST /bank-reconciliation/mutations/:id/mark-unmatched
 router.post("/bank-reconciliation/mutations/:id/mark-unmatched", adminMiddleware, async (req, res) => {
   try {
-    const mutationId = parseInt(req.params.id);
+    const mutationId = parseInt(req.params.id as string);
     if (isNaN(mutationId)) { res.status(400).json({ error: "ID tidak valid" }); return; }
 
     const [mutation] = await db.select().from(bankMutationsTable).where(eq(bankMutationsTable.id, mutationId)).limit(1);
@@ -1466,7 +1466,7 @@ router.post("/bank-reconciliation/mutations/:id/mark-unmatched", adminMiddleware
 // POST /bank-reconciliation/mutations/:id/mark-duplicate
 router.post("/bank-reconciliation/mutations/:id/mark-duplicate", adminMiddleware, async (req, res) => {
   try {
-    const mutationId = parseInt(req.params.id);
+    const mutationId = parseInt(req.params.id as string);
     if (isNaN(mutationId)) { res.status(400).json({ error: "ID tidak valid" }); return; }
 
     const [mutation] = await db.select().from(bankMutationsTable).where(eq(bankMutationsTable.id, mutationId)).limit(1);
@@ -1555,7 +1555,7 @@ router.post("/bank-reconciliation/mutations/post-journal-bulk", financeMiddlewar
 
 router.post("/bank-reconciliation/mutations/:id/post-journal", financeMiddleware, async (req, res) => {
   try {
-    const mutationId = parseInt(req.params.id);
+    const mutationId = parseInt(req.params.id as string);
     if (isNaN(mutationId)) { res.status(400).json({ error: "ID tidak valid" }); return; }
 
     const [mutation] = await db.select().from(bankMutationsTable).where(eq(bankMutationsTable.id, mutationId)).limit(1);
@@ -1607,7 +1607,7 @@ router.post("/bank-reconciliation/mutations/:id/post-journal", financeMiddleware
 // PATCH /bank-reconciliation/mutations/:id/tax-fields — set transaction_type, tax_type, tax_period, tax_payment_reference
 router.patch("/bank-reconciliation/mutations/:id/tax-fields", financeMiddleware, async (req, res) => {
   try {
-    const mutationId = parseInt(req.params.id);
+    const mutationId = parseInt(req.params.id as string);
     if (isNaN(mutationId)) { res.status(400).json({ error: "ID tidak valid" }); return; }
     const [mutTax] = await db.select({ transactionDate: bankMutationsTable.transactionDate, bankAccountId: bankMutationsTable.bankAccountId })
       .from(bankMutationsTable).where(eq(bankMutationsTable.id, mutationId)).limit(1);
@@ -1688,7 +1688,7 @@ router.post("/bank-reconciliation/account-rules", financeMiddleware, async (req,
 // PUT /bank-reconciliation/account-rules/:id
 router.put("/bank-reconciliation/account-rules/:id", financeMiddleware, async (req, res) => {
   try {
-    const ruleId = parseInt(req.params.id);
+    const ruleId = parseInt(req.params.id as string);
     if (isNaN(ruleId)) { res.status(400).json({ error: "ID tidak valid" }); return; }
     const user = (req as any).user;
     const { transactionType, direction, debitCoaId, debitCoaName, creditCoaId, creditCoaName, bankAccountId, isActive } = req.body as any;
@@ -1708,7 +1708,7 @@ router.put("/bank-reconciliation/account-rules/:id", financeMiddleware, async (r
 // DELETE /bank-reconciliation/account-rules/:id
 router.delete("/bank-reconciliation/account-rules/:id", superAdminMiddleware, async (req, res) => {
   try {
-    const ruleId = parseInt(req.params.id);
+    const ruleId = parseInt(req.params.id as string);
     if (isNaN(ruleId)) { res.status(400).json({ error: "ID tidak valid" }); return; }
     await db.delete(bankReconciliationAccountRulesTable).where(eq(bankReconciliationAccountRulesTable.id, ruleId));
     res.json({ ok: true });
@@ -1800,7 +1800,7 @@ router.post("/bank-reconciliation/closing/compute", financeMiddleware, async (re
 // POST /bank-reconciliation/closing/:id/close — finalize
 router.post("/bank-reconciliation/closing/:id/close", financeMiddleware, async (req, res) => {
   try {
-    const closingId = parseInt(req.params.id);
+    const closingId = parseInt(req.params.id as string);
     if (isNaN(closingId)) { res.status(400).json({ error: "ID tidak valid" }); return; }
     const [closing] = await db.select().from(bankReconciliationClosingTable).where(eq(bankReconciliationClosingTable.id, closingId)).limit(1);
     if (!closing) { res.status(404).json({ error: "Closing tidak ditemukan" }); return; }
@@ -1827,7 +1827,7 @@ router.post("/bank-reconciliation/closing/:id/close", financeMiddleware, async (
 // POST /bank-reconciliation/closing/:id/reopen — reopen (superAdmin only)
 router.post("/bank-reconciliation/closing/:id/reopen", superAdminMiddleware, async (req, res) => {
   try {
-    const closingId = parseInt(req.params.id);
+    const closingId = parseInt(req.params.id as string);
     if (isNaN(closingId)) { res.status(400).json({ error: "ID tidak valid" }); return; }
     const user = (req as any).user;
     const reopenedBy = user?.email ?? `user:${user?.userId}`;
@@ -1849,7 +1849,7 @@ router.post("/bank-reconciliation/closing/:id/reopen", superAdminMiddleware, asy
 // PATCH /bank-reconciliation/closing/:id — update statement balance / notes
 router.patch("/bank-reconciliation/closing/:id", financeMiddleware, async (req, res) => {
   try {
-    const closingId = parseInt(req.params.id);
+    const closingId = parseInt(req.params.id as string);
     if (isNaN(closingId)) { res.status(400).json({ error: "ID tidak valid" }); return; }
     const [closing] = await db.select().from(bankReconciliationClosingTable).where(eq(bankReconciliationClosingTable.id, closingId)).limit(1);
     if (!closing) { res.status(404).json({ error: "Closing tidak ditemukan" }); return; }

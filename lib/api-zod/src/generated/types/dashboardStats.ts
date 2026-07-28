@@ -15,6 +15,8 @@ export interface DashboardStats {
   totalRevenue: number;
   todayBookings: number;
   pendingBookings: number;
+  membershipRevenue?: number | null;
+  activeMemberships?: number | null;
   topFacilities: FacilityStat[];
   recentBookings: Booking[];
   bookingsByStatus: StatusCount[];

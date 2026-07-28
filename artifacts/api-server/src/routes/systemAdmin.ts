@@ -1,55 +1,103 @@
 import { Router } from "express";
 import { adminMiddleware } from "../lib/auth";
-import { isStorageConfigured, bucketStatus, BUCKETS } from "../lib/supabaseStorage";
-import { realtimeEnabled } from "../lib/supabase";
+import {
+  isStorageConfigured,
+  bucketStatus,
+  BUCKETS,
+  storageProjectSource,
+  isDevUsingProdStorage,
+  allowDevOnProdStorage,
+} from "../lib/supabaseStorage";
+import {
+  realtimeEnabled,
+  realtimeProjectSource,
+  isRealtimeNoop,
+} from "../lib/supabase";
 import { bizportalSyncConfigured, lastSyncState } from "../lib/bizportalSync";
 import { dbSource, isDevUsingProdDb, dbEnvironment, allowDevOnProdDb } from "@workspace/db";
 
 const router = Router();
 
 /**
+ * Sanitize a source label to strip any embedded URLs, project refs, or secrets.
+ * Only retain the env var name and environment tag.
+ */
+function sanitizeSourceLabel(label: string): string {
+  return label
+    .replace(/ref=[^\s,)]+/g, "ref=<redacted>")
+    .replace(/https?:\/\/[^\s,)]+/g, "<url-redacted>");
+}
+
+/**
  * GET /api/admin/system/supabase-status
- * Diagnostic endpoint — shows full integration status without exposing secrets or URLs.
+ *
+ * Production-safe diagnostic endpoint.
+ * - Never exposes DB connection strings, service role keys, or anon keys.
+ * - Never exposes Supabase project refs or URLs.
+ * - Only returns source label (env var name) and status booleans.
  */
 router.get("/admin/system/supabase-status", adminMiddleware, (_req, res) => {
+  const isProd = process.env.NODE_ENV === "production";
   const storageConfigured = isStorageConfigured();
-  const devProdWarning = isDevUsingProdDb
-    ? "⚠️ DANGER: Development is connected to the PRODUCTION database. " +
-      "ALLOW_DEV_ON_PROD_DB=true is active. Remove this override and set SUPABASE_DATABASE_URL_DEV immediately."
+
+  const dbWarning = isDevUsingProdDb
+    ? "DANGER: Development is connected to the PRODUCTION database. " +
+      "ALLOW_DEV_ON_PROD_DB=true is active. Remove immediately and set SUPABASE_DATABASE_URL_DEV."
+    : null;
+
+  const storageWarning = isDevUsingProdStorage
+    ? "DANGER: Development is uploading to PRODUCTION Supabase storage. " +
+      "ALLOW_DEV_ON_PROD_STORAGE=true is active. Remove immediately and set SUPABASE_SERVICE_ROLE_KEY_DEV."
     : null;
 
   res.json({
     generatedAt: new Date().toISOString(),
+    environment: dbEnvironment,
 
     database: {
-      dbEnvironment,
-      dbSource,
       configured: true,
+      environment: dbEnvironment,
+      source: sanitizeSourceLabel(dbSource),
       isDevUsingProdDb,
       allowDevOnProdDb,
-      devDbConfigured: Boolean(process.env.SUPABASE_DATABASE_URL_DEV),
       prodDbConfigured: Boolean(process.env.SUPABASE_DATABASE_URL),
-      warning: devProdWarning,
+      devDbConfigured: Boolean(process.env.SUPABASE_DATABASE_URL_DEV),
+      warning: dbWarning,
     },
 
     storage: {
       configured: storageConfigured,
+      source: sanitizeSourceLabel(storageProjectSource),
+      isDevUsingProdStorage,
+      allowDevOnProdStorage,
       buckets: storageConfigured
         ? Object.fromEntries(
             Object.values(BUCKETS).map((b) => [
               b,
-              bucketStatus[b] ?? { ok: false, checkedAt: null, error: "Not checked" },
+              {
+                ok: bucketStatus[b]?.ok ?? false,
+                checkedAt: bucketStatus[b]?.checkedAt ?? null,
+                error: bucketStatus[b]?.error ?? "Not checked yet",
+              },
             ])
           )
         : null,
-      note: "SUPABASE_STORAGE_BUCKET env var is DEPRECATED — buckets are addressed by explicit constant",
+      prodKeyConfigured: Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY),
+      devKeyConfigured: Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY_DEV),
+      warning: storageWarning,
     },
 
     realtime: {
       enabled: realtimeEnabled,
+      isNoop: isRealtimeNoop,
+      source: sanitizeSourceLabel(realtimeProjectSource),
+      prodUrlConfigured: Boolean(process.env.SUPABASE_URL),
+      prodAnonConfigured: Boolean(process.env.SUPABASE_ANON_KEY),
+      devUrlConfigured: Boolean(process.env.SUPABASE_URL_DEV),
+      devAnonConfigured: Boolean(process.env.SUPABASE_ANON_KEY_DEV),
       note: realtimeEnabled
-        ? "Active — SUPABASE_URL and SUPABASE_ANON_KEY are set"
-        : "Disabled (no-op) — set SUPABASE_URL + SUPABASE_ANON_KEY to enable availability broadcasts",
+        ? "Active"
+        : "Disabled (no-op) — availability broadcasts are silently skipped",
     },
 
     bizportalSync: {
@@ -59,27 +107,21 @@ router.get("/admin/system/supabase-status", adminMiddleware, (_req, res) => {
       lastMembershipSync: lastSyncState.membership,
       lastStatusSync: lastSyncState.status,
       note: bizportalSyncConfigured
-        ? "Push sync active (Sport Center → BizPortal via SUPABASE_DATABASE_URL)"
-        : "Push sync DISABLED — SUPABASE_DATABASE_URL not set",
+        ? "Push sync active (Sport Center → BizPortal)"
+        : "Push sync DISABLED — SUPABASE_DATABASE_URL not set in push target",
     },
 
     deprecatedEnvVars: [
       {
-        name: "SUPABASE_URL_DEV",
-        status: process.env.SUPABASE_URL_DEV ? "set-but-unused" : "not-set",
-        note: "Not read by any code path. Use SUPABASE_DATABASE_URL_DEV (PostgreSQL connection string) instead.",
-      },
-      {
         name: "SUPABASE_PG_URL",
         status: process.env.SUPABASE_PG_URL ? "set-but-unused" : "not-set",
-        note: "Redundant alias of SUPABASE_DATABASE_URL. Can be removed.",
-      },
-      {
-        name: "SUPABASE_STORAGE_BUCKET",
-        status: process.env.SUPABASE_STORAGE_BUCKET ? "set-but-unused" : "not-set",
-        note: "Storage buckets are addressed by explicit name in code. This var is ignored.",
+        note: "Redundant alias of SUPABASE_DATABASE_URL. Safe to remove.",
       },
     ],
+
+    safeMode: isProd
+      ? "ACTIVE — no URLs, keys, or project refs are returned in production"
+      : "INACTIVE — development environment, sanitized labels only",
   });
 });
 

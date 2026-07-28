@@ -1,7 +1,10 @@
 import { Request, Response, NextFunction } from "express";
 import crypto from "crypto";
 
-const SECRET = process.env.SESSION_SECRET || "sport-center-secret-key-2024";
+const SECRET = process.env.SESSION_SECRET;
+if (!SECRET) {
+  throw new Error("[auth] SESSION_SECRET environment variable is required but not set. Set it before starting the server.");
+}
 const TOKEN_EXPIRY = 7 * 24 * 60 * 60 * 1000;
 
 export function createToken(userId: number, role: string, tenantId?: number | null): string {
@@ -32,12 +35,34 @@ export function hashPassword(password: string): string {
 
 export function authMiddleware(req: Request, res: Response, next: NextFunction): void {
   const authHeader = req.headers.authorization;
-  if (!authHeader?.startsWith("Bearer ")) {
+  const rawToken = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+  if (!rawToken) {
     res.status(401).json({ error: "Unauthorized" });
     return;
   }
-  const token = authHeader.slice(7);
-  const payload = verifyToken(token);
+  const payload = verifyToken(rawToken);
+  if (!payload) {
+    res.status(401).json({ error: "Invalid or expired token" });
+    return;
+  }
+  (req as any).user = payload;
+  next();
+}
+
+/**
+ * Like authMiddleware but also accepts ?_token= query param.
+ * Scoped ONLY to document preview/pdf endpoints where window.open()
+ * makes it impossible to set custom headers. Never use globally.
+ */
+export function authMiddlewareWithQueryToken(req: Request, res: Response, next: NextFunction): void {
+  const authHeader = req.headers.authorization;
+  const queryToken = typeof req.query._token === "string" ? req.query._token : null;
+  const rawToken = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : queryToken;
+  if (!rawToken) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  const payload = verifyToken(rawToken);
   if (!payload) {
     res.status(401).json({ error: "Invalid or expired token" });
     return;
@@ -47,6 +72,21 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction):
 }
 
 const ADMIN_ROLES = ["admin", "super_admin", "admin_booking", "finance", "staff"];
+
+/**
+ * Admin middleware that also accepts ?_token= query param.
+ * Use ONLY for document preview/pdf endpoints (window.open() flows).
+ */
+export function adminDocumentPreviewMiddleware(req: Request, res: Response, next: NextFunction): void {
+  authMiddlewareWithQueryToken(req, res, () => {
+    const role = (req as any).user?.role;
+    if (!ADMIN_ROLES.includes(role)) {
+      res.status(403).json({ error: "Forbidden" });
+      return;
+    }
+    next();
+  });
+}
 
 export function adminMiddleware(req: Request, res: Response, next: NextFunction): void {
   authMiddleware(req, res, () => {

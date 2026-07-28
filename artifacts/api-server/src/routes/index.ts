@@ -34,6 +34,7 @@ import authSocialRouter from "./auth-social";
 import verificationLogsRouter from "./verificationLogs";
 import companyInvoicesRouter from "./companyInvoices";
 import companyVerificationsRouter from "./companyVerifications";
+import companyBillingRequirementsRouter from "./companyBillingRequirements";
 
 import taxConfigRouter from "./taxConfig";
 import taxReportRouter from "./taxReport";
@@ -48,6 +49,15 @@ import waBookingsAdminRouter from "./waBookingsAdmin";
 import waAiAdminRouter from "./waAiAdmin";
 import seedDemoRouter from "./seedDemo";
 import systemAdminRouter from "./systemAdmin";
+import expensesRouter from "./expenses";
+import vendorsRouter from "./vendors";
+import documentTemplatesRouter from "./documentTemplates";
+import invoicesRouter from "./invoices";
+import invoiceSettingsRouter from "./invoiceSettings";
+import documentSettingsRouter from "./documentSettings";
+import dataConnectionsRouter from "./dataConnections";
+import rekapRouter from "./rekap";
+import corporateDocumentationRouter from "./corporateDocumentation";
 
 const router: IRouter = Router();
 
@@ -87,6 +97,7 @@ router.use(whatsappRouter);
 router.use(verificationLogsRouter);
 router.use(companyInvoicesRouter);
 router.use(companyVerificationsRouter);
+router.use(companyBillingRequirementsRouter);
 router.use(taxConfigRouter);
 router.use(taxReportRouter);
 router.use(sportCenterBookingsRouter);
@@ -99,5 +110,14 @@ router.use(waBookingsAdminRouter);
 router.use(waAiAdminRouter);
 router.use(seedDemoRouter);
 router.use(systemAdminRouter);
+router.use(expensesRouter);
+router.use(vendorsRouter);
+router.use(documentTemplatesRouter);
+router.use(invoicesRouter);
+router.use(invoiceSettingsRouter);
+router.use(documentSettingsRouter);
+router.use(dataConnectionsRouter);
+router.use(rekapRouter);
+router.use(corporateDocumentationRouter);
 
 export default router;

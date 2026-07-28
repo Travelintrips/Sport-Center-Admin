@@ -21,7 +21,7 @@ export interface TaxCalculation {
  */
 export async function calculateTax(
   subtotal: number,
-  appliesTo: string = "sport_center_booking",
+  appliesTo: string = "sport_booking",
   bookingDate?: string,
 ): Promise<TaxCalculation> {
   const noTax: TaxCalculation = { dpp: subtotal, taxRate: 0, taxAmount: 0, grandTotal: subtotal, taxCode: "" };
@@ -63,6 +63,7 @@ export async function recordTaxTransaction(
   reversalOfId?: number
 ): Promise<number | null> {
   if (!taxCalc.taxCode || taxCalc.taxAmount === 0) return null;
+  const dppNilaiLain = taxCalc.dpp > 0 ? Math.round(taxCalc.dpp * 11 / 12) : 0;
   const [row] = await db.insert(taxTransactionsTable).values({
     referenceType,
     referenceId,
@@ -70,6 +71,8 @@ export async function recordTaxTransaction(
     taxCode: taxCalc.taxCode,
     taxRate: String(taxCalc.taxRate),
     dpp: String(taxCalc.dpp),
+    dppNilaiLain: String(dppNilaiLain),
+    grandTotal: String(taxCalc.grandTotal),
     taxAmount: String(taxCalc.taxAmount),
     transactionDate,
     status,
@@ -131,7 +134,7 @@ export async function getPpnConfig(): Promise<{
   const [setting] = await db
     .select()
     .from(taxSettingsTable)
-    .where(eq(taxSettingsTable.appliesTo, "sport_center_booking"))
+    .where(eq(taxSettingsTable.appliesTo, "sport_booking"))
     .limit(1);
 
   if (!setting) {

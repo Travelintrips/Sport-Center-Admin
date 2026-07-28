@@ -30,10 +30,15 @@ import {
   Landmark,
   MessageSquare,
   Bot,
+  TrendingDown,
+  FileText,
+  Activity,
+  XCircle,
+  AlertTriangle,
 } from "lucide-react";
 import { useGetMe, useLogout, getGetMeQueryKey } from "@workspace/api-client-react";
-import { useQueryClient } from "@tanstack/react-query";
-import { removeToken } from "@/lib/auth";
+import { useQueryClient, useQuery } from "@tanstack/react-query";
+import { removeToken, getToken } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { useState } from "react";
 
@@ -75,16 +80,34 @@ const NAV_GROUPS = [
     label: "Laporan & Sistem",
     items: [
       { href: "/admin/reports", label: "Laporan Keuangan", icon: TrendingUp },
+      { href: "/admin/expenses", label: "Pengeluaran", icon: TrendingDown },
+      { href: "/admin/vendors", label: "Daftar Vendor", icon: Building2 },
       { href: "/admin/notifications", label: "Kirim WA", icon: Send },
       { href: "/admin/notification-templates", label: "Template WA", icon: Bell },
+      { href: "/admin/document-settings", label: "Template Dokumen", icon: FileText },
+      { href: "/admin/document-templates", label: "Template WA Dokumen", icon: FileText },
       { href: "/admin/tax-report", label: "Laporan Pajak PPN", icon: Receipt },
       { href: "/admin/bank-reconciliation", label: "Rekonsiliasi Bank", icon: Landmark },
       { href: "/admin/operator-accounts", label: "Akun Operator", icon: UserCog },
       { href: "/admin/audit-log", label: "Audit Log", icon: Shield },
+      { href: "/admin/data-connections", label: "Data Connections", icon: Activity },
       { href: "/admin/settings", label: "Pengaturan", icon: SettingsIcon },
     ],
   },
 ];
+
+interface HealthSummary {
+  summary: { error: number; changed: number; warning: number };
+  connections: { key: string; name: string; status: string; message: string }[];
+}
+
+async function fetchHealthSummary(): Promise<HealthSummary> {
+  const res = await fetch("/api/admin/system/connections/health", {
+    headers: { Authorization: `Bearer ${getToken()}` },
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
 
 export default function AdminLayout({ children }: { children: ReactNode }) {
   const [location, setLocation] = useLocation();
@@ -99,6 +122,18 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
       staleTime: 0,
     }
   });
+
+  const { data: healthData } = useQuery<HealthSummary>({
+    queryKey: ["system-connections-health"],
+    queryFn: fetchHealthSummary,
+    enabled: !!user,
+    staleTime: 5 * 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
+  });
+
+  const connectionErrors = (healthData?.summary.error ?? 0) + (healthData?.summary.changed ?? 0);
+  const connectionWarnings = healthData?.summary.warning ?? 0;
 
   const logoutMutation = useLogout({
     mutation: {
@@ -178,6 +213,10 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                   {group.items.map((item) => {
                     const isActive = location === item.href || (location === "/admin" && item.href === "/admin/dashboard");
                     const Icon = item.icon;
+                    const isDataConn = item.href === "/admin/data-connections";
+                    const showBadge = isDataConn && (connectionErrors > 0 || connectionWarnings > 0);
+                    const badgeColor = isDataConn && connectionErrors > 0 ? "bg-red-500" : "bg-amber-500";
+                    const badgeCount = isDataConn ? (connectionErrors || connectionWarnings) : 0;
                     return (
                       <Link
                         key={item.href}
@@ -192,6 +231,11 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                       >
                         <Icon size={16} className={isActive ? 'text-orange-400' : 'text-sidebar-foreground/40'} />
                         {item.label}
+                        {showBadge && (
+                          <span className={`ml-auto ${badgeColor} text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center`}>
+                            {badgeCount}
+                          </span>
+                        )}
                       </Link>
                     );
                   })}
@@ -235,6 +279,43 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
 
       {/* Main Content */}
       <main className="flex-1 flex flex-col min-w-0 h-[100dvh] overflow-y-auto bg-background">
+        {connectionErrors > 0 && (
+          <Link href="/admin/data-connections">
+            <div className="flex items-center gap-3 px-4 py-2.5 bg-red-600 text-white text-xs font-medium cursor-pointer hover:bg-red-700 transition-colors">
+              <XCircle size={14} className="shrink-0" />
+              <span>
+                <span className="font-bold">{connectionErrors} koneksi error</span>
+                {" — "}
+                {healthData?.connections
+                  .filter((c) => c.status === "error" || c.status === "changed")
+                  .slice(0, 2)
+                  .map((c) => c.name)
+                  .join(", ")}
+                {(healthData?.connections.filter((c) => c.status === "error" || c.status === "changed").length ?? 0) > 2
+                  ? ` +${(healthData?.connections.filter((c) => c.status === "error" || c.status === "changed").length ?? 0) - 2} lainnya`
+                  : ""}
+              </span>
+              <span className="ml-auto shrink-0 underline">Lihat Detail →</span>
+            </div>
+          </Link>
+        )}
+        {connectionErrors === 0 && connectionWarnings > 0 && (
+          <Link href="/admin/data-connections">
+            <div className="flex items-center gap-3 px-4 py-2 bg-amber-500 text-white text-xs font-medium cursor-pointer hover:bg-amber-600 transition-colors">
+              <AlertTriangle size={14} className="shrink-0" />
+              <span>
+                <span className="font-bold">{connectionWarnings} koneksi warning</span>
+                {" — "}
+                {healthData?.connections
+                  .filter((c) => c.status === "warning")
+                  .slice(0, 2)
+                  .map((c) => c.name)
+                  .join(", ")}
+              </span>
+              <span className="ml-auto shrink-0 underline">Lihat Detail →</span>
+            </div>
+          </Link>
+        )}
         <div className="flex-1 p-4 md:p-8">
           {children}
         </div>

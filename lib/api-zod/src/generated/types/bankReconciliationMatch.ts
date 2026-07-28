@@ -25,4 +25,5 @@ export interface BankReconciliationMatch {
   note?: string | null;
   status: BankReconciliationMatchStatus;
   createdAt: string;
+  ocrAmount?: string | null;
 }

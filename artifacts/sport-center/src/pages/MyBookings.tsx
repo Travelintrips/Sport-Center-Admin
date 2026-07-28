@@ -1,6 +1,6 @@
 import { useState, useEffect, memo } from "react";
 import { Link, useLocation } from "wouter";
-import { useGetMe, useGetMyBookings, useGetReviews, useCreateReview, useLogout, getGetMeQueryKey, getGetMyBookingsQueryKey } from "@workspace/api-client-react";
+import { useGetMe, useGetMyBookings, useGetReviews, useCreateReview, useLogout, getGetMeQueryKey, getGetMyBookingsQueryKey, getGetReviewsQueryKey } from "@workspace/api-client-react";
 import { removeToken, getToken } from "@/lib/auth";
 import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
@@ -10,10 +10,11 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { useLang } from "@/lib/i18n";
-import { CalendarDays, Clock, ChevronRight, LogOut, ReceiptText, Star, Trophy, MessageCircle, CalendarClock, UserCheck, Link2 } from "lucide-react";
+import { CalendarDays, Clock, ChevronRight, LogOut, ReceiptText, Star, Trophy, MessageCircle, CalendarClock, UserCheck, Link2, ShoppingCart, ChevronDown, Search, X } from "lucide-react";
 import RescheduleDialog from "@/components/RescheduleDialog";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
+import type { Locale } from "date-fns";
 import { id as idLocale, enUS } from "date-fns/locale";
 
 const STATUS_CONFIG: Record<string, { label: string; labelEn: string; stripe: string; badge: string }> = {
@@ -30,7 +31,7 @@ const STATUS_CONFIG: Record<string, { label: string; labelEn: string; stripe: st
 
 const INACTIVE = ["completed", "cancelled", "expired", "rejected", "refunded"];
 
-type BookingItem = { id: number; facilityName: string; facilityCategory: string; status: string; bookingDate: string; startTime: string; endTime: string; totalPrice: number; orderNumber: string; customerName?: string };
+type BookingItem = { id: number; facilityName: string; facilityCategory: string; status: string; bookingDate: string; startTime: string; endTime: string; totalPrice: number; orderNumber: string; customerName?: string; groupRef?: string | null };
 type ReviewItem = { bookingId: number; rating: number; comment?: string | null };
 type Rs = { rating: number; comment: string; hover: number };
 
@@ -165,6 +166,110 @@ const BookingCard = memo(function BookingCard({
   );
 });
 
+function CartGroupCard({
+  group,
+  lang,
+  dateLocale,
+  onReschedule,
+}: {
+  group: { groupRef: string; items: BookingItem[] };
+  lang: string;
+  dateLocale: Locale;
+  onReschedule: (b: BookingItem) => void;
+}) {
+  const { t } = useLang();
+  const [expanded, setExpanded] = useState(true);
+  const { items } = group;
+  const totalPrice = items.reduce((s, b) => s + b.totalPrice, 0);
+  const allStatuses = [...new Set(items.map((b) => b.status))];
+  // Warna strip: merah jika ada yang cancelled/expired, hijau jika semua confirmed, kuning selainnya
+  const hasInactive = items.some((b) => INACTIVE.includes(b.status));
+  const allConfirmed = items.every((b) => b.status === "confirmed" || b.status === "completed");
+  const stripeColor = hasInactive && !allConfirmed ? "#9ca3af" : allConfirmed ? "#10b981" : "#f59e0b";
+
+  return (
+    <Card className="overflow-hidden hover:shadow-md transition-shadow border-primary/20">
+      <CardContent className="p-0">
+        <div className="flex items-stretch">
+          <div className="w-1.5 flex-shrink-0 rounded-l-xl" style={{ background: stripeColor }} />
+          <div className="flex-1 p-4">
+            {/* Header grup */}
+            <button
+              className="w-full flex items-center justify-between gap-3 text-left"
+              onClick={() => setExpanded((v) => !v)}
+            >
+              <div className="flex items-center gap-2 flex-wrap">
+                <div className="flex items-center gap-1.5 font-black text-sm text-primary">
+                  <ShoppingCart className="w-4 h-4" />
+                  {t("Booking Keranjang", "Cart Booking")}
+                </div>
+                <Badge variant="outline" className="text-xs border-primary/30 text-primary">
+                  {items.length} {t("lapangan", "courts")}
+                </Badge>
+                <div className="flex gap-1 flex-wrap">
+                  {allStatuses.map((s) => {
+                    const cfg = STATUS_CONFIG[s] ?? { badge: "bg-gray-100 text-gray-600 border-gray-200", label: s, labelEn: s };
+                    return (
+                      <span key={s} className={`text-xs px-2 py-0.5 rounded-full border font-semibold ${cfg.badge}`}>
+                        {lang === "id" ? cfg.label : cfg.labelEn}
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+              <div className="flex items-center gap-3 shrink-0">
+                <span className="font-black text-primary text-sm">Rp {totalPrice.toLocaleString("id-ID")}</span>
+                <ChevronDown className={`w-4 h-4 text-muted-foreground transition-transform ${expanded ? "rotate-180" : ""}`} />
+              </div>
+            </button>
+
+            {/* Item list */}
+            {expanded && (
+              <div className="mt-3 space-y-2">
+                {items.map((b) => {
+                  const cfg = STATUS_CONFIG[b.status] ?? { label: b.status, labelEn: b.status, stripe: "#9ca3af", badge: "bg-gray-100 text-gray-600 border-gray-200" };
+                  return (
+                    <div key={b.id} className="flex items-center justify-between gap-3 p-3 rounded-lg bg-muted/30 border border-border/40">
+                      <div className="flex-1 min-w-0">
+                        <div className="font-semibold text-sm truncate">{b.facilityName}</div>
+                        <div className="flex flex-wrap gap-2 text-xs text-muted-foreground mt-0.5">
+                          <span className="flex items-center gap-1">
+                            <CalendarDays size={11} className="text-primary" />
+                            {format(new Date(b.bookingDate), "EEE, d MMM", { locale: dateLocale })}
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <Clock size={11} className="text-primary" />
+                            {b.startTime.substring(0, 5)} – {b.endTime.substring(0, 5)}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <Badge className={`text-xs border hidden sm:inline-flex ${cfg.badge}`}>
+                          {lang === "id" ? cfg.label : cfg.labelEn}
+                        </Badge>
+                        {["pending_payment", "paid", "confirmed", "waiting_confirmation"].includes(b.status) && (
+                          <Button variant="ghost" size="sm" className="gap-1 text-orange-600 hover:text-orange-700 hover:bg-orange-50 h-7 px-2 text-xs" onClick={() => onReschedule(b)}>
+                            <CalendarClock size={11} /> {t("Reschedule", "Reschedule")}
+                          </Button>
+                        )}
+                        <Button asChild variant="ghost" size="sm" className="gap-1 text-primary h-7 px-2 text-xs">
+                          <Link href={`/booking/${b.orderNumber}`}>
+                            {t("Detail", "Detail")} <ChevronRight size={11} />
+                          </Link>
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function MyBookings() {
   const [, setLocation] = useLocation();
   const { t, lang } = useLang();
@@ -174,10 +279,11 @@ export default function MyBookings() {
 
   const { data: user, isLoading: userLoading, isError } = useGetMe({ query: { retry: false, queryKey: getGetMeQueryKey() } });
   const { data: bookings, isLoading: bookingsLoading } = useGetMyBookings({ query: { enabled: !!user, queryKey: getGetMyBookingsQueryKey() } });
-  const { data: allReviews } = useGetReviews(undefined, { query: { enabled: !!user } });
+  const { data: allReviews } = useGetReviews(undefined, { query: { enabled: !!user, queryKey: getGetReviewsQueryKey() } });
 
   const [reviewState, setReviewState] = useState<Record<number, { rating: number; comment: string; hover: number }>>({});
   const [rescheduleTarget, setRescheduleTarget] = useState<BookingItem | null>(null);
+  const [customerSearch, setCustomerSearch] = useState("");
   const [claimOpen, setClaimOpen] = useState(false);
   const [claimOrder, setClaimOrder] = useState("");
   const [claimLoading, setClaimLoading] = useState(false);
@@ -242,8 +348,45 @@ export default function MyBookings() {
   if (isError || !user) return null;
   if (user.role === "tenant") return null;
 
-  const active = (bookings ?? []).filter((b) => !INACTIVE.includes(b.status));
-  const past   = (bookings ?? []).filter((b) =>  INACTIVE.includes(b.status));
+  // Filter berdasarkan nama customer (untuk akun operator)
+  const isOperator = user.role === "admin" || user.role === "super_admin" || user.role === "admin_booking" || user.role === "staff";
+  const searchQuery = customerSearch.trim().toLowerCase();
+
+  // Pisahkan booking individual dan grup
+  const allBookings = (bookings ?? []).filter((b) => {
+    if (!searchQuery) return true;
+    const name = (b.customerName ?? "").toLowerCase();
+    return name.includes(searchQuery);
+  });
+
+  // Kelompokkan berdasarkan groupRef
+  const groupMap = new Map<string, BookingItem[]>();
+  const soloBookings: BookingItem[] = [];
+
+  for (const b of allBookings) {
+    if (b.groupRef) {
+      const list = groupMap.get(b.groupRef) ?? [];
+      list.push(b as BookingItem);
+      groupMap.set(b.groupRef, list);
+    } else {
+      soloBookings.push(b as BookingItem);
+    }
+  }
+
+  // Grup yang hanya punya 1 item diperlakukan sebagai solo
+  const cartGroups: { groupRef: string; items: BookingItem[] }[] = [];
+  for (const [groupRef, items] of groupMap.entries()) {
+    if (items.length > 1) {
+      cartGroups.push({ groupRef, items });
+    } else {
+      soloBookings.push(...items);
+    }
+  }
+
+  const active = soloBookings.filter((b) => !INACTIVE.includes(b.status));
+  const past   = soloBookings.filter((b) =>  INACTIVE.includes(b.status));
+  const activeGroups = cartGroups.filter((g) => g.items.some((b) => !INACTIVE.includes(b.status)));
+  const pastGroups   = cartGroups.filter((g) => g.items.every((b) =>  INACTIVE.includes(b.status)));
 
   return (
     <div className="container mx-auto px-4 py-10 max-w-3xl">
@@ -287,6 +430,36 @@ export default function MyBookings() {
         </CardContent></Card>
       </div>
 
+      {/* Filter Nama Customer — hanya untuk operator */}
+      {isOperator && (
+        <div className="mb-6">
+          <div className="relative">
+            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              className="pl-9 pr-9"
+              placeholder={t("Cari nama customer...", "Search customer name...")}
+              value={customerSearch}
+              onChange={(e) => setCustomerSearch(e.target.value)}
+            />
+            {customerSearch && (
+              <button
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                onClick={() => setCustomerSearch("")}
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
+          {searchQuery && (
+            <p className="text-xs text-muted-foreground mt-1.5">
+              {allBookings.length === 0
+                ? t("Tidak ada booking untuk nama ini", "No bookings found for this name")
+                : t(`Menampilkan ${allBookings.length} booking untuk "${customerSearch}"`, `Showing ${allBookings.length} bookings for "${customerSearch}"`)}
+            </p>
+          )}
+        </div>
+      )}
+
       {/* Booking List */}
       {bookingsLoading ? (
         <div className="space-y-4">{[1,2,3].map((i) => <Skeleton key={i} className="h-32" />)}</div>
@@ -299,60 +472,83 @@ export default function MyBookings() {
             <Link href="/facilities">{t("Lihat Fasilitas", "View Facilities")}</Link>
           </Button>
         </CardContent></Card>
+      ) : allBookings.length === 0 && searchQuery ? (
+        <Card><CardContent className="py-12 text-center">
+          <Search size={36} className="mx-auto text-muted-foreground/30 mb-3" />
+          <h3 className="font-bold text-base mb-1">{t("Tidak ditemukan", "No results found")}</h3>
+          <p className="text-muted-foreground text-sm">{t(`Tidak ada booking dengan nama "${customerSearch}"`, `No bookings found for "${customerSearch}"`)}</p>
+          <Button variant="ghost" size="sm" className="mt-3 text-primary" onClick={() => setCustomerSearch("")}>
+            <X size={13} className="mr-1" /> {t("Hapus filter", "Clear filter")}
+          </Button>
+        </CardContent></Card>
       ) : (
         <div className="space-y-8">
-          {active.length > 0 && (
+          {(active.length > 0 || activeGroups.length > 0) && (
             <section>
               <h2 className="text-base font-black mb-4 flex items-center gap-2">
                 <div className="w-2 h-5 bg-primary rounded-full" />
                 {t("Booking Aktif", "Active Bookings")}
-                <span className="text-sm font-normal text-muted-foreground">({active.length})</span>
+                <span className="text-sm font-normal text-muted-foreground">
+                  ({active.length + activeGroups.reduce((n, g) => n + g.items.length, 0)})
+                </span>
               </h2>
-              <div className="space-y-3">{active.map((b) => (
-                <BookingCard
-                  key={b.id} b={b}
-                  review={allReviews?.find((r) => r.bookingId === b.id)}
-                  rs={getRs(b.id)}
-                  lang={lang} dateLocale={dateLocale}
-                  userName={user?.name ?? undefined}
-                  onReschedule={setRescheduleTarget}
-                  onSetRating={(id, rating) => setRs(id, { rating })}
-                  onSetHover={(id, hover) => setRs(id, { hover })}
-                  onCommentChange={(id, comment) => setRs(id, { comment })}
-                  onSubmitReview={(id) => {
-                    const r = getRs(id);
-                    submitReview.mutate({ data: { bookingId: id, rating: r.rating, comment: r.comment || undefined } });
-                  }}
-                  submitPending={submitReview.isPending}
-                />
-              ))}</div>
+              <div className="space-y-3">
+                {activeGroups.map((g) => (
+                  <CartGroupCard key={g.groupRef} group={g} lang={lang} dateLocale={dateLocale} onReschedule={setRescheduleTarget} />
+                ))}
+                {active.map((b) => (
+                  <BookingCard
+                    key={b.id} b={b}
+                    review={allReviews?.find((r) => r.bookingId === b.id)}
+                    rs={getRs(b.id)}
+                    lang={lang} dateLocale={dateLocale}
+                    userName={user?.name ?? undefined}
+                    onReschedule={setRescheduleTarget}
+                    onSetRating={(id, rating) => setRs(id, { rating })}
+                    onSetHover={(id, hover) => setRs(id, { hover })}
+                    onCommentChange={(id, comment) => setRs(id, { comment })}
+                    onSubmitReview={(id) => {
+                      const r = getRs(id);
+                      submitReview.mutate({ data: { bookingId: id, rating: r.rating, comment: r.comment || undefined } });
+                    }}
+                    submitPending={submitReview.isPending}
+                  />
+                ))}
+              </div>
             </section>
           )}
-          {past.length > 0 && (
+          {(past.length > 0 || pastGroups.length > 0) && (
             <section>
               <h2 className="text-base font-black mb-4 flex items-center gap-2">
                 <div className="w-2 h-5 bg-muted-foreground/40 rounded-full" />
                 {t("Riwayat", "History")}
-                <span className="text-sm font-normal text-muted-foreground">({past.length})</span>
+                <span className="text-sm font-normal text-muted-foreground">
+                  ({past.length + pastGroups.reduce((n, g) => n + g.items.length, 0)})
+                </span>
               </h2>
-              <div className="space-y-3">{past.map((b) => (
-                <BookingCard
-                  key={b.id} b={b}
-                  review={allReviews?.find((r) => r.bookingId === b.id)}
-                  rs={getRs(b.id)}
-                  lang={lang} dateLocale={dateLocale}
-                  userName={user?.name ?? undefined}
-                  onReschedule={setRescheduleTarget}
-                  onSetRating={(id, rating) => setRs(id, { rating })}
-                  onSetHover={(id, hover) => setRs(id, { hover })}
-                  onCommentChange={(id, comment) => setRs(id, { comment })}
-                  onSubmitReview={(id) => {
-                    const r = getRs(id);
-                    submitReview.mutate({ data: { bookingId: id, rating: r.rating, comment: r.comment || undefined } });
-                  }}
-                  submitPending={submitReview.isPending}
-                />
-              ))}</div>
+              <div className="space-y-3">
+                {pastGroups.map((g) => (
+                  <CartGroupCard key={g.groupRef} group={g} lang={lang} dateLocale={dateLocale} onReschedule={setRescheduleTarget} />
+                ))}
+                {past.map((b) => (
+                  <BookingCard
+                    key={b.id} b={b}
+                    review={allReviews?.find((r) => r.bookingId === b.id)}
+                    rs={getRs(b.id)}
+                    lang={lang} dateLocale={dateLocale}
+                    userName={user?.name ?? undefined}
+                    onReschedule={setRescheduleTarget}
+                    onSetRating={(id, rating) => setRs(id, { rating })}
+                    onSetHover={(id, hover) => setRs(id, { hover })}
+                    onCommentChange={(id, comment) => setRs(id, { comment })}
+                    onSubmitReview={(id) => {
+                      const r = getRs(id);
+                      submitReview.mutate({ data: { bookingId: id, rating: r.rating, comment: r.comment || undefined } });
+                    }}
+                    submitPending={submitReview.isPending}
+                  />
+                ))}
+              </div>
             </section>
           )}
         </div>

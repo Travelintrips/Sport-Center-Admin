@@ -42,6 +42,7 @@ type WaBooking = {
   orderNumber: string;
   customerName: string;
   customerPhone: string;
+  bookerName: string | null;
   facilityId: number;
   facilityName: string | null;
   bookingDate: string;

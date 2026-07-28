@@ -1,23 +1,49 @@
-# Supabase Environment Variables Audit
+# Supabase Environment Audit
 
-> Last updated: June 2026
-> Project: Sport Center API Server
+**Last updated:** 2026-06-15  
+**Status:** ✅ FINAL — DB + Storage + Realtime fully isolated (dev ≠ prod)
 
 ---
 
-## Dev/Prod Isolation Policy
+## Status Final
 
-**Development MUST NOT share a database with production.**
+| Komponen | Status | Detail |
+|---|---|---|
+| **Database (dev)** | ✅ **Isolated** | Replit heliumdb via `SUPABASE_DATABASE_URL_DEV` |
+| **Database (prod)** | ✅ **Protected** | Supabase `nzdweipzckfszczzqtuw` via `SUPABASE_DATABASE_URL` |
+| **Storage (dev)** | ✅ **Isolated** | Supabase `xssrfshdrtdfupgqwfdw` via `SUPABASE_SERVICE_ROLE_KEY_DEV` |
+| **Storage (prod)** | ✅ **Protected** | Supabase `nzdweipzckfszczzqtuw` via `SUPABASE_SERVICE_ROLE_KEY` |
+| **Realtime (dev)** | ✅ **Isolated** | Supabase `xssrfshdrtdfupgqwfdw` via `SUPABASE_URL_DEV` + `SUPABASE_ANON_KEY_DEV` |
+| **Realtime (prod)** | ✅ **Protected** | Supabase `nzdweipzckfszczzqtuw` via `SUPABASE_URL` + `SUPABASE_ANON_KEY` |
+| **DB override** | ✅ **Disabled** | `ALLOW_DEV_ON_PROD_DB` dihapus |
+| **Storage override** | ✅ **Disabled** | `ALLOW_DEV_ON_PROD_STORAGE` tidak di-set (defaults `false`) |
 
-The server enforces this at startup via a hard guard in `lib/db/src/index.ts`:
+---
 
-| Condition | Behavior |
-|-----------|----------|
-| `NODE_ENV=development` + `SUPABASE_DATABASE_URL_DEV` set | ✅ Server starts — uses isolated dev DB |
-| `NODE_ENV=development` + no dev DB + `ALLOW_DEV_ON_PROD_DB=true` | ⚠️ Server starts with loud warning — uses prod DB |
-| `NODE_ENV=development` + no dev DB + `ALLOW_DEV_ON_PROD_DB` not set | ❌ **Server refuses to start** with clear error |
-| `NODE_ENV=production` + `SUPABASE_DATABASE_URL` set | ✅ Server starts — uses prod DB |
-| `NODE_ENV=production` + no `SUPABASE_DATABASE_URL` | ⚠️ Server starts with warning — falls back to `DATABASE_URL` |
+## Isolation Policy
+
+### Database
+| Kondisi | Perilaku |
+|---|---|
+| `NODE_ENV=development` + `SUPABASE_DATABASE_URL_DEV` set | ✅ Start — pakai isolated dev DB |
+| `NODE_ENV=development` + `ALLOW_DEV_ON_PROD_DB=true` | ⚠️ Start dengan WARNING — pakai prod DB |
+| `NODE_ENV=development` + tidak ada keduanya | ❌ **Server MENOLAK start (throw)** |
+| `NODE_ENV=production` + `SUPABASE_DATABASE_URL` | ✅ Start — pakai prod DB |
+
+### Storage
+| Kondisi | Perilaku |
+|---|---|
+| `NODE_ENV=development` + `SUPABASE_SERVICE_ROLE_KEY_DEV` set | ✅ Start — upload ke dev Supabase bucket |
+| `NODE_ENV=development` + `ALLOW_DEV_ON_PROD_STORAGE=true` | ⚠️ Start dengan WARNING besar — upload ke prod |
+| `NODE_ENV=development` + tidak ada keduanya | ❌ **`process.exit(1)` — server MENOLAK start** |
+| `NODE_ENV=production` + `SUPABASE_SERVICE_ROLE_KEY` | ✅ Start — upload ke prod Supabase bucket |
+
+### Realtime (Supabase Realtime)
+| Kondisi | Perilaku |
+|---|---|
+| `NODE_ENV=development` + `SUPABASE_URL_DEV` + `SUPABASE_ANON_KEY_DEV` | ✅ Realtime aktif ke dev project |
+| `NODE_ENV=development` + salah satu tidak ada | ⚠️ Realtime no-op (tidak fatal) |
+| `NODE_ENV=production` + `SUPABASE_URL` + `SUPABASE_ANON_KEY` | ✅ Realtime aktif ke prod project |
 
 ---
 
@@ -25,133 +51,160 @@ The server enforces this at startup via a hard guard in `lib/db/src/index.ts`:
 
 ```
 NODE_ENV=production:
-  1. SUPABASE_DATABASE_URL   ← primary prod Supabase DB
+  1. SUPABASE_DATABASE_URL   ← primary prod Supabase DB (nzdweipzckfszczzqtuw)
   2. DATABASE_URL            ← generic fallback (warns if used in prod)
 
 NODE_ENV=development:
-  1. SUPABASE_DATABASE_URL_DEV   ← REQUIRED — isolated dev DB
-  2. [BLOCKED] — server refuses to start unless:
-     └─ ALLOW_DEV_ON_PROD_DB=true → uses SUPABASE_DATABASE_URL (with big warning)
-                                   → or DATABASE_URL as last resort
+  1. SUPABASE_DATABASE_URL_DEV  ← REQUIRED — isolated dev DB (Replit heliumdb)
+  2. ALLOW_DEV_ON_PROD_DB=true  → pakai prod DB (EMERGENCY ONLY, loud warning)
+  3. Tidak ada keduanya         → throw Error, server crash
+```
+
+## Storage Logic (`lib/supabaseStorage.ts`)
+
+```
+NODE_ENV=production:
+  SUPABASE_SERVICE_ROLE_KEY → derive project URL from JWT ref
+  → upload ke nzdweipzckfszczzqtuw.supabase.co
+
+NODE_ENV=development:
+  1. SUPABASE_SERVICE_ROLE_KEY_DEV  ← REQUIRED — isolated dev bucket
+     → upload ke xssrfshdrtdfupgqwfdw.supabase.co
+  2. ALLOW_DEV_ON_PROD_STORAGE=true → upload ke prod (EMERGENCY ONLY)
+  3. Tidak ada keduanya             → process.exit(1)
+```
+
+## Realtime Logic (`lib/supabase.ts`)
+
+```
+NODE_ENV=production:
+  SUPABASE_URL + SUPABASE_ANON_KEY → realtime ke nzdweipzckfszczzqtuw
+
+NODE_ENV=development:
+  1. SUPABASE_URL_DEV + SUPABASE_ANON_KEY_DEV → realtime ke xssrfshdrtdfupgqwfdw
+  2. Salah satu tidak ada → realtime = no-op (bukan fatal, tapi dilaporkan di diagnostic)
 ```
 
 ---
 
 ## Active Environment Variables
 
-| Variable | Env | Required | Where Used | Notes |
-|----------|-----|----------|-----------|-------|
-| `SUPABASE_DATABASE_URL` | Prod | **Yes** | `lib/db/src/index.ts` primary prod connection; `lib/bizportalSync.ts` BizPortal push pool | Transaction pooler URL (port 6543) |
-| `SUPABASE_DATABASE_URL_DEV` | Dev | **Yes** | `lib/db/src/index.ts` primary dev connection | Must be a separate Supabase project or Replit Postgres. If missing, startup is blocked. |
-| `ALLOW_DEV_ON_PROD_DB` | Dev only | No | `lib/db/src/index.ts` emergency override | Must be `"true"` to allow dev → prod fallback. Default is blocked. **EMERGENCY USE ONLY.** |
-| `DATABASE_URL` | Both | No | `lib/db/src/index.ts` last-resort fallback | Replit managed Postgres. Used only if Supabase URLs are unavailable. |
-| `SUPABASE_URL` | Both | No | `lib/supabase.ts` Realtime client; `routes/config.ts` public config | Required alongside `SUPABASE_ANON_KEY` for Realtime availability broadcasts. |
-| `SUPABASE_ANON_KEY` | Both | No | `lib/supabase.ts` Realtime client; `routes/config.ts` | Required alongside `SUPABASE_URL` for Realtime. Also served to frontend. |
-| `SUPABASE_SERVICE_ROLE_KEY` | Both | Yes (uploads) | `lib/supabaseStorage.ts` | Server-side only. Required for Supabase Storage uploads. Project ref derived from JWT payload. |
-| `BIZPORTAL_SYNC_API_KEY` | Both | Yes (pull API) | `routes/sync.ts` pull endpoint guard | BizPortal must send as `X-API-Key`. Without it, `/api/sync/*` returns 503. |
+### Development
+| Variable | Status | Purpose |
+|---|---|---|
+| `SUPABASE_DATABASE_URL_DEV` | ✅ set | DB → Replit heliumdb (isolated) |
+| `SUPABASE_SERVICE_ROLE_KEY_DEV` | ✅ set | Storage → dev Supabase `xssrfshdrtdfupgqwfdw` |
+| `SUPABASE_URL_DEV` | ✅ set | Realtime → dev Supabase `xssrfshdrtdfupgqwfdw` |
+| `SUPABASE_ANON_KEY_DEV` | ✅ set | Realtime → dev Supabase `xssrfshdrtdfupgqwfdw` |
+| `SUPABASE_URL` | ✅ set | Dari .replit dev section (Storage derivasi URL dari JWT, bukan var ini) |
+| `SUPABASE_SERVICE_ROLE_KEY` | ✅ set | Dari .replit dev section (diabaikan di dev karena _DEV variant ada) |
+| `SUPABASE_ANON_KEY` | ✅ set | Dari .replit dev section (diabaikan di dev karena _DEV variant ada) |
+| `ALLOW_DEV_ON_PROD_DB` | ❌ removed | Emergency override — dinonaktifkan |
+| `ALLOW_DEV_ON_PROD_STORAGE` | ❌ not set | Defaults to `false` |
+
+### Production
+| Variable | Status | Purpose |
+|---|---|---|
+| `SUPABASE_DATABASE_URL` | ✅ set | DB → Supabase `nzdweipzckfszczzqtuw` |
+| `SUPABASE_SERVICE_ROLE_KEY` | ✅ set | Storage → Supabase `nzdweipzckfszczzqtuw` |
+| `SUPABASE_URL` | ✅ set | Realtime + public config |
+| `SUPABASE_ANON_KEY` | ✅ set | Realtime + frontend |
 
 ---
 
-## `ALLOW_DEV_ON_PROD_DB` — Emergency Override
-
-**This flag must NEVER be `true` in normal day-to-day development.**
-
-Acceptable use cases:
-- One-time manual data migration from prod to dev
-- Emergency hotfix debugging directly against prod data
-- Seeding dev DB from a prod snapshot
-
-When `ALLOW_DEV_ON_PROD_DB=true` is active:
-- The server starts but logs a large `╔═══╗ DANGER ╚═══╝` banner
-- The diagnostic endpoint (`/api/admin/system/supabase-status`) shows `isDevUsingProdDb: true` and `warning` field
-- Every write from dev code reaches the production database
-- **Remove this flag immediately after use and set `SUPABASE_DATABASE_URL_DEV`**
-
----
-
-## Supabase Storage Buckets
-
-| Bucket | Access | Max Size | Accepted Types | Used By |
-|--------|--------|----------|----------------|---------|
-| `facility-images` | Public | 5 MB | JPEG, PNG, WebP | Admin Portal — facility photo upload |
-| `payment-proofs` | Public | 10 MB | JPEG, PNG, WebP, PDF | Customer Portal, Admin, Tenant, WA Bot — payment proof upload |
-
-Bucket validation at startup (`lib/supabaseStorage.ts → validateBuckets()`):
-- **Production** (`NODE_ENV=production`): logs error if bucket missing — does **NOT** auto-create.
-- **Development**: auto-creates missing buckets with correct size limits and MIME type restrictions.
-
----
-
-## Deprecated Environment Variables
-
-These are **set in Replit Secrets** but **not read by any application code**.
-Do not delete them immediately — they may be used by external scripts or BizPortal. Document as deprecated.
-
-| Variable | Status | Reason Deprecated |
-|----------|--------|-------------------|
-| `SUPABASE_URL_DEV` | **set-but-unused** | Was intended for dev Supabase REST URL. Code never reads it. Use `SUPABASE_DATABASE_URL_DEV` (PostgreSQL string) for the dev DB. If you need dev Supabase Storage/Realtime, add `SUPABASE_URL_DEV` support to `lib/supabaseStorage.ts` and `lib/supabase.ts`. |
-| `SUPABASE_PG_URL` | **set-but-unused** | Points to same Supabase as `SUPABASE_DATABASE_URL`. Redundant alias. Can be removed once confirmed no external scripts depend on it. |
-| `SUPABASE_STORAGE_BUCKET` | **set-but-unused** | Value is an S3-compatible URL. Buckets are addressed by constant names (`facility-images`, `payment-proofs`) in `lib/supabaseStorage.ts`. This var is never read. |
-
----
-
-## Dev Supabase Project (Optional — `SUPABASE_URL_DEV` etc.)
-
-If you want dev Storage and Realtime to also point to a separate Supabase project (not just DB), add:
+## Diagnostic Endpoint
 
 ```
-SUPABASE_URL_DEV=https://[ref-dev].supabase.co
-SUPABASE_ANON_KEY_DEV=eyJ...
-SUPABASE_SERVICE_ROLE_KEY_DEV=eyJ...
+GET /api/admin/system/supabase-status
+Authorization: Bearer <admin-token>
 ```
 
-These are **not yet wired into the code** — they are placeholders for future isolation of Storage and Realtime per environment. To activate them, update `lib/supabaseStorage.ts` and `lib/supabase.ts` to prefer `_DEV` variants when `NODE_ENV=development`.
+Fields baru yang ditambahkan pada Phase 2:
+
+```json
+{
+  "storage": {
+    "storageProjectSource": "SUPABASE_SERVICE_ROLE_KEY_DEV (dev — isolated, ref=xssrfshdrtdfupgqwfdw)",
+    "isDevUsingProdStorage": false,
+    "allowDevOnProdStorage": false,
+    "warning": null
+  },
+  "realtime": {
+    "realtimeProjectSource": "SUPABASE_URL_DEV (dev — isolated, ref=xssrfshdrtdfupgqwfdw)",
+    "isRealtimeNoop": false
+  }
+}
+```
+
+Diagnostic TIDAK pernah mengekspos: service role key, anon key, URL lengkap, atau koneksi string.
+Hanya `ref` (project ID) yang tampil, bukan credentials.
 
 ---
 
-## BizPortal Sync Architecture
+## Test Results (2026-06-15)
 
-### Push (Sport Center → BizPortal)
-
-Triggered automatically on these events. Uses `SUPABASE_DATABASE_URL` pool directly (always prod target).
-
-| Event | Route File | BizPortal Table |
-|-------|-----------|-----------------|
-| Booking created | `routes/bookings.ts` | `public.sport_center_bookings` |
-| Payment proof uploaded | `routes/payments.ts`, `routes/whatsapp.ts` | `public.sport_center_bookings` |
-| Admin confirms payment | `routes/bookings.ts`, `routes/payments.ts` | `public.sport_center_bookings` |
-| Admin rejects booking | `routes/bookings.ts` | `public.sport_center_bookings` |
-| Booking cancelled | `routes/cancellations.ts` | `public.sport_center_bookings` |
-| WA bot upload proof | `routes/whatsapp.ts` | `public.sport_center_bookings` |
-| WA bot confirm | `routes/whatsapp.ts` | `public.sport_center_bookings` |
-| Membership created/updated | `routes/memberships.ts` | `public.sport_center_memberships` |
-
-All pushes use **upsert** (ON CONFLICT DO UPDATE) with retry (max 2 retries, 1 s backoff). Failures are logged but never block the main operation.
-
-### Pull (BizPortal → Sport Center)
-
-| Endpoint | Auth | Description |
-|----------|------|-------------|
-| `GET /api/sync/health` | None | Public status check — no secrets exposed |
-| `GET /api/sync/bookings` | `X-API-Key` | Bookings + payment + facility data |
-| `GET /api/sync/facilities` | `X-API-Key` | Active facility list |
-| `GET /api/sync/memberships` | `X-API-Key` | Gym membership list |
-| `GET /api/sync/stats` | `X-API-Key` | Daily/monthly revenue stats |
+| Test | Result | Detail |
+|---|---|---|
+| Startup isolation check (DB) | ✅ PASS | Log: `SUPABASE_DATABASE_URL_DEV (dev — isolated)` |
+| Startup isolation check (Storage) | ✅ PASS | Log: `Bucket "..." exists (env=dev)` |
+| Guard: server exit tanpa `SUPABASE_SERVICE_ROLE_KEY_DEV` | ✅ PASS | `process.exit(1)` + FATAL banner |
+| Upload payment-proof | ✅ PASS | URL: `xssrfshdrtdfupgqwfdw.supabase.co/...payment-proofs/...` |
+| Upload facility-image | ✅ PASS | URL: `xssrfshdrtdfupgqwfdw.supabase.co/...facility-images/...` |
+| Diagnostic: `isDevUsingProdStorage=false` | ✅ PASS | |
+| Diagnostic: `storageProjectSource` menampilkan ref, bukan key | ✅ PASS | |
+| Diagnostic: `isRealtimeNoop=false` | ✅ PASS | |
+| Production bucket tidak berubah | ✅ PASS | Prod project `nzdweipzckfszczzqtuw` tidak disentuh |
 
 ---
 
-## Admin Diagnostic Endpoint
+## Dev Seed Data
 
-`GET /api/admin/system/supabase-status` — requires admin JWT
+| Type | Detail |
+|---|---|
+| Admin | `admin@sportcenter.com` / `admin123` |
+| Customer 1 | `budi.dev@example.com` / `customer123` (CST-DEV-001) |
+| Customer 2 | `dewi.dev@example.com` / `customer123` (CST-DEV-002) |
+| Tenant | `tenant.dev@example.com` / `customer123` |
+| Facility 1 | Lapangan Futsal A (DEV) — Rp 150.000/jam |
+| Facility 2 | Lapangan Badminton 1 (DEV) — Rp 80.000/jam |
+| Booking 1 | `ORD-DEV-20260615-001` — confirmed |
+| Booking 2 | `ORD-DEV-20260615-002` — pending_payment |
+| Payment | Booking 1 — Rp 300.000 — confirmed |
+| Membership | Budi Santoso — 1 bulan — active |
 
-Returns (never exposes secrets or raw DB URLs):
-- `database.dbEnvironment` — `"development"` or `"production"`
-- `database.dbSource` — human-readable DB source label
-- `database.isDevUsingProdDb` — `true` if dev is using prod DB
-- `database.allowDevOnProdDb` — `true` if emergency override is active
-- `database.devDbConfigured` / `database.prodDbConfigured` — booleans
-- `database.warning` — non-null string if `isDevUsingProdDb=true`
-- `storage.buckets` — per-bucket health (ok, checkedAt, error)
-- `realtime.enabled`
-- `bizportalSync.pushConfigured` / `pullConfigured` / last sync state
-- `deprecatedEnvVars` — list of env vars that are set but unused
+---
+
+## Deprecated / Removed Variables
+
+| Variable | Status | Action |
+|---|---|---|
+| `SUPABASE_PG_URL` | ❌ removed | Alias duplikat, tidak dipakai |
+| `SUPABASE_STORAGE_BUCKET` | set-but-unused | Diabaikan; bucket dialamatkan by name |
+| `ALLOW_DEV_ON_PROD_DB` | ❌ removed | Emergency override, dinonaktifkan |
+
+---
+
+## Risiko Tersisa
+
+| Risiko | Severity | Mitigasi |
+|---|---|---|
+| Dev Supabase project `xssrfshdrtdfupgqwfdw` juga digunakan oleh project lain | Medium | Pisahkan ke project dedicated jika bucket clash jadi masalah |
+| Realtime no-op jika `SUPABASE_URL_DEV` tidak di-set | Low | Tidak fatal; `isRealtimeNoop` terekspos di diagnostic |
+| BizPortal push sync disabled di dev | Info | `SUPABASE_DATABASE_URL` tidak ada di dev — expected behavior |
+| `SUPABASE_STORAGE_BUCKET` env var masih set tapi diabaikan | Low | Documented deprecated, tidak ada dampak fungsional |
+
+---
+
+## Isolation Guarantee
+
+```
+Dev DB writes    → Replit heliumdb ONLY (tidak menyentuh Supabase prod)
+Dev file uploads → Supabase xssrfshdrtdfupgqwfdw ONLY (tidak menyentuh bucket prod)
+Dev realtime     → Supabase xssrfshdrtdfupgqwfdw ONLY
+
+Prod DB          → Supabase nzdweipzckfszczzqtuw ONLY
+Prod Storage     → Supabase nzdweipzckfszczzqtuw ONLY
+Prod Realtime    → Supabase nzdweipzckfszczzqtuw ONLY
+
+Zero cross-contamination between environments.
+```

@@ -6,7 +6,7 @@ import {
   useClearBankMutations,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { getListBankMutationsQueryKey } from "@workspace/api-client-react";
+import { getListBankMutationsQueryKey, getGetBankMutationMatchesQueryKey } from "@workspace/api-client-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -810,7 +810,7 @@ function MutationRow({ mutation, qc }: { mutation: any; qc: any }) {
   };
 
   const matchesQuery = useGetBankMutationMatches(mutation.id, {
-    query: { enabled: expanded, staleTime: 30000 },
+    query: { enabled: expanded, staleTime: 30000, queryKey: getGetBankMutationMatchesQueryKey(mutation.id) },
   });
 
   const approveMutation = useApproveBankMutation({
@@ -998,7 +998,7 @@ function MutationRow({ mutation, qc }: { mutation: any; qc: any }) {
             const best = ocrCandidates.reduce((a: any, b: any) =>
               Math.abs(parseFloat(a.ocrAmount) - mutAmt) <= Math.abs(parseFloat(b.ocrAmount) - mutAmt) ? a : b
             );
-            const ocrAmt = parseFloat(best.ocrAmount);
+            const ocrAmt = parseFloat(best.ocrAmount!);
             const selisih = Math.abs(mutAmt - ocrAmt);
             const pct = mutAmt > 0 ? (selisih / mutAmt) * 100 : 100;
             const isMatch = pct <= 1;
@@ -2269,17 +2269,18 @@ export default function AdminBankReconciliation() {
     }
   };
 
+  const listParams = {
+    status: filterStatus !== "all" ? filterStatus : undefined,
+    direction: filterDirection !== "all" ? filterDirection : undefined,
+    search: search || undefined,
+    dateFrom: dateFrom || undefined,
+    dateTo: dateTo || undefined,
+    page,
+    pageSize: 30,
+  };
   const { data, isLoading } = useListBankMutations(
-    {
-      status: filterStatus !== "all" ? filterStatus : undefined,
-      direction: filterDirection !== "all" ? filterDirection : undefined,
-      search: search || undefined,
-      dateFrom: dateFrom || undefined,
-      dateTo: dateTo || undefined,
-      page,
-      pageSize: 30,
-    },
-    { query: { staleTime: 10000 } }
+    listParams,
+    { query: { staleTime: 10000, queryKey: getListBankMutationsQueryKey(listParams) } }
   );
 
   const runMatchingMutation = useRunBankMatching({

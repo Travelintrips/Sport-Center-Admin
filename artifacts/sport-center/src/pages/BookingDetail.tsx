@@ -29,17 +29,21 @@ import {
   Building2,
   QrCode,
   ChevronRight,
+  ArrowLeft,
   Star,
   CalendarClock,
   ShieldCheck,
   ShieldX,
   ShieldAlert,
   ExternalLink,
+  PartyPopper,
+  Tag,
 } from "lucide-react";
 import { Link } from "wouter";
 import RescheduleDialog from "@/components/RescheduleDialog";
 import ExtendBookingDialog from "@/components/ExtendBookingDialog";
 import { useLang } from "@/lib/i18n";
+import CorporateDocUpload from "@/components/CorporateDocUpload";
 
 const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "") || "";
 
@@ -155,6 +159,34 @@ export default function BookingDetail() {
     e.preventDefault();
     if (!booking || !selectedFile) return;
 
+    // Deteksi payment_type dan amount yang tepat berdasarkan state booking
+    const bPayments = ((booking as any).payments as any[]) ?? [];
+    const isDpMode =
+      !!(booking as any).isDpPaid && Number((booking as any).downPayment || 0) > 0;
+    const groupInfo = (booking as any).groupInfo as { groupTotalPayment: number; groupSessionCount: number; groupRef: string } | null;
+    let detectedType = "full_payment";
+    // Untuk grup booking: pakai total semua sesi, bukan hanya 1 booking
+    let detectedAmount: number = groupInfo ? groupInfo.groupTotalPayment : booking.totalPrice;
+
+    if (isDpMode) {
+      const hasDpActive = bPayments.some(
+        (p: any) =>
+          p.paymentType === "dp" && (p.status === "pending" || p.status === "confirmed"),
+      );
+      if (!hasDpActive) {
+        detectedType = "dp";
+        detectedAmount = Number((booking as any).downPayment || 0);
+      } else {
+        detectedType = "pelunasan";
+        detectedAmount =
+          (booking as any).remainingAmount ??
+          Math.max(
+            0,
+            booking.totalPrice - Number((booking as any).downPayment || 0),
+          );
+      }
+    }
+
     try {
       setUploadProgress("uploading");
 
@@ -177,9 +209,10 @@ export default function BookingDetail() {
       submitPayment.mutate({
         data: {
           bookingId: booking.id,
-          amount: booking.totalPrice,
+          amount: detectedAmount,
           proofUrl: url ?? objectPath,
           notes: notes || undefined,
+          paymentType: detectedType as any,
         },
       });
     } catch (err: any) {
@@ -251,9 +284,27 @@ export default function BookingDetail() {
     <div className="container mx-auto px-4 py-8 md:py-12 max-w-4xl">
       {/* Header */}
       <div className="mb-8 text-center">
-        <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-full border mb-6 ${statusConfig.color}`}>
-          <StatusIcon size={20} />
-          <span className="font-bold">{statusConfig.label}</span>
+        <div className="flex flex-wrap justify-center gap-2 mb-6">
+          <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-full border ${statusConfig.color}`}>
+            <StatusIcon size={20} />
+            <span className="font-bold">{statusConfig.label}</span>
+          </div>
+          {(booking as any).payerType === "company" ? (
+            <div className="inline-flex items-center gap-1.5 px-3 py-2 rounded-full border bg-blue-100 text-blue-700 border-blue-200">
+              <Building2 size={14} />
+              <span className="font-semibold text-sm">{t("Corporate", "Corporate")}</span>
+              {(booking as any).billingStatus && (
+                <span className="ml-1 text-xs bg-blue-200 text-blue-800 px-1.5 py-0.5 rounded-full font-medium uppercase">
+                  {(booking as any).billingStatus}
+                </span>
+              )}
+            </div>
+          ) : (
+            <div className="inline-flex items-center gap-1.5 px-3 py-2 rounded-full border bg-gray-100 text-gray-600 border-gray-200">
+              <CheckCircle2 size={14} />
+              <span className="font-semibold text-sm">{t("Personal", "Personal")}</span>
+            </div>
+          )}
         </div>
         <h1 className="text-3xl md:text-5xl font-black tracking-tight mb-2">
           {t("Order", "Order")} {booking.orderNumber}
@@ -261,12 +312,15 @@ export default function BookingDetail() {
         <p className="text-muted-foreground text-lg">
           {booking.status === "pending_payment"
             ? t("Selesaikan pembayaran untuk mengamankan booking ini.", "Complete payment to secure this booking.")
-            : t("Terima kasih atas pemesanan Anda!", "Thank you for your order!")}
+            : (booking as any).payerType === "company"
+              ? t("Booking akan ditagihkan ke akun perusahaan.", "Booking will be billed to the company account.")
+              : t("Terima kasih atas pemesanan Anda!", "Thank you for your order!")}
         </p>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-        {/* Booking Details */}
+        {/* Left column: Booking Details + AP2 Verification */}
+        <div className="space-y-4">
         <Card className="border-border">
           <CardHeader className="bg-muted/30 pb-4 border-b">
             <CardTitle>{t("Detail Booking", "Booking Details")}</CardTitle>
@@ -278,6 +332,11 @@ export default function BookingDetail() {
               <div className="text-sm text-muted-foreground">
                 {booking.customerPhone} · {booking.customerEmail}
               </div>
+              {(booking as any).payerType === "company" && (booking as any).bookedForName && (booking as any).bookedForName !== booking.customerName && (
+                <div className="text-xs text-blue-600 mt-1">
+                  {t("Digunakan oleh", "Used by")}: <span className="font-medium">{(booking as any).bookedForName}</span>
+                </div>
+              )}
             </div>
             <div className="h-px bg-border" />
             <div>
@@ -324,12 +383,40 @@ export default function BookingDetail() {
                 </div>
               </div>
             ) : (
-              <div className="flex justify-between items-center text-xl font-black">
-                <div>{t("Grand Total", "Grand Total")}</div>
-                <div className="text-primary">
-                  Rp {booking.totalPrice.toLocaleString("id-ID")}
-                </div>
-              </div>
+              (() => {
+                const gt = Number((booking as any).grandTotal ?? booking.totalPrice);
+                const hasPpn = (booking as any).ppnAmount != null && Number((booking as any).ppnAmount) > 0;
+                const dppVal = hasPpn
+                  ? ((booking as any).dpp != null ? Number((booking as any).dpp) : Math.round(gt / 1.11))
+                  : gt;
+                const dppNilaiLainVal = hasPpn ? Math.round(dppVal * 11 / 12) : 0;
+                const ppnVal = hasPpn ? (gt - dppVal) : 0;
+                return (
+                  <div className="space-y-1.5 w-full">
+                    {hasPpn && (
+                      <>
+                        <div className="flex justify-between items-center text-sm text-muted-foreground">
+                          <span>DPP</span>
+                          <span className="font-medium">Rp {dppVal.toLocaleString("id-ID")}</span>
+                        </div>
+                        <div className="flex justify-between items-center text-xs text-muted-foreground/70">
+                          <span>{t("DPP Nilai Lain (11/12 × DPP)", "DPP Nilai Lain (11/12 × DPP)")}</span>
+                          <span>Rp {dppNilaiLainVal.toLocaleString("id-ID")}</span>
+                        </div>
+                        <div className="flex justify-between items-center text-sm text-muted-foreground">
+                          <span>PPN 12%</span>
+                          <span className="text-primary font-semibold">+Rp {ppnVal.toLocaleString("id-ID")}</span>
+                        </div>
+                        <div className="h-px bg-border" />
+                      </>
+                    )}
+                    <div className="flex justify-between items-center text-xl font-black">
+                      <div>{t("Total DPP + PPN", "Total DPP + PPN")}</div>
+                      <div className="text-primary">Rp {gt.toLocaleString("id-ID")}</div>
+                    </div>
+                  </div>
+                );
+              })()
             )}
           </CardContent>
         </Card>
@@ -385,8 +472,40 @@ export default function BookingDetail() {
             </CardContent>
           </Card>
         )}
+        {/* Event Discount Info */}
+        {(booking as any).bookingType === "event" && (
+          <Card className="border-2 border-purple-200 bg-purple-50/50 mt-4">
+            <CardContent className="p-5">
+              <div className="flex items-start gap-3">
+                <PartyPopper size={22} className="text-purple-600 mt-0.5 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <div className="font-bold text-sm text-purple-900">{t("Booking Event — Diskon 21,43% Diterapkan", "Event Booking — 21.43% Discount Applied")}</div>
+                  <div className="text-xs mt-0.5 text-purple-700">
+                    {t("Harga fasilitas mendapat diskon khusus event.", "Facility price has been discounted for this event booking.")}
+                  </div>
+                  {(booking as any).eventDiscountAmount && Number((booking as any).eventDiscountAmount) > 0 && (
+                    <div className="mt-2 inline-flex items-center gap-1.5 rounded-md bg-purple-100 border border-purple-200 px-2.5 py-1 text-xs font-semibold text-purple-800">
+                      <Tag size={11} />
+                      {t("Diskon", "Discount")}: Rp {Number((booking as any).eventDiscountAmount).toLocaleString("id-ID")}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
-        {/* Payment Section */}
+        {/* Upload Dokumentasi — hanya untuk booking corporate yang aktif */}
+        {(booking as any).payerType === "company" && (
+          <CorporateDocUpload
+            bookingId={(booking as any).id}
+            isAdmin={false}
+            canUpload={["confirmed", "completed", "paid", "waiting_confirmation"].includes(booking.status)}
+          />
+        )}
+        </div>{/* end left column */}
+
+        {/* Right column: Payment Section */}
         <div className="space-y-6">
           {booking.status === "pending_payment" && (
             <Card className="border-primary/30 shadow-md">
@@ -398,20 +517,73 @@ export default function BookingDetail() {
               </CardHeader>
               <CardContent className="p-6 space-y-5">
                 {/* DP Info Banner */}
-                {(booking as any).isDpPaid && (
-                  <div className="flex items-start gap-3 p-3.5 rounded-xl border border-violet-200 bg-violet-50 dark:bg-violet-900/20 dark:border-violet-800">
-                    <div className="w-8 h-8 rounded-lg bg-violet-100 dark:bg-violet-900/40 flex items-center justify-center shrink-0">
-                      <CreditCard size={16} className="text-violet-600 dark:text-violet-300" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="font-semibold text-sm text-violet-800 dark:text-violet-200">{t("DP Sudah Dicatat", "Down Payment Recorded")}</div>
-                      <div className="text-xs text-violet-600 dark:text-violet-400 mt-0.5 space-y-0.5">
-                        <div>{t("DP", "DP")}: <span className="font-bold">Rp {Number((booking as any).downPayment || 0).toLocaleString("id-ID")}</span></div>
-                        <div>{t("Sisa Pembayaran", "Remaining")}: <span className="font-bold">Rp {Math.max(0, Number(booking.totalPrice) - Number((booking as any).downPayment || 0)).toLocaleString("id-ID")}</span></div>
+                {(booking as any).isDpPaid && (() => {
+                  const bPayments = ((booking as any).payments as any[]) ?? [];
+                  const dpConfirmed = bPayments.some((p: any) => p.paymentType === "dp" && p.status === "confirmed");
+                  const dpPending = bPayments.some((p: any) => p.paymentType === "dp" && p.status === "pending");
+                  const pelunasanPending = bPayments.some((p: any) => p.paymentType === "pelunasan" && p.status === "pending");
+                  const remaining = (booking as any).remainingAmount ?? Math.max(0, Number(booking.totalPrice) - Number((booking as any).downPayment || 0));
+
+                  if (dpConfirmed && pelunasanPending) {
+                    return (
+                      <div className="flex items-start gap-3 p-3.5 rounded-xl border border-blue-200 bg-blue-50 dark:bg-blue-900/20 dark:border-blue-800">
+                        <div className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-900/40 flex items-center justify-center shrink-0">
+                          <Clock size={16} className="text-blue-600 dark:text-blue-300" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="font-semibold text-sm text-blue-800 dark:text-blue-200">{t("Bukti Pelunasan Diterima", "Pelunasan Proof Received")}</div>
+                          <div className="text-xs text-blue-600 dark:text-blue-400 mt-0.5">{t("Admin sedang memverifikasi pelunasan Anda.", "Admin is verifying your payment.")}</div>
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  if (dpConfirmed) {
+                    return (
+                      <div className="flex items-start gap-3 p-3.5 rounded-xl border border-emerald-200 bg-emerald-50 dark:bg-emerald-900/20 dark:border-emerald-800">
+                        <div className="w-8 h-8 rounded-lg bg-emerald-100 dark:bg-emerald-900/40 flex items-center justify-center shrink-0">
+                          <CheckCircle2 size={16} className="text-emerald-600 dark:text-emerald-300" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="font-semibold text-sm text-emerald-800 dark:text-emerald-200">{t("DP Dikonfirmasi ✓", "DP Confirmed ✓")}</div>
+                          <div className="text-xs text-emerald-600 dark:text-emerald-400 mt-0.5 space-y-0.5">
+                            <div>{t("DP", "DP")}: <span className="font-bold">Rp {Number((booking as any).downPayment || 0).toLocaleString("id-ID")}</span></div>
+                            <div>{t("Sisa Pelunasan", "Remaining")}: <span className="font-bold text-primary">Rp {remaining.toLocaleString("id-ID")}</span></div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  if (dpPending) {
+                    return (
+                      <div className="flex items-start gap-3 p-3.5 rounded-xl border border-amber-200 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-800">
+                        <div className="w-8 h-8 rounded-lg bg-amber-100 dark:bg-amber-900/40 flex items-center justify-center shrink-0">
+                          <Clock size={16} className="text-amber-600 dark:text-amber-300" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="font-semibold text-sm text-amber-800 dark:text-amber-200">{t("Bukti DP Menunggu Konfirmasi", "DP Proof Awaiting Confirmation")}</div>
+                          <div className="text-xs text-amber-600 dark:text-amber-400 mt-0.5">{t("Admin sedang memverifikasi bukti DP Anda.", "Admin is verifying your DP proof.")}</div>
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="flex items-start gap-3 p-3.5 rounded-xl border border-violet-200 bg-violet-50 dark:bg-violet-900/20 dark:border-violet-800">
+                      <div className="w-8 h-8 rounded-lg bg-violet-100 dark:bg-violet-900/40 flex items-center justify-center shrink-0">
+                        <CreditCard size={16} className="text-violet-600 dark:text-violet-300" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="font-semibold text-sm text-violet-800 dark:text-violet-200">{t("DP Sudah Dicatat", "Down Payment Recorded")}</div>
+                        <div className="text-xs text-violet-600 dark:text-violet-400 mt-0.5 space-y-0.5">
+                          <div>{t("DP", "DP")}: <span className="font-bold">Rp {Number((booking as any).downPayment || 0).toLocaleString("id-ID")}</span></div>
+                          <div>{t("Sisa Pembayaran", "Remaining")}: <span className="font-bold">Rp {remaining.toLocaleString("id-ID")}</span></div>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                )}
+                  );
+                })()}
 
                 {/* DP Toggle (only if isDpPaid is false) */}
                 {!(booking as any).isDpPaid && !dpMode && !paymentMethod && (
@@ -467,7 +639,9 @@ export default function BookingDetail() {
                 )}
 
                 {(() => {
-                  const remaining = Math.max(0, Number(booking.totalPrice) - Number((booking as any).downPayment || 0));
+                  const remaining =
+                    (booking as any).remainingAmount ??
+                    Math.max(0, Number(booking.totalPrice) - Number((booking as any).downPayment || 0));
                   const isDpFullyPaid = (booking as any).isDpPaid && remaining <= 0;
 
                   if (isDpFullyPaid) {
@@ -512,7 +686,7 @@ export default function BookingDetail() {
                             </span>{" "}
                             {(booking as any).groupInfo && (
                               <span className="text-xs text-muted-foreground font-normal">
-                                ({(booking as any).groupInfo.groupSessionCount} {t("sesi", "sessions")} × Rp {booking.totalPrice.toLocaleString("id-ID")})
+                                ({(booking as any).groupInfo.groupSessionCount} {t("sesi", "sessions")} × Rp {Math.round((booking as any).groupInfo.groupTotalPayment / (booking as any).groupInfo.groupSessionCount).toLocaleString("id-ID")})
                               </span>
                             )}{" "}
                             {t("via:", "via:")}
@@ -522,25 +696,23 @@ export default function BookingDetail() {
 
                       {/* Payment Method Selector */}
                       {!paymentMethod && (
-                  <div className="grid grid-cols-2 gap-3">
-                    {hasBankInfo && (
-                      <button
-                        type="button"
-                        onClick={() => setPaymentMethod("transfer")}
-                        className="flex flex-col items-center gap-3 p-5 rounded-2xl border-2 border-border hover:border-primary hover:bg-primary/5 transition-all group"
-                      >
-                        <div className="w-12 h-12 rounded-xl bg-blue-100 flex items-center justify-center group-hover:bg-blue-200 transition-colors">
-                          <Building2 size={22} className="text-blue-600" />
+                  <div className={`grid gap-3 ${hasQris ? "grid-cols-2" : "grid-cols-1"}`}>
+                    <button
+                      type="button"
+                      onClick={() => setPaymentMethod("transfer")}
+                      className="flex flex-col items-center gap-3 p-5 rounded-2xl border-2 border-border hover:border-primary hover:bg-primary/5 transition-all group"
+                    >
+                      <div className="w-12 h-12 rounded-xl bg-blue-100 flex items-center justify-center group-hover:bg-blue-200 transition-colors">
+                        <Building2 size={22} className="text-blue-600" />
+                      </div>
+                      <div className="text-center">
+                        <div className="font-semibold text-sm">{t("Transfer Bank", "Bank Transfer")}</div>
+                        <div className="text-xs text-muted-foreground mt-0.5">
+                          {settings?.bankName ?? t("Bank Transfer", "Bank Transfer")}
                         </div>
-                        <div className="text-center">
-                          <div className="font-semibold text-sm">{t("Transfer Bank", "Bank Transfer")}</div>
-                          <div className="text-xs text-muted-foreground mt-0.5">
-                            {settings?.bankName}
-                          </div>
-                        </div>
-                        <ChevronRight size={14} className="text-muted-foreground group-hover:text-primary transition-colors" />
-                      </button>
-                    )}
+                      </div>
+                      <ChevronRight size={14} className="text-muted-foreground group-hover:text-primary transition-colors" />
+                    </button>
                     {hasQris && (
                       <button
                         type="button"
@@ -557,11 +729,6 @@ export default function BookingDetail() {
                         <ChevronRight size={14} className="text-muted-foreground group-hover:text-primary transition-colors" />
                       </button>
                     )}
-                    {!hasBankInfo && !hasQris && (
-                      <div className="col-span-2 text-center py-4 text-sm text-muted-foreground">
-                        {t("Hubungi admin untuk info pembayaran.", "Contact admin for payment information.")}
-                      </div>
-                    )}
                   </div>
                 )}
 
@@ -571,30 +738,33 @@ export default function BookingDetail() {
                     <button
                       type="button"
                       onClick={() => { setPaymentMethod(null); clearFile(); }}
-                      className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
+                      className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1.5 hover:gap-2 transition-all group"
                     >
-                      ← {t("Pilih metode lain", "Choose another method")}
+                      <ArrowLeft size={13} className="group-hover:-translate-x-0.5 transition-transform" />
+                      {t("Pilih metode lain", "Choose another method")}
                     </button>
 
-                    <div className="bg-muted rounded-xl p-4 relative group">
-                      <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">
-                        {settings?.bankName}
+                    {hasBankInfo && (
+                      <div className="bg-muted rounded-xl p-4 relative group">
+                        <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">
+                          {settings?.bankName}
+                        </div>
+                        <div className="text-2xl font-mono tracking-wider mb-1">
+                          {settings?.bankAccount}
+                        </div>
+                        <div className="text-sm font-medium">
+                          {t("a.n", "a/n")} {settings?.bankAccountName}
+                        </div>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="absolute top-2 right-2 opacity-50 group-hover:opacity-100 transition-opacity"
+                          onClick={() => copyToClipboard(settings?.bankAccount ?? "")}
+                        >
+                          <Copy size={16} />
+                        </Button>
                       </div>
-                      <div className="text-2xl font-mono tracking-wider mb-1">
-                        {settings?.bankAccount}
-                      </div>
-                      <div className="text-sm font-medium">
-                        {t("a.n", "a/n")} {settings?.bankAccountName}
-                      </div>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="absolute top-2 right-2 opacity-50 group-hover:opacity-100 transition-opacity"
-                        onClick={() => copyToClipboard(settings?.bankAccount ?? "")}
-                      >
-                        <Copy size={16} />
-                      </Button>
-                    </div>
+                    )}
 
                     <UploadProofForm
                       selectedFile={selectedFile}
@@ -620,9 +790,10 @@ export default function BookingDetail() {
                     <button
                       type="button"
                       onClick={() => { setPaymentMethod(null); clearFile(); }}
-                      className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
+                      className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1.5 hover:gap-2 transition-all group"
                     >
-                      ← {t("Pilih metode lain", "Choose another method")}
+                      <ArrowLeft size={13} className="group-hover:-translate-x-0.5 transition-transform" />
+                      {t("Pilih metode lain", "Choose another method")}
                     </button>
 
                     <div className="rounded-xl border border-border overflow-hidden">
@@ -745,6 +916,19 @@ export default function BookingDetail() {
                     </div>
                   </div>
                   <p className="text-xs text-green-600 mt-2">{t("Tunjukkan kode ini kepada petugas saat tiba", "Show this code to staff upon arrival")}</p>
+                </div>
+
+                {/* Download Invoice PDF */}
+                <div className="border-t border-green-200 pt-4 mt-2">
+                  <a
+                    href={`/api/public/invoices/${booking.orderNumber}/pdf`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center justify-center gap-2 w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-3 px-4 rounded-xl text-sm transition-colors"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                    {t("Download Invoice PDF", "Download Invoice PDF")}
+                  </a>
                 </div>
 
                 {/* Reschedule + Tambah Waktu — only for confirmed */}
