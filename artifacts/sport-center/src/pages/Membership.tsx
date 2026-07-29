@@ -1,3 +1,4 @@
+import SEOHead from "@/components/SEOHead";
 import { useState, useRef } from "react";
 import { useSubmitMembershipPaymentProof, useGetSettings } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
@@ -545,6 +546,11 @@ export default function Membership() {
   // ─── Main page (form step) ─────────────────────────────────────────────────
   return (
     <div className="flex flex-col min-h-screen">
+      <SEOHead
+        title="Keanggotaan Member Gym | Sport Center Soekarno-Hatta"
+        description="Bergabunglah sebagai member Sport Center Soekarno-Hatta dan nikmati berbagai keuntungan eksklusif, diskon booking, dan akses prioritas ke fasilitas gym premium."
+        path="/membership"
+      />
       {/* Hero */}
       <section className="bg-gradient-to-br from-primary/20 via-background to-background py-16 md:py-24">
         <div className="container px-4 md:px-8 text-center max-w-2xl mx-auto">

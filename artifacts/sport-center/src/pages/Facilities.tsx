@@ -1,3 +1,4 @@
+import SEOHead from "@/components/SEOHead";
 import { useState, useMemo, useRef } from "react";
 import { Link } from "wouter";
 import { useListFacilities, useSubmitMembershipPaymentProof, useGetSettings } from "@workspace/api-client-react";
@@ -577,6 +578,11 @@ export default function Facilities() {
 
   return (
     <div className="min-h-screen bg-[#F8FAFC] dark:bg-slate-950 pb-20">
+      <SEOHead
+        title="Fasilitas Olahraga | Sport Center Soekarno-Hatta"
+        description="Temukan fasilitas olahraga terlengkap di Sport Center Soekarno-Hatta. Lapangan futsal, basket, badminton, gym, dan banyak lagi — tersedia untuk booking online."
+        path="/facilities"
+      />
       {/* Header section */}
       <div className="bg-white dark:bg-slate-900 border-b border-border/50 pt-12 pb-16">
         <div className="container mx-auto px-4 md:px-8">

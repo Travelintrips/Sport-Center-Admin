@@ -83,6 +83,7 @@
     "@supabase/supabase-js": "^2.106.1",
     "html5-qrcode": "^2.3.8",
     "jsqr": "^1.4.0",
+    "react-helmet-async": "^3.0.0",
     "react-qr-code": "^2.0.21",
     "xlsx": "^0.18.5"
   }
