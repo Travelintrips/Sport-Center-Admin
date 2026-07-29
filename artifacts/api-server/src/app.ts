@@ -62,8 +62,19 @@ if (process.env.NODE_ENV === "production") {
   const frontendDist = path.resolve(process.cwd(), "artifacts/sport-center/dist/public");
   if (fs.existsSync(frontendDist)) {
     app.use(express.static(frontendDist));
-    app.get("/{*path}", (_req, res) => {
-      res.sendFile(path.join(frontendDist, "index.html"));
+    // Serve prerendered per-route index.html when it exists (Phase 2 SEO),
+    // fall back to root index.html only for routes without a dedicated file.
+    app.get("/{*path}", (req, res) => {
+      const routeSegment = req.path === "/" ? "" : req.path.replace(/^\//, "").split("/")[0];
+      const specificFile =
+        routeSegment
+          ? path.join(frontendDist, routeSegment, "index.html")
+          : path.join(frontendDist, "index.html");
+      if (routeSegment && fs.existsSync(specificFile)) {
+        res.sendFile(specificFile);
+      } else {
+        res.sendFile(path.join(frontendDist, "index.html"));
+      }
     });
   }
 }
