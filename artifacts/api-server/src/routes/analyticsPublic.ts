@@ -68,7 +68,7 @@ async function fetchGA4Stats(): Promise<PublicStats> {
   return { users30d, pageViews30d, sessions30d, activeUsers, configured: true };
 }
 
-router.get("/api/analytics/public-stats", async (_req, res) => {
+router.get("/analytics/public-stats", async (_req, res) => {
   try {
     const now = Date.now();
     if (cache && cache.expiresAt > now) {
