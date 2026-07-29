@@ -851,6 +851,7 @@ function BookingDetailDrawer({
   onUpdateStatus,
   onConfirmPayment,
   onRejectPayment,
+  onClearProof,
   onDelete,
   isUpdating,
   settings,
@@ -860,6 +861,7 @@ function BookingDetailDrawer({
   onUpdateStatus: (status: string, notes?: string) => void;
   onConfirmPayment: (paymentId: number) => void;
   onRejectPayment: (paymentId: number) => void;
+  onClearProof: (paymentId: number) => void;
   onDelete: (id: number) => void;
   isUpdating: boolean;
   settings?: any;
@@ -1182,6 +1184,14 @@ function BookingDetailDrawer({
                           >
                             <XCircle size={13} />
                             Tolak
+                          </button>
+                          <button
+                            onClick={() => onClearProof(pmt.id)}
+                            disabled={isUpdating}
+                            title="Hapus bukti transfer"
+                            className="flex items-center justify-center gap-1.5 h-9 px-3 rounded-xl text-xs font-semibold border border-slate-200 dark:border-slate-600 text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-50 transition-colors"
+                          >
+                            <Trash2 size={13} />
                           </button>
                         </div>
                       )}
@@ -2128,6 +2138,27 @@ export default function AdminBookings() {
       },
       onError: () => toast({ title: "Gagal memperbarui pembayaran", variant: "destructive" }),
     },
+  });
+
+  const clearProofMutation = useMutation({
+    mutationFn: async (paymentId: number) => {
+      const res = await fetch(`${API_BASE}/payments/${paymentId}/proof`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error ?? "Gagal menghapus bukti transfer");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: getListBookingsQueryKey() });
+      toast({ title: "Bukti transfer berhasil dihapus" });
+      setSelectedBooking(null);
+    },
+    onError: (err: Error) =>
+      toast({ title: err.message, variant: "destructive" }),
   });
 
   const checkInMutation = useCheckInBooking({
@@ -3165,8 +3196,9 @@ export default function AdminBookings() {
           onRejectPayment={(paymentId) =>
             updatePaymentMutation.mutate({ id: paymentId, data: { status: "rejected" } })
           }
+          onClearProof={(paymentId) => clearProofMutation.mutate(paymentId)}
           onDelete={handleDelete}
-          isUpdating={isUpdating}
+          isUpdating={isUpdating || clearProofMutation.isPending}
         />
       )}
 

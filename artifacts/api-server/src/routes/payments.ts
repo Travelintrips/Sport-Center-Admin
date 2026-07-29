@@ -483,4 +483,69 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
   }
 });
 
+// DELETE /payments/:id/proof — admin: hapus bukti transfer, kembalikan status booking ke pending_payment
+router.delete("/payments/:id/proof", adminMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(String(req.params.id));
+    const [payment] = await db.select().from(paymentsTable).where(eq(paymentsTable.id, id)).limit(1);
+    if (!payment) { res.status(404).json({ error: "Not found" }); return; }
+
+    // Hanya boleh hapus bukti jika payment masih pending
+    if (payment.status !== "pending") {
+      res.status(400).json({ error: "Bukti transfer hanya bisa dihapus jika pembayaran masih pending" });
+      return;
+    }
+
+    await db.update(paymentsTable).set({
+      proofUrl: null,
+      ocrName: null,
+      ocrAmount: null,
+      ocrDate: null,
+      ocrRaw: null,
+      ocrData: null,
+    }).where(eq(paymentsTable.id, id));
+
+    // Kembalikan status booking ke pending_payment jika masih waiting_confirmation
+    const [booking] = await db.select().from(bookingsTable)
+      .where(eq(bookingsTable.id, payment.bookingId)).limit(1);
+
+    if (booking && booking.status === "waiting_confirmation") {
+      await db.update(bookingsTable)
+        .set({ status: "pending_payment" })
+        .where(eq(bookingsTable.id, booking.id));
+
+      // Propagasi ke sibling jika booking grup
+      if (booking.groupRef) {
+        const siblings = await db.select().from(bookingsTable).where(
+          and(eq(bookingsTable.groupRef, booking.groupRef), ne(bookingsTable.id, booking.id))
+        );
+        for (const sib of siblings) {
+          if (sib.status === "waiting_confirmation") {
+            await db.update(bookingsTable)
+              .set({ status: "pending_payment" })
+              .where(eq(bookingsTable.id, sib.id));
+          }
+        }
+      }
+    }
+
+    const userInfo = getUserFromReq(req);
+    const clientInfo = getClientInfo(req);
+    await logAudit({
+      ...userInfo,
+      action: "delete_payment_proof",
+      entity: "payment",
+      entityId: id,
+      before: { proofUrl: payment.proofUrl },
+      after: { proofUrl: null },
+      ...clientInfo,
+    });
+
+    res.json({ success: true });
+  } catch (err) {
+    req.log.error({ err }, "Delete payment proof error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 export default router;
