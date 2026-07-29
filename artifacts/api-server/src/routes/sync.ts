@@ -564,4 +564,37 @@ router.get("/admin/sync-bizportal-payments/status", adminMiddleware, (_req, res)
   res.json(paymentSyncStatus);
 });
 
+/**
+ * GET /api/admin/sync-bizportal-payments/pending
+ * Rekonsiliasi: hitung berapa confirmed SC payments yang belum ada di BizPortal.
+ * Dipakai UI untuk menampilkan badge "X pending" di tombol Sync Bizportal.
+ */
+router.get("/admin/sync-bizportal-payments/pending", adminMiddleware, async (_req, res) => {
+  try {
+    const { getProdPool } = await import("../lib/bizportalSync");
+    const pool = getProdPool();
+    if (!pool) {
+      res.json({ pending: 0, configured: false });
+      return;
+    }
+
+    const { rows } = await pool.query(`
+      SELECT COUNT(*) AS pending
+      FROM sport_center.sport_payments sp
+      JOIN sport_center.sport_bookings sb ON sb.id = sp.booking_id
+      LEFT JOIN public.sport_bookings pb ON pb.sc_booking_id = sb.id
+      WHERE sp.status = 'confirmed'
+        AND pb.id IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM public.sport_payments bpay
+          WHERE bpay.payment_number = 'SCPAY-SC-' || sp.id::text
+        )
+    `);
+
+    res.json({ pending: parseInt(rows[0]?.pending ?? "0", 10), configured: true });
+  } catch (err: any) {
+    res.json({ pending: 0, configured: true, error: err.message });
+  }
+});
+
 export default router;

@@ -7,6 +7,7 @@ import { reverseJournalEntry } from "./accounting";
 import { runBankAudit } from "./bankAudit";
 import { runConnectionHealthCheck } from "./connectionHealth";
 import { sendRekapPemakaianToAdmin } from "./rekapPemakaian";
+import { bulkPushPaymentsToBizportal } from "./bizportalSync";
 import { logger } from "./logger";
 
 function getAppUrl(): string {
@@ -465,4 +466,19 @@ export function startScheduler(): void {
     await sendNightlyRekap();
     await checkConnections();
   }, 5 * 60 * 1000);
+
+  // Every 60 minutes: auto-sync confirmed payments to BizPortal so both sides stay balanced
+  setInterval(async () => {
+    try {
+      const result = await bulkPushPaymentsToBizportal();
+      if (result.pushed > 0) {
+        logger.info(
+          { pushed: result.pushed, skipped: result.skipped, failed: result.failed },
+          "[scheduler] Auto BizPortal payment sync: pushed new payments",
+        );
+      }
+    } catch (err) {
+      logger.error({ err }, "[scheduler] Auto BizPortal payment sync failed");
+    }
+  }, 60 * 60 * 1000);
 }

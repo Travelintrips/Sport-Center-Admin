@@ -2280,6 +2280,18 @@ export default function AdminBookings() {
   const YEARS = Array.from({ length: 5 }, (_, i) => String(now.getFullYear() - 2 + i));
 
   const [isSyncing, setIsSyncing] = useState(false);
+  const { data: syncPendingData, refetch: refetchPending } = useQuery({
+    queryKey: ["sync-bizportal-pending"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/sync-bizportal-payments/pending", {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      return res.ok ? res.json() : { pending: 0 };
+    },
+    refetchInterval: 5 * 60 * 1000, // auto-refresh every 5 min
+    staleTime: 60 * 1000,
+  });
+  const pendingSyncCount: number = syncPendingData?.pending ?? 0;
   const handleSyncBizportal = async () => {
     setIsSyncing(true);
     try {
@@ -2424,12 +2436,17 @@ export default function AdminBookings() {
             </motion.div>
           )}
           <button
-            onClick={handleSyncBizportal}
+            onClick={() => { handleSyncBizportal().then(() => refetchPending()); }}
             disabled={isSyncing}
-            className="flex items-center gap-1.5 h-9 px-3 rounded-xl border border-blue-200 dark:border-blue-700 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="relative flex items-center gap-1.5 h-9 px-3 rounded-xl border border-blue-200 dark:border-blue-700 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <RefreshCw size={13} className={isSyncing ? "animate-spin" : ""} />
             {isSyncing ? "Syncing..." : "Sync Bizportal"}
+            {!isSyncing && pendingSyncCount > 0 && (
+              <span className="absolute -top-1.5 -right-1.5 flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-amber-500 text-white text-[10px] font-bold leading-none">
+                {pendingSyncCount}
+              </span>
+            )}
           </button>
           <button
             onClick={() => setShowExportModal(true)}
