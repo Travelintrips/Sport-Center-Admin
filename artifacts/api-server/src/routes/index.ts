@@ -58,6 +58,7 @@ import documentSettingsRouter from "./documentSettings";
 import dataConnectionsRouter from "./dataConnections";
 import rekapRouter from "./rekap";
 import corporateDocumentationRouter from "./corporateDocumentation";
+import analyticsPublicRouter from "./analyticsPublic";
 
 const router: IRouter = Router();
 
@@ -119,5 +120,6 @@ router.use(documentSettingsRouter);
 router.use(dataConnectionsRouter);
 router.use(rekapRouter);
 router.use(corporateDocumentationRouter);
+router.use(analyticsPublicRouter);
 
 export default router;
