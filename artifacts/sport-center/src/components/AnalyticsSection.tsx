@@ -21,20 +21,26 @@ function formatNumber(n: number): string {
 export function AnalyticsSection() {
   const { t } = useLang();
 
-  const { data, isLoading } = useQuery<PublicStats>({
+  const { data, isLoading, isError } = useQuery<PublicStats>({
     queryKey: ["public-analytics-stats"],
-    queryFn: () => fetch(`${API}/analytics/public-stats`).then((r) => r.json()),
-    staleTime: 5 * 60 * 1000, // 5 minutes — matches server cache
-    retry: false,
+    queryFn: async () => {
+      const res = await fetch(`${API}/analytics/public-stats`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    },
+    staleTime: 5 * 60 * 1000,
+    retry: 1,
   });
 
-  // Don't render if not configured or still loading with no data
-  if (!isLoading && (!data || !data.configured)) return null;
+  // Only hide when API explicitly says not configured (after successful fetch)
+  if (!isLoading && !isError && data && !data.configured) return null;
+
+  const loading = isLoading || isError || !data;
 
   const stats = [
     {
       icon: Users,
-      value: isLoading ? "—" : formatNumber(data!.users30d),
+      value: loading ? null : formatNumber(data!.users30d),
       label: t("Pengguna 30 Hari", "Users (30 Days)"),
       sublabel: t("Pengunjung unik", "Unique visitors"),
       color: "text-blue-500",
@@ -42,7 +48,7 @@ export function AnalyticsSection() {
     },
     {
       icon: Eye,
-      value: isLoading ? "—" : formatNumber(data!.pageViews30d),
+      value: loading ? null : formatNumber(data!.pageViews30d),
       label: t("Halaman Dilihat", "Page Views"),
       sublabel: t("30 hari terakhir", "Last 30 days"),
       color: "text-emerald-500",
@@ -50,7 +56,7 @@ export function AnalyticsSection() {
     },
     {
       icon: TrendingUp,
-      value: isLoading ? "—" : formatNumber(data!.sessions30d),
+      value: loading ? null : formatNumber(data!.sessions30d),
       label: t("Sesi", "Sessions"),
       sublabel: t("Kunjungan aktif", "Active visits"),
       color: "text-orange-500",
@@ -58,12 +64,12 @@ export function AnalyticsSection() {
     },
     {
       icon: Activity,
-      value: isLoading ? "—" : formatNumber(data!.activeUsers),
+      value: loading ? null : formatNumber(data!.activeUsers),
       label: t("Aktif Sekarang", "Active Now"),
       sublabel: t("Pengguna realtime", "Realtime users"),
       color: "text-primary",
       bg: "bg-primary/10",
-      pulse: !isLoading && data!.activeUsers > 0,
+      pulse: !loading && (data?.activeUsers ?? 0) > 0,
     },
   ];
 
@@ -105,13 +111,14 @@ export function AnalyticsSection() {
                 </div>
               </div>
               <div>
-                <div
-                  className={`text-2xl md:text-3xl font-black tracking-tight ${
-                    isLoading ? "opacity-30 animate-pulse" : ""
-                  } text-secondary dark:text-white`}
-                >
-                  {value}
-                </div>
+                {value === null ? (
+                  /* Skeleton */
+                  <div className="h-8 w-16 bg-muted animate-pulse rounded-lg mx-auto mb-1" />
+                ) : (
+                  <div className="text-2xl md:text-3xl font-black tracking-tight text-secondary dark:text-white">
+                    {value}
+                  </div>
+                )}
                 <div className="font-bold text-sm text-secondary dark:text-white mt-0.5">{label}</div>
                 <div className="text-xs text-muted-foreground mt-0.5">{sublabel}</div>
               </div>
@@ -121,7 +128,7 @@ export function AnalyticsSection() {
 
         {/* Powered by note */}
         <p className="text-center text-xs text-muted-foreground mt-8 flex items-center justify-center gap-1.5">
-          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
             <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
             <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
             <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
