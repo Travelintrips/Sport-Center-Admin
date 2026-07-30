@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { Users, Search, Trash2, CheckCircle, Dumbbell, Clock, XCircle, ImageIcon, ExternalLink, LogIn, CalendarCheck } from "lucide-react";
+import { Users, Search, Trash2, CheckCircle, Dumbbell, Clock, XCircle, ImageIcon, ExternalLink, LogIn, CalendarCheck, BadgeCheck } from "lucide-react";
 import { getToken } from "@/lib/auth";
 
 const API = import.meta.env.VITE_API_BASE_URL ?? "/api";
@@ -457,12 +457,31 @@ export default function AdminMemberships() {
 
               {!viewMember.paymentProofUrl && viewMember.status === "pending_payment" && (
                 <div className="rounded-xl bg-blue-50 border border-blue-200 p-3 text-sm text-blue-700">
-                  Customer belum melakukan pembayaran.
+                  Customer belum melakukan pembayaran / upload bukti.
+                </div>
+              )}
+
+              {/* Tombol konfirmasi menonjol untuk status yang butuh tindakan */}
+              {(viewMember.status === "pending_payment" || viewMember.status === "waiting_confirmation") && (
+                <div className="rounded-xl bg-green-50 border border-green-200 p-4 space-y-2">
+                  <p className="text-sm font-semibold text-green-800">
+                    {viewMember.status === "waiting_confirmation"
+                      ? "Bukti pembayaran sudah diupload — siap dikonfirmasi"
+                      : "Aktifkan membership secara manual (pembayaran diterima di luar sistem)"}
+                  </p>
+                  <Button
+                    className="w-full gap-2 bg-green-600 hover:bg-green-700 text-white"
+                    disabled={updateMutation.isPending}
+                    onClick={() => updateMutation.mutate({ id: viewMember.id, data: { status: "active" as any } })}
+                  >
+                    <BadgeCheck size={16} />
+                    Aktifkan Membership
+                  </Button>
                 </div>
               )}
 
               <div className="border-t pt-4">
-                <p className="text-sm text-muted-foreground mb-3">Ubah Status</p>
+                <p className="text-sm text-muted-foreground mb-3">Ubah Status Manual</p>
                 <div className="flex gap-2 flex-wrap">
                   {[
                     { value: "active", label: "Aktif" },
