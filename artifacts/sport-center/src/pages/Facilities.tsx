@@ -857,7 +857,7 @@ export default function Facilities() {
         )}
       </div>
 
-      <MembershipDialog open={membershipOpen} onClose={() => setMembershipOpen(false)} initialMode={membershipMode} />
+      <MembershipDialog key={membershipMode} open={membershipOpen} onClose={() => setMembershipOpen(false)} initialMode={membershipMode} />
     </div>
   );
 }
