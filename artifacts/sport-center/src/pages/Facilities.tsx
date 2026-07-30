@@ -60,6 +60,8 @@ function MembershipDialog({ open, onClose, initialMode = "register" }: { open: b
 
   // Renew-mode state
   const [lookupPhone, setLookupPhone] = useState("");
+  const [lookupName, setLookupName] = useState("");
+  const [lookupResults, setLookupResults] = useState<LookupResult[]>([]);
   const [lookupResult, setLookupResult] = useState<LookupResult | null>(null);
   const [lookupError, setLookupError] = useState<string | null>(null);
   const [lookupLoading, setLookupLoading] = useState(false);
@@ -116,15 +118,18 @@ function MembershipDialog({ open, onClose, initialMode = "register" }: { open: b
   }
 
   async function handleLookup() {
-    if (!lookupPhone.trim()) return;
+    const phone = lookupPhone.trim();
+    const name  = lookupName.trim();
+    if (!phone && !name) return;
     setLookupLoading(true);
     setLookupError(null);
     setLookupResult(null);
+    setLookupResults([]);
     try {
       const res = await fetch("/api/memberships/lookup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone: lookupPhone.trim() }),
+        body: JSON.stringify(phone ? { phone } : { name }),
       });
       if (!res.ok) {
         const e = await res.json();
@@ -132,7 +137,17 @@ function MembershipDialog({ open, onClose, initialMode = "register" }: { open: b
         return;
       }
       const data = await res.json();
-      setLookupResult(data);
+      if (Array.isArray(data)) {
+        // pencarian by nama → bisa banyak hasil
+        if (data.length === 1) {
+          setLookupResult(data[0]);
+        } else {
+          setLookupResults(data);
+        }
+      } else {
+        // pencarian by phone → satu hasil
+        setLookupResult(data);
+      }
     } catch {
       setLookupError(t("Gagal terhubung. Coba lagi.", "Connection failed. Try again."));
     } finally {
@@ -195,7 +210,9 @@ function MembershipDialog({ open, onClose, initialMode = "register" }: { open: b
     setForm({ name: "", email: "", phone: "", startDate: today, notes: "" });
     setMonths(1);
     setLookupPhone("");
+    setLookupName("");
     setLookupResult(null);
+    setLookupResults([]);
     setLookupError(null);
     setRenewMonths(1);
     onClose();
@@ -240,27 +257,101 @@ function MembershipDialog({ open, onClose, initialMode = "register" }: { open: b
           {/* STEP: LOOKUP (renew mode) */}
           {step === "lookup" && (
             <div className="space-y-5">
-              <p className="text-sm text-muted-foreground font-medium">
-                {t("Masukkan nomor WhatsApp yang terdaftar untuk mencari data membership Anda.", "Enter your registered WhatsApp number to find your membership.")}
-              </p>
-              <div className="space-y-1.5">
-                <Label htmlFor="lookup-phone" className="font-bold text-foreground/80">{t("No. WhatsApp / Telepon", "WhatsApp / Phone No.")} <span className="text-destructive">*</span></Label>
-                <div className="flex gap-2">
-                  <Input
-                    id="lookup-phone"
-                    type="tel"
-                    value={lookupPhone}
-                    onChange={(e) => { setLookupPhone(e.target.value); setLookupError(null); setLookupResult(null); }}
-                    onKeyDown={(e) => e.key === "Enter" && handleLookup()}
-                    placeholder="08xxxxxxxxxx"
-                    className="h-12 rounded-xl bg-[#F8FAFC] dark:bg-slate-900 border-border font-medium"
-                  />
-                  <Button type="button" onClick={handleLookup} disabled={lookupLoading || !lookupPhone.trim()} className="h-12 px-5 rounded-xl shrink-0">
-                    {lookupLoading ? <Loader2 size={16} className="animate-spin" /> : t("Cari", "Search")}
-                  </Button>
+              {/* Tab toggle: cari by phone atau by nama */}
+              {(() => {
+                const byPhone = !lookupName.trim();
+                return (
+                  <>
+                    <div className="flex rounded-xl border border-border overflow-hidden">
+                      <button
+                        type="button"
+                        className={`flex-1 py-2.5 text-sm font-bold transition-colors ${byPhone ? "bg-primary text-white" : "bg-[#F8FAFC] dark:bg-slate-900 text-muted-foreground hover:text-foreground"}`}
+                        onClick={() => { setLookupName(""); setLookupError(null); setLookupResult(null); setLookupResults([]); }}
+                      >
+                        {t("No. WhatsApp", "WhatsApp No.")}
+                      </button>
+                      <button
+                        type="button"
+                        className={`flex-1 py-2.5 text-sm font-bold transition-colors ${!byPhone ? "bg-primary text-white" : "bg-[#F8FAFC] dark:bg-slate-900 text-muted-foreground hover:text-foreground"}`}
+                        onClick={() => { setLookupPhone(""); setLookupError(null); setLookupResult(null); setLookupResults([]); }}
+                      >
+                        {t("Nama Member", "Member Name")}
+                      </button>
+                    </div>
+
+                    {byPhone ? (
+                      <div className="space-y-1.5">
+                        <Label htmlFor="lookup-phone" className="font-bold text-foreground/80">
+                          {t("No. WhatsApp / Telepon", "WhatsApp / Phone No.")} <span className="text-destructive">*</span>
+                        </Label>
+                        <p className="text-xs text-muted-foreground">{t("Masukkan nomor WhatsApp yang terdaftar saat mendaftar.", "Enter the WhatsApp number used during registration.")}</p>
+                        <div className="flex gap-2">
+                          <Input
+                            id="lookup-phone"
+                            type="tel"
+                            value={lookupPhone}
+                            onChange={(e) => { setLookupPhone(e.target.value); setLookupError(null); setLookupResult(null); setLookupResults([]); }}
+                            onKeyDown={(e) => e.key === "Enter" && handleLookup()}
+                            placeholder="08xxxxxxxxxx"
+                            className="h-12 rounded-xl bg-[#F8FAFC] dark:bg-slate-900 border-border font-medium"
+                          />
+                          <Button type="button" onClick={handleLookup} disabled={lookupLoading || !lookupPhone.trim()} className="h-12 px-5 rounded-xl shrink-0">
+                            {lookupLoading ? <Loader2 size={16} className="animate-spin" /> : t("Cari", "Search")}
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="space-y-1.5">
+                        <Label htmlFor="lookup-name" className="font-bold text-foreground/80">
+                          {t("Nama Member", "Member Name")} <span className="text-destructive">*</span>
+                        </Label>
+                        <p className="text-xs text-muted-foreground">{t("Ketik sebagian nama untuk mencari member yang terdaftar.", "Type part of the name to search registered members.")}</p>
+                        <div className="flex gap-2">
+                          <Input
+                            id="lookup-name"
+                            type="text"
+                            value={lookupName}
+                            onChange={(e) => { setLookupName(e.target.value); setLookupError(null); setLookupResult(null); setLookupResults([]); }}
+                            onKeyDown={(e) => e.key === "Enter" && handleLookup()}
+                            placeholder={t("cth: Budi Santoso", "e.g. John Doe")}
+                            className="h-12 rounded-xl bg-[#F8FAFC] dark:bg-slate-900 border-border font-medium"
+                          />
+                          <Button type="button" onClick={handleLookup} disabled={lookupLoading || !lookupName.trim()} className="h-12 px-5 rounded-xl shrink-0">
+                            {lookupLoading ? <Loader2 size={16} className="animate-spin" /> : t("Cari", "Search")}
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
+
+              {lookupError && <p className="text-sm text-destructive font-medium">{lookupError}</p>}
+
+              {/* Multiple results (nama search) */}
+              {lookupResults.length > 1 && !lookupResult && (
+                <div className="space-y-2 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                  <p className="text-sm font-semibold text-muted-foreground">
+                    {t("Ditemukan", "Found")} {lookupResults.length} {t("member. Pilih yang sesuai:", "members. Select one:")}
+                  </p>
+                  {lookupResults.map((r) => (
+                    <button
+                      key={r.id}
+                      type="button"
+                      onClick={() => setLookupResult(r)}
+                      className="w-full flex items-center justify-between rounded-2xl bg-[#F8FAFC] dark:bg-slate-900 border border-border p-4 hover:border-primary/60 hover:bg-primary/5 transition-colors text-left"
+                    >
+                      <div>
+                        <div className="font-black text-secondary dark:text-white text-sm">{r.name}</div>
+                        <div className="text-xs text-muted-foreground">{r.phone} · {t("s/d", "until")} {r.endDate}</div>
+                      </div>
+                      <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${r.status === "active" ? "bg-green-100 text-green-700" : r.status === "expired" ? "bg-red-100 text-red-700" : "bg-yellow-100 text-yellow-700"}`}>
+                        {r.status === "active" ? t("Aktif", "Active") : r.status === "expired" ? t("Expired", "Expired") : t("Menunggu", "Pending")}
+                      </span>
+                    </button>
+                  ))}
                 </div>
-                {lookupError && <p className="text-sm text-destructive font-medium">{lookupError}</p>}
-              </div>
+              )}
 
               {lookupResult && (
                 <div className="animate-in fade-in slide-in-from-bottom-2 duration-300 space-y-4">

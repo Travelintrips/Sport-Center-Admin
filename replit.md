@@ -267,6 +267,10 @@ Web app untuk manajemen dan pemesanan fasilitas olahraga — customer-facing boo
 - DB is a **shared Supabase** instance — our tables live in a dedicated `sport_center` Postgres schema (via `pgSchema` in `lib/db/src/schema/_schema.ts`), NOT `public` (which holds ~150 tables from other apps). Always define new tables on `scSchema`. Runtime uses transaction pooler (6543); DDL/migrations need session pooler (5432).
 - The `Customers` page currently shows only registered users (role=customer), not anonymous bookings. Existing demo bookings are made without a user account, so the customers list may appear empty until actual user registrations occur.
 
+## User preferences
+
+- Gunakan bahasa Indonesia saat berkomunikasi dengan user.
+
 ## Pointers
 
 - OpenAPI spec: `lib/api-spec/openapi.yaml`

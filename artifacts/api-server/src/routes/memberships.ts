@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db, gymMembershipsTable, publicMembershipsTable, gymCheckinsTable } from "@workspace/db";
-import { eq, and } from "drizzle-orm";
+import { eq, and, ilike } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
 import { syncMembershipToBizportal, pushMembershipPaymentAsBankMutation } from "../lib/bizportalSync";
 import { createMembershipJournalEntry, createPublicMembershipAccountingEntry } from "../lib/accounting";
@@ -66,21 +66,37 @@ async function deleteFromPublic(sourceId: number) {
 
 // ─── Gym Check-in Endpoints ───────────────────────────────────────────────────
 
-// POST /memberships/lookup — public, cari membership by phone
+// POST /memberships/lookup — public, cari membership by phone atau name
 router.post("/memberships/lookup", async (req, res) => {
   try {
     const phone = String(req.body?.phone || "").trim();
-    if (!phone) { res.status(400).json({ error: "phone wajib diisi" }); return; }
+    const name  = String(req.body?.name  || "").trim();
 
-    const all = await db.select().from(gymMembershipsTable).where(eq(gymMembershipsTable.phone, phone));
-    const candidates = all
+    if (!phone && !name) {
+      res.status(400).json({ error: "phone atau name wajib diisi" });
+      return;
+    }
+
+    let rows: (typeof gymMembershipsTable.$inferSelect)[] = [];
+
+    if (phone) {
+      // Cari exact match by phone
+      rows = await db.select().from(gymMembershipsTable).where(eq(gymMembershipsTable.phone, phone));
+    } else {
+      // Cari by nama (case-insensitive, partial match)
+      rows = await db.select().from(gymMembershipsTable).where(ilike(gymMembershipsTable.name, `%${name}%`));
+    }
+
+    const candidates = rows
       .filter((m) => m.status !== "cancelled")
       .sort((a, b) => new Date(b.endDate).getTime() - new Date(a.endDate).getTime());
 
-    if (candidates.length === 0) { res.status(404).json({ error: "Membership tidak ditemukan" }); return; }
+    if (candidates.length === 0) {
+      res.status(404).json({ error: "Membership tidak ditemukan" });
+      return;
+    }
 
-    const m = candidates[0]!;
-    res.json({
+    const result = candidates.map((m) => ({
       id: m.id,
       name: m.name,
       phone: m.phone,
@@ -90,7 +106,14 @@ router.post("/memberships/lookup", async (req, res) => {
       endDate: m.endDate,
       months: m.months,
       totalPrice: Number(m.totalPrice),
-    });
+    }));
+
+    // Jika cari by phone → kembalikan 1 hasil (backward compat); by name → array
+    if (phone) {
+      res.json(result[0]);
+    } else {
+      res.json(result);
+    }
   } catch (err) {
     req.log.error({ err }, "Lookup membership error");
     res.status(500).json({ error: "Internal server error" });
