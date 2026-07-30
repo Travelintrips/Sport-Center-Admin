@@ -59,6 +59,7 @@ function MembershipDialog({ open, onClose, initialMode = "register" }: { open: b
   const { data: settings } = useGetSettings();
 
   // Renew-mode state
+  const [lookupMode, setLookupMode] = useState<"phone" | "name">("phone");
   const [lookupPhone, setLookupPhone] = useState("");
   const [lookupName, setLookupName] = useState("");
   const [lookupResults, setLookupResults] = useState<LookupResult[]>([]);
@@ -209,6 +210,7 @@ function MembershipDialog({ open, onClose, initialMode = "register" }: { open: b
     setProofPreview(null);
     setForm({ name: "", email: "", phone: "", startDate: today, notes: "" });
     setMonths(1);
+    setLookupMode("phone");
     setLookupPhone("");
     setLookupName("");
     setLookupResult(null);
@@ -258,73 +260,66 @@ function MembershipDialog({ open, onClose, initialMode = "register" }: { open: b
           {step === "lookup" && (
             <div className="space-y-5">
               {/* Tab toggle: cari by phone atau by nama */}
-              {(() => {
-                const byPhone = !lookupName.trim();
-                return (
-                  <>
-                    <div className="flex rounded-xl border border-border overflow-hidden">
-                      <button
-                        type="button"
-                        className={`flex-1 py-2.5 text-sm font-bold transition-colors ${byPhone ? "bg-primary text-white" : "bg-[#F8FAFC] dark:bg-slate-900 text-muted-foreground hover:text-foreground"}`}
-                        onClick={() => { setLookupName(""); setLookupError(null); setLookupResult(null); setLookupResults([]); }}
-                      >
-                        {t("No. WhatsApp", "WhatsApp No.")}
-                      </button>
-                      <button
-                        type="button"
-                        className={`flex-1 py-2.5 text-sm font-bold transition-colors ${!byPhone ? "bg-primary text-white" : "bg-[#F8FAFC] dark:bg-slate-900 text-muted-foreground hover:text-foreground"}`}
-                        onClick={() => { setLookupPhone(""); setLookupError(null); setLookupResult(null); setLookupResults([]); }}
-                      >
-                        {t("Nama Member", "Member Name")}
-                      </button>
-                    </div>
+              <div className="flex rounded-xl border border-border overflow-hidden">
+                <button
+                  type="button"
+                  className={`flex-1 py-2.5 text-sm font-bold transition-colors ${lookupMode === "phone" ? "bg-primary text-white" : "bg-[#F8FAFC] dark:bg-slate-900 text-muted-foreground hover:text-foreground"}`}
+                  onClick={() => { setLookupMode("phone"); setLookupName(""); setLookupError(null); setLookupResult(null); setLookupResults([]); }}
+                >
+                  {t("No. WhatsApp", "WhatsApp No.")}
+                </button>
+                <button
+                  type="button"
+                  className={`flex-1 py-2.5 text-sm font-bold transition-colors ${lookupMode === "name" ? "bg-primary text-white" : "bg-[#F8FAFC] dark:bg-slate-900 text-muted-foreground hover:text-foreground"}`}
+                  onClick={() => { setLookupMode("name"); setLookupPhone(""); setLookupError(null); setLookupResult(null); setLookupResults([]); }}
+                >
+                  {t("Nama Member", "Member Name")}
+                </button>
+              </div>
 
-                    {byPhone ? (
-                      <div className="space-y-1.5">
-                        <Label htmlFor="lookup-phone" className="font-bold text-foreground/80">
-                          {t("No. WhatsApp / Telepon", "WhatsApp / Phone No.")} <span className="text-destructive">*</span>
-                        </Label>
-                        <p className="text-xs text-muted-foreground">{t("Masukkan nomor WhatsApp yang terdaftar saat mendaftar.", "Enter the WhatsApp number used during registration.")}</p>
-                        <div className="flex gap-2">
-                          <Input
-                            id="lookup-phone"
-                            type="tel"
-                            value={lookupPhone}
-                            onChange={(e) => { setLookupPhone(e.target.value); setLookupError(null); setLookupResult(null); setLookupResults([]); }}
-                            onKeyDown={(e) => e.key === "Enter" && handleLookup()}
-                            placeholder="08xxxxxxxxxx"
-                            className="h-12 rounded-xl bg-[#F8FAFC] dark:bg-slate-900 border-border font-medium"
-                          />
-                          <Button type="button" onClick={handleLookup} disabled={lookupLoading || !lookupPhone.trim()} className="h-12 px-5 rounded-xl shrink-0">
-                            {lookupLoading ? <Loader2 size={16} className="animate-spin" /> : t("Cari", "Search")}
-                          </Button>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="space-y-1.5">
-                        <Label htmlFor="lookup-name" className="font-bold text-foreground/80">
-                          {t("Nama Member", "Member Name")} <span className="text-destructive">*</span>
-                        </Label>
-                        <p className="text-xs text-muted-foreground">{t("Ketik sebagian nama untuk mencari member yang terdaftar.", "Type part of the name to search registered members.")}</p>
-                        <div className="flex gap-2">
-                          <Input
-                            id="lookup-name"
-                            type="text"
-                            value={lookupName}
-                            onChange={(e) => { setLookupName(e.target.value); setLookupError(null); setLookupResult(null); setLookupResults([]); }}
-                            onKeyDown={(e) => e.key === "Enter" && handleLookup()}
-                            placeholder={t("cth: Budi Santoso", "e.g. John Doe")}
-                            className="h-12 rounded-xl bg-[#F8FAFC] dark:bg-slate-900 border-border font-medium"
-                          />
-                          <Button type="button" onClick={handleLookup} disabled={lookupLoading || !lookupName.trim()} className="h-12 px-5 rounded-xl shrink-0">
-                            {lookupLoading ? <Loader2 size={16} className="animate-spin" /> : t("Cari", "Search")}
-                          </Button>
-                        </div>
-                      </div>
-                    )}
-                  </>
-                );
-              })()}
+              {lookupMode === "phone" ? (
+                <div className="space-y-1.5">
+                  <Label htmlFor="lookup-phone" className="font-bold text-foreground/80">
+                    {t("No. WhatsApp / Telepon", "WhatsApp / Phone No.")} <span className="text-destructive">*</span>
+                  </Label>
+                  <p className="text-xs text-muted-foreground">{t("Masukkan nomor WhatsApp yang terdaftar saat mendaftar.", "Enter the WhatsApp number used during registration.")}</p>
+                  <div className="flex gap-2">
+                    <Input
+                      id="lookup-phone"
+                      type="tel"
+                      value={lookupPhone}
+                      onChange={(e) => { setLookupPhone(e.target.value); setLookupError(null); setLookupResult(null); setLookupResults([]); }}
+                      onKeyDown={(e) => e.key === "Enter" && handleLookup()}
+                      placeholder="08xxxxxxxxxx"
+                      className="h-12 rounded-xl bg-[#F8FAFC] dark:bg-slate-900 border-border font-medium"
+                    />
+                    <Button type="button" onClick={handleLookup} disabled={lookupLoading || !lookupPhone.trim()} className="h-12 px-5 rounded-xl shrink-0">
+                      {lookupLoading ? <Loader2 size={16} className="animate-spin" /> : t("Cari", "Search")}
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-1.5">
+                  <Label htmlFor="lookup-name" className="font-bold text-foreground/80">
+                    {t("Nama Member", "Member Name")} <span className="text-destructive">*</span>
+                  </Label>
+                  <p className="text-xs text-muted-foreground">{t("Ketik sebagian nama untuk mencari member yang terdaftar.", "Type part of the name to search registered members.")}</p>
+                  <div className="flex gap-2">
+                    <Input
+                      id="lookup-name"
+                      type="text"
+                      value={lookupName}
+                      onChange={(e) => { setLookupName(e.target.value); setLookupError(null); setLookupResult(null); setLookupResults([]); }}
+                      onKeyDown={(e) => e.key === "Enter" && handleLookup()}
+                      placeholder={t("cth: Budi Santoso", "e.g. John Doe")}
+                      className="h-12 rounded-xl bg-[#F8FAFC] dark:bg-slate-900 border-border font-medium"
+                    />
+                    <Button type="button" onClick={handleLookup} disabled={lookupLoading || !lookupName.trim()} className="h-12 px-5 rounded-xl shrink-0">
+                      {lookupLoading ? <Loader2 size={16} className="animate-spin" /> : t("Cari", "Search")}
+                    </Button>
+                  </div>
+                </div>
+              )}
 
               {lookupError && <p className="text-sm text-destructive font-medium">{lookupError}</p>}
 
