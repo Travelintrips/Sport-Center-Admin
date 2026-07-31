@@ -1,10 +1,22 @@
 import { Request, Response, NextFunction } from "express";
 import crypto from "crypto";
 
-const SECRET = process.env.SESSION_SECRET;
-if (!SECRET) {
-  throw new Error("[auth] SESSION_SECRET environment variable is required but not set. Set it before starting the server.");
+/**
+ * requireEnv — reads a required env var and throws a safe startup error if missing.
+ * Never prints the value; only names the missing variable.
+ */
+function requireEnv(name: string): string {
+  const val = process.env[name];
+  if (!val) {
+    throw new Error(
+      `[startup] Required environment variable "${name}" is not set. ` +
+      `Set it before starting the server. (value is not logged for security)`
+    );
+  }
+  return val;
 }
+
+const SECRET: string = requireEnv("SESSION_SECRET");
 const TOKEN_EXPIRY = 7 * 24 * 60 * 60 * 1000;
 
 export function createToken(userId: number, role: string, tenantId?: number | null): string {

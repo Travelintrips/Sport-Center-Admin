@@ -72,16 +72,19 @@ router.get("/analytics/public-stats", async (_req, res) => {
   try {
     const now = Date.now();
     if (cache && cache.expiresAt > now) {
-      return res.json(cache.data);
+      res.json(cache.data);
+      return;
     }
 
     const data = await fetchGA4Stats();
     cache = { data, expiresAt: now + 5 * 60 * 1000 }; // 5 minutes
     res.json(data);
+    return;
   } catch (err: any) {
     console.error("[analytics] Error fetching GA4 stats:", err?.message ?? err);
     // Return unconfigured rather than a 500 so frontend hides gracefully
     res.json({ users30d: 0, pageViews30d: 0, sessions30d: 0, activeUsers: 0, configured: false });
+    return;
   }
 });
 

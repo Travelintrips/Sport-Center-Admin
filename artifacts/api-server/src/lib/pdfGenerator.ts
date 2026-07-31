@@ -75,8 +75,12 @@ export async function generatePdfBufferFromUrl(
     });
 
     // Tunggu font Inter dari Google Fonts benar-benar ter-render
+    // @ts-expect-error — callback ini dieksekusi di browser context oleh puppeteer's
+    // evaluateHandle; `document` adalah Web API yang tersedia di browser, bukan di Node.js.
+    // Casting via globalThis tidak menghilangkan error karena TypeScript tidak tahu
+    // bahwa fungsi ini berjalan di browser engine, bukan di proses Node ini.
     await page.evaluateHandle(() =>
-      (document as any).fonts ? document.fonts.ready : Promise.resolve(),
+      document.fonts ? document.fonts.ready : Promise.resolve(),
     );
 
     const pdfUint8 = await page.pdf({
@@ -121,8 +125,9 @@ export async function generatePdfBufferFromHtml(html: string): Promise<Buffer> {
   try {
     const page = await browser.newPage();
     await page.setContent(html, { waitUntil: "networkidle0", timeout: 45_000 });
+    // @ts-expect-error — browser context; `document` is a Web API not available in Node.js TypeScript.
     await page.evaluateHandle(() =>
-      (document as any).fonts ? document.fonts.ready : Promise.resolve(),
+      document.fonts ? document.fonts.ready : Promise.resolve(),
     );
     const pdfUint8 = await page.pdf({
       format: "A4",

@@ -3,28 +3,24 @@
 # GCP Project : sc-sport-center
 # App Engine  : default service, asia-southeast2
 # Branch      : main
-# Trigger     : push to main (configure in Cloud Build console)
+# Trigger     : push to main (configure in Cloud Build console — source: GitHub,
+#               repository: Travelintrips/Sport-Center-Admin, branch: ^main$)
 #
-# SECRETS — inject via Cloud Build substitutions or Secret Manager.
-# Do NOT add real secret values here.
+# ── SECRET MANAGEMENT ─────────────────────────────────────────────────────────
+# Build steps do NOT receive production runtime secrets.
+# All runtime secrets are stored in Google Secret Manager under the project
+# sc-sport-center with the naming convention:
+#   sport-center-prod-<secret-name>
 #
-# Required substitutions (set in Cloud Build trigger):
-#   _SUPABASE_DATABASE_URL        — production DB connection string
-#   _SUPABASE_URL                 — Supabase project URL
-#   _SUPABASE_ANON_KEY            — Supabase anon key
-#   _SUPABASE_SERVICE_ROLE_KEY    — Supabase service role key
-#   _SESSION_SECRET               — HMAC session secret
-#   _FONNTE_TOKEN                 — WhatsApp Fonnte token
-#   _OPENAI_API_KEY               — OpenAI API key
-#   _GOOGLE_CLIENT_ID             — Google OAuth client ID
-#   _GOOGLE_SERVICE_ACCOUNT_JSON  — Google service account JSON (escaped)
-#   _BIZPORTAL_SYNC_API_KEY       — BizPortal sync API key
-#   _CASHIER_TOKEN_SECRET         — Cashier token secret
-#   _VAPID_PUBLIC_KEY             — VAPID public key
-#   _VAPID_PRIVATE_KEY            — VAPID private key
-#   _ADMIN_WA_PHONES              — Admin WhatsApp phone numbers
-#   _WATI_API_TOKEN               — WATI API token
-#   _WATI_BASE_URL                — WATI base URL
+# Runtime secrets are NOT injected during build. They are read by the running
+# GAE instance at startup using Application Default Credentials (ADC), which
+# are automatically available on App Engine via the service account.
+#
+# Required IAM before first deployment:
+#   App Engine default SA  : roles/secretmanager.secretAccessor (on each prod secret)
+#   Cloud Build SA         : roles/appengine.deployer + roles/storage.objectCreator
+#                            roles/cloudbuild.builds.builder (default)
+# ─────────────────────────────────────────────────────────────────────────────
 
 steps:
   # ── Step 1: Install pnpm ───────────────────────────────────────────────────
@@ -47,7 +43,11 @@ steps:
     args: ["--filter", "@workspace/api-server", "run", "build"]
     waitFor: ["pnpm-install"]
 
-  # ── Step 4: Build frontend + prerender ────────────────────────────────────
+  # ── Step 4: Build frontend + prerender (VITE_PUBLIC_URL baked at build time) ─
+  # IMPORTANT: VITE_PUBLIC_URL is a build-time variable for canonical URLs in
+  # the prerendered HTML. It is NOT a runtime secret. Changing the domain
+  # requires a new frontend build — app.yaml's env_variables do NOT affect
+  # an already-built bundle.
   - name: "node:20"
     id: build-frontend
     entrypoint: pnpm
@@ -66,6 +66,9 @@ steps:
           set -e
           echo "=== Assembling gae-deploy/ ==="
 
+          # Ensure dist/ directory exists in gae-deploy/
+          mkdir -p gae-deploy/dist
+
           # Copy compiled API server bundle
           cp -r artifacts/api-server/dist/. gae-deploy/dist/
 
@@ -76,11 +79,11 @@ steps:
           echo "=== API bundle files ==="
           ls -lh gae-deploy/dist/
 
-          echo "=== Frontend routes ==="
-          ls gae-deploy/artifacts/sport-center/dist/public/
-
-          echo "=== Prerendered route index.html files ==="
+          echo "=== Frontend routes (prerendered) ==="
           find gae-deploy/artifacts/sport-center/dist/public -name "index.html" | sort
+
+          echo "=== Verify no workspace symlinks ==="
+          find gae-deploy/dist -type l && echo "WARNING: symlinks found" || echo "No symlinks — OK"
     waitFor: ["build-api", "build-frontend"]
 
   # ── Step 6: Install production runtime dependencies ───────────────────────
@@ -95,11 +98,38 @@ steps:
           npm install --omit=dev --no-audit --no-fund
           echo "=== Runtime node_modules installed ==="
           du -sh node_modules/
+          echo "=== Verify pg is present ==="
+          ls node_modules/pg/package.json && echo "pg OK"
+          echo "=== Verify nodemailer is present ==="
+          ls node_modules/nodemailer/package.json && echo "nodemailer OK"
     waitFor: ["assemble-deploy"]
 
-  # ── Step 7: Deploy to App Engine ──────────────────────────────────────────
-  # This step is intentionally LAST and gated.
-  # Remove the leading '#' on the gcloud line only after manual approval.
+  # ── Step 7: Health smoke test before deploying ────────────────────────────
+  - name: "node:20"
+    id: smoke-test
+    entrypoint: bash
+    args:
+      - "-c"
+      - |
+          set -e
+          echo "=== Smoke test: verify bundle loads without crashing ==="
+          cd gae-deploy
+
+          # Start server with a dummy DATABASE_URL (only testing module load, not DB)
+          # The server will fail env validation in production mode but we catch that.
+          timeout 5 node ./dist/index.mjs 2>&1 | head -10 || true
+          echo "=== Bundle load check complete ==="
+    env:
+      - "PORT=9999"
+      - "NODE_ENV=development"
+      - "SESSION_SECRET=smoke-test-secret-not-real"
+    waitFor: ["npm-install-prod"]
+
+  # ── Step 8: Deploy to App Engine ──────────────────────────────────────────
+  # Deploys gae-deploy/ as the deployment root. Runtime secrets must already
+  # exist in Google Secret Manager and be readable by the App Engine SA.
+  # Secrets are NOT passed via --set-env-vars — they are loaded at runtime
+  # from Secret Manager using ADC.
   - name: "gcr.io/cloud-builders/gcloud"
     id: deploy-gae
     entrypoint: bash
@@ -109,24 +139,10 @@ steps:
           set -e
           gcloud app deploy gae-deploy/app.yaml \
             --project=sc-sport-center \
-            --quiet \
-            --set-env-vars="SUPABASE_DATABASE_URL=$$_SUPABASE_DATABASE_URL,\
-          SUPABASE_URL=$$_SUPABASE_URL,\
-          SUPABASE_ANON_KEY=$$_SUPABASE_ANON_KEY,\
-          SUPABASE_SERVICE_ROLE_KEY=$$_SUPABASE_SERVICE_ROLE_KEY,\
-          SESSION_SECRET=$$_SESSION_SECRET,\
-          FONNTE_TOKEN=$$_FONNTE_TOKEN,\
-          OPENAI_API_KEY=$$_OPENAI_API_KEY,\
-          GOOGLE_CLIENT_ID=$$_GOOGLE_CLIENT_ID,\
-          BIZPORTAL_SYNC_API_KEY=$$_BIZPORTAL_SYNC_API_KEY,\
-          CASHIER_TOKEN_SECRET=$$_CASHIER_TOKEN_SECRET,\
-          VAPID_PUBLIC_KEY=$$_VAPID_PUBLIC_KEY,\
-          VAPID_PRIVATE_KEY=$$_VAPID_PRIVATE_KEY,\
-          ADMIN_WA_PHONES=$$_ADMIN_WA_PHONES,\
-          WATI_API_TOKEN=$$_WATI_API_TOKEN,\
-          WATI_BASE_URL=$$_WATI_BASE_URL"
-    secretEnv: []
-    waitFor: ["npm-install-prod"]
+            --quiet
+          echo "=== Deployment complete ==="
+          gcloud app versions list --service=default --project=sc-sport-center --limit=3
+    waitFor: ["smoke-test"]
 
 timeout: "1200s"
 

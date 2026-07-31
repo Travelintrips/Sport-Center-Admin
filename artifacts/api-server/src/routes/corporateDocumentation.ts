@@ -31,7 +31,7 @@ const upload = multer({
 // Ambil semua dokumentasi untuk booking tertentu
 router.get("/bookings/:id/documentation", async (req, res) => {
   try {
-    const bookingId = parseInt(req.params.id);
+    const bookingId = parseInt(String(req.params["id"]), 10);
     if (isNaN(bookingId)) {
       res.status(400).json({ error: "ID booking tidak valid" });
       return;
@@ -57,7 +57,7 @@ router.post(
   upload.single("file"),
   async (req, res) => {
     try {
-      const bookingId = parseInt(req.params.id);
+      const bookingId = parseInt(String(req.params["id"]), 10);
       if (isNaN(bookingId)) {
         res.status(400).json({ error: "ID booking tidak valid" });
         return;
@@ -184,8 +184,8 @@ router.delete(
   adminMiddleware,
   async (req, res) => {
     try {
-      const bookingId = parseInt(req.params.id);
-      const docId = parseInt(req.params.docId);
+      const bookingId = parseInt(String(req.params["id"]), 10);
+      const docId = parseInt(String(req.params["docId"]), 10);
 
       if (isNaN(bookingId) || isNaN(docId)) {
         res.status(400).json({ error: "ID tidak valid" });
@@ -240,7 +240,7 @@ router.get(
   adminMiddleware,
   async (req, res) => {
     try {
-      const bookingId = parseInt(req.params.id);
+      const bookingId = parseInt(String(req.params["id"]), 10);
       if (isNaN(bookingId)) {
         res.status(400).json({ error: "ID booking tidak valid" });
         return;
