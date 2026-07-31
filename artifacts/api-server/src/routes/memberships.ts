@@ -216,6 +216,51 @@ router.get("/memberships", adminMiddleware, async (req, res) => {
   }
 });
 
+router.get("/memberships/export", adminMiddleware, async (req, res) => {
+  try {
+    const { startDate, endDate } = req.query;
+    let memberships = await db.select().from(gymMembershipsTable).orderBy(gymMembershipsTable.startDate);
+
+    if (startDate) memberships = memberships.filter((m) => m.startDate >= (startDate as string));
+    if (endDate) memberships = memberships.filter((m) => m.startDate <= (endDate as string));
+
+    const statusLabel: Record<string, string> = {
+      active: "Aktif",
+      expired: "Kadaluarsa",
+      cancelled: "Dibatalkan",
+      waiting_confirmation: "Menunggu Konfirmasi",
+      pending_payment: "Menunggu Bayar",
+    };
+
+    const header = "Nama,Email,Telepon,Tanggal Mulai,Tanggal Selesai,Durasi (bulan),Total Harga,Status,Metode Bayar,Catatan,Tanggal Daftar\n";
+    const rows = memberships.map((m) =>
+      [
+        m.name,
+        m.email ?? "",
+        m.phone ?? "",
+        m.startDate,
+        m.endDate,
+        m.months,
+        Number(m.totalPrice),
+        statusLabel[m.status] ?? m.status,
+        m.paymentMethod ?? "",
+        m.notes ?? "",
+        new Date(m.createdAt).toISOString(),
+      ]
+        .map((v) => `"${String(v).replace(/"/g, '""')}"`)
+        .join(",")
+    );
+
+    const csv = header + rows.join("\n");
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", "attachment; filename=members-gym.csv");
+    res.send(csv);
+  } catch (err) {
+    req.log.error({ err }, "Export memberships error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 router.get("/memberships/:id", adminMiddleware, async (req, res) => {
   try {
     const id = parseInt(String(req.params.id));
