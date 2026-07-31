@@ -1,0 +1,135 @@
+# cloudbuild.yaml — Cloud Build pipeline for Sport Center GAE deployment
+#
+# GCP Project : sc-sport-center
+# App Engine  : default service, asia-southeast2
+# Branch      : main
+# Trigger     : push to main (configure in Cloud Build console)
+#
+# SECRETS — inject via Cloud Build substitutions or Secret Manager.
+# Do NOT add real secret values here.
+#
+# Required substitutions (set in Cloud Build trigger):
+#   _SUPABASE_DATABASE_URL        — production DB connection string
+#   _SUPABASE_URL                 — Supabase project URL
+#   _SUPABASE_ANON_KEY            — Supabase anon key
+#   _SUPABASE_SERVICE_ROLE_KEY    — Supabase service role key
+#   _SESSION_SECRET               — HMAC session secret
+#   _FONNTE_TOKEN                 — WhatsApp Fonnte token
+#   _OPENAI_API_KEY               — OpenAI API key
+#   _GOOGLE_CLIENT_ID             — Google OAuth client ID
+#   _GOOGLE_SERVICE_ACCOUNT_JSON  — Google service account JSON (escaped)
+#   _BIZPORTAL_SYNC_API_KEY       — BizPortal sync API key
+#   _CASHIER_TOKEN_SECRET         — Cashier token secret
+#   _VAPID_PUBLIC_KEY             — VAPID public key
+#   _VAPID_PRIVATE_KEY            — VAPID private key
+#   _ADMIN_WA_PHONES              — Admin WhatsApp phone numbers
+#   _WATI_API_TOKEN               — WATI API token
+#   _WATI_BASE_URL                — WATI base URL
+
+steps:
+  # ── Step 1: Install pnpm ───────────────────────────────────────────────────
+  - name: "node:20"
+    id: install-pnpm
+    entrypoint: npm
+    args: ["install", "--global", "pnpm@10"]
+
+  # ── Step 2: Install workspace dependencies ─────────────────────────────────
+  - name: "node:20"
+    id: pnpm-install
+    entrypoint: pnpm
+    args: ["install", "--frozen-lockfile"]
+    waitFor: ["install-pnpm"]
+
+  # ── Step 3: Build API server (esbuild) ─────────────────────────────────────
+  - name: "node:20"
+    id: build-api
+    entrypoint: pnpm
+    args: ["--filter", "@workspace/api-server", "run", "build"]
+    waitFor: ["pnpm-install"]
+
+  # ── Step 4: Build frontend + prerender ────────────────────────────────────
+  - name: "node:20"
+    id: build-frontend
+    entrypoint: pnpm
+    args: ["--filter", "@workspace/sport-center", "run", "build"]
+    env:
+      - "VITE_PUBLIC_URL=https://sc.travelintrips.co.id"
+    waitFor: ["pnpm-install"]
+
+  # ── Step 5: Assemble gae-deploy/ package ──────────────────────────────────
+  - name: "node:20"
+    id: assemble-deploy
+    entrypoint: bash
+    args:
+      - "-c"
+      - |
+          set -e
+          echo "=== Assembling gae-deploy/ ==="
+
+          # Copy compiled API server bundle
+          cp -r artifacts/api-server/dist/. gae-deploy/dist/
+
+          # Copy prerendered frontend static files
+          mkdir -p gae-deploy/artifacts/sport-center/dist
+          cp -r artifacts/sport-center/dist/public gae-deploy/artifacts/sport-center/dist/
+
+          echo "=== API bundle files ==="
+          ls -lh gae-deploy/dist/
+
+          echo "=== Frontend routes ==="
+          ls gae-deploy/artifacts/sport-center/dist/public/
+
+          echo "=== Prerendered route index.html files ==="
+          find gae-deploy/artifacts/sport-center/dist/public -name "index.html" | sort
+    waitFor: ["build-api", "build-frontend"]
+
+  # ── Step 6: Install production runtime dependencies ───────────────────────
+  - name: "node:20"
+    id: npm-install-prod
+    entrypoint: bash
+    args:
+      - "-c"
+      - |
+          set -e
+          cd gae-deploy
+          npm install --omit=dev --no-audit --no-fund
+          echo "=== Runtime node_modules installed ==="
+          du -sh node_modules/
+    waitFor: ["assemble-deploy"]
+
+  # ── Step 7: Deploy to App Engine ──────────────────────────────────────────
+  # This step is intentionally LAST and gated.
+  # Remove the leading '#' on the gcloud line only after manual approval.
+  - name: "gcr.io/cloud-builders/gcloud"
+    id: deploy-gae
+    entrypoint: bash
+    args:
+      - "-c"
+      - |
+          set -e
+          gcloud app deploy gae-deploy/app.yaml \
+            --project=sc-sport-center \
+            --quiet \
+            --set-env-vars="SUPABASE_DATABASE_URL=$$_SUPABASE_DATABASE_URL,\
+          SUPABASE_URL=$$_SUPABASE_URL,\
+          SUPABASE_ANON_KEY=$$_SUPABASE_ANON_KEY,\
+          SUPABASE_SERVICE_ROLE_KEY=$$_SUPABASE_SERVICE_ROLE_KEY,\
+          SESSION_SECRET=$$_SESSION_SECRET,\
+          FONNTE_TOKEN=$$_FONNTE_TOKEN,\
+          OPENAI_API_KEY=$$_OPENAI_API_KEY,\
+          GOOGLE_CLIENT_ID=$$_GOOGLE_CLIENT_ID,\
+          BIZPORTAL_SYNC_API_KEY=$$_BIZPORTAL_SYNC_API_KEY,\
+          CASHIER_TOKEN_SECRET=$$_CASHIER_TOKEN_SECRET,\
+          VAPID_PUBLIC_KEY=$$_VAPID_PUBLIC_KEY,\
+          VAPID_PRIVATE_KEY=$$_VAPID_PRIVATE_KEY,\
+          ADMIN_WA_PHONES=$$_ADMIN_WA_PHONES,\
+          WATI_API_TOKEN=$$_WATI_API_TOKEN,\
+          WATI_BASE_URL=$$_WATI_BASE_URL"
+    secretEnv: []
+    waitFor: ["npm-install-prod"]
+
+timeout: "1200s"
+
+options:
+  machineType: "E2_HIGHCPU_8"
+  logging: CLOUD_LOGGING_ONLY
