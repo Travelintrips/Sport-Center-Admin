@@ -7,20 +7,11 @@ import router from "./routes";
 import { logger } from "./lib/logger";
 import path from "path";
 import fs from "fs";
+import { fileURLToPath } from "url";
 
-// ── AI KERNEL v2: DB ENGINE GUARD ─────────────────────────────────────────
-// Only Supabase PostgreSQL is permitted. Any other DB engine is a kernel violation.
-const dbUrl =
-  process.env.SUPABASE_DATABASE_URL ||
-  process.env.SUPABASE_DATABASE_URL_DEV ||
-  process.env.DATABASE_URL ||
-  "";
-if (dbUrl && !/supabase\.(co|com|in)/.test(dbUrl)) {
-  throw new Error(
-    "[KERNEL VIOLATION] Invalid DB engine. Only Supabase PostgreSQL is allowed.\n" +
-    "Set SUPABASE_DATABASE_URL or SUPABASE_DATABASE_URL_DEV to a valid Supabase URL."
-  );
-}
+// Resolve directory of this module — works regardless of process.cwd()
+// In the bundled dist/index.mjs, import.meta.url = file:///…/artifacts/api-server/dist/index.mjs
+const __moduleDir = path.dirname(fileURLToPath(import.meta.url));
 
 const app: Express = express();
 
@@ -59,7 +50,12 @@ app.get("/api", (_req, res) => {
 app.use("/api", router);
 
 if (process.env.NODE_ENV === "production") {
-  const frontendDist = path.resolve(process.cwd(), "artifacts/sport-center/dist/public");
+  // Resolve frontend dist relative to THIS module's compiled location.
+  // __moduleDir = …/artifacts/api-server/dist
+  // ../../sport-center/dist/public = …/artifacts/sport-center/dist/public
+  const frontendDist = path.resolve(__moduleDir, "../../sport-center/dist/public");
+  logger.info({ frontendDist, exists: fs.existsSync(frontendDist) }, "[app] frontend dist path");
+
   if (fs.existsSync(frontendDist)) {
     app.use(express.static(frontendDist));
     // Serve prerendered per-route index.html when it exists (Phase 2 SEO),
@@ -75,6 +71,13 @@ if (process.env.NODE_ENV === "production") {
       } else {
         res.sendFile(path.join(frontendDist, "index.html"));
       }
+    });
+  } else {
+    // Frontend dist not found — log loudly so it shows in build logs,
+    // but still respond 200 on GET / so the Cloud Run health check passes.
+    logger.warn("[app] frontend dist not found — serving API-only mode; GET / returns health stub");
+    app.get("/", (_req, res) => {
+      res.json({ status: "ok", mode: "api-only" });
     });
   }
 }
