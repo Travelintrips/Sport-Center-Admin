@@ -2202,19 +2202,51 @@ export default function AdminBookings() {
     }
   };
 
-  const handleExport = () => {
+  // --- CSV Export with month filter ---
+  const now = new Date();
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [exportMonth, setExportMonth] = useState(String(now.getMonth() + 1).padStart(2, "0"));
+  const [exportYear, setExportYear] = useState(String(now.getFullYear()));
+  const [exportAllData, setExportAllData] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+
+  const handleExport = async () => {
     const token = getToken();
-    fetch("/api/admin/bookings/export", {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then((r) => r.blob())
-      .then((blob) => {
-        const a = document.createElement("a");
-        a.href = URL.createObjectURL(blob);
-        a.download = "bookings.csv";
-        a.click();
-      });
+    setIsExporting(true);
+    try {
+      let url = "/api/admin/bookings/export";
+      let filename = "bookings.csv";
+      if (!exportAllData) {
+        const y = exportYear;
+        const m = exportMonth;
+        const lastDay = new Date(Number(y), Number(m), 0).getDate();
+        const startDate = `${y}-${m}-01`;
+        const endDate = `${y}-${m}-${String(lastDay).padStart(2, "0")}`;
+        const monthNames = ["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Agu","Sep","Okt","Nov","Des"];
+        filename = `bookings-${monthNames[Number(m) - 1]}-${y}.csv`;
+        url += `?startDate=${startDate}&endDate=${endDate}`;
+      }
+      const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+      const blob = await r.blob();
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = filename;
+      a.click();
+      setShowExportModal(false);
+    } finally {
+      setIsExporting(false);
+    }
   };
+
+  const MONTHS = [
+    { value: "01", label: "Januari" }, { value: "02", label: "Februari" },
+    { value: "03", label: "Maret" }, { value: "04", label: "April" },
+    { value: "05", label: "Mei" }, { value: "06", label: "Juni" },
+    { value: "07", label: "Juli" }, { value: "08", label: "Agustus" },
+    { value: "09", label: "September" }, { value: "10", label: "Oktober" },
+    { value: "11", label: "November" }, { value: "12", label: "Desember" },
+  ];
+  const YEARS = Array.from({ length: 5 }, (_, i) => String(now.getFullYear() - 2 + i));
 
   const [isSyncing, setIsSyncing] = useState(false);
   const handleSyncBizportal = async () => {
@@ -2369,7 +2401,7 @@ export default function AdminBookings() {
             {isSyncing ? "Syncing..." : "Sync Bizportal"}
           </button>
           <button
-            onClick={handleExport}
+            onClick={() => setShowExportModal(true)}
             className="flex items-center gap-1.5 h-9 px-3 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
           >
             <Download size={13} />
@@ -2377,6 +2409,88 @@ export default function AdminBookings() {
           </button>
         </div>
       </motion.div>
+
+      {/* Export CSV Modal */}
+      <Dialog open={showExportModal} onOpenChange={setShowExportModal}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <Download size={16} className="text-slate-500" />
+              Ekspor CSV Pemesanan
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-1">
+            {/* Toggle: per-bulan vs semua */}
+            <div className="flex items-center gap-3 p-3 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700">
+              <input
+                type="checkbox"
+                id="export-all"
+                checked={exportAllData}
+                onChange={(e) => setExportAllData(e.target.checked)}
+                className="w-4 h-4 rounded accent-emerald-500"
+              />
+              <Label htmlFor="export-all" className="text-sm cursor-pointer">
+                Ekspor semua data (tanpa filter bulan)
+              </Label>
+            </div>
+
+            {/* Month / Year pickers */}
+            {!exportAllData && (
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-slate-500">Bulan</Label>
+                    <Select value={exportMonth} onValueChange={setExportMonth}>
+                      <SelectTrigger className="h-9 text-sm">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {MONTHS.map((m) => (
+                          <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-slate-500">Tahun</Label>
+                    <Select value={exportYear} onValueChange={setExportYear}>
+                      <SelectTrigger className="h-9 text-sm">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {YEARS.map((y) => (
+                          <SelectItem key={y} value={y}>{y}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <p className="text-xs text-slate-400 dark:text-slate-500">
+                  Akan mengekspor booking dengan tanggal bermain di bulan {MONTHS.find(m => m.value === exportMonth)?.label} {exportYear}.
+                </p>
+              </div>
+            )}
+
+            <div className="flex gap-2 pt-1">
+              <Button
+                variant="outline"
+                className="flex-1 h-9 text-sm"
+                onClick={() => setShowExportModal(false)}
+              >
+                Batal
+              </Button>
+              <Button
+                className="flex-1 h-9 text-sm gap-1.5 bg-emerald-600 hover:bg-emerald-700"
+                onClick={handleExport}
+                disabled={isExporting}
+              >
+                <Download size={14} />
+                {isExporting ? "Mengunduh..." : "Unduh CSV"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Stats */}
       {!isLoading && (
