@@ -100,7 +100,7 @@ function taxBreakdown(totalAmountInclusive: number) {
 
 // ─── PDF Print Helpers ────────────────────────────────────────────────────────
 
-function printInvoicePdf(invoice: any) {
+function printInvoicePdf(invoice: any, signatureUrl?: string | null, financeName?: string | null, financeTitle?: string | null) {
   const items: any[] = invoice.items ?? [];
   const periodStr = periodLabel(invoice.periodMonth);
   const today = new Date().toLocaleDateString("id-ID", { day:"numeric", month:"long", year:"numeric" });
@@ -147,9 +147,6 @@ function printInvoicePdf(invoice: any) {
     .badge-paid { background:#dcfce7; color:#15803d; padding:3px 10px; border-radius:99px; font-size:11px; font-weight:700; }
     .section-title { font-size:11px; color:#9ca3af; font-weight:700; text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px; }
     .payment-box { border:1px solid #e5e7eb; border-radius:6px; padding:12px 14px; background:#f0fdf4; margin-top:14px; }
-    .sign-section { margin-top:28px; display:flex; justify-content:space-between; }
-    .sign-box { text-align:center; }
-    .sign-line { margin:52px 0 6px; border-bottom:1px solid #111; }
   </style></head><body>
 
   <!-- HEADER -->
@@ -232,27 +229,17 @@ function printInvoicePdf(invoice: any) {
   ${invoice.notes ? `<div style="margin-top:12px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;padding:10px;font-size:11px;"><strong>Catatan:</strong> ${invoice.notes}</div>` : ""}
   ${invoice.paidAt ? `<div style="margin-top:10px;color:#15803d;font-size:11px;">✓ Dibayar pada ${new Date(invoice.paidAt).toLocaleDateString("id-ID", { day:"numeric", month:"long", year:"numeric" })}</div>` : ""}
 
-  <!-- TANDA TANGAN & MATERAI -->
-  <div class="sign-section">
-    <div class="sign-box" style="width:180px;">
-      <div style="font-size:11px;">Diterima oleh,</div>
-      <div style="font-size:10px;color:#6b7280;">(${invoice.companyName})</div>
-      <div class="sign-line"></div>
-      <div style="font-size:11px;font-weight:600;">${invoice.picName ?? "......................................"}</div>
-      <div style="font-size:10px;color:#6b7280;">Jabatan: ...............................</div>
-    </div>
-    <div class="sign-box" style="width:200px;">
-      <div style="font-size:11px;">Hormat kami,</div>
-      <div style="font-size:10px;color:#6b7280;">Sport Center Soekarno-Hatta</div>
-      <div style="border:1px dashed #d1d5db;border-radius:50%;width:64px;height:64px;margin:8px auto 0;display:flex;align-items:center;justify-content:center;">
-        <span style="font-size:8px;color:#9ca3af;text-align:center;line-height:1.3;">Materai<br/>Rp 10.000</span>
-      </div>
-      <div style="border:2px dashed #ea580c;border-radius:50%;width:80px;height:80px;margin:-20px auto 0;display:flex;align-items:center;justify-content:center;">
-        <span style="font-size:7px;color:#ea580c;text-align:center;line-height:1.4;font-weight:700;">STEMPEL<br/>SPORT CENTER<br/>SOEKARNO-HATTA</span>
-      </div>
-      <div class="sign-line" style="margin-top:4px;"></div>
-      <div style="font-size:11px;font-weight:600;">Admin Sport Center</div>
-      <div style="font-size:10px;color:#6b7280;">Sport Center Soekarno-Hatta</div>
+  <!-- TANDA TANGAN -->
+  <div style="margin-top:28px;display:flex;justify-content:flex-end;">
+    <div style="text-align:center;min-width:200px;">
+      <div style="font-size:12px;color:#374151;margin-bottom:4px;">Hormat kami,</div>
+      ${signatureUrl
+        ? `<img src="${signatureUrl}" alt="Tanda Tangan" style="height:72px;width:auto;object-fit:contain;margin:4px 0;" />`
+        : `<div style="height:80px;"></div>`
+      }
+      <div style="border-bottom:1px solid #374151;width:140px;margin:0 auto 6px;"></div>
+      <div style="font-weight:700;font-size:11.5px;color:#111827;">${financeName || "Admin Sport Center"}</div>
+      <div style="font-size:10.5px;color:#374151;">${financeTitle || "Sport Center Soekarno-Hatta"}</div>
     </div>
   </div>
 
@@ -550,13 +537,13 @@ function printBeritaAcara(invoice: any) {
   if (win) { win.document.write(html); win.document.close(); }
 }
 
-async function downloadBillingPackage(invoice: any, requirements: any[]) {
+async function downloadBillingPackage(invoice: any, requirements: any[], signatureUrl?: string | null, financeName?: string | null, financeTitle?: string | null) {
   const docTypes = requirements.map((r: any) => r.documentType);
   const delays: Array<{ fn: () => void; delay: number; doc: string }> = [];
   let delay = 0;
 
   if (docTypes.includes("invoice")) {
-    delays.push({ fn: () => printInvoicePdf(invoice), delay, doc: "invoice" });
+    delays.push({ fn: () => printInvoicePdf(invoice, signatureUrl, financeName, financeTitle), delay, doc: "invoice" });
     delay += 800;
   }
   if (docTypes.includes("lampiran_pemakaian")) {
@@ -936,6 +923,16 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
     refetchOnMount: "always",
   });
 
+  const { data: invoiceSettings } = useQuery({
+    queryKey: ["invoice-settings-public"],
+    queryFn: async () => {
+      const res = await fetch("/api/invoice-settings/public");
+      if (!res.ok) return null;
+      return res.json();
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+
   const { data: billingDocStatus } = useQuery({
     queryKey: ["billing-doc-status", invoiceId],
     queryFn: async () => {
@@ -1001,7 +998,7 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
 
   const handleDownloadInvoice = async () => {
     if (!invoice) return;
-    printInvoicePdf(invoice);
+    printInvoicePdf(invoice, invoiceSettings?.signatureUrl, invoiceSettings?.financeName, invoiceSettings?.financeTitle);
     await auditBillingAction(invoiceId, "COMPANY_DOCUMENT_DOWNLOADED", ["invoice"]);
   };
 
@@ -1014,7 +1011,7 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
         { documentType: "lampiran_pemakaian" },
         { documentType: "kwitansi" },
       ];
-      const docs = await downloadBillingPackage(invoice, requirements);
+      const docs = await downloadBillingPackage(invoice, requirements, invoiceSettings?.signatureUrl, invoiceSettings?.financeName, invoiceSettings?.financeTitle);
       toast({
         title: "Billing Package sedang dibuka",
         description: `${docs.length} dokumen dibuka di tab baru untuk dicetak`,
