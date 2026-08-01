@@ -98,7 +98,7 @@ async function fetchGA4Stats(): Promise<AnalyticsReport> {
           { name: "bounceRate" },
         ],
         orderBys: [{ metric: { metricName: "screenPageViews" }, desc: true }],
-        limit: 5,
+        limit: "5",
       },
     }),
     // Realtime active users
