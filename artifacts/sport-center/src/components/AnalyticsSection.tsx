@@ -74,7 +74,7 @@ export function AnalyticsSection() {
   ];
 
   return (
-    <section className="py-16 md:py-20 bg-white dark:bg-slate-900 border-t border-border/40">
+    <section id="analytics-section" className="py-16 md:py-20 bg-white dark:bg-slate-900 border-t border-border/40">
       <div className="container px-4 md:px-8">
         {/* Header */}
         <div className="text-center max-w-2xl mx-auto mb-12">
