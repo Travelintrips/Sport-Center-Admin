@@ -26,7 +26,7 @@ interface AnalyticsReport {
 }
 
 function formatDuration(seconds: number): string {
-  if (!seconds || seconds === 0) return "0d";
+  if (seconds == null || isNaN(seconds) || seconds === 0) return "0d";
   const m = Math.floor(seconds / 60);
   const s = Math.round(seconds % 60);
   if (m === 0) return `${s}d`;
@@ -34,6 +34,7 @@ function formatDuration(seconds: number): string {
 }
 
 function formatNumber(n: number): string {
+  if (n == null || isNaN(n)) return "0";
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M";
   if (n >= 1_000) return (n / 1_000).toFixed(1) + "K";
   return n.toString();
