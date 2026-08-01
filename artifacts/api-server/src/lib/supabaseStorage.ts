@@ -67,19 +67,24 @@ if (IS_DEV) {
 } else {
   const prodKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
   if (!prodKey) {
-    console.error(
-      "\n╔══════════════════════════════════════════════════════════════════╗\n" +
-      "║  FATAL: SUPABASE_SERVICE_ROLE_KEY is not set in production.     ║\n" +
-      "║                                                                  ║\n" +
-      "║  File uploads (payment proofs, facility images, QRIS) will      ║\n" +
-      "║  fail without this key. Set it in the production environment.   ║\n" +
-      "╚══════════════════════════════════════════════════════════════════╝\n"
+    // Non-fatal in production: storage features will be unavailable, but the
+    // server starts normally. Google Secret Manager loads this key after ESM
+    // module graph initialization completes — a module-level process.exit(1)
+    // would fire BEFORE secretLoader.ts can inject the value. The env
+    // validator (envValidation.ts) handles the startup-fatal check after GSM
+    // loading completes. File upload/download endpoints will return 500 until
+    // the key is available.
+    console.warn(
+      "[supabaseStorage] SUPABASE_SERVICE_ROLE_KEY not set — " +
+      "storage features (file uploads/downloads) will be unavailable until the key is provided."
     );
-    process.exit(1);
+    SERVICE_KEY = "";
+    storageProjectSource = "NOT CONFIGURED";
+  } else {
+    SERVICE_KEY = prodKey;
+    // Do NOT log project ref in production — keep it out of logs
+    storageProjectSource = "SUPABASE_SERVICE_ROLE_KEY (production)";
   }
-  SERVICE_KEY = prodKey;
-  // Do NOT log project ref in production — keep it out of logs
-  storageProjectSource = "SUPABASE_SERVICE_ROLE_KEY (production)";
 }
 
 const PROJECT_REF = getProjectRef(SERVICE_KEY);

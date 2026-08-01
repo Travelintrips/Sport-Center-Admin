@@ -23,9 +23,8 @@ import { logger } from "./logger";
 
 /** Fatal in production if absent. */
 const REQUIRED_STARTUP: Array<{ name: string; description: string }> = [
-  { name: "SESSION_SECRET",            description: "HMAC key for auth tokens and password hashing" },
-  { name: "SUPABASE_DATABASE_URL",     description: "Primary PostgreSQL connection URL (Supabase production DB)" },
-  { name: "SUPABASE_SERVICE_ROLE_KEY", description: "Supabase service role key — required for all file uploads/downloads" },
+  { name: "SESSION_SECRET",        description: "HMAC key for auth tokens and password hashing" },
+  { name: "SUPABASE_DATABASE_URL", description: "Primary PostgreSQL connection URL (Supabase production DB)" },
 ];
 
 /** Warn in production; app degrades gracefully. */
