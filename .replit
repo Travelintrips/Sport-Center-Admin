@@ -105,6 +105,7 @@ OPENAI_API_KEY = "sk-proj-bft8FOm4XZCO3t5kgmMPpZCTnN3BBEEo50WDzwfkhYZXy6sBT_Z4_L
 OPENAI_BASE_URL = "https://api.openai.com/v1"
 FONNTE_CUSTOMER_TOKEN = ""
 VITE_PUBLIC_URL = "https://sc.travelintrips.co.id"
+PORT = "8080"
 
 [userenv.development]
 SUPABASE_URL_DEV = "https://xssrfshdrtdfupgqwfdw.supabase.co"
