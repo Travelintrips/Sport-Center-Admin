@@ -1,5 +1,6 @@
 import SEOHead from "@/components/SEOHead";
 import { AnalyticsSection } from "@/components/AnalyticsSection";
+import { AnalyticsReportSection } from "@/components/AnalyticsReportSection";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -1013,7 +1014,7 @@ export default function Home() {
         </div>
       </section>
 
-      <AnalyticsSection />
+      <AnalyticsReportSection />
 
     </div>
   );
