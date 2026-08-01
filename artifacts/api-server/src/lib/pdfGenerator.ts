@@ -30,8 +30,31 @@ async function loadDeps() {
   return { chromium: _chromium, puppeteer: _puppeteer };
 }
 
+/**
+ * PDF_ENABLED feature flag.
+ * Set PDF_ENABLED=false in app.yaml env_variables to disable PDF generation
+ * on App Engine Standard if Chromium proves incompatible with the sandbox.
+ * Defaults to "true" — set explicitly to "false" to disable.
+ */
+export function isPdfEnabled(): boolean {
+  return process.env.PDF_ENABLED !== "false";
+}
+
 async function launchBrowser() {
+  if (!isPdfEnabled()) {
+    throw new Error(
+      "[PDF] PDF generation is disabled (PDF_ENABLED=false). " +
+      "Set PDF_ENABLED=true in the environment to re-enable. " +
+      "If running on App Engine Standard, consider Cloud Run for PDF workloads.",
+    );
+  }
+
   const { chromium, puppeteer } = await loadDeps();
+
+  // Chromium binary is downloaded lazily from GitHub to /tmp on first call.
+  // On App Engine Standard: /tmp is a 256 MB tmpfs — download succeeds IF
+  // the Chromium sandbox restrictions are compatible. If this throws, set
+  // PDF_ENABLED=false and use a Cloud Run worker instead.
   const executablePath = await chromium.default.executablePath(
     "https://github.com/Sparticuz/chromium/releases/download/v149.0.0/chromium-v149.0.0-pack.x64.tar",
   );
@@ -74,14 +97,11 @@ export async function generatePdfBufferFromUrl(
       timeout: 45_000,
     });
 
-    // Tunggu font Inter dari Google Fonts benar-benar ter-render
-    // @ts-expect-error — callback ini dieksekusi di browser context oleh puppeteer's
-    // evaluateHandle; `document` adalah Web API yang tersedia di browser, bukan di Node.js.
-    // Casting via globalThis tidak menghilangkan error karena TypeScript tidak tahu
-    // bahwa fungsi ini berjalan di browser engine, bukan di proses Node ini.
-    await page.evaluateHandle(() =>
-      document.fonts ? document.fonts.ready : Promise.resolve(),
-    );
+    // Tunggu font Inter dari Google Fonts benar-benar ter-render.
+    // Dikirim sebagai string agar TypeScript tidak mencoba menganalisis ekspresi
+    // browser (document.fonts) dalam konteks Node.js — fungsi ini dieksekusi
+    // sepenuhnya oleh engine browser di dalam puppeteer, bukan di proses Node ini.
+    await page.evaluateHandle("document.fonts ? document.fonts.ready : Promise.resolve()");
 
     const pdfUint8 = await page.pdf({
       format: "A4",
@@ -125,10 +145,8 @@ export async function generatePdfBufferFromHtml(html: string): Promise<Buffer> {
   try {
     const page = await browser.newPage();
     await page.setContent(html, { waitUntil: "networkidle0", timeout: 45_000 });
-    // @ts-expect-error — browser context; `document` is a Web API not available in Node.js TypeScript.
-    await page.evaluateHandle(() =>
-      document.fonts ? document.fonts.ready : Promise.resolve(),
-    );
+    // Sama seperti di atas — string agar TypeScript tidak parse DOM API di Node context.
+    await page.evaluateHandle("document.fonts ? document.fonts.ready : Promise.resolve()");
     const pdfUint8 = await page.pdf({
       format: "A4",
       printBackground: true,

@@ -36,12 +36,33 @@ steps:
     args: ["install", "--frozen-lockfile"]
     waitFor: ["install-pnpm"]
 
-  # ── Step 3: Build API server (esbuild) ─────────────────────────────────────
+  # ── Step 3a: Build shared libs (generate .d.ts for TypeScript project references) ─
+  - name: "node:20"
+    id: build-libs
+    entrypoint: bash
+    args:
+      - "-c"
+      - |
+          set -e
+          pnpm --filter @workspace/db run build
+          pnpm --filter @workspace/api-zod run build
+          echo "=== Shared libs built ==="
+    waitFor: ["pnpm-install"]
+
+  # ── Step 3b: TypeScript typecheck ──────────────────────────────────────────
+  # Fails the build on any type error — must pass before bundling.
+  - name: "node:20"
+    id: typecheck-api
+    entrypoint: pnpm
+    args: ["--filter", "@workspace/api-server", "run", "typecheck"]
+    waitFor: ["build-libs"]
+
+  # ── Step 3c: Build API server (esbuild) ────────────────────────────────────
   - name: "node:20"
     id: build-api
     entrypoint: pnpm
     args: ["--filter", "@workspace/api-server", "run", "build"]
-    waitFor: ["pnpm-install"]
+    waitFor: ["typecheck-api"]
 
   # ── Step 4: Build frontend + prerender (VITE_PUBLIC_URL baked at build time) ─
   # IMPORTANT: VITE_PUBLIC_URL is a build-time variable for canonical URLs in
@@ -54,7 +75,7 @@ steps:
     args: ["--filter", "@workspace/sport-center", "run", "build"]
     env:
       - "VITE_PUBLIC_URL=https://sc.travelintrips.co.id"
-    waitFor: ["pnpm-install"]
+    waitFor: ["build-libs"]
 
   # ── Step 5: Assemble gae-deploy/ package ──────────────────────────────────
   - name: "node:20"

@@ -5,6 +5,19 @@ import { ensureDefaultTemplates } from "./lib/seedTemplates";
 import { initBizportalTables } from "./lib/bizportalSync";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
+import { validateEnv } from "./lib/envValidation";
+import { loadSecretsFromGSM } from "./lib/secretLoader";
+
+// ── 1. Load secrets from Google Secret Manager (production/GAE only) ──────────
+// Must run before any other import reads process.env for secrets.
+// Non-fatal: if GSM is unavailable, envValidation below catches missing vars.
+const gsmResult = await loadSecretsFromGSM();
+if (gsmResult.loaded.length > 0) {
+  logger.info({ loaded: gsmResult.loaded }, "[secretLoader] Secrets loaded from Google Secret Manager");
+}
+if (gsmResult.failed.length > 0) {
+  logger.warn({ failed: gsmResult.failed }, "[secretLoader] Some secrets could not be loaded from GSM");
+}
 
 const rawPort = process.env["PORT"];
 
@@ -20,64 +33,10 @@ if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
-/**
- * validateProductionEnv — runs BEFORE server listens.
- * Fails fast on missing critical secrets in production.
- * In development: only warns, never exits.
- */
-function validateProductionEnv(): void {
-  const isProd = process.env.NODE_ENV === "production";
-  if (!isProd) return;
-
-  const fatal: string[] = [];
-  const warn: string[] = [];
-
-  // Critical — DB (accept either Supabase or Replit PostgreSQL)
-  if (!process.env.SUPABASE_DATABASE_URL && !process.env.DATABASE_URL) {
-    fatal.push("No database URL configured — set DATABASE_URL or SUPABASE_DATABASE_URL");
-  }
-
-  // Soft — Storage (Replit Object Storage or local FS fallback available)
-  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    warn.push("SUPABASE_SERVICE_ROLE_KEY not set — Supabase storage unavailable, using Replit Object Storage or local FS fallback");
-  }
-
-  // Soft — Realtime (no-op allowed, but must be explicit)
-  if (!process.env.SUPABASE_URL) {
-    warn.push("SUPABASE_URL not set — realtime availability broadcasts are no-ops");
-  }
-  if (!process.env.SUPABASE_ANON_KEY) {
-    warn.push("SUPABASE_ANON_KEY not set — realtime availability broadcasts are no-ops");
-  }
-
-  // Warned flags in production — these bleed in from dev env in Replit deployments
-  // The db module correctly ignores ALLOW_DEV_ON_PROD_DB in production (always uses SUPABASE_DATABASE_URL)
-  if (process.env.ALLOW_DEV_ON_PROD_DB === "true") {
-    warn.push("ALLOW_DEV_ON_PROD_DB=true is set — harmless in production (db module ignores it), but remove from prod env when possible");
-  }
-  if (process.env.ALLOW_DEV_ON_PROD_STORAGE === "true") {
-    warn.push("ALLOW_DEV_ON_PROD_STORAGE=true is set — harmless in production (storage module ignores it), but remove from prod env when possible");
-  }
-  if (process.env.SUPABASE_DATABASE_URL_DEV) {
-    warn.push("SUPABASE_DATABASE_URL_DEV is set in production env — this var is for development only");
-  }
-
-  for (const w of warn) {
-    logger.warn(`[prod-env] ${w}`);
-  }
-
-  if (fatal.length > 0) {
-    logger.error(
-      { missing: fatal },
-      "[prod-env] FATAL: Production environment is missing required variables. Refusing to start."
-    );
-    for (const f of fatal) {
-      logger.error(`[prod-env] ✗ ${f}`);
-    }
-    process.exit(1);
-  }
-
-  logger.info("[prod-env] Production environment validation passed.");
+// ── 2. Validate environment variables — fails fast in production if critical vars are missing ──
+const envResult = validateEnv();
+if (!envResult.ok) {
+  process.exit(1);
 }
 
 async function runStartupMigrations() {
@@ -764,8 +723,7 @@ async function runStartupMigrations() {
   logger.info("Startup migrations OK");
 }
 
-// Run BEFORE listening — fails fast in production if env is incomplete
-validateProductionEnv();
+// env validation already ran above (step 2) — no-op placeholder kept for clarity
 
 app.listen(port, (err) => {
   if (err) {
