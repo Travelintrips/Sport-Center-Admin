@@ -104,7 +104,13 @@ steps:
           find gae-deploy/artifacts/sport-center/dist/public -name "index.html" | sort
 
           echo "=== Verify no workspace symlinks ==="
-          find gae-deploy/dist -type l && echo "WARNING: symlinks found" || echo "No symlinks — OK"
+          SYMLINKS=$(find gae-deploy/dist -type l)
+          if [ -n "$SYMLINKS" ]; then
+            echo "WARNING: symlinks found:"
+            echo "$SYMLINKS"
+          else
+            echo "No symlinks — OK"
+          fi
     waitFor: ["build-api", "build-frontend"]
 
   # ── Step 6: Install production runtime dependencies ───────────────────────
@@ -125,7 +131,17 @@ steps:
           ls node_modules/nodemailer/package.json && echo "nodemailer OK"
     waitFor: ["assemble-deploy"]
 
-  # ── Step 7: Health smoke test before deploying ────────────────────────────
+  # ── Step 7: Health + static routing smoke test before deploying ──────────────
+  # Starts the assembled server in production mode with stub credentials.
+  # The env validator only checks presence (not validity) of required vars,
+  # so stub values pass. The DB pool lazy-connects so the server starts
+  # immediately; startup migration errors are non-fatal.
+  #
+  # Tests:
+  #   - /health (200) — liveness endpoint
+  #   - / and 3 prerendered routes (200) — static routing
+  #
+  # If any check fails, the build stops before deploy.
   - name: "node:20"
     id: smoke-test
     entrypoint: bash
@@ -133,17 +149,46 @@ steps:
       - "-c"
       - |
           set -e
-          echo "=== Smoke test: verify bundle loads without crashing ==="
+          echo "=== Smoke test: assembled production server ==="
           cd gae-deploy
 
-          # Start server with a dummy DATABASE_URL (only testing module load, not DB)
-          # The server will fail env validation in production mode but we catch that.
-          timeout 5 node ./dist/index.mjs 2>&1 | head -10 || true
-          echo "=== Bundle load check complete ==="
+          # Start the server in the background
+          node ./dist/index.mjs &
+          SERVER_PID=$!
+
+          # Wait for startup (DB connection errors are non-fatal and logged)
+          sleep 5
+
+          echo "--- /health ---"
+          HEALTH_STATUS=$(curl -sf -o /dev/null -w "%{http_code}" http://localhost:9999/health)
+          if [ "$HEALTH_STATUS" != "200" ]; then
+            echo "FAIL: /health returned HTTP $HEALTH_STATUS"
+            kill $SERVER_PID 2>/dev/null
+            exit 1
+          fi
+          echo "PASS: /health HTTP 200"
+          curl -s http://localhost:9999/health
+
+          echo "--- Static routes ---"
+          for route in "/" "/facilities" "/promos" "/membership"; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:9999${route}")
+            if [ "$STATUS" != "200" ]; then
+              echo "FAIL: $route returned HTTP $STATUS"
+              kill $SERVER_PID 2>/dev/null
+              exit 1
+            fi
+            echo "PASS: $route HTTP 200"
+          done
+
+          kill $SERVER_PID 2>/dev/null
+          wait $SERVER_PID 2>/dev/null || true
+          echo "=== Smoke test passed ==="
     env:
       - "PORT=9999"
-      - "NODE_ENV=development"
+      - "NODE_ENV=production"
       - "SESSION_SECRET=smoke-test-secret-not-real"
+      - "SUPABASE_DATABASE_URL=postgresql://stub:stub@localhost:65432/stub"
+      - "SUPABASE_SERVICE_ROLE_KEY=smoke-test-stub-not-a-real-key"
     waitFor: ["npm-install-prod"]
 
   # ── Step 8: Deploy to App Engine ──────────────────────────────────────────
