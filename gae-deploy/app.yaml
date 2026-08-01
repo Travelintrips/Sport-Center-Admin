@@ -45,6 +45,12 @@ automatic_scaling:
 env_variables:
   NODE_ENV: "production"
   VITE_PUBLIC_URL: "https://sc.travelintrips.co.id"
-  # PDF generation via headless Chromium. Set to "false" to disable if
-  # Chromium is incompatible with this App Engine Standard instance.
-  PDF_ENABLED: "true"
+  # PDF generation via headless Chromium.
+  # Set to "false" for first deployment — compatibility with App Engine Standard
+  # gVisor sandbox is unproven. Re-enable only after an isolated production test
+  # confirms Chromium starts and renders successfully.
+  PDF_ENABLED: "false"
+  # Base URL used in invoice links, WhatsApp messages, and tokenized action URLs.
+  # NOT a secret — set here rather than in Secret Manager.
+  # Also overridable at runtime via settings table (paymentDomain / appUrl).
+  APP_URL: "https://sc.travelintrips.co.id"
