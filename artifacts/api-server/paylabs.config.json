@@ -1,0 +1,18 @@
+{
+  "title": "Online Payment (Bank Transfer, Virtual Account, QRIS)",
+  "description": "",
+  "sendInvoice": true,
+  "chargeCustomer": false,
+  "newOrderStatus": "completed",
+  "debugMode": false,
+  "sandboxMode": true,
+  "storeId": "MY-STORE-001",
+  "sandboxPublicKey": "",
+  "sandboxPrivateKey": "",
+  "sandboxMerchantId": "",
+  "prodPublicKey": "",
+  "prodPrivateKey": "",
+  "prodMerchantId": "MERCH-123",
+  "paymentMethodsConfig": null,
+  "updatedAt": "2026-08-03T13:08:44.266Z"
+}
