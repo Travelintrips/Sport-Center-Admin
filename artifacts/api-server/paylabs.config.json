@@ -13,6 +13,167 @@
   "prodPublicKey": "",
   "prodPrivateKey": "",
   "prodMerchantId": "MERCH-123",
-  "paymentMethodsConfig": null,
-  "updatedAt": "2026-08-03T13:08:44.266Z"
+  "paymentMethodsConfig": [
+    {
+      "id": "paylabs",
+      "active": false,
+      "name": "Paylabs Payment Gateway",
+      "iconUrl": "",
+      "enableIcon": true,
+      "customDescription": ""
+    },
+    {
+      "id": "qris",
+      "active": true,
+      "name": "Paylabs - QRIS",
+      "iconUrl": "",
+      "enableIcon": true,
+      "customDescription": ""
+    },
+    {
+      "id": "bri",
+      "active": true,
+      "name": "Paylabs - BRI Virtual Account",
+      "iconUrl": "",
+      "enableIcon": true,
+      "customDescription": ""
+    },
+    {
+      "id": "bca",
+      "active": false,
+      "name": "Paylabs - BCA Virtual Account",
+      "iconUrl": "",
+      "enableIcon": true,
+      "customDescription": ""
+    },
+    {
+      "id": "bni",
+      "active": true,
+      "name": "Paylabs - BNI VA",
+      "iconUrl": "",
+      "enableIcon": true,
+      "customDescription": ""
+    },
+    {
+      "id": "mandiri",
+      "active": true,
+      "name": "Paylabs - Mandiri VA",
+      "iconUrl": "",
+      "enableIcon": true,
+      "customDescription": ""
+    },
+    {
+      "id": "permata",
+      "active": true,
+      "name": "Paylabs - Permata VA",
+      "iconUrl": "",
+      "enableIcon": true,
+      "customDescription": ""
+    },
+    {
+      "id": "cimb",
+      "active": true,
+      "name": "Paylabs - CIMB VA",
+      "iconUrl": "",
+      "enableIcon": true,
+      "customDescription": ""
+    },
+    {
+      "id": "btn",
+      "active": false,
+      "name": "Paylabs - BTN VA",
+      "iconUrl": "",
+      "enableIcon": true,
+      "customDescription": ""
+    },
+    {
+      "id": "danamon",
+      "active": false,
+      "name": "Paylabs - Danamon VA",
+      "iconUrl": "",
+      "enableIcon": true,
+      "customDescription": ""
+    },
+    {
+      "id": "ovo",
+      "active": false,
+      "name": "Paylabs - Ovo Balance",
+      "iconUrl": "",
+      "enableIcon": true,
+      "customDescription": ""
+    },
+    {
+      "id": "dana",
+      "active": false,
+      "name": "Paylabs - Dana Balance",
+      "iconUrl": "",
+      "enableIcon": true,
+      "customDescription": ""
+    },
+    {
+      "id": "shopeepay",
+      "active": false,
+      "name": "Paylabs - ShopeePay",
+      "iconUrl": "",
+      "enableIcon": true,
+      "customDescription": ""
+    },
+    {
+      "id": "linkaja",
+      "active": false,
+      "name": "Paylabs - LinkAja",
+      "iconUrl": "",
+      "enableIcon": true,
+      "customDescription": ""
+    },
+    {
+      "id": "gopay",
+      "active": false,
+      "name": "Paylabs - Gopay Balance",
+      "iconUrl": "",
+      "enableIcon": true,
+      "customDescription": ""
+    },
+    {
+      "id": "maybank",
+      "active": false,
+      "name": "Paylabs - Maybank VA",
+      "iconUrl": "",
+      "enableIcon": true,
+      "customDescription": ""
+    },
+    {
+      "id": "bsi",
+      "active": true,
+      "name": "Paylabs - BSI VA",
+      "iconUrl": "",
+      "enableIcon": true,
+      "customDescription": ""
+    },
+    {
+      "id": "muamalat",
+      "active": false,
+      "name": "Paylabs - Muamalat Virtual Account",
+      "iconUrl": "",
+      "enableIcon": true,
+      "customDescription": ""
+    },
+    {
+      "id": "sinarmas",
+      "active": false,
+      "name": "Paylabs - Sinarmas VA",
+      "iconUrl": "",
+      "enableIcon": true,
+      "customDescription": ""
+    },
+    {
+      "id": "ina",
+      "active": false,
+      "name": "Paylabs - INA VA",
+      "iconUrl": "",
+      "enableIcon": true,
+      "customDescription": ""
+    }
+  ],
+  "updatedAt": "2026-08-03T14:27:11.557Z"
 }
