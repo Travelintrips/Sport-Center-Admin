@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,11 +8,26 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   MoreVertical,
   ChevronRight,
   ChevronLeft,
   CreditCard,
   Save,
+  Eye,
+  EyeOff,
+  AlertTriangle,
+  Download,
+  Upload,
+  Shield,
+  ArrowLeftRight,
+  SlidersHorizontal,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
@@ -478,11 +493,90 @@ function MethodRow({
   );
 }
 
+// ─── Secret textarea field ────────────────────────────────────────────────────
+
+function SecretField({
+  id,
+  label,
+  required,
+  hint,
+  value,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  required?: boolean;
+  hint?: string;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const [show, setShow] = useState(false);
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor={id} className="text-sm font-semibold">
+        {label} {required && <span className="text-red-500">*</span>}
+      </Label>
+      <div className="relative">
+        <Textarea
+          id={id}
+          rows={5}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={show ? "" : ""}
+          className={`font-mono text-xs pr-8 resize-none ${!show && value ? "text-security" : ""}`}
+          style={!show && value ? { WebkitTextSecurity: "disc" } as React.CSSProperties : {}}
+        />
+        {value && (
+          <button
+            type="button"
+            onClick={() => setShow((v) => !v)}
+            className="absolute top-2.5 right-2.5 text-muted-foreground hover:text-foreground"
+          >
+            {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+          </button>
+        )}
+      </div>
+      {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
+    </div>
+  );
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function PaylabsGateway() {
+  const { toast } = useToast();
+  const importRef = useRef<HTMLInputElement>(null);
+
   const [methods, setMethods] = useState<PaymentMethod[]>(INITIAL_METHODS);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  // Pengaturan Umum
+  const [general, setGeneral] = useState({
+    title: "Online Payment (Bank Transfer, Virtual Account, QRIS)",
+    description: "",
+    sendInvoice: true,
+    chargeCustomer: false,
+    newOrderStatus: "completed",
+    debugMode: false,
+  });
+
+  // Mode
+  const [sandboxMode, setSandboxMode] = useState(true);
+  const [storeId, setStoreId] = useState("");
+
+  // Sandbox credentials
+  const [sandboxCreds, setSandboxCreds] = useState({
+    publicKey: "",
+    privateKey: "",
+    merchantId: "",
+  });
+
+  // Production credentials
+  const [prodCreds, setProdCreds] = useState({
+    publicKey: "",
+    privateKey: "",
+    merchantId: "",
+  });
 
   const selected = selectedId ? methods.find((m) => m.id === selectedId) : null;
 
@@ -492,8 +586,46 @@ export default function PaylabsGateway() {
     );
   }
 
-  function handleSave(updated: PaymentMethod) {
+  function handleSaveMethod(updated: PaymentMethod) {
     setMethods((prev) => prev.map((m) => (m.id === updated.id ? updated : m)));
+  }
+
+  function handleSaveAll() {
+    toast({ title: "Pengaturan disimpan", description: "Konfigurasi Paylabs berhasil disimpan." });
+  }
+
+  function handleExport() {
+    const data = { general, sandboxMode, storeId, sandboxCreds, prodCreds, methods };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "paylabs-config.json";
+    a.click();
+    URL.revokeObjectURL(url);
+    toast({ title: "Konfigurasi diekspor", description: "File paylabs-config.json berhasil diunduh." });
+  }
+
+  function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const data = JSON.parse(ev.target?.result as string);
+        if (data.general) setGeneral(data.general);
+        if (data.sandboxMode !== undefined) setSandboxMode(data.sandboxMode);
+        if (data.storeId !== undefined) setStoreId(data.storeId);
+        if (data.sandboxCreds) setSandboxCreds(data.sandboxCreds);
+        if (data.prodCreds) setProdCreds(data.prodCreds);
+        if (data.methods) setMethods(data.methods);
+        toast({ title: "Konfigurasi diimpor", description: "Pengaturan berhasil dimuat dari file." });
+      } catch {
+        toast({ title: "Gagal impor", description: "File JSON tidak valid.", variant: "destructive" });
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = "";
   }
 
   if (selected) {
@@ -501,13 +633,13 @@ export default function PaylabsGateway() {
       <MethodDetail
         method={selected}
         onBack={() => setSelectedId(null)}
-        onSave={handleSave}
+        onSave={handleSaveMethod}
       />
     );
   }
 
   return (
-    <div className="p-6 max-w-3xl mx-auto space-y-6">
+    <div className="p-6 max-w-3xl mx-auto space-y-6 pb-20">
       {/* Page header */}
       <div>
         <h1 className="text-2xl font-black text-foreground flex items-center gap-2">
@@ -519,7 +651,7 @@ export default function PaylabsGateway() {
         </p>
       </div>
 
-      {/* Methods card */}
+      {/* ── Metode Pembayaran ── */}
       <Card className="overflow-hidden">
         <CardHeader className="pb-0 pt-4 px-4">
           <CardTitle className="text-sm font-semibold flex items-center gap-2 text-foreground">
@@ -539,6 +671,295 @@ export default function PaylabsGateway() {
           ))}
         </CardContent>
       </Card>
+
+      {/* ── Pengaturan Umum ── */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm font-semibold flex items-center gap-2">
+            <SlidersHorizontal className="h-4 w-4 text-muted-foreground" />
+            Pengaturan Umum
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-1.5">
+            <Label htmlFor="gen-title">Judul</Label>
+            <Input
+              id="gen-title"
+              value={general.title}
+              onChange={(e) => setGeneral((g) => ({ ...g, title: e.target.value }))}
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="gen-desc">Deskripsi</Label>
+            <Textarea
+              id="gen-desc"
+              rows={3}
+              placeholder="Deskripsi metode pembayaran yang dilihat pelanggan saat checkout."
+              value={general.description}
+              onChange={(e) => setGeneral((g) => ({ ...g, description: e.target.value }))}
+            />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="flex items-center justify-between p-3 rounded-lg border bg-background gap-3">
+              <Switch
+                id="send-invoice"
+                checked={general.sendInvoice}
+                onCheckedChange={(v) => setGeneral((g) => ({ ...g, sendInvoice: v }))}
+                className="data-[state=checked]:bg-cyan-500 shrink-0"
+              />
+              <Label htmlFor="send-invoice" className="cursor-pointer flex-1">
+                <p className="font-medium text-sm">Kirim Invoice</p>
+                <p className="text-xs text-muted-foreground">Email invoice ke pelanggan</p>
+              </Label>
+            </div>
+            <div className="flex items-center justify-between p-3 rounded-lg border bg-background gap-3">
+              <Switch
+                id="charge-customer"
+                checked={general.chargeCustomer}
+                onCheckedChange={(v) => setGeneral((g) => ({ ...g, chargeCustomer: v }))}
+                className="data-[state=checked]:bg-cyan-500 shrink-0"
+              />
+              <Label htmlFor="charge-customer" className="cursor-pointer flex-1">
+                <p className="font-medium text-sm">Biaya ke Pelanggan</p>
+                <p className="text-xs text-muted-foreground">Service fee ditanggung customer</p>
+              </Label>
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>Status Pesanan Baru</Label>
+            <Select
+              value={general.newOrderStatus}
+              onValueChange={(v) => setGeneral((g) => ({ ...g, newOrderStatus: v }))}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="completed">Completed</SelectItem>
+                <SelectItem value="processing">Processing</SelectItem>
+                <SelectItem value="on-hold">On Hold</SelectItem>
+                <SelectItem value="pending">Pending Payment</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="flex items-center justify-between p-3 rounded-lg border bg-background gap-3">
+            <Switch
+              id="debug-mode"
+              checked={general.debugMode}
+              onCheckedChange={(v) => setGeneral((g) => ({ ...g, debugMode: v }))}
+              className="data-[state=checked]:bg-cyan-500 shrink-0"
+            />
+            <Label htmlFor="debug-mode" className="cursor-pointer flex-1">
+              <p className="font-medium text-sm">Mode Debug</p>
+              <p className="text-xs text-muted-foreground">Logging detail untuk debugging</p>
+            </Label>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* ── Mode ── */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm font-semibold flex items-center gap-2">
+            <Shield className="h-4 w-4 text-muted-foreground" />
+            Mode
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between p-3 rounded-lg border bg-background gap-3">
+            <Switch
+              id="sandbox-mode"
+              checked={sandboxMode}
+              onCheckedChange={setSandboxMode}
+              className="data-[state=checked]:bg-cyan-500 shrink-0"
+            />
+            <Label htmlFor="sandbox-mode" className="cursor-pointer flex-1">
+              <p className="font-medium text-sm">Sandbox Mode (Testing)</p>
+              <p className="text-xs text-muted-foreground">
+                Aktifkan untuk SIT/sandbox. Nonaktifkan untuk produksi.
+              </p>
+            </Label>
+          </div>
+
+          {sandboxMode && (
+            <div className="flex items-start gap-2 p-3 rounded-lg bg-yellow-50 border border-yellow-200 text-yellow-700 text-sm">
+              <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+              <span>Mode sandbox aktif — gunakan kredensial SIT Paylabs.</span>
+            </div>
+          )}
+
+          <div className="space-y-1.5">
+            <Label htmlFor="store-id">
+              Store ID <span className="text-muted-foreground font-normal">(opsional)</span>
+            </Label>
+            <Input
+              id="store-id"
+              placeholder="(opsional)"
+              value={storeId}
+              onChange={(e) => setStoreId(e.target.value)}
+            />
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* ── Kredensial Sandbox (SIT) ── */}
+      <Card className={sandboxMode ? "border-yellow-300 bg-yellow-50/30" : "opacity-60"}>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-sm font-semibold flex items-center gap-2">
+              <Shield className="h-4 w-4 text-yellow-500" />
+              Kredensial Sandbox (SIT)
+            </CardTitle>
+            {sandboxMode && (
+              <Badge className="bg-yellow-100 text-yellow-700 border border-yellow-300 text-xs">
+                Aktif
+              </Badge>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <SecretField
+            id="sb-pubkey"
+            label="Paylabs Public Key (Sandbox)"
+            required
+            hint="Public key dari dashboard Paylabs SIT."
+            value={sandboxCreds.publicKey}
+            onChange={(v) => setSandboxCreds((c) => ({ ...c, publicKey: v }))}
+          />
+          <SecretField
+            id="sb-privkey"
+            label="Merchant Private Key (Sandbox)"
+            required
+            hint="Private key merchant untuk environment SIT."
+            value={sandboxCreds.privateKey}
+            onChange={(v) => setSandboxCreds((c) => ({ ...c, privateKey: v }))}
+          />
+          <div className="space-y-1.5">
+            <Label htmlFor="sb-mid">
+              Merchant ID <span className="text-red-500">*</span>
+            </Label>
+            <Input
+              id="sb-mid"
+              placeholder="Contoh: 010728"
+              value={sandboxCreds.merchantId}
+              onChange={(e) => setSandboxCreds((c) => ({ ...c, merchantId: e.target.value }))}
+            />
+            <p className="text-xs text-muted-foreground">Merchant ID untuk environment SIT.</p>
+          </div>
+          <div>
+            <Button variant="outline" size="sm" className="gap-2 rounded-full">
+              <Shield className="h-3.5 w-3.5" />
+              Tampilkan Merchant Public Key
+            </Button>
+            <p className="text-xs text-muted-foreground mt-2">
+              Public key ini harus diupload ke dashboard Paylabs SIT agar tanda tangan dikenali.
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* ── Kredensial Produksi ── */}
+      <Card className={!sandboxMode ? "border-green-300 bg-green-50/30" : "opacity-60"}>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-sm font-semibold flex items-center gap-2">
+              <CreditCard className="h-4 w-4 text-green-600" />
+              Kredensial Produksi
+            </CardTitle>
+            {!sandboxMode && (
+              <Badge className="bg-green-100 text-green-700 border border-green-300 text-xs">
+                Aktif
+              </Badge>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <SecretField
+            id="prod-pubkey"
+            label="Paylabs Public Key"
+            required
+            hint="Public key dari dashboard Paylabs produksi."
+            value={prodCreds.publicKey}
+            onChange={(v) => setProdCreds((c) => ({ ...c, publicKey: v }))}
+          />
+          <SecretField
+            id="prod-privkey"
+            label="Merchant Private Key"
+            required
+            hint="Private key merchant untuk produksi. Jangan bagikan ke siapapun."
+            value={prodCreds.privateKey}
+            onChange={(v) => setProdCreds((c) => ({ ...c, privateKey: v }))}
+          />
+          <div className="space-y-1.5">
+            <Label htmlFor="prod-mid">
+              Merchant ID <span className="text-red-500">*</span>
+            </Label>
+            <Input
+              id="prod-mid"
+              placeholder="Contoh: 010613"
+              value={prodCreds.merchantId}
+              onChange={(e) => setProdCreds((c) => ({ ...c, merchantId: e.target.value }))}
+            />
+            <p className="text-xs text-muted-foreground">Merchant ID untuk environment produksi.</p>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* ── Sinkronisasi ke Proyek Lain ── */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm font-semibold flex items-center gap-2">
+            <ArrowLeftRight className="h-4 w-4 text-muted-foreground" />
+            Sinkronisasi ke Proyek Lain
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Export konfigurasi ini (termasuk icon URL, kredensial, dan status metode pembayaran)
+            lalu import di proyek lain agar semua proyek punya pengaturan yang sama.
+          </p>
+          <div className="flex gap-3 flex-wrap">
+            <Button variant="outline" onClick={handleExport} className="gap-2">
+              <Download className="h-4 w-4" />
+              Export Konfigurasi
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => importRef.current?.click()}
+              className="gap-2"
+            >
+              <Upload className="h-4 w-4" />
+              Import Konfigurasi
+            </Button>
+            <input
+              ref={importRef}
+              type="file"
+              accept=".json"
+              className="hidden"
+              onChange={handleImport}
+            />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            File yang didownload berformat JSON — buka halaman Paylabs Settings di proyek lain,
+            klik Import, pilih file tersebut.
+          </p>
+        </CardContent>
+      </Card>
+
+      {/* ── Simpan Perubahan ── */}
+      <div className="flex justify-end">
+        <Button
+          onClick={handleSaveAll}
+          className="bg-cyan-500 hover:bg-cyan-600 text-white gap-2"
+        >
+          <Save className="h-4 w-4" />
+          Simpan Perubahan
+        </Button>
+      </div>
     </div>
   );
 }
