@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,6 +30,7 @@ import {
   SlidersHorizontal,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { getToken } from "@/lib/auth";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -546,6 +547,8 @@ function SecretField({
 export default function PaylabsGateway() {
   const { toast } = useToast();
   const importRef = useRef<HTMLInputElement>(null);
+  const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   const [methods, setMethods] = useState<PaymentMethod[]>(INITIAL_METHODS);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -578,6 +581,54 @@ export default function PaylabsGateway() {
     merchantId: "",
   });
 
+  // ── Load from API on mount ──────────────────────────────────────────────────
+  useEffect(() => {
+    async function load() {
+      try {
+        const res = await fetch("/api/admin/paylabs/settings", {
+          headers: { Authorization: `Bearer ${getToken()}` },
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const d = await res.json();
+
+        setGeneral({
+          title: d.title ?? "Online Payment (Bank Transfer, Virtual Account, QRIS)",
+          description: d.description ?? "",
+          sendInvoice: d.sendInvoice ?? true,
+          chargeCustomer: d.chargeCustomer ?? false,
+          newOrderStatus: d.newOrderStatus ?? "completed",
+          debugMode: d.debugMode ?? false,
+        });
+        setSandboxMode(d.sandboxMode ?? true);
+        setStoreId(d.storeId ?? "");
+        setSandboxCreds({
+          publicKey: d.sandboxPublicKey ?? "",
+          privateKey: d.sandboxPrivateKey ?? "",
+          merchantId: d.sandboxMerchantId ?? "",
+        });
+        setProdCreds({
+          publicKey: d.prodPublicKey ?? "",
+          privateKey: d.prodPrivateKey ?? "",
+          merchantId: d.prodMerchantId ?? "",
+        });
+        if (Array.isArray(d.paymentMethodsConfig)) {
+          setMethods((prev) =>
+            prev.map((m) => {
+              const saved = d.paymentMethodsConfig.find((s: any) => s.id === m.id);
+              return saved ? { ...m, ...saved } : m;
+            })
+          );
+        }
+      } catch (err) {
+        // Not critical — just use defaults
+        console.warn("[PaylabsGateway] could not load settings:", err);
+      } finally {
+        setLoading(false);
+      }
+    }
+    load();
+  }, []);
+
   const selected = selectedId ? methods.find((m) => m.id === selectedId) : null;
 
   function handleActivate(id: string) {
@@ -590,8 +641,54 @@ export default function PaylabsGateway() {
     setMethods((prev) => prev.map((m) => (m.id === updated.id ? updated : m)));
   }
 
-  function handleSaveAll() {
-    toast({ title: "Pengaturan disimpan", description: "Konfigurasi Paylabs berhasil disimpan." });
+  async function handleSaveAll() {
+    setSaving(true);
+    try {
+      const body = {
+        title: general.title,
+        description: general.description,
+        sendInvoice: general.sendInvoice,
+        chargeCustomer: general.chargeCustomer,
+        newOrderStatus: general.newOrderStatus,
+        debugMode: general.debugMode,
+        sandboxMode,
+        storeId,
+        sandboxPublicKey: sandboxCreds.publicKey,
+        sandboxPrivateKey: sandboxCreds.privateKey,
+        sandboxMerchantId: sandboxCreds.merchantId,
+        prodPublicKey: prodCreds.publicKey,
+        prodPrivateKey: prodCreds.privateKey,
+        prodMerchantId: prodCreds.merchantId,
+        paymentMethodsConfig: methods.map((m) => ({
+          id: m.id,
+          active: m.active,
+          name: m.name,
+          iconUrl: m.iconUrl,
+          enableIcon: m.enableIcon,
+          customDescription: m.customDescription,
+        })),
+      };
+
+      const res = await fetch("/api/admin/paylabs/settings", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${getToken()}`,
+        },
+        body: JSON.stringify(body),
+      });
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      toast({ title: "Pengaturan disimpan", description: "Konfigurasi Paylabs berhasil disimpan ke database." });
+    } catch (err) {
+      toast({
+        title: "Gagal menyimpan",
+        description: "Terjadi kesalahan saat menyimpan ke database.",
+        variant: "destructive",
+      });
+    } finally {
+      setSaving(false);
+    }
   }
 
   function handleExport() {

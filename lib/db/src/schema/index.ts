@@ -43,3 +43,4 @@ export * from "./vendors";
 export * from "./coaAccounts";
 export * from "./waNotifLogs";
 export * from "./corporateBookingDocumentation";
+export * from "./paylabsSettings";

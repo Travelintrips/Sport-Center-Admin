@@ -59,6 +59,7 @@ import dataConnectionsRouter from "./dataConnections";
 import rekapRouter from "./rekap";
 import corporateDocumentationRouter from "./corporateDocumentation";
 import analyticsPublicRouter from "./analyticsPublic";
+import paylabsSettingsRouter from "./paylabsSettings";
 
 const router: IRouter = Router();
 
@@ -121,5 +122,6 @@ router.use(dataConnectionsRouter);
 router.use(rekapRouter);
 router.use(corporateDocumentationRouter);
 router.use(analyticsPublicRouter);
+router.use(paylabsSettingsRouter);
 
 export default router;
