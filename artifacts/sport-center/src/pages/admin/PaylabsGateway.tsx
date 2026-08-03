@@ -678,12 +678,17 @@ export default function PaylabsGateway() {
         body: JSON.stringify(body),
       });
 
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        throw new Error(`HTTP ${res.status}: ${errBody?.error ?? "unknown"}`);
+      }
       toast({ title: "Pengaturan disimpan", description: "Konfigurasi Paylabs berhasil disimpan ke database." });
     } catch (err) {
+      const msg = err instanceof Error ? err.message : "unknown error";
+      console.error("[PaylabsGateway] save error:", msg);
       toast({
         title: "Gagal menyimpan",
-        description: "Terjadi kesalahan saat menyimpan ke database.",
+        description: msg,
         variant: "destructive",
       });
     } finally {
