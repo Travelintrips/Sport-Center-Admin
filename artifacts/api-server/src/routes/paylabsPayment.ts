@@ -109,7 +109,7 @@ router.post("/paylabs/create-payment", async (req, res) => {
   const amount       = Number(booking.grandTotal ?? booking.totalPrice);
   const tradeNo      = `SC-${booking.orderNumber}-${Date.now()}`.slice(0, 32);
   const requestId    = randomUUID();
-  const notifyUrl    = `${getBaseUrl()}/api/paylabs/webhook`;
+  const notifyUrl    = `${await getBaseUrl()}/api/paylabs/webhook`;
   const productName  = `Booking ${booking.orderNumber}`;
   const productInfo: ProductInfo[] = [{
     id      : String(booking.facilityId),
