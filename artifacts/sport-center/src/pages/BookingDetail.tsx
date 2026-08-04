@@ -1185,7 +1185,10 @@ function PaylabsPaymentSection({
         body: JSON.stringify({ bookingId, paymentMethod: methodId }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+      if (!res.ok) {
+        const detail = data.errMsg ?? data.error ?? `HTTP ${res.status}`;
+        throw new Error(detail);
+      }
       setPayment(data);
       setPollStatus("waiting");
     } catch (err: any) {

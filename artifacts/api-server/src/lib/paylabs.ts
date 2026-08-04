@@ -169,8 +169,20 @@ export async function callPaylabs<T = Record<string, unknown>>(
 
   const bodyStr   = JSON.stringify(body);
   const timestamp = makeTimestamp();
-  const signature = sign(config.privateKey, timestamp, bodyStr);
   const url       = `${config.baseUrl}${endpoint}`;
+
+  let signature: string;
+  try {
+    signature = sign(config.privateKey, timestamp, bodyStr);
+  } catch (keyErr) {
+    const msg = String(keyErr);
+    logger.error({ keyErr, merchantId: config.merchantId }, "[paylabs] RSA signing failed — check private key format");
+    return {
+      ok: false, httpStatus: 0, data: {} as T,
+      errCode: "INVALID_PRIVATE_KEY",
+      errMsg: `RSA sign error: ${msg}. Pastikan private key di Paylabs Settings berformat PEM atau base64 RSA yang valid.`,
+    };
+  }
 
   if (config.debugMode) {
     logger.debug({ url, timestamp, body }, "[paylabs] outgoing request");
