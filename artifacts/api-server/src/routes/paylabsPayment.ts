@@ -112,13 +112,11 @@ router.post("/paylabs/create-payment", async (req, res) => {
   const notifyUrl    = `${getBaseUrl()}/api/paylabs/webhook`;
   const productName  = `Booking ${booking.orderNumber}`;
   const productInfo: ProductInfo[] = [{
-    id         : String(booking.facilityId),
-    name       : productName,
-    price      : amount,
-    type       : "lapangan",
-    quantity   : 1,
-    unit       : "sesi",
-    description: `${booking.bookingDate} ${booking.startTime}–${booking.endTime}`,
+    id      : String(booking.facilityId),
+    name    : productName,
+    price   : amount,
+    type    : "lapangan",
+    quantity: 1,
   }];
 
   const method = resolvePaymentMethod(paymentMethod);
@@ -130,25 +128,25 @@ router.post("/paylabs/create-payment", async (req, res) => {
   let paylabsRes: Awaited<ReturnType<typeof createQris>>;
 
   try {
+    // payer = nama pembayar (v4.8.1 docs: "Nama orang yang melakukan pembayaran")
+    const payer = (booking as any).bookerName ?? booking.customerName ?? "Pelanggan";
+
     if (method.type === "qris") {
       paylabsRes = await createQris({
         requestId, merchantTradeNo: tradeNo,
-        amount, phoneNo: booking.customerPhone ?? undefined,
+        amount, payer,
         notifyUrl, productName, productInfo,
       }, cfg);
     } else if (method.type === "va") {
       paylabsRes = await createVa({
         requestId, merchantTradeNo: tradeNo,
-        vaCode: method.code!, amount,
-        phoneNo: booking.customerPhone ?? undefined,
-        billEndDate: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+        paymentType: method.code!, amount, payer,
         notifyUrl, productName, productInfo,
       }, cfg);
     } else {
       paylabsRes = await createEwallet({
         requestId, merchantTradeNo: tradeNo,
-        ewalletCode: method.code!, amount,
-        phoneNo: booking.customerPhone ?? undefined,
+        ewalletCode: method.code!, amount, payer,
         notifyUrl, productName, productInfo,
       }, cfg);
     }

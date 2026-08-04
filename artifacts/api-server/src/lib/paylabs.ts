@@ -91,17 +91,21 @@ export async function loadPaylabsConfigFromDb(): Promise<PaylabsConfig> {
 
 // ─── Crypto helpers ──────────────────────────────────────────────────────────
 
-/** yyyyMMddHHmmss in UTC */
+/**
+ * ISO 8601 timestamp with milliseconds and +07:00 offset (WIB)
+ * Required format per Paylabs v4.8.1 docs: 2022-09-16T16:58:47.964+07:00
+ */
 function makeTimestamp(): string {
+  // Build a WIB (+07:00) ISO string
   const now = new Date();
-  return [
-    now.getUTCFullYear(),
-    String(now.getUTCMonth() + 1).padStart(2, "0"),
-    String(now.getUTCDate()).padStart(2, "0"),
-    String(now.getUTCHours()).padStart(2, "0"),
-    String(now.getUTCMinutes()).padStart(2, "0"),
-    String(now.getUTCSeconds()).padStart(2, "0"),
-  ].join("");
+  const wibOffset = 7 * 60; // minutes
+  const local = new Date(now.getTime() + wibOffset * 60 * 1000);
+  const pad = (n: number, len = 2) => String(n).padStart(len, "0");
+  const ms = pad(local.getUTCMilliseconds(), 3);
+  return (
+    `${local.getUTCFullYear()}-${pad(local.getUTCMonth() + 1)}-${pad(local.getUTCDate())}` +
+    `T${pad(local.getUTCHours())}:${pad(local.getUTCMinutes())}:${pad(local.getUTCSeconds())}.${ms}+07:00`
+  );
 }
 
 function normaliseKey(key: string, type: "PUBLIC" | "PRIVATE"): string {
@@ -205,13 +209,18 @@ export async function callPaylabs<T = Record<string, unknown>>(
     logger.debug({ url, timestamp, body }, "[paylabs] outgoing request");
   }
 
+  // X-REQUEST-ID must be unique per request (use requestId from body if present, else random)
+  const requestId = (body as Record<string, unknown>).requestId as string | undefined
+    ?? `req-${Date.now()}`;
+
   let httpStatus = 0;
   try {
     const res = await fetch(url, {
       method : "POST",
       headers: {
-        "Content-Type" : "application/json",
-        "X-MERCHANT-ID": config.merchantId,
+        "Content-Type" : "application/json;charset=utf-8",
+        "X-PARTNER-ID" : config.merchantId,   // v4.8.1: X-PARTNER-ID (not X-MERCHANT-ID)
+        "X-REQUEST-ID" : requestId,            // v4.8.1: required unique request ID
         "X-TIMESTAMP"  : timestamp,
         "X-SIGNATURE"  : signature,
       },
@@ -219,14 +228,30 @@ export async function callPaylabs<T = Record<string, unknown>>(
     });
 
     httpStatus = res.status;
-    const data = await res.json().catch(() => ({})) as T & { errCode?: string; errMsg?: string };
+    const raw = await res.text().catch(() => "");
+    let data: T & Record<string, unknown> = {} as T & Record<string, unknown>;
+    try { data = JSON.parse(raw); } catch { /* non-JSON response */ }
 
-    if (config.debugMode) {
-      logger.debug({ httpStatus, data }, "[paylabs] response");
+    if (config.debugMode || !res.ok) {
+      logger.info({ httpStatus, url, data, rawSnippet: raw.slice(0, 500) }, "[paylabs] response");
     }
 
-    const ok = res.ok && (!data.errCode || data.errCode === "0" || data.errCode === "SUCCESS");
-    return { ok, httpStatus, data, errCode: data.errCode, errMsg: data.errMsg };
+    // Paylabs v4.8.1: errCode (0 = success), errCodeDes = error description
+    const errCode: string | undefined =
+      (data as any).errCode   ?? (data as any).errcode   ??
+      (data as any).errorCode ?? (data as any).error_code ??
+      (data as any).responseCode ?? undefined;
+
+    const errMsg: string | undefined =
+      (data as any).errCodeDes   ??   // v4.8.1 primary field
+      (data as any).errMsg       ??   // fallback (older API versions)
+      (data as any).errmsg       ??
+      (data as any).errorMessage ?? (data as any).error_message ??
+      (data as any).message      ?? (data as any).error    ??
+      (data as any).responseMessage ?? undefined;
+
+    const ok = res.ok && (!errCode || errCode === "0" || errCode === "SUCCESS" || errCode === "00");
+    return { ok, httpStatus, data, errCode, errMsg };
   } catch (err) {
     logger.error({ err, url }, "[paylabs] request failed");
     return { ok: false, httpStatus, data: {} as T, errCode: "NETWORK_ERROR", errMsg: String(err) };
@@ -239,7 +264,7 @@ export interface CreateQrisRequest {
   requestId: string;
   merchantTradeNo: string;
   amount: number;
-  phoneNo?: string;
+  payer?: string;          // v4.8.1: nama pembayar (bukan nomor telepon)
   notifyUrl: string;
   productName: string;
   productInfo?: ProductInfo[];
@@ -248,11 +273,9 @@ export interface CreateQrisRequest {
 export interface CreateVaRequest {
   requestId: string;
   merchantTradeNo: string;
-  vaCode: string;          // BRI | BNI | BCA | MANDIRI | PERMATA | CIMB | BSI | BTN | MUAMALAT | DANAMON | SINARMAS | INA
+  paymentType: string;     // v4.8.1: BRIVA | BNIVA | BCAVA | MandiriVA | PermataVA | CIMBVA | BSIVA | BTNVA | MuamalatVA | DanamonVA | SinarmasVA | INAVA
   amount: number;
-  phoneNo?: string;
-  billStartDate?: string;  // ISO8601
-  billEndDate?: string;    // ISO8601
+  payer?: string;          // v4.8.1: nama pembayar (bukan nomor telepon)
   notifyUrl: string;
   productName: string;
   productInfo?: ProductInfo[];
@@ -263,7 +286,7 @@ export interface CreateEwalletRequest {
   merchantTradeNo: string;
   ewalletCode: string;     // OVO | DANA | SHOPEEPAY | LINKAJA | GOPAY
   amount: number;
-  phoneNo?: string;
+  payer?: string;          // v4.8.1: nama pembayar
   redirectUrl?: string;
   notifyUrl: string;
   productName: string;
@@ -276,31 +299,55 @@ export interface ProductInfo {
   price: number;
   type: string;
   quantity: number;
-  unit: string;
-  description?: string;
+  url?: string;          // v4.8.1 optional product URL
 }
 
 export function createQris(req: CreateQrisRequest, cfg?: PaylabsConfig) {
+  const c = cfg ?? getPaylabsConfig();
   return callPaylabs("/payment/createQRIS", {
-    ...req,
-    merchantId: (cfg ?? getPaylabsConfig()).merchantId,
-    storeId   : (cfg ?? getPaylabsConfig()).storeId,
+    requestId      : req.requestId,
+    merchantId     : c.merchantId,
+    storeId        : c.storeId || undefined,
+    paymentType    : "QRIS",
+    merchantTradeNo: req.merchantTradeNo,
+    amount         : req.amount,
+    notifyUrl      : req.notifyUrl,
+    payer          : req.payer,
+    productName    : req.productName,
+    productInfo    : req.productInfo,
   }, cfg);
 }
 
 export function createVa(req: CreateVaRequest, cfg?: PaylabsConfig) {
+  const c = cfg ?? getPaylabsConfig();
   return callPaylabs("/payment/createVA", {
-    ...req,
-    merchantId: (cfg ?? getPaylabsConfig()).merchantId,
-    storeId   : (cfg ?? getPaylabsConfig()).storeId,
+    requestId      : req.requestId,
+    merchantId     : c.merchantId,
+    storeId        : c.storeId || undefined,
+    paymentType    : req.paymentType,   // e.g. "BRIVA", "BCAVA", "MandiriVA"
+    merchantTradeNo: req.merchantTradeNo,
+    amount         : req.amount,
+    notifyUrl      : req.notifyUrl,
+    payer          : req.payer,
+    productName    : req.productName,
+    productInfo    : req.productInfo,
   }, cfg);
 }
 
 export function createEwallet(req: CreateEwalletRequest, cfg?: PaylabsConfig) {
+  const c = cfg ?? getPaylabsConfig();
   return callPaylabs("/payment/createEwallet", {
-    ...req,
-    merchantId: (cfg ?? getPaylabsConfig()).merchantId,
-    storeId   : (cfg ?? getPaylabsConfig()).storeId,
+    requestId      : req.requestId,
+    merchantId     : c.merchantId,
+    storeId        : c.storeId || undefined,
+    paymentType    : req.ewalletCode,
+    merchantTradeNo: req.merchantTradeNo,
+    amount         : req.amount,
+    notifyUrl      : req.notifyUrl,
+    payer          : req.payer,
+    redirectUrl    : req.redirectUrl,
+    productName    : req.productName,
+    productInfo    : req.productInfo,
   }, cfg);
 }
 
@@ -316,10 +363,24 @@ export function statusInquiry(merchantTradeNo: string, cfg?: PaylabsConfig) {
 
 // ─── VA code mapper ───────────────────────────────────────────────────────────
 
+// v4.8.1 paymentType codes for VA (from docs: SinarmasVA,MaybankVA,DanamonVA,BNCVA,BCAVA,INAVA,BNIVA,PermataVA,MuamalatVA,BSIVA,BRIVA,MandiriVA,CIMBVA,NobuVA,KaltimtaraVA,BTNVA)
 const METHOD_TO_VA: Record<string, string> = {
-  bri: "BRI", bni: "BNI", bca: "BCA", mandiri: "MANDIRI",
-  permata: "PERMATA", cimb: "CIMB", bsi: "BSI", btn: "BTN",
-  muamalat: "MUAMALAT", danamon: "DANAMON", sinarmas: "SINARMAS", ina: "INA",
+  bri      : "BRIVA",
+  bni      : "BNIVA",
+  bca      : "BCAVA",
+  mandiri  : "MandiriVA",
+  permata  : "PermataVA",
+  cimb     : "CIMBVA",
+  bsi      : "BSIVA",
+  btn      : "BTNVA",
+  muamalat : "MuamalatVA",
+  danamon  : "DanamonVA",
+  sinarmas : "SinarmasVA",
+  ina      : "INAVA",
+  maybank  : "MaybankVA",
+  bnc      : "BNCVA",
+  nobu     : "NobuVA",
+  kaltimtara: "KaltimtaraVA",
 };
 
 const EWALLET_CODES: Record<string, string> = {
