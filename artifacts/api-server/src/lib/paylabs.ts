@@ -249,31 +249,40 @@ export async function callPaylabs<T = Record<string, unknown>>(
     };
   }
 
-  // Always log outgoing request details (endpoint + stringToSign) to aid diagnosis
+  // X-REQUEST-ID must be unique per request (use requestId from body if present, else random)
+  const requestId = (body as Record<string, unknown>).requestId as string | undefined
+    ?? `req-${Date.now()}`;
+
+  const requestHeaders = {
+    "Content-Type" : "application/json;charset=utf-8",
+    "X-PARTNER-ID" : config.merchantId,
+    "X-REQUEST-ID" : requestId,
+    "X-TIMESTAMP"  : timestamp,
+    "X-SIGNATURE"  : signature,
+  };
+
+  // ── PAYLABS DEBUG LOG ──────────────────────────────────────────────────────
+  console.log("=== [PAYLABS] OUTGOING REQUEST ===");
+  console.log("URL          :", url);
+  console.log("X-PARTNER-ID :", requestHeaders["X-PARTNER-ID"]);
+  console.log("X-REQUEST-ID :", requestHeaders["X-REQUEST-ID"]);
+  console.log("X-TIMESTAMP  :", requestHeaders["X-TIMESTAMP"]);
+  console.log("X-SIGNATURE  :", requestHeaders["X-SIGNATURE"]);
+  console.log("stringToSign :", stringToSignForLog);
+  console.log("body         :", bodyStr);
+  console.log("==================================");
+  // ──────────────────────────────────────────────────────────────────────────
+
   logger.info(
     { url, timestamp, endpoint, stringToSign: stringToSignForLog, merchantId: config.merchantId },
     "[paylabs] outgoing request",
   );
 
-  if (config.debugMode) {
-    logger.debug({ url, timestamp, body }, "[paylabs] outgoing request (debug body)");
-  }
-
-  // X-REQUEST-ID must be unique per request (use requestId from body if present, else random)
-  const requestId = (body as Record<string, unknown>).requestId as string | undefined
-    ?? `req-${Date.now()}`;
-
   let httpStatus = 0;
   try {
     const res = await fetch(url, {
       method : "POST",
-      headers: {
-        "Content-Type" : "application/json;charset=utf-8",
-        "X-PARTNER-ID" : config.merchantId,   // v4.8.1: X-PARTNER-ID (not X-MERCHANT-ID)
-        "X-REQUEST-ID" : requestId,            // v4.8.1: required unique request ID
-        "X-TIMESTAMP"  : timestamp,
-        "X-SIGNATURE"  : signature,
-      },
+      headers: requestHeaders,
       body: bodyStr,
     });
 
@@ -287,6 +296,13 @@ export async function callPaylabs<T = Record<string, unknown>>(
     if (isJson) {
       try { data = JSON.parse(raw); jsonParseOk = true; } catch { /* non-JSON response */ }
     }
+
+    // ── PAYLABS DEBUG LOG ────────────────────────────────────────────────────
+    console.log("=== [PAYLABS] RESPONSE ===");
+    console.log("HTTP Status  :", httpStatus);
+    console.log("Raw response :", raw.slice(0, 1000));
+    console.log("==========================");
+    // ────────────────────────────────────────────────────────────────────────
 
     if (config.debugMode || !res.ok) {
       logger.info({ httpStatus, url, data, rawSnippet: raw.slice(0, 500) }, "[paylabs] response");
