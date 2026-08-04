@@ -228,12 +228,20 @@ export async function callPaylabs<T = Record<string, unknown>>(
   const timestamp = makeTimestamp();
   const url       = `${config.baseUrl}${endpoint}`;
 
+  // Build the string-to-sign so we can log it for diagnostics
+  const minifiedForLog = minifyBody(bodyStr);
+  const bodyHashForLog = crypto.createHash("sha256").update(minifiedForLog, "utf8").digest("hex").toLowerCase();
+  const stringToSignForLog = `POST:${endpoint}:${bodyHashForLog}:${timestamp}`;
+
   let signature: string;
   try {
     signature = sign(config.privateKey, timestamp, bodyStr, endpoint);
   } catch (keyErr) {
     const msg = String(keyErr);
-    logger.error({ keyErr, merchantId: config.merchantId }, "[paylabs] RSA signing failed — check private key format");
+    logger.error(
+      { keyErr, merchantId: config.merchantId, endpoint, stringToSign: stringToSignForLog },
+      "[paylabs] RSA signing failed — check private key format",
+    );
     return {
       ok: false, httpStatus: 0, data: {} as T,
       errCode: "INVALID_PRIVATE_KEY",
@@ -241,8 +249,14 @@ export async function callPaylabs<T = Record<string, unknown>>(
     };
   }
 
+  // Always log outgoing request details (endpoint + stringToSign) to aid diagnosis
+  logger.info(
+    { url, timestamp, endpoint, stringToSign: stringToSignForLog, merchantId: config.merchantId },
+    "[paylabs] outgoing request",
+  );
+
   if (config.debugMode) {
-    logger.debug({ url, timestamp, body }, "[paylabs] outgoing request");
+    logger.debug({ url, timestamp, body }, "[paylabs] outgoing request (debug body)");
   }
 
   // X-REQUEST-ID must be unique per request (use requestId from body if present, else random)
