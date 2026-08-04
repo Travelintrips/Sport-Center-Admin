@@ -15,7 +15,9 @@ import { logger } from "./logger";
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
-const SANDBOX_BASE = "https://pay.paylabs.co.id/sandbox";
+// v4.8.1: sandbox and production share the same base domain;
+// sandbox is distinguished by using test merchant credentials, not a /sandbox prefix.
+const SANDBOX_BASE = "https://pay.paylabs.co.id";
 const PROD_BASE    = "https://pay.paylabs.co.id";
 
 export interface PaylabsConfig {
@@ -242,36 +244,52 @@ export async function callPaylabs<T = Record<string, unknown>>(
       logger.info({ httpStatus, url, data, rawSnippet: raw.slice(0, 500) }, "[paylabs] response");
     }
 
+    // Always log when response is not OK — helps diagnose field-name mismatches
+    if (!res.ok || config.debugMode) {
+      logger.warn({ httpStatus, url, contentType, rawSnippet: raw.slice(0, 800), jsonParseOk }, "[paylabs] non-OK or debug response");
+    }
+
     // Paylabs v4.8.1: errCode (0 = success), errCodeDes = error description
+    // We cast broadly to catch any possible field casing/naming variant.
+    const d = data as Record<string, any>;
     const errCode: string | undefined =
-      (data as any).errCode   ?? (data as any).errcode   ??
-      (data as any).errorCode ?? (data as any).error_code ??
-      (data as any).responseCode ?? undefined;
+      d.errCode   ?? d.errcode    ?? d.ErrCode   ??
+      d.errorCode ?? d.error_code ?? d.ErrorCode ??
+      d.responseCode ?? d.code ?? d.status_code  ?? undefined;
 
     let errMsg: string | undefined =
-      (data as any).errCodeDes   ??   // v4.8.1 primary field
-      (data as any).errMsg       ??   // fallback (older API versions)
-      (data as any).errmsg       ??
-      (data as any).errorMessage ?? (data as any).error_message ??
-      (data as any).message      ?? (data as any).error    ??
-      (data as any).responseMessage ?? undefined;
+      d.errCodeDes    ??   // v4.8.1 primary
+      d.errMsg        ??   // older versions
+      d.errmsg        ?? d.ErrMsg       ??
+      d.errorMessage  ?? d.error_message ?? d.ErrorMessage ??
+      d.description   ?? d.desc        ??
+      d.message       ?? d.Message     ??
+      d.error         ?? d.Error       ??
+      d.responseMessage ?? d.reason    ??
+      d.detail        ?? d.details     ?? undefined;
 
-    // When Paylabs returns non-JSON (e.g. HTML 404 for non-whitelisted IPs),
-    // produce a meaningful error instead of leaving errMsg undefined.
+    // Non-JSON response (HTML error page etc.)
     if (!res.ok && !jsonParseOk) {
       const httpDesc =
         httpStatus === 404 ? "Endpoint tidak ditemukan (HTTP 404)" :
-        httpStatus === 401 ? "Autentikasi gagal (HTTP 401)" :
+        httpStatus === 401 ? "Autentikasi gagal — cek Merchant ID & Private Key (HTTP 401)" :
         httpStatus === 403 ? "Akses ditolak (HTTP 403)" :
-        httpStatus === 0   ? "Tidak dapat terhubung ke Paylabs" :
+        httpStatus === 0   ? "Tidak dapat terhubung ke server Paylabs" :
         `HTTP ${httpStatus}`;
-      errMsg = `${httpDesc}. Pastikan IP server sudah di-whitelist di dashboard Paylabs (Settings → Whitelist IP), lalu coba lagi.`;
-    } else if (!errMsg && !errCode && !res.ok) {
-      errMsg = `HTTP ${httpStatus} — respons tidak dikenali dari Paylabs.`;
+      errMsg = `${httpDesc}`;
     }
 
+    // JSON response but no recognisable error fields — show raw snippet so it's debuggable
+    if (!errMsg && !errCode && !res.ok) {
+      const snippet = raw.slice(0, 200);
+      errMsg = `HTTP ${httpStatus} — respons tidak dikenali dari Paylabs: ${snippet}`;
+    }
+
+    // Even when ok, if errMsg is still undefined fall back to empty string (never "undefined")
+    const finalErrMsg = errMsg ?? (errCode && errCode !== "0" && errCode !== "00" ? `Paylabs errCode: ${errCode}` : undefined);
+
     const ok = res.ok && (!errCode || errCode === "0" || errCode === "SUCCESS" || errCode === "00");
-    return { ok, httpStatus, data, errCode, errMsg };
+    return { ok, httpStatus, data, errCode, errMsg: finalErrMsg };
   } catch (err) {
     logger.error({ err, url }, "[paylabs] request failed");
     return { ok: false, httpStatus, data: {} as T, errCode: "NETWORK_ERROR", errMsg: String(err) };
@@ -322,15 +340,21 @@ export interface ProductInfo {
   url?: string;          // v4.8.1 optional product URL
 }
 
+/** Format amount as Decimal(12,2) string per Paylabs v4.8.1 docs */
+function formatAmount(amount: number): string {
+  return amount.toFixed(2);
+}
+
 export function createQris(req: CreateQrisRequest, cfg?: PaylabsConfig) {
   const c = cfg ?? getPaylabsConfig();
-  return callPaylabs("/payment/createQRIS", {
+  // v4.8.1 endpoint: POST /payment/v2.3/qris/create
+  return callPaylabs("/payment/v2.3/qris/create", {
     requestId      : req.requestId,
     merchantId     : c.merchantId,
     storeId        : c.storeId || undefined,
     paymentType    : "QRIS",
     merchantTradeNo: req.merchantTradeNo,
-    amount         : req.amount,
+    amount         : formatAmount(req.amount),
     notifyUrl      : req.notifyUrl,
     payer          : req.payer,
     productName    : req.productName,
@@ -340,13 +364,14 @@ export function createQris(req: CreateQrisRequest, cfg?: PaylabsConfig) {
 
 export function createVa(req: CreateVaRequest, cfg?: PaylabsConfig) {
   const c = cfg ?? getPaylabsConfig();
-  return callPaylabs("/payment/createVA", {
+  // v4.8.1 endpoint: POST /payment/v2.3/va/create
+  return callPaylabs("/payment/v2.3/va/create", {
     requestId      : req.requestId,
     merchantId     : c.merchantId,
     storeId        : c.storeId || undefined,
     paymentType    : req.paymentType,   // e.g. "BRIVA", "BCAVA", "MandiriVA"
     merchantTradeNo: req.merchantTradeNo,
-    amount         : req.amount,
+    amount         : formatAmount(req.amount),
     notifyUrl      : req.notifyUrl,
     payer          : req.payer,
     productName    : req.productName,
@@ -356,13 +381,14 @@ export function createVa(req: CreateVaRequest, cfg?: PaylabsConfig) {
 
 export function createEwallet(req: CreateEwalletRequest, cfg?: PaylabsConfig) {
   const c = cfg ?? getPaylabsConfig();
-  return callPaylabs("/payment/createEwallet", {
+  // v4.8.1 endpoint: POST /payment/v2.3/ewallet/create
+  return callPaylabs("/payment/v2.3/ewallet/create", {
     requestId      : req.requestId,
     merchantId     : c.merchantId,
     storeId        : c.storeId || undefined,
     paymentType    : req.ewalletCode,
     merchantTradeNo: req.merchantTradeNo,
-    amount         : req.amount,
+    amount         : formatAmount(req.amount),
     notifyUrl      : req.notifyUrl,
     payer          : req.payer,
     redirectUrl    : req.redirectUrl,
@@ -373,10 +399,11 @@ export function createEwallet(req: CreateEwalletRequest, cfg?: PaylabsConfig) {
 
 export function statusInquiry(merchantTradeNo: string, cfg?: PaylabsConfig) {
   const config = cfg ?? getPaylabsConfig();
-  return callPaylabs("/payment/statusInquiry", {
+  // v4.8.1 endpoint: POST /payment/v2.3/va/inquiry (try va inquiry; fallback in route)
+  return callPaylabs("/payment/v2.3/va/inquiry", {
     requestId      : `inq-${merchantTradeNo}-${Date.now()}`,
     merchantId     : config.merchantId,
-    storeId        : config.storeId,
+    storeId        : config.storeId || undefined,
     merchantTradeNo,
   }, cfg);
 }

@@ -157,21 +157,29 @@ router.post("/paylabs/create-payment", async (req, res) => {
   }
 
   if (!paylabsRes.ok) {
+    const displayMsg =
+      paylabsRes.errMsg ??
+      (paylabsRes.errCode ? `errCode: ${paylabsRes.errCode}` : null) ??
+      `HTTP ${paylabsRes.httpStatus} — tidak ada detail error dari Paylabs`;
+    logger.warn({ errCode: paylabsRes.errCode, errMsg: paylabsRes.errMsg, httpStatus: paylabsRes.httpStatus, raw: paylabsRes.data }, "[paylabs] create-payment failed");
     res.status(502).json({
-      error  : `Paylabs error: ${paylabsRes.errMsg ?? paylabsRes.errCode}`,
+      error  : displayMsg,
       errCode: paylabsRes.errCode,
       errMsg : paylabsRes.errMsg,
     });
     return;
   }
 
-  // Extract gateway response fields
+  // Extract gateway response fields — v4.8.1 field names:
+  //   VA:   vaCode, platformTradeNo
+  //   QRIS: qrCode, platformTradeNo
+  //   Ewallet: payUrl, platformTradeNo
   const d              = paylabsRes.data as Record<string, unknown>;
-  const paylabsTradeNo = String(d.paylabsTradeNo ?? d.tradeNo ?? "");
-  const qrCodeUrl      = String(d.qrCodeUrl  ?? d.qrUrl   ?? d.payUrl  ?? "");
-  const qrContent      = String(d.qrContent  ?? d.qrCode  ?? "");
-  const vaNumber       = String(d.vaNumber   ?? d.virtualAccountNo ?? "");
-  const payUrl         = String(d.payUrl     ?? d.paymentUrl ?? "");
+  const paylabsTradeNo = String(d.platformTradeNo ?? d.paylabsTradeNo ?? d.tradeNo ?? "");
+  const qrContent      = String(d.qrCode      ?? d.qrContent ?? d.qrCodeUrl ?? "");
+  const qrCodeUrl      = qrContent ? "" : String(d.qrCodeUrl ?? d.qrUrl ?? "");
+  const vaNumber       = String(d.vaCode      ?? d.vaNumber  ?? d.virtualAccountNo ?? "");
+  const payUrl         = String(d.payUrl      ?? d.paymentUrl ?? "");
 
   // Persist to paylabs_transactions
   try {
