@@ -11,40 +11,12 @@
  */
 
 import crypto from "crypto";
-import fs from "fs";
-import path from "path";
 import { logger } from "./logger";
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
 const SANDBOX_BASE = "https://pay.paylabs.co.id/sandbox";
 const PROD_BASE    = "https://pay.paylabs.co.id";
-
-const CONFIG_PATH = path.resolve(
-  process.env.PAYLABS_CONFIG_PATH ??
-    path.join(process.cwd(), "paylabs.config.json"),
-);
-
-interface FileConfig {
-  sandboxMode?: boolean;
-  storeId?: string;
-  sandboxPublicKey?: string;
-  sandboxPrivateKey?: string;
-  sandboxMerchantId?: string;
-  prodPublicKey?: string;
-  prodPrivateKey?: string;
-  prodMerchantId?: string;
-  debugMode?: boolean;
-}
-
-function readFileConfig(): FileConfig {
-  try {
-    if (fs.existsSync(CONFIG_PATH)) {
-      return JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8")) as FileConfig;
-    }
-  } catch { /* ignore */ }
-  return {};
-}
 
 export interface PaylabsConfig {
   sandboxMode: boolean;
@@ -56,34 +28,65 @@ export interface PaylabsConfig {
   debugMode: boolean;
 }
 
-/** Merge: config file wins over env-var fallback (config file = explicitly saved by admin UI) */
+/** Env-var only fallback (used when DB is unavailable) */
 export function getPaylabsConfig(): PaylabsConfig {
-  const file = readFileConfig();
-  const sandboxMode = file.sandboxMode ?? process.env.PAYLABS_SANDBOX_MODE !== "false";
+  const sandboxMode = process.env.PAYLABS_SANDBOX_MODE !== "false";
 
   const merchantId = sandboxMode
-    ? (file.sandboxMerchantId || process.env.PAYLABS_SANDBOX_MERCHANT_ID || "")
-    : (file.prodMerchantId    || process.env.PAYLABS_PROD_MERCHANT_ID    || "");
+    ? (process.env.PAYLABS_SANDBOX_MERCHANT_ID || "")
+    : (process.env.PAYLABS_PROD_MERCHANT_ID    || "");
 
   const privateKey = sandboxMode
-    ? (file.sandboxPrivateKey || process.env.PAYLABS_SANDBOX_PRIVATE_KEY || "")
-    : (file.prodPrivateKey    || process.env.PAYLABS_PROD_PRIVATE_KEY    || "");
+    ? (process.env.PAYLABS_SANDBOX_PRIVATE_KEY || "")
+    : (process.env.PAYLABS_PROD_PRIVATE_KEY    || "");
 
   const paylabsPublicKey = sandboxMode
-    ? (file.sandboxPublicKey  || process.env.PAYLABS_SANDBOX_PUBLIC_KEY  || "")
-    : (file.prodPublicKey     || process.env.PAYLABS_PROD_PUBLIC_KEY     || "");
-
-  const storeId = file.storeId || process.env.PAYLABS_STORE_ID || "";
+    ? (process.env.PAYLABS_SANDBOX_PUBLIC_KEY  || "")
+    : (process.env.PAYLABS_PROD_PUBLIC_KEY     || "");
 
   return {
     sandboxMode,
-    storeId,
+    storeId: process.env.PAYLABS_STORE_ID || "",
     merchantId,
     privateKey,
     paylabsPublicKey,
     baseUrl: sandboxMode ? SANDBOX_BASE : PROD_BASE,
-    debugMode: file.debugMode ?? false,
+    debugMode: false,
   };
+}
+
+/** Load Paylabs config from DB (paylabs_settings table), fall back to env vars */
+export async function loadPaylabsConfigFromDb(): Promise<PaylabsConfig> {
+  try {
+    const { db, paylabsSettingsTable } = await import("@workspace/db");
+    const [row] = await db.select().from(paylabsSettingsTable).limit(1);
+    if (!row) return getPaylabsConfig();
+
+    const sandboxMode = row.sandboxMode;
+    const merchantId = sandboxMode
+      ? (row.sandboxMerchantId || process.env.PAYLABS_SANDBOX_MERCHANT_ID || "")
+      : (row.prodMerchantId    || process.env.PAYLABS_PROD_MERCHANT_ID    || "");
+    const privateKey = sandboxMode
+      ? (row.sandboxPrivateKey || process.env.PAYLABS_SANDBOX_PRIVATE_KEY || "")
+      : (row.prodPrivateKey    || process.env.PAYLABS_PROD_PRIVATE_KEY    || "");
+    const paylabsPublicKey = sandboxMode
+      ? (row.sandboxPublicKey  || process.env.PAYLABS_SANDBOX_PUBLIC_KEY  || "")
+      : (row.prodPublicKey     || process.env.PAYLABS_PROD_PUBLIC_KEY     || "");
+    const storeId = row.storeId || process.env.PAYLABS_STORE_ID || "";
+
+    return {
+      sandboxMode,
+      storeId,
+      merchantId,
+      privateKey,
+      paylabsPublicKey,
+      baseUrl: sandboxMode ? SANDBOX_BASE : PROD_BASE,
+      debugMode: row.debugMode,
+    };
+  } catch (err) {
+    logger.warn({ err }, "[paylabs] loadPaylabsConfigFromDb failed, falling back to env");
+    return getPaylabsConfig();
+  }
 }
 
 // ─── Crypto helpers ──────────────────────────────────────────────────────────

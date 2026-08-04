@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import QRCode from "react-qr-code";
 import { useRoute } from "wouter";
 import {
@@ -43,11 +43,19 @@ import { Link } from "wouter";
 import RescheduleDialog from "@/components/RescheduleDialog";
 import ExtendBookingDialog from "@/components/ExtendBookingDialog";
 import { useLang } from "@/lib/i18n";
+import { getToken } from "@/lib/auth";
 import CorporateDocUpload from "@/components/CorporateDocUpload";
 
 const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "") || "";
 
-type PaymentMethod = "transfer" | "qris";
+type PaymentMethod = "transfer" | "qris" | "paylabs";
+
+interface PaylabsPublicConfig {
+  sandboxMode: boolean;
+  configured: boolean;
+  paymentMethodsConfig: Array<{ id: string; name: string; active: boolean; iconUrl?: string }> | null;
+  title: string;
+}
 
 export default function BookingDetail() {
   const [, params] = useRoute("/booking/:orderNumber");
@@ -79,6 +87,17 @@ export default function BookingDetail() {
   const [reviewRating, setReviewRating] = useState(0);
   const [reviewComment, setReviewComment] = useState("");
   const [hoverRating, setHoverRating] = useState(0);
+
+  // ── Paylabs config ──────────────────────────────────────────────────────────
+  const [paylabsConfig, setPaylabsConfig] = useState<PaylabsPublicConfig | null>(null);
+  useEffect(() => {
+    fetch(`${BASE}/api/paylabs/config`)
+      .then((r: Response) => r.ok ? r.json() : null)
+      .then((d: PaylabsPublicConfig | null) => d && setPaylabsConfig(d))
+      .catch(() => {});
+  }, []);
+
+  const hasPaylabs = paylabsConfig?.configured ?? false;
 
   const payDp = usePayBookingDp({
     mutation: {
@@ -696,7 +715,7 @@ export default function BookingDetail() {
 
                       {/* Payment Method Selector */}
                       {!paymentMethod && (
-                  <div className={`grid gap-3 ${hasQris ? "grid-cols-2" : "grid-cols-1"}`}>
+                  <div className={`grid gap-3 ${(() => { const extras = (hasQris ? 1 : 0) + (hasPaylabs ? 1 : 0); return extras >= 2 ? "grid-cols-3" : extras === 1 ? "grid-cols-2" : "grid-cols-1"; })()}`}>
                     <button
                       type="button"
                       onClick={() => setPaymentMethod("transfer")}
@@ -725,6 +744,22 @@ export default function BookingDetail() {
                         <div className="text-center">
                           <div className="font-semibold text-sm">QRIS</div>
                           <div className="text-xs text-muted-foreground mt-0.5">{t("Scan & Pay", "Scan & Pay")}</div>
+                        </div>
+                        <ChevronRight size={14} className="text-muted-foreground group-hover:text-primary transition-colors" />
+                      </button>
+                    )}
+                    {hasPaylabs && (
+                      <button
+                        type="button"
+                        onClick={() => setPaymentMethod("paylabs")}
+                        className="flex flex-col items-center gap-3 p-5 rounded-2xl border-2 border-border hover:border-primary hover:bg-primary/5 transition-all group"
+                      >
+                        <div className="w-12 h-12 rounded-xl bg-cyan-100 flex items-center justify-center group-hover:bg-cyan-200 transition-colors">
+                          <CreditCard size={22} className="text-cyan-600" />
+                        </div>
+                        <div className="text-center">
+                          <div className="font-semibold text-sm">Paylabs</div>
+                          <div className="text-xs text-muted-foreground mt-0.5">{t("VA / QRIS / E-Wallet", "VA / QRIS / E-Wallet")}</div>
                         </div>
                         <ChevronRight size={14} className="text-muted-foreground group-hover:text-primary transition-colors" />
                       </button>
@@ -828,6 +863,19 @@ export default function BookingDetail() {
                       uploadProgress={uploadProgress}
                     />
                   </div>
+                )}
+
+                {/* Paylabs Gateway */}
+                {paymentMethod === "paylabs" && booking && (
+                  <PaylabsPaymentSection
+                    bookingId={booking.id}
+                    orderNumber={booking.orderNumber}
+                    amount={Number((booking as any).grandTotal ?? booking.totalPrice)}
+                    paylabsConfig={paylabsConfig!}
+                    onBack={() => setPaymentMethod(null)}
+                    onSuccess={() => queryClient.invalidateQueries({ queryKey: getGetBookingByOrderQueryKey(orderNumber) })}
+                    base={BASE}
+                  />
                 )}
                     </>
                   );
@@ -1080,6 +1128,248 @@ export default function BookingDetail() {
           endTime={booking.endTime}
           onSuccess={() => queryClient.invalidateQueries({ queryKey: getGetBookingByOrderQueryKey(orderNumber) })}
         />
+      )}
+    </div>
+  );
+}
+
+/* ─── Paylabs Payment Section ────────────────────────────────────── */
+
+const VA_BANKS = ["bri","bni","bca","mandiri","permata","cimb","bsi","btn","muamalat","danamon","sinarmas","ina","maybank"];
+const EWALLETS = ["ovo","dana","shopeepay","linkaja","gopay"];
+
+function PaylabsPaymentSection({
+  bookingId, amount, paylabsConfig, onBack, onSuccess, base,
+}: {
+  bookingId: number;
+  orderNumber: string;
+  amount: number;
+  paylabsConfig: { sandboxMode: boolean; configured: boolean; paymentMethodsConfig: Array<{ id: string; name: string; active: boolean }> | null; title: string };
+  onBack: () => void;
+  onSuccess: () => void;
+  base: string;
+}) {
+  const { t } = useLang();
+  const { toast } = useToast();
+
+  const [subMethod, setSubMethod] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [payment, setPayment] = useState<{
+    merchantTradeNo: string; qrCodeUrl: string; qrContent: string;
+    vaNumber: string; payUrl: string; paymentMethod: string;
+    sandboxMode: boolean;
+  } | null>(null);
+  const [pollStatus, setPollStatus] = useState<"waiting" | "paid" | "error">("waiting");
+
+  // ── Active methods from config ────────────────────────────────────────────
+  const activeMethods = (paylabsConfig.paymentMethodsConfig ?? []).filter((m) => m.active);
+
+  // If no config, offer QRIS + common VAs by default
+  const fallbackMethods = [
+    { id: "qris", name: "QRIS" },
+    { id: "bri",  name: "BRI Virtual Account" },
+    { id: "bni",  name: "BNI Virtual Account" },
+    { id: "bca",  name: "BCA Virtual Account" },
+    { id: "mandiri", name: "Mandiri Virtual Account" },
+  ];
+  const methods = activeMethods.length > 0 ? activeMethods : fallbackMethods;
+
+  // ── Create payment ────────────────────────────────────────────────────────
+  async function handleSelectMethod(methodId: string) {
+    setSubMethod(methodId);
+    setLoading(true);
+    try {
+      const res = await fetch(`${base}/api/paylabs/create-payment`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` },
+        body: JSON.stringify({ bookingId, paymentMethod: methodId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+      setPayment(data);
+      setPollStatus("waiting");
+    } catch (err: any) {
+      toast({ title: t("Gagal membuat pembayaran", "Failed to create payment"), description: err.message, variant: "destructive" });
+      setSubMethod(null);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // ── Poll for payment status ───────────────────────────────────────────────
+  useEffect(() => {
+    if (!payment || pollStatus !== "waiting") return;
+    const iv = setInterval(async () => {
+      try {
+        const res = await fetch(`${base}/api/paylabs/status/${encodeURIComponent(payment.merchantTradeNo)}`, {
+          headers: { Authorization: `Bearer ${getToken()}` },
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        const localStatus = (data.local?.status ?? "").toUpperCase();
+        const paylabsStatus = String(data.paylabs?.status ?? data.paylabs?.tradeState ?? "").toUpperCase();
+        const isPaid = localStatus === "SUCCESS" || paylabsStatus === "SUCCESS" || paylabsStatus === "02" || paylabsStatus === "PAID";
+        if (isPaid) {
+          setPollStatus("paid");
+          clearInterval(iv);
+          onSuccess();
+          toast({ title: t("Pembayaran Berhasil! 🎉", "Payment Successful! 🎉"), description: t("Booking Anda telah dikonfirmasi.", "Your booking has been confirmed.") });
+        }
+      } catch { /* ignore */ }
+    }, 5000);
+    return () => clearInterval(iv);
+  }, [payment, pollStatus]);
+
+  // ── Method type helpers ───────────────────────────────────────────────────
+  const isQris    = (id: string) => id === "qris";
+  const isVa      = (id: string) => VA_BANKS.includes(id);
+  const isEwallet = (id: string) => EWALLETS.includes(id);
+
+  // ── Render ────────────────────────────────────────────────────────────────
+  return (
+    <div className="space-y-4">
+      {/* Back button */}
+      <button
+        type="button"
+        onClick={() => { if (subMethod && !payment) { setSubMethod(null); } else { onBack(); } }}
+        className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1.5 hover:gap-2 transition-all group"
+      >
+        <ArrowLeft size={13} className="group-hover:-translate-x-0.5 transition-transform" />
+        {subMethod ? t("Pilih metode lain", "Choose another method") : t("Kembali", "Back")}
+      </button>
+
+      {/* Sandbox warning */}
+      {paylabsConfig.sandboxMode && (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-700">
+          <AlertCircle size={13} className="shrink-0" />
+          {t("Mode Sandbox — gunakan kredensial test Paylabs", "Sandbox Mode — use Paylabs test credentials")}
+        </div>
+      )}
+
+      {/* Method picker */}
+      {!subMethod && (
+        <div className="space-y-2">
+          <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+            {t("Pilih Metode Pembayaran", "Choose Payment Method")}
+          </div>
+          <div className="rounded-xl border border-border overflow-hidden divide-y divide-border">
+            {methods.map((m) => (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => handleSelectMethod(m.id)}
+                className="w-full flex items-center gap-3 px-4 py-3 hover:bg-muted/40 transition-colors text-left"
+              >
+                <div className={`w-9 h-9 rounded-lg flex items-center justify-center text-[10px] font-black shrink-0 ${
+                  isQris(m.id)    ? "bg-red-100 text-red-700" :
+                  isVa(m.id)      ? "bg-blue-100 text-blue-700" :
+                  isEwallet(m.id) ? "bg-purple-100 text-purple-700" :
+                                    "bg-muted text-muted-foreground"
+                }`}>
+                  {m.id.toUpperCase().slice(0, 4)}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-semibold text-foreground">{m.name}</div>
+                  <div className="text-xs text-muted-foreground">
+                    {isQris(m.id) ? t("Scan QR Code", "Scan QR Code") :
+                     isVa(m.id) ? t("Virtual Account", "Virtual Account") :
+                     t("E-Wallet / Dompet Digital", "E-Wallet / Digital Wallet")}
+                  </div>
+                </div>
+                <ChevronRight size={15} className="text-muted-foreground shrink-0" />
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Loading */}
+      {subMethod && loading && (
+        <div className="flex flex-col items-center gap-3 py-8">
+          <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
+          <div className="text-sm text-muted-foreground">{t("Membuat pembayaran...", "Creating payment...")}</div>
+        </div>
+      )}
+
+      {/* Payment result */}
+      {payment && !loading && pollStatus !== "paid" && (
+        <div className="space-y-4">
+          {/* QRIS */}
+          {payment.qrContent && (
+            <div className="rounded-xl border border-border overflow-hidden">
+              <div className="bg-muted px-4 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                {t("Scan QR Code Paylabs", "Scan Paylabs QR Code")}
+              </div>
+              <div className="p-4 flex justify-center">
+                {payment.qrCodeUrl ? (
+                  <img src={payment.qrCodeUrl} alt="Paylabs QR" className="max-w-[240px] w-full rounded-lg border border-border" />
+                ) : (
+                  <div className="bg-white p-3 rounded-xl border border-border">
+                    <QRCode value={payment.qrContent} size={200} />
+                  </div>
+                )}
+              </div>
+              <div className="px-4 pb-3 text-center text-sm text-muted-foreground">
+                {t("Scan dengan aplikasi e-wallet / m-banking apapun", "Scan with any e-wallet / m-banking app")}
+              </div>
+            </div>
+          )}
+
+          {/* Virtual Account */}
+          {payment.vaNumber && (
+            <div className="rounded-xl border border-border bg-muted/20 p-4 space-y-2">
+              <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                {t("Nomor Virtual Account", "Virtual Account Number")}
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="text-2xl font-mono tracking-widest font-bold flex-1">{payment.vaNumber}</div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="shrink-0"
+                  onClick={() => { navigator.clipboard.writeText(payment.vaNumber); toast({ title: t("Disalin!", "Copied!") }); }}
+                >
+                  <Copy size={14} />
+                </Button>
+              </div>
+              <div className="text-xs text-muted-foreground">
+                {t("Transfer tepat sesuai nominal. Konfirmasi otomatis setelah transfer.", "Transfer exact amount. Auto-confirmed after transfer.")}
+              </div>
+            </div>
+          )}
+
+          {/* E-Wallet redirect */}
+          {payment.payUrl && !payment.qrContent && !payment.vaNumber && (
+            <a
+              href={payment.payUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center justify-center gap-2 w-full bg-cyan-500 hover:bg-cyan-600 text-white font-semibold py-3 px-4 rounded-xl text-sm transition-colors"
+            >
+              <ExternalLink size={16} />
+              {t("Bayar Sekarang", "Pay Now")}
+            </a>
+          )}
+
+          {/* Polling indicator */}
+          <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-blue-50 border border-blue-200">
+            <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse shrink-0" />
+            <div className="text-xs text-blue-700">
+              {t("Menunggu pembayaran... Halaman otomatis update setelah lunas.", "Waiting for payment... Page auto-updates once paid.")}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Paid state */}
+      {pollStatus === "paid" && (
+        <div className="flex flex-col items-center gap-3 py-6 text-center">
+          <div className="w-14 h-14 rounded-full bg-green-100 flex items-center justify-center">
+            <CheckCircle2 size={28} className="text-green-600" />
+          </div>
+          <div className="font-bold text-lg text-green-800">{t("Pembayaran Berhasil!", "Payment Successful!")}</div>
+          <div className="text-sm text-green-700">{t("Booking Anda sedang dikonfirmasi...", "Your booking is being confirmed...")}</div>
+        </div>
       )}
     </div>
   );

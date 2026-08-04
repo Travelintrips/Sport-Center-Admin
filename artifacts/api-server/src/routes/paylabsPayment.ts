@@ -9,13 +9,12 @@
 
 import { Router } from "express";
 import { randomUUID } from "crypto";
-import { db, bookingsTable, paymentsTable, bookingHistoryTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
-import { sql } from "drizzle-orm";
-import { authMiddleware, adminMiddleware } from "../lib/auth";
-import { getBaseUrl } from "../lib/appUrl";
+import { db, bookingsTable, paymentsTable, bookingHistoryTable, paylabsSettingsTable } from "@workspace/db";
+import { eq, sql } from "drizzle-orm";
 import { logger } from "../lib/logger";
+import { getBaseUrl } from "../lib/appUrl";
 import {
+  loadPaylabsConfigFromDb,
   getPaylabsConfig,
   verifyPaylabsSignature,
   createQris,
@@ -55,9 +54,37 @@ async function ensureTransactionsTable() {
   `));
 }
 
-// ─── POST /api/paylabs/create-payment ────────────────────────────────────────
+// ─── GET /api/paylabs/config — public config (for checkout page) ─────────────
+// No auth required — just tells the frontend if Paylabs is configured + active methods
 
-router.post("/paylabs/create-payment", authMiddleware, async (req, res) => {
+router.get("/paylabs/config", async (_req, res) => {
+  try {
+    const [row] = await db.select().from(paylabsSettingsTable).limit(1);
+    const cfg = await loadPaylabsConfigFromDb();
+
+    res.json({
+      sandboxMode         : cfg.sandboxMode,
+      configured          : Boolean(cfg.merchantId),
+      paymentMethodsConfig: (row?.paymentMethodsConfig as unknown[] | null) ?? null,
+      title               : row?.title ?? "Online Payment",
+    });
+  } catch (err) {
+    logger.warn({ err }, "[paylabs] config endpoint error");
+    // Graceful fallback
+    const cfg = getPaylabsConfig();
+    res.json({
+      sandboxMode         : cfg.sandboxMode,
+      configured          : Boolean(cfg.merchantId),
+      paymentMethodsConfig: null,
+      title               : "Online Payment",
+    });
+  }
+});
+
+// ─── POST /api/paylabs/create-payment ────────────────────────────────────────
+// No auth required — booking status validation is the security guard
+
+router.post("/paylabs/create-payment", async (req, res) => {
   const { bookingId, paymentMethod = "qris" } = req.body as {
     bookingId: number;
     paymentMethod?: string;
@@ -78,7 +105,7 @@ router.post("/paylabs/create-payment", authMiddleware, async (req, res) => {
     return;
   }
 
-  const cfg          = getPaylabsConfig();
+  const cfg          = await loadPaylabsConfigFromDb();
   const amount       = Number(booking.grandTotal ?? booking.totalPrice);
   const tradeNo      = `SC-${booking.orderNumber}-${Date.now()}`.slice(0, 32);
   const requestId    = randomUUID();
@@ -201,16 +228,15 @@ router.post("/paylabs/create-payment", authMiddleware, async (req, res) => {
 router.post("/paylabs/webhook", async (req, res) => {
   const timestamp = String(req.headers["x-timestamp"] ?? "");
   const signature = String(req.headers["x-signature"] ?? "");
-  const rawBody   = JSON.stringify(req.body); // body-parser already parsed it
+  const rawBody   = JSON.stringify(req.body);
 
-  const cfg = getPaylabsConfig();
+  const cfg = await loadPaylabsConfigFromDb();
 
   // Verify signature if public key is configured
   if (cfg.paylabsPublicKey) {
     const valid = verifyPaylabsSignature(cfg.paylabsPublicKey, timestamp, rawBody, signature);
     if (!valid) {
       logger.warn({ timestamp, signature }, "[paylabs] webhook signature invalid");
-      // Still acknowledge but don't process (avoid Paylabs retries for non-payment issues)
       res.status(200).json({ errCode: "SIGNATURE_INVALID" });
       return;
     }
@@ -267,7 +293,6 @@ router.post("/paylabs/webhook", async (req, res) => {
     }
 
     if (booking.status === "confirmed") {
-      // Already confirmed — idempotent
       res.status(200).json({ errCode: "0", errMsg: "already confirmed" });
       return;
     }
@@ -309,17 +334,15 @@ router.post("/paylabs/webhook", async (req, res) => {
 
 // ─── GET /api/paylabs/status/:tradeNo ────────────────────────────────────────
 
-router.get("/paylabs/status/:tradeNo", authMiddleware, async (req, res) => {
+router.get("/paylabs/status/:tradeNo", async (req, res) => {
   const { tradeNo } = req.params;
   try {
-    // Check local DB first
     await ensureTransactionsTable();
     const rows = await db.execute(sql.raw(
       `SELECT * FROM sport_center.paylabs_transactions WHERE merchant_trade_no = '${tradeNo}' LIMIT 1`
     ));
     const local = (rows as any).rows?.[0] ?? (rows as any)[0];
 
-    // Poll Paylabs
     const paylabsRes = await statusInquiry(tradeNo);
 
     res.json({
@@ -328,33 +351,8 @@ router.get("/paylabs/status/:tradeNo", authMiddleware, async (req, res) => {
       paylabsOk  : paylabsRes.ok,
     });
   } catch (err) {
-    req.log.error({ err }, "[paylabs] status inquiry error");
+    logger.error({ err }, "[paylabs] status inquiry error");
     res.status(500).json({ error: "Status inquiry failed" });
-  }
-});
-
-// ─── GET /api/paylabs/config — public config (for checkout page) ─────────────
-
-router.get("/paylabs/config", (req, res) => {
-  try {
-    const cfg = getPaylabsConfig();
-    const fs  = require("fs");
-    const path = require("path");
-    const configPath = path.resolve(
-      process.env.PAYLABS_CONFIG_PATH ??
-        path.join(process.cwd(), "paylabs.config.json"),
-    );
-    let fileConfig: Record<string, unknown> = {};
-    try { fileConfig = JSON.parse(fs.readFileSync(configPath, "utf8")); } catch { /**/ }
-
-    res.json({
-      sandboxMode           : cfg.sandboxMode,
-      configured            : Boolean(cfg.merchantId),
-      paymentMethodsConfig  : fileConfig.paymentMethodsConfig ?? null,
-      title                 : fileConfig.title ?? "Online Payment",
-    });
-  } catch (err) {
-    res.status(500).json({ error: "Config error" });
   }
 });
 
