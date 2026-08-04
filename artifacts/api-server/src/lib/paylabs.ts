@@ -249,13 +249,23 @@ export async function callPaylabs<T = Record<string, unknown>>(
 ): Promise<PaylabsResponse<T>> {
   const config = cfg ?? getPaylabsConfig();
 
+  // ── Diagnostic: log effective config info (no raw keys) ─────────────────────
+  const keyRaw      = config.privateKey.trim().replace(/\\n/g, "\n");
+  const keyBase64   = keyRaw.replace(/-----[^-]+-----/g, "").replace(/\s+/g, "");
+  const keyFormat   = keyRaw.includes("RSA PRIVATE KEY") ? "PKCS#1 PEM"
+                    : keyRaw.includes("PRIVATE KEY")     ? "PKCS#8 PEM"
+                    : keyRaw.length > 0                  ? "raw base64"
+                    : "empty";
+  console.log(`=== [PAYLABS CONFIG] merchantId=${config.merchantId || "(empty)"} sandboxMode=${config.sandboxMode} storeId=${config.storeId || "(none)"} privateKeyFormat=${keyFormat} privateKeyBase64Len=${keyBase64.length} ===`);
+
   if (!config.merchantId || !config.privateKey) {
+    console.log(`[PAYLABS] NOT_CONFIGURED: merchantId=${!!config.merchantId} privateKey=${!!config.privateKey}`);
     return {
       ok: false,
       httpStatus: 0,
       data: {} as T,
       errCode: "NOT_CONFIGURED",
-      errMsg: "Paylabs credentials not configured. Set PAYLABS_*_MERCHANT_ID and PAYLABS_*_PRIVATE_KEY.",
+      errMsg: `Paylabs credentials not configured. merchantId=${config.merchantId ? "OK" : "EMPTY"}, privateKey=${config.privateKey ? `set (${keyFormat})` : "EMPTY"}`,
     };
   }
 
@@ -274,13 +284,15 @@ export async function callPaylabs<T = Record<string, unknown>>(
   } catch (keyErr) {
     const msg = String(keyErr);
     logger.error(
-      { keyErr, merchantId: config.merchantId, endpoint, stringToSign: stringToSignForLog },
+      { merchantId: config.merchantId, sandboxMode: config.sandboxMode, keyFormat, keyBase64Len: keyBase64.length, endpoint, errDetail: msg.slice(0, 500) },
       "[paylabs] RSA signing failed — check private key format",
     );
+    console.log(`[PAYLABS SIGN ERROR] merchantId=${config.merchantId} sandboxMode=${config.sandboxMode} keyFormat=${keyFormat} keyBase64Len=${keyBase64.length}`);
+    console.log(`[PAYLABS SIGN ERROR] detail: ${msg.slice(0, 800)}`);
     return {
       ok: false, httpStatus: 0, data: {} as T,
       errCode: "INVALID_PRIVATE_KEY",
-      errMsg: `RSA sign error: ${msg}. Pastikan private key di Paylabs Settings berformat PEM atau base64 RSA yang valid.`,
+      errMsg: `RSA sign error (merchantId=${config.merchantId}, keyFormat=${keyFormat}, keyLen=${keyBase64.length}): ${msg.slice(0, 300)}`,
     };
   }
 
