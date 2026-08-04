@@ -349,7 +349,23 @@ router.get("/paylabs/status/:tradeNo", async (req, res) => {
     ));
     const local = (rows as any).rows?.[0] ?? (rows as any)[0];
 
+    // If local status already terminal (SUCCESS/FAILED/CANCELLED), skip Paylabs inquiry
+    const localStatus = String(local?.status ?? "").toUpperCase();
+    const terminalStatuses = ["SUCCESS", "PAID", "FAILED", "CANCELLED", "EXPIRED"];
+    if (terminalStatuses.includes(localStatus)) {
+      return res.json({ local: local ?? null, paylabs: null, paylabsOk: false, inquirySkipped: true });
+    }
+
     const paylabsRes = await statusInquiry(tradeNo);
+
+    // "URL not found" / 403 means inquiry endpoint not activated for this merchant on Paylabs — don't log as error
+    const urlNotFound = !paylabsRes.ok && (
+      String(paylabsRes.errMsg ?? "").toLowerCase().includes("url not found") ||
+      String((paylabsRes.data as any)?.errCodeDes ?? "").toLowerCase().includes("url not found")
+    );
+    if (urlNotFound) {
+      return res.json({ local: local ?? null, paylabs: null, paylabsOk: false, inquirySkipped: true, inquiryNotSupported: true });
+    }
 
     res.json({
       local      : local ?? null,

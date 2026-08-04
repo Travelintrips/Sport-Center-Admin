@@ -1159,7 +1159,7 @@ function PaylabsPaymentSection({
     vaNumber: string; payUrl: string; paymentMethod: string;
     sandboxMode: boolean;
   } | null>(null);
-  const [pollStatus, setPollStatus] = useState<"waiting" | "paid" | "error">("waiting");
+  const [pollStatus, setPollStatus] = useState<"waiting" | "paid" | "error" | "no_inquiry">("waiting");
 
   // ── Fetch fresh config every time this section is opened ─────────────────
   const [freshConfig, setFreshConfig] = useState<PaylabsPublicConfig | null>(null);
@@ -1204,7 +1204,8 @@ function PaylabsPaymentSection({
 
   // ── Poll for payment status ───────────────────────────────────────────────
   useEffect(() => {
-    if (!payment || pollStatus !== "waiting") return;
+    if (!payment || (pollStatus !== "waiting" && pollStatus !== "no_inquiry")) return;
+    if (pollStatus === "no_inquiry") return; // inquiry not supported, stop polling
     const iv = setInterval(async () => {
       try {
         const res = await fetch(`${base}/api/paylabs/status/${encodeURIComponent(payment.merchantTradeNo)}`, {
@@ -1220,6 +1221,11 @@ function PaylabsPaymentSection({
           clearInterval(iv);
           onSuccess();
           toast({ title: t("Pembayaran Berhasil! 🎉", "Payment Successful! 🎉"), description: t("Booking Anda telah dikonfirmasi.", "Your booking has been confirmed.") });
+        }
+        // Inquiry endpoint not supported for this merchant — stop polling (rely on webhook + manual refresh)
+        if (data.inquiryNotSupported) {
+          clearInterval(iv);
+          setPollStatus("no_inquiry");
         }
       } catch { /* ignore */ }
     }, 5000);
