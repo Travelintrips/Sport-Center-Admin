@@ -106,20 +106,37 @@ function makeTimestamp(): string {
 
 function normaliseKey(key: string, type: "PUBLIC" | "PRIVATE"): string {
   key = key.trim();
-  const header = `-----BEGIN ${type} KEY-----`;
-  const footer = `-----END ${type} KEY-----`;
-  if (key.startsWith(header)) return key;
-  // Raw base64 → wrap as PEM
+  // Already a complete PEM block (any header) — return as-is
+  if (key.includes("-----BEGIN")) return key;
+  // Raw base64 → wrap as PKCS#8 PEM
   const body = key.replace(/\s+/g, "").match(/.{1,64}/g)!.join("\n");
-  return `${header}\n${body}\n${footer}`;
+  return `-----BEGIN ${type} KEY-----\n${body}\n-----END ${type} KEY-----`;
 }
 
 function sign(privateKeyPem: string, timestamp: string, body: string): string {
-  const pem = normaliseKey(privateKeyPem, "PRIVATE");
   const msg = `${timestamp}\r\n${body}`;
-  const s = crypto.createSign("RSA-SHA256");
-  s.update(msg, "utf8");
-  return s.sign(pem, "base64");
+
+  const trySign = (pem: string): string => {
+    const s = crypto.createSign("RSA-SHA256");
+    s.update(msg, "utf8");
+    return s.sign(pem, "base64");
+  };
+
+  const pem = normaliseKey(privateKeyPem, "PRIVATE");
+
+  // If the key was already in a PEM block, just use it directly
+  if (privateKeyPem.trim().includes("-----BEGIN")) {
+    return trySign(pem);
+  }
+
+  // Raw base64 key: try PKCS#8 first, then PKCS#1 (RSA PRIVATE KEY) as fallback
+  try {
+    return trySign(pem);
+  } catch {
+    const rawB64 = privateKeyPem.replace(/\s+/g, "").match(/.{1,64}/g)!.join("\n");
+    const pkcs1Pem = `-----BEGIN RSA PRIVATE KEY-----\n${rawB64}\n-----END RSA PRIVATE KEY-----`;
+    return trySign(pkcs1Pem);
+  }
 }
 
 export function verifyPaylabsSignature(
