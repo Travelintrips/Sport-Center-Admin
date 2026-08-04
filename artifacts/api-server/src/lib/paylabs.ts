@@ -19,7 +19,7 @@ import { logger } from "./logger";
 
 // v4.8.1: sandbox and production share the same base domain;
 // sandbox is distinguished by using test merchant credentials, not a /sandbox prefix.
-const SANDBOX_BASE = "https://pay.paylabs.co.id";
+const SANDBOX_BASE = "https://sit-pay.paylabs.co.id";
 const PROD_BASE    = "https://pay.paylabs.co.id";
 
 export interface PaylabsConfig {
