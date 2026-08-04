@@ -1139,12 +1139,12 @@ const VA_BANKS = ["bri","bni","bca","mandiri","permata","cimb","bsi","btn","muam
 const EWALLETS = ["ovo","dana","shopeepay","linkaja","gopay"];
 
 function PaylabsPaymentSection({
-  bookingId, amount, paylabsConfig, onBack, onSuccess, base,
+  bookingId, amount, onBack, onSuccess, base,
 }: {
   bookingId: number;
   orderNumber: string;
   amount: number;
-  paylabsConfig: { sandboxMode: boolean; configured: boolean; paymentMethodsConfig: Array<{ id: string; name: string; active: boolean }> | null; title: string };
+  paylabsConfig: PaylabsPublicConfig;   // kept in props signature for caller; component fetches fresh copy
   onBack: () => void;
   onSuccess: () => void;
   base: string;
@@ -1161,18 +1161,21 @@ function PaylabsPaymentSection({
   } | null>(null);
   const [pollStatus, setPollStatus] = useState<"waiting" | "paid" | "error">("waiting");
 
-  // ── Active methods from config ────────────────────────────────────────────
-  const activeMethods = (paylabsConfig.paymentMethodsConfig ?? []).filter((m) => m.active);
+  // ── Fetch fresh config every time this section is opened ─────────────────
+  const [freshConfig, setFreshConfig] = useState<PaylabsPublicConfig | null>(null);
+  useEffect(() => {
+    fetch(`${base}/api/paylabs/config`)
+      .then((r: Response) => r.ok ? r.json() : null)
+      .then((d: PaylabsPublicConfig | null) => d && setFreshConfig(d))
+      .catch(() => {});
+  }, [base]);
 
-  // If no config, offer QRIS + common VAs by default
-  const fallbackMethods = [
-    { id: "qris", name: "QRIS" },
-    { id: "bri",  name: "BRI Virtual Account" },
-    { id: "bni",  name: "BNI Virtual Account" },
-    { id: "bca",  name: "BCA Virtual Account" },
-    { id: "mandiri", name: "Mandiri Virtual Account" },
-  ];
-  const methods = activeMethods.length > 0 ? activeMethods : fallbackMethods;
+  // ── Active methods — always from the freshly fetched config ──────────────
+  const activeMethods = (freshConfig?.paymentMethodsConfig ?? []).filter((m) => m.active);
+  const sandboxMode   = freshConfig?.sandboxMode ?? false;
+
+  // Fallback while config is loading (show skeleton) or if no methods configured
+  const methods = activeMethods;
 
   // ── Create payment ────────────────────────────────────────────────────────
   async function handleSelectMethod(methodId: string) {
@@ -1241,8 +1244,17 @@ function PaylabsPaymentSection({
         {subMethod ? t("Pilih metode lain", "Choose another method") : t("Kembali", "Back")}
       </button>
 
+      {/* Loading skeleton while fresh config arrives */}
+      {!freshConfig && (
+        <div className="flex flex-col gap-2">
+          {[1,2,3].map(i => (
+            <div key={i} className="h-14 rounded-xl bg-muted animate-pulse" />
+          ))}
+        </div>
+      )}
+
       {/* Sandbox warning */}
-      {paylabsConfig.sandboxMode && (
+      {sandboxMode && freshConfig && (
         <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-700">
           <AlertCircle size={13} className="shrink-0" />
           {t("Mode Sandbox — gunakan kredensial test Paylabs", "Sandbox Mode — use Paylabs test credentials")}
@@ -1250,7 +1262,7 @@ function PaylabsPaymentSection({
       )}
 
       {/* Method picker */}
-      {!subMethod && (
+      {!subMethod && freshConfig && (
         <div className="space-y-2">
           <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
             {t("Pilih Metode Pembayaran", "Choose Payment Method")}
