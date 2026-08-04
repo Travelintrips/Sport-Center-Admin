@@ -22,10 +22,26 @@ async function getOrCreate() {
 }
 
 // GET /api/admin/paylabs/settings
+// Returns DB values merged with env-var fallbacks so the admin panel always
+// shows the effective configuration (env vars seed empty DB fields).
 router.get("/admin/paylabs/settings", adminMiddleware, async (req, res) => {
   try {
     const config = await getOrCreate();
-    res.json(config);
+
+    // Merge env var fallbacks into empty fields — read-only, not persisted here.
+    // This ensures the admin form pre-populates with whatever is actually in use.
+    const merged = {
+      ...config,
+      sandboxMerchantId: config.sandboxMerchantId || process.env.PAYLABS_SANDBOX_MERCHANT_ID || "",
+      sandboxPrivateKey:  config.sandboxPrivateKey  || process.env.PAYLABS_SANDBOX_PRIVATE_KEY  || "",
+      sandboxPublicKey:   config.sandboxPublicKey   || process.env.PAYLABS_SANDBOX_PUBLIC_KEY   || "",
+      prodMerchantId:    config.prodMerchantId    || process.env.PAYLABS_PROD_MERCHANT_ID    || "",
+      prodPrivateKey:     config.prodPrivateKey     || process.env.PAYLABS_PROD_PRIVATE_KEY     || "",
+      prodPublicKey:      config.prodPublicKey      || process.env.PAYLABS_PROD_PUBLIC_KEY      || "",
+      storeId:            config.storeId            || process.env.PAYLABS_STORE_ID             || "",
+    };
+
+    res.json(merged);
   } catch (err) {
     req.log.error({ err }, "GET paylabs settings error");
     res.status(500).json({ error: "Internal server error" });
