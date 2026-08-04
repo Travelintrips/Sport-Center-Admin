@@ -1,13 +1,15 @@
 /**
- * Paylabs Payment Gateway — API v2 client
+ * Paylabs Payment Gateway — API v4.8.1 client
  *
- * Signing algorithm : RSA-SHA256
- *   message  = X-TIMESTAMP + "\r\n" + requestBodyJSON
- *   signature = base64( RSA_SHA256_SIGN( merchantPrivateKey, message ) )
+ * Signing algorithm (v4.8.1):
+ *   minifiedBody = JSON.stringify(body) stripped of \n\r\t
+ *   bodyHash     = lowercase( SHA256Hex( minifiedBody ) )
+ *   stringToSign = "POST:" + endpoint + ":" + bodyHash + ":" + X-TIMESTAMP
+ *   X-SIGNATURE  = Base64( SHA256withRSA( stringToSign, merchantPrivateKey ) )
  *
- * Verification (webhook):
- *   message  = X-TIMESTAMP header + "\r\n" + notificationBodyJSON
- *   verify   = RSA_SHA256_VERIFY( paylabsPublicKey, message, base64sig )
+ * Verification (webhook — same algorithm):
+ *   stringToSign = "POST:" + endpoint + ":" + bodyHash + ":" + X-TIMESTAMP
+ *   valid        = SHA256withRSA_VERIFY( paylabsPublicKey, stringToSign, base64sig )
  */
 
 import crypto from "crypto";
@@ -119,18 +121,47 @@ function normaliseKey(key: string, type: "PUBLIC" | "PRIVATE"): string {
   return `-----BEGIN ${type} KEY-----\n${body}\n-----END ${type} KEY-----`;
 }
 
-function sign(privateKeyPem: string, timestamp: string, body: string): string {
-  const msg = `${timestamp}\r\n${body}`;
+/**
+ * Build the canonical string-to-sign per Paylabs v4.8.1:
+ *   POST:<endpoint>:<lowercase(sha256hex(minifiedBody))>:<timestamp>
+ */
+function buildStringToSign(
+  method: string,
+  endpoint: string,
+  minifiedBody: string,
+  timestamp: string,
+): string {
+  const bodyHash = crypto
+    .createHash("sha256")
+    .update(minifiedBody, "utf8")
+    .digest("hex")
+    .toLowerCase();
+  return `${method}:${endpoint}:${bodyHash}:${timestamp}`;
+}
+
+/** Minify JSON body — strip \n \r \t per Paylabs spec */
+function minifyBody(body: string): string {
+  return body.replace(/[\n\r\t]/g, "");
+}
+
+function sign(
+  privateKeyPem: string,
+  timestamp: string,
+  bodyStr: string,
+  endpoint: string,
+  method = "POST",
+): string {
+  const minified     = minifyBody(bodyStr);
+  const stringToSign = buildStringToSign(method, endpoint, minified, timestamp);
 
   const trySign = (pem: string): string => {
     const s = crypto.createSign("RSA-SHA256");
-    s.update(msg, "utf8");
+    s.update(stringToSign, "utf8");
     return s.sign(pem, "base64");
   };
 
   const pem = normaliseKey(privateKeyPem, "PRIVATE");
 
-  // If the key was already in a PEM block, just use it directly
   if (privateKeyPem.trim().includes("-----BEGIN")) {
     return trySign(pem);
   }
@@ -139,7 +170,7 @@ function sign(privateKeyPem: string, timestamp: string, body: string): string {
   try {
     return trySign(pem);
   } catch {
-    const rawB64 = privateKeyPem.replace(/\s+/g, "").match(/.{1,64}/g)!.join("\n");
+    const rawB64  = privateKeyPem.replace(/\s+/g, "").match(/.{1,64}/g)!.join("\n");
     const pkcs1Pem = `-----BEGIN RSA PRIVATE KEY-----\n${rawB64}\n-----END RSA PRIVATE KEY-----`;
     return trySign(pkcs1Pem);
   }
@@ -148,14 +179,17 @@ function sign(privateKeyPem: string, timestamp: string, body: string): string {
 export function verifyPaylabsSignature(
   paylabsPublicKeyPem: string,
   timestamp: string,
-  body: string,
+  bodyStr: string,
   signature: string,
+  endpoint = "/api/paylabs/webhook",
+  method   = "POST",
 ): boolean {
   try {
-    const pem = normaliseKey(paylabsPublicKeyPem, "PUBLIC");
-    const msg = `${timestamp}\r\n${body}`;
+    const pem          = normaliseKey(paylabsPublicKeyPem, "PUBLIC");
+    const minified     = minifyBody(bodyStr);
+    const stringToSign = buildStringToSign(method, endpoint, minified, timestamp);
     const v = crypto.createVerify("RSA-SHA256");
-    v.update(msg, "utf8");
+    v.update(stringToSign, "utf8");
     return v.verify(pem, signature, "base64");
   } catch (err) {
     logger.warn({ err }, "[paylabs] signature verification error");
