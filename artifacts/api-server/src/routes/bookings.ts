@@ -155,6 +155,18 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
     const bookingIds = bookings.map((b) => b.id);
     const allPayments = bookingIds.length > 0 ? await db.select().from(paymentsTable) : [];
 
+    // Ambil companyName dari usersTable untuk booking perusahaan
+    const companyCustomerIds = [...new Set(bookings.map((b) => b.companyCustomerId).filter((id): id is number => id != null))];
+    const companyUsers = companyCustomerIds.length > 0
+      ? await db.select({ id: usersTable.id, name: usersTable.name, companyName: usersTable.companyName })
+          .from(usersTable)
+          .where(inArray(usersTable.id, companyCustomerIds))
+      : [];
+    const companyNameById: Record<number, string> = {};
+    for (const u of companyUsers) {
+      companyNameById[u.id] = u.companyName ?? u.name ?? "";
+    }
+
     const paymentsByBookingId: Record<number, typeof allPayments> = {};
     for (const p of allPayments) {
       if (!paymentsByBookingId[p.bookingId]) paymentsByBookingId[p.bookingId] = [];
@@ -172,6 +184,7 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
       const dpAmt = Number(b.downPayment ?? 0);
       return {
         ...b,
+        companyName: b.companyCustomerId ? (companyNameById[b.companyCustomerId] ?? "") : null,
         totalPrice: Number(b.totalPrice),
         discountAmount: Number(b.discountAmount),
         basePrice: b.basePrice == null ? null : Number(b.basePrice),

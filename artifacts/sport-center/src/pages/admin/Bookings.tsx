@@ -2883,8 +2883,15 @@ export default function AdminBookings() {
                           </div>
                           <div>
                             <div className="font-semibold text-slate-800 dark:text-slate-200 text-xs leading-tight">
-                              {b.customerName}
+                              {b.payerType === "company" && (b as any).companyName
+                                ? (b as any).companyName
+                                : b.customerName}
                             </div>
+                            {b.payerType === "company" && (b as any).companyName && (
+                              <div className="text-[11px] text-slate-500 dark:text-slate-400 leading-tight">
+                                a/n {b.customerName}
+                              </div>
+                            )}
                             <div className="text-[11px] text-slate-400">{b.customerPhone}</div>
                             {b.customerType === "angkasa_pura" && (
                               <div className="mt-0.5 flex items-center gap-1">
