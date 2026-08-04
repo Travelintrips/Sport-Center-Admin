@@ -155,26 +155,45 @@ function sign(
   const minified     = minifyBody(bodyStr);
   const stringToSign = buildStringToSign(method, endpoint, minified, timestamp);
 
-  const trySign = (pem: string): string => {
+  const doSign = (key: crypto.KeyObject | string): string => {
     const s = crypto.createSign("RSA-SHA256");
     s.update(stringToSign, "utf8");
-    return s.sign(pem, "base64");
+    return s.sign(key as any, "base64");
   };
 
-  const pem = normaliseKey(privateKeyPem, "PRIVATE");
+  // Strip all PEM headers/footers to get raw base64
+  const raw    = privateKeyPem.trim();
+  const base64 = raw.replace(/-----[^-]+-----/g, "").replace(/\s+/g, "");
+  const body64 = base64.match(/.{1,64}/g)?.join("\n") ?? base64;
 
-  if (privateKeyPem.trim().includes("-----BEGIN")) {
-    return trySign(pem);
+  const attempts: Array<() => crypto.KeyObject> = [
+    // 1. Parse as-is using createPrivateKey (handles -----BEGIN PRIVATE KEY----- and -----BEGIN RSA PRIVATE KEY-----)
+    ...(raw.includes("-----BEGIN") ? [() => crypto.createPrivateKey(raw)] : []),
+    // 2. PKCS#8 (-----BEGIN PRIVATE KEY-----)
+    () => crypto.createPrivateKey(`-----BEGIN PRIVATE KEY-----\n${body64}\n-----END PRIVATE KEY-----`),
+    // 3. PKCS#1 RSA (-----BEGIN RSA PRIVATE KEY-----)
+    () => crypto.createPrivateKey(`-----BEGIN RSA PRIVATE KEY-----\n${body64}\n-----END RSA PRIVATE KEY-----`),
+    // 4. DER buffer — PKCS#8
+    () => crypto.createPrivateKey({ key: Buffer.from(base64, "base64"), format: "der", type: "pkcs8" }),
+    // 5. DER buffer — PKCS#1
+    () => crypto.createPrivateKey({ key: Buffer.from(base64, "base64"), format: "der", type: "pkcs1" }),
+  ];
+
+  const errors: string[] = [];
+  for (const attempt of attempts) {
+    try {
+      const keyObj = attempt();
+      return doSign(keyObj);
+    } catch (e) {
+      errors.push(String(e).split("\n")[0]);
+    }
   }
 
-  // Raw base64 key: try PKCS#8 first, then PKCS#1 (RSA PRIVATE KEY) as fallback
-  try {
-    return trySign(pem);
-  } catch {
-    const rawB64  = privateKeyPem.replace(/\s+/g, "").match(/.{1,64}/g)!.join("\n");
-    const pkcs1Pem = `-----BEGIN RSA PRIVATE KEY-----\n${rawB64}\n-----END RSA PRIVATE KEY-----`;
-    return trySign(pkcs1Pem);
-  }
+  throw new Error(
+    `RSA signing failed — semua format kunci dicoba tapi gagal. ` +
+    `Pastikan private key PKCS#8 atau PKCS#1 RSA 2048-bit. ` +
+    `Detail: ${errors.join(" | ")}`,
+  );
 }
 
 export function verifyPaylabsSignature(
