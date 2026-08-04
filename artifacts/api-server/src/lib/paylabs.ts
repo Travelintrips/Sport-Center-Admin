@@ -229,8 +229,14 @@ export async function callPaylabs<T = Record<string, unknown>>(
 
     httpStatus = res.status;
     const raw = await res.text().catch(() => "");
+    const contentType = res.headers.get("content-type") ?? "";
+    const isJson = contentType.includes("application/json") || (raw.trimStart().startsWith("{") || raw.trimStart().startsWith("["));
+
     let data: T & Record<string, unknown> = {} as T & Record<string, unknown>;
-    try { data = JSON.parse(raw); } catch { /* non-JSON response */ }
+    let jsonParseOk = false;
+    if (isJson) {
+      try { data = JSON.parse(raw); jsonParseOk = true; } catch { /* non-JSON response */ }
+    }
 
     if (config.debugMode || !res.ok) {
       logger.info({ httpStatus, url, data, rawSnippet: raw.slice(0, 500) }, "[paylabs] response");
@@ -242,13 +248,27 @@ export async function callPaylabs<T = Record<string, unknown>>(
       (data as any).errorCode ?? (data as any).error_code ??
       (data as any).responseCode ?? undefined;
 
-    const errMsg: string | undefined =
+    let errMsg: string | undefined =
       (data as any).errCodeDes   ??   // v4.8.1 primary field
       (data as any).errMsg       ??   // fallback (older API versions)
       (data as any).errmsg       ??
       (data as any).errorMessage ?? (data as any).error_message ??
       (data as any).message      ?? (data as any).error    ??
       (data as any).responseMessage ?? undefined;
+
+    // When Paylabs returns non-JSON (e.g. HTML 404 for non-whitelisted IPs),
+    // produce a meaningful error instead of leaving errMsg undefined.
+    if (!res.ok && !jsonParseOk) {
+      const httpDesc =
+        httpStatus === 404 ? "Endpoint tidak ditemukan (HTTP 404)" :
+        httpStatus === 401 ? "Autentikasi gagal (HTTP 401)" :
+        httpStatus === 403 ? "Akses ditolak (HTTP 403)" :
+        httpStatus === 0   ? "Tidak dapat terhubung ke Paylabs" :
+        `HTTP ${httpStatus}`;
+      errMsg = `${httpDesc}. Pastikan IP server sudah di-whitelist di dashboard Paylabs (Settings → Whitelist IP), lalu coba lagi.`;
+    } else if (!errMsg && !errCode && !res.ok) {
+      errMsg = `HTTP ${httpStatus} — respons tidak dikenali dari Paylabs.`;
+    }
 
     const ok = res.ok && (!errCode || errCode === "0" || errCode === "SUCCESS" || errCode === "00");
     return { ok, httpStatus, data, errCode, errMsg };
