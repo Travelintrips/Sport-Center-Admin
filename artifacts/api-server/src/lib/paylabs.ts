@@ -230,7 +230,7 @@ export async function callPaylabs<T = Record<string, unknown>>(
 
   let signature: string;
   try {
-    signature = sign(config.privateKey, timestamp, bodyStr);
+    signature = sign(config.privateKey, timestamp, bodyStr, endpoint);
   } catch (keyErr) {
     const msg = String(keyErr);
     logger.error({ keyErr, merchantId: config.merchantId }, "[paylabs] RSA signing failed — check private key format");
