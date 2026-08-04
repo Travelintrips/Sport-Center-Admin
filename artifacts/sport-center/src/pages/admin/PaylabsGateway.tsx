@@ -437,10 +437,12 @@ function MethodDetail({
 function MethodRow({
   method,
   onActivate,
+  onDeactivate,
   onManage,
 }: {
   method: PaymentMethod;
   onActivate: (id: string) => void;
+  onDeactivate: (id: string) => void;
   onManage: (id: string) => void;
 }) {
   return (
@@ -474,6 +476,16 @@ function MethodRow({
           <Badge className="bg-green-50 text-green-600 border border-green-200 text-xs">
             Aktif
           </Badge>
+        )}
+        {method.active && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => onDeactivate(method.id)}
+            className="text-xs h-8 px-3 rounded-full text-muted-foreground"
+          >
+            Nonaktifkan
+          </Button>
         )}
 
         <Button
@@ -631,14 +643,47 @@ export default function PaylabsGateway() {
 
   const selected = selectedId ? methods.find((m) => m.id === selectedId) : null;
 
+  // ── Immediately persist only paymentMethodsConfig to DB ─────────────────────
+  async function persistMethods(newMethods: PaymentMethod[]) {
+    try {
+      await fetch("/api/admin/paylabs/settings", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${getToken()}`,
+        },
+        body: JSON.stringify({
+          paymentMethodsConfig: newMethods.map((m) => ({
+            id: m.id,
+            active: m.active,
+            name: m.name,
+            iconUrl: m.iconUrl,
+            enableIcon: m.enableIcon,
+            customDescription: m.customDescription,
+          })),
+        }),
+      });
+    } catch (err) {
+      console.error("[PaylabsGateway] persistMethods error:", err);
+    }
+  }
+
   function handleActivate(id: string) {
-    setMethods((prev) =>
-      prev.map((m) => (m.id === id ? { ...m, active: true } : m))
-    );
+    const newMethods = methods.map((m) => (m.id === id ? { ...m, active: true } : m));
+    setMethods(newMethods);
+    persistMethods(newMethods);
+  }
+
+  function handleDeactivate(id: string) {
+    const newMethods = methods.map((m) => (m.id === id ? { ...m, active: false } : m));
+    setMethods(newMethods);
+    persistMethods(newMethods);
   }
 
   function handleSaveMethod(updated: PaymentMethod) {
-    setMethods((prev) => prev.map((m) => (m.id === updated.id ? updated : m)));
+    const newMethods = methods.map((m) => (m.id === updated.id ? updated : m));
+    setMethods(newMethods);
+    persistMethods(newMethods);
   }
 
   async function handleSaveAll() {
@@ -768,6 +813,7 @@ export default function PaylabsGateway() {
               key={method.id}
               method={method}
               onActivate={handleActivate}
+              onDeactivate={handleDeactivate}
               onManage={(id) => setSelectedId(id)}
             />
           ))}
