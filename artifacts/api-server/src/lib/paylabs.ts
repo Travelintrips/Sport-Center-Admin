@@ -67,16 +67,17 @@ export async function loadPaylabsConfigFromDb(): Promise<PaylabsConfig> {
     if (!row) return getPaylabsConfig();
 
     const sandboxMode = row.sandboxMode;
+    // Env vars take priority over DB — allows production override without touching admin panel
     const merchantId = sandboxMode
-      ? (row.sandboxMerchantId || process.env.PAYLABS_SANDBOX_MERCHANT_ID || "")
-      : (row.prodMerchantId    || process.env.PAYLABS_PROD_MERCHANT_ID    || "");
+      ? (process.env.PAYLABS_SANDBOX_MERCHANT_ID || row.sandboxMerchantId || "")
+      : (process.env.PAYLABS_PROD_MERCHANT_ID    || row.prodMerchantId    || "");
     const privateKey = sandboxMode
-      ? (row.sandboxPrivateKey || process.env.PAYLABS_SANDBOX_PRIVATE_KEY || "")
-      : (row.prodPrivateKey    || process.env.PAYLABS_PROD_PRIVATE_KEY    || "");
+      ? (process.env.PAYLABS_SANDBOX_PRIVATE_KEY || row.sandboxPrivateKey || "")
+      : (process.env.PAYLABS_PROD_PRIVATE_KEY    || row.prodPrivateKey    || "");
     const paylabsPublicKey = sandboxMode
-      ? (row.sandboxPublicKey  || process.env.PAYLABS_SANDBOX_PUBLIC_KEY  || "")
-      : (row.prodPublicKey     || process.env.PAYLABS_PROD_PUBLIC_KEY     || "");
-    const storeId = row.storeId || process.env.PAYLABS_STORE_ID || "";
+      ? (process.env.PAYLABS_SANDBOX_PUBLIC_KEY  || row.sandboxPublicKey  || "")
+      : (process.env.PAYLABS_PROD_PUBLIC_KEY     || row.prodPublicKey     || "");
+    const storeId = process.env.PAYLABS_STORE_ID || row.storeId || "";
 
     return {
       sandboxMode,
