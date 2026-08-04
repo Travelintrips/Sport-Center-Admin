@@ -155,43 +155,57 @@ function sign(
   const minified     = minifyBody(bodyStr);
   const stringToSign = buildStringToSign(method, endpoint, minified, timestamp);
 
-  const doSign = (key: crypto.KeyObject | string): string => {
+  const doSign = (key: crypto.KeyObject): string => {
     const s = crypto.createSign("RSA-SHA256");
     s.update(stringToSign, "utf8");
-    return s.sign(key as any, "base64");
+    return s.sign(key, "base64");
   };
 
-  // Strip all PEM headers/footers to get raw base64
-  const raw    = privateKeyPem.trim();
-  const base64 = raw.replace(/-----[^-]+-----/g, "").replace(/\s+/g, "");
-  const body64 = base64.match(/.{1,64}/g)?.join("\n") ?? base64;
+  // Normalise key: convert literal \n escape sequences to real newlines (common DB storage issue)
+  const raw = privateKeyPem
+    .trim()
+    .replace(/\\n/g, "\n")   // literal \n → real newline
+    .replace(/\\r/g, "");    // literal \r → remove
 
-  const attempts: Array<() => crypto.KeyObject> = [
-    // 1. Parse as-is using createPrivateKey (handles -----BEGIN PRIVATE KEY----- and -----BEGIN RSA PRIVATE KEY-----)
-    ...(raw.includes("-----BEGIN") ? [() => crypto.createPrivateKey(raw)] : []),
-    // 2. PKCS#8 (-----BEGIN PRIVATE KEY-----)
-    () => crypto.createPrivateKey(`-----BEGIN PRIVATE KEY-----\n${body64}\n-----END PRIVATE KEY-----`),
-    // 3. PKCS#1 RSA (-----BEGIN RSA PRIVATE KEY-----)
-    () => crypto.createPrivateKey(`-----BEGIN RSA PRIVATE KEY-----\n${body64}\n-----END RSA PRIVATE KEY-----`),
-    // 4. DER buffer — PKCS#8
-    () => crypto.createPrivateKey({ key: Buffer.from(base64, "base64"), format: "der", type: "pkcs8" }),
-    // 5. DER buffer — PKCS#1
-    () => crypto.createPrivateKey({ key: Buffer.from(base64, "base64"), format: "der", type: "pkcs1" }),
+  // Strip all PEM headers/footers to get raw base64 (no spaces)
+  const base64 = raw.replace(/-----[^-]+-----/g, "").replace(/\s+/g, "");
+  // Re-chunk into 64-char lines for PEM body
+  const body64 = (base64.match(/.{1,64}/g) ?? [base64]).join("\n");
+
+  const pkcs8Pem   = `-----BEGIN PRIVATE KEY-----\n${body64}\n-----END PRIVATE KEY-----`;
+  const pkcs1Pem   = `-----BEGIN RSA PRIVATE KEY-----\n${body64}\n-----END RSA PRIVATE KEY-----`;
+  const derBuf     = Buffer.from(base64, "base64");
+
+  const attempts: Array<[string, () => crypto.KeyObject]> = [
+    // 1. Explicit PKCS#8 PEM with format hint (most compatible with OpenSSL 3)
+    ["pkcs8-pem-explicit",  () => crypto.createPrivateKey({ key: pkcs8Pem,  format: "pem", type: "pkcs8" })],
+    // 2. Explicit PKCS#1 PEM with format hint (OpenSSL 3 requires explicit type for RSA PEM)
+    ["pkcs1-pem-explicit",  () => crypto.createPrivateKey({ key: pkcs1Pem,  format: "pem", type: "pkcs1" })],
+    // 3. Auto-detect from raw input (works if key already has correct PEM header)
+    ...(raw.includes("-----BEGIN") ? [["raw-auto", () => crypto.createPrivateKey(raw)] as [string, () => crypto.KeyObject]] : []),
+    // 4. Auto-detect PKCS#8 PEM
+    ["pkcs8-pem-auto",      () => crypto.createPrivateKey(pkcs8Pem)],
+    // 5. Auto-detect PKCS#1 PEM
+    ["pkcs1-pem-auto",      () => crypto.createPrivateKey(pkcs1Pem)],
+    // 6. DER — PKCS#8
+    ["pkcs8-der",           () => crypto.createPrivateKey({ key: derBuf, format: "der", type: "pkcs8" })],
+    // 7. DER — PKCS#1
+    ["pkcs1-der",           () => crypto.createPrivateKey({ key: derBuf, format: "der", type: "pkcs1" })],
   ];
 
   const errors: string[] = [];
-  for (const attempt of attempts) {
+  for (const [label, attempt] of attempts) {
     try {
       const keyObj = attempt();
       return doSign(keyObj);
     } catch (e) {
-      errors.push(String(e).split("\n")[0]);
+      errors.push(`[${label}] ${String(e).split("\n")[0]}`);
     }
   }
 
   throw new Error(
     `RSA signing failed — semua format kunci dicoba tapi gagal. ` +
-    `Pastikan private key PKCS#8 atau PKCS#1 RSA 2048-bit. ` +
+    `Pastikan private key PKCS#8 atau PKCS#1 RSA 2048-bit (PEM atau base64). ` +
     `Detail: ${errors.join(" | ")}`,
   );
 }
