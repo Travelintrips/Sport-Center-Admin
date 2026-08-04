@@ -755,14 +755,15 @@ export default function AdminSettings() {
               </div>
 
               <div className="space-y-2">
-                <Label>Nomor Admin Tambahan</Label>
+                <Label>Nomor Admin &amp; Grup WA</Label>
                 <Input
                   value={waForm.adminWaPhones}
                   onChange={(e) => setWaForm(f => ({ ...f, adminWaPhones: e.target.value }))}
-                  placeholder="6281234,6289876 (pisahkan dengan koma)"
+                  placeholder="6281234,6289876,1203456789-1234567890@g.us"
                 />
                 <p className="text-xs text-muted-foreground">
-                  Semua nomor ini akan menerima notifikasi admin (booking baru, bukti bayar, dll).
+                  Pisahkan dengan koma. Bisa nomor individu (<strong>628xxx</strong>) atau ID grup WA (<strong>1234567890-123456@g.us</strong>).
+                  Semua penerima ini akan mendapat notifikasi booking baru, bukti bayar, dll.
                 </p>
               </div>
 

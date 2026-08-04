@@ -38,9 +38,9 @@ async function getWaConfig(): Promise<{ token: string; customerToken: string; ad
       : adminWa
       ? [adminWa]
       : [];
-    // Gunakan grup dari env hanya sebagai fallback. Jika adminWaPhones
-    // sudah diatur di database, jangan menambahkan grup kedua dari env.
-    if (adminPhones.length === 0 && ENV_ADMIN_WA_GROUP) {
+    // Selalu sertakan grup WA admin (env ADMIN_WA_GROUP) sebagai penerima
+    // tambahan — bukan hanya fallback. Dedup agar tidak double-kirim.
+    if (ENV_ADMIN_WA_GROUP && !adminPhones.includes(ENV_ADMIN_WA_GROUP)) {
       adminPhones.push(ENV_ADMIN_WA_GROUP);
     }
     return { token, customerToken, adminPhones };
@@ -50,8 +50,8 @@ async function getWaConfig(): Promise<{ token: string; customerToken: string; ad
       : ENV_FONNTE_ADMIN_WA
       ? [ENV_FONNTE_ADMIN_WA]
       : [];
-    // Fallback terakhir hanya jika belum ada penerima admin lain.
-    if (adminPhones.length === 0 && ENV_ADMIN_WA_GROUP) {
+    // Selalu sertakan grup WA dari env — bukan hanya fallback.
+    if (ENV_ADMIN_WA_GROUP && !adminPhones.includes(ENV_ADMIN_WA_GROUP)) {
       adminPhones.push(ENV_ADMIN_WA_GROUP);
     }
     const fallbackToken = ENV_FONNTE_TOKEN;
