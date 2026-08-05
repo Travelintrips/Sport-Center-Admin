@@ -1,4 +1,5 @@
 import { Router } from "express";
+import multer from "multer";
 import { db, usersTable, bookingsTable, companyInvoicesTable, companyInvoiceItemsTable, facilitiesTable, auditLogsTable, corporateBookingDocumentationTable } from "@workspace/db";
 import { eq, and, gte, lt, inArray, isNull, or } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
@@ -6,6 +7,16 @@ import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
 import { pushInvoicePaymentAsBankMutation } from "../lib/bizportalSync";
 import { createInvoiceJournalEntry, createPublicInvoiceAccountingEntry } from "../lib/accounting";
 import { logAccountingError } from "../lib/auditLog";
+import { uploadProofWithFallback } from "./storage";
+
+const uploadMiddleware = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const ok = file.mimetype.startsWith("image/") || file.mimetype === "application/pdf";
+    if (ok) cb(null, true); else cb(new Error("Hanya file gambar atau PDF yang diizinkan"));
+  },
+});
 
 const router = Router();
 
@@ -59,6 +70,7 @@ function mapInvoice(
     grandTotal,
     status: inv.status,
     paidAt: inv.paidAt ?? null,
+    paymentProofUrl: inv.paymentProofUrl ?? null,
     notes: inv.notes ?? null,
     createdAt: inv.createdAt,
     items: (items ?? []).map((item: any) => ({

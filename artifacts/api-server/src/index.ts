@@ -711,6 +711,9 @@ async function runStartupMigrations() {
        caption     text,
        created_at  timestamptz NOT NULL DEFAULT NOW()
      )`,
+    // ── company_invoices: payment_proof_url + waiting_verification status ────
+    `ALTER TABLE sport_center.company_invoices ADD COLUMN IF NOT EXISTS payment_proof_url text`,
+    `DO $mig$ BEGIN ALTER TYPE sport_center.invoice_status ADD VALUE IF NOT EXISTS 'waiting_verification'; EXCEPTION WHEN OTHERS THEN null; END $mig$`,
     // ── paylabs_settings ─────────────────────────────────────────────────────
     `CREATE TABLE IF NOT EXISTS sport_center.paylabs_settings (
        id                     SERIAL PRIMARY KEY,
