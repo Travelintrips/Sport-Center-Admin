@@ -68,7 +68,10 @@ export async function loadPaylabsConfigFromDb(): Promise<PaylabsConfig> {
 
     const sandboxMode = row.sandboxMode;
     // DB takes priority over env vars — admin panel is the source of truth.
-    // Env vars serve as seed/fallback only when the DB field is empty.
+    // Env vars serve as seed/fallback only when the DB field is null/undefined.
+    // EXCEPTION: paylabsPublicKey — if DB is explicitly "" (empty string, not null),
+    // skip env var fallback. This lets admin disable signature verification for sandbox
+    // testing without touching secrets. Use ?? (null-coalescing) instead of ||.
     const merchantId = sandboxMode
       ? (row.sandboxMerchantId || process.env.PAYLABS_SANDBOX_MERCHANT_ID || "")
       : (row.prodMerchantId    || process.env.PAYLABS_PROD_MERCHANT_ID    || "");
@@ -76,8 +79,8 @@ export async function loadPaylabsConfigFromDb(): Promise<PaylabsConfig> {
       ? (row.sandboxPrivateKey || process.env.PAYLABS_SANDBOX_PRIVATE_KEY || "")
       : (row.prodPrivateKey    || process.env.PAYLABS_PROD_PRIVATE_KEY    || "");
     const paylabsPublicKey = sandboxMode
-      ? (row.sandboxPublicKey  || process.env.PAYLABS_SANDBOX_PUBLIC_KEY  || "")
-      : (row.prodPublicKey     || process.env.PAYLABS_PROD_PUBLIC_KEY     || "");
+      ? (row.sandboxPublicKey  ?? process.env.PAYLABS_SANDBOX_PUBLIC_KEY  ?? "")
+      : (row.prodPublicKey     ?? process.env.PAYLABS_PROD_PUBLIC_KEY     ?? "");
     const storeId = row.storeId || process.env.PAYLABS_STORE_ID || "";
 
     return {
@@ -249,23 +252,13 @@ export async function callPaylabs<T = Record<string, unknown>>(
 ): Promise<PaylabsResponse<T>> {
   const config = cfg ?? getPaylabsConfig();
 
-  // ── Diagnostic: log effective config info (no raw keys) ─────────────────────
-  const keyRaw      = config.privateKey.trim().replace(/\\n/g, "\n");
-  const keyBase64   = keyRaw.replace(/-----[^-]+-----/g, "").replace(/\s+/g, "");
-  const keyFormat   = keyRaw.includes("RSA PRIVATE KEY") ? "PKCS#1 PEM"
-                    : keyRaw.includes("PRIVATE KEY")     ? "PKCS#8 PEM"
-                    : keyRaw.length > 0                  ? "raw base64"
-                    : "empty";
-  console.log(`=== [PAYLABS CONFIG] merchantId=${config.merchantId || "(empty)"} sandboxMode=${config.sandboxMode} storeId=${config.storeId || "(none)"} privateKeyFormat=${keyFormat} privateKeyBase64Len=${keyBase64.length} ===`);
-
   if (!config.merchantId || !config.privateKey) {
-    console.log(`[PAYLABS] NOT_CONFIGURED: merchantId=${!!config.merchantId} privateKey=${!!config.privateKey}`);
     return {
       ok: false,
       httpStatus: 0,
       data: {} as T,
       errCode: "NOT_CONFIGURED",
-      errMsg: `Paylabs credentials not configured. merchantId=${config.merchantId ? "OK" : "EMPTY"}, privateKey=${config.privateKey ? `set (${keyFormat})` : "EMPTY"}`,
+      errMsg: `Paylabs credentials not configured. merchantId=${config.merchantId ? "SET" : "EMPTY"}, privateKey=${config.privateKey ? "SET" : "EMPTY"}`,
     };
   }
 
@@ -284,15 +277,13 @@ export async function callPaylabs<T = Record<string, unknown>>(
   } catch (keyErr) {
     const msg = String(keyErr);
     logger.error(
-      { merchantId: config.merchantId, sandboxMode: config.sandboxMode, keyFormat, keyBase64Len: keyBase64.length, endpoint, errDetail: msg.slice(0, 500) },
+      { sandboxMode: config.sandboxMode, endpoint, errDetail: msg.slice(0, 500) },
       "[paylabs] RSA signing failed — check private key format",
     );
-    console.log(`[PAYLABS SIGN ERROR] merchantId=${config.merchantId} sandboxMode=${config.sandboxMode} keyFormat=${keyFormat} keyBase64Len=${keyBase64.length}`);
-    console.log(`[PAYLABS SIGN ERROR] detail: ${msg.slice(0, 800)}`);
     return {
       ok: false, httpStatus: 0, data: {} as T,
       errCode: "INVALID_PRIVATE_KEY",
-      errMsg: `RSA sign error (merchantId=${config.merchantId}, keyFormat=${keyFormat}, keyLen=${keyBase64.length}): ${msg.slice(0, 300)}`,
+      errMsg: `RSA sign error for Paylabs request: ${msg.slice(0, 300)}`,
     };
   }
 
@@ -308,20 +299,8 @@ export async function callPaylabs<T = Record<string, unknown>>(
     "X-SIGNATURE"  : signature,
   };
 
-  // ── PAYLABS DEBUG LOG ──────────────────────────────────────────────────────
-  console.log("=== [PAYLABS] OUTGOING REQUEST ===");
-  console.log("URL          :", url);
-  console.log("X-PARTNER-ID :", requestHeaders["X-PARTNER-ID"]);
-  console.log("X-REQUEST-ID :", requestHeaders["X-REQUEST-ID"]);
-  console.log("X-TIMESTAMP  :", requestHeaders["X-TIMESTAMP"]);
-  console.log("X-SIGNATURE  :", requestHeaders["X-SIGNATURE"]);
-  console.log("stringToSign :", stringToSignForLog);
-  console.log("body         :", bodyStr);
-  console.log("==================================");
-  // ──────────────────────────────────────────────────────────────────────────
-
   logger.info(
-    { url, timestamp, endpoint, stringToSign: stringToSignForLog, merchantId: config.merchantId },
+    { url, timestamp, endpoint, stringToSign: stringToSignForLog },
     "[paylabs] outgoing request",
   );
 
@@ -555,4 +534,41 @@ export function resolvePaymentMethod(method: string): {
   if (METHOD_TO_VA[m]) return { type: "va", code: METHOD_TO_VA[m] };
   if (EWALLET_CODES[m]) return { type: "ewallet", code: EWALLET_CODES[m] };
   return { type: "unknown" };
+}
+
+// ─── Centralised status mapper (Phase 4) ─────────────────────────────────────
+
+/**
+ * Map raw Paylabs status string to our internal enum.
+ * Paylabs numeric codes (v4.8.1):
+ *   01 → PENDING   02 → SUCCESS   09 → FAILED
+ * Never silently map an unknown status to SUCCESS.
+ */
+export type PaylabsInternalStatus = "PENDING" | "SUCCESS" | "FAILED" | "UNKNOWN";
+
+export function mapPaylabsStatus(rawStatus: string): PaylabsInternalStatus {
+  switch (String(rawStatus).trim().toUpperCase()) {
+    case "01": return "PENDING";
+    case "1":  return "PENDING";
+    case "02": return "SUCCESS";
+    case "2":  return "SUCCESS";
+    case "09": return "FAILED";
+    case "9":  return "FAILED";
+    // String aliases that some Paylabs sandbox responses use.
+    case "SUCCESS":
+    case "PAID":
+    case "SUCCEEDED":
+    case "SETTLED":
+    case "COMPLETE":
+    case "COMPLETED":
+    case "PAYMENT_SUCCESS":
+    case "TRADE_SUCCESS": return "SUCCESS";
+    case "FAILED":
+    case "CANCELLED":
+    case "EXPIRED":  return "FAILED";
+    case "PENDING":
+    case "CREATED":
+    case "WAITING":  return "PENDING";
+    default:         return "UNKNOWN";
+  }
 }

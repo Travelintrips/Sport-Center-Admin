@@ -1,11 +1,15 @@
-modules = ["nodejs-20", "web"]
+modules = ["nodejs-20", "web", "python-base-3.13"]
 
 
 [deployment]
 router = "application"
 deploymentTarget = "autoscale"
-run = ["bash", "-c", "PORT=8080 NODE_ENV=production node --enable-source-maps ./artifacts/api-server/dist/index.mjs"]
-build = ["bash", "-c", "VITE_PUBLIC_URL=https://sc.travelintrips.co.id pnpm -r --if-present run build"]
+run = [
+  "bash",
+  "-c",
+  "PORT=8080 NODE_ENV=production node --enable-source-maps ./artifacts/api-server/dist/index.mjs",
+]
+build = ["bash", "-c", "pnpm -r --if-present run build"]
 
 [deployment.postBuild]
 args = ["pnpm", "store", "prune"]
@@ -66,10 +70,6 @@ externalPort = 80
 [[ports]]
 localPort = 8080
 externalPort = 8080
-
-[[ports]]
-localPort = 8081
-externalPort = 8081
 
 [[ports]]
 localPort = 21089

@@ -9,7 +9,7 @@ const PROD_URL =
   process.env.SUPABASE_DATABASE_URL_DEV;
 
 let _prodPool: pg.Pool | null = null;
-function getProdPool(): pg.Pool | null {
+export function getProdPool(): pg.Pool | null {
   if (!PROD_URL) return null;
   if (!_prodPool) {
     _prodPool = new Pool({

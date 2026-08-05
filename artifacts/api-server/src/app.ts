@@ -36,7 +36,16 @@ app.use(
   }),
 );
 app.use(cors());
-app.use(express.json());
+// Capture raw body buffer before JSON parsing — needed for Paylabs webhook signature verification.
+// express.json() re-serialises req.body which may differ from the original bytes (whitespace, key
+// order). Storing the raw buffer lets verifyPaylabsSignature work on the exact bytes Paylabs signed.
+app.use(
+  express.json({
+    verify: (req: any, _res, buf) => {
+      req.rawBody = buf;
+    },
+  }),
+);
 app.use(express.urlencoded({ extended: true }));
 
 // ── Health / readiness endpoints at root level ────────────────────────────────
