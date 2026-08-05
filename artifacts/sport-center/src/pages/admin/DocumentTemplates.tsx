@@ -350,7 +350,7 @@ export default function AdminDocumentTemplates() {
               </div>
               <div className="space-y-1.5">
                 <Label className="text-xs font-semibold">Nama Perusahaan (tampil di dokumen)</Label>
-                <Input value={form.companyDisplayName} onChange={(e) => f("companyDisplayName", e.target.value)} placeholder="PT. Sport Center Jakarta" />
+                <Input value={form.companyDisplayName} onChange={(e) => f("companyDisplayName", e.target.value)} placeholder="PT. Sport Center Bandara Soekarno Hatta" />
               </div>
               <div className="space-y-1.5">
                 <Label className="text-xs font-semibold">Ukuran Kertas</Label>

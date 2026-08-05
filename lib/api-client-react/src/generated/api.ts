@@ -96,6 +96,8 @@ import type {
   ListPaymentsParams,
   ListPromosParams,
   LoginInput,
+  MembershipLookupInput,
+  MembershipLookupResult,
   MembershipPaymentProofInput,
   MyBookingItem,
   OkResult,
@@ -4950,6 +4952,77 @@ export const useCreateMembership = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getCreateMembershipMutationOptions(options));
+    }
+
+export const getLookupMembershipUrl = () => {
+
+
+
+
+  return `/api/memberships/lookup`
+}
+
+/**
+ * @summary Look up a membership by phone number (public)
+ */
+export const lookupMembership = async (membershipLookupInput: MembershipLookupInput, options?: RequestInit): Promise<MembershipLookupResult> => {
+
+  return customFetch<MembershipLookupResult>(getLookupMembershipUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      membershipLookupInput,)
+  }
+);}
+
+
+
+
+export const getLookupMembershipMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof lookupMembership>>, TError,{data: BodyType<MembershipLookupInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof lookupMembership>>, TError,{data: BodyType<MembershipLookupInput>}, TContext> => {
+
+const mutationKey = ['lookupMembership'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof lookupMembership>>, {data: BodyType<MembershipLookupInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  lookupMembership(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type LookupMembershipMutationResult = NonNullable<Awaited<ReturnType<typeof lookupMembership>>>
+    export type LookupMembershipMutationBody = BodyType<MembershipLookupInput>
+    export type LookupMembershipMutationError = ErrorType<void>
+
+    /**
+ * @summary Look up a membership by phone number (public)
+ */
+export const useLookupMembership = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof lookupMembership>>, TError,{data: BodyType<MembershipLookupInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof lookupMembership>>,
+        TError,
+        {data: BodyType<MembershipLookupInput>},
+        TContext
+      > => {
+      return useMutation(getLookupMembershipMutationOptions(options));
     }
 
 export const getSubmitMembershipPaymentProofUrl = (id: number,) => {

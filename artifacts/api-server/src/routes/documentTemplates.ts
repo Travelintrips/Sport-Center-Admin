@@ -1,8 +1,9 @@
 import { Router } from "express";
-import { db, companyDocumentTemplatesTable, usersTable, bookingsTable, facilitiesTable, settingsTable } from "@workspace/db";
+import { db, companyDocumentTemplatesTable, companyDocumentSettingsTable, usersTable, bookingsTable, facilitiesTable, settingsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { adminMiddleware, adminDocumentPreviewMiddleware } from "../lib/auth";
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
+import { verifyKwitansiToken } from "../lib/kwitansiToken";
 import { renderDocument, type DocumentType } from "../lib/documentRenderer";
 
 const router = Router();
@@ -66,7 +67,7 @@ router.get("/admin/document-templates", adminMiddleware, async (req, res) => {
 
 router.get("/admin/document-templates/:id", adminMiddleware, async (req, res) => {
   try {
-    const id = parseInt(req.params.id);
+    const id = parseInt(String(req.params.id));
     const [tpl] = await db.select().from(companyDocumentTemplatesTable).where(eq(companyDocumentTemplatesTable.id, id)).limit(1);
     if (!tpl) { res.status(404).json({ error: "Template tidak ditemukan" }); return; }
     res.json(tpl);
@@ -115,7 +116,7 @@ router.post("/admin/document-templates", adminMiddleware, async (req, res) => {
 
 router.put("/admin/document-templates/:id", adminMiddleware, async (req, res) => {
   try {
-    const id = parseInt(req.params.id);
+    const id = parseInt(String(req.params.id));
     const [existing] = await db.select().from(companyDocumentTemplatesTable).where(eq(companyDocumentTemplatesTable.id, id)).limit(1);
     if (!existing) { res.status(404).json({ error: "Template tidak ditemukan" }); return; }
 
@@ -157,7 +158,7 @@ router.put("/admin/document-templates/:id", adminMiddleware, async (req, res) =>
 
 router.delete("/admin/document-templates/:id", adminMiddleware, async (req, res) => {
   try {
-    const id = parseInt(req.params.id);
+    const id = parseInt(String(req.params.id));
     const [existing] = await db.select().from(companyDocumentTemplatesTable).where(eq(companyDocumentTemplatesTable.id, id)).limit(1);
     if (!existing) { res.status(404).json({ error: "Template tidak ditemukan" }); return; }
     if (existing.isDefault) { res.status(400).json({ error: "System default template tidak bisa dihapus" }); return; }
@@ -181,7 +182,8 @@ router.delete("/admin/document-templates/:id", adminMiddleware, async (req, res)
 
 router.get("/admin/documents/:documentType/:entityId/preview", adminDocumentPreviewMiddleware, async (req, res) => {
   try {
-    const { documentType, entityId } = req.params;
+    const documentType = String(req.params.documentType);
+    const entityId = String(req.params.entityId);
     const companyId = req.query.companyId ? parseInt(String(req.query.companyId)) : null;
 
     if (!(DOCUMENT_TYPES as readonly string[]).includes(documentType)) {
@@ -211,7 +213,8 @@ router.get("/admin/documents/:documentType/:entityId/preview", adminDocumentPrev
 
 router.get("/admin/documents/:documentType/:entityId/pdf", adminDocumentPreviewMiddleware, async (req, res) => {
   try {
-    const { documentType, entityId } = req.params;
+    const documentType = String(req.params.documentType);
+    const entityId = String(req.params.entityId);
     const companyId = req.query.companyId ? parseInt(String(req.query.companyId)) : null;
 
     if (!(DOCUMENT_TYPES as readonly string[]).includes(documentType)) {
@@ -245,7 +248,7 @@ router.get("/admin/documents/:documentType/:entityId/pdf", adminDocumentPreviewM
       });
 
       const page = await browser.newPage();
-      await page.setContent(html, { waitUntil: "networkidle0" });
+      await page.setContent(html, { waitUntil: "load" });
 
       pdfBuffer = Buffer.from(await page.pdf({
         format: "A4",
@@ -296,6 +299,11 @@ router.get("/admin/documents/:documentType/:entityId/pdf", adminDocumentPreviewM
 router.get("/public/kwitansi/:orderNumber", async (req, res) => {
   try {
     const { orderNumber } = req.params;
+    const t = String(req.query.t ?? "");
+    if (!verifyKwitansiToken(orderNumber, t)) {
+      res.status(403).send("<!DOCTYPE html><html><head><meta charset='utf-8'><title>Akses Ditolak</title></head><body><h2>❌ Link tidak valid atau sudah kadaluarsa.</h2></body></html>");
+      return;
+    }
 
     const [booking] = await db
       .select()
@@ -329,7 +337,7 @@ router.get("/public/kwitansi/:orderNumber", async (req, res) => {
     ]);
 
     const s = settings as any;
-    const centerName = s?.centerName ?? "Sport Center Jakarta";
+    const centerName = s?.centerName ?? "Sport Center Bandara Soekarno Hatta";
     const centerAddress = s?.address ?? "";
     const centerPhone = s?.phone ?? "";
 
@@ -338,6 +346,15 @@ router.get("/public/kwitansi/:orderNumber", async (req, res) => {
     const grandTotal = booking.grandTotal != null ? Number(booking.grandTotal) : subtotal;
     const ppnRate = booking.ppnRate != null ? Number(booking.ppnRate) : null;
     const hasPpn = ppnAmount > 0 && ppnRate != null;
+
+    function escapeHtml(str: string): string {
+      return String(str ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
 
     function formatIDR(n: number) {
       return "Rp " + n.toLocaleString("id-ID");
@@ -353,6 +370,16 @@ router.get("/public/kwitansi/:orderNumber", async (req, res) => {
 
     const confirmedAt = formatDateTime((booking as any).updatedAt ?? (booking as any).createdAt ?? "");
 
+    const eCenterName = escapeHtml(centerName);
+    const eCenterAddress = escapeHtml(centerAddress);
+    const eCenterPhone = escapeHtml(centerPhone);
+    const eOrderNumber = escapeHtml(orderNumber);
+    const eCustomerName = escapeHtml(booking.customerName ?? "-");
+    const eCustomerPhone = escapeHtml(booking.customerPhone ?? "-");
+    const eFacilityName = escapeHtml(facilityRow?.name ?? "-");
+    const eStartTime = escapeHtml(booking.startTime ?? "");
+    const eEndTime = escapeHtml(booking.endTime ?? "");
+
     const ppnRow = hasPpn ? `<tr><td style="padding:6px 0;color:#6b7280;font-size:.85rem">PPN ${ppnRate}%</td><td style="padding:6px 0;text-align:right;color:#374151;font-size:.85rem">${formatIDR(ppnAmount)}</td></tr>` : "";
 
     const html = `<!DOCTYPE html>
@@ -360,7 +387,7 @@ router.get("/public/kwitansi/:orderNumber", async (req, res) => {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Kwitansi ${orderNumber} — ${centerName}</title>
+  <title>Kwitansi ${eOrderNumber} — ${eCenterName}</title>
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
     body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:linear-gradient(to bottom,#fff7ed,#f9fafb);min-height:100vh;padding-bottom:2.5rem}
@@ -402,9 +429,9 @@ router.get("/public/kwitansi/:orderNumber", async (req, res) => {
   <div class="header">
     <div class="header-inner">
       <div class="badge">✅ Kwitansi Pembayaran</div>
-      <div class="center-name">${centerName}</div>
-      ${centerAddress ? `<div class="center-sub">📍 ${centerAddress}</div>` : ""}
-      ${centerPhone ? `<div class="center-sub">📞 ${centerPhone}</div>` : ""}
+      <div class="center-name">${eCenterName}</div>
+      ${eCenterAddress ? `<div class="center-sub">📍 ${eCenterAddress}</div>` : ""}
+      ${eCenterPhone ? `<div class="center-sub">📞 ${eCenterPhone}</div>` : ""}
     </div>
   </div>
 
@@ -420,18 +447,18 @@ router.get("/public/kwitansi/:orderNumber", async (req, res) => {
     <div class="card">
       <div class="card-header">
         <div class="card-label">Nomor Order</div>
-        <div class="order-num">${orderNumber}</div>
+        <div class="order-num">${eOrderNumber}</div>
       </div>
       <div class="card-body">
         <table>
-          <tr><td class="label-col">Nama Customer</td><td class="val-col val-bold">${booking.customerName ?? "-"}</td></tr>
-          <tr><td class="label-col">No. HP</td><td class="val-col">${booking.customerPhone ?? "-"}</td></tr>
+          <tr><td class="label-col">Nama Customer</td><td class="val-col val-bold">${eCustomerName}</td></tr>
+          <tr><td class="label-col">No. HP</td><td class="val-col">${eCustomerPhone}</td></tr>
         </table>
         <hr class="divider">
         <table>
-          <tr><td class="label-col">Fasilitas</td><td class="val-col val-bold">${facilityRow?.name ?? "-"}</td></tr>
+          <tr><td class="label-col">Fasilitas</td><td class="val-col val-bold">${eFacilityName}</td></tr>
           <tr><td class="label-col">Tanggal</td><td class="val-col">${formatDate(booking.bookingDate)}</td></tr>
-          <tr><td class="label-col">Waktu</td><td class="val-col">${booking.startTime} – ${booking.endTime}</td></tr>
+          <tr><td class="label-col">Waktu</td><td class="val-col">${eStartTime} – ${eEndTime}</td></tr>
           <tr><td class="label-col">Durasi</td><td class="val-col">${booking.durationHours} jam</td></tr>
         </table>
       </div>
@@ -459,8 +486,8 @@ router.get("/public/kwitansi/:orderNumber", async (req, res) => {
         <div class="stamp-area">
           <div>
             <div style="font-size:.75rem;color:#9ca3af;margin-bottom:.3rem">Diterbitkan oleh</div>
-            <div style="font-weight:700;font-size:.9rem;color:#1f2937">🏢 ${centerName}</div>
-            ${centerPhone ? `<div style="font-size:.75rem;color:#9ca3af;margin-top:.15rem">${centerPhone}</div>` : ""}
+            <div style="font-weight:700;font-size:.9rem;color:#1f2937">🏢 ${eCenterName}</div>
+            ${eCenterPhone ? `<div style="font-size:.75rem;color:#9ca3af;margin-top:.15rem">${eCenterPhone}</div>` : ""}
           </div>
           <div class="stamp-circle">
             <div class="stamp-text">LUNAS</div>
@@ -489,6 +516,11 @@ router.get("/public/kwitansi/:orderNumber", async (req, res) => {
 router.get("/public/kwitansi-data/:orderNumber", async (req, res) => {
   try {
     const { orderNumber } = req.params;
+    const t = String(req.query.t ?? "");
+    if (!verifyKwitansiToken(orderNumber, t)) {
+      res.status(403).json({ error: "Link tidak valid atau sudah kadaluarsa" });
+      return;
+    }
 
     const [booking] = await db
       .select()
@@ -506,10 +538,39 @@ router.get("/public/kwitansi-data/:orderNumber", async (req, res) => {
       return;
     }
 
-    const [[facilityRow], [settings]] = await Promise.all([
+    const [[facilityRow], [settings], [kwitansiTpl], [kwitansiDocSetting], [invoiceDocSetting]] = await Promise.all([
       db.select({ name: facilitiesTable.name }).from(facilitiesTable).where(eq(facilitiesTable.id, booking.facilityId)).limit(1).catch(() => [null]),
       db.select().from(settingsTable).limit(1).catch(() => [null]),
+      db.select({ financeName: companyDocumentTemplatesTable.financeName, financeTitle: companyDocumentTemplatesTable.financeTitle, financeSignature: companyDocumentTemplatesTable.financeSignature })
+        .from(companyDocumentTemplatesTable)
+        .where(eq(companyDocumentTemplatesTable.documentType, "kwitansi"))
+        .limit(1)
+        .catch(() => [null]),
+      db.select({ financeName: companyDocumentSettingsTable.financeName, financeTitle: companyDocumentSettingsTable.financeTitle })
+        .from(companyDocumentSettingsTable)
+        .where(eq(companyDocumentSettingsTable.documentType, "kwitansi"))
+        .limit(1)
+        .catch(() => [null]),
+      db.select({ financeName: companyDocumentSettingsTable.financeName, financeTitle: companyDocumentSettingsTable.financeTitle })
+        .from(companyDocumentSettingsTable)
+        .where(eq(companyDocumentSettingsTable.documentType, "invoice"))
+        .limit(1)
+        .catch(() => [null]),
     ]);
+
+    // Prioritas: docSettings.kwitansi → docSettings.invoice → docTemplates.kwitansi → fallback
+    // (docSettings adalah yang diatur user di admin portal Document Settings)
+    const financeName =
+      kwitansiDocSetting?.financeName?.trim() ||
+      invoiceDocSetting?.financeName?.trim() ||
+      kwitansiTpl?.financeName?.trim() ||
+      "";
+    const financeTitle =
+      (kwitansiDocSetting?.financeName?.trim() ? kwitansiDocSetting?.financeTitle?.trim() : null) ||
+      (invoiceDocSetting?.financeName?.trim() ? invoiceDocSetting?.financeTitle?.trim() : null) ||
+      (kwitansiTpl?.financeName?.trim() ? kwitansiTpl?.financeTitle?.trim() : null) ||
+      "Finance";
+    const financeSignature = kwitansiTpl?.financeSignature ?? null;
 
     res.json({
       orderNumber: booking.orderNumber,
@@ -526,12 +587,15 @@ router.get("/public/kwitansi-data/:orderNumber", async (req, res) => {
       grandTotal: booking.grandTotal != null ? Number(booking.grandTotal) : null,
       status: booking.status,
       confirmedAt: booking.updatedAt ?? booking.createdAt,
-      centerName: (settings as any)?.centerName ?? "Sport Center Jakarta",
+      centerName: (settings as any)?.centerName ?? "Sport Center Bandara Soekarno Hatta",
       centerAddress: (settings as any)?.address ?? "",
       centerPhone: (settings as any)?.phone ?? "",
       bankName: (settings as any)?.bankName ?? "",
       bankAccount: (settings as any)?.bankAccount ?? "",
       bankAccountName: (settings as any)?.bankAccountName ?? "",
+      financeName,
+      financeTitle,
+      financeSignature,
     });
   } catch (err: any) {
     req.log.error({ err }, "Public kwitansi-data error");
