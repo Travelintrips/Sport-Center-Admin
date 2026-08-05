@@ -3,12 +3,8 @@ import crypto from "crypto";
 import { db, paylabsSettingsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
-<<<<<<< HEAD
-import { loadPaylabsConfigFromDb, normalizeOptionalPaylabsStoreId } from "../lib/paylabs";
-=======
-import { loadPaylabsConfigFromDb, normalizePaylabsPublicKey } from "../lib/paylabs";
+import { loadPaylabsConfigFromDb, normalizeOptionalPaylabsStoreId, normalizePaylabsPublicKey } from "../lib/paylabs";
 import { logger } from "../lib/logger";
->>>>>>> 91db56267c9870311e2d7e70ca501ced79d1a747
 
 const router = Router();
 
@@ -172,7 +168,6 @@ router.patch("/admin/paylabs/settings", adminMiddleware, async (req, res) => {
       if (key in req.body) patch[key] = req.body[key];
     }
 
-<<<<<<< HEAD
     // Validate and normalize storeId before saving
     if ("storeId" in patch) {
       const raw = patch.storeId as string | null | undefined;
@@ -189,7 +184,8 @@ router.patch("/admin/paylabs/settings", adminMiddleware, async (req, res) => {
           });
         }
       }
-=======
+    }
+
     // Handle Paylabs public keys separately — normalize PEM + audit log
     // Only update if client sends a non-empty value (empty string = "don't change")
     const adminUser = (req as any).user?.username ?? (req as any).user?.id ?? "unknown_admin";
@@ -219,7 +215,6 @@ router.patch("/admin/paylabs/settings", adminMiddleware, async (req, res) => {
         { admin: adminUser, field: "prodPublicKey", action: "updated", keyLength: normalized.length },
         "[paylabs-settings] Paylabs production public key updated by admin",
       );
->>>>>>> 91db56267c9870311e2d7e70ca501ced79d1a747
     }
 
     const [updated] = await db
