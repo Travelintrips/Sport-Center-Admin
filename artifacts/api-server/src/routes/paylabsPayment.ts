@@ -18,6 +18,7 @@ import { authMiddleware, adminMiddleware } from "../lib/auth";
 import {
   loadPaylabsConfigFromDb,
   getPaylabsConfig,
+  normalizePaylabsPublicKey,
   verifyPaylabsSignature,
   createQris,
   createVa,
@@ -512,30 +513,49 @@ router.post("/paylabs/webhook", async (req, res) => {
   });
 
   const cfg = await loadPaylabsConfigFromDb();
+  // Normalize stored public key — handles literal \n from secret managers / DB storage
+  const normalizedPublicKey = cfg.paylabsPublicKey
+    ? normalizePaylabsPublicKey(cfg.paylabsPublicKey)
+    : "";
 
   // ── Phase 6: signature verification ─────────────────────────────────────────
   const isMockMode = process.env.PAYLABS_MOCK === "true" && process.env.NODE_ENV !== "production";
 
   if (isMockMode) {
-    wlog("signature result", { result: "SKIPPED_MOCK_MODE", isMockMode: true });
-  } else if (cfg.paylabsPublicKey) {
-    const valid = verifyPaylabsSignature(cfg.paylabsPublicKey, timestamp, rawBody, signature);
     wlog("signature result", {
-      hasPublicKey       : true,
-      hasTimestamp       : Boolean(timestamp),
-      hasSignature       : Boolean(signature),
-      partnerIdPresent   : Boolean(partnerId),
-      canonicalEndpoint  : "/api/paylabs/webhook",
-      usesRawBody        : Boolean((req as any).rawBody),
-      rawBodyLength      : rawBody.length,
-      result             : valid ? "VALID" : "INVALID",
+      hasPublicKey      : false,
+      hasSignature      : Boolean(signature),
+      hasTimestamp      : Boolean(timestamp),
+      hasPartnerId      : Boolean(partnerId),
+      verificationResult: "SKIPPED_MOCK_MODE",
+    });
+  } else if (normalizedPublicKey) {
+    const valid = verifyPaylabsSignature(normalizedPublicKey, timestamp, rawBody, signature);
+    const verificationResult = valid ? "VALID" : "INVALID";
+    wlog("signature result", {
+      hasPublicKey      : true,
+      hasSignature      : Boolean(signature),
+      hasTimestamp      : Boolean(timestamp),
+      hasPartnerId      : Boolean(partnerId),
+      verificationResult,
     });
     if (!valid) {
       res.status(200).json({ errCode: "SIGNATURE_INVALID" });
       return;
     }
   } else {
-    wlog("signature result", { result: "SKIPPED_NO_PUBLIC_KEY", hasPublicKey: false });
+    // FAIL CLOSED — no Paylabs public key configured, cannot verify webhook authenticity.
+    // Real Paylabs webhooks must be rejected; only PAYLABS_MOCK=true bypasses this.
+    wlog("signature result", {
+      hasPublicKey      : false,
+      hasSignature      : Boolean(signature),
+      hasTimestamp      : Boolean(timestamp),
+      hasPartnerId      : Boolean(partnerId),
+      verificationResult: "PUBLIC_KEY_NOT_CONFIGURED",
+      result            : "PUBLIC_KEY_NOT_CONFIGURED",
+    });
+    res.status(200).json({ errCode: "CONFIGURATION_ERROR", errMsg: "signature_required" });
+    return;
   }
 
   // ── Phase 4: centralised status mapper ──────────────────────────────────────
