@@ -1,8 +1,11 @@
 import { Router } from "express";
-import { db, usersTable, bookingsTable, companyInvoicesTable, companyInvoiceItemsTable, facilitiesTable, auditLogsTable } from "@workspace/db";
+import { db, usersTable, bookingsTable, companyInvoicesTable, companyInvoiceItemsTable, facilitiesTable, auditLogsTable, corporateBookingDocumentationTable } from "@workspace/db";
 import { eq, and, gte, lt, inArray, isNull, or } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
+import { pushInvoicePaymentAsBankMutation } from "../lib/bizportalSync";
+import { createInvoiceJournalEntry, createPublicInvoiceAccountingEntry } from "../lib/accounting";
+import { logAccountingError } from "../lib/auditLog";
 
 const router = Router();
 
@@ -426,7 +429,28 @@ router.get("/company-invoices/:id", adminMiddleware, async (req, res) => {
     const [company] = await db.select().from(usersTable).where(eq(usersTable.id, inv.companyCustomerId)).limit(1);
     const items = await resolveInvoiceItems(id, inv);
 
-    res.json(mapInvoice(inv, company?.companyName ?? company?.name, items, company));
+    // Ambil dokumentasi corporate untuk setiap booking dalam invoice
+    const bookingIds = items.map((i) => i.bookingId).filter(Boolean) as number[];
+    let docsByBookingId: Record<number, any[]> = {};
+    if (bookingIds.length > 0) {
+      const allDocs = await db
+        .select()
+        .from(corporateBookingDocumentationTable)
+        .where(inArray(corporateBookingDocumentationTable.bookingId, bookingIds));
+      for (const doc of allDocs) {
+        if (!docsByBookingId[doc.bookingId]) docsByBookingId[doc.bookingId] = [];
+        docsByBookingId[doc.bookingId].push(doc);
+      }
+    }
+
+    const invoiceData = mapInvoice(inv, company?.companyName ?? company?.name, items, company);
+    // Sisipkan dokumentasi ke setiap item
+    const itemsWithDocs = invoiceData.items.map((item) => ({
+      ...item,
+      documentation: docsByBookingId[item.bookingId] ?? [],
+    }));
+
+    res.json({ ...invoiceData, items: itemsWithDocs });
   } catch (err) {
     req.log.error({ err }, "Get company invoice error");
     res.status(500).json({ error: "Internal server error" });
@@ -509,6 +533,22 @@ router.patch("/company-invoices/:id", adminMiddleware, async (req, res) => {
 
     const [company] = await db.select().from(usersTable).where(eq(usersTable.id, updated.companyCustomerId)).limit(1);
     const items = await db.select().from(companyInvoiceItemsTable).where(eq(companyInvoiceItemsTable.invoiceId, id));
+
+    if (status === "paid" && inv.status !== "paid") {
+      const paidDate = updated.paidAt ?? new Date();
+      const today = paidDate.toISOString().split("T")[0]!;
+      // totalAmount = harga inklusif PPN. Fungsi journal menerima DPP (sebelum PPN).
+      // Gunakan calcTaxBreakdown (sama seperti mapInvoice) untuk ekstrak DPP & ppnAmount.
+      const { dpp: invDpp, ppnAmount: invPpn } = calcTaxBreakdown(Number(updated.totalAmount));
+      pushInvoicePaymentAsBankMutation(updated, company?.companyName ?? company?.name, paidDate).catch(() => {});
+      createInvoiceJournalEntry(updated.id, updated.invoiceNumber, invDpp, invPpn, today).catch((err) =>
+        logAccountingError({ operation: "createInvoiceJournalEntry", orderNumber: updated.invoiceNumber, bookingId: updated.id, error: err }),
+      );
+      createPublicInvoiceAccountingEntry(updated.id, updated.invoiceNumber, invDpp, invPpn, today).catch((err) =>
+        logAccountingError({ operation: "createPublicInvoiceAccountingEntry", orderNumber: updated.invoiceNumber, bookingId: updated.id, error: err }),
+      );
+    }
+
     res.json(mapInvoice(updated, company?.companyName ?? company?.name, items, company));
   } catch (err) {
     req.log.error({ err }, "Update company invoice error");

@@ -64,7 +64,7 @@ router.post("/bookings/:id/cancel", async (req, res) => {
       reason: reason || "Tidak ada alasan",
     });
 
-    syncStatusToBizportal(booking.orderNumber, "cancelled").catch(() => {});
+    syncStatusToBizportal(booking.orderNumber, "cancelled", null, null, booking).catch(() => {});
 
     const userInfo = getUserFromReq(req);
     const clientInfo = getClientInfo(req);

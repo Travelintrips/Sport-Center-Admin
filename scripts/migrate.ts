@@ -794,5 +794,43 @@ ALTER TABLE sport_center.sport_expenses
   ADD COLUMN IF NOT EXISTS vendor_id INTEGER
     REFERENCES sport_center.sport_vendors(id)
     ON DELETE SET NULL;
+
+-- ============================================================
+-- wa_notif_logs: log pengiriman notifikasi WhatsApp per booking
+-- ============================================================
+CREATE TABLE IF NOT EXISTS sport_center.wa_notif_logs (
+  id              SERIAL PRIMARY KEY,
+  booking_id      INTEGER,
+  order_number    TEXT,
+  event           TEXT,
+  recipient_phone TEXT NOT NULL,
+  message_preview TEXT,
+  status          TEXT NOT NULL DEFAULT 'sent',
+  error_message   TEXT,
+  sent_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- ============================================================
+-- gym_checkins: rekam check-in harian member gym
+-- ============================================================
+CREATE TABLE IF NOT EXISTS sport_center.gym_checkins (
+  id              SERIAL PRIMARY KEY,
+  membership_id   INTEGER NOT NULL REFERENCES sport_center.sport_memberships(id) ON DELETE CASCADE,
+  checkin_date    TEXT NOT NULL,
+  checked_in_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  notes           TEXT,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS gym_checkins_date_idx       ON sport_center.gym_checkins(checkin_date);
+CREATE INDEX IF NOT EXISTS gym_checkins_membership_idx ON sport_center.gym_checkins(membership_id);
+
+-- ============================================================
+-- Event booking: booking_type + event_discount_amount
+-- ============================================================
+ALTER TABLE sport_center.sport_bookings
+  ADD COLUMN IF NOT EXISTS booking_type TEXT NOT NULL DEFAULT 'regular';
+
+ALTER TABLE sport_center.sport_bookings
+  ADD COLUMN IF NOT EXISTS event_discount_amount NUMERIC(12,2);
 `;
 
