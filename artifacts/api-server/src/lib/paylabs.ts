@@ -187,11 +187,19 @@ function normaliseKey(key: string, type: "PUBLIC" | "PRIVATE"): string {
 export function normalizePaylabsPublicKey(raw: string): string {
   const trimmed = raw.trim();
   if (!trimmed) return "";
+  let pem: string;
   try {
-    return normaliseKey(trimmed, "PUBLIC");
+    pem = normaliseKey(trimmed, "PUBLIC");
   } catch {
-    return ""; // reject malformed input
+    return ""; // reject structurally malformed input
   }
+  // Validate the resulting PEM is a parseable public key
+  try {
+    crypto.createPublicKey({ key: pem, format: "pem" });
+  } catch {
+    return ""; // reject cryptographically invalid key
+  }
+  return pem;
 }
 
 /**

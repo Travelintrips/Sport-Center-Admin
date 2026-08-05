@@ -193,26 +193,26 @@ router.patch("/admin/paylabs/settings", adminMiddleware, async (req, res) => {
     if ("sandboxPublicKey" in req.body && req.body.sandboxPublicKey !== "") {
       const normalized = normalizePaylabsPublicKey(String(req.body.sandboxPublicKey));
       if (!normalized) {
-        res.status(400).json({ error: "Invalid Paylabs sandbox public key — must be valid PEM or base64" });
+        res.status(422).json({ error: "Paylabs sandbox public key tidak valid — harus PEM lengkap atau base64 dari dashboard Paylabs" });
         return;
       }
       patch.sandboxPublicKey = normalized;
       logger.info(
-        { admin: adminUser, field: "sandboxPublicKey", action: "updated", keyLength: normalized.length },
-        "[paylabs-settings] Paylabs sandbox public key updated by admin",
+        { admin: adminUser, field: "sandboxPublicKey", action: "pending_write", received: true, normalizedLength: normalized.length },
+        "[paylabs-settings] sandbox public key pending DB write",
       );
     }
 
     if ("prodPublicKey" in req.body && req.body.prodPublicKey !== "") {
       const normalized = normalizePaylabsPublicKey(String(req.body.prodPublicKey));
       if (!normalized) {
-        res.status(400).json({ error: "Invalid Paylabs production public key — must be valid PEM or base64" });
+        res.status(422).json({ error: "Paylabs production public key tidak valid — harus PEM lengkap atau base64 dari dashboard Paylabs" });
         return;
       }
       patch.prodPublicKey = normalized;
       logger.info(
-        { admin: adminUser, field: "prodPublicKey", action: "updated", keyLength: normalized.length },
-        "[paylabs-settings] Paylabs production public key updated by admin",
+        { admin: adminUser, field: "prodPublicKey", action: "pending_write", received: true, normalizedLength: normalized.length },
+        "[paylabs-settings] production public key pending DB write",
       );
     }
 
@@ -221,6 +221,30 @@ router.patch("/admin/paylabs/settings", adminMiddleware, async (req, res) => {
       .set({ ...patch, updatedAt: new Date() })
       .where(eq(paylabsSettingsTable.id, current.id))
       .returning();
+
+    if (!updated) {
+      req.log.error({ rowId: current.id }, "PATCH paylabs settings: DB update returned no rows");
+      res.status(500).json({ error: "Gagal menyimpan — settings row tidak ditemukan" });
+      return;
+    }
+
+    // Log confirmation of DB write for public keys (no key values logged)
+    if ("sandboxPublicKey" in patch) {
+      const storedLength = updated.sandboxPublicKey?.trim().length ?? 0;
+      const configuredAfterSave = storedLength > 0;
+      logger.info(
+        { admin: adminUser, field: "sandboxPublicKey", stored: configuredAfterSave, storedLength, configuredAfterSave },
+        "[paylabs-settings] sandbox public key update",
+      );
+    }
+    if ("prodPublicKey" in patch) {
+      const storedLength = updated.prodPublicKey?.trim().length ?? 0;
+      const configuredAfterSave = storedLength > 0;
+      logger.info(
+        { admin: adminUser, field: "prodPublicKey", stored: configuredAfterSave, storedLength, configuredAfterSave },
+        "[paylabs-settings] production public key update",
+      );
+    }
 
     // Return safe response — redact public keys, send only configured status
     const safeResponse = {

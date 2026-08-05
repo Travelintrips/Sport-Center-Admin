@@ -798,17 +798,22 @@ export default function PaylabsGateway() {
         throw new Error(`HTTP ${res.status}: ${errBody?.error ?? "unknown"}`);
       }
 
-      const saved = await res.json().catch(() => ({}));
-
-      // Update configured flags from response; clear pending new key inputs
-      setSandboxPaylabsPubKeyConfigured(
-        Boolean(saved.sandboxPublicKeyConfigured),
-      );
-      setProdPaylabsPubKeyConfigured(Boolean(saved.prodPublicKeyConfigured));
+      // Clear local key inputs immediately after PATCH succeeds
       setNewSandboxPaylabsPubKey("");
       setNewProdPaylabsPubKey("");
       setShowSandboxPubKeyInput(false);
       setShowProdPubKeyInput(false);
+
+      // Refetch from GET so badge always reflects actual DB state (not just PATCH response)
+      const refetch = await fetch("/api/admin/paylabs/settings", {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+
+      if (refetch) {
+        setSandboxPaylabsPubKeyConfigured(Boolean(refetch.sandboxPublicKeyConfigured));
+        setProdPaylabsPubKeyConfigured(Boolean(refetch.prodPublicKeyConfigured));
+        setStoreId(refetch.storeId ?? "");
+      }
 
       toast({
         title: "Pengaturan disimpan",
