@@ -99,7 +99,7 @@ export default function WaProofUpload() {
               </p>
             </div>
             <a
-              href={`/wa/status/${orderNumber}`}
+              href={`/status/${orderNumber}`}
               className="block w-full bg-orange-500 hover:bg-orange-600 text-white font-bold py-3 px-4 rounded-lg text-sm transition-colors">
               🔍 Cek Status Booking
             </a>

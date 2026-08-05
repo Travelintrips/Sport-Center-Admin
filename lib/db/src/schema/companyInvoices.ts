@@ -4,7 +4,7 @@ import { z } from "zod/v4";
 import { usersTable } from "./users";
 import { scSchema } from "./_schema";
 
-export const invoiceStatusEnum = scSchema.enum("invoice_status", ["unpaid", "partial_paid", "paid"]);
+export const invoiceStatusEnum = scSchema.enum("invoice_status", ["unpaid", "partial_paid", "paid", "waiting_verification"]);
 
 export const companyInvoicesTable = scSchema.table("company_invoices", {
   id: serial("id").primaryKey(),
