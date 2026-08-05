@@ -559,3 +559,32 @@ export function resolvePaymentMethod(method: string): {
   if (EWALLET_CODES[m]) return { type: "ewallet", code: EWALLET_CODES[m] };
   return { type: "unknown" };
 }
+
+// ─── Centralised status mapper (Phase 4) ─────────────────────────────────────
+
+/**
+ * Map raw Paylabs status string to our internal enum.
+ * Paylabs numeric codes (v4.8.1):
+ *   01 → PENDING   02 → SUCCESS   09 → FAILED
+ * Never silently map an unknown status to SUCCESS.
+ */
+export type PaylabsInternalStatus = "PENDING" | "SUCCESS" | "FAILED" | "UNKNOWN";
+
+export function mapPaylabsStatus(rawStatus: string): PaylabsInternalStatus {
+  switch (rawStatus) {
+    case "01": return "PENDING";
+    case "02": return "SUCCESS";
+    case "09": return "FAILED";
+    // String aliases that some Paylabs sandbox responses use
+    case "SUCCESS":
+    case "PAID":
+    case "SUCCEEDED": return "SUCCESS";
+    case "FAILED":
+    case "CANCELLED":
+    case "EXPIRED":  return "FAILED";
+    case "PENDING":
+    case "CREATED":
+    case "WAITING":  return "PENDING";
+    default:         return "UNKNOWN";
+  }
+}
