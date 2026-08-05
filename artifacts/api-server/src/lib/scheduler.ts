@@ -1,5 +1,5 @@
 import { db, bookingsTable, facilitiesTable, bankReconciliationMatchesTable, waActionTokensTable, gymMembershipsTable } from "@workspace/db";
-import { eq, and, lt, lte, isNotNull, isNull, inArray, sql } from "drizzle-orm";
+import { eq, and, lt, lte, isNotNull, isNull, inArray, sql, or } from "drizzle-orm";
 import { notifyBookingExpired, notifyReminderH1, notifyWaDayReminder, notifyWaStaffCheckin, notifyAuditCritical, notifyPaymentReminder } from "./notifications";
 import { createWaToken } from "./waTokens";
 import { reverseTaxTransaction } from "./tax";
@@ -58,16 +58,26 @@ async function expireOverdueMemberships(): Promise<void> {
 async function expireOverdueBookings(): Promise<void> {
   try {
     const now = new Date();
-    // Expire booking yang belum bayar (pending_payment) dan sudah lewat 7 hari
-    // setelah tanggal bermain. booking_date adalah text "YYYY-MM-DD" sehingga
-    // di-cast ke date lalu ditambah 7 hari sebelum dibandingkan dengan now.
+    // Expire booking yang:
+    // (a) pending_payment atau waiting_confirmation dan 7 hari setelah tanggal main sudah lewat, ATAU
+    // (b) pending_payment dan paymentDeadline sudah lewat (deadline pembayaran singkat)
     const overdue = await db
       .select()
       .from(bookingsTable)
       .where(
-        and(
-          eq(bookingsTable.status, "pending_payment"),
-          lt(sql`(${bookingsTable.bookingDate}::date + interval '7 days')`, now)
+        or(
+          and(
+            or(
+              eq(bookingsTable.status, "pending_payment"),
+              eq(bookingsTable.status, "waiting_confirmation"),
+            ),
+            lt(sql`(${bookingsTable.bookingDate}::date + interval '7 days')`, now),
+          ),
+          and(
+            eq(bookingsTable.status, "pending_payment"),
+            isNotNull(bookingsTable.paymentDeadline),
+            lt(bookingsTable.paymentDeadline, now),
+          ),
         )
       );
 

@@ -54,17 +54,23 @@ router.post("/bookings/track-payer-selection", async (req, res) => {
 });
 
 async function generateOrderNumber(): Promise<string> {
-  const rows = await db.select({ orderNumber: bookingsTable.orderNumber }).from(bookingsTable);
-  let maxNum = 0;
-  for (const row of rows) {
-    const match = row.orderNumber.match(/^SC-(\d+)$/);
-    if (match) {
-      const n = parseInt(match[1], 10);
-      if (n > maxNum) maxNum = n;
+  // Advisory lock (bigint namespace) serializes order number generation across concurrent requests
+  await db.execute(sql`SELECT pg_advisory_lock(42001)`);
+  try {
+    const rows = await db.select({ orderNumber: bookingsTable.orderNumber }).from(bookingsTable);
+    let maxNum = 0;
+    for (const row of rows) {
+      const match = row.orderNumber.match(/^SC-(\d+)$/);
+      if (match) {
+        const n = parseInt(match[1], 10);
+        if (n > maxNum) maxNum = n;
+      }
     }
+    const next = maxNum + 1;
+    return `SC-${String(next).padStart(4, "0")}`;
+  } finally {
+    await db.execute(sql`SELECT pg_advisory_unlock(42001)`);
   }
-  const next = maxNum + 1;
-  return `SC-${String(next).padStart(4, "0")}`;
 }
 
 function addHours(time: string, hours: number): string {
@@ -201,7 +207,12 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
         facilityCategory: facility?.category ?? "",
         payment: payment ? { ...payment, amount: Number(payment.amount) } : null,
         payments: bPayments.map((p) => ({ ...p, amount: Number(p.amount) })),
-        remainingAmount: Math.max(0, grandTotalNum - dpAmt),
+        remainingAmount: (() => {
+          const confirmedDp = bPayments
+            .filter((p) => p.paymentType === "dp" && p.status === "confirmed")
+            .reduce((sum, p) => sum + Number(p.amount), 0);
+          return Math.max(0, grandTotalNum - (confirmedDp > 0 ? confirmedDp : dpAmt));
+        })(),
       };
     });
 
@@ -225,13 +236,18 @@ export function normalizePhone(raw: string): string {
 }
 
 async function generateCustomerCode(): Promise<string> {
-  const rows = await db.select({ code: usersTable.customerCode }).from(usersTable);
-  let max = 0;
-  for (const row of rows) {
-    const m = (row.code ?? "").match(/^C(\d+)$/);
-    if (m) { const n = parseInt(m[1]); if (n > max) max = n; }
+  await db.execute(sql`SELECT pg_advisory_lock(42002)`);
+  try {
+    const rows = await db.select({ code: usersTable.customerCode }).from(usersTable);
+    let max = 0;
+    for (const row of rows) {
+      const m = (row.code ?? "").match(/^C(\d+)$/);
+      if (m) { const n = parseInt(m[1]); if (n > max) max = n; }
+    }
+    return `C${String(max + 1).padStart(5, "0")}`;
+  } finally {
+    await db.execute(sql`SELECT pg_advisory_unlock(42002)`);
   }
-  return `C${String(max + 1).padStart(5, "0")}`;
 }
 
 function getTodayWIB(): string {
@@ -371,6 +387,8 @@ router.post("/bookings", async (req, res) => {
     }
 
     const isWalkIn = facility.bookingMode === "walk_in";
+    // Advisory lock state: set in conflict check, released after INSERT or on early exit
+    let slotLockKey: { fId: number; dInt: number } | null = null;
 
     if (isWalkIn) {
       // Gym walk-in: no time slot required, flat rate per visit
@@ -410,10 +428,14 @@ router.post("/bookings", async (req, res) => {
         return;
       }
 
-      // Conflict check
+      // Conflict check — advisory lock 2-param per (facilityId, date) cegah double booking
       const endTime = addHours(startTime, durationHours);
+      const _slotFId = Number(facilityId);
+      const _slotDInt = parseInt(bookingDate.replace(/-/g, ""), 10);
+      await db.execute(sql`SELECT pg_advisory_lock(${_slotFId}, ${_slotDInt})`);
+      slotLockKey = { fId: _slotFId, dInt: _slotDInt };
       const conflicting = await db.select().from(bookingsTable).where(
-        and(eq(bookingsTable.facilityId, Number(facilityId)), eq(bookingsTable.bookingDate, bookingDate))
+        and(eq(bookingsTable.facilityId, _slotFId), eq(bookingsTable.bookingDate, bookingDate))
       );
       const active = conflicting.filter((b) => !INACTIVE_STATUSES.includes(b.status));
       const conflict = active.some((b) => {
@@ -424,6 +446,8 @@ router.post("/bookings", async (req, res) => {
         return sMin < bEnd && eMin > bStart;
       });
       if (conflict) {
+        await db.execute(sql`SELECT pg_advisory_unlock(${slotLockKey.fId}, ${slotLockKey.dInt})`);
+        slotLockKey = null;
         res.status(409).json({ error: "Slot waktu ini sudah dipesan. Pilih jam lain." });
         return;
       }
@@ -557,6 +581,12 @@ router.post("/bookings", async (req, res) => {
       grandTotal: taxCalc.taxAmount > 0 ? String(taxCalc.grandTotal) : null,
       vendorId: req.body.vendorId ? Number(req.body.vendorId) : null,
     }).returning();
+
+    // Release slot advisory lock setelah INSERT berhasil
+    if (slotLockKey) {
+      await db.execute(sql`SELECT pg_advisory_unlock(${slotLockKey.fId}, ${slotLockKey.dInt})`).catch(() => {});
+      slotLockKey = null;
+    }
 
     if (promoCode && !isAp) {
       await db.update(promosTable)
@@ -745,15 +775,8 @@ router.post("/bookings", async (req, res) => {
       } catch {}
     }
 
-    // ─── Kirim rekap pemakaian Sport Center ke grup admin ──────────────────
-    (async () => {
-      try {
-        await sendRekapPemakaianToAdmin(bookingDate);
-        console.log("[SPORT CENTER REKAP] Rekap pemakaian berhasil dikirim");
-      } catch (err) {
-        console.error("[SPORT CENTER REKAP] Gagal kirim rekap pemakaian", err);
-      }
-    })();
+    // ─── Kirim rekap hanya jika booking hari ini (hindari spam untuk advance booking) ──
+    triggerRekapIfToday(bookingDate);
 
     res.status(201).json({
       ...booking,
@@ -772,6 +795,10 @@ router.post("/bookings", async (req, res) => {
       customerReused,
     });
   } catch (err) {
+    // Pastikan advisory lock dilepas jika terjadi error setelah lock diacquire
+    if (slotLockKey) {
+      await db.execute(sql`SELECT pg_advisory_unlock(${slotLockKey.fId}, ${slotLockKey.dInt})`).catch(() => {});
+    }
     req.log.error({ err }, "Create booking error");
     res.status(500).json({ error: "Internal server error" });
   }
@@ -979,8 +1006,13 @@ router.post("/bookings/recurring", async (req, res) => {
     const created: any[] = [];
     const skipped: string[] = [];
     for (const bookingDate of dates) {
-      const conflict = await checkSlotConflict(Number(facilityId), bookingDate, startTime, endTime);
+      // Advisory lock per (facilityId, date) cegah double booking pada recurring
+      const recFId = Number(facilityId);
+      const recDInt = parseInt(bookingDate.replace(/-/g, ""), 10);
+      await db.execute(sql`SELECT pg_advisory_lock(${recFId}, ${recDInt})`);
+      const conflict = await checkSlotConflict(recFId, bookingDate, startTime, endTime);
       if (conflict) {
+        await db.execute(sql`SELECT pg_advisory_unlock(${recFId}, ${recDInt})`);
         skipped.push(bookingDate);
         continue;
       }
@@ -1025,6 +1057,8 @@ router.post("/bookings/recurring", async (req, res) => {
           status: "confirmed",
         } : {}),
       }).returning();
+      // Release advisory lock untuk tanggal ini setelah INSERT berhasil
+      await db.execute(sql`SELECT pg_advisory_unlock(${recFId}, ${recDInt})`).catch(() => {});
       broadcastAvailabilityChange(Number(facilityId), bookingDate);
       if (taxCalc.taxCode) {
         recordTaxTransaction("booking", booking.id, booking.orderNumber, taxCalc, bookingDate).catch(() => {});

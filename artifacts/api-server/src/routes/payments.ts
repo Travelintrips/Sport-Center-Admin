@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db, paymentsTable, bookingsTable, bookingHistoryTable, facilitiesTable, bookingGroupsTable } from "@workspace/db";
 import { eq, and, ne } from "drizzle-orm";
-import { adminMiddleware } from "../lib/auth";
+import { adminMiddleware, verifyToken } from "../lib/auth";
 import multer from "multer";
 import path from "path";
 import { randomUUID } from "crypto";
@@ -53,7 +53,7 @@ router.post("/payments/proof-upload", upload.single("proof"), async (req, res) =
   }
 });
 
-router.get("/payments", async (req, res) => {
+router.get("/payments", adminMiddleware, async (req, res) => {
   try {
     const { bookingId } = req.query;
     let payments = await db.select().from(paymentsTable);
@@ -73,6 +73,26 @@ router.post("/payments", async (req, res) => {
     const [booking] = await db.select().from(bookingsTable)
       .where(eq(bookingsTable.id, Number(bookingId))).limit(1);
     if (!booking) { res.status(404).json({ error: "Booking not found" }); return; }
+
+    // Validasi status: hanya booking pending_payment yang boleh menerima bukti bayar
+    if (booking.status !== "pending_payment") {
+      res.status(409).json({ error: "Booking tidak dalam status menunggu pembayaran" });
+      return;
+    }
+
+    // Validasi kepemilikan: jika request membawa token, pastikan customer yang mengirim adalah pemilik booking
+    const authHeader = req.headers.authorization;
+    if (authHeader?.startsWith("Bearer ")) {
+      const payload = verifyToken(authHeader.slice(7));
+      if (payload?.userId) {
+        const isOwner = booking.customerId === payload.userId || booking.bookedByUserId === payload.userId;
+        const isAdmin = !!payload.role && payload.role !== "customer";
+        if (!isOwner && !isAdmin) {
+          res.status(403).json({ error: "Tidak diizinkan mengupload bukti untuk booking ini" });
+          return;
+        }
+      }
+    }
 
     const existingPayments = await db.select().from(paymentsTable)
       .where(eq(paymentsTable.bookingId, Number(bookingId)));
@@ -200,7 +220,7 @@ router.post("/payments", async (req, res) => {
         if (hasPendingPayment.length === 0) {
           await db.insert(paymentsTable).values({
             bookingId: sib.id,
-            amount: String(sib.totalPrice),
+            amount: String(sib.grandTotal ?? sib.totalPrice),
             proofUrl,
             notes: `[Grup ${booking.groupRef}] ${notes || ""}`.trim(),
             paymentType: paymentType as "dp" | "pelunasan" | "full_payment",
@@ -292,6 +312,7 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
       note: string,
       proofUrl?: string | null,
       paidAt?: Date | null,
+      extraFields?: Record<string, unknown>,
     ) => {
       if (!booking?.groupRef) return;
       const siblings = await db.select().from(bookingsTable).where(
@@ -300,7 +321,7 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
       for (const sib of siblings) {
         const sibPrev = sib.status;
         await db.update(bookingsTable)
-          .set({ status: targetStatus as any, updatedAt: new Date() })
+          .set({ status: targetStatus as any, updatedAt: new Date(), ...(extraFields ?? {}) })
           .where(eq(bookingsTable.id, sib.id));
         await db.insert(bookingHistoryTable).values({
           bookingId: sib.id,
@@ -339,7 +360,7 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
           // Sync status ke BizPortal — booking sudah DP, menunggu pelunasan
           syncStatusToBizportal(booking.orderNumber, "pending_payment", payment.proofUrl).catch(() => {});
 
-          await propagateGroupStatus("pending_payment", "DP dikonfirmasi oleh admin, menunggu pelunasan", null, null);
+          await propagateGroupStatus("pending_payment", "DP dikonfirmasi oleh admin, menunggu pelunasan", null, null, { isDpPaid: true });
         }
 
         await logAudit({
@@ -525,6 +546,9 @@ router.delete("/payments/:id/proof", adminMiddleware, async (req, res) => {
           and(eq(bookingsTable.groupRef, booking.groupRef), ne(bookingsTable.id, booking.id))
         );
         for (const sib of siblings) {
+          // Hapus payment record pending sibling yang dibuat saat upload grup
+          await db.delete(paymentsTable)
+            .where(and(eq(paymentsTable.bookingId, sib.id), eq(paymentsTable.status, "pending")));
           if (sib.status === "waiting_confirmation") {
             await db.update(bookingsTable)
               .set({ status: "pending_payment" })
