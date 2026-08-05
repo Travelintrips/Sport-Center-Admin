@@ -1028,8 +1028,9 @@ router.patch("/bookings/:id/dp", async (req, res) => {
       return;
     }
 
+    // Hanya simpan nominal DP — isDpPaid baru di-set true saat pembayaran DP dikonfirmasi admin
     await db.update(bookingsTable)
-      .set({ downPayment: String(dp), isDpPaid: true })
+      .set({ downPayment: String(dp), isDpPaid: false })
       .where(eq(bookingsTable.id, id));
 
     const [facility] = await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, booking.facilityId)).limit(1);

@@ -74,12 +74,14 @@ router.post("/payments", async (req, res) => {
       .where(eq(paymentsTable.bookingId, Number(bookingId)));
 
     // Auto-detect payment_type jika tidak dikirim dari client
+    // Gunakan downPayment > 0 (bukan isDpPaid) untuk cek apakah booking pakai skema DP
+    // isDpPaid baru true setelah admin konfirmasi DP — tidak bisa dipakai untuk detect di sini
     if (!paymentType) {
-      if (booking.isDpPaid && Number(booking.downPayment) > 0) {
-        const hasDpActive = existingPayments.some(
-          (p) => p.paymentType === "dp" && (p.status === "pending" || p.status === "confirmed"),
+      if (Number(booking.downPayment) > 0) {
+        const hasDpConfirmed = existingPayments.some(
+          (p) => p.paymentType === "dp" && p.status === "confirmed",
         );
-        paymentType = hasDpActive ? "pelunasan" : "dp";
+        paymentType = hasDpConfirmed ? "pelunasan" : "dp";
       } else {
         paymentType = "full_payment";
       }
@@ -202,10 +204,10 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
       const isDP = payment.paymentType === "dp";
 
       if (isDP) {
-        // DP dikonfirmasi — booking kembali ke pending_payment untuk upload pelunasan
+        // DP dikonfirmasi — set isDpPaid=true, booking kembali ke pending_payment untuk upload pelunasan
         const prevStatus = booking?.status ?? "waiting_confirmation";
         await db.update(bookingsTable)
-          .set({ status: "pending_payment", updatedAt: new Date() })
+          .set({ status: "pending_payment", isDpPaid: true, updatedAt: new Date() })
           .where(eq(bookingsTable.id, payment.bookingId));
 
         if (booking) {
@@ -216,6 +218,8 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
             changedByName: userInfo.userName || "admin",
             note: "DP dikonfirmasi oleh admin, menunggu pelunasan",
           });
+          // Sync status ke BizPortal — booking sudah DP, menunggu pelunasan
+          syncStatusToBizportal(booking.orderNumber, "pending_payment", payment.proofUrl).catch(() => {});
         }
 
         await logAudit({
