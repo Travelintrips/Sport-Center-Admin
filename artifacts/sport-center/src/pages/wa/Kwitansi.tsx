@@ -25,6 +25,7 @@ interface KwitansiData {
   bankAccountName: string;
   financeName: string;
   financeTitle: string;
+  financeSignature: string | null;
 }
 
 function formatIDR(n: number) {
@@ -189,14 +190,24 @@ export default function WaKwitansi() {
             </div>
           </div>
 
-          {/* Signature block */}
+          {/* Signature block — sama seperti admin portal */}
           <div className="mt-5 flex justify-end">
-            <div className="text-center min-w-[140px]">
-              <p className="text-xs text-gray-500 mb-1">{formatDate(data.confirmedAt?.split("T")[0] || "")}</p>
-              {/* Signature line */}
-              <div className="h-12 border-b-2 border-gray-300 mx-2 mb-1" />
-              <p className="font-black text-sm text-gray-800">{data.financeName || data.centerName}</p>
-              <p className="text-xs text-gray-500">{data.financeTitle || "Finance Manager"}</p>
+            <div className="text-right min-w-[160px]">
+              <p className="text-xs text-gray-500 mb-2">Hormat kami,</p>
+              <div className="flex flex-col items-center">
+                {data.financeSignature ? (
+                  <img
+                    src={data.financeSignature}
+                    alt="Tanda tangan"
+                    className="h-14 w-auto object-contain mb-1"
+                  />
+                ) : (
+                  <div className="h-14" />
+                )}
+                <div className="w-full border-b-2 border-gray-400 mb-1" />
+                <p className="font-black text-sm text-gray-800">{data.financeName || data.centerName}</p>
+                <p className="text-xs text-gray-500">{data.financeTitle || "Finance"}</p>
+              </div>
             </div>
           </div>
 
