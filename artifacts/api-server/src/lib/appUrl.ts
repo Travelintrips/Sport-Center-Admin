@@ -77,7 +77,7 @@ export async function getPaymentCallbackUrl(): Promise<string> {
     //    di dev, karena keduanya kemungkinan menunjuk ke URL produksi.
     _cachedPaymentUrl = process.env.REPLIT_DEV_DOMAIN
       ? `https://${process.env.REPLIT_DEV_DOMAIN}`
-      : (process.env.APP_URL ?? "").replace(/\/$/, "");
+      : "";
     _paymentCacheExpiry = now + CACHE_TTL_MS;
     return _cachedPaymentUrl;
   }
@@ -107,7 +107,7 @@ export async function getPaymentCallbackUrl(): Promise<string> {
       : "";
 
   _paymentCacheExpiry = now + CACHE_TTL_MS;
-  return _cachedPaymentUrl;
+  return _cachedPaymentUrl!;
 }
 
 export function invalidateBaseUrlCache(): void {

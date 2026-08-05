@@ -81,6 +81,7 @@ interface FinalizePaymentOptions {
   paylabsTradeNo:  string;
   providerStatus:  string;   // raw status string from Paylabs
   source:          "webhook" | "paylabs_manual_reconciliation";
+  requestId?:      string;
   reason?:         string;
   adminId?:        number;
   rawNotification?: Record<string, unknown>;
@@ -89,6 +90,7 @@ interface FinalizePaymentOptions {
 interface FinalizePaymentResult {
   outcome: "confirmed" | "already_confirmed" | "transaction_not_found" | "booking_not_found" | "error";
   bookingId?:    number;
+  transactionId?: number;
   orderNumber?:  string;
   previousPaymentStatus?: string;
   previousBookingStatus?: string;
@@ -98,123 +100,139 @@ interface FinalizePaymentResult {
 async function finalizePayment(opts: FinalizePaymentOptions): Promise<FinalizePaymentResult> {
   const {
     merchantTradeNo, paylabsTradeNo, providerStatus,
-    source, reason, adminId, rawNotification,
+    source, requestId, reason, adminId, rawNotification,
   } = opts;
 
   try {
-    // ── Step 1: Read current paylabs_transaction ────────────────────────────
-    const txRows = await db.execute(sql.raw(`
-      SELECT id, booking_id, order_number, status, amount
-      FROM sport_center.paylabs_transactions
-      WHERE merchant_trade_no = '${merchantTradeNo.replace(/'/g, "''")}'
-      LIMIT 1
-    `));
-    const txRow = (txRows as any).rows?.[0] ?? (txRows as any)[0];
+    return await db.transaction(async (tx: any) => {
+      // Exact merchantTradeNo lookup is the only entry point into the relation.
+      const txRows = await tx.execute(sql`
+        SELECT id, booking_id, order_number, status, amount
+        FROM sport_center.paylabs_transactions
+        WHERE merchant_trade_no = ${merchantTradeNo}
+        LIMIT 1
+        FOR UPDATE
+      `);
+      const txRow = (txRows as any).rows?.[0] ?? (txRows as any)[0];
 
-    if (!txRow) {
-      return { outcome: "transaction_not_found" };
-    }
+      if (!txRow) {
+        logger.warn(
+          { merchantTradeNo, booking_id: null, transaction_id: null, requestId },
+          "[paylabs] transaction not found",
+        );
+        return { outcome: "transaction_not_found" as const };
+      }
 
-    const previousPaymentStatus = String(txRow.status ?? "");
+      const transactionId = Number(txRow.id);
+      const bookingId = Number(txRow.booking_id);
+      const previousPaymentStatus = String(txRow.status ?? "");
 
-    // ── Step 2: Idempotency guard ───────────────────────────────────────────
-    if (previousPaymentStatus === "SUCCESS") {
+      logger.info(
+        { merchantTradeNo, booking_id: bookingId, transaction_id: transactionId, requestId },
+        "[paylabs] transaction found",
+      );
+
+      if (!bookingId) {
+        throw new Error(`Payment transaction ${transactionId} has no booking_id`);
+      }
+
+      const [booking] = await tx
+        .select()
+        .from(bookingsTable)
+        .where(eq(bookingsTable.id, bookingId))
+        .limit(1);
+
+      if (!booking) {
+        throw new Error(`Booking ${bookingId} not found for payment transaction ${transactionId}`);
+      }
+
+      logger.info(
+        { merchantTradeNo, booking_id: bookingId, transaction_id: transactionId, requestId },
+        "[paylabs] booking found",
+      );
+
+      if (previousPaymentStatus === "SUCCESS") {
+        return {
+          outcome: "already_confirmed" as const,
+          bookingId,
+          transactionId,
+          orderNumber: String(txRow.order_number),
+          previousPaymentStatus,
+          previousBookingStatus: String(booking.status ?? ""),
+        };
+      }
+
+      const rawNotificationJson = rawNotification ? JSON.stringify(rawNotification) : null;
+      await tx.execute(sql`
+        UPDATE sport_center.paylabs_transactions
+        SET status           = 'SUCCESS',
+            provider_status  = ${providerStatus},
+            paylabs_trade_no = ${paylabsTradeNo},
+            raw_notification = ${rawNotificationJson}::jsonb,
+            updated_at       = NOW()
+        WHERE id = ${transactionId}
+          AND status != 'SUCCESS'
+      `);
+
+      const previousBookingStatus = String(booking.status ?? "");
+      if (previousBookingStatus !== "confirmed") {
+        await tx
+          .update(bookingsTable)
+          .set({ status: "confirmed", updatedAt: new Date() })
+          .where(eq(bookingsTable.id, bookingId));
+      }
+
+      logger.info(
+        { merchantTradeNo, booking_id: bookingId, transaction_id: transactionId, requestId },
+        "[paylabs] booking confirmed",
+      );
+
+      const amountPaid = Number(txRow.amount ?? booking.grandTotal ?? booking.totalPrice);
+      await tx.insert(paymentsTable).values({
+        bookingId,
+        amount     : String(amountPaid),
+        proofUrl   : `paylabs:${paylabsTradeNo}`,
+        notes      : `Auto-confirmed via Paylabs ${source} (${merchantTradeNo}) | reason: ${reason ?? "payment_notification"}`,
+        status     : "confirmed",
+        paymentType: "full_payment",
+      } as any).onConflictDoNothing();
+
+      const auditNote = [
+        `Paylabs payment confirmed.`,
+        `source=${source}`,
+        `merchantTradeNo=${merchantTradeNo}`,
+        `platformTradeNo=${paylabsTradeNo}`,
+        `prevPaymentStatus=${previousPaymentStatus}`,
+        `prevBookingStatus=${previousBookingStatus}`,
+        reason  ? `reason=${reason}`   : "",
+        adminId ? `adminId=${adminId}` : "",
+      ].filter(Boolean).join(" | ");
+
+      await tx.insert(bookingHistoryTable).values({
+        bookingId,
+        fromStatus   : previousBookingStatus || null,
+        toStatus     : "confirmed",
+        changedBy    : source === "paylabs_manual_reconciliation" && adminId ? adminId : null,
+        changedByName: source === "paylabs_manual_reconciliation"
+          ? `admin:${adminId ?? "system"}`
+          : "paylabs-webhook",
+        note: auditNote,
+      } as any);
+
+      logger.info(
+        { merchantTradeNo, booking_id: bookingId, transaction_id: transactionId, requestId },
+        "[paylabs] commit success",
+      );
+
       return {
-        outcome: "already_confirmed",
-        bookingId:            Number(txRow.booking_id),
-        orderNumber:          String(txRow.order_number),
+        outcome: "confirmed" as const,
+        bookingId,
+        transactionId,
+        orderNumber: String(booking.orderNumber),
         previousPaymentStatus,
+        previousBookingStatus,
       };
-    }
-
-    // ── Step 3: Update paylabs_transaction (idempotent WHERE clause) ────────
-    const notifSql = rawNotification
-      ? `'${JSON.stringify(rawNotification).replace(/'/g, "''")}'`
-      : "raw_notification";  // no-op self-reference when not provided
-
-    await db.execute(sql.raw(`
-      UPDATE sport_center.paylabs_transactions
-      SET status           = 'SUCCESS',
-          provider_status  = '${providerStatus.replace(/'/g, "''")}',
-          paylabs_trade_no = '${paylabsTradeNo.replace(/'/g, "''")}',
-          raw_notification = ${notifSql},
-          updated_at       = NOW()
-      WHERE merchant_trade_no = '${merchantTradeNo.replace(/'/g, "''")}'
-        AND status != 'SUCCESS'
-    `));
-
-    // ── Step 4: Find booking via booking_id (no regex parsing) ──────────────
-    const bookingId = Number(txRow.booking_id);
-    if (!bookingId) {
-      return { outcome: "booking_not_found" };
-    }
-
-    const [booking] = await db
-      .select()
-      .from(bookingsTable)
-      .where(eq(bookingsTable.id, bookingId))
-      .limit(1);
-
-    if (!booking) {
-      return { outcome: "booking_not_found" };
-    }
-
-    const previousBookingStatus = String(booking.status ?? "");
-
-    // ── Step 5: Update booking (idempotent) ─────────────────────────────────
-    if (previousBookingStatus !== "confirmed") {
-      await db
-        .update(bookingsTable)
-        .set({ status: "confirmed", updatedAt: new Date() })
-        .where(eq(bookingsTable.id, bookingId));
-    }
-
-    // ── Step 6: Insert payment record (onConflictDoNothing = idempotent) ────
-    const amountPaid = Number(txRow.amount ?? booking.grandTotal ?? booking.totalPrice);
-    await db.insert(paymentsTable).values({
-      bookingId,
-      amount     : String(amountPaid),
-      proofUrl   : `paylabs:${paylabsTradeNo}`,
-      notes      : `Auto-confirmed via Paylabs ${source} (${merchantTradeNo}) | reason: ${reason ?? "payment_notification"}`,
-      status     : "confirmed",
-      paymentType: "full_payment",
-    } as any).onConflictDoNothing().catch((err: unknown) => {
-      logger.warn({ err }, "[paylabs:finalize] payment insert failed (non-fatal)");
     });
-
-    // ── Step 7: Booking history audit ───────────────────────────────────────
-    const auditNote = [
-      `Paylabs payment confirmed.`,
-      `source=${source}`,
-      `merchantTradeNo=${merchantTradeNo}`,
-      `platformTradeNo=${paylabsTradeNo}`,
-      `prevPaymentStatus=${previousPaymentStatus}`,
-      `prevBookingStatus=${previousBookingStatus}`,
-      reason  ? `reason=${reason}`   : "",
-      adminId ? `adminId=${adminId}` : "",
-    ].filter(Boolean).join(" | ");
-
-    await db.insert(bookingHistoryTable).values({
-      bookingId,
-      fromStatus   : previousBookingStatus || null,
-      toStatus     : "confirmed",
-      changedBy    : source === "paylabs_manual_reconciliation" && adminId ? adminId : null,
-      changedByName: source === "paylabs_manual_reconciliation"
-        ? `admin:${adminId ?? "system"}`
-        : "paylabs-webhook",
-      note: auditNote,
-    } as any).catch((err: unknown) => {
-      logger.warn({ err }, "[paylabs:finalize] booking_history insert failed (non-fatal)");
-    });
-
-    return {
-      outcome: "confirmed",
-      bookingId,
-      orderNumber:           String(booking.orderNumber),
-      previousPaymentStatus,
-      previousBookingStatus,
-    };
-
   } catch (err: any) {
     return { outcome: "error", error: String(err?.message ?? err) };
   }
@@ -275,12 +293,16 @@ router.post("/paylabs/create-payment", async (req, res) => {
 
   const requestId    = randomUUID();
   const callbackBase = await getPaymentCallbackUrl();
+  if (!callbackBase) {
+    res.status(503).json({ error: "Paylabs callback URL is not configured for this environment" });
+    return;
+  }
   const notifyUrl    = `${callbackBase}/api/paylabs/webhook`;
   const productName  = `Booking ${booking.orderNumber}`;
 
   // Always log the notifyUrl so it's auditable
   logger.info(
-    { notifyUrl, callbackBase, tradeNo, bookingId, orderNumber: booking.orderNumber, nodeEnv: process.env.NODE_ENV },
+    { notifyUrl, callbackBase, tradeNo, requestId, bookingId, orderNumber: booking.orderNumber, nodeEnv: process.env.NODE_ENV },
     "[paylabs:create-payment] notifyUrl sent to Paylabs",
   );
 
@@ -351,7 +373,18 @@ router.post("/paylabs/create-payment", async (req, res) => {
   try {
     await ensureTransactionsTable();
     // Store notifyUrl so it's auditable after the fact (Phase 1 visibility)
-    const rawReq = JSON.stringify({ requestId, amount, paymentMethod, notifyUrl, tradeNo }).replace(/'/g, "''");
+    const providerPaymentType = method.type === "qris"
+      ? "QRIS"
+      : method.code ?? paymentMethod.toUpperCase();
+    const rawReq = JSON.stringify({
+      requestId,
+      merchantTradeNo: tradeNo,
+      amount,
+      paymentMethod,
+      paymentType: providerPaymentType,
+      notifyUrl,
+      redirectUrl: null,
+    }).replace(/'/g, "''");
     await db.execute(sql.raw(`
       INSERT INTO sport_center.paylabs_transactions
         (booking_id, order_number, merchant_trade_no, paylabs_trade_no,
@@ -410,10 +443,26 @@ router.post("/paylabs/webhook", async (req, res) => {
   const rawBody     = (req as any).rawBody
     ? ((req as any).rawBody as Buffer).toString("utf8")
     : JSON.stringify(req.body);
+  const body              = req.body as Record<string, unknown>;
+  const merchantTradeNo   = String(body.merchantTradeNo ?? "");
+  const rawProviderStatus = String(body.status ?? body.tradeState ?? "");
+  const paylabsTradeNo    = String(body.paylabsTradeNo ?? body.platformTradeNo ?? body.tradeNo ?? "");
+  let transactionId: number | null = null;
+  let bookingId: number | null = null;
 
   // ── Phase 5: structured step logging ────────────────────────────────────────
   const wlog = (step: string, extra: Record<string, unknown> = {}) =>
-    logger.info({ requestId, step, ...extra }, `[paylabs:webhook] ${step}`);
+    logger.info(
+      {
+        merchantTradeNo,
+        booking_id: bookingId,
+        transaction_id: transactionId,
+        requestId,
+        step,
+        ...extra,
+      },
+      `[paylabs] ${step === "received" ? "callback received" : step}`,
+    );
 
   wlog("received", {
     hasTimestamp  : Boolean(timestamp),
@@ -449,11 +498,6 @@ router.post("/paylabs/webhook", async (req, res) => {
     wlog("signature result", { result: "SKIPPED_NO_PUBLIC_KEY", hasPublicKey: false });
   }
 
-  const body             = req.body as Record<string, unknown>;
-  const merchantTradeNo  = String(body.merchantTradeNo  ?? "");
-  const rawProviderStatus = String(body.status ?? body.tradeState ?? "");
-  const paylabsTradeNo   = String(body.paylabsTradeNo ?? body.platformTradeNo ?? body.tradeNo ?? "");
-
   // ── Phase 4: centralised status mapper ──────────────────────────────────────
   const internalStatus = mapPaylabsStatus(rawProviderStatus);
   const isPaid         = internalStatus === "SUCCESS";
@@ -465,22 +509,24 @@ router.post("/paylabs/webhook", async (req, res) => {
     isPaid,
   });
 
-  // Update paylabs_transactions (non-fatal — finalization does its own update inside the tx)
-  try {
-    await ensureTransactionsTable();
-    await db.execute(sql.raw(`
-      UPDATE sport_center.paylabs_transactions
-      SET provider_status  = '${rawProviderStatus.replace(/'/g, "''")}',
-          paylabs_trade_no = '${paylabsTradeNo.replace(/'/g, "''")}',
-          raw_notification = '${JSON.stringify(body).replace(/'/g, "''")}',
-          updated_at       = NOW()
-      WHERE merchant_trade_no = '${merchantTradeNo.replace(/'/g, "''")}'
-    `));
-  } catch (err) {
-    logger.warn({ err }, "[paylabs:webhook] pre-update non-fatal");
-  }
-
   if (!isPaid) {
+    // Non-success provider states are recorded without finalizing the booking.
+    try {
+      await ensureTransactionsTable();
+      await db.execute(sql.raw(`
+        UPDATE sport_center.paylabs_transactions
+        SET provider_status  = '${rawProviderStatus.replace(/'/g, "''")}',
+            paylabs_trade_no = '${paylabsTradeNo.replace(/'/g, "''")}',
+            raw_notification = '${JSON.stringify(body).replace(/'/g, "''")}',
+            updated_at       = NOW()
+        WHERE merchant_trade_no = '${merchantTradeNo.replace(/'/g, "''")}'
+      `));
+    } catch (err) {
+      logger.warn(
+        { err, merchantTradeNo, booking_id: bookingId, transaction_id: transactionId, requestId },
+        "[paylabs] non-success status persistence failed",
+      );
+    }
     wlog("acknowledgement sent", { isPaid: false, internalStatus });
     res.status(200).json({ errCode: "0", errMsg: "received" });
     return;
@@ -492,11 +538,14 @@ router.post("/paylabs/webhook", async (req, res) => {
     paylabsTradeNo,
     providerStatus  : rawProviderStatus,
     source          : "webhook",
+    requestId,
     rawNotification : body,
   });
 
-  wlog("transaction matched",   { outcome: result.outcome, bookingId: result.bookingId });
-  wlog("booking matched",       { orderNumber: result.orderNumber, bookingId: result.bookingId });
+  transactionId = result.transactionId ?? null;
+  bookingId = result.bookingId ?? null;
+  wlog("transaction found", { outcome: result.outcome });
+  wlog("booking found", { orderNumber: result.orderNumber });
   wlog("finalization committed", {
     outcome              : result.outcome,
     previousPaymentStatus: result.previousPaymentStatus,
@@ -513,7 +562,8 @@ router.post("/paylabs/webhook", async (req, res) => {
     db.select().from(bookingsTable)
       .where(eq(bookingsTable.id, result.bookingId))
       .limit(1)
-      .then(([bk]: [typeof bookingsTable.$inferSelect | undefined]) => {
+      .then((rows) => {
+        const bk = rows[0];
         if (!bk) return;
         notifyPaymentConfirmed({
           customerName  : bk.customerName ?? "",
