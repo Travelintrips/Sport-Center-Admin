@@ -24,12 +24,36 @@ const PROD_BASE    = "https://pay.paylabs.co.id";
 
 export interface PaylabsConfig {
   sandboxMode: boolean;
-  storeId: string;
+  storeId?: string;          // optional — omitted from payload when not configured
   merchantId: string;
   privateKey: string;
   paylabsPublicKey: string;
   baseUrl: string;
   debugMode: boolean;
+}
+
+// ─── Store ID helper ──────────────────────────────────────────────────────────
+
+/**
+ * Normalize and validate an optional Paylabs Store ID.
+ *
+ * Rules:
+ *   - undefined / null / blank → return undefined (omit from payload)
+ *   - length 1–5 or 33+       → throw (invalid)
+ *   - length 6–32             → return trimmed value
+ *
+ * Use conditional spread in every payload builder:
+ *   ...(normalizeOptionalPaylabsStoreId(cfg.storeId) ? { storeId: ... } : {})
+ */
+export function normalizeOptionalPaylabsStoreId(value?: string | null): string | undefined {
+  const normalized = value?.trim();
+  if (!normalized) return undefined;
+  if (normalized.length < 6 || normalized.length > 32) {
+    throw new Error(
+      `Paylabs Store ID must contain between 6 and 32 characters (got ${normalized.length})`
+    );
+  }
+  return normalized;
 }
 
 /** Env-var only fallback (used when DB is unavailable) */
@@ -48,9 +72,17 @@ export function getPaylabsConfig(): PaylabsConfig {
     ? (process.env.PAYLABS_SANDBOX_PUBLIC_KEY  || "")
     : (process.env.PAYLABS_PROD_PUBLIC_KEY     || "");
 
+  let storeId: string | undefined;
+  try {
+    storeId = normalizeOptionalPaylabsStoreId(process.env.PAYLABS_STORE_ID);
+  } catch (e) {
+    logger.warn({ err: String(e) }, "[paylabs] PAYLABS_STORE_ID env var invalid — omitting from requests");
+    storeId = undefined;
+  }
+
   return {
     sandboxMode,
-    storeId: process.env.PAYLABS_STORE_ID || "",
+    storeId,
     merchantId,
     privateKey,
     paylabsPublicKey,
@@ -81,7 +113,13 @@ export async function loadPaylabsConfigFromDb(): Promise<PaylabsConfig> {
     const paylabsPublicKey = sandboxMode
       ? (row.sandboxPublicKey  ?? process.env.PAYLABS_SANDBOX_PUBLIC_KEY  ?? "")
       : (row.prodPublicKey     ?? process.env.PAYLABS_PROD_PUBLIC_KEY     ?? "");
-    const storeId = row.storeId || process.env.PAYLABS_STORE_ID || "";
+    let storeId: string | undefined;
+    try {
+      storeId = normalizeOptionalPaylabsStoreId(row.storeId ?? process.env.PAYLABS_STORE_ID);
+    } catch (e) {
+      logger.warn({ err: String(e) }, "[paylabs] storeId in DB/env is invalid length — omitting from requests");
+      storeId = undefined;
+    }
 
     return {
       sandboxMode,
@@ -441,7 +479,7 @@ export function createQris(req: CreateQrisRequest, cfg?: PaylabsConfig) {
   return callPaylabs("/payment/v2.3/qris/create", {
     requestId      : req.requestId,
     merchantId     : c.merchantId,
-    storeId        : c.storeId || undefined,
+    ...(c.storeId ? { storeId: c.storeId } : {}),
     paymentType    : "QRIS",
     merchantTradeNo: req.merchantTradeNo,
     amount         : formatAmount(req.amount),
@@ -458,7 +496,7 @@ export function createVa(req: CreateVaRequest, cfg?: PaylabsConfig) {
   return callPaylabs("/payment/v2.3/va/create", {
     requestId      : req.requestId,
     merchantId     : c.merchantId,
-    storeId        : c.storeId || undefined,
+    ...(c.storeId ? { storeId: c.storeId } : {}),
     paymentType    : req.paymentType,   // e.g. "BRIVA", "BCAVA", "MandiriVA"
     merchantTradeNo: req.merchantTradeNo,
     amount         : formatAmount(req.amount),
@@ -475,7 +513,7 @@ export function createEwallet(req: CreateEwalletRequest, cfg?: PaylabsConfig) {
   return callPaylabs("/payment/v2.3/ewallet/create", {
     requestId      : req.requestId,
     merchantId     : c.merchantId,
-    storeId        : c.storeId || undefined,
+    ...(c.storeId ? { storeId: c.storeId } : {}),
     paymentType    : req.ewalletCode,
     merchantTradeNo: req.merchantTradeNo,
     amount         : formatAmount(req.amount),
@@ -493,7 +531,7 @@ export function statusInquiry(merchantTradeNo: string, cfg?: PaylabsConfig) {
   return callPaylabs("/payment/v2.3/va/inquiry", {
     requestId      : `inq-${merchantTradeNo}-${Date.now()}`,
     merchantId     : config.merchantId,
-    storeId        : config.storeId || undefined,
+    ...(config.storeId ? { storeId: config.storeId } : {}),
     merchantTradeNo,
   }, cfg);
 }

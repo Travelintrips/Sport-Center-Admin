@@ -3,7 +3,7 @@ import crypto from "crypto";
 import { db, paylabsSettingsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
-import { loadPaylabsConfigFromDb } from "../lib/paylabs";
+import { loadPaylabsConfigFromDb, normalizeOptionalPaylabsStoreId } from "../lib/paylabs";
 
 const router = Router();
 
@@ -156,6 +156,24 @@ router.patch("/admin/paylabs/settings", adminMiddleware, async (req, res) => {
     const patch: Record<string, unknown> = {};
     for (const key of ALLOWED) {
       if (key in req.body) patch[key] = req.body[key];
+    }
+
+    // Validate and normalize storeId before saving
+    if ("storeId" in patch) {
+      const raw = patch.storeId as string | null | undefined;
+      const trimmed = typeof raw === "string" ? raw.trim() : "";
+      if (!trimmed) {
+        // Empty/blank → store as null (omitted from Paylabs payload)
+        patch.storeId = null;
+      } else {
+        try {
+          patch.storeId = normalizeOptionalPaylabsStoreId(trimmed);
+        } catch (e) {
+          return res.status(400).json({
+            error: e instanceof Error ? e.message : "Paylabs Store ID tidak valid",
+          });
+        }
+      }
     }
 
     const [updated] = await db

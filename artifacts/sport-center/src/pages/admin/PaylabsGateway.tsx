@@ -689,6 +689,18 @@ export default function PaylabsGateway() {
   async function handleSaveAll() {
     setSaving(true);
     try {
+      // Validate Store ID before sending
+      const trimmedStoreId = storeId.trim();
+      if (trimmedStoreId.length > 0 && (trimmedStoreId.length < 6 || trimmedStoreId.length > 32)) {
+        toast({
+          title: "Store ID tidak valid",
+          description: "Paylabs Store ID harus 6–32 karakter, atau dikosongkan jika tidak ada.",
+          variant: "destructive",
+        });
+        setSaving(false);
+        return;
+      }
+
       const body = {
         title: general.title,
         description: general.description,
@@ -697,7 +709,7 @@ export default function PaylabsGateway() {
         newOrderStatus: general.newOrderStatus,
         debugMode: general.debugMode,
         sandboxMode,
-        storeId,
+        storeId: trimmedStoreId || null,
         sandboxPublicKey: sandboxCreds.publicKey,
         sandboxPrivateKey: sandboxCreds.privateKey,
         sandboxMerchantId: sandboxCreds.merchantId,
@@ -942,14 +954,18 @@ export default function PaylabsGateway() {
 
           <div className="space-y-1.5">
             <Label htmlFor="store-id">
-              Store ID <span className="text-muted-foreground font-normal">(opsional)</span>
+              Paylabs Store ID{" "}
+              <span className="text-muted-foreground font-normal">(Opsional)</span>
             </Label>
             <Input
               id="store-id"
-              placeholder="(opsional)"
+              placeholder="Kosongkan jika Paylabs tidak memberikan Store ID"
               value={storeId}
               onChange={(e) => setStoreId(e.target.value)}
             />
+            <p className="text-xs text-muted-foreground">
+              Kosongkan jika Paylabs tidak memberikan Store ID. Jika diisi, panjang harus 6–32 karakter.
+            </p>
           </div>
         </CardContent>
       </Card>
