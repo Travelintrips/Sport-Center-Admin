@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import {
   useListCompanyInvoices, useGenerateCompanyInvoice, useUpdateCompanyInvoice,
   useListCustomers,
@@ -17,7 +17,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Building2, Plus, CheckCircle, FileText, AlertCircle, RefreshCw, Eye,
   User, Phone, Mail, MapPin, Download, MessageSquare, AlertTriangle,
-  Package, Settings, CheckSquare, XSquare, Send,
+  Package, Settings, CheckSquare, XSquare, Send, Upload, ImageIcon, X,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useQueryClient, useQuery, useMutation } from "@tanstack/react-query";
@@ -921,6 +921,12 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
   const [sendingWa, setSendingWa] = useState(false);
   const [rebuilding, setRebuilding] = useState(false);
   const [generatingPackage, setGeneratingPackage] = useState(false);
+  const [proofFile, setProofFile] = useState<File | null>(null);
+  const [proofPreview, setProofPreview] = useState<string | null>(null);
+  const [paymentNotes, setPaymentNotes] = useState("");
+  const [uploadingProof, setUploadingProof] = useState(false);
+  const [markPaidOnUpload, setMarkPaidOnUpload] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { data: invoice, isLoading } = useQuery({
     queryKey: ["company-invoice-detail", invoiceId],
@@ -977,6 +983,51 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
       toast({ title: e?.message ?? "Gagal sinkronisasi item", variant: "destructive" });
     } finally {
       setRebuilding(false);
+    }
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setProofFile(file);
+    if (file.type.startsWith("image/")) {
+      const reader = new FileReader();
+      reader.onload = (ev) => setProofPreview(ev.target?.result as string);
+      reader.readAsDataURL(file);
+    } else {
+      setProofPreview(null);
+    }
+  };
+
+  const handleUploadProof = async () => {
+    if (!proofFile && !paymentNotes.trim()) {
+      toast({ title: "Pilih file bukti atau isi catatan terlebih dahulu", variant: "destructive" });
+      return;
+    }
+    setUploadingProof(true);
+    try {
+      const token = getToken();
+      const formData = new FormData();
+      if (proofFile) formData.append("file", proofFile);
+      formData.append("paymentNotes", paymentNotes);
+      formData.append("markPaid", String(markPaidOnUpload));
+      const res = await fetch(`/api/company-invoices/${invoiceId}/upload-payment-proof`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token ?? ""}` },
+        body: formData,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Upload gagal");
+      toast({ title: "Bukti pembayaran berhasil disimpan" });
+      setProofFile(null);
+      setProofPreview(null);
+      setPaymentNotes("");
+      qc.invalidateQueries({ queryKey: ["company-invoice-detail", invoiceId] });
+      qc.invalidateQueries({ queryKey: getListCompanyInvoicesQueryKey() });
+    } catch (e: any) {
+      toast({ title: e?.message ?? "Gagal upload bukti", variant: "destructive" });
+    } finally {
+      setUploadingProof(false);
     }
   };
 
@@ -1307,6 +1358,191 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
             Dibayar pada {new Date(invoice.paidAt).toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" })}
           </div>
         )}
+
+        {/* Upload Bukti Pembayaran */}
+        <div className="rounded-lg border p-4 space-y-3">
+          <div className="font-semibold text-sm flex items-center gap-2">
+            <Upload size={14} className="text-blue-600" />
+            Bukti Pembayaran Transfer
+          </div>
+
+          {/* Existing proof */}
+          {invoice.paymentProofUrl && (
+            <div className="space-y-2">
+              <div className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Bukti yang sudah diupload</div>
+              {invoice.paymentProofUrl.match(/\.(jpg|jpeg|png|webp|gif|heic)$/i) ? (
+                <a href={invoice.paymentProofUrl} target="_blank" rel="noopener noreferrer" className="block">
+                  <img
+                    src={invoice.paymentProofUrl}
+                    alt="Bukti pembayaran"
+                    className="max-h-48 rounded-lg border object-contain bg-muted/20 cursor-zoom-in hover:opacity-90 transition-opacity"
+                  />
+                </a>
+              ) : (
+                <a
+                  href={invoice.paymentProofUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-2 text-sm text-blue-600 hover:underline"
+                >
+                  <FileText size={14} /> Lihat Bukti Pembayaran (PDF)
+                </a>
+              )}
+              {invoice.paymentNotes && (
+                <div className="text-sm text-muted-foreground bg-muted/30 rounded p-2">{invoice.paymentNotes}</div>
+              )}
+            </div>
+          )}
+
+          {/* Upload area */}
+          {invoice.status !== "paid" && (
+            <div className="space-y-3 pt-1 border-t">
+              <div className="text-xs text-muted-foreground">
+                {invoice.paymentProofUrl ? "Perbarui bukti pembayaran" : "Upload bukti transfer dari perusahaan"}
+              </div>
+
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*,application/pdf"
+                className="hidden"
+                onChange={handleFileChange}
+              />
+
+              {proofPreview ? (
+                <div className="relative inline-block">
+                  <img src={proofPreview} alt="Preview" className="max-h-40 rounded-lg border object-contain bg-muted/20" />
+                  <button
+                    type="button"
+                    onClick={() => { setProofFile(null); setProofPreview(null); if (fileInputRef.current) fileInputRef.current.value = ""; }}
+                    className="absolute -top-2 -right-2 bg-destructive text-white rounded-full p-0.5 hover:bg-destructive/80"
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              ) : proofFile ? (
+                <div className="flex items-center gap-2 text-sm bg-muted/30 rounded p-2">
+                  <FileText size={14} className="text-blue-600" />
+                  <span className="truncate flex-1">{proofFile.name}</span>
+                  <button type="button" onClick={() => { setProofFile(null); if (fileInputRef.current) fileInputRef.current.value = ""; }}>
+                    <X size={13} className="text-muted-foreground hover:text-destructive" />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="w-full flex items-center justify-center gap-2 border-2 border-dashed border-border rounded-lg py-6 text-sm text-muted-foreground hover:border-primary hover:text-primary transition-colors"
+                >
+                  <ImageIcon size={16} />
+                  Pilih foto atau PDF bukti transfer
+                </button>
+              )}
+
+              {proofFile && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5 text-xs"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <Upload size={12} /> Ganti File
+                </Button>
+              )}
+
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1 block">Catatan (opsional)</label>
+                <Textarea
+                  value={paymentNotes}
+                  onChange={(e) => setPaymentNotes(e.target.value)}
+                  placeholder="Mis: Transfer BCA tgl 5 Agustus 2026, ref TXN-12345..."
+                  rows={2}
+                  className="text-sm"
+                />
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="mark-paid"
+                  checked={markPaidOnUpload}
+                  onCheckedChange={(v) => setMarkPaidOnUpload(!!v)}
+                />
+                <label htmlFor="mark-paid" className="text-sm cursor-pointer select-none">
+                  Tandai invoice ini sebagai <strong>Lunas</strong> setelah upload
+                </label>
+              </div>
+
+              <Button
+                onClick={handleUploadProof}
+                disabled={uploadingProof || (!proofFile && !paymentNotes.trim())}
+                className="w-full gap-2"
+                size="sm"
+              >
+                <Upload size={13} />
+                {uploadingProof ? "Mengupload..." : "Simpan Bukti Pembayaran"}
+              </Button>
+            </div>
+          )}
+
+          {/* Show update option even if paid */}
+          {invoice.status === "paid" && (
+            <div className="space-y-3 pt-1 border-t">
+              <div className="text-xs text-muted-foreground">
+                {invoice.paymentProofUrl ? "Perbarui bukti pembayaran" : "Upload bukti transfer"}
+              </div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*,application/pdf"
+                className="hidden"
+                onChange={handleFileChange}
+              />
+              {proofPreview ? (
+                <div className="relative inline-block">
+                  <img src={proofPreview} alt="Preview" className="max-h-40 rounded-lg border object-contain bg-muted/20" />
+                  <button
+                    type="button"
+                    onClick={() => { setProofFile(null); setProofPreview(null); if (fileInputRef.current) fileInputRef.current.value = ""; }}
+                    className="absolute -top-2 -right-2 bg-destructive text-white rounded-full p-0.5 hover:bg-destructive/80"
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              ) : proofFile ? (
+                <div className="flex items-center gap-2 text-sm bg-muted/30 rounded p-2">
+                  <FileText size={14} className="text-blue-600" />
+                  <span className="truncate flex-1">{proofFile.name}</span>
+                  <button type="button" onClick={() => { setProofFile(null); if (fileInputRef.current) fileInputRef.current.value = ""; }}>
+                    <X size={13} className="text-muted-foreground hover:text-destructive" />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="flex items-center gap-2 text-sm text-blue-600 hover:underline"
+                >
+                  <Upload size={13} /> {invoice.paymentProofUrl ? "Perbarui bukti" : "Upload bukti"}
+                </button>
+              )}
+              {proofFile && (
+                <div className="space-y-2">
+                  <Textarea
+                    value={paymentNotes}
+                    onChange={(e) => setPaymentNotes(e.target.value)}
+                    placeholder="Catatan (opsional)"
+                    rows={2}
+                    className="text-sm"
+                  />
+                  <Button onClick={handleUploadProof} disabled={uploadingProof} size="sm" variant="outline" className="gap-2">
+                    <Upload size={13} /> {uploadingProof ? "Mengupload..." : "Simpan"}
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </DialogContent>
   );
