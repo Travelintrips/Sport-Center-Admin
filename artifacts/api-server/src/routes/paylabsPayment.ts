@@ -109,8 +109,12 @@ router.post("/paylabs/create-payment", async (req, res) => {
   const amount       = Number(booking.grandTotal ?? booking.totalPrice);
   const tradeNo      = `SC-${booking.orderNumber}-${Date.now()}`.slice(0, 32);
   const requestId    = randomUUID();
-  const notifyUrl    = `${await getPaymentCallbackUrl()}/api/paylabs/webhook`;
+  const callbackBase = await getPaymentCallbackUrl();
+  const notifyUrl    = `${callbackBase}/api/paylabs/webhook`;
   const productName  = `Booking ${booking.orderNumber}`;
+
+  // Diagnostic: log the callback URL being sent to Paylabs so it's easy to verify
+  logger.info({ notifyUrl, callbackBase, nodeEnv: process.env.NODE_ENV }, "[paylabs] notifyUrl yang dikirim ke Paylabs");
   const productInfo: ProductInfo[] = [{
     id      : String(booking.facilityId),
     name    : productName,
@@ -234,7 +238,12 @@ router.post("/paylabs/create-payment", async (req, res) => {
 router.post("/paylabs/webhook", async (req, res) => {
   const timestamp = String(req.headers["x-timestamp"] ?? "");
   const signature = String(req.headers["x-signature"] ?? "");
-  const rawBody   = JSON.stringify(req.body);
+  // Use raw body bytes captured before express.json() parsed them.
+  // JSON.stringify(req.body) would re-serialise and may differ (whitespace, key order)
+  // from what Paylabs actually signed. req.rawBody is set by the verify callback in app.ts.
+  const rawBody   = (req as any).rawBody
+    ? ((req as any).rawBody as Buffer).toString("utf8")
+    : JSON.stringify(req.body);
 
   const cfg = await loadPaylabsConfigFromDb();
 
