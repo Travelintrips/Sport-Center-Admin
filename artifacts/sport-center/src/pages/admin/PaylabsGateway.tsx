@@ -53,7 +53,8 @@ const INITIAL_METHODS: PaymentMethod[] = [
   {
     id: "paylabs",
     name: "Paylabs Payment Gateway",
-    description: "Online Payment (Bank Transfer, Virtual Account, QRIS, E-Money)",
+    description:
+      "Online Payment (Bank Transfer, Virtual Account, QRIS, E-Money)",
     active: false,
     iconText: "PL",
     iconBg: "bg-slate-100",
@@ -308,7 +309,9 @@ function MethodIcon({ method }: { method: PaymentMethod }) {
     <div
       className={`h-10 w-10 rounded-lg flex items-center justify-center shrink-0 ${method.iconBg}`}
     >
-      <span className={`text-[9px] font-black leading-tight text-center ${method.iconColor}`}>
+      <span
+        className={`text-[9px] font-black leading-tight text-center ${method.iconColor}`}
+      >
         {method.iconText}
       </span>
     </div>
@@ -331,7 +334,10 @@ function MethodDetail({
 
   function handleSave() {
     onSave(form);
-    toast({ title: "Perubahan disimpan", description: `${form.name} berhasil diperbarui.` });
+    toast({
+      title: "Perubahan disimpan",
+      description: `${form.name} berhasil diperbarui.`,
+    });
     onBack();
   }
 
@@ -355,7 +361,10 @@ function MethodDetail({
         <CardContent className="pt-5 space-y-5">
           {/* Active toggle */}
           <div className="flex items-center justify-between p-3 rounded-lg border bg-background">
-            <Label htmlFor="detail-active" className="text-sm font-medium cursor-pointer flex-1">
+            <Label
+              htmlFor="detail-active"
+              className="text-sm font-medium cursor-pointer flex-1"
+            >
               Aktifkan atau Nonaktifkan {method.name}
             </Label>
             <Switch
@@ -378,7 +387,10 @@ function MethodDetail({
 
           {/* Enable icon toggle */}
           <div className="flex items-center justify-between p-3 rounded-lg border bg-background">
-            <Label htmlFor="detail-icon-enabled" className="text-sm font-medium cursor-pointer flex-1">
+            <Label
+              htmlFor="detail-icon-enabled"
+              className="text-sm font-medium cursor-pointer flex-1"
+            >
               Aktifkan Ikon
             </Label>
             <Switch
@@ -396,9 +408,13 @@ function MethodDetail({
               id="detail-icon-url"
               placeholder="https://example.com/img/bank.png"
               value={form.iconUrl}
-              onChange={(e) => setForm((f) => ({ ...f, iconUrl: e.target.value }))}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, iconUrl: e.target.value }))
+              }
             />
-            <p className="text-xs text-muted-foreground">URL harus berekstensi .png</p>
+            <p className="text-xs text-muted-foreground">
+              URL harus berekstensi .png
+            </p>
           </div>
 
           {/* Description */}
@@ -408,7 +424,9 @@ function MethodDetail({
               id="detail-desc"
               placeholder="Deskripsi yang dilihat pengguna saat checkout."
               value={form.customDescription}
-              onChange={(e) => setForm((f) => ({ ...f, customDescription: e.target.value }))}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, customDescription: e.target.value }))
+              }
               rows={3}
             />
             <p className="text-xs text-muted-foreground">
@@ -450,8 +468,12 @@ function MethodRow({
       <MethodIcon method={method} />
 
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-semibold text-foreground truncate">{method.name}</p>
-        <p className="text-xs text-muted-foreground truncate">{method.description}</p>
+        <p className="text-sm font-semibold text-foreground truncate">
+          {method.name}
+        </p>
+        <p className="text-xs text-muted-foreground truncate">
+          {method.description}
+        </p>
       </div>
 
       <div className="flex items-center gap-2 shrink-0">
@@ -537,7 +559,11 @@ function SecretField({
           onChange={(e) => onChange(e.target.value)}
           placeholder={show ? "" : ""}
           className={`font-mono text-xs pr-8 resize-none ${!show && value ? "text-security" : ""}`}
-          style={!show && value ? { WebkitTextSecurity: "disc" } as React.CSSProperties : {}}
+          style={
+            !show && value
+              ? ({ WebkitTextSecurity: "disc" } as React.CSSProperties)
+              : {}
+          }
         />
         {value && (
           <button
@@ -545,7 +571,11 @@ function SecretField({
             onClick={() => setShow((v) => !v)}
             className="absolute top-2.5 right-2.5 text-muted-foreground hover:text-foreground"
           >
-            {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            {show ? (
+              <EyeOff className="h-4 w-4" />
+            ) : (
+              <Eye className="h-4 w-4" />
+            )}
           </button>
         )}
       </div>
@@ -585,7 +615,8 @@ export default function PaylabsGateway() {
     privateKey: "",
     merchantId: "",
   });
-  const [sandboxPaylabsPubKeyConfigured, setSandboxPaylabsPubKeyConfigured] = useState(false);
+  const [sandboxPaylabsPubKeyConfigured, setSandboxPaylabsPubKeyConfigured] =
+    useState(false);
   const [newSandboxPaylabsPubKey, setNewSandboxPaylabsPubKey] = useState("");
   const [showSandboxPubKeyInput, setShowSandboxPubKeyInput] = useState(false);
 
@@ -594,7 +625,8 @@ export default function PaylabsGateway() {
     privateKey: "",
     merchantId: "",
   });
-  const [prodPaylabsPubKeyConfigured, setProdPaylabsPubKeyConfigured] = useState(false);
+  const [prodPaylabsPubKeyConfigured, setProdPaylabsPubKeyConfigured] =
+    useState(false);
   const [newProdPaylabsPubKey, setNewProdPaylabsPubKey] = useState("");
   const [showProdPubKeyInput, setShowProdPubKeyInput] = useState(false);
 
@@ -609,7 +641,8 @@ export default function PaylabsGateway() {
         const d = await res.json();
 
         setGeneral({
-          title: d.title ?? "Online Payment (Bank Transfer, Virtual Account, QRIS)",
+          title:
+            d.title ?? "Online Payment (Bank Transfer, Virtual Account, QRIS)",
           description: d.description ?? "",
           sendInvoice: d.sendInvoice ?? true,
           chargeCustomer: d.chargeCustomer ?? false,
@@ -627,15 +660,19 @@ export default function PaylabsGateway() {
           merchantId: d.prodMerchantId ?? "",
         });
         // Public keys: only receive configured status, never the actual key
-        setSandboxPaylabsPubKeyConfigured(Boolean(d.sandboxPublicKeyConfigured));
+        setSandboxPaylabsPubKeyConfigured(
+          Boolean(d.sandboxPublicKeyConfigured),
+        );
         setProdPaylabsPubKeyConfigured(Boolean(d.prodPublicKeyConfigured));
 
         if (Array.isArray(d.paymentMethodsConfig)) {
           setMethods((prev) =>
             prev.map((m) => {
-              const saved = d.paymentMethodsConfig.find((s: any) => s.id === m.id);
+              const saved = d.paymentMethodsConfig.find(
+                (s: any) => s.id === m.id,
+              );
               return saved ? { ...m, ...saved } : m;
-            })
+            }),
           );
         }
       } catch (err) {
@@ -676,13 +713,17 @@ export default function PaylabsGateway() {
   }
 
   function handleActivate(id: string) {
-    const newMethods = methods.map((m) => (m.id === id ? { ...m, active: true } : m));
+    const newMethods = methods.map((m) =>
+      m.id === id ? { ...m, active: true } : m,
+    );
     setMethods(newMethods);
     persistMethods(newMethods);
   }
 
   function handleDeactivate(id: string) {
-    const newMethods = methods.map((m) => (m.id === id ? { ...m, active: false } : m));
+    const newMethods = methods.map((m) =>
+      m.id === id ? { ...m, active: false } : m,
+    );
     setMethods(newMethods);
     persistMethods(newMethods);
   }
@@ -698,10 +739,14 @@ export default function PaylabsGateway() {
     try {
       // Validate Store ID before sending
       const trimmedStoreId = storeId.trim();
-      if (trimmedStoreId.length > 0 && (trimmedStoreId.length < 6 || trimmedStoreId.length > 32)) {
+      if (
+        trimmedStoreId.length > 0 &&
+        (trimmedStoreId.length < 6 || trimmedStoreId.length > 32)
+      ) {
         toast({
           title: "Store ID tidak valid",
-          description: "Paylabs Store ID harus 6–32 karakter, atau dikosongkan jika tidak ada.",
+          description:
+            "Paylabs Store ID harus 6–32 karakter, atau dikosongkan jika tidak ada.",
           variant: "destructive",
         });
         setSaving(false);
@@ -717,6 +762,7 @@ export default function PaylabsGateway() {
         debugMode: general.debugMode,
         sandboxMode,
         storeId: trimmedStoreId || null,
+        sandboxPublicKey: sandboxCreds.publicKey,
         sandboxPrivateKey: sandboxCreds.privateKey,
         sandboxMerchantId: sandboxCreds.merchantId,
         prodPrivateKey: prodCreds.privateKey,
@@ -756,14 +802,19 @@ export default function PaylabsGateway() {
       const saved = await res.json().catch(() => ({}));
 
       // Update configured flags from response; clear pending new key inputs
-      setSandboxPaylabsPubKeyConfigured(Boolean(saved.sandboxPublicKeyConfigured));
+      setSandboxPaylabsPubKeyConfigured(
+        Boolean(saved.sandboxPublicKeyConfigured),
+      );
       setProdPaylabsPubKeyConfigured(Boolean(saved.prodPublicKeyConfigured));
       setNewSandboxPaylabsPubKey("");
       setNewProdPaylabsPubKey("");
       setShowSandboxPubKeyInput(false);
       setShowProdPubKeyInput(false);
 
-      toast({ title: "Pengaturan disimpan", description: "Konfigurasi Paylabs berhasil disimpan ke database." });
+      toast({
+        title: "Pengaturan disimpan",
+        description: "Konfigurasi Paylabs berhasil disimpan ke database.",
+      });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "unknown error";
       console.error("[PaylabsGateway] save error:", msg);
@@ -785,18 +836,25 @@ export default function PaylabsGateway() {
       sandboxMode,
       storeId,
       sandboxCreds, // contains merchantId and privateKey only (no public key)
-      prodCreds,    // same
+      prodCreds, // same
       methods,
-      _note: "Paylabs public keys are NOT exported for security reasons. Enter them manually on each project.",
+      _note:
+        "Paylabs public keys are NOT exported for security reasons. Enter them manually on each project.",
     };
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const blob = new Blob([JSON.stringify(data, null, 2)], {
+      type: "application/json",
+    });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
     a.download = "paylabs-config.json";
     a.click();
     URL.revokeObjectURL(url);
-    toast({ title: "Konfigurasi diekspor", description: "File paylabs-config.json berhasil diunduh. Public key tidak disertakan." });
+    toast({
+      title: "Konfigurasi diekspor",
+      description:
+        "File paylabs-config.json berhasil diunduh. Public key tidak disertakan.",
+    });
   }
 
   function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
@@ -812,16 +870,30 @@ export default function PaylabsGateway() {
         if (data.sandboxCreds) {
           // Never import public key from file — only privateKey and merchantId
           const { privateKey, merchantId } = data.sandboxCreds;
-          setSandboxCreds({ privateKey: privateKey ?? "", merchantId: merchantId ?? "" });
+          setSandboxCreds({
+            privateKey: privateKey ?? "",
+            merchantId: merchantId ?? "",
+          });
         }
         if (data.prodCreds) {
           const { privateKey, merchantId } = data.prodCreds;
-          setProdCreds({ privateKey: privateKey ?? "", merchantId: merchantId ?? "" });
+          setProdCreds({
+            privateKey: privateKey ?? "",
+            merchantId: merchantId ?? "",
+          });
         }
         if (data.methods) setMethods(data.methods);
-        toast({ title: "Konfigurasi diimpor", description: "Pengaturan berhasil dimuat. Masukkan Paylabs public key secara manual." });
+        toast({
+          title: "Konfigurasi diimpor",
+          description:
+            "Pengaturan berhasil dimuat. Masukkan Paylabs public key secara manual.",
+        });
       } catch {
-        toast({ title: "Gagal impor", description: "File JSON tidak valid.", variant: "destructive" });
+        toast({
+          title: "Gagal impor",
+          description: "File JSON tidak valid.",
+          variant: "destructive",
+        });
       }
     };
     reader.readAsText(file);
@@ -887,7 +959,9 @@ export default function PaylabsGateway() {
             <Input
               id="gen-title"
               value={general.title}
-              onChange={(e) => setGeneral((g) => ({ ...g, title: e.target.value }))}
+              onChange={(e) =>
+                setGeneral((g) => ({ ...g, title: e.target.value }))
+              }
             />
           </div>
 
@@ -898,7 +972,9 @@ export default function PaylabsGateway() {
               rows={3}
               placeholder="Deskripsi metode pembayaran yang dilihat pelanggan saat checkout."
               value={general.description}
-              onChange={(e) => setGeneral((g) => ({ ...g, description: e.target.value }))}
+              onChange={(e) =>
+                setGeneral((g) => ({ ...g, description: e.target.value }))
+              }
             />
           </div>
 
@@ -907,24 +983,35 @@ export default function PaylabsGateway() {
               <Switch
                 id="send-invoice"
                 checked={general.sendInvoice}
-                onCheckedChange={(v) => setGeneral((g) => ({ ...g, sendInvoice: v }))}
+                onCheckedChange={(v) =>
+                  setGeneral((g) => ({ ...g, sendInvoice: v }))
+                }
                 className="data-[state=checked]:bg-cyan-500 shrink-0"
               />
               <Label htmlFor="send-invoice" className="cursor-pointer flex-1">
                 <p className="font-medium text-sm">Kirim Invoice</p>
-                <p className="text-xs text-muted-foreground">Email invoice ke pelanggan</p>
+                <p className="text-xs text-muted-foreground">
+                  Email invoice ke pelanggan
+                </p>
               </Label>
             </div>
             <div className="flex items-center justify-between p-3 rounded-lg border bg-background gap-3">
               <Switch
                 id="charge-customer"
                 checked={general.chargeCustomer}
-                onCheckedChange={(v) => setGeneral((g) => ({ ...g, chargeCustomer: v }))}
+                onCheckedChange={(v) =>
+                  setGeneral((g) => ({ ...g, chargeCustomer: v }))
+                }
                 className="data-[state=checked]:bg-cyan-500 shrink-0"
               />
-              <Label htmlFor="charge-customer" className="cursor-pointer flex-1">
+              <Label
+                htmlFor="charge-customer"
+                className="cursor-pointer flex-1"
+              >
                 <p className="font-medium text-sm">Biaya ke Pelanggan</p>
-                <p className="text-xs text-muted-foreground">Service fee ditanggung customer</p>
+                <p className="text-xs text-muted-foreground">
+                  Service fee ditanggung customer
+                </p>
               </Label>
             </div>
           </div>
@@ -933,7 +1020,9 @@ export default function PaylabsGateway() {
             <Label>Status Pesanan Baru</Label>
             <Select
               value={general.newOrderStatus}
-              onValueChange={(v) => setGeneral((g) => ({ ...g, newOrderStatus: v }))}
+              onValueChange={(v) =>
+                setGeneral((g) => ({ ...g, newOrderStatus: v }))
+              }
             >
               <SelectTrigger>
                 <SelectValue />
@@ -951,12 +1040,16 @@ export default function PaylabsGateway() {
             <Switch
               id="debug-mode"
               checked={general.debugMode}
-              onCheckedChange={(v) => setGeneral((g) => ({ ...g, debugMode: v }))}
+              onCheckedChange={(v) =>
+                setGeneral((g) => ({ ...g, debugMode: v }))
+              }
               className="data-[state=checked]:bg-cyan-500 shrink-0"
             />
             <Label htmlFor="debug-mode" className="cursor-pointer flex-1">
               <p className="font-medium text-sm">Mode Debug</p>
-              <p className="text-xs text-muted-foreground">Logging detail untuk debugging</p>
+              <p className="text-xs text-muted-foreground">
+                Logging detail untuk debugging
+              </p>
             </Label>
           </div>
         </CardContent>
@@ -996,7 +1089,9 @@ export default function PaylabsGateway() {
           <div className="space-y-1.5">
             <Label htmlFor="store-id">
               Paylabs Store ID{" "}
-              <span className="text-muted-foreground font-normal">(Opsional)</span>
+              <span className="text-muted-foreground font-normal">
+                (Opsional)
+              </span>
             </Label>
             <Input
               id="store-id"
@@ -1005,14 +1100,19 @@ export default function PaylabsGateway() {
               onChange={(e) => setStoreId(e.target.value)}
             />
             <p className="text-xs text-muted-foreground">
-              Kosongkan jika Paylabs tidak memberikan Store ID. Jika diisi, panjang harus 6–32 karakter.
+              Kosongkan jika Paylabs tidak memberikan Store ID. Jika diisi,
+              panjang harus 6–32 karakter.
             </p>
           </div>
         </CardContent>
       </Card>
 
       {/* ── Kredensial Sandbox (SIT) ── */}
-      <Card className={sandboxMode ? "border-yellow-300 bg-yellow-50/30" : "opacity-60"}>
+      <Card
+        className={
+          sandboxMode ? "border-yellow-300 bg-yellow-50/30" : "opacity-60"
+        }
+      >
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
             <CardTitle className="text-sm font-semibold flex items-center gap-2">
@@ -1031,7 +1131,8 @@ export default function PaylabsGateway() {
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <Label>
-                Paylabs Public Key (Sandbox) <span className="text-red-500">*</span>
+                Paylabs Public Key (Sandbox){" "}
+                <span className="text-red-500">*</span>
               </Label>
               <Badge
                 className={
@@ -1040,12 +1141,15 @@ export default function PaylabsGateway() {
                     : "bg-red-100 text-red-700 border border-red-300 text-xs"
                 }
               >
-                {sandboxPaylabsPubKeyConfigured ? "Configured" : "Not configured"}
+                {sandboxPaylabsPubKeyConfigured
+                  ? "Configured"
+                  : "Not configured"}
               </Badge>
             </div>
             <p className="text-xs text-muted-foreground">
-              Public key milik Paylabs (bukan merchant) — digunakan untuk verifikasi signature webhook SIT.
-              Salin dari dashboard Paylabs SIT.
+              Public key milik Paylabs (bukan merchant) — digunakan untuk
+              verifikasi signature webhook SIT. Salin dari dashboard Paylabs
+              SIT.
             </p>
             {!showSandboxPubKeyInput ? (
               <Button
@@ -1055,25 +1159,33 @@ export default function PaylabsGateway() {
                 onClick={() => setShowSandboxPubKeyInput(true)}
               >
                 <Shield className="h-3.5 w-3.5" />
-                {sandboxPaylabsPubKeyConfigured ? "Ganti Paylabs Public Key" : "Set Paylabs Public Key"}
+                {sandboxPaylabsPubKeyConfigured
+                  ? "Ganti Paylabs Public Key"
+                  : "Set Paylabs Public Key"}
               </Button>
             ) : (
               <div className="space-y-2">
                 <Textarea
                   rows={6}
-                  placeholder={"-----BEGIN PUBLIC KEY-----\nMIIBI...\n-----END PUBLIC KEY-----"}
+                  placeholder={
+                    "-----BEGIN PUBLIC KEY-----\nMIIBI...\n-----END PUBLIC KEY-----"
+                  }
                   value={newSandboxPaylabsPubKey}
                   onChange={(e) => setNewSandboxPaylabsPubKey(e.target.value)}
                   className="font-mono text-xs"
                 />
                 <p className="text-xs text-muted-foreground">
-                  Tempel PEM lengkap atau base64. Literal \n dari secret manager juga didukung.
-                  Key tidak akan ditampilkan kembali setelah disimpan.
+                  Tempel PEM lengkap atau base64. Literal \n dari secret manager
+                  juga didukung. Key tidak akan ditampilkan kembali setelah
+                  disimpan.
                 </p>
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => { setShowSandboxPubKeyInput(false); setNewSandboxPaylabsPubKey(""); }}
+                  onClick={() => {
+                    setShowSandboxPubKeyInput(false);
+                    setNewSandboxPaylabsPubKey("");
+                  }}
                   className="text-muted-foreground"
                 >
                   Batal
@@ -1098,15 +1210,23 @@ export default function PaylabsGateway() {
               id="sb-mid"
               placeholder="Contoh: 010728"
               value={sandboxCreds.merchantId}
-              onChange={(e) => setSandboxCreds((c) => ({ ...c, merchantId: e.target.value }))}
+              onChange={(e) =>
+                setSandboxCreds((c) => ({ ...c, merchantId: e.target.value }))
+              }
             />
-            <p className="text-xs text-muted-foreground">Merchant ID untuk environment SIT.</p>
+            <p className="text-xs text-muted-foreground">
+              Merchant ID untuk environment SIT.
+            </p>
           </div>
         </CardContent>
       </Card>
 
       {/* ── Kredensial Produksi ── */}
-      <Card className={!sandboxMode ? "border-green-300 bg-green-50/30" : "opacity-60"}>
+      <Card
+        className={
+          !sandboxMode ? "border-green-300 bg-green-50/30" : "opacity-60"
+        }
+      >
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
             <CardTitle className="text-sm font-semibold flex items-center gap-2">
@@ -1125,7 +1245,8 @@ export default function PaylabsGateway() {
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <Label>
-                Paylabs Public Key (Produksi) <span className="text-red-500">*</span>
+                Paylabs Public Key (Produksi){" "}
+                <span className="text-red-500">*</span>
               </Label>
               <Badge
                 className={
@@ -1138,8 +1259,9 @@ export default function PaylabsGateway() {
               </Badge>
             </div>
             <p className="text-xs text-muted-foreground">
-              Public key milik Paylabs (bukan merchant) — digunakan untuk verifikasi signature webhook produksi.
-              Salin dari dashboard Paylabs produksi.
+              Public key milik Paylabs (bukan merchant) — digunakan untuk
+              verifikasi signature webhook produksi. Salin dari dashboard
+              Paylabs produksi.
             </p>
             {!showProdPubKeyInput ? (
               <Button
@@ -1149,24 +1271,32 @@ export default function PaylabsGateway() {
                 onClick={() => setShowProdPubKeyInput(true)}
               >
                 <Shield className="h-3.5 w-3.5" />
-                {prodPaylabsPubKeyConfigured ? "Ganti Paylabs Public Key" : "Set Paylabs Public Key"}
+                {prodPaylabsPubKeyConfigured
+                  ? "Ganti Paylabs Public Key"
+                  : "Set Paylabs Public Key"}
               </Button>
             ) : (
               <div className="space-y-2">
                 <Textarea
                   rows={6}
-                  placeholder={"-----BEGIN PUBLIC KEY-----\nMIIBI...\n-----END PUBLIC KEY-----"}
+                  placeholder={
+                    "-----BEGIN PUBLIC KEY-----\nMIIBI...\n-----END PUBLIC KEY-----"
+                  }
                   value={newProdPaylabsPubKey}
                   onChange={(e) => setNewProdPaylabsPubKey(e.target.value)}
                   className="font-mono text-xs"
                 />
                 <p className="text-xs text-muted-foreground">
-                  Tempel PEM lengkap atau base64. Key tidak akan ditampilkan kembali setelah disimpan.
+                  Tempel PEM lengkap atau base64. Key tidak akan ditampilkan
+                  kembali setelah disimpan.
                 </p>
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => { setShowProdPubKeyInput(false); setNewProdPaylabsPubKey(""); }}
+                  onClick={() => {
+                    setShowProdPubKeyInput(false);
+                    setNewProdPaylabsPubKey("");
+                  }}
                   className="text-muted-foreground"
                 >
                   Batal
@@ -1191,9 +1321,13 @@ export default function PaylabsGateway() {
               id="prod-mid"
               placeholder="Contoh: 010613"
               value={prodCreds.merchantId}
-              onChange={(e) => setProdCreds((c) => ({ ...c, merchantId: e.target.value }))}
+              onChange={(e) =>
+                setProdCreds((c) => ({ ...c, merchantId: e.target.value }))
+              }
             />
-            <p className="text-xs text-muted-foreground">Merchant ID untuk environment produksi.</p>
+            <p className="text-xs text-muted-foreground">
+              Merchant ID untuk environment produksi.
+            </p>
           </div>
         </CardContent>
       </Card>
@@ -1208,8 +1342,9 @@ export default function PaylabsGateway() {
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            Export konfigurasi ini (termasuk icon URL, kredensial, dan status metode pembayaran)
-            lalu import di proyek lain agar semua proyek punya pengaturan yang sama.
+            Export konfigurasi ini (termasuk icon URL, kredensial, dan status
+            metode pembayaran) lalu import di proyek lain agar semua proyek
+            punya pengaturan yang sama.
           </p>
           <div className="flex gap-3 flex-wrap">
             <Button variant="outline" onClick={handleExport} className="gap-2">
@@ -1233,8 +1368,8 @@ export default function PaylabsGateway() {
             />
           </div>
           <p className="text-xs text-muted-foreground">
-            File yang didownload berformat JSON — buka halaman Paylabs Settings di proyek lain,
-            klik Import, pilih file tersebut.
+            File yang didownload berformat JSON — buka halaman Paylabs Settings
+            di proyek lain, klik Import, pilih file tersebut.
           </p>
         </CardContent>
       </Card>

@@ -173,7 +173,6 @@ router.patch("/admin/paylabs/settings", adminMiddleware, async (req, res) => {
       const raw = patch.storeId as string | null | undefined;
       const trimmed = typeof raw === "string" ? raw.trim() : "";
       if (!trimmed) {
-        // Empty/blank → store as null (omitted from Paylabs payload)
         patch.storeId = null;
       } else {
         try {
@@ -197,7 +196,6 @@ router.patch("/admin/paylabs/settings", adminMiddleware, async (req, res) => {
         return;
       }
       patch.sandboxPublicKey = normalized;
-      // Audit log: record change WITHOUT logging the key value
       logger.info(
         { admin: adminUser, field: "sandboxPublicKey", action: "updated", keyLength: normalized.length },
         "[paylabs-settings] Paylabs sandbox public key updated by admin",
