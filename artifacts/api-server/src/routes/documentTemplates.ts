@@ -319,9 +319,14 @@ router.get("/public/kwitansi-data/:orderNumber", async (req, res) => {
       return;
     }
 
-    const [[facilityRow], [settings]] = await Promise.all([
+    const [[facilityRow], [settings], [kwitansiTemplate]] = await Promise.all([
       db.select({ name: facilitiesTable.name }).from(facilitiesTable).where(eq(facilitiesTable.id, booking.facilityId)).limit(1).catch(() => [null]),
       db.select().from(settingsTable).limit(1).catch(() => [null]),
+      db.select({ financeName: companyDocumentTemplatesTable.financeName, financeTitle: companyDocumentTemplatesTable.financeTitle })
+        .from(companyDocumentTemplatesTable)
+        .where(eq(companyDocumentTemplatesTable.documentType, "kwitansi"))
+        .limit(1)
+        .catch(() => [null]),
     ]);
 
     res.json({
@@ -345,6 +350,8 @@ router.get("/public/kwitansi-data/:orderNumber", async (req, res) => {
       bankName: (settings as any)?.bankName ?? "",
       bankAccount: (settings as any)?.bankAccount ?? "",
       bankAccountName: (settings as any)?.bankAccountName ?? "",
+      financeName: kwitansiTemplate?.financeName ?? (settings as any)?.centerName ?? "",
+      financeTitle: kwitansiTemplate?.financeTitle ?? "Finance Manager",
     });
   } catch (err: any) {
     req.log.error({ err }, "Public kwitansi-data error");
