@@ -696,7 +696,6 @@ export default function PaylabsGateway() {
   async function handleSaveAll() {
     setSaving(true);
     try {
-<<<<<<< HEAD
       // Validate Store ID before sending
       const trimmedStoreId = storeId.trim();
       if (trimmedStoreId.length > 0 && (trimmedStoreId.length < 6 || trimmedStoreId.length > 32)) {
@@ -709,10 +708,7 @@ export default function PaylabsGateway() {
         return;
       }
 
-      const body = {
-=======
       const body: Record<string, unknown> = {
->>>>>>> 91db56267c9870311e2d7e70ca501ced79d1a747
         title: general.title,
         description: general.description,
         sendInvoice: general.sendInvoice,
@@ -720,12 +716,8 @@ export default function PaylabsGateway() {
         newOrderStatus: general.newOrderStatus,
         debugMode: general.debugMode,
         sandboxMode,
-<<<<<<< HEAD
         storeId: trimmedStoreId || null,
         sandboxPublicKey: sandboxCreds.publicKey,
-=======
-        storeId,
->>>>>>> 91db56267c9870311e2d7e70ca501ced79d1a747
         sandboxPrivateKey: sandboxCreds.privateKey,
         sandboxMerchantId: sandboxCreds.merchantId,
         prodPrivateKey: prodCreds.privateKey,
