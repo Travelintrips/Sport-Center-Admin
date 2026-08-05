@@ -68,7 +68,10 @@ export async function loadPaylabsConfigFromDb(): Promise<PaylabsConfig> {
 
     const sandboxMode = row.sandboxMode;
     // DB takes priority over env vars — admin panel is the source of truth.
-    // Env vars serve as seed/fallback only when the DB field is empty.
+    // Env vars serve as seed/fallback only when the DB field is null/undefined.
+    // EXCEPTION: paylabsPublicKey — if DB is explicitly "" (empty string, not null),
+    // skip env var fallback. This lets admin disable signature verification for sandbox
+    // testing without touching secrets. Use ?? (null-coalescing) instead of ||.
     const merchantId = sandboxMode
       ? (row.sandboxMerchantId || process.env.PAYLABS_SANDBOX_MERCHANT_ID || "")
       : (row.prodMerchantId    || process.env.PAYLABS_PROD_MERCHANT_ID    || "");
@@ -76,8 +79,8 @@ export async function loadPaylabsConfigFromDb(): Promise<PaylabsConfig> {
       ? (row.sandboxPrivateKey || process.env.PAYLABS_SANDBOX_PRIVATE_KEY || "")
       : (row.prodPrivateKey    || process.env.PAYLABS_PROD_PRIVATE_KEY    || "");
     const paylabsPublicKey = sandboxMode
-      ? (row.sandboxPublicKey  || process.env.PAYLABS_SANDBOX_PUBLIC_KEY  || "")
-      : (row.prodPublicKey     || process.env.PAYLABS_PROD_PUBLIC_KEY     || "");
+      ? (row.sandboxPublicKey  ?? process.env.PAYLABS_SANDBOX_PUBLIC_KEY  ?? "")
+      : (row.prodPublicKey     ?? process.env.PAYLABS_PROD_PUBLIC_KEY     ?? "");
     const storeId = row.storeId || process.env.PAYLABS_STORE_ID || "";
 
     return {
