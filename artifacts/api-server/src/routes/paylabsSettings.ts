@@ -173,12 +173,13 @@ router.patch("/admin/paylabs/settings", adminMiddleware, async (req, res) => {
       const raw = patch.storeId as string | null | undefined;
       const trimmed = typeof raw === "string" ? raw.trim() : "";
       if (!trimmed) {
-        patch.storeId = null;
+        // Empty/blank → "" (column is NOT NULL; empty string = no storeId used in payload)
+        patch.storeId = "";
       } else {
         try {
-          patch.storeId = normalizeOptionalPaylabsStoreId(trimmed);
+          patch.storeId = normalizeOptionalPaylabsStoreId(trimmed) ?? "";
         } catch (e) {
-          return res.status(400).json({
+          return res.status(422).json({
             error: e instanceof Error ? e.message : "Paylabs Store ID tidak valid",
           });
         }
