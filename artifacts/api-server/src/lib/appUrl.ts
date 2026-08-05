@@ -69,7 +69,20 @@ export async function getPaymentCallbackUrl(): Promise<string> {
     return _cachedPaymentUrl;
   }
 
-  // 2. DB settings — admin panel override
+  const isProd = process.env.NODE_ENV === "production";
+
+  if (!isProd) {
+    // 2. Dev: SELALU gunakan REPLIT_DEV_DOMAIN — domain Vite (port 5000) yang
+    //    mem-proxy /api/* → localhost:8080. DB paymentDomain dan APP_URL TIDAK dipakai
+    //    di dev, karena keduanya kemungkinan menunjuk ke URL produksi.
+    _cachedPaymentUrl = process.env.REPLIT_DEV_DOMAIN
+      ? `https://${process.env.REPLIT_DEV_DOMAIN}`
+      : (process.env.APP_URL ?? "").replace(/\/$/, "");
+    _paymentCacheExpiry = now + CACHE_TTL_MS;
+    return _cachedPaymentUrl;
+  }
+
+  // 3. Production: DB paymentDomain (admin panel) → APP_URL → REPLIT_DEV_DOMAIN fallback
   try {
     const [s] = await db
       .select({ paymentDomain: settingsTable.paymentDomain, appUrl: settingsTable.appUrl })
@@ -85,21 +98,7 @@ export async function getPaymentCallbackUrl(): Promise<string> {
     // fall through
   }
 
-  const isProd = process.env.NODE_ENV === "production";
-
-  if (!isProd) {
-    // 3. Dev: gunakan REPLIT_DEV_DOMAIN — ini adalah domain Vite (port 5000) yang
-    //    mem-proxy semua /api/* ke localhost:8080 (API server). Paylabs callback ke
-    //    domain ini akan melewati proxy Vite dan tiba di /api/paylabs/webhook dengan benar.
-    //    JANGAN gunakan APP_URL di sini — APP_URL kemungkinan adalah URL produksi GAE/Cloud Run.
-    _cachedPaymentUrl = process.env.REPLIT_DEV_DOMAIN
-      ? `https://${process.env.REPLIT_DEV_DOMAIN}`
-      : (process.env.APP_URL ?? "").replace(/\/$/, "");
-    _paymentCacheExpiry = now + CACHE_TTL_MS;
-    return _cachedPaymentUrl;
-  }
-
-  // 4. Production: APP_URL adalah URL stabil prod (GAE, Cloud Run, custom domain)
+  // 4. Production fallback: APP_URL adalah URL stabil prod (custom domain, GAE, Cloud Run)
   const appUrl = (process.env.APP_URL ?? "").replace(/\/$/, "");
   _cachedPaymentUrl = appUrl
     ? appUrl
