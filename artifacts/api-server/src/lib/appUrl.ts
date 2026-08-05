@@ -14,6 +14,12 @@ function envFallback(): string {
   return (process.env.APP_URL ?? "").replace(/\/$/, "");
 }
 
+function normalizePaymentCallbackBase(value: string): string {
+  return value
+    .replace(/\/+$/, "")
+    .replace(/\/api$/, "");
+}
+
 export async function getBaseUrl(): Promise<string> {
   const now = Date.now();
   if (_cachedUrl !== null && now < _cacheExpiry) return _cachedUrl;
@@ -62,7 +68,7 @@ export async function getPaymentCallbackUrl(): Promise<string> {
   if (_cachedPaymentUrl !== null && now < _paymentCacheExpiry) return _cachedPaymentUrl;
 
   // 1. Explicit env override — selalu menang di semua mode
-  const explicitOverride = (process.env.PAYLABS_CALLBACK_BASE_URL ?? "").replace(/\/$/, "");
+  const explicitOverride = normalizePaymentCallbackBase(process.env.PAYLABS_CALLBACK_BASE_URL ?? "");
   if (explicitOverride) {
     _cachedPaymentUrl = explicitOverride;
     _paymentCacheExpiry = now + CACHE_TTL_MS;
@@ -76,7 +82,7 @@ export async function getPaymentCallbackUrl(): Promise<string> {
     //    mem-proxy /api/* → localhost:8080. DB paymentDomain dan APP_URL TIDAK dipakai
     //    di dev, karena keduanya kemungkinan menunjuk ke URL produksi.
     _cachedPaymentUrl = process.env.REPLIT_DEV_DOMAIN
-      ? `https://${process.env.REPLIT_DEV_DOMAIN}`
+      ? normalizePaymentCallbackBase(`https://${process.env.REPLIT_DEV_DOMAIN}`)
       : "";
     _paymentCacheExpiry = now + CACHE_TTL_MS;
     return _cachedPaymentUrl;
@@ -88,7 +94,7 @@ export async function getPaymentCallbackUrl(): Promise<string> {
       .select({ paymentDomain: settingsTable.paymentDomain, appUrl: settingsTable.appUrl })
       .from(settingsTable)
       .limit(1);
-    const dbOverride = (s?.paymentDomain || s?.appUrl || "").replace(/\/$/, "");
+    const dbOverride = normalizePaymentCallbackBase(s?.paymentDomain || s?.appUrl || "");
     if (dbOverride) {
       _cachedPaymentUrl = dbOverride;
       _paymentCacheExpiry = now + CACHE_TTL_MS;
@@ -99,11 +105,11 @@ export async function getPaymentCallbackUrl(): Promise<string> {
   }
 
   // 4. Production fallback: APP_URL adalah URL stabil prod (custom domain, GAE, Cloud Run)
-  const appUrl = (process.env.APP_URL ?? "").replace(/\/$/, "");
+  const appUrl = normalizePaymentCallbackBase(process.env.APP_URL ?? "");
   _cachedPaymentUrl = appUrl
     ? appUrl
     : process.env.REPLIT_DEV_DOMAIN
-      ? `https://${process.env.REPLIT_DEV_DOMAIN}`
+      ? normalizePaymentCallbackBase(`https://${process.env.REPLIT_DEV_DOMAIN}`)
       : "";
 
   _paymentCacheExpiry = now + CACHE_TTL_MS;

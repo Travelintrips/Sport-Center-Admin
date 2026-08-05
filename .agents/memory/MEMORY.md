@@ -24,3 +24,4 @@
 - [GAE deploy TS fix](gae-deploy-ts-fix.md) — analyticsPublic.ts GA4 limit field must be string "5" not number 5; blocks Cloud Build typecheck without fix.
 - [GAE deploy bundle gaps](gae-deploy-bundle-gaps.md) — gae-deploy/package.json must include @google-cloud/storage; @replit/object-storage must NOT be in esbuild external (bundle inline); app.ts uses process.cwd() for frontend dist path; express.static needs redirect:false.
 - [GAE health endpoints](gae-health-endpoints.md) — health/healthz/readiness mounted at root via app.use(healthRouter) in app.ts (NOT only under /api); /readiness does SELECT 1 with DB pool; test in jest.config.mjs uses ts-jest ESM mode + supertest.
+- [Paylabs callback invariant](paylabs-callback-invariant.md) — persist merchantTradeNo→booking_id before provider calls; callback must use exact transaction lookup and raw-body signature verification.

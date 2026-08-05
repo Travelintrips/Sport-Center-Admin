@@ -320,6 +320,53 @@ router.post("/paylabs/create-payment", async (req, res) => {
     return;
   }
 
+  const providerPaymentType = method.type === "qris"
+    ? "QRIS"
+    : method.code ?? paymentMethod.toUpperCase();
+  const rawReq = JSON.stringify({
+    requestId,
+    merchantTradeNo: tradeNo,
+    amount,
+    paymentMethod,
+    paymentType: providerPaymentType,
+    notifyUrl,
+    redirectUrl: null,
+  });
+
+  // Save the relation before calling Paylabs so a fast callback can resolve
+  // merchantTradeNo -> booking_id immediately.
+  try {
+    await ensureTransactionsTable();
+    await db.execute(sql`
+      INSERT INTO sport_center.paylabs_transactions
+        (booking_id, order_number, merchant_trade_no, paylabs_trade_no,
+         payment_method, amount, status, notify_url, raw_request)
+      VALUES (
+        ${booking.id},
+        ${booking.orderNumber ?? ""},
+        ${tradeNo},
+        NULL,
+        ${paymentMethod},
+        ${amount},
+        'PENDING',
+        ${notifyUrl},
+        ${rawReq}::jsonb
+      )
+      ON CONFLICT (merchant_trade_no) DO UPDATE SET
+        booking_id  = EXCLUDED.booking_id,
+        notify_url  = EXCLUDED.notify_url,
+        raw_request = EXCLUDED.raw_request,
+        updated_at  = NOW()
+    `);
+  } catch (dbErr) {
+    logger.error(
+      { dbErr, merchantTradeNo: tradeNo, booking_id: booking.id, transaction_id: null, requestId },
+      "[paylabs:create-payment] failed to persist transaction",
+    );
+    res.status(500).json({ error: "Gagal menyiapkan transaksi Paylabs" });
+    return;
+  }
+
   let paylabsRes: Awaited<ReturnType<typeof createQris>>;
 
   try {
@@ -371,51 +418,22 @@ router.post("/paylabs/create-payment", async (req, res) => {
   const payUrl         = String(d.payUrl      ?? d.paymentUrl ?? "");
 
   try {
-    await ensureTransactionsTable();
-    // Store notifyUrl so it's auditable after the fact (Phase 1 visibility)
-    const providerPaymentType = method.type === "qris"
-      ? "QRIS"
-      : method.code ?? paymentMethod.toUpperCase();
-    const rawReq = JSON.stringify({
-      requestId,
-      merchantTradeNo: tradeNo,
-      amount,
-      paymentMethod,
-      paymentType: providerPaymentType,
-      notifyUrl,
-      redirectUrl: null,
-    }).replace(/'/g, "''");
-    await db.execute(sql.raw(`
-      INSERT INTO sport_center.paylabs_transactions
-        (booking_id, order_number, merchant_trade_no, paylabs_trade_no,
-         payment_method, amount, status,
-         notify_url,
-         qr_code_url, qr_content, va_number, pay_url,
-         raw_request, raw_response)
-      VALUES (
-        ${booking.id},
-        '${(booking.orderNumber ?? "").replace(/'/g, "''")}',
-        '${tradeNo.replace(/'/g, "''")}',
-        '${paylabsTradeNo.replace(/'/g, "''")}',
-        '${paymentMethod.replace(/'/g, "''")}',
-        ${amount},
-        'PENDING',
-        '${notifyUrl.replace(/'/g, "''")}',
-        '${qrCodeUrl.replace(/'/g, "''")}',
-        '${qrContent.replace(/'/g, "''")}',
-        '${vaNumber.replace(/'/g, "''")}',
-        '${payUrl.replace(/'/g, "''")}',
-        '${rawReq}',
-        '${JSON.stringify(d).replace(/'/g, "''")}'
-      )
-      ON CONFLICT (merchant_trade_no) DO UPDATE SET
-        paylabs_trade_no = EXCLUDED.paylabs_trade_no,
-        notify_url       = EXCLUDED.notify_url,
-        raw_response     = EXCLUDED.raw_response,
-        updated_at       = NOW()
-    `));
+    await db.execute(sql`
+      UPDATE sport_center.paylabs_transactions
+      SET paylabs_trade_no = ${paylabsTradeNo},
+          qr_code_url      = ${qrCodeUrl},
+          qr_content       = ${qrContent},
+          va_number        = ${vaNumber},
+          pay_url          = ${payUrl},
+          raw_response     = ${JSON.stringify(d)}::jsonb,
+          updated_at       = NOW()
+      WHERE merchant_trade_no = ${tradeNo}
+    `);
   } catch (dbErr) {
-    logger.warn({ dbErr }, "[paylabs:create-payment] failed to persist transaction (non-fatal)");
+    logger.error(
+      { dbErr, merchantTradeNo: tradeNo, booking_id: booking.id, transaction_id: null, requestId },
+      "[paylabs:create-payment] failed to update provider response",
+    );
   }
 
   res.json({
@@ -444,11 +462,33 @@ router.post("/paylabs/webhook", async (req, res) => {
     ? ((req as any).rawBody as Buffer).toString("utf8")
     : JSON.stringify(req.body);
   const body              = req.body as Record<string, unknown>;
-  const merchantTradeNo   = String(body.merchantTradeNo ?? "");
-  const rawProviderStatus = String(body.status ?? body.tradeState ?? "");
+  const merchantTradeNo   = String(body.merchantTradeNo ?? body.merchant_trade_no ?? "");
+  const rawProviderStatus = String(
+    body.tradeStatus ??
+    body.tradeState ??
+    body.status ??
+    body.paymentStatus ??
+    body.orderStatus ??
+    body.resultStatus ??
+    "",
+  );
   const paylabsTradeNo    = String(body.paylabsTradeNo ?? body.platformTradeNo ?? body.tradeNo ?? "");
   let transactionId: number | null = null;
   let bookingId: number | null = null;
+
+  try {
+    const txRows = await db.execute(sql`
+      SELECT id, booking_id
+      FROM sport_center.paylabs_transactions
+      WHERE merchant_trade_no = ${merchantTradeNo}
+      LIMIT 1
+    `);
+    const txRow = (txRows as any).rows?.[0] ?? (txRows as any)[0];
+    transactionId = txRow ? Number(txRow.id) : null;
+    bookingId = txRow?.booking_id ? Number(txRow.booking_id) : null;
+  } catch {
+    // finalizePayment performs the authoritative lookup inside its transaction.
+  }
 
   // ── Phase 5: structured step logging ────────────────────────────────────────
   const wlog = (step: string, extra: Record<string, unknown> = {}) =>
