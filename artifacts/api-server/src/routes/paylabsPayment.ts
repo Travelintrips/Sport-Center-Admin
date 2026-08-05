@@ -12,7 +12,7 @@ import { randomUUID } from "crypto";
 import { db, bookingsTable, paymentsTable, bookingHistoryTable, paylabsSettingsTable } from "@workspace/db";
 import { eq, sql } from "drizzle-orm";
 import { logger } from "../lib/logger";
-import { getBaseUrl } from "../lib/appUrl";
+import { getBaseUrl, getPaymentCallbackUrl } from "../lib/appUrl";
 import {
   loadPaylabsConfigFromDb,
   getPaylabsConfig,
@@ -109,7 +109,7 @@ router.post("/paylabs/create-payment", async (req, res) => {
   const amount       = Number(booking.grandTotal ?? booking.totalPrice);
   const tradeNo      = `SC-${booking.orderNumber}-${Date.now()}`.slice(0, 32);
   const requestId    = randomUUID();
-  const notifyUrl    = `${await getBaseUrl()}/api/paylabs/webhook`;
+  const notifyUrl    = `${await getPaymentCallbackUrl()}/api/paylabs/webhook`;
   const productName  = `Booking ${booking.orderNumber}`;
   const productInfo: ProductInfo[] = [{
     id      : String(booking.facilityId),

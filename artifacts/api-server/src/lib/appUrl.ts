@@ -2,6 +2,8 @@ import { db, settingsTable } from "@workspace/db";
 
 let _cachedUrl: string | null = null;
 let _cacheExpiry = 0;
+let _cachedPaymentUrl: string | null = null;
+let _paymentCacheExpiry = 0;
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
 function envFallback(): string {
@@ -43,7 +45,51 @@ export async function getBaseUrl(): Promise<string> {
   return _cachedUrl!;
 }
 
+/**
+ * URL stabil untuk payment gateway callback/webhook.
+ *
+ * BERBEDA dari getBaseUrl():
+ * - getBaseUrl() di dev pakai REPLIT_DEV_DOMAIN (ephemeral, berubah setiap restart)
+ * - getPaymentCallbackUrl() SELALU prioritaskan APP_URL atau paymentDomain dari DB
+ *   karena Paylabs menyimpan notifyUrl per-transaksi — jika domain berubah,
+ *   callback tidak akan pernah diterima.
+ *
+ * Priority: DB paymentDomain → ENV APP_URL → REPLIT_DEV_DOMAIN (terakhir, fallback saja)
+ */
+export async function getPaymentCallbackUrl(): Promise<string> {
+  const now = Date.now();
+  if (_cachedPaymentUrl !== null && now < _paymentCacheExpiry) return _cachedPaymentUrl;
+
+  try {
+    const [s] = await db
+      .select({ paymentDomain: settingsTable.paymentDomain, appUrl: settingsTable.appUrl })
+      .from(settingsTable)
+      .limit(1);
+    const dbOverride = (s?.paymentDomain || s?.appUrl || "").replace(/\/$/, "");
+    if (dbOverride) {
+      _cachedPaymentUrl = dbOverride;
+      _paymentCacheExpiry = now + CACHE_TTL_MS;
+      return _cachedPaymentUrl;
+    }
+  } catch {
+    // fall through
+  }
+
+  // Fallback: APP_URL (stabil, tidak berubah saat restart), baru REPLIT_DEV_DOMAIN
+  const appUrl = (process.env.APP_URL ?? "").replace(/\/$/, "");
+  _cachedPaymentUrl = appUrl
+    ? appUrl
+    : process.env.REPLIT_DEV_DOMAIN
+      ? `https://${process.env.REPLIT_DEV_DOMAIN}`
+      : "";
+
+  _paymentCacheExpiry = now + CACHE_TTL_MS;
+  return _cachedPaymentUrl;
+}
+
 export function invalidateBaseUrlCache(): void {
   _cachedUrl = null;
   _cacheExpiry = 0;
+  _cachedPaymentUrl = null;
+  _paymentCacheExpiry = 0;
 }
