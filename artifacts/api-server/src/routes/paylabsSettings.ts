@@ -3,7 +3,12 @@ import crypto from "crypto";
 import { db, paylabsSettingsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
+<<<<<<< HEAD
 import { loadPaylabsConfigFromDb, normalizeOptionalPaylabsStoreId } from "../lib/paylabs";
+=======
+import { loadPaylabsConfigFromDb, normalizePaylabsPublicKey } from "../lib/paylabs";
+import { logger } from "../lib/logger";
+>>>>>>> 91db56267c9870311e2d7e70ca501ced79d1a747
 
 const router = Router();
 
@@ -24,23 +29,31 @@ async function getOrCreate() {
 }
 
 // GET /api/admin/paylabs/settings
-// Returns DB values merged with env-var fallbacks so the admin panel always
-// shows the effective configuration (env vars seed empty DB fields).
+// Returns DB values merged with env-var fallbacks.
+// SECURITY: Paylabs public keys (sandboxPublicKey / prodPublicKey) are NEVER returned
+// to the client — only boolean "configured" flags are sent instead.
+// Merchant private keys ARE returned so the admin form can pre-populate them (they are
+// already stored in DB and the admin has write access to change them).
 router.get("/admin/paylabs/settings", adminMiddleware, async (req, res) => {
   try {
     const config = await getOrCreate();
 
-    // Merge env var fallbacks into empty fields — read-only, not persisted here.
-    // This ensures the admin form pre-populates with whatever is actually in use.
+    // Effective values (DB takes priority, env vars are fallback for seeds)
+    const sandboxPublicKeyEffective  = config.sandboxPublicKey  || process.env.PAYLABS_SANDBOX_PUBLIC_KEY  || "";
+    const prodPublicKeyEffective     = config.prodPublicKey     || process.env.PAYLABS_PROD_PUBLIC_KEY     || "";
+
     const merged = {
       ...config,
       sandboxMerchantId: config.sandboxMerchantId || process.env.PAYLABS_SANDBOX_MERCHANT_ID || "",
       sandboxPrivateKey:  config.sandboxPrivateKey  || process.env.PAYLABS_SANDBOX_PRIVATE_KEY  || "",
-      sandboxPublicKey:   config.sandboxPublicKey   || process.env.PAYLABS_SANDBOX_PUBLIC_KEY   || "",
       prodMerchantId:    config.prodMerchantId    || process.env.PAYLABS_PROD_MERCHANT_ID    || "",
       prodPrivateKey:     config.prodPrivateKey     || process.env.PAYLABS_PROD_PRIVATE_KEY     || "",
-      prodPublicKey:      config.prodPublicKey      || process.env.PAYLABS_PROD_PUBLIC_KEY      || "",
       storeId:            config.storeId            || process.env.PAYLABS_STORE_ID             || "",
+      // Redact public keys — send only configured status
+      sandboxPublicKey: undefined,
+      prodPublicKey:    undefined,
+      sandboxPublicKeyConfigured: Boolean(sandboxPublicKeyEffective.trim()),
+      prodPublicKeyConfigured:    Boolean(prodPublicKeyEffective.trim()),
     };
 
     res.json(merged);
@@ -131,11 +144,14 @@ router.get("/admin/paylabs/test-config", adminMiddleware, async (req, res) => {
 });
 
 // PATCH /api/admin/paylabs/settings
+// NOTE: sandboxPublicKey / prodPublicKey are Paylabs-owned public keys used for
+// VERIFYING webhook signatures (not merchant keys). They are normalized here
+// and stored, but never returned to the client in GET (only boolean flags are sent).
 router.patch("/admin/paylabs/settings", adminMiddleware, async (req, res) => {
   try {
     const current = await getOrCreate();
 
-    const ALLOWED = [
+    const ALLOWED_NON_KEY = [
       "title",
       "description",
       "sendInvoice",
@@ -144,20 +160,19 @@ router.patch("/admin/paylabs/settings", adminMiddleware, async (req, res) => {
       "debugMode",
       "sandboxMode",
       "storeId",
-      "sandboxPublicKey",
       "sandboxPrivateKey",
       "sandboxMerchantId",
-      "prodPublicKey",
       "prodPrivateKey",
       "prodMerchantId",
       "paymentMethodsConfig",
     ] as const;
 
     const patch: Record<string, unknown> = {};
-    for (const key of ALLOWED) {
+    for (const key of ALLOWED_NON_KEY) {
       if (key in req.body) patch[key] = req.body[key];
     }
 
+<<<<<<< HEAD
     // Validate and normalize storeId before saving
     if ("storeId" in patch) {
       const raw = patch.storeId as string | null | undefined;
@@ -174,6 +189,37 @@ router.patch("/admin/paylabs/settings", adminMiddleware, async (req, res) => {
           });
         }
       }
+=======
+    // Handle Paylabs public keys separately — normalize PEM + audit log
+    // Only update if client sends a non-empty value (empty string = "don't change")
+    const adminUser = (req as any).user?.username ?? (req as any).user?.id ?? "unknown_admin";
+
+    if ("sandboxPublicKey" in req.body && req.body.sandboxPublicKey !== "") {
+      const normalized = normalizePaylabsPublicKey(String(req.body.sandboxPublicKey));
+      if (!normalized) {
+        res.status(400).json({ error: "Invalid Paylabs sandbox public key — must be valid PEM or base64" });
+        return;
+      }
+      patch.sandboxPublicKey = normalized;
+      // Audit log: record change WITHOUT logging the key value
+      logger.info(
+        { admin: adminUser, field: "sandboxPublicKey", action: "updated", keyLength: normalized.length },
+        "[paylabs-settings] Paylabs sandbox public key updated by admin",
+      );
+    }
+
+    if ("prodPublicKey" in req.body && req.body.prodPublicKey !== "") {
+      const normalized = normalizePaylabsPublicKey(String(req.body.prodPublicKey));
+      if (!normalized) {
+        res.status(400).json({ error: "Invalid Paylabs production public key — must be valid PEM or base64" });
+        return;
+      }
+      patch.prodPublicKey = normalized;
+      logger.info(
+        { admin: adminUser, field: "prodPublicKey", action: "updated", keyLength: normalized.length },
+        "[paylabs-settings] Paylabs production public key updated by admin",
+      );
+>>>>>>> 91db56267c9870311e2d7e70ca501ced79d1a747
     }
 
     const [updated] = await db
@@ -182,7 +228,16 @@ router.patch("/admin/paylabs/settings", adminMiddleware, async (req, res) => {
       .where(eq(paylabsSettingsTable.id, current.id))
       .returning();
 
-    res.json(updated);
+    // Return safe response — redact public keys, send only configured status
+    const safeResponse = {
+      ...updated,
+      sandboxPublicKey: undefined,
+      prodPublicKey:    undefined,
+      sandboxPublicKeyConfigured: Boolean(updated.sandboxPublicKey?.trim()),
+      prodPublicKeyConfigured:    Boolean(updated.prodPublicKey?.trim()),
+    };
+
+    res.json(safeResponse);
   } catch (err) {
     req.log.error({ err }, "PATCH paylabs settings error");
     res.status(500).json({ error: "Internal server error" });

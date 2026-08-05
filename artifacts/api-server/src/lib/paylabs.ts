@@ -156,12 +156,42 @@ function makeTimestamp(): string {
 }
 
 function normaliseKey(key: string, type: "PUBLIC" | "PRIVATE"): string {
-  key = key.trim();
-  // Already a complete PEM block (any header) — return as-is
-  if (key.includes("-----BEGIN")) return key;
-  // Raw base64 → wrap as PKCS#8 PEM
-  const body = key.replace(/\s+/g, "").match(/.{1,64}/g)!.join("\n");
-  return `-----BEGIN ${type} KEY-----\n${body}\n-----END ${type} KEY-----`;
+  // Handle literal \n escape sequences (common when pasting from secret managers)
+  key = key.trim().replace(/\\n/g, "\n").replace(/\\r/g, "");
+  // Already a complete PEM block — re-normalize line widths and return
+  if (key.includes("-----BEGIN")) {
+    const body = key.replace(/-----[^-]+-----/g, "").replace(/\s+/g, "");
+    if (!body) throw new Error(`Empty PEM body for ${type} key`);
+    const chunked = (body.match(/.{1,64}/g) ?? []).join("\n");
+    // Preserve original header type (PUBLIC KEY, RSA PUBLIC KEY, etc.)
+    const header = key.match(/-----BEGIN ([^-]+)-----/)?.[1] ?? `${type} KEY`;
+    return `-----BEGIN ${header}-----\n${chunked}\n-----END ${header}-----`;
+  }
+  // Raw base64 → wrap as PEM
+  const body = key.replace(/\s+/g, "");
+  if (!body) throw new Error(`Empty raw base64 for ${type} key`);
+  const chunked = body.match(/.{1,64}/g)!.join("\n");
+  return `-----BEGIN ${type} KEY-----\n${chunked}\n-----END ${type} KEY-----`;
+}
+
+/**
+ * Normalize a PEM public key received from the Paylabs dashboard (sandbox or production).
+ * Accepts:
+ *   - Full PEM with -----BEGIN PUBLIC KEY----- header
+ *   - Literal \n escape sequences (from secret managers / copy-paste)
+ *   - Raw base64 without header
+ * Returns well-formed PEM or empty string if input is blank.
+ * NOTE: This is the Paylabs-owned public key used for VERIFYING their webhook signatures.
+ *       Do NOT confuse with the merchant public key (derived from merchant private key).
+ */
+export function normalizePaylabsPublicKey(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return "";
+  try {
+    return normaliseKey(trimmed, "PUBLIC");
+  } catch {
+    return ""; // reject malformed input
+  }
 }
 
 /**

@@ -579,19 +579,24 @@ export default function PaylabsGateway() {
   const [sandboxMode, setSandboxMode] = useState(true);
   const [storeId, setStoreId] = useState("");
 
-  // Sandbox credentials
+  // Sandbox credentials — publicKey is NEVER stored in state after load (security).
+  // Only a boolean "configured" flag is kept; user must re-enter to change.
   const [sandboxCreds, setSandboxCreds] = useState({
-    publicKey: "",
     privateKey: "",
     merchantId: "",
   });
+  const [sandboxPaylabsPubKeyConfigured, setSandboxPaylabsPubKeyConfigured] = useState(false);
+  const [newSandboxPaylabsPubKey, setNewSandboxPaylabsPubKey] = useState("");
+  const [showSandboxPubKeyInput, setShowSandboxPubKeyInput] = useState(false);
 
   // Production credentials
   const [prodCreds, setProdCreds] = useState({
-    publicKey: "",
     privateKey: "",
     merchantId: "",
   });
+  const [prodPaylabsPubKeyConfigured, setProdPaylabsPubKeyConfigured] = useState(false);
+  const [newProdPaylabsPubKey, setNewProdPaylabsPubKey] = useState("");
+  const [showProdPubKeyInput, setShowProdPubKeyInput] = useState(false);
 
   // ── Load from API on mount ──────────────────────────────────────────────────
   useEffect(() => {
@@ -614,15 +619,17 @@ export default function PaylabsGateway() {
         setSandboxMode(d.sandboxMode ?? true);
         setStoreId(d.storeId ?? "");
         setSandboxCreds({
-          publicKey: d.sandboxPublicKey ?? "",
           privateKey: d.sandboxPrivateKey ?? "",
           merchantId: d.sandboxMerchantId ?? "",
         });
         setProdCreds({
-          publicKey: d.prodPublicKey ?? "",
           privateKey: d.prodPrivateKey ?? "",
           merchantId: d.prodMerchantId ?? "",
         });
+        // Public keys: only receive configured status, never the actual key
+        setSandboxPaylabsPubKeyConfigured(Boolean(d.sandboxPublicKeyConfigured));
+        setProdPaylabsPubKeyConfigured(Boolean(d.prodPublicKeyConfigured));
+
         if (Array.isArray(d.paymentMethodsConfig)) {
           setMethods((prev) =>
             prev.map((m) => {
@@ -689,6 +696,7 @@ export default function PaylabsGateway() {
   async function handleSaveAll() {
     setSaving(true);
     try {
+<<<<<<< HEAD
       // Validate Store ID before sending
       const trimmedStoreId = storeId.trim();
       if (trimmedStoreId.length > 0 && (trimmedStoreId.length < 6 || trimmedStoreId.length > 32)) {
@@ -702,6 +710,9 @@ export default function PaylabsGateway() {
       }
 
       const body = {
+=======
+      const body: Record<string, unknown> = {
+>>>>>>> 91db56267c9870311e2d7e70ca501ced79d1a747
         title: general.title,
         description: general.description,
         sendInvoice: general.sendInvoice,
@@ -709,11 +720,14 @@ export default function PaylabsGateway() {
         newOrderStatus: general.newOrderStatus,
         debugMode: general.debugMode,
         sandboxMode,
+<<<<<<< HEAD
         storeId: trimmedStoreId || null,
         sandboxPublicKey: sandboxCreds.publicKey,
+=======
+        storeId,
+>>>>>>> 91db56267c9870311e2d7e70ca501ced79d1a747
         sandboxPrivateKey: sandboxCreds.privateKey,
         sandboxMerchantId: sandboxCreds.merchantId,
-        prodPublicKey: prodCreds.publicKey,
         prodPrivateKey: prodCreds.privateKey,
         prodMerchantId: prodCreds.merchantId,
         paymentMethodsConfig: methods.map((m) => ({
@@ -725,6 +739,14 @@ export default function PaylabsGateway() {
           customDescription: m.customDescription,
         })),
       };
+
+      // Only send public key if user entered a new one (empty string = don't change)
+      if (newSandboxPaylabsPubKey.trim()) {
+        body.sandboxPublicKey = newSandboxPaylabsPubKey.trim();
+      }
+      if (newProdPaylabsPubKey.trim()) {
+        body.prodPublicKey = newProdPaylabsPubKey.trim();
+      }
 
       const res = await fetch("/api/admin/paylabs/settings", {
         method: "PATCH",
@@ -739,6 +761,17 @@ export default function PaylabsGateway() {
         const errBody = await res.json().catch(() => ({}));
         throw new Error(`HTTP ${res.status}: ${errBody?.error ?? "unknown"}`);
       }
+
+      const saved = await res.json().catch(() => ({}));
+
+      // Update configured flags from response; clear pending new key inputs
+      setSandboxPaylabsPubKeyConfigured(Boolean(saved.sandboxPublicKeyConfigured));
+      setProdPaylabsPubKeyConfigured(Boolean(saved.prodPublicKeyConfigured));
+      setNewSandboxPaylabsPubKey("");
+      setNewProdPaylabsPubKey("");
+      setShowSandboxPubKeyInput(false);
+      setShowProdPubKeyInput(false);
+
       toast({ title: "Pengaturan disimpan", description: "Konfigurasi Paylabs berhasil disimpan ke database." });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "unknown error";
@@ -754,7 +787,17 @@ export default function PaylabsGateway() {
   }
 
   function handleExport() {
-    const data = { general, sandboxMode, storeId, sandboxCreds, prodCreds, methods };
+    // SECURITY: Paylabs public keys are NOT included in export (prevent key leakage).
+    // Merchant private keys are included since the admin explicitly chose to export.
+    const data = {
+      general,
+      sandboxMode,
+      storeId,
+      sandboxCreds, // contains merchantId and privateKey only (no public key)
+      prodCreds,    // same
+      methods,
+      _note: "Paylabs public keys are NOT exported for security reasons. Enter them manually on each project.",
+    };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -762,7 +805,7 @@ export default function PaylabsGateway() {
     a.download = "paylabs-config.json";
     a.click();
     URL.revokeObjectURL(url);
-    toast({ title: "Konfigurasi diekspor", description: "File paylabs-config.json berhasil diunduh." });
+    toast({ title: "Konfigurasi diekspor", description: "File paylabs-config.json berhasil diunduh. Public key tidak disertakan." });
   }
 
   function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
@@ -775,10 +818,17 @@ export default function PaylabsGateway() {
         if (data.general) setGeneral(data.general);
         if (data.sandboxMode !== undefined) setSandboxMode(data.sandboxMode);
         if (data.storeId !== undefined) setStoreId(data.storeId);
-        if (data.sandboxCreds) setSandboxCreds(data.sandboxCreds);
-        if (data.prodCreds) setProdCreds(data.prodCreds);
+        if (data.sandboxCreds) {
+          // Never import public key from file — only privateKey and merchantId
+          const { privateKey, merchantId } = data.sandboxCreds;
+          setSandboxCreds({ privateKey: privateKey ?? "", merchantId: merchantId ?? "" });
+        }
+        if (data.prodCreds) {
+          const { privateKey, merchantId } = data.prodCreds;
+          setProdCreds({ privateKey: privateKey ?? "", merchantId: merchantId ?? "" });
+        }
         if (data.methods) setMethods(data.methods);
-        toast({ title: "Konfigurasi diimpor", description: "Pengaturan berhasil dimuat dari file." });
+        toast({ title: "Konfigurasi diimpor", description: "Pengaturan berhasil dimuat. Masukkan Paylabs public key secara manual." });
       } catch {
         toast({ title: "Gagal impor", description: "File JSON tidak valid.", variant: "destructive" });
       }
@@ -986,19 +1036,66 @@ export default function PaylabsGateway() {
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
-          <SecretField
-            id="sb-pubkey"
-            label="Paylabs Public Key (Sandbox)"
-            required
-            hint="Public key dari dashboard Paylabs SIT."
-            value={sandboxCreds.publicKey}
-            onChange={(v) => setSandboxCreds((c) => ({ ...c, publicKey: v }))}
-          />
+          {/* Paylabs Public Key (Sandbox) — Paylabs's key for verifying webhook signatures */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label>
+                Paylabs Public Key (Sandbox) <span className="text-red-500">*</span>
+              </Label>
+              <Badge
+                className={
+                  sandboxPaylabsPubKeyConfigured
+                    ? "bg-green-100 text-green-700 border border-green-300 text-xs"
+                    : "bg-red-100 text-red-700 border border-red-300 text-xs"
+                }
+              >
+                {sandboxPaylabsPubKeyConfigured ? "Configured" : "Not configured"}
+              </Badge>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Public key milik Paylabs (bukan merchant) — digunakan untuk verifikasi signature webhook SIT.
+              Salin dari dashboard Paylabs SIT.
+            </p>
+            {!showSandboxPubKeyInput ? (
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2"
+                onClick={() => setShowSandboxPubKeyInput(true)}
+              >
+                <Shield className="h-3.5 w-3.5" />
+                {sandboxPaylabsPubKeyConfigured ? "Ganti Paylabs Public Key" : "Set Paylabs Public Key"}
+              </Button>
+            ) : (
+              <div className="space-y-2">
+                <Textarea
+                  rows={6}
+                  placeholder={"-----BEGIN PUBLIC KEY-----\nMIIBI...\n-----END PUBLIC KEY-----"}
+                  value={newSandboxPaylabsPubKey}
+                  onChange={(e) => setNewSandboxPaylabsPubKey(e.target.value)}
+                  className="font-mono text-xs"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Tempel PEM lengkap atau base64. Literal \n dari secret manager juga didukung.
+                  Key tidak akan ditampilkan kembali setelah disimpan.
+                </p>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => { setShowSandboxPubKeyInput(false); setNewSandboxPaylabsPubKey(""); }}
+                  className="text-muted-foreground"
+                >
+                  Batal
+                </Button>
+              </div>
+            )}
+          </div>
+
           <SecretField
             id="sb-privkey"
             label="Merchant Private Key (Sandbox)"
             required
-            hint="Private key merchant untuk environment SIT."
+            hint="Private key merchant untuk environment SIT. Digunakan untuk menandatangani request ke Paylabs."
             value={sandboxCreds.privateKey}
             onChange={(v) => setSandboxCreds((c) => ({ ...c, privateKey: v }))}
           />
@@ -1013,15 +1110,6 @@ export default function PaylabsGateway() {
               onChange={(e) => setSandboxCreds((c) => ({ ...c, merchantId: e.target.value }))}
             />
             <p className="text-xs text-muted-foreground">Merchant ID untuk environment SIT.</p>
-          </div>
-          <div>
-            <Button variant="outline" size="sm" className="gap-2 rounded-full">
-              <Shield className="h-3.5 w-3.5" />
-              Tampilkan Merchant Public Key
-            </Button>
-            <p className="text-xs text-muted-foreground mt-2">
-              Public key ini harus diupload ke dashboard Paylabs SIT agar tanda tangan dikenali.
-            </p>
           </div>
         </CardContent>
       </Card>
@@ -1042,19 +1130,65 @@ export default function PaylabsGateway() {
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
-          <SecretField
-            id="prod-pubkey"
-            label="Paylabs Public Key"
-            required
-            hint="Public key dari dashboard Paylabs produksi."
-            value={prodCreds.publicKey}
-            onChange={(v) => setProdCreds((c) => ({ ...c, publicKey: v }))}
-          />
+          {/* Paylabs Public Key (Produksi) — Paylabs's key for verifying webhook signatures */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label>
+                Paylabs Public Key (Produksi) <span className="text-red-500">*</span>
+              </Label>
+              <Badge
+                className={
+                  prodPaylabsPubKeyConfigured
+                    ? "bg-green-100 text-green-700 border border-green-300 text-xs"
+                    : "bg-red-100 text-red-700 border border-red-300 text-xs"
+                }
+              >
+                {prodPaylabsPubKeyConfigured ? "Configured" : "Not configured"}
+              </Badge>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Public key milik Paylabs (bukan merchant) — digunakan untuk verifikasi signature webhook produksi.
+              Salin dari dashboard Paylabs produksi.
+            </p>
+            {!showProdPubKeyInput ? (
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2"
+                onClick={() => setShowProdPubKeyInput(true)}
+              >
+                <Shield className="h-3.5 w-3.5" />
+                {prodPaylabsPubKeyConfigured ? "Ganti Paylabs Public Key" : "Set Paylabs Public Key"}
+              </Button>
+            ) : (
+              <div className="space-y-2">
+                <Textarea
+                  rows={6}
+                  placeholder={"-----BEGIN PUBLIC KEY-----\nMIIBI...\n-----END PUBLIC KEY-----"}
+                  value={newProdPaylabsPubKey}
+                  onChange={(e) => setNewProdPaylabsPubKey(e.target.value)}
+                  className="font-mono text-xs"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Tempel PEM lengkap atau base64. Key tidak akan ditampilkan kembali setelah disimpan.
+                </p>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => { setShowProdPubKeyInput(false); setNewProdPaylabsPubKey(""); }}
+                  className="text-muted-foreground"
+                >
+                  Batal
+                </Button>
+              </div>
+            )}
+          </div>
+
           <SecretField
             id="prod-privkey"
-            label="Merchant Private Key"
+            label="Merchant Private Key (Produksi)"
             required
-            hint="Private key merchant untuk produksi. Jangan bagikan ke siapapun."
+            hint="Private key merchant untuk produksi. Digunakan untuk menandatangani request ke Paylabs."
             value={prodCreds.privateKey}
             onChange={(v) => setProdCreds((c) => ({ ...c, privateKey: v }))}
           />
