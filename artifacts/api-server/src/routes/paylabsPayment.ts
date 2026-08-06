@@ -540,6 +540,18 @@ router.post("/paylabs/webhook", async (req, res) => {
       verificationResult,
     });
     if (!valid) {
+      // Persist raw_notification even on rejection so we can distinguish
+      // "webhook never arrived" (raw_notification=null) from "webhook arrived
+      // but rejected" (raw_notification has content, status stays PENDING).
+      try {
+        await ensureTransactionsTable();
+        await db.execute(sql`
+          UPDATE sport_center.paylabs_transactions
+          SET raw_notification = ${JSON.stringify({ _rejected: true, _reason: "SIGNATURE_INVALID", body, timestamp, partnerId })}::jsonb,
+              updated_at       = NOW()
+          WHERE merchant_trade_no = ${merchantTradeNo}
+        `);
+      } catch { /* best-effort — don't block the response */ }
       res.status(200).json({ errCode: "SIGNATURE_INVALID" });
       return;
     }
@@ -554,6 +566,16 @@ router.post("/paylabs/webhook", async (req, res) => {
       verificationResult: "PUBLIC_KEY_NOT_CONFIGURED",
       result            : "PUBLIC_KEY_NOT_CONFIGURED",
     });
+    // Persist raw_notification so we know a webhook arrived (even if no public key)
+    try {
+      await ensureTransactionsTable();
+      await db.execute(sql`
+        UPDATE sport_center.paylabs_transactions
+        SET raw_notification = ${JSON.stringify({ _rejected: true, _reason: "PUBLIC_KEY_NOT_CONFIGURED", body })}::jsonb,
+            updated_at       = NOW()
+        WHERE merchant_trade_no = ${merchantTradeNo}
+      `);
+    } catch { /* best-effort */ }
     res.status(200).json({ errCode: "CONFIGURATION_ERROR", errMsg: "signature_required" });
     return;
   }
