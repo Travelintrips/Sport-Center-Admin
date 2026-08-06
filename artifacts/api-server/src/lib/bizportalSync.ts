@@ -169,10 +169,7 @@ export async function syncBookingToBizportal(payload: SyncBookingPayload): Promi
   if (!pool) return;
 
 
-  const { booking, facilityName, facilityCategory, paymentProofUrl, paidAt, groupRef, groupTotal } = payload;
-  const bizFacilityId = `sc-${booking.facilityId}`;
-
-  const { booking, facilityName, facilityCategory, paymentProofUrl, paidAt, overrideTotalPrice } = payload;
+  const { booking, facilityName, facilityCategory, paymentProofUrl, paidAt, groupRef, groupTotal, overrideTotalPrice } = payload;
   // facility_id di sport_bookings_sync adalah INTEGER — kirim langsung, bukan string "sc-X"
   const bizFacilityId = booking.facilityId;
 
