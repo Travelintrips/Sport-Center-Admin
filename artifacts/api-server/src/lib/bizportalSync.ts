@@ -158,7 +158,8 @@ export async function syncBookingToBizportal(payload: SyncBookingPayload): Promi
   if (!pool) return;
 
   const { booking, facilityName, facilityCategory, paymentProofUrl, paidAt } = payload;
-  const bizFacilityId = `sc-${booking.facilityId}`;
+  // facility_id di sport_bookings_sync adalah INTEGER — kirim langsung, bukan string "sc-X"
+  const bizFacilityId = booking.facilityId;
   const status        = toStatus(booking.status);
   const paymentStatus = toPaymentStatus(booking.status);
   const tax           = calcTaxBreakdown(booking);
@@ -174,15 +175,25 @@ export async function syncBookingToBizportal(payload: SyncBookingPayload): Promi
            created_at, updated_at)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,NOW())
          ON CONFLICT (booking_code) DO UPDATE SET
+           facility_name     = EXCLUDED.facility_name,
+           customer_name     = EXCLUDED.customer_name,
+           customer_phone    = EXCLUDED.customer_phone,
+           customer_email    = EXCLUDED.customer_email,
+           date              = EXCLUDED.date,
+           start_time        = EXCLUDED.start_time,
+           end_time          = EXCLUDED.end_time,
+           total_hours       = EXCLUDED.total_hours,
+           total_price       = EXCLUDED.total_price,
+           notes             = EXCLUDED.notes,
            status            = EXCLUDED.status,
            payment_status    = EXCLUDED.payment_status,
            payment_proof_url = COALESCE(EXCLUDED.payment_proof_url, sport_bookings_sync.payment_proof_url),
            payment_proof_at  = COALESCE(EXCLUDED.payment_proof_at,  sport_bookings_sync.payment_proof_at),
-           ppn_rate          = COALESCE(EXCLUDED.ppn_rate,          sport_bookings_sync.ppn_rate),
-           dpp               = COALESCE(EXCLUDED.dpp,               sport_bookings_sync.dpp),
-           dpp_nilai_lain    = COALESCE(EXCLUDED.dpp_nilai_lain,    sport_bookings_sync.dpp_nilai_lain),
-           ppn_amount        = COALESCE(EXCLUDED.ppn_amount,        sport_bookings_sync.ppn_amount),
-           grand_total       = COALESCE(EXCLUDED.grand_total,       sport_bookings_sync.grand_total),
+           ppn_rate          = EXCLUDED.ppn_rate,
+           dpp               = EXCLUDED.dpp,
+           dpp_nilai_lain    = EXCLUDED.dpp_nilai_lain,
+           ppn_amount        = EXCLUDED.ppn_amount,
+           grand_total       = EXCLUDED.grand_total,
            updated_at        = NOW()`,
         [
           booking.orderNumber,
