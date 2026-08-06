@@ -47,8 +47,23 @@ router.post("/storage/upload-proof", uploadProof.single("file"), async (req: Req
 
 /**
  * Serve files stored in Replit Object Storage (fallback URLs start with /api/storage/files/).
+ *
+ * PRODUCTION GUARD: This endpoint is only used for files uploaded via Replit Object Storage
+ * (relative URLs like /api/storage/files/...). In production on GAE, all uploads go through
+ * Supabase Storage (absolute URLs). This endpoint is disabled in production to prevent
+ * accidental attempts to connect to the Replit sidecar at 127.0.0.1:1106, which does not
+ * exist outside the Replit environment.
  */
 router.get("/storage/files/:folder/:filename", async (req: Request, res: Response) => {
+  // Production GAE: Replit sidecar is not available — this endpoint should never be reached
+  // because all production uploads use Supabase Storage absolute URLs.
+  if (process.env.NODE_ENV === "production") {
+    res.status(404).json({
+      error: "Replit Object Storage is not available in production. Files should be served via Supabase Storage absolute URLs.",
+    });
+    return;
+  }
+
   try {
     const objectPath = `${req.params.folder}/${req.params.filename}`;
     if (!objectPath) { res.status(400).send("Missing object path"); return; }

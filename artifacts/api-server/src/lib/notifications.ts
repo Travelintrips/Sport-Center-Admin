@@ -1,4 +1,4 @@
-import { db, notificationTemplatesTable, settingsTable, waNotifLogsTable } from "@workspace/db";
+import { db, notificationTemplatesTable, settingsTable, waNotifLogsTable, bookingsTable, bookingGroupsTable, facilitiesTable } from "@workspace/db";
 import { renderDocumentText } from "./documentRenderer";
 import { eq } from "drizzle-orm";
 import { trackSentMessage } from "./waSentTracker";
@@ -10,6 +10,7 @@ const ENV_FONNTE_TOKEN = process.env.FONNTE_TOKEN || "";
 const ENV_FONNTE_CUSTOMER_TOKEN = process.env.FONNTE_CUSTOMER_TOKEN || "";
 const ENV_FONNTE_ADMIN_WA = process.env.FONNTE_ADMIN_WA || "";
 const ENV_ADMIN_WA_PHONES = process.env.ADMIN_WA_PHONES || "";
+const ENV_ADMIN_WA_GROUP = process.env.ADMIN_WA_GROUP || "";
 
 function interpolate(template: string, vars: Record<string, string>): string {
   return template.replace(/\{\{(\w+)\}\}/g, (_, key) => vars[key] ?? "");
@@ -21,8 +22,15 @@ async function getWaConfig(): Promise<{ token: string; customerToken: string; ad
   try {
     const [s] = await db.select().from(settingsTable).limit(1);
     const token = s?.fonnteToken || ENV_FONNTE_TOKEN;
-    // customerToken: token khusus pengirim ke customer (081216104734), fallback ke token admin
-    const customerToken = (s as any)?.fonnteCustomerToken || ENV_FONNTE_CUSTOMER_TOKEN || token;
+    const rawCustomerToken = (s as any)?.fonnteCustomerToken || ENV_FONNTE_CUSTOMER_TOKEN;
+    // Warning #3: jika customer token tidak dikonfigurasi, fallback ke token admin
+    if (!rawCustomerToken) {
+      logger.warn(
+        "[WA] ⚠️  FONNTE_CUSTOMER_TOKEN tidak di-set. Pesan ke customer menggunakan token admin sebagai fallback. " +
+        "Set FONNTE_CUSTOMER_TOKEN di env atau settings DB untuk pengirim terpisah ke customer.",
+      );
+    }
+    const customerToken = rawCustomerToken || token;
     const phonesRaw = s?.adminWaPhones || ENV_ADMIN_WA_PHONES;
     const adminWa = s?.fonnteAdminWa || ENV_FONNTE_ADMIN_WA;
     const adminPhones = phonesRaw
@@ -30,6 +38,11 @@ async function getWaConfig(): Promise<{ token: string; customerToken: string; ad
       : adminWa
       ? [adminWa]
       : [];
+    // Selalu sertakan grup WA admin (env ADMIN_WA_GROUP) sebagai penerima
+    // tambahan — bukan hanya fallback. Dedup agar tidak double-kirim.
+    if (ENV_ADMIN_WA_GROUP && !adminPhones.includes(ENV_ADMIN_WA_GROUP)) {
+      adminPhones.push(ENV_ADMIN_WA_GROUP);
+    }
     return { token, customerToken, adminPhones };
   } catch {
     const adminPhones = ENV_ADMIN_WA_PHONES
@@ -37,6 +50,10 @@ async function getWaConfig(): Promise<{ token: string; customerToken: string; ad
       : ENV_FONNTE_ADMIN_WA
       ? [ENV_FONNTE_ADMIN_WA]
       : [];
+    // Selalu sertakan grup WA dari env — bukan hanya fallback.
+    if (ENV_ADMIN_WA_GROUP && !adminPhones.includes(ENV_ADMIN_WA_GROUP)) {
+      adminPhones.push(ENV_ADMIN_WA_GROUP);
+    }
     const fallbackToken = ENV_FONNTE_TOKEN;
     const fallbackCustomerToken = ENV_FONNTE_CUSTOMER_TOKEN || fallbackToken;
     return { token: fallbackToken, customerToken: fallbackCustomerToken, adminPhones };
@@ -69,6 +86,20 @@ async function sendWA(
   if (!cleanPhone || !isValidPhone(cleanPhone)) {
     logger.warn({ phone, cleanPhone }, "[WA] sendWA: nomor tidak valid, pesan tidak dikirim");
     if (ctx) logWaSend(cleanPhone || phone, message, "failed", "Nomor tidak valid", ctx).catch(() => {});
+    return;
+  }
+  // Warning #4 guard: jika NODE_ENV bukan production, log peringatan
+  if (process.env.NODE_ENV !== "production") {
+    logger.warn(
+      { target: cleanPhone, event: ctx?.event },
+      "[WA] ⚠️  PERINGATAN: Mengirim WA di lingkungan non-production. Set WA_DRY_RUN=true di env DEV untuk mencegah pengiriman nyata.",
+    );
+  }
+  // Dry-run mode: log pesan tapi tidak kirim ke Fonnte (set WA_DRY_RUN=true di env DEV)
+  if (process.env.WA_DRY_RUN === "true") {
+    logger.warn({ target: cleanPhone, event: ctx?.event }, "[WA] DRY RUN — pesan tidak dikirim ke Fonnte");
+    logger.info({ target: cleanPhone, preview: message.slice(0, 200) }, "[WA] DRY RUN message preview");
+    if (ctx) logWaSend(cleanPhone, message, "sent", "DRY RUN — tidak dikirim ke Fonnte", ctx).catch(() => {});
     return;
   }
   // Catat SEGERA sebelum await apapun — Fonnte echo bisa datang saat getWaConfig() pending
@@ -111,9 +142,20 @@ async function sendWA(
   }
 }
 
-async function sendWAToAdmins(message: string): Promise<void> {
+export async function sendWAToAdmins(message: string): Promise<void> {
   const { adminPhones } = await getWaConfig();
+  const isDev = process.env.NODE_ENV !== "production";
+  // Deduplikasi: normalize nomor lalu kirim sekali per nomor unik
+  const seen = new Set<string>();
   for (const phone of adminPhones) {
+    const clean = cleanPhoneNumber(phone);
+    if (!clean || seen.has(clean)) continue;
+    // Di non-production: skip grup WA (format XXXXXXXX@g.us) agar notif dev tidak masuk grup produksi
+    if (isDev && clean.endsWith("@g.us")) {
+      logger.info({ target: clean }, "[WA] DEV — skip kirim ke grup WA (hanya production)");
+      continue;
+    }
+    seen.add(clean);
     await sendWA(phone, message);
   }
 }
@@ -149,7 +191,7 @@ async function logWaSend(
       orderNumber: ctx?.orderNumber ?? null,
       event: ctx?.event ?? null,
       recipientPhone: phone,
-      messagePreview: message.slice(0, 300),
+      messagePreview: message.slice(0, 4000),
       status,
       errorMessage,
     });
@@ -186,6 +228,48 @@ export interface BookingNotifData {
   bookingId?: number;
   uploadProofUrl?: string;
   statusUrl?: string;
+  groupRef?: string | null;
+}
+
+// Jika booking ini bagian dari keranjang multi-lapangan (groupRef), rangkum semua sesi
+// lain dalam grup supaya customer tahu bookingan lain yang menyertai — bukan cuma 1 link.
+async function buildGroupSummary(groupRef: string | null | undefined, currentOrderNumber: string): Promise<string> {
+  if (!groupRef) return "";
+  try {
+    const rows = await db
+      .select({
+        orderNumber: bookingsTable.orderNumber,
+        bookingDate: bookingsTable.bookingDate,
+        startTime: bookingsTable.startTime,
+        endTime: bookingsTable.endTime,
+        totalPrice: bookingsTable.totalPrice,
+        facilityName: facilitiesTable.name,
+      })
+      .from(bookingsTable)
+      .leftJoin(facilitiesTable, eq(bookingsTable.facilityId, facilitiesTable.id))
+      .where(eq(bookingsTable.groupRef, groupRef));
+
+    if (rows.length <= 1) return "";
+
+    const [group] = await db.select().from(bookingGroupsTable).where(eq(bookingGroupsTable.groupRef, groupRef)).limit(1);
+
+    const lines = rows
+      .map((r) => {
+        const marker = r.orderNumber === currentOrderNumber ? "👉" : "•";
+        return `${marker} *${r.orderNumber}* — ${r.facilityName ?? "-"} | ${r.bookingDate} ${r.startTime}–${r.endTime} | Rp ${Number(r.totalPrice).toLocaleString("id-ID")}`;
+      })
+      .join("\n");
+
+    const totalStr = group ? `Rp ${Number(group.totalPayment).toLocaleString("id-ID")}` : "";
+
+    return (
+      `\n\n📦 *Booking ini bagian dari keranjang ${rows.length} lapangan:*\n${lines}` +
+      (totalStr ? `\n\n💰 *Total Semua Sesi: ${totalStr}*` : "")
+    );
+  } catch (err) {
+    logger.error({ err, groupRef }, "[WA] buildGroupSummary failed");
+    return "";
+  }
 }
 
 export async function notifyBookingCreated(data: BookingNotifData): Promise<void> {
@@ -198,6 +282,8 @@ export async function notifyBookingCreated(data: BookingNotifData): Promise<void
     statusUrl: data.statusUrl ?? "",
   };
 
+  const groupSummary = await buildGroupSummary(data.groupRef, data.orderNumber);
+
   const customerTpl = await getTemplate("booking_created");
   if (customerTpl) {
     let msg = interpolate(customerTpl, vars as unknown as Record<string, string>);
@@ -208,6 +294,7 @@ export async function notifyBookingCreated(data: BookingNotifData): Promise<void
     if (data.statusUrl && !msg.includes(data.statusUrl)) {
       msg += `\n🔍 Cek status booking:\n${data.statusUrl}`;
     }
+    msg += groupSummary;
     await sendWAToCustomer(data.customerPhone, msg, { bookingId: data.bookingId, orderNumber: data.orderNumber, event: "booking_created" });
   } else {
     // Fallback: pesan hardcoded jika template belum di-set
@@ -227,7 +314,8 @@ export async function notifyBookingCreated(data: BookingNotifData): Promise<void
       (data.paymentDeadline ? `⏰ Batas pembayaran: *${data.paymentDeadline}*\n\n` : "") +
       (data.uploadProofUrl ? `📎 Upload bukti transfer:\n${data.uploadProofUrl}\n\n` : "") +
       (data.statusUrl ? `🔍 Cek status booking:\n${data.statusUrl}\n\n` : "") +
-      `Terima kasih! 🏆`;
+      groupSummary +
+      `\n\nTerima kasih! 🏆`;
     await sendWAToCustomer(data.customerPhone, msg, { bookingId: data.bookingId, orderNumber: data.orderNumber, event: "booking_created" });
   }
 
@@ -250,6 +338,8 @@ export async function notifyBookingCreated(data: BookingNotifData): Promise<void
 }
 
 export async function notifyPaymentConfirmed(data: BookingNotifData): Promise<void> {
+  const groupSummary = await buildGroupSummary(data.groupRef, data.orderNumber);
+
   // Attempt to render WA message from company document template engine (kwitansi)
   if (data.bookingId) {
     try {
@@ -262,6 +352,7 @@ export async function notifyPaymentConfirmed(data: BookingNotifData): Promise<vo
           const appUrl = await getBaseUrl() || (s as { appUrl?: string } | null)?.appUrl || "";
           if (appUrl && data.orderNumber) msg += `\n\n🧾 Lihat & cetak kwitansi digital:\n${appUrl}/kwitansi/${data.orderNumber}?t=${signKwitansiToken(data.orderNumber)}`;
         } catch { /* non-fatal */ }
+        msg += groupSummary;
         await sendWAToCustomer(data.customerPhone, msg, { bookingId: data.bookingId, orderNumber: data.orderNumber, event: "payment_confirmed" });
         return;
       }
@@ -271,7 +362,8 @@ export async function notifyPaymentConfirmed(data: BookingNotifData): Promise<vo
   // Fallback: legacy notification template
   const tpl = await getTemplate("payment_confirmed");
   if (tpl) {
-    await sendWAToCustomer(data.customerPhone, interpolate(tpl, data as unknown as Record<string, string>), { bookingId: data.bookingId, orderNumber: data.orderNumber, event: "payment_confirmed" });
+    const tplMsg = interpolate(tpl, data as unknown as Record<string, string>) + groupSummary;
+    await sendWAToCustomer(data.customerPhone, tplMsg, { bookingId: data.bookingId, orderNumber: data.orderNumber, event: "payment_confirmed" });
     return;
   }
 
@@ -291,6 +383,7 @@ export async function notifyPaymentConfirmed(data: BookingNotifData): Promise<vo
     `Fasilitas: ${data.facilityName}\n` +
     `✅ Pembayaran telah dikonfirmasi\n\n` +
     (kwitansiUrl ? `🧾 Lihat & cetak kwitansi digital:\n${kwitansiUrl}\n\n` : "") +
+    groupSummary +
     `Sampai jumpa di lapangan! 🏆`;
   await sendWAToCustomer(data.customerPhone, msg, { bookingId: data.bookingId, orderNumber: data.orderNumber, event: "payment_confirmed" });
 }
@@ -330,6 +423,28 @@ export async function notifyPaymentProofUploaded(data: BookingNotifData & { revi
   }
   const tpl = await getTemplate("admin_payment_proof");
   if (tpl) await sendWAToAdmins(interpolate(tpl, data as unknown as Record<string, string>));
+}
+
+export interface MembershipPaymentProofData {
+  membershipId: number;
+  customerName: string;
+  startDate: string;
+  endDate: string;
+  totalPrice: string;
+  reviewUrl?: string;
+}
+
+export async function notifyMembershipPaymentProofUploaded(data: MembershipPaymentProofData): Promise<void> {
+  const msg =
+    `🔔 *Bukti Pembayaran Masuk*\n\n` +
+    `Booking: *MB-${data.membershipId}*\n` +
+    `Customer: *${data.customerName}*\n` +
+    `Fasilitas: *Gym Member*\n` +
+    `Tanggal mulai : *${data.startDate}*\n` +
+    `tanggal akhir : *${data.endDate}*\n` +
+    `Total: *Rp ${data.totalPrice}*` +
+    (data.reviewUrl ? `\n\n📎 Tap link untuk cek & konfirmasi:\n${data.reviewUrl}` : "");
+  await sendWAToAdmins(msg);
 }
 
 export async function notifyReminderH1(data: BookingNotifData): Promise<void> {
@@ -530,7 +645,7 @@ export async function notifyWaCustomerRegistered(data: WaCustomerRegisteredData)
   const msg =
     `🎉 *Registrasi Berhasil!*\n\n` +
     `Halo *${data.customerName}*,\n` +
-    `Akun kamu di *Sport Center Jakarta* sudah aktif ✅\n\n` +
+    `Akun kamu di *Sport Center Bandara Soekarno Hatta* sudah aktif ✅\n\n` +
     `👤 *Kode Customer:* \`${data.customerCode}\`\n\n` +
     `Simpan kode ini untuk referensi ya!\n\n` +
     `Sekarang kamu bisa langsung booking fasilitas:\n` +

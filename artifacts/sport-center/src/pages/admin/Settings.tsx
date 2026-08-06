@@ -9,7 +9,7 @@ import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { Save, Upload, Trash2, QrCode, ImageIcon, Plane, MessageCircle, Eye, EyeOff, CheckCircle2, AlertCircle, Receipt, FlaskConical, RefreshCw, Link2 } from "lucide-react";
+import { Save, Upload, Trash2, QrCode, ImageIcon, Plane, MessageCircle, Eye, EyeOff, CheckCircle2, AlertCircle, Receipt, FlaskConical, RefreshCw, Link2, Send, CalendarDays } from "lucide-react";
 import { getToken } from "@/lib/auth";
 
 function ApDiscountCard() {
@@ -337,6 +337,107 @@ function SeedDemoCard() {
   );
 }
 
+function RekapPemakaianCard() {
+  const { toast } = useToast();
+  const token = getToken();
+  const [sending, setSending] = useState(false);
+  const [date, setDate] = useState(() => {
+    const wib = new Date(Date.now() + 7 * 60 * 60 * 1000);
+    return wib.toISOString().split("T")[0];
+  });
+
+  const handleSend = async () => {
+    setSending(true);
+    try {
+      const res = await fetch("/api/admin/rekap-pemakaian/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ date }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Gagal mengirim rekap");
+      toast({ title: "✅ Rekap terkirim!", description: data.message });
+    } catch (err: any) {
+      toast({ title: "Gagal kirim rekap", description: err.message, variant: "destructive" });
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base font-bold flex items-center gap-2">
+          <Send size={18} className="text-green-600" />
+          Rekap Pemakaian Harian — Grup WA Admin
+        </CardTitle>
+        <p className="text-xs text-muted-foreground mt-1">
+          Laporan pemakaian fasilitas per kategori dikirim otomatis ke grup WA admin setiap hari jam <strong>08:00 WIB</strong>. Bisa juga dikirim manual di bawah.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="rounded-lg bg-muted/50 border p-3 text-xs text-muted-foreground space-y-1">
+          <p className="font-semibold text-foreground">📋 Format pesan rekap:</p>
+          <pre className="whitespace-pre text-xs font-mono leading-relaxed">
+{`PEMAKAIAN SPORT CENTER
+Senin 7 Juli 2026
+
+Ket: ✅ Lunas  ⏳ Verifikasi  ❌ Belum Bayar
+
+*GYM*
+1. Oce (m) ✅
+2. Cahyo (m) ⏳
+3. Budi (m) ❌
+
+*BASKET/VOLI/FUTSAL*
+1. Tim A 08:00-10:00 (m) ✅
+
+*TENIS*
+1.
+
+*BADMINTON*
+1. Rudi 09:00-10:00 (m) ❌
+
+*BILIARD*
+1.
+
+SELAMAT BEROLAHRAGA 🏆`}
+          </pre>
+        </div>
+
+        <div className="flex items-end gap-3 flex-wrap">
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
+              <CalendarDays size={12} /> Tanggal rekap
+            </label>
+            <input
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              className="border border-input rounded-md px-3 py-1.5 text-sm bg-background focus:outline-none focus:ring-1 focus:ring-primary"
+            />
+          </div>
+          <Button
+            type="button"
+            onClick={handleSend}
+            disabled={sending}
+            className="bg-green-600 hover:bg-green-700 gap-2"
+          >
+            {sending ? (
+              <><RefreshCw size={14} className="animate-spin" /> Mengirim...</>
+            ) : (
+              <><Send size={14} /> Kirim Rekap Sekarang</>
+            )}
+          </Button>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Pastikan <strong>FONNTE_TOKEN</strong> dan <strong>ADMIN_WA_GROUP</strong> sudah dikonfigurasi di Secrets agar rekap terkirim ke grup WA.
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function AdminSettings() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -654,14 +755,15 @@ export default function AdminSettings() {
               </div>
 
               <div className="space-y-2">
-                <Label>Nomor Admin Tambahan</Label>
+                <Label>Nomor Admin &amp; Grup WA</Label>
                 <Input
                   value={waForm.adminWaPhones}
                   onChange={(e) => setWaForm(f => ({ ...f, adminWaPhones: e.target.value }))}
-                  placeholder="6281234,6289876 (pisahkan dengan koma)"
+                  placeholder="6281234,6289876,1203456789-1234567890@g.us"
                 />
                 <p className="text-xs text-muted-foreground">
-                  Semua nomor ini akan menerima notifikasi admin (booking baru, bukti bayar, dll).
+                  Pisahkan dengan koma. Bisa nomor individu (<strong>628xxx</strong>) atau ID grup WA (<strong>1234567890-123456@g.us</strong>).
+                  Semua penerima ini akan mendapat notifikasi booking baru, bukti bayar, dll.
                 </p>
               </div>
 
@@ -751,6 +853,9 @@ export default function AdminSettings() {
           </CardContent>
         </Card>
       </form>
+
+      {/* ─── Kirim Rekap Pemakaian ke Grup WA Admin ─────────────────────────── */}
+      <RekapPemakaianCard />
 
       <Card>
         <CardHeader className="pb-3">

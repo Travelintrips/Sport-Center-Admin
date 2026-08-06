@@ -30,8 +30,6 @@ export interface Settings {
   /** @nullable */
   fonnteToken?: string | null;
   /** @nullable */
-  fonnteCustomerToken?: string | null;
-  /** @nullable */
   fonnteAdminWa?: string | null;
   /** @nullable */
   adminWaPhones?: string | null;

@@ -100,7 +100,11 @@ async function buildAll() {
       "xlsx",
       "googleapis",
       "openai",
-      "@replit/object-storage",
+      // "@replit/object-storage" intentionally removed from external list.
+      // gae-deploy/package.json excludes this Replit-only package, so it must
+      // be bundled inline. The code that calls it is guarded by IS_PRODUCTION,
+      // so it is never executed on App Engine — but the module must resolve at
+      // import time. Bundling inline prevents the missing-package crash.
       "playwright",
       "puppeteer",
       "puppeteer-core",

@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { db, companyDocumentTemplatesTable, usersTable, bookingsTable, facilitiesTable, settingsTable } from "@workspace/db";
+import { db, companyDocumentTemplatesTable, companyDocumentSettingsTable, usersTable, bookingsTable, facilitiesTable, settingsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { adminMiddleware, adminDocumentPreviewMiddleware } from "../lib/auth";
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
@@ -337,7 +337,7 @@ router.get("/public/kwitansi/:orderNumber", async (req, res) => {
     ]);
 
     const s = settings as any;
-    const centerName = s?.centerName ?? "Sport Center Jakarta";
+    const centerName = s?.centerName ?? "Sport Center Bandara Soekarno Hatta";
     const centerAddress = s?.address ?? "";
     const centerPhone = s?.phone ?? "";
 
@@ -538,10 +538,39 @@ router.get("/public/kwitansi-data/:orderNumber", async (req, res) => {
       return;
     }
 
-    const [[facilityRow], [settings]] = await Promise.all([
+    const [[facilityRow], [settings], [kwitansiTpl], [kwitansiDocSetting], [invoiceDocSetting]] = await Promise.all([
       db.select({ name: facilitiesTable.name }).from(facilitiesTable).where(eq(facilitiesTable.id, booking.facilityId)).limit(1).catch(() => [null]),
       db.select().from(settingsTable).limit(1).catch(() => [null]),
+      db.select({ financeName: companyDocumentTemplatesTable.financeName, financeTitle: companyDocumentTemplatesTable.financeTitle, financeSignature: companyDocumentTemplatesTable.financeSignature })
+        .from(companyDocumentTemplatesTable)
+        .where(eq(companyDocumentTemplatesTable.documentType, "kwitansi"))
+        .limit(1)
+        .catch(() => [null]),
+      db.select({ financeName: companyDocumentSettingsTable.financeName, financeTitle: companyDocumentSettingsTable.financeTitle })
+        .from(companyDocumentSettingsTable)
+        .where(eq(companyDocumentSettingsTable.documentType, "kwitansi"))
+        .limit(1)
+        .catch(() => [null]),
+      db.select({ financeName: companyDocumentSettingsTable.financeName, financeTitle: companyDocumentSettingsTable.financeTitle })
+        .from(companyDocumentSettingsTable)
+        .where(eq(companyDocumentSettingsTable.documentType, "invoice"))
+        .limit(1)
+        .catch(() => [null]),
     ]);
+
+    // Prioritas: docSettings.kwitansi → docSettings.invoice → docTemplates.kwitansi → fallback
+    // (docSettings adalah yang diatur user di admin portal Document Settings)
+    const financeName =
+      kwitansiDocSetting?.financeName?.trim() ||
+      invoiceDocSetting?.financeName?.trim() ||
+      kwitansiTpl?.financeName?.trim() ||
+      "";
+    const financeTitle =
+      (kwitansiDocSetting?.financeName?.trim() ? kwitansiDocSetting?.financeTitle?.trim() : null) ||
+      (invoiceDocSetting?.financeName?.trim() ? invoiceDocSetting?.financeTitle?.trim() : null) ||
+      (kwitansiTpl?.financeName?.trim() ? kwitansiTpl?.financeTitle?.trim() : null) ||
+      "Finance";
+    const financeSignature = kwitansiTpl?.financeSignature ?? null;
 
     res.json({
       orderNumber: booking.orderNumber,
@@ -558,12 +587,15 @@ router.get("/public/kwitansi-data/:orderNumber", async (req, res) => {
       grandTotal: booking.grandTotal != null ? Number(booking.grandTotal) : null,
       status: booking.status,
       confirmedAt: booking.updatedAt ?? booking.createdAt,
-      centerName: (settings as any)?.centerName ?? "Sport Center Jakarta",
+      centerName: (settings as any)?.centerName ?? "Sport Center Bandara Soekarno Hatta",
       centerAddress: (settings as any)?.address ?? "",
       centerPhone: (settings as any)?.phone ?? "",
       bankName: (settings as any)?.bankName ?? "",
       bankAccount: (settings as any)?.bankAccount ?? "",
       bankAccountName: (settings as any)?.bankAccountName ?? "",
+      financeName,
+      financeTitle,
+      financeSignature,
     });
   } catch (err: any) {
     req.log.error({ err }, "Public kwitansi-data error");

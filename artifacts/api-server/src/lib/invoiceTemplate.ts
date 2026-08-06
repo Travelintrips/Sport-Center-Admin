@@ -15,6 +15,7 @@ export interface InvoiceSession {
   basePrice: number;       // harga asli sebelum diskon
   grandTotal: number;      // harga final setelah diskon+pajak
   discountAmount?: number;
+  bookingType?: string;
   status: string;
 }
 
@@ -43,6 +44,7 @@ export interface InvoiceData {
 
   promoCode?: string | null;
   discountAmount?: number;
+  bookingType?: string;
 
   // Group invoice support
   groupRef?: string | null;
@@ -63,6 +65,9 @@ export interface InvoiceData {
   signatureUrl?: string | null;
   footerText?: string | null;
   invoicePrefix?: string | null;
+
+  // Dokumentasi kegiatan (corporate booking)
+  documentation?: Array<{ fileUrl: string; fileName: string | null; caption: string | null }>;
 }
 
 // ─── Terbilang Converter (Indonesian number to words) ────────────────────────
@@ -180,7 +185,7 @@ export function buildInvoiceHtml(data: InvoiceData, opts: BuildOptions = {}): st
           ${hasSessionDiscount ? `
           <tr style="background:#fff7ed;">
             <td></td>
-            <td colspan="4" style="padding:4px 12px;font-size:11.5px;color:#92400e;">Diskon AP2${data.promoCode ? ` (${data.promoCode})` : ""}</td>
+            <td colspan="4" style="padding:4px 12px;font-size:11.5px;color:#92400e;">${s.bookingType === "event" ? "Diskon Event" : "Diskon AP2"}${data.promoCode ? ` (${data.promoCode})` : ""}</td>
             <td style="padding:4px 12px;font-size:11.5px;text-align:right;color:#92400e;">-Rp ${rp(s.discountAmount ?? 0)}</td>
           </tr>
           <tr style="background:#f0fdf4;">
@@ -202,7 +207,7 @@ export function buildInvoiceHtml(data: InvoiceData, opts: BuildOptions = {}): st
     ${hasDiscount ? `
     <tr style="background:#fff7ed;">
       <td></td>
-      <td colspan="4" style="padding:6px 12px;font-size:12px;color:#92400e;">Diskon${data.promoCode ? ` (${data.promoCode})` : ""}</td>
+      <td colspan="4" style="padding:6px 12px;font-size:12px;color:#92400e;">${data.bookingType === "event" ? "Diskon Event" : data.bookingType === "angkasa_pura" || (data.discountAmount && data.discountAmount > 0 && !data.promoCode) ? "Diskon AP2" : "Diskon"}${data.promoCode ? ` (${data.promoCode})` : ""}</td>
       <td style="padding:6px 12px;font-size:12px;text-align:right;color:#92400e;">-Rp ${rp(data.discountAmount ?? 0)}</td>
     </tr>` : ""}
   `;
@@ -649,6 +654,34 @@ export function buildInvoiceHtml(data: InvoiceData, opts: BuildOptions = {}): st
   <div class="sc-terbilang">
     <strong>Terbilang:</strong> ${terbilangStr}
   </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       E2. DOKUMENTASI KEGIATAN (corporate booking)
+  ═══════════════════════════════════════════════════════════════ -->
+  ${(data.documentation && data.documentation.length > 0) ? `
+  <div class="sc-section-title" style="margin-top:24px;">Dokumentasi Kegiatan</div>
+  <table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:8px;">
+    <thead>
+      <tr style="background:#f8fafc;">
+        <th style="padding:6px 10px;text-align:left;border-bottom:1px solid #e2e8f0;color:#64748b;font-weight:600;">No</th>
+        <th style="padding:6px 10px;text-align:left;border-bottom:1px solid #e2e8f0;color:#64748b;font-weight:600;">Nama File</th>
+        <th style="padding:6px 10px;text-align:left;border-bottom:1px solid #e2e8f0;color:#64748b;font-weight:600;">Keterangan</th>
+        <th style="padding:6px 10px;text-align:left;border-bottom:1px solid #e2e8f0;color:#64748b;font-weight:600;">Link</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${data.documentation.map((doc, i) => `
+      <tr style="border-bottom:1px solid #f1f5f9;">
+        <td style="padding:6px 10px;color:#374151;">${i + 1}</td>
+        <td style="padding:6px 10px;color:#374151;">${doc.fileName ?? "—"}</td>
+        <td style="padding:6px 10px;color:#374151;">${doc.caption ?? "—"}</td>
+        <td style="padding:6px 10px;">
+          <a href="${doc.fileUrl}" style="color:#0369a1;text-decoration:underline;font-size:11px;" target="_blank">Buka File ↗</a>
+        </td>
+      </tr>`).join("")}
+    </tbody>
+  </table>
+  ` : ""}
 
   <!-- ═══════════════════════════════════════════════════════════════
        F. PAYMENT INFO

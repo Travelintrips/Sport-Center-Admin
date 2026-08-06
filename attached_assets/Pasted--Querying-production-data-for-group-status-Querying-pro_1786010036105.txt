@@ -1,0 +1,135 @@
+
+Querying production data for group status
+
+Querying production data for group status
+Confirmed — semua 4 dalam satu grup GRP-17156. Saya query langsung sekarang:
+
+
+2 actions
+Data GRP-17156 hanya ada di production Supabase yang URL-nya tidak di-set di dev environment ini. Artinya semua perubahan kode yang sudah saya buat perlu di-deploy ke production dulu, baru resync bisa bekerja dengan benar.
+
+Situasinya:
+
+Yang sudah selesai di kode (dev):
+
+✅ isDpPaid logic fix
+✅ Sibling BizPortal → total_price = 0
+✅ Primary BizPortal → pakai total grup (640.000 untuk 4 sesi)
+✅ Jurnal akuntansi → pakai total grup
+✅ Bulk resync handle grup dengan benar
+Yang perlu dilakukan:
+
+Publish/deploy app ke production agar semua fix aktif
+Di admin panel production → halaman Bookings → klik Sync BizPortal
+Setelah resync selesai, SC-0227 akan tetap 640.000, SC-0228/0229/0230 akan berubah jadi Rp 0
+Hasil akhir di BizPortal untuk GRP-17156:
+
+Order	Nominal	Keterangan
+SC-0227 (primary)	Rp 640.000	Total 4 sesi
+SC-0228	Rp 0	Sub-sesi grup
+SC-0229	Rp 0	Sub-sesi grup
+SC-0230	Rp 0	Sub-sesi grup
+Total	640.000 ✅	Tidak double
+
+5 actions
+Sudah confirmed. Ini jawaban dan langkah selanjutnya:
+
+Kenapa Nominalnya Berbeda
+Semua 4 booking (SC-0227 s/d SC-0230) memang satu grup GRP-17156, total Rp 640.000 (4 sesi × Rp 160.000).
+
+Yang terjadi di BizPortal saat ini:
+
+SC-0227 (primary/booking pertama) → Rp 640.000 ✅ sudah benar
+SC-0228/0229/0230 (sibling) → Rp 160.000 masing-masing ❌ harusnya Rp 0
+Ini bug lama: sibling booking ikut ter-sync dengan harga per-sesi mereka sendiri, padahal SC-0227 sudah menanggung total grup. Hasilnya total di BizPortal jadi Rp 640.000 + Rp 480.000 = Rp 1.120.000 — dobel dari yang seharusnya.
+
+Cara Fix Data Lama
+Publish dulu (klik tombol deploy di atas) → fixes aktif di production
+Buka admin panel → halaman Bookings → klik Sync BizPortal
+Tunggu selesai → SC-0228/0229/0230 akan berubah jadi Rp 0
+Setelah itu BizPortal menampilkan Rp 640.000 hanya 1 kali untuk seluruh grup GRP-17156. ✅
+
+
+Worked for 1 minute
+Publish
+Domain
+Available
+sport-center-admin-1--sc1041
+.replit.app
+Who can access your app
+
+Public
+Anyone on the internet with the URL
+belum berubah di bizorta
+
+47 minutes ago
+Investigating potential sync failure causes
+
+Investigating potential sync failure causes
+Saya cek kode resync dan log dulu — kemungkinan belum deploy atau ada bug di sync route.
+
+
+3 actions
+Log menunjukkan request sync jam 08:07 kena 401 (tidak login). Dan yang lebih penting — app belum di-deploy, jadi production masih pakai kode lama. Saya cek dulu syncStatusToBizportal biar tahu persis apa yang akan berubah setelah deploy.
+
+
+3 actions
+Ada dua masalah: (1) app belum deploy, (2) saya perlu cek apakah bulk sync memanggil fungsi yang benar (bukan cuma update status, tapi juga update nominal). Baca kode sync sekarang:
+
+
+3 actions
+Kode sync sudah benar, tapi saya perlu cek apakah syncBookingToBizportal juga update kolom total_price (bukan cuma grand_total):
+
+
+4 actions
+Bug ditemukan. Pada ON CONFLICT DO UPDATE, kolom total_price tidak diupdate — hanya di-set saat INSERT pertama. Jadi meskipun bulk resync mengirim nilai yang benar, total_price lama (160.000 per sibling) tidak pernah berubah.
+
+
+2 actions
+Ini bug root cause-nya — total_price tidak pernah diupdate saat conflict (hanya saat INSERT pertama). Sekarang sudah diperbaiki.
+
+Setelah app di-publish/deploy, jalankan resync dari admin panel production dan SC-0228/0229/0230 akan berubah ke Rp 0.
+
+Confirming task completion
+
+Confirming task completion
+Sudah selesai. Ringkasan masalah dan fix:
+
+Root cause yang ditemukan: Kolom total_price di tabel sport_bookings_sync tidak pernah diupdate saat upsert — hanya di-set waktu INSERT pertama. Jadi meskipun resync mengirim nilai yang benar (640.000 untuk primary, 0 untuk sibling), angka lama (160.000 × 3) tidak pernah berubah.
+
+Yang sudah diperbaiki:
+
+bizportalSync.ts → tambah total_price = EXCLUDED.total_price di ON CONFLICT DO UPDATE
+Sebelumnya kode resync group sudah benar (primary = group total, sibling = 0), tinggal kolom ini yang tidak ikut terupdate
+Langkah selanjutnya:
+
+Publish app (klik tombol deploy di atas)
+Buka admin panel production → Bookings → Sync BizPortal
+SC-0228, SC-0229, SC-0230 akan berubah ke Rp 0 — total GRP-17156 jadi Rp 640.000 ✅
+
+Worked for 1 minute
+Publish
+Domain
+Available
+sport-center-admin-1--sc1041
+.replit.app
+Who can access your app
+
+Public
+Anyone on the internet with the URL
+
+Checkpoint made
+45 minutes ago
+sudah saya publish
+
+37 minutes ago
+Executing synchronization process
+
+Executing synchronization process
+Sekarang buka admin panel di production (bukan preview di sini), lalu:
+
+Login sebagai admin
+Buka halaman Bookings
+Klik tombol Sync BizPortal
+Tunggu proses selesai (bisa 1–2 menit tergantung jumlah booking)
+Setelah selesai, cek lagi di BizPortal — SC-0228, SC-0229, SC-0230 harusnya sudah berubah ke Rp 0, dan SC-0227 tetap Rp 640.000.
