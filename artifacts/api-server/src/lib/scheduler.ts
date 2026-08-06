@@ -26,14 +26,18 @@ function getTodayWIB(): string {
 async function expireOverdueBookings(): Promise<void> {
   try {
     const now = new Date();
+    // Expire booking pending_payment yang booking_date-nya sudah lewat 7 hari
+    const sevenDaysAgo = new Date(now);
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    const sevenDaysAgoStr = sevenDaysAgo.toISOString().split("T")[0]; // YYYY-MM-DD
+
     const overdue = await db
       .select()
       .from(bookingsTable)
       .where(
         and(
           eq(bookingsTable.status, "pending_payment"),
-          isNotNull(bookingsTable.paymentDeadline),
-          lt(bookingsTable.paymentDeadline, now)
+          lt(bookingsTable.bookingDate, sevenDaysAgoStr)
         )
       );
 

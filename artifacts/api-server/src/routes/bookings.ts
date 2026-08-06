@@ -435,7 +435,12 @@ router.post("/bookings", async (req, res) => {
       companyCustomerId: effectiveCompanyCustomerId,
       paymentRequiredNow: !isCompanyBilling && !isPendingCompany,
       billingStatus: isCompanyBilling ? "unbilled" : null,
-      paymentDeadline: (isCompanyBilling || isPendingCompany) ? null : new Date(Date.now() + deadlineHours * 60 * 60 * 1000),
+      paymentDeadline: (isCompanyBilling || isPendingCompany) ? null : (() => {
+        // Deadline = 7 hari setelah tanggal bermain (end of day WIB)
+        const d = new Date(bookingDate + "T23:59:59+07:00");
+        d.setDate(d.getDate() + 7);
+        return d;
+      })(),
       bookedForName: (isCompanyBilling || isPendingCompany) ? (req.body.bookedForName?.trim() || customerName) : null,
       bookedForPhone: (isCompanyBilling || isPendingCompany) ? (req.body.bookedForPhone?.trim() || customerPhone) : null,
       ppnRate: taxCalc.taxRate > 0 ? String(taxCalc.taxRate) : null,
@@ -557,7 +562,9 @@ router.post("/bookings", async (req, res) => {
         picPhone: companyBillingUser!.picPhone ?? undefined,
       }).catch(() => {});
     } else {
-      const deadline = new Date(Date.now() + deadlineHours * 60 * 60 * 1000);
+      // Deadline = 7 hari setelah tanggal bermain (end of day WIB)
+      const deadline = new Date(bookingDate + "T23:59:59+07:00");
+      deadline.setDate(deadline.getDate() + 7);
       const deadlineStr = deadline.toLocaleString("id-ID", { timeZone: "Asia/Jakarta", hour12: false });
       const isProdEnv = process.env.NODE_ENV === "production";
       const appUrl = isProdEnv
