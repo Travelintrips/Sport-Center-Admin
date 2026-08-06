@@ -130,6 +130,8 @@ export interface SyncBookingPayload {
   facilityCategory?: string | null;
   paymentProofUrl?: string | null;
   paidAt?: Date | null;
+  /** Override total_price sent to BizPortal (used for group bookings: primary=groupTotal, siblings=0) */
+  overrideTotalPrice?: number;
 }
 
 
@@ -157,11 +159,12 @@ export async function syncBookingToBizportal(payload: SyncBookingPayload): Promi
   const pool = getProdPool();
   if (!pool) return;
 
-  const { booking, facilityName, facilityCategory, paymentProofUrl, paidAt } = payload;
+  const { booking, facilityName, facilityCategory, paymentProofUrl, paidAt, overrideTotalPrice } = payload;
   const bizFacilityId = `sc-${booking.facilityId}`;
   const status        = toStatus(booking.status);
   const paymentStatus = toPaymentStatus(booking.status);
   const tax           = calcTaxBreakdown(booking);
+  const totalPriceSent = overrideTotalPrice !== undefined ? overrideTotalPrice : Math.round(Number(booking.totalPrice));
 
   try {
     await withRetry(async () => {
@@ -196,7 +199,7 @@ export async function syncBookingToBizportal(payload: SyncBookingPayload): Promi
           booking.startTime,
           booking.endTime,
           booking.durationHours,
-          Math.round(Number(booking.totalPrice)),
+          totalPriceSent,
           booking.notes || null,
           status,
           paymentStatus,

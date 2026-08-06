@@ -1,6 +1,6 @@
 import { Router, Request, Response, NextFunction } from "express";
-import { db, bookingsTable, facilitiesTable, paymentsTable, usersTable, gymMembershipsTable } from "@workspace/db";
-import { desc, gte, and, lte, eq } from "drizzle-orm";
+import { db, bookingsTable, facilitiesTable, paymentsTable, usersTable, gymMembershipsTable, bookingGroupsTable } from "@workspace/db";
+import { desc, gte, and, lte, eq, inArray } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
 import { syncBookingToBizportal, syncMembershipToBizportal, bizportalSyncConfigured } from "../lib/bizportalSync";
 
@@ -325,6 +325,35 @@ router.post("/admin/sync-bizportal", adminMiddleware, async (req, res) => {
 
     const facilityMap = new Map(facilities.map((f) => [f.id, { name: f.name, category: f.category }]));
 
+    // ── Group-aware price resolution ──────────────────────────────────────────
+    // For group bookings: primary (lowest id in group) → groupTotalPayment,
+    // siblings → 0. This prevents double-counting in BizPortal.
+    const groupRefs = [...new Set(allBookings.map((b) => b.groupRef).filter(Boolean))] as string[];
+    const groups = groupRefs.length
+      ? await db
+          .select({ groupRef: bookingGroupsTable.groupRef, totalPayment: bookingGroupsTable.totalPayment })
+          .from(bookingGroupsTable)
+          .where(inArray(bookingGroupsTable.groupRef, groupRefs))
+      : [];
+    const groupTotalMap = new Map(groups.map((g) => [g.groupRef, Number(g.totalPayment)]));
+
+    // Determine primary booking per group (smallest id = first created)
+    const primaryIdByGroup = new Map<string, number>();
+    for (const b of allBookings) {
+      if (!b.groupRef) continue;
+      const cur = primaryIdByGroup.get(b.groupRef);
+      if (cur === undefined || b.id < cur) primaryIdByGroup.set(b.groupRef, b.id);
+    }
+
+    function resolveGroupPrice(booking: typeof allBookings[0]): number | undefined {
+      if (!booking.groupRef) return undefined; // non-group: use booking.totalPrice as-is
+      const groupTotal = groupTotalMap.get(booking.groupRef);
+      if (groupTotal === undefined) return undefined; // group not found, fallback
+      const isPrimary = primaryIdByGroup.get(booking.groupRef) === booking.id;
+      return isPrimary ? groupTotal : 0;
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     let synced = 0;
     let failed = 0;
     const errors: string[] = [];
@@ -333,8 +362,9 @@ router.post("/admin/sync-bizportal", adminMiddleware, async (req, res) => {
       const facilityInfo = facilityMap.get(booking.facilityId);
       const facilityName = facilityInfo?.name ?? "Unknown";
       const facilityCategory = facilityInfo?.category ?? null;
+      const overrideTotalPrice = resolveGroupPrice(booking);
       try {
-        await syncBookingToBizportal({ booking, facilityName, facilityCategory });
+        await syncBookingToBizportal({ booking, facilityName, facilityCategory, overrideTotalPrice });
         synced++;
       } catch (err: any) {
         failed++;
