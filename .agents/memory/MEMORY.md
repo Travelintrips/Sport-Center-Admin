@@ -1,3 +1,4 @@
+- [Replit DB migration fix](replit-db-migration.md) — DB client had a Supabase-only lock guard; removed it so Replit's built-in PostgreSQL (DATABASE_URL) works alongside Supabase URLs.
 - [Supabase shared instance & schema isolation](supabase-shared-instance.md) — DB is shared; our tables live in dedicated `sport_center` schema; `drizzle-kit push` hangs, generate+apply via pg on port 5432.
 - [Booking PII & access control](booking-pii-access.md) — GET /bookings list is admin-only; public booking reads must redact idCardNumber; normalize ID cards to uppercase/trim.
 - [Migration runner setup](migration-runner.md) — scripts/migrate.ts needs `pg` in scripts/package.json; run via scripts/node_modules/.bin/tsx scripts/migrate.ts (not npx/pnpm tsx which can't find pg).
@@ -19,3 +20,10 @@
 - [Prod schema sync approach](prod-schema-sync.md) — drizzle-kit push hangs on shared Supabase (150+ tables); use targeted ALTER TABLE script via scripts/src/ instead.
 - [COA Accounts feature](coa-accounts-feature.md) — coa_accounts table in sport_center schema; expenses FK to coa_accounts; journal type auto-detected from accountType (expense→operational, asset→kasbon, liability→bayar hutang).
 - [Workflow waitForPort config](workflow-port-config.md) — restart_workflow tool fails "DIDNT_OPEN_A_PORT" if workflow not configured with waitForPort; fix via configureWorkflow({waitForPort:8080,outputType:"console"}).
+- [Re-import recovery](reimport-recovery.md) — Sport Center is a mature project, not a fresh import; on re-import just pnpm install + restart workflows, secrets/replit.md already cover setup.
+- [GAE deploy TS fix](gae-deploy-ts-fix.md) — analyticsPublic.ts GA4 limit field must be string "5" not number 5; blocks Cloud Build typecheck without fix.
+- [GAE deploy bundle gaps](gae-deploy-bundle-gaps.md) — gae-deploy/package.json must include @google-cloud/storage; @replit/object-storage must NOT be in esbuild external (bundle inline); app.ts uses process.cwd() for frontend dist path; express.static needs redirect:false.
+- [GAE health endpoints](gae-health-endpoints.md) — health/healthz/readiness mounted at root via app.use(healthRouter) in app.ts (NOT only under /api); /readiness does SELECT 1 with DB pool; test in jest.config.mjs uses ts-jest ESM mode + supertest.
+- [Paylabs callback invariant](paylabs-callback-invariant.md) — persist merchantTradeNo→booking_id before provider calls; callback must use exact transaction lookup and raw-body signature verification.
+- [Paylabs public key verification](paylabs-pubkey-verification.md) — fail-closed webhook (no key = reject), admin UI redacts keys (configured bool only), normalizePaylabsPublicKey() for PEM normalization.
+- [Paylabs private key persistence](paylabs-private-key-persistence.md) — GET must never return private keys; PATCH only accepts them when explicitly provided + valid; badge+editor UI pattern is the correct fix.

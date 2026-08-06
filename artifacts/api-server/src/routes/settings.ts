@@ -55,7 +55,7 @@ router.patch("/settings", adminMiddleware, async (req, res) => {
     const allowed = [
       "centerName","address","phone","whatsapp","email",
       "openHour","closeHour","logoUrl","bankName","bankAccount","bankAccountName",
-      "fonnteToken","fonnteAdminWa","adminWaPhones","appUrl","paymentDomain","paymentDeadlineHours",
+      "fonnteToken","fonnteCustomerToken","fonnteAdminWa","adminWaPhones","appUrl","paymentDomain","paymentDeadlineHours",
     ];
     const patch: Record<string, unknown> = {};
     for (const key of allowed) {

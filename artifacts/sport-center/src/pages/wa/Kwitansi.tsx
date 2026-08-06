@@ -23,6 +23,9 @@ interface KwitansiData {
   bankName: string;
   bankAccount: string;
   bankAccountName: string;
+  financeName: string;
+  financeTitle: string;
+  financeSignature: string | null;
 }
 
 function formatIDR(n: number) {
@@ -168,7 +171,7 @@ export default function WaKwitansi() {
           </div>
         </div>
 
-        {/* Center info / stamp area */}
+        {/* Signature & stamp area */}
         <div className="bg-white rounded-2xl shadow-sm border px-4 py-4">
           <div className="flex justify-between items-start">
             <div>
@@ -188,6 +191,28 @@ export default function WaKwitansi() {
               </div>
             </div>
           </div>
+
+          {/* Signature block — sama seperti admin portal */}
+          <div className="mt-5 flex justify-end">
+            <div className="text-right min-w-[160px]">
+              <p className="text-xs text-gray-500 mb-2">Hormat kami,</p>
+              <div className="flex flex-col items-center">
+                {data.financeSignature ? (
+                  <img
+                    src={data.financeSignature}
+                    alt="Tanda tangan"
+                    className="h-14 w-auto object-contain mb-1"
+                  />
+                ) : (
+                  <div className="h-14" />
+                )}
+                <div className="w-full border-b-2 border-gray-400 mb-1" />
+                <p className="font-black text-sm text-gray-800">{data.financeName || data.centerName}</p>
+                <p className="text-xs text-gray-500">{data.financeTitle || "Finance"}</p>
+              </div>
+            </div>
+          </div>
+
           <p className="text-[10px] text-gray-400 mt-3 text-center">
             Kwitansi ini merupakan bukti pembayaran yang sah. Diterbitkan secara digital oleh sistem Sport Center.
           </p>

@@ -1,5 +1,5 @@
 import pg from "pg";
-import type { Booking, GymMembership } from "@workspace/db";
+import type { Booking, GymMembership, CompanyInvoice } from "@workspace/db";
 
 const { Pool } = pg;
 
@@ -9,13 +9,13 @@ const PROD_URL =
   process.env.SUPABASE_DATABASE_URL_DEV;
 
 let _prodPool: pg.Pool | null = null;
-function getProdPool(): pg.Pool | null {
+export function getProdPool(): pg.Pool | null {
   if (!PROD_URL) return null;
   if (!_prodPool) {
     _prodPool = new Pool({
       connectionString: PROD_URL,
       ssl: { rejectUnauthorized: false },
-      max: 3,
+      max: 10,
       options: "-c search_path=sport_center,public",
     });
   }
@@ -132,10 +132,15 @@ export interface SyncBookingPayload {
   facilityCategory?: string | null;
   paymentProofUrl?: string | null;
   paidAt?: Date | null;
+
   /** group_ref dari booking gabungan (misal GRP-12345) */
   groupRef?: string | null;
   /** Total nominal seluruh booking dalam satu group (untuk rekonsiliasi bank) */
   groupTotal?: number | null;
+
+  /** Override total_price sent to BizPortal (used for group bookings: primary=groupTotal, siblings=0) */
+  overrideTotalPrice?: number;
+
 }
 
 
@@ -163,11 +168,18 @@ export async function syncBookingToBizportal(payload: SyncBookingPayload): Promi
   const pool = getProdPool();
   if (!pool) return;
 
+
   const { booking, facilityName, facilityCategory, paymentProofUrl, paidAt, groupRef, groupTotal } = payload;
   const bizFacilityId = `sc-${booking.facilityId}`;
+
+  const { booking, facilityName, facilityCategory, paymentProofUrl, paidAt, overrideTotalPrice } = payload;
+  // facility_id di sport_bookings_sync adalah INTEGER — kirim langsung, bukan string "sc-X"
+  const bizFacilityId = booking.facilityId;
+
   const status        = toStatus(booking.status);
   const paymentStatus = toPaymentStatus(booking.status);
   const tax           = calcTaxBreakdown(booking);
+  const totalPriceSent = overrideTotalPrice !== undefined ? overrideTotalPrice : Math.round(Number(booking.totalPrice));
 
   try {
     await withRetry(async () => {
@@ -181,10 +193,21 @@ export async function syncBookingToBizportal(payload: SyncBookingPayload): Promi
            created_at, updated_at)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,NOW())
          ON CONFLICT (booking_code) DO UPDATE SET
+           facility_name     = EXCLUDED.facility_name,
+           customer_name     = EXCLUDED.customer_name,
+           customer_phone    = EXCLUDED.customer_phone,
+           customer_email    = EXCLUDED.customer_email,
+           date              = EXCLUDED.date,
+           start_time        = EXCLUDED.start_time,
+           end_time          = EXCLUDED.end_time,
+           total_hours       = EXCLUDED.total_hours,
+           total_price       = EXCLUDED.total_price,
+           notes             = EXCLUDED.notes,
            status            = EXCLUDED.status,
            payment_status    = EXCLUDED.payment_status,
            payment_proof_url = COALESCE(EXCLUDED.payment_proof_url, sport_bookings_sync.payment_proof_url),
            payment_proof_at  = COALESCE(EXCLUDED.payment_proof_at,  sport_bookings_sync.payment_proof_at),
+
            ppn_rate          = COALESCE(EXCLUDED.ppn_rate,          sport_bookings_sync.ppn_rate),
            dpp               = COALESCE(EXCLUDED.dpp,               sport_bookings_sync.dpp),
            dpp_nilai_lain    = COALESCE(EXCLUDED.dpp_nilai_lain,    sport_bookings_sync.dpp_nilai_lain),
@@ -192,6 +215,13 @@ export async function syncBookingToBizportal(payload: SyncBookingPayload): Promi
            grand_total       = COALESCE(EXCLUDED.grand_total,       sport_bookings_sync.grand_total),
            group_ref         = COALESCE(EXCLUDED.group_ref,         sport_bookings_sync.group_ref),
            group_total       = COALESCE(EXCLUDED.group_total,       sport_bookings_sync.group_total),
+
+           ppn_rate          = EXCLUDED.ppn_rate,
+           dpp               = EXCLUDED.dpp,
+           dpp_nilai_lain    = EXCLUDED.dpp_nilai_lain,
+           ppn_amount        = EXCLUDED.ppn_amount,
+           grand_total       = EXCLUDED.grand_total,
+
            updated_at        = NOW()`,
         [
           booking.orderNumber,
@@ -204,7 +234,7 @@ export async function syncBookingToBizportal(payload: SyncBookingPayload): Promi
           booking.startTime,
           booking.endTime,
           booking.durationHours,
-          Math.round(Number(booking.totalPrice)),
+          totalPriceSent,
           booking.notes || null,
           status,
           paymentStatus,
@@ -227,6 +257,10 @@ export async function syncBookingToBizportal(payload: SyncBookingPayload): Promi
   } catch (err: any) {
     lastSyncState.booking = { at: new Date().toISOString(), success: false, error: err?.message };
     console.error(`[bizportalSync] ✗ Booking sync failed: ${booking.orderNumber} — ${err?.message}`);
+    // Rethrow so callers that await this (e.g. the manual full-resync endpoint)
+    // can correctly count failures. Fire-and-forget call sites already use
+    // `.catch(() => {})`, so this is safe for them.
+    throw err;
   }
 }
 
@@ -278,17 +312,356 @@ export async function syncMembershipToBizportal(membership: GymMembership): Prom
   } catch (err: any) {
     lastSyncState.membership = { at: new Date().toISOString(), success: false, error: err?.message };
     console.error(`[bizportalSync] ✗ Membership sync failed: ID=${membership.id} — ${err?.message}`);
+    throw err;
   }
+}
+
+export async function deleteBookingFromBizportal(orderNumber: string): Promise<void> {
+  const pool = getProdPool();
+  if (!pool) return;
+
+  try {
+    await withRetry(async () => {
+      await pool.query(
+        `DELETE FROM sport_center.sport_bookings_sync WHERE booking_code = $1`,
+        [orderNumber]
+      );
+    }, `deleteBooking:${orderNumber}`);
+
+    console.info(`[bizportalSync] ✓ Booking deleted from BizPortal: ${orderNumber}`);
+  } catch (err: any) {
+    console.error(`[bizportalSync] ✗ Booking delete failed: ${orderNumber} — ${err?.message}`);
+  }
+}
+
+// ── Bank Mutation Push ──────────────────────────────────────────────────────
+// Saat booking payment dikonfirmasi, otomatis buat entry bank_mutations
+// dengan bankAccountId = nomor rekening dari settings (Mandiri CST).
+// Idempotent: mutationKey 'SC-{orderNumber}' dicek sebelum insert.
+export async function pushConfirmedPaymentAsBankMutation(
+  booking: Booking,
+  confirmedAt?: Date | null,
+): Promise<void> {
+  const pool = getProdPool();
+  if (!pool) return;
+
+  const amount =
+    booking.grandTotal != null && Number(booking.grandTotal) > 0
+      ? Math.round(Number(booking.grandTotal))
+      : Math.round(Number(booking.totalPrice));
+  if (amount <= 0) return;
+
+  const mutationKey = `SC-${booking.orderNumber}`;
+  const transactionDate = confirmedAt
+    ? confirmedAt.toISOString().split("T")[0]!
+    : new Date().toISOString().split("T")[0]!;
+  const description = `SPORT CENTER | ${booking.orderNumber} | ${booking.customerName}`;
+  const normalizedDescription = description
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  try {
+    // Ambil bankAccountId (nomor rekening Mandiri CST) dari settings
+    let bankAccountId: string | null = null;
+    try {
+      const { rows } = await pool.query(
+        `SELECT bank_account FROM sport_center.settings LIMIT 1`,
+      );
+      if (rows[0]?.bank_account) bankAccountId = String(rows[0].bank_account);
+    } catch {
+      // non-fatal — lanjut tanpa bankAccountId
+    }
+
+    await withRetry(async () => {
+      await pool.query(
+        `INSERT INTO sport_center.bank_mutations
+           (bank_account_id, transaction_date, description, credit_amount, debit_amount,
+            amount, direction, mutation_key, normalized_description, provider_order_id,
+            status, matched_order_id, created_at, updated_at)
+         SELECT $1,$2,$3,$4,'0',$4,'IN',$5,$6,$7,'auto_matched',$8,NOW(),NOW()
+         WHERE NOT EXISTS (
+           SELECT 1 FROM sport_center.bank_mutations WHERE mutation_key = $5
+         )`,
+        [
+          bankAccountId,
+          transactionDate,
+          description,
+          String(amount),
+          mutationKey,
+          normalizedDescription,
+          booking.orderNumber,
+          booking.id,
+        ],
+      );
+    }, `pushBankMutation:${booking.orderNumber}`);
+
+    console.info(`[bizportalSync] ✓ Bank mutation created: ${booking.orderNumber} → Rp ${amount.toLocaleString("id-ID")}`);
+  } catch (err: any) {
+    console.error(`[bizportalSync] ✗ Bank mutation push failed: ${booking.orderNumber} — ${err?.message}`);
+  }
+}
+
+async function getBankAccountId(pool: pg.Pool): Promise<string | null> {
+  try {
+    const { rows } = await pool.query(
+      `SELECT bank_account FROM sport_center.settings LIMIT 1`,
+    );
+    return rows[0]?.bank_account ? String(rows[0].bank_account) : null;
+  } catch {
+    return null;
+  }
+}
+
+// ── Membership Bank Mutation Push ───────────────────────────────────────────
+// Saat membership gym berstatus "active" (lunas), otomatis buat entry
+// bank_mutations dengan bankAccountId = nomor rekening dari settings (Mandiri CST).
+// Idempotent: mutationKey 'SC-MB-{id}' dicek sebelum insert.
+export async function pushMembershipPaymentAsBankMutation(
+  membership: GymMembership,
+  confirmedAt?: Date | null,
+): Promise<void> {
+  const pool = getProdPool();
+  if (!pool) return;
+
+  const amount = Math.round(Number(membership.totalPrice));
+  if (amount <= 0) return;
+
+  const mutationKey = `SC-MB-${membership.id}`;
+  const transactionDate = confirmedAt
+    ? confirmedAt.toISOString().split("T")[0]!
+    : new Date().toISOString().split("T")[0]!;
+  const description = `SPORT CENTER MEMBER GYM | MB-${membership.id} | ${membership.name}`;
+  const normalizedDescription = description
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  try {
+    const bankAccountId = await getBankAccountId(pool);
+
+    await withRetry(async () => {
+      await pool.query(
+        `INSERT INTO sport_center.bank_mutations
+           (bank_account_id, transaction_date, description, credit_amount, debit_amount,
+            amount, direction, mutation_key, normalized_description, provider_order_id,
+            status, matched_order_id, created_at, updated_at)
+         SELECT $1,$2,$3,$4,'0',$4,'IN',$5,$6,$7,'auto_matched',$8,NOW(),NOW()
+         WHERE NOT EXISTS (
+           SELECT 1 FROM sport_center.bank_mutations WHERE mutation_key = $5
+         )`,
+        [
+          bankAccountId,
+          transactionDate,
+          description,
+          String(amount),
+          mutationKey,
+          normalizedDescription,
+          mutationKey,
+          null,
+        ],
+      );
+    }, `pushMembershipMutation:${membership.id}`);
+
+    console.info(`[bizportalSync] ✓ Bank mutation created (membership): MB-${membership.id} → Rp ${amount.toLocaleString("id-ID")}`);
+  } catch (err: any) {
+    console.error(`[bizportalSync] ✗ Bank mutation push failed (membership): MB-${membership.id} — ${err?.message}`);
+  }
+}
+
+// ── Company Invoice Bank Mutation Push ──────────────────────────────────────
+// Saat invoice perusahaan ditandai "paid" (lunas), otomatis buat entry
+// bank_mutations dengan bankAccountId = nomor rekening dari settings (Mandiri CST).
+// Idempotent: mutationKey 'SC-INV-{invoiceNumber}' dicek sebelum insert.
+export async function pushInvoicePaymentAsBankMutation(
+  invoice: CompanyInvoice,
+  companyName?: string | null,
+  confirmedAt?: Date | null,
+): Promise<void> {
+  const pool = getProdPool();
+  if (!pool) return;
+
+  const amount =
+    invoice.grandTotal != null && Number(invoice.grandTotal) > 0
+      ? Math.round(Number(invoice.grandTotal))
+      : Math.round(Number(invoice.totalAmount));
+  if (amount <= 0) return;
+
+  const mutationKey = `SC-INV-${invoice.invoiceNumber}`;
+  const transactionDate = confirmedAt
+    ? confirmedAt.toISOString().split("T")[0]!
+    : new Date().toISOString().split("T")[0]!;
+  const description = `SPORT CENTER INVOICE PERUSAHAAN | ${invoice.invoiceNumber} | ${companyName || ""}`.trim();
+  const normalizedDescription = description
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  try {
+    const bankAccountId = await getBankAccountId(pool);
+
+    await withRetry(async () => {
+      await pool.query(
+        `INSERT INTO sport_center.bank_mutations
+           (bank_account_id, transaction_date, description, credit_amount, debit_amount,
+            amount, direction, mutation_key, normalized_description, provider_order_id,
+            status, matched_order_id, created_at, updated_at)
+         SELECT $1,$2,$3,$4,'0',$4,'IN',$5,$6,$7,'auto_matched',$8,NOW(),NOW()
+         WHERE NOT EXISTS (
+           SELECT 1 FROM sport_center.bank_mutations WHERE mutation_key = $5
+         )`,
+        [
+          bankAccountId,
+          transactionDate,
+          description,
+          String(amount),
+          mutationKey,
+          normalizedDescription,
+          mutationKey,
+          null,
+        ],
+      );
+    }, `pushInvoiceMutation:${invoice.invoiceNumber}`);
+
+    console.info(`[bizportalSync] ✓ Bank mutation created (invoice): ${invoice.invoiceNumber} → Rp ${amount.toLocaleString("id-ID")}`);
+  } catch (err: any) {
+    console.error(`[bizportalSync] ✗ Bank mutation push failed (invoice): ${invoice.invoiceNumber} — ${err?.message}`);
+  }
+}
+
+// ── Bulk Payment Push ────────────────────────────────────────────────────────
+// Push semua payment confirmed dari Sport Center ke public.sport_payments BizPortal.
+// Idempotent: payment_number 'SCPAY-SC-{sc_payment_id}' dicek sebelum insert.
+// Juga update payment_status di public.sport_bookings agar konsisten.
+export interface BulkPaymentPushResult {
+  total: number;
+  pushed: number;
+  skipped: number;
+  failed: number;
+  errors: string[];
+}
+
+export async function bulkPushPaymentsToBizportal(): Promise<BulkPaymentPushResult> {
+  const pool = getProdPool();
+  if (!pool) return { total: 0, pushed: 0, skipped: 0, failed: 0, errors: [] };
+
+  const result: BulkPaymentPushResult = { total: 0, pushed: 0, skipped: 0, failed: 0, errors: [] };
+
+  try {
+    // Ambil semua SC payments confirmed beserta data booking-nya.
+    // Tidak menggunakan grand_total booking — setiap baris payment punya amount-nya
+    // sendiri (penting untuk flow DP/pelunasan agar tidak double-count).
+    const { rows: scPayments } = await pool.query(`
+      SELECT
+        sp.id             AS sc_payment_id,
+        sp.amount         AS payment_amount,
+        sp.payment_method,
+        sp.payment_type,
+        sp.confirmed_at,
+        sp.created_at     AS payment_created_at,
+        sb.order_number,
+        sb.ppn_rate,
+        sb.ppn_amount,
+        pb.id             AS biz_booking_id
+      FROM sport_center.sport_payments sp
+      JOIN sport_center.sport_bookings sb ON sb.id = sp.booking_id
+      LEFT JOIN public.sport_bookings pb ON pb.sc_booking_id = sb.id
+      WHERE sp.status = 'confirmed'
+      ORDER BY sp.id
+    `);
+
+    result.total = scPayments.length;
+
+    for (const p of scPayments) {
+      const paymentNumber = `SCPAY-SC-${p.sc_payment_id}`;
+      try {
+        if (!p.biz_booking_id) {
+          // Booking SC belum ada di BizPortal — skip
+          result.skipped++;
+          continue;
+        }
+
+        // Gunakan jumlah yang benar-benar dibayar per payment record (bukan grand_total booking)
+        const amount  = Math.round(Number(p.payment_amount));
+        const taxRate = p.ppn_rate   != null ? Number(p.ppn_rate)   : 0;
+        // Distribusikan PPN secara proporsional tidak diperlukan untuk pencatatan BizPortal;
+        // masukkan 0 agar tidak salah alokasi — BizPortal menghitung ulang dari tarifnya sendiri.
+        const taxAmount = 0;
+
+        // INSERT ... ON CONFLICT DO NOTHING — atomik dan idempotent tanpa race condition
+        const { rowCount } = await pool.query(
+          `INSERT INTO public.sport_payments
+             (booking_id, payment_number, amount, method, status, paid_at,
+              payment_type, tax_rate, tax_amount, source, posting_status, created_at, updated_at)
+           VALUES ($1,$2,$3,$4,'paid',$5,$6,$7,$8,'SPORT_CENTER_SUPABASE','unposted',$9,NOW())
+           ON CONFLICT (payment_number) DO NOTHING`,
+          [
+            p.biz_booking_id,
+            paymentNumber,
+            String(amount),
+            p.payment_method || 'Transfer Bank',
+            p.confirmed_at || p.payment_created_at,
+            p.payment_type || 'booking',
+            taxRate,
+            taxAmount,
+            p.payment_created_at,
+          ]
+        );
+
+        if ((rowCount ?? 0) === 0) {
+          // Sudah ada sebelumnya (ON CONFLICT DO NOTHING)
+          result.skipped++;
+          continue;
+        }
+
+        // Update payment_status di public.sport_bookings hanya jika semua payment booking ini sudah confirmed
+        await pool.query(
+          `UPDATE public.sport_bookings pb
+           SET payment_status = 'paid', updated_at = NOW()
+           WHERE pb.id = $1
+             AND pb.payment_status != 'paid'
+             AND NOT EXISTS (
+               SELECT 1 FROM sport_center.sport_payments sp2
+               JOIN sport_center.sport_bookings sb2 ON sb2.id = sp2.booking_id
+               WHERE sb2.id = (SELECT sc_booking_id FROM public.sport_bookings WHERE id = $1)
+                 AND sp2.status != 'confirmed'
+                 AND sp2.payment_type != 'dp'
+             )`,
+          [p.biz_booking_id]
+        );
+
+        result.pushed++;
+        console.info(`[bizportalSync] ✓ Payment pushed: ${p.order_number} (${paymentNumber}) → Rp ${amount.toLocaleString('id-ID')}`);
+      } catch (err: any) {
+        result.failed++;
+        result.errors.push(`${p.order_number} (SC-PAY-${p.sc_payment_id}): ${err?.message ?? 'unknown'}`);
+        console.error(`[bizportalSync] ✗ Payment push failed: ${p.order_number} — ${err?.message}`);
+      }
+    }
+  } catch (err: any) {
+    // Fatal error (e.g. DB query gagal sebelum loop) — hitung sebagai failure
+    result.failed++;
+    result.errors.push(`Fatal: ${err?.message}`);
+    console.error(`[bizportalSync] ✗ bulkPushPaymentsToBizportal fatal: ${err?.message}`);
+  }
+
+  return result;
 }
 
 export async function syncStatusToBizportal(
   orderNumber: string,
   scStatus: string,
   paymentProofUrl?: string | null,
-  paidAt?: Date | null
+  paidAt?: Date | null,
+  booking?: Booking
 ): Promise<void> {
   const pool = getProdPool();
   if (!pool) return;
+
+  const tax = booking ? calcTaxBreakdown(booking) : null;
 
   try {
     await withRetry(async () => {
@@ -298,6 +671,11 @@ export async function syncStatusToBizportal(
              payment_status    = $3,
              payment_proof_url = COALESCE($4, payment_proof_url),
              payment_proof_at  = COALESCE($5, payment_proof_at),
+             ppn_rate          = COALESCE($6, ppn_rate),
+             dpp               = COALESCE($7, dpp),
+             dpp_nilai_lain    = COALESCE($8, dpp_nilai_lain),
+             ppn_amount        = COALESCE($9, ppn_amount),
+             grand_total       = COALESCE($10, grand_total),
              updated_at        = NOW()
          WHERE booking_code    = $1`,
         [
@@ -306,6 +684,11 @@ export async function syncStatusToBizportal(
           toPaymentStatus(scStatus),
           paymentProofUrl || null,
           paidAt || null,
+          tax?.ppnRate ?? null,
+          tax?.dpp ?? null,
+          tax?.dppNilaiLain ?? null,
+          tax?.ppnAmount ?? null,
+          tax?.grandTotal ?? null,
         ]
       );
     }, `syncStatus:${orderNumber}`);

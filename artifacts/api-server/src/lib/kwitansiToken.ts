@@ -1,4 +1,4 @@
-import { createHmac } from "crypto";
+import { createHmac, timingSafeEqual } from "crypto";
 
 function getSecret(): string {
   const s = process.env.CASHIER_TOKEN_SECRET ?? process.env.SESSION_SECRET;
@@ -12,14 +12,14 @@ function getSecret(): string {
 }
 
 export function signKwitansiToken(orderNumber: string): string {
-  return createHmac("sha256", getSecret()).update(orderNumber).digest("hex");
+  // Take first 6 bytes of HMAC-SHA256 → 8-char base64url token
+  const full = createHmac("sha256", getSecret()).update(orderNumber).digest();
+  return full.subarray(0, 6).toString("base64url");
 }
 
 export function verifyKwitansiToken(orderNumber: string, token: string): boolean {
   if (!token || typeof token !== "string") return false;
   const expected = signKwitansiToken(orderNumber);
   if (expected.length !== token.length) return false;
-  let diff = 0;
-  for (let i = 0; i < expected.length; i++) diff |= expected.charCodeAt(i) ^ token.charCodeAt(i);
-  return diff === 0;
+  return timingSafeEqual(Buffer.from(expected), Buffer.from(token));
 }
