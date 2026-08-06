@@ -502,17 +502,12 @@ function MatchCandidateRow({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
 
-            <Badge variant="outline" className="text-xs capitalize">{match.candidateType}</Badge>
-            {match.isGroupPayment && (
+            {match.isGroupPayment ? (
               <Badge className="bg-violet-100 text-violet-700 border-violet-200 text-xs font-semibold">
                 🏷️ Group Booking · {match.groupBookingCount} sesi
               </Badge>
-
-            {match.candidateType === "group_payment" ? (
-              <Badge className="bg-purple-100 text-purple-700 border-purple-200 text-xs">Group Booking</Badge>
             ) : (
               <Badge variant="outline" className="text-xs capitalize">{match.candidateType}</Badge>
-
             )}
             {match.customerName ? (
               <span className="text-sm font-semibold truncate max-w-[180px]" title={match.customerName}>{match.customerName}</span>
@@ -520,9 +515,7 @@ function MatchCandidateRow({
               <span className="text-sm font-medium text-muted-foreground">ID #{match.candidateId}</span>
             )}
 
-            {!match.isGroupPayment && match.facilityName && (
-
-            {match.candidateType === "group_payment" && match.bookingCount > 0 && (
+            {match.isGroupPayment && match.bookingCount > 0 && (
               <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-100 font-medium">
                 {match.bookingCount} Booking
               </span>

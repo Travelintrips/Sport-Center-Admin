@@ -10,9 +10,7 @@ import { logAudit, getClientInfo, getUserFromReq, logAccountingError } from "../
 import { syncStatusToBizportal, pushConfirmedPaymentAsBankMutation } from "../lib/bizportalSync";
 import { uploadProofWithFallback } from "./storage";
 
-import { createJournalEntry, createPublicAccountingEntry, createPublicAccountingEntryForGroup } from "../lib/accounting";
-
-import { createJournalEntry, createPublicAccountingEntry, extractBookingDpp } from "../lib/accounting";
+import { createJournalEntry, createPublicAccountingEntry, createPublicAccountingEntryForGroup, extractBookingDpp } from "../lib/accounting";
 
 import { createWaToken } from "../lib/waTokens";
 import { logger } from "../lib/logger";
@@ -792,6 +790,93 @@ router.delete("/payments/:id/proof", adminMiddleware, async (req, res) => {
   } catch (err) {
     req.log.error({ err }, "Delete payment proof error");
     res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// POST /payments/backfill-group-accounting
+// Backfill BizPortal entries untuk semua grup booking lama yang sudah confirmed/completed
+// tapi belum punya group entry (correlation_id = sc_group_<groupRef>).
+// Idempotent — aman dijalankan berulang kali.
+router.post("/payments/backfill-group-accounting", adminMiddleware, async (req, res) => {
+  try {
+    // 1. Ambil semua groupRef unik yang punya booking confirmed/completed
+    const groupRows = await db
+      .selectDistinct({ groupRef: bookingsTable.groupRef })
+      .from(bookingsTable)
+      .where(
+        and(
+          ne(bookingsTable.groupRef, ""),
+        )
+      );
+
+    const groupRefs = groupRows
+      .map(r => r.groupRef)
+      .filter((g): g is string => !!g);
+
+    let processed = 0;
+    let skipped = 0;
+    let failed = 0;
+    const errors: string[] = [];
+
+    for (const groupRef of groupRefs) {
+      try {
+        // Ambil semua booking dalam grup ini
+        const bookingsInGroup = await db
+          .select({
+            id: bookingsTable.id,
+            orderNumber: bookingsTable.orderNumber,
+            totalPrice: bookingsTable.totalPrice,
+            ppnAmount: bookingsTable.ppnAmount,
+            grandTotal: bookingsTable.grandTotal,
+            facilityId: bookingsTable.facilityId,
+            status: bookingsTable.status,
+            updatedAt: bookingsTable.updatedAt,
+          })
+          .from(bookingsTable)
+          .where(eq(bookingsTable.groupRef, groupRef));
+
+        // Hanya proses grup yang minimal ada 1 booking confirmed/completed
+        const hasConfirmed = bookingsInGroup.some(
+          b => b.status === "confirmed" || b.status === "completed"
+        );
+        if (!hasConfirmed) { skipped++; continue; }
+
+        // Pakai tanggal updatedAt booking pertama yang confirmed sebagai journal date
+        const confirmedBooking = bookingsInGroup.find(
+          b => b.status === "confirmed" || b.status === "completed"
+        );
+        const journalDate = confirmedBooking?.updatedAt
+          ? new Date(confirmedBooking.updatedAt).toISOString().slice(0, 10)
+          : new Date().toISOString().slice(0, 10);
+
+        const groupEntries = bookingsInGroup.map(b => ({
+          id: b.id,
+          orderNumber: b.orderNumber,
+          subtotal: Number(b.totalPrice),
+          ppnAmount: b.ppnAmount != null ? Number(b.ppnAmount) : 0,
+          facilityId: b.facilityId,
+        }));
+
+        await createPublicAccountingEntryForGroup(groupRef, groupEntries, journalDate);
+        processed++;
+      } catch (err: any) {
+        failed++;
+        errors.push(`${groupRef}: ${err?.message ?? "unknown error"}`);
+        logger.error({ err, groupRef }, "[backfill-group-accounting] Gagal proses grup");
+      }
+    }
+
+    res.json({
+      ok: true,
+      totalGroups: groupRefs.length,
+      processed,
+      skipped,
+      failed,
+      errors: errors.slice(0, 10),
+    });
+  } catch (err: any) {
+    req.log.error({ err }, "Backfill group accounting error");
+    res.status(500).json({ error: err?.message ?? "Gagal backfill group accounting" });
   }
 });
 
