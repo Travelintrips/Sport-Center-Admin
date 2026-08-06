@@ -9,7 +9,7 @@ import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { Save, Upload, Trash2, QrCode, ImageIcon, Plane, MessageCircle, Eye, EyeOff, CheckCircle2, AlertCircle, Receipt, FlaskConical, RefreshCw } from "lucide-react";
+import { Save, Upload, Trash2, QrCode, ImageIcon, Plane, MessageCircle, Eye, EyeOff, CheckCircle2, AlertCircle, Receipt, FlaskConical, RefreshCw, Link2, Send, CalendarDays } from "lucide-react";
 import { getToken } from "@/lib/auth";
 
 function ApDiscountCard() {
@@ -337,6 +337,107 @@ function SeedDemoCard() {
   );
 }
 
+function RekapPemakaianCard() {
+  const { toast } = useToast();
+  const token = getToken();
+  const [sending, setSending] = useState(false);
+  const [date, setDate] = useState(() => {
+    const wib = new Date(Date.now() + 7 * 60 * 60 * 1000);
+    return wib.toISOString().split("T")[0];
+  });
+
+  const handleSend = async () => {
+    setSending(true);
+    try {
+      const res = await fetch("/api/admin/rekap-pemakaian/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ date }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Gagal mengirim rekap");
+      toast({ title: "✅ Rekap terkirim!", description: data.message });
+    } catch (err: any) {
+      toast({ title: "Gagal kirim rekap", description: err.message, variant: "destructive" });
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base font-bold flex items-center gap-2">
+          <Send size={18} className="text-green-600" />
+          Rekap Pemakaian Harian — Grup WA Admin
+        </CardTitle>
+        <p className="text-xs text-muted-foreground mt-1">
+          Laporan pemakaian fasilitas per kategori dikirim otomatis ke grup WA admin setiap hari jam <strong>08:00 WIB</strong>. Bisa juga dikirim manual di bawah.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="rounded-lg bg-muted/50 border p-3 text-xs text-muted-foreground space-y-1">
+          <p className="font-semibold text-foreground">📋 Format pesan rekap:</p>
+          <pre className="whitespace-pre text-xs font-mono leading-relaxed">
+{`PEMAKAIAN SPORT CENTER
+Senin 7 Juli 2026
+
+Ket: ✅ Lunas  ⏳ Verifikasi  ❌ Belum Bayar
+
+*GYM*
+1. Oce (m) ✅
+2. Cahyo (m) ⏳
+3. Budi (m) ❌
+
+*BASKET/VOLI/FUTSAL*
+1. Tim A 08:00-10:00 (m) ✅
+
+*TENIS*
+1.
+
+*BADMINTON*
+1. Rudi 09:00-10:00 (m) ❌
+
+*BILIARD*
+1.
+
+SELAMAT BEROLAHRAGA 🏆`}
+          </pre>
+        </div>
+
+        <div className="flex items-end gap-3 flex-wrap">
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
+              <CalendarDays size={12} /> Tanggal rekap
+            </label>
+            <input
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              className="border border-input rounded-md px-3 py-1.5 text-sm bg-background focus:outline-none focus:ring-1 focus:ring-primary"
+            />
+          </div>
+          <Button
+            type="button"
+            onClick={handleSend}
+            disabled={sending}
+            className="bg-green-600 hover:bg-green-700 gap-2"
+          >
+            {sending ? (
+              <><RefreshCw size={14} className="animate-spin" /> Mengirim...</>
+            ) : (
+              <><Send size={14} /> Kirim Rekap Sekarang</>
+            )}
+          </Button>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Pastikan <strong>FONNTE_TOKEN</strong> dan <strong>ADMIN_WA_GROUP</strong> sudah dikonfigurasi di Secrets agar rekap terkirim ke grup WA.
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function AdminSettings() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -349,9 +450,11 @@ export default function AdminSettings() {
     paymentDeadlineHours: "24",
   });
   const [waForm, setWaForm] = useState({
-    fonnteToken: "", fonnteAdminWa: "", adminWaPhones: "", appUrl: "",
+    fonnteToken: "", fonnteCustomerToken: "", fonnteAdminWa: "", adminWaPhones: "", appUrl: "",
   });
+  const [paymentDomain, setPaymentDomain] = useState("");
   const [showToken, setShowToken] = useState(false);
+  const [showCustomerToken, setShowCustomerToken] = useState(false);
   const [qrisPreview, setQrisPreview] = useState<string | null>(null);
   const [qrisUploading, setQrisUploading] = useState(false);
   const [qrisDeleting, setQrisDeleting] = useState(false);
@@ -374,10 +477,12 @@ export default function AdminSettings() {
       });
       setWaForm({
         fonnteToken: (settings as any).fonnteToken ?? "",
+        fonnteCustomerToken: (settings as any).fonnteCustomerToken ?? "",
         fonnteAdminWa: (settings as any).fonnteAdminWa ?? "",
         adminWaPhones: (settings as any).adminWaPhones ?? "",
         appUrl: (settings as any).appUrl ?? "",
       });
+      setPaymentDomain((settings as any).paymentDomain ?? "");
       setQrisPreview((settings as any).qrisImageUrl ?? null);
     }
   }, [settings]);
@@ -404,6 +509,11 @@ export default function AdminSettings() {
     const payload: any = { ...waForm };
     Object.keys(payload).forEach(k => { if (!payload[k]) delete payload[k]; });
     updateMutation.mutate({ data: payload });
+  };
+
+  const handlePaymentDomainSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    updateMutation.mutate({ data: { paymentDomain: paymentDomain.trim() || null } as any });
   };
 
   const handleQrisUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -582,7 +692,7 @@ export default function AdminSettings() {
           <CardContent className="space-y-4">
             <div className="grid md:grid-cols-2 gap-4">
               <div className="md:col-span-2 space-y-2">
-                <Label>Fonnte API Token</Label>
+                <Label>Token Fonnte — Nomor Admin (085121073537)</Label>
                 <div className="relative">
                   <Input
                     type={showToken ? "text" : "password"}
@@ -600,11 +710,35 @@ export default function AdminSettings() {
                   </button>
                 </div>
                 <p className="text-xs text-muted-foreground">
+                  Token nomor WhatsApp admin (<strong>085121073537</strong>). Digunakan untuk mengirim notifikasi ke admin.
                   Dapatkan token di{" "}
                   <a href="https://fonnte.com" target="_blank" rel="noreferrer" className="text-primary underline">
                     fonnte.com
-                  </a>
-                  . Token digunakan untuk mengirim pesan WA ke customer dan admin.
+                  </a>.
+                </p>
+              </div>
+
+              <div className="md:col-span-2 space-y-2">
+                <Label>Token Fonnte — Nomor Customer (081216104734)</Label>
+                <div className="relative">
+                  <Input
+                    type={showCustomerToken ? "text" : "password"}
+                    value={waForm.fonnteCustomerToken}
+                    onChange={(e) => setWaForm(f => ({ ...f, fonnteCustomerToken: e.target.value }))}
+                    placeholder="Token dari dashboard.fonnte.com untuk nomor customer"
+                    className="pr-10 font-mono text-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowCustomerToken(v => !v)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  >
+                    {showCustomerToken ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Token nomor WhatsApp customer (<strong>081216104734</strong>). Digunakan untuk mengirim notifikasi ke customer (booking, konfirmasi, reminder, dll).
+                  Jika kosong, sistem pakai token admin di atas.
                 </p>
               </div>
 
@@ -621,14 +755,15 @@ export default function AdminSettings() {
               </div>
 
               <div className="space-y-2">
-                <Label>Nomor Admin Tambahan</Label>
+                <Label>Nomor Admin &amp; Grup WA</Label>
                 <Input
                   value={waForm.adminWaPhones}
                   onChange={(e) => setWaForm(f => ({ ...f, adminWaPhones: e.target.value }))}
-                  placeholder="6281234,6289876 (pisahkan dengan koma)"
+                  placeholder="6281234,6289876,1203456789-1234567890@g.us"
                 />
                 <p className="text-xs text-muted-foreground">
-                  Semua nomor ini akan menerima notifikasi admin (booking baru, bukti bayar, dll).
+                  Pisahkan dengan koma. Bisa nomor individu (<strong>628xxx</strong>) atau ID grup WA (<strong>1234567890-123456@g.us</strong>).
+                  Semua penerima ini akan mendapat notifikasi booking baru, bukti bayar, dll.
                 </p>
               </div>
 
@@ -671,6 +806,56 @@ export default function AdminSettings() {
           </CardContent>
         </Card>
       </form>
+
+      {/* ─── Domain Link Pembayaran ─────────────────────────────── */}
+      <form onSubmit={handlePaymentDomainSubmit}>
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base font-bold flex items-center gap-2">
+              <Link2 size={18} className="text-blue-600" />
+              Domain Link Pembayaran Tenant
+            </CardTitle>
+            <p className="text-xs text-muted-foreground mt-1">
+              Domain yang digunakan pada link bayar yang dikirim via WhatsApp ke customer.
+              Jika diisi, akan menimpa konfigurasi server secara otomatis.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="payment-domain">URL Domain</Label>
+              <Input
+                id="payment-domain"
+                type="url"
+                value={paymentDomain}
+                onChange={(e) => setPaymentDomain(e.target.value)}
+                placeholder="https://sportcenter.domain.co.id"
+                className="font-mono text-sm"
+              />
+              <p className="text-xs text-muted-foreground">
+                Format: <code className="bg-muted px-1 rounded">https://domain.anda.com</code> — tanpa garis miring di akhir.
+                {paymentDomain ? (
+                  <span className="block mt-1 text-blue-700 bg-blue-50 border border-blue-200 rounded px-2 py-1">
+                    Link bukti bayar akan menjadi: <strong>{paymentDomain.replace(/\/$/, "")}/bukti/&#123;token&#125;</strong>
+                  </span>
+                ) : (
+                  <span className="block mt-1">
+                    Jika kosong, sistem menggunakan URL dari environment variable server.
+                  </span>
+                )}
+              </p>
+            </div>
+            <div className="flex justify-end">
+              <Button type="submit" disabled={updateMutation.isPending}>
+                <Save size={16} className="mr-2" />
+                {updateMutation.isPending ? "Menyimpan..." : "Simpan Domain"}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </form>
+
+      {/* ─── Kirim Rekap Pemakaian ke Grup WA Admin ─────────────────────────── */}
+      <RekapPemakaianCard />
 
       <Card>
         <CardHeader className="pb-3">

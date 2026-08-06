@@ -5,6 +5,7 @@ import { randomUUID, randomBytes, createHmac, timingSafeEqual } from "crypto";
 import { db, bookingsTable, facilitiesTable, paymentsTable, bookingHistoryTable, waActionTokensTable, settingsTable, usersTable, blockedSchedulesTable, waBookingSessionsTable } from "@workspace/db";
 import { eq, and, desc, isNotNull, inArray, or, lt, gt, sql } from "drizzle-orm";
 import { createWaToken, verifyWaToken, consumeWaToken, getWaTokenRow } from "../lib/waTokens";
+import { getBaseUrl } from "../lib/appUrl";
 import {
   parseIntent,
   parseName,
@@ -38,12 +39,13 @@ import {
 } from "../lib/notifications";
 import { calculatePrice } from "../lib/pricing";
 import { logAudit, logAccountingError } from "../lib/auditLog";
-import { createJournalEntry, createPublicAccountingEntry } from "../lib/accounting";
+import { createJournalEntry, createPublicAccountingEntry, extractBookingDpp } from "../lib/accounting";
 import { hashPassword } from "../lib/auth";
-import { syncStatusToBizportal } from "../lib/bizportalSync";
+import { syncStatusToBizportal, pushConfirmedPaymentAsBankMutation } from "../lib/bizportalSync";
 import { calculateTax, recordTaxTransaction } from "../lib/tax";
 import { broadcastAvailabilityChange } from "../lib/supabase";
-import { uploadToStorage, BUCKETS } from "../lib/supabaseStorage";
+import { logger } from "../lib/logger";
+import { uploadProofWithFallback } from "./storage";
 import {
   generateAiReply,
   logAiMessageReceived,
@@ -55,14 +57,10 @@ import { getHistory, appendTurn, clearHistory } from "../lib/aiConversationMemor
 
 const router = Router();
 
-// In development use the Replit dev domain so WA links open on the same dev instance
-// where tokens were created. In production always use APP_URL.
-const _rawAppUrl = process.env.APP_URL ?? "";
-const _replitDevDomain = process.env.REPLIT_DEV_DOMAIN;
-const APP_URL =
-  process.env.NODE_ENV !== "production" && _replitDevDomain
-    ? `https://${_replitDevDomain}`
-    : _rawAppUrl;
+// Base URL for WA links is always resolved fresh via getBaseUrl():
+// dev environments always use the Replit dev domain (never a prod domain
+// saved in settings), production uses APP_URL / settings.paymentDomain / settings.appUrl.
+// See lib/appUrl.ts — single source of truth, shared with bookings.ts, payments.ts, notifications.ts.
 
 const INACTIVE_STATUSES = ["cancelled", "expired", "rejected", "refunded"];
 
@@ -120,12 +118,18 @@ function isDuplicateWebhook(body: Record<string, unknown>): boolean {
   return false;
 }
 
-// ─── Multer for proof upload (memory → Supabase Storage) ─────────────────────
+// ─── Multer for proof upload (memory → Storage) ───────────────────────────────
 const uploadProof = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
-    const ok = /image\/(jpeg|png|webp)|application\/pdf/.test(file.mimetype);
+    // Accept all image types + PDF. Some mobile browsers (especially WhatsApp
+    // on Android/iOS) may send image/heic, image/heif, or even
+    // application/octet-stream for camera photos — accept broadly.
+    const ok =
+      file.mimetype.startsWith("image/") ||
+      file.mimetype === "application/pdf" ||
+      file.mimetype === "application/octet-stream";
     cb(null, ok);
   },
 });
@@ -353,7 +357,7 @@ router.post("/wa/customer/register", async (req, res) => {
       customerName: user.name,
       customerPhone: cleanedPhone,
       customerCode,
-      facilitiesUrl: `${APP_URL}/facilities`,
+      facilitiesUrl: `${await getBaseUrl()}/facilities`,
     });
 
     // Audit log
@@ -483,7 +487,7 @@ router.post("/wa/webhook", async (req, res) => {
         const b = bookings[0];
         const [fac] = await db.select({ name: facilitiesTable.name }).from(facilitiesTable)
           .where(eq(facilitiesTable.id, b.facilityId)).limit(1);
-        const statusUrl = `${APP_URL}/wa/status/${b.orderNumber}`;
+        const statusUrl = `${await getBaseUrl()}/status/${b.orderNumber}`;
         await sendWAReply(senderPhone,
           `🔍 *Status Booking Terakhir*\n\n` +
           `Order: *${b.orderNumber}*\n` +
@@ -508,7 +512,7 @@ router.post("/wa/webhook", async (req, res) => {
     if (!isBookingIntent(msg)) {
       // Fallback: balas semua pesan dengan menu utama
       await sendWAReply(senderPhone,
-        `👋 Halo! Selamat datang di *Sport Center Jakarta*.\n\n` +
+        `👋 Halo! Selamat datang di *Sport Center Bandara Soekarno Hatta*.\n\n` +
         `Ketik salah satu perintah berikut:\n` +
         `🏅 *booking* — Buat booking fasilitas\n` +
         `🔍 *status* — Cek status booking\n\n` +
@@ -519,7 +523,7 @@ router.post("/wa/webhook", async (req, res) => {
 
       if (!registeredUser) {
         const regToken = generateRegToken(senderPhone);
-        const registerUrl = `${APP_URL}/wa/register/${regToken}`;
+        const registerUrl = `${await getBaseUrl()}/wa/register/${regToken}`;
         await sendWAReply(senderPhone,
           `👋 Halo! Untuk booking fasilitas, kamu perlu *daftar dulu* sebagai customer.\n\n` +
           `📝 *Daftar gratis sekarang (hanya 1 menit):*\n${registerUrl}\n\n` +
@@ -545,7 +549,7 @@ router.post("/wa/webhook", async (req, res) => {
         );
 
         if (matched) {
-          const formUrl = `${APP_URL}/wa/booking/${matched.id}?phone=${senderPhone}`;
+          const formUrl = `${await getBaseUrl()}/wa/booking/${matched.id}?phone=${senderPhone}`;
           const reply =
             `🏅 *Booking ${matched.name}*\n\n` +
             `Harga: *Rp ${Number(matched.pricePerHour).toLocaleString("id-ID")}/jam*\n` +
@@ -606,7 +610,7 @@ router.post("/wa/webhook", async (req, res) => {
         `🕐 *Jam Operasional:* 06:00 – 22:00 WIB\n` +
         `📍 *Lokasi:* Kawasan Bandara Soekarno-Hatta\n\n` +
         `Untuk info fasilitas & booking, kunjungi:\n` +
-        `🔗 ${APP_URL}/facilities\n\n` +
+        `🔗 ${await getBaseUrl()}/facilities\n\n` +
         `Atau ketik:\n` +
         `• *booking* — untuk pesan lapangan\n` +
         `• *status* — untuk cek status pesanan\n\n` +
@@ -635,7 +639,7 @@ async function sendWAReply(phone: string, message: string): Promise<void> {
     if (!resp.ok || (data as any).status === false) {
       console.error("[wa] sendWAReply Fonnte error:", resp.status, JSON.stringify(data));
     } else {
-      console.log("[wa] sendWAReply OK →", phone, "status:", resp.status);
+      logger.info({ phone, httpStatus: resp.status }, "[wa] sendWAReply OK");
     }
   } catch (err: any) {
     console.error("[wa] sendWAReply exception:", err?.message);
@@ -731,8 +735,9 @@ router.post("/wa/booking", async (req, res) => {
 
     // Send WA to customer — kirim grandTotal (termasuk PPN) sebagai jumlah transfer
     const amountToPay = taxCalc.taxAmount > 0 ? taxCalc.grandTotal : totalPrice;
-    const statusUrl = `${APP_URL}/wa/status/${orderNumber}`;
-    const uploadProofUrl = `${APP_URL}/wa/proof/${proofToken}`;
+    const statusUrl = `${await getBaseUrl()}/status/${orderNumber}`;
+    const uploadProofUrl = `${await getBaseUrl()}/bukti/${proofToken}`;
+
     const deadlineStr = paymentDeadline.toLocaleString("id-ID", { timeZone: "Asia/Jakarta", hour12: false });
 
     notifyWaBookingCreated({
@@ -792,6 +797,7 @@ router.get("/wa/status/:orderNumber", async (req, res) => {
       .limit(1);
     const proofToken = tokens[0]?.token ?? null;
 
+    const baseUrl = await getBaseUrl();
     res.json({
       orderNumber: booking.orderNumber,
       customerName: booking.customerName,
@@ -818,7 +824,10 @@ router.get("/wa/status/:orderNumber", async (req, res) => {
         proofUrl: payment.proofUrl,
         confirmedAt: payment.confirmedAt,
       } : null,
-      uploadProofUrl: proofToken ? `${APP_URL}/wa/proof/${proofToken}` : null,
+      uploadProofUrl: proofToken ? `${baseUrl}/bukti/${proofToken}` : null,
+      invoicePdfUrl: ["confirmed", "completed"].includes(booking.status)
+        ? `${baseUrl}/api/public/invoices/${booking.orderNumber}/pdf`
+        : null,
     });
   } catch (err) {
     res.status(500).json({ error: "Internal server error" });
@@ -888,7 +897,7 @@ router.post("/wa/action/:token", async (req, res) => {
           changedByName: "admin (WhatsApp)", note: "Pembayaran dikonfirmasi via WhatsApp",
         });
 
-        const statusUrl = `${APP_URL}/wa/status/${booking.orderNumber}`;
+        const statusUrl = `${await getBaseUrl()}/status/${booking.orderNumber}`;
         notifyWaBookingConfirmed({
           customerName: booking.customerName, customerPhone: booking.customerPhone,
           orderNumber: booking.orderNumber, facilityName: facility?.name ?? "",
@@ -903,11 +912,12 @@ router.post("/wa/action/:token", async (req, res) => {
           orderNumber: booking.orderNumber, customerName: booking.customerName,
           facilityName: facility?.name ?? "", bookingDate: booking.bookingDate,
           startTime: booking.startTime, endTime: booking.endTime,
-          checkinUrl: `${APP_URL}/wa/action/${checkinToken}`,
-          finishUrl: `${APP_URL}/wa/action/${finishToken}`,
+          checkinUrl: `${await getBaseUrl()}/wa/action/${checkinToken}`,
+          finishUrl: `${await getBaseUrl()}/wa/action/${finishToken}`,
         });
 
-        syncStatusToBizportal(booking.orderNumber, "confirmed", payment.proofUrl, new Date()).catch(() => {});
+        syncStatusToBizportal(booking.orderNumber, "confirmed", payment.proofUrl, new Date(), booking).catch(() => {});
+        pushConfirmedPaymentAsBankMutation(booking, new Date()).catch(() => {});
 
         await logAudit({
           action: "wa_approve_payment",
@@ -919,12 +929,11 @@ router.post("/wa/action/:token", async (req, res) => {
         });
 
         const _today = new Date().toISOString().split("T")[0];
-        const _subtotal = Number(booking.totalPrice);
-        const _ppnAmount = booking.ppnAmount != null ? Number(booking.ppnAmount) : 0;
-        createJournalEntry(booking.id, booking.orderNumber, _subtotal, _ppnAmount, _today).catch((err) =>
+        const { dpp: _dpp, ppnAmount: _ppnAmount } = extractBookingDpp(booking);
+        createJournalEntry(booking.id, booking.orderNumber, _dpp, _ppnAmount, _today).catch((err) =>
           logAccountingError({ operation: "createJournalEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
         );
-        createPublicAccountingEntry(booking.id, booking.orderNumber, _subtotal, _ppnAmount, booking.facilityId, _today).catch((err) =>
+        createPublicAccountingEntry(booking.id, booking.orderNumber, _dpp, _ppnAmount, booking.facilityId, _today).catch((err) =>
           logAccountingError({ operation: "createPublicAccountingEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
         );
 
@@ -954,7 +963,7 @@ router.post("/wa/action/:token", async (req, res) => {
           orderNumber: booking.orderNumber, facilityName: facility?.name ?? "",
           bookingDate: booking.bookingDate, startTime: booking.startTime, endTime: booking.endTime,
           totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
-          uploadProofUrl: `${APP_URL}/wa/proof/${newUploadToken}`,
+          uploadProofUrl: `${await getBaseUrl()}/bukti/${newUploadToken}`,
           reason: adminNotes,
         });
 
@@ -1041,13 +1050,50 @@ router.post("/wa/action/:token", async (req, res) => {
   }
 });
 
+// GET /api/wa/get-proof-token/:orderNumber — cari token upload bukti aktif untuk order (no auth)
+router.get("/wa/get-proof-token/:orderNumber", async (req, res) => {
+  try {
+    const { orderNumber } = req.params as { orderNumber: string };
+    const [booking] = await db
+      .select({ id: bookingsTable.id, status: bookingsTable.status, orderNumber: bookingsTable.orderNumber })
+      .from(bookingsTable)
+      .where(eq(bookingsTable.orderNumber, orderNumber))
+      .limit(1);
+
+    if (!booking) {
+      res.status(404).json({ error: "Booking tidak ditemukan" });
+      return;
+    }
+
+    const [tokenRow] = await db
+      .select({ token: waActionTokensTable.token, expiresAt: waActionTokensTable.expiresAt })
+      .from(waActionTokensTable)
+      .where(and(eq(waActionTokensTable.bookingId, booking.id), eq(waActionTokensTable.action, "upload_proof")))
+      .orderBy(desc(waActionTokensTable.createdAt))
+      .limit(1);
+
+    if (tokenRow?.token) {
+      res.json({ token: tokenRow.token, orderNumber: booking.orderNumber });
+      return;
+    }
+
+    if (["pending_payment", "waiting_confirmation"].includes(booking.status)) {
+      const newToken = await createWaToken(booking.id, "upload_proof", 7);
+      res.json({ token: newToken, orderNumber: booking.orderNumber });
+      return;
+    }
+
+    res.status(404).json({ error: "Link upload tidak tersedia untuk status booking ini" });
+  } catch (err) {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 // POST /api/wa/proof/upload — multer file upload, returns URL
 router.post("/wa/proof/upload", uploadProof.single("proof"), async (req, res) => {
   try {
     if (!req.file) { res.status(400).json({ error: "Tidak ada file" }); return; }
-    const ext = path.extname(req.file.originalname).toLowerCase() || ".jpg";
-    const objectPath = `wa-proof-${randomUUID()}${ext}`;
-    const publicUrl = await uploadToStorage(BUCKETS.proof, objectPath, req.file.buffer, req.file.mimetype);
+    const publicUrl = await uploadProofWithFallback(req.file.buffer, req.file.originalname, req.file.mimetype);
     res.json({ url: publicUrl });
   } catch (err) {
     res.status(500).json({ error: "Upload gagal" });
@@ -1067,9 +1113,7 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
 
     let proofUrl: string | undefined = req.body?.proofUrl;
     if (req.file) {
-      const ext = path.extname(req.file.originalname).toLowerCase() || ".jpg";
-      const objectPath = `wa-proof-${randomUUID()}${ext}`;
-      proofUrl = await uploadToStorage(BUCKETS.proof, objectPath, req.file.buffer, req.file.mimetype);
+      proofUrl = await uploadProofWithFallback(req.file.buffer, req.file.originalname, req.file.mimetype);
     }
     if (!proofUrl) { res.status(400).json({ error: "Tidak ada bukti yang diupload" }); return; }
 
@@ -1117,7 +1161,7 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
       bookingDate: booking.bookingDate, startTime: booking.startTime, endTime: booking.endTime,
       totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
       proofUrl: fullProofUrl,
-      reviewUrl: `${APP_URL}/wa/review/${reviewToken}`,
+      reviewUrl: `${await getBaseUrl()}/ulasan/${reviewToken}`,
     });
 
     await logAudit({
@@ -1127,7 +1171,7 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
       after: { proofUrl, status: "waiting_confirmation" },
     });
 
-    syncStatusToBizportal(booking.orderNumber, "waiting_confirmation", proofUrl).catch(() => {});
+    syncStatusToBizportal(booking.orderNumber, "waiting_confirmation", proofUrl, null, booking).catch(() => {});
 
     res.json({ success: true, orderNumber: booking.orderNumber });
   } catch (err) {
@@ -1199,7 +1243,7 @@ router.post("/wa/review/:token", async (req, res) => {
         changedByName: "admin (WhatsApp)", note: "Pembayaran dikonfirmasi via WA Review Link",
       });
 
-      const statusUrl = `${APP_URL}/wa/status/${booking.orderNumber}`;
+      const statusUrl = `${await getBaseUrl()}/status/${booking.orderNumber}`;
       notifyWaBookingConfirmed({
         customerName: booking.customerName, customerPhone: booking.customerPhone,
         orderNumber: booking.orderNumber, facilityName: facility?.name ?? "",
@@ -1213,11 +1257,12 @@ router.post("/wa/review/:token", async (req, res) => {
         orderNumber: booking.orderNumber, customerName: booking.customerName,
         facilityName: facility?.name ?? "", bookingDate: booking.bookingDate,
         startTime: booking.startTime, endTime: booking.endTime,
-        checkinUrl: `${APP_URL}/wa/action/${checkinToken}`,
-        finishUrl: `${APP_URL}/wa/action/${finishToken}`,
+        checkinUrl: `${await getBaseUrl()}/wa/action/${checkinToken}`,
+        finishUrl: `${await getBaseUrl()}/wa/action/${finishToken}`,
       }).catch(() => {});
 
-      syncStatusToBizportal(booking.orderNumber, "confirmed", payment.proofUrl, new Date()).catch(() => {});
+      syncStatusToBizportal(booking.orderNumber, "confirmed", payment.proofUrl, new Date(), booking).catch(() => {});
+      pushConfirmedPaymentAsBankMutation(booking, new Date()).catch(() => {});
 
       await logAudit({
         action: "wa_approve_payment",
@@ -1229,12 +1274,11 @@ router.post("/wa/review/:token", async (req, res) => {
       });
 
       const _today = new Date().toISOString().split("T")[0];
-      const _subtotal = Number(booking.totalPrice);
-      const _ppnAmount = booking.ppnAmount != null ? Number(booking.ppnAmount) : 0;
-      createJournalEntry(booking.id, booking.orderNumber, _subtotal, _ppnAmount, _today).catch((err) =>
+      const { dpp: _dpp, ppnAmount: _ppnAmount } = extractBookingDpp(booking);
+      createJournalEntry(booking.id, booking.orderNumber, _dpp, _ppnAmount, _today).catch((err) =>
         logAccountingError({ operation: "createJournalEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
       );
-      createPublicAccountingEntry(booking.id, booking.orderNumber, _subtotal, _ppnAmount, booking.facilityId, _today).catch((err) =>
+      createPublicAccountingEntry(booking.id, booking.orderNumber, _dpp, _ppnAmount, booking.facilityId, _today).catch((err) =>
         logAccountingError({ operation: "createPublicAccountingEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
       );
 
@@ -1258,7 +1302,9 @@ router.post("/wa/review/:token", async (req, res) => {
         orderNumber: booking.orderNumber, facilityName: facility?.name ?? "",
         bookingDate: booking.bookingDate, startTime: booking.startTime, endTime: booking.endTime,
         totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
-        uploadProofUrl: `${APP_URL}/wa/proof/${newUploadToken}`,
+
+        uploadProofUrl: `${await getBaseUrl()}/bukti/${newUploadToken}`,
+
         reason: adminNotes,
       });
 
@@ -1522,8 +1568,8 @@ async function execAdminApprove(adminPhone: string, orderNumber: string) {
     const settingsRows = await db.select().from(settingsTable).limit(1);
     const settings = settingsRows[0];
     const amountToPay = booking.grandTotal ? Number(booking.grandTotal) : Number(booking.totalPrice);
-    const statusUrl = `${APP_URL}/wa/status/${booking.orderNumber}`;
-    const uploadProofUrl = `${APP_URL}/wa/proof/${proofToken}`;
+    const statusUrl = `${await getBaseUrl()}/status/${booking.orderNumber}`;
+    const uploadProofUrl = `${await getBaseUrl()}/bukti/${proofToken}`;
     const deadlineStr = paymentDeadline.toLocaleString("id-ID", { timeZone: "Asia/Jakarta", hour12: false });
 
     notifyWaBookingApproved({
@@ -1596,7 +1642,7 @@ async function execAdminApprove(adminPhone: string, orderNumber: string) {
 
   const checkinToken = await createWaToken(booking.id, "checkin", 30);
   const finishToken = await createWaToken(booking.id, "finish", 30);
-  const statusUrl = `${APP_URL}/wa/status/${booking.orderNumber}`;
+  const statusUrl = `${await getBaseUrl()}/status/${booking.orderNumber}`;
 
   notifyWaBookingConfirmed({
     customerName: booking.customerName,
@@ -1617,9 +1663,12 @@ async function execAdminApprove(adminPhone: string, orderNumber: string) {
     bookingDate: booking.bookingDate,
     startTime: booking.startTime,
     endTime: booking.endTime,
-    checkinUrl: `${APP_URL}/wa/action/${checkinToken}`,
-    finishUrl: `${APP_URL}/wa/action/${finishToken}`,
+    checkinUrl: `${await getBaseUrl()}/wa/action/${checkinToken}`,
+    finishUrl: `${await getBaseUrl()}/wa/action/${finishToken}`,
   });
+
+  syncStatusToBizportal(booking.orderNumber, "confirmed", null, new Date(), booking).catch(() => {});
+  pushConfirmedPaymentAsBankMutation(booking, new Date()).catch(() => {});
 
   await logAudit({
     action: "wa_admin_approve",
@@ -1689,7 +1738,7 @@ async function execAdminReject(adminPhone: string, orderNumber: string, reason: 
       startTime: booking.startTime,
       endTime: booking.endTime,
       totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
-      uploadProofUrl: `${APP_URL}/wa/proof/${newUploadToken}`,
+      uploadProofUrl: `${await getBaseUrl()}/bukti/${newUploadToken}`,
       reason,
     });
   }
@@ -1732,7 +1781,7 @@ async function execAdminStatus(adminPhone: string, orderNumber: string) {
     `Total: *${formatIDR(Number(booking.grandTotal ?? booking.totalPrice))}*\n` +
     `Status: *${booking.status.replace(/_/g, " ").toUpperCase()}*\n` +
     (payment ? `Bukti: ${payment.proofUrl ?? "-"}\n` : "") +
-    `\n🔗 ${APP_URL}/wa/status/${orderNumber}`
+    `\n🔗 ${await getBaseUrl()}/status/${orderNumber}`
   );
 }
 
@@ -1789,7 +1838,7 @@ async function execAdminPaid(adminPhone: string, orderNumber: string) {
     startTime: booking.startTime,
     endTime: booking.endTime,
     totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
-    statusUrl: `${APP_URL}/wa/status/${booking.orderNumber}`,
+    statusUrl: `${await getBaseUrl()}/status/${booking.orderNumber}`,
   });
 
   notifyWaStaffCheckin({
@@ -1799,8 +1848,8 @@ async function execAdminPaid(adminPhone: string, orderNumber: string) {
     bookingDate: booking.bookingDate,
     startTime: booking.startTime,
     endTime: booking.endTime,
-    checkinUrl: `${APP_URL}/wa/action/${checkinToken}`,
-    finishUrl: `${APP_URL}/wa/action/${finishToken}`,
+    checkinUrl: `${await getBaseUrl()}/wa/action/${checkinToken}`,
+    finishUrl: `${await getBaseUrl()}/wa/action/${finishToken}`,
   });
 
   await logAudit({
@@ -1813,12 +1862,11 @@ async function execAdminPaid(adminPhone: string, orderNumber: string) {
   });
 
   const _paidToday = new Date().toISOString().split("T")[0];
-  const _paidSubtotal = Number(booking.totalPrice);
-  const _paidPpnAmount = booking.ppnAmount != null ? Number(booking.ppnAmount) : 0;
-  createJournalEntry(booking.id, booking.orderNumber, _paidSubtotal, _paidPpnAmount, _paidToday).catch((err) =>
+  const { dpp: _paidDpp, ppnAmount: _paidPpnAmount } = extractBookingDpp(booking);
+  createJournalEntry(booking.id, booking.orderNumber, _paidDpp, _paidPpnAmount, _paidToday).catch((err) =>
     logAccountingError({ operation: "createJournalEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
   );
-  createPublicAccountingEntry(booking.id, booking.orderNumber, _paidSubtotal, _paidPpnAmount, booking.facilityId, _paidToday).catch((err) =>
+  createPublicAccountingEntry(booking.id, booking.orderNumber, _paidDpp, _paidPpnAmount, booking.facilityId, _paidToday).catch((err) =>
     logAccountingError({ operation: "createPublicAccountingEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
   );
 
@@ -1921,8 +1969,8 @@ async function execAdminResend(adminPhone: string, orderNumber: string) {
       endTime: booking.endTime,
       totalPrice: amountToPay.toLocaleString("id-ID"),
       paymentDeadline: deadline,
-      statusUrl: `${APP_URL}/wa/status/${booking.orderNumber}`,
-      uploadProofUrl: `${APP_URL}/wa/proof/${proofToken}`,
+      statusUrl: `${await getBaseUrl()}/status/${booking.orderNumber}`,
+      uploadProofUrl: `${await getBaseUrl()}/bukti/${proofToken}`,
       bankName: settings?.bankName ?? "",
       bankAccount: settings?.bankAccount ?? "",
       bankAccountName: settings?.bankAccountName ?? "",
@@ -1938,7 +1986,7 @@ async function execAdminResend(adminPhone: string, orderNumber: string) {
       startTime: booking.startTime,
       endTime: booking.endTime,
       totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
-      statusUrl: `${APP_URL}/wa/status/${booking.orderNumber}`,
+      statusUrl: `${await getBaseUrl()}/status/${booking.orderNumber}`,
     });
     await sendWAMsg(adminPhone, `✅ Konfirmasi booking dikirim ulang ke customer *${booking.customerName}*.`);
   } else {
@@ -1971,7 +2019,7 @@ async function startBookingSession(phone: string, msg: string, waName: string): 
 
     if (isFirstTime) {
       const regToken = generateRegToken(phone);
-      const regUrl = `${APP_URL}/wa/register/${regToken}`;
+      const regUrl = `${await getBaseUrl()}/wa/register/${regToken}`;
 
       const session = await createSession({
         phone,
@@ -1980,7 +2028,7 @@ async function startBookingSession(phone: string, msg: string, waName: string): 
       });
 
       const reply = [
-        `👋 Halo${waName ? `, *${waName}*` : ""}! Selamat datang di *Sport Center Jakarta*! 🏅`,
+        `👋 Halo${waName ? `, *${waName}*` : ""}! Selamat datang di *Sport Center Bandara Soekarno Hatta*! 🏅`,
         ``,
         `Karena ini pertama kali Anda booking, kami butuh sedikit data Anda. Isi formulir singkat berikut (hanya 1 menit):`,
         ``,
@@ -2093,7 +2141,7 @@ async function continueSession(session: WaBookingSessionRow, phone: string, msg:
   // Hanya kata eksplisit batal/cancel yang boleh cancel di semua step
   // "tidak"/"no"/"ga" saja tidak cukup — terlalu ambigu (bisa jawaban dari pertanyaan opsional)
   if (isExplicitCancel(lower)) {
-    console.log(`[continueSession] explicit cancel — phone=${phone} step=${step} msg="${msg}"`);
+    logger.info({ phone, step }, "[continueSession] explicit cancel");
     await updateSession(session.id, { status: "cancelled" });
     await sendWAMsg(phone, `❌ Booking dibatalkan. Ketik *booking* kapan saja untuk memulai lagi. 🏅`);
     return;
@@ -2103,7 +2151,7 @@ async function continueSession(session: WaBookingSessionRow, phone: string, msg:
     case "wait_registration": {
       // Kirim ulang link registrasi — belum selesai mengisi form
       const regToken = generateRegToken(phone);
-      const regUrl = `${APP_URL}/wa/register/${regToken}`;
+      const regUrl = `${await getBaseUrl()}/wa/register/${regToken}`;
       const reply = [
         `📋 Silakan isi formulir pendaftaran terlebih dahulu:`,
         ``,
@@ -2784,7 +2832,7 @@ async function execCreateBookingFromSession(session: WaBookingSessionRow, phone:
     },
   });
 
-  const statusUrl = `${APP_URL}/wa/status/${orderNumber}`;
+  const statusUrl = `${await getBaseUrl()}/status/${orderNumber}`;
   const weekend = isWeekendDate(session.bookingDate);
 
   // ── 12. Kirim WA ke customer ───────────────────────────────────────────────
@@ -2879,7 +2927,6 @@ router.post("/wa/fonnte/webhook", async (req, res) => {
   res.status(200).json({ status: "ok" });
 
   try {
-    // Log raw payload (debug — lihat field apa yang Fonnte kirim)
     req.log?.debug?.({ body: req.body }, "[wa-webhook] raw payload");
 
     if (isDuplicateWebhook(req.body)) return;
@@ -2958,7 +3005,8 @@ router.post("/wa/fonnte/webhook", async (req, res) => {
           .orderBy(desc(waActionTokensTable.createdAt))
           .limit(1);
         const proofToken = tokens[0]?.token;
-        const uploadUrl = proofToken ? `${APP_URL}/wa/proof/${proofToken}` : null;
+
+        const uploadUrl = proofToken ? `${await getBaseUrl()}/bukti/${proofToken}` : null;
         const reply = uploadUrl
           ? `📎 Untuk upload bukti pembayaran *${b.orderNumber}*, silakan gunakan link berikut:\n\n${uploadUrl}\n\n⚠️ Upload hanya bisa melalui link, tidak bisa via WhatsApp langsung.`
           : `📎 Untuk upload bukti pembayaran *${b.orderNumber}*, ketik *status* untuk mendapatkan link upload.`;
@@ -2992,7 +3040,7 @@ router.post("/wa/fonnte/webhook", async (req, res) => {
         const adminContact = settingsRow?.whatsapp || settingsRow?.phone || (await getAdminPhones())[0] || "";
         const reply = adminContact
           ? `👋 Baik, saya hubungkan Anda dengan admin kami.\n\n📞 *Admin WhatsApp:* ${adminContact}\n\nSilakan hubungi admin langsung untuk bantuan lebih lanjut. Jam operasional: *${settingsRow?.openHour ?? "06:00"}–${settingsRow?.closeHour ?? "22:00"}*. 🙏`
-          : `👋 Untuk berbicara langsung dengan admin, ketik *status* atau kunjungi ${APP_URL}/contact.\n\nKami siap membantu! 🏅`;
+          : `👋 Untuk berbicara langsung dengan admin, ketik *status* atau kunjungi ${await getBaseUrl()}/contact.\n\nKami siap membantu! 🏅`;
         await sendWAMsg(phone, reply);
         await logAudit({ action: "ai_talk_to_admin_handled", entity: "wa_ai", after: { phone, adminContact } });
         return;
@@ -3054,7 +3102,7 @@ router.post("/wa/fonnte/webhook", async (req, res) => {
           `   ${facMap.get(b.facilityId) ?? "-"} — ${b.bookingDate} ${b.startTime}–${b.endTime}\n` +
           `   Status: *${statusLabel}*\n\n`;
       }
-      reply += `Detail: ${APP_URL}/wa/status/${allBookings[0].orderNumber}`;
+      reply += `Detail: ${await getBaseUrl()}/status/${allBookings[0].orderNumber}`;
       await sendWAMsg(phone, reply);
       return;
     }
@@ -3077,7 +3125,7 @@ router.post("/wa/fonnte/webhook", async (req, res) => {
       `Ketik:\n` +
       `• *booking* — pesan fasilitas olahraga\n` +
       `• *status* — cek status pesanan\n\n` +
-      `Atau kunjungi: ${APP_URL}/facilities`
+      `Atau kunjungi: ${await getBaseUrl()}/facilities`
     );
   } catch (err) {
     console.error("[wa/fonnte/webhook] error:", err);
@@ -3188,9 +3236,10 @@ router.post("/wa/booking-approval", async (req, res) => {
         userName: "admin (WhatsApp approval)",
       });
 
+
       const uploadToken = await createWaToken(booking.id, "upload_proof", 3);
-      const statusUrl = `${APP_URL}/wa/status/${booking.orderNumber}`;
-      const uploadProofUrl = `${APP_URL}/wa/proof/${uploadToken}`;
+      const statusUrl = `${await getBaseUrl()}/status/${booking.orderNumber}`;
+      const uploadProofUrl = `${await getBaseUrl()}/bukti/${uploadToken}`;
       const deadline = new Date(Date.now() + 24 * 60 * 60 * 1000);
       const deadlineStr = deadline.toLocaleString("id-ID", { timeZone: "Asia/Jakarta", hour12: false });
 

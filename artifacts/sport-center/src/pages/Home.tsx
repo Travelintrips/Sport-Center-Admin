@@ -1,3 +1,6 @@
+import SEOHead from "@/components/SEOHead";
+import { AnalyticsSection } from "@/components/AnalyticsSection";
+import { AnalyticsReportSection } from "@/components/AnalyticsReportSection";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -443,6 +446,11 @@ export default function Home() {
 
   return (
     <div className="flex flex-col min-h-screen">
+      <SEOHead
+        title="Sport Center Soekarno-Hatta | Booking Lapangan Olahraga"
+        description="Pusat olahraga premium di kawasan Bandara Soekarno-Hatta. Booking lapangan futsal, basket, badminton, dan gym secara online 24/7."
+        path="/"
+      />
 
       {/* ── Hero ─────────────────────────────────────────────────── */}
       <section className="relative bg-white dark:bg-slate-950 overflow-hidden">
@@ -1005,6 +1013,8 @@ export default function Home() {
           </div>
         </div>
       </section>
+
+      <AnalyticsReportSection />
 
     </div>
   );

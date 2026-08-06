@@ -1,6 +1,12 @@
 #!/bin/bash
 set -e
 
+# Kill any stale processes on ports 5000 and 8080 before starting
+pkill -f "artifacts/api-server/dist/index.mjs" 2>/dev/null || true
+pkill -f "vite" 2>/dev/null || true
+fuser -k 5000/tcp 8080/tcp 2>/dev/null || true
+sleep 1
+
 # Build the API server first
 echo "[start-dev] Building API server..."
 pnpm --filter @workspace/api-server run build
