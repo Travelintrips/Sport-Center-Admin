@@ -26,3 +26,4 @@
 - [GAE health endpoints](gae-health-endpoints.md) — health/healthz/readiness mounted at root via app.use(healthRouter) in app.ts (NOT only under /api); /readiness does SELECT 1 with DB pool; test in jest.config.mjs uses ts-jest ESM mode + supertest.
 - [Paylabs callback invariant](paylabs-callback-invariant.md) — persist merchantTradeNo→booking_id before provider calls; callback must use exact transaction lookup and raw-body signature verification.
 - [Paylabs public key verification](paylabs-pubkey-verification.md) — fail-closed webhook (no key = reject), admin UI redacts keys (configured bool only), normalizePaylabsPublicKey() for PEM normalization.
+- [Paylabs private key persistence](paylabs-private-key-persistence.md) — GET must never return private keys; PATCH only accepts them when explicitly provided + valid; badge+editor UI pattern is the correct fix.

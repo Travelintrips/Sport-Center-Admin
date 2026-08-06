@@ -1195,7 +1195,15 @@ function PaylabsPaymentSection({
       setPayment(data);
       setPollStatus("waiting");
     } catch (err: any) {
-      toast({ title: t("Gagal membuat pembayaran", "Failed to create payment"), description: err.message, variant: "destructive" });
+      const rawMsg: string = err.message ?? "";
+      const isKeyError = /rsa|decoder|invalid_private_key|signing failed|pkcs/i.test(rawMsg);
+      const safeDesc = isKeyError
+        ? t(
+            "Gagal membuat pembayaran karena konfigurasi payment gateway belum valid. Hubungi administrator.",
+            "Payment failed due to invalid gateway configuration. Please contact the administrator.",
+          )
+        : rawMsg;
+      toast({ title: t("Gagal membuat pembayaran", "Failed to create payment"), description: safeDesc, variant: "destructive" });
       setSubMethod(null);
     } finally {
       setLoading(false);

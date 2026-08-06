@@ -609,22 +609,25 @@ export default function PaylabsGateway() {
   const [sandboxMode, setSandboxMode] = useState(true);
   const [storeId, setStoreId] = useState("");
 
-  // Sandbox credentials — publicKey is NEVER stored in state after load (security).
-  // Only a boolean "configured" flag is kept; user must re-enter to change.
-  const [sandboxCreds, setSandboxCreds] = useState({
-    privateKey: "",
-    merchantId: "",
-  });
+  // Sandbox credentials
+  // Private keys are NEVER returned by the API — only a boolean "configured" flag is kept.
+  // User must explicitly click "Set / Ganti" to enter a new key.
+  const [sandboxMerchantId, setSandboxMerchantId] = useState("");
+  const [sandboxPrivateKeyConfigured, setSandboxPrivateKeyConfigured] = useState(false);
+  const [isEditingSandboxPrivateKey, setIsEditingSandboxPrivateKey] = useState(false);
+  const [sandboxPrivateKeyInput, setSandboxPrivateKeyInput] = useState("");
+
   const [sandboxPaylabsPubKeyConfigured, setSandboxPaylabsPubKeyConfigured] =
     useState(false);
   const [newSandboxPaylabsPubKey, setNewSandboxPaylabsPubKey] = useState("");
   const [showSandboxPubKeyInput, setShowSandboxPubKeyInput] = useState(false);
 
-  // Production credentials
-  const [prodCreds, setProdCreds] = useState({
-    privateKey: "",
-    merchantId: "",
-  });
+  // Production credentials — same pattern
+  const [prodMerchantId, setProdMerchantId] = useState("");
+  const [productionPrivateKeyConfigured, setProductionPrivateKeyConfigured] = useState(false);
+  const [isEditingProdPrivateKey, setIsEditingProdPrivateKey] = useState(false);
+  const [prodPrivateKeyInput, setProdPrivateKeyInput] = useState("");
+
   const [prodPaylabsPubKeyConfigured, setProdPaylabsPubKeyConfigured] =
     useState(false);
   const [newProdPaylabsPubKey, setNewProdPaylabsPubKey] = useState("");
@@ -651,18 +654,13 @@ export default function PaylabsGateway() {
         });
         setSandboxMode(d.sandboxMode ?? true);
         setStoreId(d.storeId ?? "");
-        setSandboxCreds({
-          privateKey: d.sandboxPrivateKey ?? "",
-          merchantId: d.sandboxMerchantId ?? "",
-        });
-        setProdCreds({
-          privateKey: d.prodPrivateKey ?? "",
-          merchantId: d.prodMerchantId ?? "",
-        });
+        setSandboxMerchantId(d.sandboxMerchantId ?? "");
+        setProdMerchantId(d.prodMerchantId ?? "");
+        // Private keys: only receive configured status, never the actual key
+        setSandboxPrivateKeyConfigured(Boolean(d.sandboxPrivateKeyConfigured));
+        setProductionPrivateKeyConfigured(Boolean(d.productionPrivateKeyConfigured));
         // Public keys: only receive configured status, never the actual key
-        setSandboxPaylabsPubKeyConfigured(
-          Boolean(d.sandboxPublicKeyConfigured),
-        );
+        setSandboxPaylabsPubKeyConfigured(Boolean(d.sandboxPublicKeyConfigured));
         setProdPaylabsPubKeyConfigured(Boolean(d.prodPublicKeyConfigured));
 
         if (Array.isArray(d.paymentMethodsConfig)) {
@@ -762,10 +760,8 @@ export default function PaylabsGateway() {
         debugMode: general.debugMode,
         sandboxMode,
         storeId: trimmedStoreId || "",
-        sandboxPrivateKey: sandboxCreds.privateKey,
-        sandboxMerchantId: sandboxCreds.merchantId,
-        prodPrivateKey: prodCreds.privateKey,
-        prodMerchantId: prodCreds.merchantId,
+        sandboxMerchantId,
+        prodMerchantId,
         paymentMethodsConfig: methods.map((m) => ({
           id: m.id,
           active: m.active,
@@ -775,6 +771,14 @@ export default function PaylabsGateway() {
           customDescription: m.customDescription,
         })),
       };
+
+      // Private keys: only include if user explicitly opened the editor and typed something
+      if (isEditingSandboxPrivateKey && sandboxPrivateKeyInput.trim()) {
+        body.sandboxPrivateKey = sandboxPrivateKeyInput;
+      }
+      if (isEditingProdPrivateKey && prodPrivateKeyInput.trim()) {
+        body.prodPrivateKey = prodPrivateKeyInput;
+      }
 
       // Only send public key if user entered a new one (empty string = don't change)
       if (newSandboxPaylabsPubKey.trim()) {
@@ -798,13 +802,17 @@ export default function PaylabsGateway() {
         throw new Error(`HTTP ${res.status}: ${errBody?.error ?? "unknown"}`);
       }
 
-      // Clear local key inputs immediately after PATCH succeeds
+      // Clear local key inputs and editor state immediately after PATCH succeeds
       setNewSandboxPaylabsPubKey("");
       setNewProdPaylabsPubKey("");
       setShowSandboxPubKeyInput(false);
       setShowProdPubKeyInput(false);
+      setIsEditingSandboxPrivateKey(false);
+      setSandboxPrivateKeyInput("");
+      setIsEditingProdPrivateKey(false);
+      setProdPrivateKeyInput("");
 
-      // Refetch from GET so badge always reflects actual DB state (not just PATCH response)
+      // Refetch from GET so badges always reflect actual DB state (not just PATCH response)
       const refetch = await fetch("/api/admin/paylabs/settings", {
         headers: { Authorization: `Bearer ${getToken()}` },
       }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
@@ -812,6 +820,8 @@ export default function PaylabsGateway() {
       if (refetch) {
         setSandboxPaylabsPubKeyConfigured(Boolean(refetch.sandboxPublicKeyConfigured));
         setProdPaylabsPubKeyConfigured(Boolean(refetch.prodPublicKeyConfigured));
+        setSandboxPrivateKeyConfigured(Boolean(refetch.sandboxPrivateKeyConfigured));
+        setProductionPrivateKeyConfigured(Boolean(refetch.productionPrivateKeyConfigured));
         setStoreId(refetch.storeId ?? "");
       }
 
@@ -833,17 +843,17 @@ export default function PaylabsGateway() {
   }
 
   function handleExport() {
-    // SECURITY: Paylabs public keys are NOT included in export (prevent key leakage).
-    // Merchant private keys are included since the admin explicitly chose to export.
+    // SECURITY: Paylabs public keys and private keys are NOT included in export.
+    // Private keys are write-only and never stored in frontend state.
     const data = {
       general,
       sandboxMode,
       storeId,
-      sandboxCreds, // contains merchantId and privateKey only (no public key)
-      prodCreds, // same
+      sandboxMerchantId,
+      prodMerchantId,
       methods,
       _note:
-        "Paylabs public keys are NOT exported for security reasons. Enter them manually on each project.",
+        "Paylabs public keys and private keys are NOT exported for security reasons. Enter them manually on each project.",
     };
     const blob = new Blob([JSON.stringify(data, null, 2)], {
       type: "application/json",
@@ -857,7 +867,7 @@ export default function PaylabsGateway() {
     toast({
       title: "Konfigurasi diekspor",
       description:
-        "File paylabs-config.json berhasil diunduh. Public key tidak disertakan.",
+        "File paylabs-config.json berhasil diunduh. Public key dan private key tidak disertakan.",
     });
   }
 
@@ -871,26 +881,16 @@ export default function PaylabsGateway() {
         if (data.general) setGeneral(data.general);
         if (data.sandboxMode !== undefined) setSandboxMode(data.sandboxMode);
         if (data.storeId !== undefined) setStoreId(data.storeId);
-        if (data.sandboxCreds) {
-          // Never import public key from file — only privateKey and merchantId
-          const { privateKey, merchantId } = data.sandboxCreds;
-          setSandboxCreds({
-            privateKey: privateKey ?? "",
-            merchantId: merchantId ?? "",
-          });
-        }
-        if (data.prodCreds) {
-          const { privateKey, merchantId } = data.prodCreds;
-          setProdCreds({
-            privateKey: privateKey ?? "",
-            merchantId: merchantId ?? "",
-          });
-        }
+        if (data.sandboxMerchantId !== undefined) setSandboxMerchantId(data.sandboxMerchantId);
+        if (data.prodMerchantId !== undefined) setProdMerchantId(data.prodMerchantId);
+        // Legacy import support: old exports used sandboxCreds/prodCreds objects
+        if (data.sandboxCreds?.merchantId) setSandboxMerchantId(data.sandboxCreds.merchantId);
+        if (data.prodCreds?.merchantId) setProdMerchantId(data.prodCreds.merchantId);
         if (data.methods) setMethods(data.methods);
         toast({
           title: "Konfigurasi diimpor",
           description:
-            "Pengaturan berhasil dimuat. Masukkan Paylabs public key secara manual.",
+            "Pengaturan berhasil dimuat. Masukkan Paylabs public key dan private key secara manual.",
         });
       } catch {
         toast({
@@ -1198,14 +1198,68 @@ export default function PaylabsGateway() {
             )}
           </div>
 
-          <SecretField
-            id="sb-privkey"
-            label="Merchant Private Key (Sandbox)"
-            required
-            hint="Private key merchant untuk environment SIT. Digunakan untuk menandatangani request ke Paylabs."
-            value={sandboxCreds.privateKey}
-            onChange={(v) => setSandboxCreds((c) => ({ ...c, privateKey: v }))}
-          />
+          {/* Merchant Private Key (Sandbox) — write-only, badge + explicit edit pattern */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label>
+                Merchant Private Key (Sandbox){" "}
+                <span className="text-red-500">*</span>
+              </Label>
+              <Badge
+                className={
+                  sandboxPrivateKeyConfigured
+                    ? "bg-green-100 text-green-700 border border-green-300 text-xs"
+                    : "bg-red-100 text-red-700 border border-red-300 text-xs"
+                }
+              >
+                {sandboxPrivateKeyConfigured ? "Configured" : "Not configured"}
+              </Badge>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Private key merchant untuk environment SIT. Digunakan untuk menandatangani request ke Paylabs.
+              Key tidak pernah ditampilkan setelah disimpan.
+            </p>
+            {!isEditingSandboxPrivateKey ? (
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2"
+                onClick={() => setIsEditingSandboxPrivateKey(true)}
+              >
+                <Shield className="h-3.5 w-3.5" />
+                {sandboxPrivateKeyConfigured
+                  ? "Ganti Merchant Private Key"
+                  : "Set Merchant Private Key"}
+              </Button>
+            ) : (
+              <div className="space-y-2">
+                <Textarea
+                  rows={6}
+                  placeholder={"-----BEGIN PRIVATE KEY-----\nMIIEvAI...\n-----END PRIVATE KEY-----"}
+                  value={sandboxPrivateKeyInput}
+                  onChange={(e) => setSandboxPrivateKeyInput(e.target.value)}
+                  className="font-mono text-xs"
+                  autoFocus
+                />
+                <p className="text-xs text-muted-foreground">
+                  Tempel PKCS#8 atau PKCS#1 RSA PEM. Literal \n dari secret manager juga didukung.
+                  Key divalidasi sebelum disimpan dan tidak akan ditampilkan kembali.
+                </p>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setIsEditingSandboxPrivateKey(false);
+                    setSandboxPrivateKeyInput("");
+                  }}
+                  className="text-muted-foreground"
+                >
+                  Batal
+                </Button>
+              </div>
+            )}
+          </div>
+
           <div className="space-y-1.5">
             <Label htmlFor="sb-mid">
               Merchant ID <span className="text-red-500">*</span>
@@ -1213,10 +1267,8 @@ export default function PaylabsGateway() {
             <Input
               id="sb-mid"
               placeholder="Contoh: 010728"
-              value={sandboxCreds.merchantId}
-              onChange={(e) =>
-                setSandboxCreds((c) => ({ ...c, merchantId: e.target.value }))
-              }
+              value={sandboxMerchantId}
+              onChange={(e) => setSandboxMerchantId(e.target.value)}
             />
             <p className="text-xs text-muted-foreground">
               Merchant ID untuk environment SIT.
@@ -1309,14 +1361,68 @@ export default function PaylabsGateway() {
             )}
           </div>
 
-          <SecretField
-            id="prod-privkey"
-            label="Merchant Private Key (Produksi)"
-            required
-            hint="Private key merchant untuk produksi. Digunakan untuk menandatangani request ke Paylabs."
-            value={prodCreds.privateKey}
-            onChange={(v) => setProdCreds((c) => ({ ...c, privateKey: v }))}
-          />
+          {/* Merchant Private Key (Produksi) — write-only, badge + explicit edit pattern */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label>
+                Merchant Private Key (Produksi){" "}
+                <span className="text-red-500">*</span>
+              </Label>
+              <Badge
+                className={
+                  productionPrivateKeyConfigured
+                    ? "bg-green-100 text-green-700 border border-green-300 text-xs"
+                    : "bg-red-100 text-red-700 border border-red-300 text-xs"
+                }
+              >
+                {productionPrivateKeyConfigured ? "Configured" : "Not configured"}
+              </Badge>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Private key merchant untuk produksi. Digunakan untuk menandatangani request ke Paylabs.
+              Key tidak pernah ditampilkan setelah disimpan.
+            </p>
+            {!isEditingProdPrivateKey ? (
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2"
+                onClick={() => setIsEditingProdPrivateKey(true)}
+              >
+                <Shield className="h-3.5 w-3.5" />
+                {productionPrivateKeyConfigured
+                  ? "Ganti Merchant Private Key"
+                  : "Set Merchant Private Key"}
+              </Button>
+            ) : (
+              <div className="space-y-2">
+                <Textarea
+                  rows={6}
+                  placeholder={"-----BEGIN PRIVATE KEY-----\nMIIEvAI...\n-----END PRIVATE KEY-----"}
+                  value={prodPrivateKeyInput}
+                  onChange={(e) => setProdPrivateKeyInput(e.target.value)}
+                  className="font-mono text-xs"
+                  autoFocus
+                />
+                <p className="text-xs text-muted-foreground">
+                  Tempel PKCS#8 atau PKCS#1 RSA PEM. Literal \n dari secret manager juga didukung.
+                  Key divalidasi sebelum disimpan dan tidak akan ditampilkan kembali.
+                </p>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setIsEditingProdPrivateKey(false);
+                    setProdPrivateKeyInput("");
+                  }}
+                  className="text-muted-foreground"
+                >
+                  Batal
+                </Button>
+              </div>
+            )}
+          </div>
+
           <div className="space-y-1.5">
             <Label htmlFor="prod-mid">
               Merchant ID <span className="text-red-500">*</span>
@@ -1324,10 +1430,8 @@ export default function PaylabsGateway() {
             <Input
               id="prod-mid"
               placeholder="Contoh: 010613"
-              value={prodCreds.merchantId}
-              onChange={(e) =>
-                setProdCreds((c) => ({ ...c, merchantId: e.target.value }))
-              }
+              value={prodMerchantId}
+              onChange={(e) => setProdMerchantId(e.target.value)}
             />
             <p className="text-xs text-muted-foreground">
               Merchant ID untuk environment produksi.

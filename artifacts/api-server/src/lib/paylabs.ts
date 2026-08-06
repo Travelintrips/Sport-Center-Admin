@@ -175,6 +175,70 @@ function normaliseKey(key: string, type: "PUBLIC" | "PRIVATE"): string {
 }
 
 /**
+ * Normalize a merchant private key before storing it.
+ * Accepts PKCS#8 PEM, PKCS#1 RSA PEM, or raw base64.
+ * - Trims outer whitespace
+ * - Converts literal \n escape sequences to real newlines
+ * - Converts CRLF → LF
+ * - Preserves the original PEM header type (PRIVATE KEY vs RSA PRIVATE KEY)
+ * - Re-chunks body into 64-char lines
+ * Throws if the key is empty or the PEM body is empty.
+ * Does NOT validate with crypto.createPrivateKey — caller must do that.
+ */
+export function normalizePaylabsPrivateKey(raw: string): string {
+  let key = raw.trim();
+  if (!key) throw new Error("Private key is empty");
+  // Literal escape sequences → real characters
+  key = key.replace(/\\n/g, "\n").replace(/\\r/g, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  if (key.includes("-----BEGIN")) {
+    const headerMatch = key.match(/-----BEGIN ([^-]+)-----/);
+    const header = headerMatch?.[1]?.trim() ?? "PRIVATE KEY";
+    const body = key.replace(/-----[^-]+-----/g, "").replace(/\s+/g, "");
+    if (!body) throw new Error("PEM body is empty");
+    const chunked = (body.match(/.{1,64}/g) ?? []).join("\n");
+    return `-----BEGIN ${header}-----\n${chunked}\n-----END ${header}-----`;
+  }
+  // Raw base64 without header — wrap as PKCS#8 (default)
+  const body = key.replace(/\s+/g, "");
+  if (!body) throw new Error("Private key body is empty");
+  const chunked = (body.match(/.{1,64}/g) ?? []).join("\n");
+  return `-----BEGIN PRIVATE KEY-----\n${chunked}\n-----END PRIVATE KEY-----`;
+}
+
+/**
+ * Returns true if the given string is a non-empty, cryptographically valid private key.
+ * Tries PKCS#8 and PKCS#1 PEM formats via crypto.createPrivateKey.
+ */
+export function isPrivateKeyValid(raw: string | null | undefined): boolean {
+  if (!raw || !raw.trim()) return false;
+  // Reject obvious mask/placeholder values
+  if (/^[•*·]+$/.test(raw.trim())) return false;
+  if (/^(configured|\[redacted\]|\*{4,})$/i.test(raw.trim())) return false;
+  let normalized: string;
+  try {
+    normalized = normalizePaylabsPrivateKey(raw);
+  } catch {
+    return false;
+  }
+  const base64 = normalized.replace(/-----[^-]+-----/g, "").replace(/\s+/g, "");
+  const body64 = (base64.match(/.{1,64}/g) ?? [base64]).join("\n");
+  const pkcs8Pem = `-----BEGIN PRIVATE KEY-----\n${body64}\n-----END PRIVATE KEY-----`;
+  const pkcs1Pem = `-----BEGIN RSA PRIVATE KEY-----\n${body64}\n-----END RSA PRIVATE KEY-----`;
+  const derBuf   = Buffer.from(base64, "base64");
+  const attempts: Array<() => crypto.KeyObject> = [
+    () => crypto.createPrivateKey({ key: normalized,  format: "pem" }),
+    () => crypto.createPrivateKey({ key: pkcs8Pem, format: "pem", type: "pkcs8" }),
+    () => crypto.createPrivateKey({ key: pkcs1Pem, format: "pem", type: "pkcs1" }),
+    () => crypto.createPrivateKey({ key: derBuf,   format: "der", type: "pkcs8" }),
+    () => crypto.createPrivateKey({ key: derBuf,   format: "der", type: "pkcs1" }),
+  ];
+  for (const attempt of attempts) {
+    try { attempt(); return true; } catch { /* try next */ }
+  }
+  return false;
+}
+
+/**
  * Normalize a PEM public key received from the Paylabs dashboard (sandbox or production).
  * Accepts:
  *   - Full PEM with -----BEGIN PUBLIC KEY----- header

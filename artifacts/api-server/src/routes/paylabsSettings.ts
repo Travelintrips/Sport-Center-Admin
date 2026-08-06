@@ -3,7 +3,7 @@ import crypto from "crypto";
 import { db, paylabsSettingsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
-import { loadPaylabsConfigFromDb, normalizeOptionalPaylabsStoreId, normalizePaylabsPublicKey } from "../lib/paylabs";
+import { loadPaylabsConfigFromDb, normalizeOptionalPaylabsStoreId, normalizePaylabsPublicKey, normalizePaylabsPrivateKey, isPrivateKeyValid } from "../lib/paylabs";
 import { logger } from "../lib/logger";
 
 const router = Router();
@@ -25,11 +25,10 @@ async function getOrCreate() {
 }
 
 // GET /api/admin/paylabs/settings
-// Returns DB values merged with env-var fallbacks.
-// SECURITY: Paylabs public keys (sandboxPublicKey / prodPublicKey) are NEVER returned
-// to the client — only boolean "configured" flags are sent instead.
-// Merchant private keys ARE returned so the admin form can pre-populate them (they are
-// already stored in DB and the admin has write access to change them).
+// SECURITY:
+//   - Paylabs public keys (sandboxPublicKey / prodPublicKey) are NEVER returned — only boolean flags.
+//   - Merchant private keys are NEVER returned — only boolean flags indicating whether a valid key exists.
+//     The admin UI uses a badge + explicit "Set / Ganti" button flow; private keys are write-only.
 router.get("/admin/paylabs/settings", adminMiddleware, async (req, res) => {
   try {
     const config = await getOrCreate();
@@ -38,13 +37,20 @@ router.get("/admin/paylabs/settings", adminMiddleware, async (req, res) => {
     const sandboxPublicKeyEffective  = config.sandboxPublicKey  || process.env.PAYLABS_SANDBOX_PUBLIC_KEY  || "";
     const prodPublicKeyEffective     = config.prodPublicKey     || process.env.PAYLABS_PROD_PUBLIC_KEY     || "";
 
+    // For private keys: check DB first, then env var. Validate with crypto to detect corrupted/masked values.
+    const sandboxPrivateKeyRaw = config.sandboxPrivateKey || process.env.PAYLABS_SANDBOX_PRIVATE_KEY || "";
+    const prodPrivateKeyRaw    = config.prodPrivateKey    || process.env.PAYLABS_PROD_PRIVATE_KEY    || "";
+
     const merged = {
       ...config,
       sandboxMerchantId: config.sandboxMerchantId || process.env.PAYLABS_SANDBOX_MERCHANT_ID || "",
-      sandboxPrivateKey:  config.sandboxPrivateKey  || process.env.PAYLABS_SANDBOX_PRIVATE_KEY  || "",
       prodMerchantId:    config.prodMerchantId    || process.env.PAYLABS_PROD_MERCHANT_ID    || "",
-      prodPrivateKey:     config.prodPrivateKey     || process.env.PAYLABS_PROD_PRIVATE_KEY     || "",
-      storeId:            config.storeId            || process.env.PAYLABS_STORE_ID             || "",
+      storeId:           config.storeId           || process.env.PAYLABS_STORE_ID            || "",
+      // NEVER return private keys to the client — write-only, validated before storing
+      sandboxPrivateKey: undefined,
+      prodPrivateKey:    undefined,
+      sandboxPrivateKeyConfigured: isPrivateKeyValid(sandboxPrivateKeyRaw),
+      productionPrivateKeyConfigured: isPrivateKeyValid(prodPrivateKeyRaw),
       // Redact public keys — send only configured status
       sandboxPublicKey: undefined,
       prodPublicKey:    undefined,
@@ -156,9 +162,7 @@ router.patch("/admin/paylabs/settings", adminMiddleware, async (req, res) => {
       "debugMode",
       "sandboxMode",
       "storeId",
-      "sandboxPrivateKey",
       "sandboxMerchantId",
-      "prodPrivateKey",
       "prodMerchantId",
       "paymentMethodsConfig",
     ] as const;
@@ -166,6 +170,49 @@ router.patch("/admin/paylabs/settings", adminMiddleware, async (req, res) => {
     const patch: Record<string, unknown> = {};
     for (const key of ALLOWED_NON_KEY) {
       if (key in req.body) patch[key] = req.body[key];
+    }
+
+    const adminUser = (req as any).user?.username ?? (req as any).user?.id ?? "unknown_admin";
+
+    // ── Private key handling — write-only, validated before storing ──────────
+    // Reject mask/placeholder values immediately (422).
+    // Only update if the field is present AND passes normalization + crypto validation.
+    const MASK_REGEX = /^[•*·]+$/;
+    const PLACEHOLDER_REGEX = /^(configured|\[redacted\]|\*{4,})$/i;
+
+    async function applyPrivateKey(
+      fieldName: "sandboxPrivateKey" | "prodPrivateKey",
+      label: string,
+    ): Promise<boolean> {
+      if (!(fieldName in req.body)) return true; // not provided — keep existing, OK
+      const raw: unknown = req.body[fieldName];
+      // Empty string or null — do not overwrite existing key, but don't error
+      if (!raw || (typeof raw === "string" && !raw.trim())) return true;
+      const rawStr = String(raw).trim();
+      // Reject masked / placeholder values
+      if (MASK_REGEX.test(rawStr) || PLACEHOLDER_REGEX.test(rawStr)) {
+        res.status(422).json({ error: `${label} tidak valid — nilai masked atau placeholder tidak diterima` });
+        return false;
+      }
+      // Normalize
+      let normalized: string;
+      try {
+        normalized = normalizePaylabsPrivateKey(rawStr);
+      } catch (e) {
+        res.status(422).json({ error: `${label} tidak dapat dinormalisasi: ${e instanceof Error ? e.message : String(e)}` });
+        return false;
+      }
+      // Cryptographic validation
+      if (!isPrivateKeyValid(normalized)) {
+        res.status(422).json({ error: `${label} tidak valid — pastikan private key PKCS#8 atau PKCS#1 RSA 2048-bit (PEM atau base64).` });
+        return false;
+      }
+      patch[fieldName] = normalized;
+      logger.info(
+        { admin: adminUser, field: fieldName, action: "private_key_update", normalizedLength: normalized.length },
+        "[paylabs-settings] private key updated",
+      );
+      return true;
     }
 
     // Validate and normalize storeId before saving
@@ -186,10 +233,14 @@ router.patch("/admin/paylabs/settings", adminMiddleware, async (req, res) => {
       }
     }
 
+    // Process private key updates (write-only, validated before storing)
+    const sbOk = await applyPrivateKey("sandboxPrivateKey", "Merchant Private Key Sandbox");
+    if (!sbOk) return;
+    const prodOk = await applyPrivateKey("prodPrivateKey", "Merchant Private Key Produksi");
+    if (!prodOk) return;
+
     // Handle Paylabs public keys separately — normalize PEM + audit log
     // Only update if client sends a non-empty value (empty string = "don't change")
-    const adminUser = (req as any).user?.username ?? (req as any).user?.id ?? "unknown_admin";
-
     if ("sandboxPublicKey" in req.body && req.body.sandboxPublicKey !== "") {
       const normalized = normalizePaylabsPublicKey(String(req.body.sandboxPublicKey));
       if (!normalized) {
@@ -246,13 +297,17 @@ router.patch("/admin/paylabs/settings", adminMiddleware, async (req, res) => {
       );
     }
 
-    // Return safe response — redact public keys, send only configured status
+    // Return safe response — NEVER return private keys or public keys; only boolean configured flags
     const safeResponse = {
       ...updated,
-      sandboxPublicKey: undefined,
-      prodPublicKey:    undefined,
-      sandboxPublicKeyConfigured: Boolean(updated.sandboxPublicKey?.trim()),
-      prodPublicKeyConfigured:    Boolean(updated.prodPublicKey?.trim()),
+      sandboxPrivateKey: undefined,
+      prodPrivateKey:    undefined,
+      sandboxPublicKey:  undefined,
+      prodPublicKey:     undefined,
+      sandboxPrivateKeyConfigured:    isPrivateKeyValid(updated.sandboxPrivateKey),
+      productionPrivateKeyConfigured: isPrivateKeyValid(updated.prodPrivateKey),
+      sandboxPublicKeyConfigured:     Boolean(updated.sandboxPublicKey?.trim()),
+      prodPublicKeyConfigured:        Boolean(updated.prodPublicKey?.trim()),
     };
 
     res.json(safeResponse);
