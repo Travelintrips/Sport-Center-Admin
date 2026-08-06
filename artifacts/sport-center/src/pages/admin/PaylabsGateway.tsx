@@ -802,6 +802,10 @@ export default function PaylabsGateway() {
         throw new Error(`HTTP ${res.status}: ${errBody?.error ?? "unknown"}`);
       }
 
+      // Parse PATCH response — the server includes sandboxPrivateKeyConfigured in it
+      // after cryptographic validation. Use it as fallback when the refetch fails.
+      const patchResult = await res.json().catch(() => null);
+
       // Clear local key inputs and editor state immediately after PATCH succeeds
       setNewSandboxPaylabsPubKey("");
       setNewProdPaylabsPubKey("");
@@ -812,17 +816,21 @@ export default function PaylabsGateway() {
       setIsEditingProdPrivateKey(false);
       setProdPrivateKeyInput("");
 
-      // Refetch from GET so badges always reflect actual DB state (not just PATCH response)
+      // Refetch from GET so badges always reflect actual DB state
       const refetch = await fetch("/api/admin/paylabs/settings", {
         headers: { Authorization: `Bearer ${getToken()}` },
       }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
 
-      if (refetch) {
-        setSandboxPaylabsPubKeyConfigured(Boolean(refetch.sandboxPublicKeyConfigured));
-        setProdPaylabsPubKeyConfigured(Boolean(refetch.prodPublicKeyConfigured));
-        setSandboxPrivateKeyConfigured(Boolean(refetch.sandboxPrivateKeyConfigured));
-        setProductionPrivateKeyConfigured(Boolean(refetch.productionPrivateKeyConfigured));
-        setStoreId(refetch.storeId ?? "");
+      // Use GET if successful; fall back to PATCH response if refetch fails.
+      // Without this fallback, a brief network hiccup between PATCH and refetch
+      // leaves the badge stuck at "Not configured" even though the key was saved.
+      const source = refetch ?? patchResult;
+      if (source) {
+        setSandboxPaylabsPubKeyConfigured(Boolean(source.sandboxPublicKeyConfigured));
+        setProdPaylabsPubKeyConfigured(Boolean(source.prodPublicKeyConfigured));
+        setSandboxPrivateKeyConfigured(Boolean(source.sandboxPrivateKeyConfigured));
+        setProductionPrivateKeyConfigured(Boolean(source.productionPrivateKeyConfigured));
+        setStoreId(source.storeId ?? storeId);
       }
 
       toast({

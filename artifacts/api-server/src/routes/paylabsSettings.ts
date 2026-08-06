@@ -194,23 +194,53 @@ router.patch("/admin/paylabs/settings", adminMiddleware, async (req, res) => {
         res.status(422).json({ error: `${label} tidak valid — nilai masked atau placeholder tidak diterima` });
         return false;
       }
+
+      // Detect PEM type for logging
+      const detectedType = rawStr.includes("-----BEGIN RSA PRIVATE KEY-----")
+        ? "PKCS#1 RSA PRIVATE KEY"
+        : rawStr.includes("-----BEGIN PRIVATE KEY-----")
+          ? "PKCS#8 PRIVATE KEY"
+          : rawStr.includes("-----BEGIN")
+            ? "PEM (unknown header)"
+            : "raw base64";
+
       // Normalize
       let normalized: string;
       try {
         normalized = normalizePaylabsPrivateKey(rawStr);
       } catch (e) {
+        logger.warn(
+          { admin: adminUser, field: fieldName, action: "normalize_failed", inputLength: rawStr.length, detectedType, error: String(e) },
+          "[paylabs-settings] private key normalization failed",
+        );
         res.status(422).json({ error: `${label} tidak dapat dinormalisasi: ${e instanceof Error ? e.message : String(e)}` });
         return false;
       }
+
       // Cryptographic validation
-      if (!isPrivateKeyValid(normalized)) {
+      const valid = isPrivateKeyValid(normalized);
+      logger.info(
+        {
+          admin: adminUser,
+          field: fieldName,
+          action: "private_key_received",
+          received: true,
+          inputLength: rawStr.length,
+          detectedType,
+          normalizedLength: normalized.length,
+          cryptoValid: valid,
+        },
+        "[paylabs-settings] sandbox private key update",
+      );
+
+      if (!valid) {
         res.status(422).json({ error: `${label} tidak valid — pastikan private key PKCS#8 atau PKCS#1 RSA 2048-bit (PEM atau base64).` });
         return false;
       }
       patch[fieldName] = normalized;
       logger.info(
-        { admin: adminUser, field: fieldName, action: "private_key_update", normalizedLength: normalized.length },
-        "[paylabs-settings] private key updated",
+        { admin: adminUser, field: fieldName, action: "private_key_stored", normalizedLength: normalized.length },
+        "[paylabs-settings] private key stored to DB",
       );
       return true;
     }
