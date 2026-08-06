@@ -246,8 +246,9 @@ export async function createPublicAccountingEntryForGroup(
   const entryNumber  = await nextPublicEntryNumber(pool, year);
   const ids          = await getPublicIds();
 
-  const orderList = groupBookings.map(b => b.orderNumber).join(", ");
+  const orderList   = groupBookings.map(b => b.orderNumber).join(", ");
   const description = `Pembayaran Grup Booking Sport Center (${groupRef} — ${groupBookings.length} sesi: ${orderList})`;
+
 
   // Gunakan facilityId dari booking pertama (representatif)
   const facilityId = groupBookings[0]?.facilityId ?? null;
@@ -330,10 +331,14 @@ export async function createPublicMembershipAccountingEntry(
   const entryNumber = await nextPublicEntryNumber(pool, year);
   const ids = await getPublicIds();
 
+  const facilityId  = groupBookings[0]?.facilityId ?? null;
+
+
   const entryResult = await pool.query(
     `INSERT INTO public.accounting_entries
       (entry_number, journal_id, date, ref, description, status, source, source_id,
        total_debit, total_credit, company_id, facility_id, correlation_id, governance_flags)
+
     VALUES ($1,$2,$3::date,$4,$5,'draft','sport_center_membership',$6,$7,$7,$8,NULL,$9,'{}')
     RETURNING id`,
     [
@@ -341,6 +346,15 @@ export async function createPublicMembershipAccountingEntry(
       `Pembayaran Member Gym Sport Center (${refNumber})`,
       membershipId, grandTotal, COMPANY_ID,
       correlationId,
+
+    VALUES ($1,$2,$3::date,$4,$5,'draft','sport_center_booking',$6,$7,$7,$8,$9,$10,'{}')
+    RETURNING id`,
+    [
+      entryNumber, ids.journalId, journalDate, groupRef,
+      description,
+      groupBookings[0]?.id ?? 0,
+      totalGross, COMPANY_ID, facilityId, correlationId,
+
     ]
   );
   const entryId = Number(entryResult.rows[0]?.id);
@@ -353,6 +367,73 @@ export async function createPublicMembershipAccountingEntry(
         ($1,$8,$9,0,$10)`,
       [
         entryId,
+
+
+        ids.coaKas,         `Penerimaan grup booking ${groupRef}`, totalGross,
+        ids.coaPendapatan,  `Pendapatan grup booking ${groupRef}`, totalRevenue,
+        ids.coaPpnKeluaran, `PPN Keluaran grup booking ${groupRef}`, totalPpn,
+      ]
+    );
+  } else {
+    await pool.query(
+      `INSERT INTO public.accounting_entry_lines (entry_id, account_id, description, debit, credit) VALUES
+        ($1,$2,$3,$4,0),
+        ($1,$5,$6,0,$4)`,
+      [entryId, ids.coaKas, `Penerimaan grup booking ${groupRef}`, totalGross, ids.coaPendapatan, `Pendapatan grup booking ${groupRef}`]
+    );
+  }
+
+  await pool.query(`UPDATE public.accounting_entries SET status = 'posted' WHERE id = $1`, [entryId]);
+
+  console.info(`[accounting] ✓ Group accounting entry created: ${entryNumber} (${groupRef}, ${groupBookings.length} sesi, total Rp ${totalGross.toLocaleString("id-ID")})`);
+}
+
+// ─── Public Accounting: Member Gym & Invoice Perusahaan ──────────────────────
+
+export async function createPublicMembershipAccountingEntry(
+  membershipId: number,
+  refNumber: string,
+  dpp: number,
+  ppnAmount: number,
+  journalDate: string,
+): Promise<void> {
+  const pool = getPublicPool();
+  if (!pool) {
+    console.warn("[accounting] Tidak ada Supabase URL — skip createPublicMembershipAccountingEntry");
+    return;
+  }
+
+  const grandTotal  = dpp + ppnAmount;
+  const hasPpn      = ppnAmount > 0;
+  const year        = new Date(journalDate).getFullYear();
+  const period      = journalDate.slice(0, 7);
+  const entryNumber = await nextPublicEntryNumber(pool, year);
+  const ids         = await getPublicIds();
+
+  const entryResult = await pool.query(
+    `INSERT INTO public.accounting_entries
+      (entry_number, journal_id, date, ref, description, status, source, source_id,
+       total_debit, total_credit, company_id, facility_id, correlation_id, governance_flags)
+    VALUES ($1,$2,$3::date,$4,$5,'draft','sport_center_membership',$6,$7,$7,$8,NULL,$9,'{}')
+    RETURNING id`,
+    [
+      entryNumber, ids.journalId, journalDate, refNumber,
+      `Pembayaran Member Gym Sport Center (${refNumber})`,
+      membershipId, grandTotal, COMPANY_ID,
+      `sc_membership_${refNumber}`,
+    ]
+  );
+  const entryId = Number(entryResult.rows[0]?.id);
+
+  if (hasPpn) {
+    await pool.query(
+      `INSERT INTO public.accounting_entry_lines (entry_id, account_id, description, debit, credit) VALUES
+        ($1,$2,$3,$4,0),
+        ($1,$5,$6,0,$7),
+        ($1,$8,$9,0,$10)`,
+      [
+        entryId,
+
         ids.coaKas,         `Penerimaan member gym ${refNumber}`, grandTotal,
         ids.coaPendapatan,  `Pendapatan member gym ${refNumber}`, dpp,
         ids.coaPpnKeluaran, `PPN Keluaran member gym ${refNumber}`, ppnAmount,
@@ -382,7 +463,6 @@ export async function createPublicMembershipAccountingEntry(
   }
 
   await pool.query(`UPDATE public.accounting_entries SET status = 'posted' WHERE id = $1`, [entryId]);
-
   console.info(`[accounting] ✓ Public accounting entry created (membership): ${entryNumber} (${refNumber})`);
 }
 
@@ -399,13 +479,13 @@ export async function createPublicInvoiceAccountingEntry(
     return;
   }
 
-  const grandTotal = subtotal + ppnAmount;
-  const netRevenue = subtotal;
-  const hasPpn = ppnAmount > 0;
-  const year = new Date(journalDate).getFullYear();
-  const period = journalDate.slice(0, 7);
+  const grandTotal  = subtotal + ppnAmount;
+  const netRevenue  = subtotal;
+  const hasPpn      = ppnAmount > 0;
+  const year        = new Date(journalDate).getFullYear();
+  const period      = journalDate.slice(0, 7);
   const entryNumber = await nextPublicEntryNumber(pool, year);
-  const ids = await getPublicIds();
+  const ids         = await getPublicIds();
 
   const entryResult = await pool.query(
     `INSERT INTO public.accounting_entries
@@ -435,6 +515,7 @@ export async function createPublicInvoiceAccountingEntry(
         ids.coaPpnKeluaran, `PPN Keluaran invoice ${invoiceNumber}`, ppnAmount,
       ]
     );
+
   } else {
     await pool.query(
       `INSERT INTO public.accounting_entry_lines (entry_id, account_id, description, debit, credit) VALUES
@@ -447,6 +528,7 @@ export async function createPublicInvoiceAccountingEntry(
   await pool.query(`UPDATE public.accounting_entries SET status = 'posted' WHERE id = $1`, [entryId]);
 
   if (hasPpn) {
+
     await db.insert(taxTransactionsTable).values({
       referenceType: "sport_center_invoice",
       referenceId: invoiceId,
@@ -461,7 +543,6 @@ export async function createPublicInvoiceAccountingEntry(
       status: "posted",
       transactionType: "original",
     });
-
     await pool.query(
       `INSERT INTO public.gl_tax_lines
         (company_id, accounting_entry_id, tax_type, rate,
@@ -469,10 +550,17 @@ export async function createPublicInvoiceAccountingEntry(
       VALUES ($1,$2,'PPN_OUT',11,$3,$4,'out',$5,'company_invoice',$6,false,NOW())`,
       [COMPANY_ID, entryId, subtotal, ppnAmount, period, invoiceNumber]
     );
+  } else {
+    await pool.query(
+      `INSERT INTO public.accounting_entry_lines (entry_id, account_id, description, debit, credit) VALUES
+        ($1,$2,$3,$4,0),
+        ($1,$5,$6,0,$4)`,
+      [entryId, ids.coaKas, `Penerimaan invoice ${invoiceNumber}`, grandTotal, ids.coaPendapatan, `Pendapatan invoice ${invoiceNumber}`]
+    );
   }
 
+  await pool.query(`UPDATE public.accounting_entries SET status = 'posted' WHERE id = $1`, [entryId]);
   console.info(`[accounting] ✓ Public accounting entry created (invoice): ${entryNumber} (${invoiceNumber})`);
-
 }
 
 export async function reversePublicAccountingEntry(
@@ -591,16 +679,35 @@ async function postJournalLines(
   );
 }
 
+/**
+ * Petakan metode pembayaran ke nama akun GL dan kode akun yang sesuai.
+ * Default: Bank Mandiri (Transfer Bank) jika tidak dikenali.
+ */
+function resolvePaymentAccount(paymentMethod?: string): { debitAccount: string; accountCode: string } {
+  const m = (paymentMethod ?? "").toLowerCase().trim();
+  if (m.includes("qris"))                                                   return { debitAccount: "Kas - QRIS",              accountCode: "1102" };
+  if (m.includes("tunai") || m.includes("cash"))                            return { debitAccount: "Kas Tunai",               accountCode: "1101" };
+  if (m.includes("ewallet") || m.includes("e-wallet") || m.includes("ovo")
+    || m.includes("dana") || m.includes("gopay") || m.includes("shopeepay")) return { debitAccount: "Kas - E-Wallet",         accountCode: "1103" };
+  if (m.includes("virtual account") || m.startsWith("va"))                  return { debitAccount: "Bank - Virtual Account",  accountCode: "1106" };
+  if (m.includes("kartu kredit") || m.includes("credit card") || m === "cc") return { debitAccount: "Bank - Kartu Kredit",   accountCode: "1107" };
+  // default: transfer bank / Bank Mandiri
+  return { debitAccount: "Bank Mandiri", accountCode: "1104" };
+}
+
 export async function createJournalEntry(
   bookingId: number,
   orderNumber: string,
   subtotal: number,
   ppnAmount: number,
   journalDate: string,
+  paymentMethod?: string,
 ): Promise<void> {
   // subtotal = DPP (sebelum PPN), grandTotal = DPP + PPN = jumlah yang masuk ke bank
   const grandTotal = subtotal + ppnAmount;
   const netRevenue = subtotal;
+  const { debitAccount, accountCode } = resolvePaymentAccount(paymentMethod);
+  const methodLabel = paymentMethod ? ` via ${paymentMethod}` : "";
 
   const [journal] = await db
     .insert(accountingJournalsTable)
@@ -608,7 +715,7 @@ export async function createJournalEntry(
       bookingId,
       orderNumber,
       journalType: "payment_confirmed",
-      debitAccount: "Bank Mandiri",
+      debitAccount,
       debitAmount: String(grandTotal),
       creditRevenueAccount: "Pendapatan Sport Center",
       creditRevenueAmount: String(ppnAmount > 0 ? netRevenue : grandTotal),
@@ -616,15 +723,15 @@ export async function createJournalEntry(
       creditPpnAmount: String(ppnAmount),
       journalDate,
       isReversal: false,
-      notes: `Pembayaran dikonfirmasi untuk booking ${orderNumber}`,
+      notes: `Pembayaran dikonfirmasi untuk booking ${orderNumber}${methodLabel}`,
     })
     .returning();
 
   if (!journal) return;
 
   const lines: Array<{ lineType: string; accountCode: string; accountName: string; amount: number; description?: string }> = [
-    { lineType: "debit",  accountCode: "1104", accountName: "Bank Mandiri",              amount: grandTotal,  description: `Penerimaan booking ${orderNumber}` },
-    { lineType: "credit", accountCode: "4-1001", accountName: "Pendapatan Sport Center", amount: ppnAmount > 0 ? netRevenue : grandTotal, description: `Pendapatan booking ${orderNumber}` },
+    { lineType: "debit",  accountCode, accountName: debitAccount,                         amount: grandTotal,                              description: `Penerimaan booking ${orderNumber}${methodLabel}` },
+    { lineType: "credit", accountCode: "4-1001", accountName: "Pendapatan Sport Center",  amount: ppnAmount > 0 ? netRevenue : grandTotal, description: `Pendapatan booking ${orderNumber}` },
   ];
   if (ppnAmount > 0) {
     lines.push({ lineType: "credit", accountCode: "2-1101", accountName: "PPN Keluaran", amount: ppnAmount, description: `PPN 11% booking ${orderNumber}` });

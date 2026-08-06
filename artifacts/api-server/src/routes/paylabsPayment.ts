@@ -29,6 +29,8 @@ import {
   type ProductInfo,
 } from "../lib/paylabs";
 import { notifyPaymentConfirmed } from "../lib/notifications";
+import { createJournalEntry, createPublicAccountingEntry, extractBookingDpp } from "../lib/accounting";
+import { logAccountingError } from "../lib/auditLog";
 
 const router = Router();
 
@@ -95,7 +97,19 @@ interface FinalizePaymentResult {
   orderNumber?:  string;
   previousPaymentStatus?: string;
   previousBookingStatus?: string;
+  paymentMethod?: string;
   error?: string;
+}
+
+/** Petakan kode channel Paylabs ke label metode pembayaran yang mudah dibaca. */
+function resolvePaylabsPaymentMethod(rawMethod?: string, rawChannel?: string): string {
+  const m = (rawMethod ?? rawChannel ?? "").toUpperCase();
+  if (m.includes("QRIS"))                        return "QRIS";
+  if (m.includes("OVO") || m.includes("GOPAY") || m.includes("DANA") || m.includes("SHOPEEPAY") || m.includes("EWALLET")) return "E-Wallet";
+  if (m.startsWith("VA") || m.includes("VIRTUAL_ACCOUNT") || m.includes("VIRTUAL ACCOUNT"))  return "Virtual Account";
+  if (m.includes("CC") || m.includes("CREDIT"))  return "Kartu Kredit";
+  if (m === "")                                   return "Transfer Bank";
+  return rawMethod ?? rawChannel ?? "Transfer Bank";
 }
 
 async function finalizePayment(opts: FinalizePaymentOptions): Promise<FinalizePaymentResult> {
@@ -108,7 +122,7 @@ async function finalizePayment(opts: FinalizePaymentOptions): Promise<FinalizePa
     return await db.transaction(async (tx: any) => {
       // Exact merchantTradeNo lookup is the only entry point into the relation.
       const txRows = await tx.execute(sql`
-        SELECT id, booking_id, order_number, status, amount
+        SELECT id, booking_id, order_number, status, amount, payment_method
         FROM sport_center.paylabs_transactions
         WHERE merchant_trade_no = ${merchantTradeNo}
         LIMIT 1
@@ -225,6 +239,8 @@ async function finalizePayment(opts: FinalizePaymentOptions): Promise<FinalizePa
         "[paylabs] commit success",
       );
 
+      const resolvedMethod = resolvePaylabsPaymentMethod(String(txRow.payment_method ?? ""));
+
       return {
         outcome: "confirmed" as const,
         bookingId,
@@ -232,6 +248,7 @@ async function finalizePayment(opts: FinalizePaymentOptions): Promise<FinalizePa
         orderNumber: String(booking.orderNumber),
         previousPaymentStatus,
         previousBookingStatus,
+        paymentMethod: resolvedMethod,
       };
     });
   } catch (err: any) {
@@ -640,13 +657,18 @@ router.post("/paylabs/webhook", async (req, res) => {
   }
 
   if (result.outcome === "confirmed" && result.bookingId) {
-    // Fire-and-forget: fetch full booking data then send WA notification
+    const confirmedBookingId = result.bookingId;
+    const confirmedPaymentMethod = result.paymentMethod ?? "Transfer Bank";
+
+    // Fire-and-forget: fetch full booking data then send WA notification + jurnal akuntansi
     db.select().from(bookingsTable)
-      .where(eq(bookingsTable.id, result.bookingId))
+      .where(eq(bookingsTable.id, confirmedBookingId))
       .limit(1)
       .then((rows) => {
         const bk = rows[0];
         if (!bk) return;
+
+        // WA notification
         notifyPaymentConfirmed({
           customerName  : bk.customerName ?? "",
           customerPhone : bk.customerPhone ?? "",
@@ -659,6 +681,14 @@ router.post("/paylabs/webhook", async (req, res) => {
           bookingId     : bk.id,
           groupRef      : bk.groupRef,
         }).catch(() => {});
+
+        // Jurnal akuntansi — wajib untuk semua pembayaran Paylabs
+        const today = new Date().toISOString().split("T")[0];
+        const { dpp, ppnAmount } = extractBookingDpp(bk);
+        createJournalEntry(bk.id, bk.orderNumber ?? "", dpp, ppnAmount, today, confirmedPaymentMethod)
+          .catch((err) => logAccountingError({ operation: "createJournalEntry", orderNumber: bk.orderNumber ?? "", bookingId: bk.id, error: err }));
+        createPublicAccountingEntry(bk.id, bk.orderNumber ?? "", dpp, ppnAmount, bk.facilityId, today)
+          .catch((err) => logAccountingError({ operation: "createPublicAccountingEntry", orderNumber: bk.orderNumber ?? "", bookingId: bk.id, error: err }));
       })
       .catch(() => {});
   }
@@ -747,6 +777,26 @@ router.post("/paylabs/reconcile", authMiddleware, adminMiddleware, async (req, r
     "[paylabs:reconcile] completed",
   );
 
+  // Jurnal akuntansi untuk reconcile manual
+  if (result.outcome === "confirmed" && result.bookingId) {
+    const reconBookingId = result.bookingId;
+    const reconPaymentMethod = result.paymentMethod ?? String(txRow.payment_method ?? "Transfer Bank");
+    db.select().from(bookingsTable)
+      .where(eq(bookingsTable.id, reconBookingId))
+      .limit(1)
+      .then((rows) => {
+        const bk = rows[0];
+        if (!bk) return;
+        const today = new Date().toISOString().split("T")[0];
+        const { dpp, ppnAmount } = extractBookingDpp(bk);
+        createJournalEntry(bk.id, bk.orderNumber ?? "", dpp, ppnAmount, today, reconPaymentMethod)
+          .catch((err) => logAccountingError({ operation: "createJournalEntry", orderNumber: bk.orderNumber ?? "", bookingId: bk.id, error: err }));
+        createPublicAccountingEntry(bk.id, bk.orderNumber ?? "", dpp, ppnAmount, bk.facilityId, today)
+          .catch((err) => logAccountingError({ operation: "createPublicAccountingEntry", orderNumber: bk.orderNumber ?? "", bookingId: bk.id, error: err }));
+      })
+      .catch(() => {});
+  }
+
   res.json({
     outcome              : result.outcome,
     merchantTradeNo,
@@ -754,6 +804,7 @@ router.post("/paylabs/reconcile", authMiddleware, adminMiddleware, async (req, r
     orderNumber          : result.orderNumber,
     previousPaymentStatus: result.previousPaymentStatus,
     previousBookingStatus: result.previousBookingStatus,
+    paymentMethod        : result.paymentMethod,
     error                : result.error,
   });
 });

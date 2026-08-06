@@ -586,9 +586,10 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
           const today = new Date().toISOString().split("T")[0];
           const subtotal = Number(booking.totalPrice);
           const ppnAmount = booking.ppnAmount != null ? Number(booking.ppnAmount) : 0;
+          const paymentMethodLabel = payment.paymentMethod ?? "Transfer Bank";
 
           // Jurnal internal per booking (tidak berubah)
-          createJournalEntry(booking.id, booking.orderNumber, subtotal, ppnAmount, today).catch((err) =>
+          createJournalEntry(booking.id, booking.orderNumber, subtotal, ppnAmount, today, paymentMethodLabel).catch((err) =>
             logAccountingError({ operation: "createJournalEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
           );
 
@@ -651,7 +652,7 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
           // Sync ke BizPortal pakai total grup (bukan per-sesi) agar nominal tidak terbelah
           syncStatusToBizportal(booking.orderNumber, "confirmed", payment.proofUrl, new Date(), bookingForFinancial).catch(() => {});
           pushConfirmedPaymentAsBankMutation(bookingForFinancial, new Date()).catch(() => {});
-          createJournalEntry(booking.id, booking.orderNumber, journalDpp, journalPpn, today).catch((err) =>
+          createJournalEntry(booking.id, booking.orderNumber, journalDpp, journalPpn, today, paymentMethodLabel).catch((err) =>
             logAccountingError({ operation: "createJournalEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
           );
           createPublicAccountingEntry(booking.id, booking.orderNumber, journalDpp, journalPpn, booking.facilityId, today).catch((err) =>
