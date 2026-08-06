@@ -1,6 +1,5 @@
 modules = ["nodejs-20", "web"]
 
-
 [deployment]
 router = "application"
 deploymentTarget = "autoscale"
@@ -52,7 +51,7 @@ timeoutMs = 20000
 localPort = 5000
 externalPort = 80
 
-# Perbaikan: Tambahkan konfigurasi nix untuk pnpm hoisting
+# Konfigurasi nix (HANYA SATU KALI)
 [nix]
 channel = "stable-25_05"
 
@@ -122,9 +121,7 @@ SUPABASE_STORAGE_BUCKET = "https://nzdweipzckfszczzqtuw.storage.supabase.co/stor
 SUPABASE_SERVICE_ROLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im56ZHdlaXB6Y2tmc3pjenpxdHV3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3ODQwMjg0NCwiZXhwIjoyMDkzOTc4ODQ0fQ.W0uM_UzGfF8Zy4PFQKhz6dKpEVDHS6_k9FtqoM9iGms"
 SUPABASE_DATABASE_URL = "postgresql://postgres.nzdweipzckfszczzqtuw:AnTXXOl0t1ArQOEU@aws-1-ap-southeast-2.pooler.supabase.com:6543/postgres"
 SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im56ZHdlaXB6Y2tmc3pjenpxdHV3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg0MDI4NDQsImV4cCI6MjA5Mzk3ODg0NH0.p9k3-qyRjPuXsHLizUrSRMyS-0yJAatUyjQU9NIIu1U"
-
 # Tambahkan GA4 tracking
 GA4_PROPERTY_ID = "547502054"
-
-[nix]
-channel = "stable-25_05"
+# WhatsApp Group ID untuk notifikasi (isi dengan ID group Anda)
+WHATSAPP_GROUP_ID = ""
