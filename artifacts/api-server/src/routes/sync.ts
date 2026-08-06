@@ -1,9 +1,7 @@
 import { Router, Request, Response, NextFunction } from "express";
 import { db, bookingsTable, facilitiesTable, paymentsTable, usersTable, gymMembershipsTable } from "@workspace/db";
 
-import { desc, gte, and, lte, eq, inArray, sql } from "drizzle-orm";
-
-import { desc, gte, and, lte, eq, inArray, isNotNull } from "drizzle-orm";
+import { desc, gte, and, lte, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { extractBookingDpp } from "../lib/accounting";
 import { adminMiddleware } from "../lib/auth";
 import { syncBookingToBizportal, syncMembershipToBizportal, bizportalSyncConfigured, bulkPushPaymentsToBizportal, type BulkPaymentPushResult } from "../lib/bizportalSync";

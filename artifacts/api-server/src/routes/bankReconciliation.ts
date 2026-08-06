@@ -874,7 +874,7 @@ router.post("/bank-reconciliation/:mutationId/approve", adminMiddleware, async (
         .set({
           status: "approved",
           matchedPaymentId: match?.candidateType === "payment" ? match.candidateId : null,
-          matchedOrderId: (match?.candidateType === "order" || match?.candidateType === "group_payment") ? match.candidateId : null,
+          matchedOrderId: ((match?.candidateType as string) === "order" || (match?.candidateType as string) === "group_payment") ? match.candidateId : null,
           updatedAt: new Date(),
         })
         .where(eq(bankMutationsTable.id, mutationId));

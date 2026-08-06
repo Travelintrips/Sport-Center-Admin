@@ -340,10 +340,10 @@ router.patch("/admin/paylabs/settings", adminMiddleware, async (req, res) => {
       prodPublicKeyConfigured:        Boolean(updated.prodPublicKey?.trim()),
     };
 
-    res.json(safeResponse);
+    return res.json(safeResponse);
   } catch (err) {
     req.log.error({ err }, "PATCH paylabs settings error");
-    res.status(500).json({ error: "Internal server error" });
+    return res.status(500).json({ error: "Internal server error" });
   }
 });
 

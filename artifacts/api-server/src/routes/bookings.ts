@@ -263,6 +263,8 @@ function getNowMinutesWIB(): number {
 }
 
 router.post("/bookings", async (req, res) => {
+  // Declared outside try so the catch block can release the advisory lock on error
+  let slotLockKey: { fId: number; dInt: number } | null = null;
   try {
     const { customerName, customerEmail, facilityId, bookingDate, notes, promoCode, discountAmount, customerType } = req.body;
     const customerPhone: string = normalizePhone(String(req.body.customerPhone ?? "").trim());
@@ -387,8 +389,6 @@ router.post("/bookings", async (req, res) => {
     }
 
     const isWalkIn = facility.bookingMode === "walk_in";
-    // Advisory lock state: set in conflict check, released after INSERT or on early exit
-    let slotLockKey: { fId: number; dInt: number } | null = null;
 
     if (isWalkIn) {
       // Gym walk-in: no time slot required, flat rate per visit

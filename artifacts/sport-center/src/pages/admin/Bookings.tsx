@@ -2068,6 +2068,14 @@ export default function AdminBookings() {
     return m;
   }, [groups]);
 
+  const bookingCountByGroupRef = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const b of bookings as any[]) {
+      if (b.groupRef) m[b.groupRef] = (m[b.groupRef] ?? 0) + 1;
+    }
+    return m;
+  }, [bookings]);
+
   const dissolveGroup = async (groupRef: string) => {
     setDissolvingRef(groupRef);
     try {
