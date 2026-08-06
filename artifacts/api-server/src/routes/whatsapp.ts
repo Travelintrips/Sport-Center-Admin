@@ -930,7 +930,8 @@ router.post("/wa/action/:token", async (req, res) => {
 
         const _today = new Date().toISOString().split("T")[0];
         const { dpp: _dpp, ppnAmount: _ppnAmount } = extractBookingDpp(booking);
-        createJournalEntry(booking.id, booking.orderNumber, _dpp, _ppnAmount, _today).catch((err) =>
+        const _paymentMethod = payment?.paymentMethod ?? "Transfer Bank";
+        createJournalEntry(booking.id, booking.orderNumber, _dpp, _ppnAmount, _today, _paymentMethod).catch((err) =>
           logAccountingError({ operation: "createJournalEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
         );
         createPublicAccountingEntry(booking.id, booking.orderNumber, _dpp, _ppnAmount, booking.facilityId, _today).catch((err) =>
@@ -1275,7 +1276,8 @@ router.post("/wa/review/:token", async (req, res) => {
 
       const _today = new Date().toISOString().split("T")[0];
       const { dpp: _dpp, ppnAmount: _ppnAmount } = extractBookingDpp(booking);
-      createJournalEntry(booking.id, booking.orderNumber, _dpp, _ppnAmount, _today).catch((err) =>
+      const _paymentMethod = payment?.paymentMethod ?? "Transfer Bank";
+      createJournalEntry(booking.id, booking.orderNumber, _dpp, _ppnAmount, _today, _paymentMethod).catch((err) =>
         logAccountingError({ operation: "createJournalEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
       );
       createPublicAccountingEntry(booking.id, booking.orderNumber, _dpp, _ppnAmount, booking.facilityId, _today).catch((err) =>
