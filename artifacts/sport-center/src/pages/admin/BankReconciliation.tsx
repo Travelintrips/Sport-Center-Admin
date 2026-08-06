@@ -549,8 +549,6 @@ function MatchCandidateRow({
             </div>
           )}
 
-          {/* Booking detail row (single booking) */}
-          {!match.isGroupPayment && (match.bookingOrderNumber || match.bookingDate || match.bookingAmount || match.bookingStatus) && (
           {/* Group Payment Detail */}
           {match.candidateType === "group_payment" && (
             <div className="mt-1.5 space-y-1">
