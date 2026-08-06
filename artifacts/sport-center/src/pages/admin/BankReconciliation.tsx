@@ -501,16 +501,27 @@ function MatchCandidateRow({
 
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
+
+            <Badge variant="outline" className="text-xs capitalize">{match.candidateType}</Badge>
+            {match.isGroupPayment && (
+              <Badge className="bg-violet-100 text-violet-700 border-violet-200 text-xs font-semibold">
+                🏷️ Group Booking · {match.groupBookingCount} sesi
+              </Badge>
+
             {match.candidateType === "group_payment" ? (
               <Badge className="bg-purple-100 text-purple-700 border-purple-200 text-xs">Group Booking</Badge>
             ) : (
               <Badge variant="outline" className="text-xs capitalize">{match.candidateType}</Badge>
+
             )}
             {match.customerName ? (
               <span className="text-sm font-semibold truncate max-w-[180px]" title={match.customerName}>{match.customerName}</span>
             ) : (
               <span className="text-sm font-medium text-muted-foreground">ID #{match.candidateId}</span>
             )}
+
+            {!match.isGroupPayment && match.facilityName && (
+
             {match.candidateType === "group_payment" && match.bookingCount > 0 && (
               <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-100 font-medium">
                 {match.bookingCount} Booking
@@ -528,6 +539,25 @@ function MatchCandidateRow({
             )}
           </div>
 
+          {/* Group Payment detail */}
+          {match.isGroupPayment && (
+            <div className="mt-1.5 p-2 rounded-lg bg-violet-50 border border-violet-100 space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-semibold text-violet-700 uppercase tracking-wide">
+                  Group: {match.groupRef}
+                </span>
+                <span className="text-xs font-bold text-violet-800">
+                  {new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(Number(match.groupTotalAmount ?? match.bookingAmount))}
+                </span>
+              </div>
+              <p className="text-[10px] text-violet-600">
+                Total {match.groupBookingCount} booking akan dikonfirmasi sekaligus
+              </p>
+            </div>
+          )}
+
+          {/* Booking detail row (single booking) */}
+          {!match.isGroupPayment && (match.bookingOrderNumber || match.bookingDate || match.bookingAmount || match.bookingStatus) && (
           {/* Group Payment Detail */}
           {match.candidateType === "group_payment" && (
             <div className="mt-1.5 space-y-1">
@@ -566,6 +596,7 @@ function MatchCandidateRow({
 
           {/* Booking detail row (individual bookings only) */}
           {match.candidateType !== "group_payment" && (match.bookingOrderNumber || match.bookingDate || match.bookingAmount || match.bookingStatus) && (
+
             <div className="mt-1 flex flex-wrap gap-2 text-[10px] text-muted-foreground">
               {match.bookingOrderNumber && (
                 <span className="font-mono">{match.bookingOrderNumber}</span>

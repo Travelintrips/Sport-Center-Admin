@@ -1120,9 +1120,27 @@ function BookingDetailDrawer({
           {/* Payment Proof Section — multi-payment (DP + Pelunasan) */}
           {allPayments.length > 0 && (
             <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
-              <div className="px-4 py-2.5 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-700">
+              <div className="px-4 py-2.5 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between gap-2">
                 <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Riwayat Pembayaran</span>
+                {booking.groupRef && (
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300">
+                    🏷️ Group Booking
+                  </span>
+                )}
               </div>
+              {/* Group Booking banner */}
+              {booking.groupRef && (
+                <div className="px-4 py-2.5 bg-violet-50 dark:bg-violet-900/20 border-b border-violet-100 dark:border-violet-800">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] text-violet-700 dark:text-violet-300 font-medium">
+                      Grup: <span className="font-bold font-mono">{booking.groupRef}</span>
+                    </span>
+                    <span className="text-[10px] text-violet-600 dark:text-violet-400">
+                      Konfirmasi 1 booking = konfirmasi seluruh sesi dalam grup
+                    </span>
+                  </div>
+                </div>
+              )}
               <div className="divide-y divide-slate-100 dark:divide-slate-800">
                 {allPayments.map((pmt: any) => {
                   const typeLabel =
