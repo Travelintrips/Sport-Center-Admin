@@ -1,6 +1,7 @@
 import { Router, Request, Response, NextFunction } from "express";
 import { db, bookingsTable, facilitiesTable, paymentsTable, usersTable, gymMembershipsTable } from "@workspace/db";
-import { desc, gte, and, lte, eq, inArray } from "drizzle-orm";
+import { desc, gte, and, lte, eq, inArray, isNotNull } from "drizzle-orm";
+import { extractBookingDpp } from "../lib/accounting";
 import { adminMiddleware } from "../lib/auth";
 import { syncBookingToBizportal, syncMembershipToBizportal, bizportalSyncConfigured, bulkPushPaymentsToBizportal, type BulkPaymentPushResult } from "../lib/bizportalSync";
 
@@ -379,6 +380,23 @@ router.post("/admin/sync-bizportal", adminMiddleware, async (req, res) => {
     // Respond immediately — sync jalan di background.
     res.json({ success: true, started: true, total: allBookings.length, statusUrl: "/api/admin/sync-bizportal/status" });
 
+    // Hitung group total untuk setiap groupRef agar BizPortal tidak double-count:
+    // - Booking primary dalam grup → total_price = sum semua sesi dalam grup
+    // - Booking sibling → total_price = 0
+    // Primary ditentukan berdasarkan id terkecil dalam grup (booking pertama dibuat).
+    const groupTotals = new Map<string, number>(); // groupRef → total DPP + PPN
+    const groupPrimaryIds = new Map<string, number>(); // groupRef → id booking primary
+
+    for (const b of allBookings) {
+      if (!b.groupRef) continue;
+      const { dpp, ppnAmount } = extractBookingDpp(b);
+      groupTotals.set(b.groupRef, (groupTotals.get(b.groupRef) ?? 0) + dpp + ppnAmount);
+      const currentPrimary = groupPrimaryIds.get(b.groupRef);
+      if (currentPrimary === undefined || b.id < currentPrimary) {
+        groupPrimaryIds.set(b.groupRef, b.id);
+      }
+    }
+
     // Sync paralel per-batch (bukan satu-satu) supaya cepat selesai untuk
     // dataset besar. Batch kecil menjaga jumlah koneksi simultan ke Supabase
     // tetap wajar (lihat pool `max` di bizportalSync.ts).
@@ -390,7 +408,22 @@ router.post("/admin/sync-bizportal", adminMiddleware, async (req, res) => {
           const facilityInfo = facilityMap.get(booking.facilityId);
           const facilityName = facilityInfo?.name ?? "Unknown";
           const facilityCategory = facilityInfo?.category ?? null;
-          return syncBookingToBizportal({ booking, facilityName, facilityCategory });
+
+          // Untuk booking dalam grup: override totalPrice agar tidak double-count di BizPortal
+          let bookingToSync = booking;
+          if (booking.groupRef) {
+            const isPrimary = groupPrimaryIds.get(booking.groupRef) === booking.id;
+            if (isPrimary) {
+              // Primary menanggung total seluruh grup
+              const groupTotal = groupTotals.get(booking.groupRef) ?? Number(booking.totalPrice);
+              bookingToSync = { ...booking, totalPrice: String(groupTotal), grandTotal: String(groupTotal) } as any;
+            } else {
+              // Sibling: total_price = 0 supaya tidak menambah nominal di BizPortal
+              bookingToSync = { ...booking, totalPrice: "0", grandTotal: null, dpp: null, ppnAmount: null } as any;
+            }
+          }
+
+          return syncBookingToBizportal({ booking: bookingToSync, facilityName, facilityCategory });
         }),
       );
       results.forEach((result, idx) => {

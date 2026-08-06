@@ -439,15 +439,13 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
             sendInvoiceToCustomer(booking.orderNumber, invoiceAudit)
               .catch((err) => logger.error({ err, orderNumber: booking.orderNumber }, "[InvoiceDelivery] Gagal kirim invoice PDF setelah payment confirmed"));
           }
-          syncStatusToBizportal(booking.orderNumber, "confirmed", payment.proofUrl, new Date(), booking).catch(() => {});
-
           const today = new Date().toISOString().split("T")[0];
 
-          // Hitung total jurnal: untuk grup pakai sum semua sesi, bukan hanya sesi utama
-          // Ini mencegah jurnal hanya mencatat 1/N dari total pembayaran grup
+          // Hitung total finansial: untuk grup pakai sum semua sesi, bukan hanya sesi utama
+          // Ini memastikan BizPortal, bank mutation, dan jurnal mencatat nilai yang benar
           let journalDpp: number;
           let journalPpn: number;
-          let journalBookingForMutation = booking;
+          let bookingForFinancial: typeof booking;
 
           if (booking.groupRef) {
             const allGroupBookings = await db
@@ -461,16 +459,19 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
               journalDpp += extracted.dpp;
               journalPpn += extracted.ppnAmount;
             }
-            // Override grandTotal pada booking utama untuk bank mutation (pakai total grup)
+            // Override grandTotal & totalPrice → total grup, bukan per-sesi
             const groupGrandTotal = journalDpp + journalPpn;
-            journalBookingForMutation = { ...booking, grandTotal: String(groupGrandTotal), totalPrice: String(groupGrandTotal) } as any;
+            bookingForFinancial = { ...booking, grandTotal: String(groupGrandTotal), totalPrice: String(groupGrandTotal) } as any;
           } else {
             const extracted = extractBookingDpp(booking);
             journalDpp = extracted.dpp;
             journalPpn = extracted.ppnAmount;
+            bookingForFinancial = booking;
           }
 
-          pushConfirmedPaymentAsBankMutation(journalBookingForMutation, new Date()).catch(() => {});
+          // Sync ke BizPortal pakai total grup (bukan per-sesi) agar nominal tidak terbelah
+          syncStatusToBizportal(booking.orderNumber, "confirmed", payment.proofUrl, new Date(), bookingForFinancial).catch(() => {});
+          pushConfirmedPaymentAsBankMutation(bookingForFinancial, new Date()).catch(() => {});
           createJournalEntry(booking.id, booking.orderNumber, journalDpp, journalPpn, today).catch((err) =>
             logAccountingError({ operation: "createJournalEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
           );
