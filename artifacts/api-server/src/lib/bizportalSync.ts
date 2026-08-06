@@ -55,7 +55,9 @@ export async function initBizportalTables(): Promise<void> {
         ADD COLUMN IF NOT EXISTS dpp           BIGINT,
         ADD COLUMN IF NOT EXISTS dpp_nilai_lain BIGINT,
         ADD COLUMN IF NOT EXISTS ppn_amount    BIGINT,
-        ADD COLUMN IF NOT EXISTS grand_total   BIGINT;
+        ADD COLUMN IF NOT EXISTS grand_total   BIGINT,
+        ADD COLUMN IF NOT EXISTS group_ref     TEXT,
+        ADD COLUMN IF NOT EXISTS group_total   BIGINT;
       CREATE TABLE IF NOT EXISTS sport_center.sport_memberships_sync (
         id                SERIAL PRIMARY KEY,
         name              TEXT,
@@ -130,6 +132,10 @@ export interface SyncBookingPayload {
   facilityCategory?: string | null;
   paymentProofUrl?: string | null;
   paidAt?: Date | null;
+  /** group_ref dari booking gabungan (misal GRP-12345) */
+  groupRef?: string | null;
+  /** Total nominal seluruh booking dalam satu group (untuk rekonsiliasi bank) */
+  groupTotal?: number | null;
 }
 
 
@@ -157,7 +163,7 @@ export async function syncBookingToBizportal(payload: SyncBookingPayload): Promi
   const pool = getProdPool();
   if (!pool) return;
 
-  const { booking, facilityName, facilityCategory, paymentProofUrl, paidAt } = payload;
+  const { booking, facilityName, facilityCategory, paymentProofUrl, paidAt, groupRef, groupTotal } = payload;
   const bizFacilityId = `sc-${booking.facilityId}`;
   const status        = toStatus(booking.status);
   const paymentStatus = toPaymentStatus(booking.status);
@@ -171,8 +177,9 @@ export async function syncBookingToBizportal(payload: SyncBookingPayload): Promi
            date, start_time, end_time, total_hours, total_price, notes, status,
            payment_status, payment_proof_url, payment_proof_at,
            ppn_rate, dpp, dpp_nilai_lain, ppn_amount, grand_total,
+           group_ref, group_total,
            created_at, updated_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,NOW())
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,NOW())
          ON CONFLICT (booking_code) DO UPDATE SET
            status            = EXCLUDED.status,
            payment_status    = EXCLUDED.payment_status,
@@ -183,6 +190,8 @@ export async function syncBookingToBizportal(payload: SyncBookingPayload): Promi
            dpp_nilai_lain    = COALESCE(EXCLUDED.dpp_nilai_lain,    sport_bookings_sync.dpp_nilai_lain),
            ppn_amount        = COALESCE(EXCLUDED.ppn_amount,        sport_bookings_sync.ppn_amount),
            grand_total       = COALESCE(EXCLUDED.grand_total,       sport_bookings_sync.grand_total),
+           group_ref         = COALESCE(EXCLUDED.group_ref,         sport_bookings_sync.group_ref),
+           group_total       = COALESCE(EXCLUDED.group_total,       sport_bookings_sync.group_total),
            updated_at        = NOW()`,
         [
           booking.orderNumber,
@@ -206,6 +215,8 @@ export async function syncBookingToBizportal(payload: SyncBookingPayload): Promi
           tax.dppNilaiLain,
           tax.ppnAmount,
           tax.grandTotal,
+          groupRef || (booking as any).groupRef || null,
+          groupTotal ?? null,
           booking.createdAt,
         ]
       );

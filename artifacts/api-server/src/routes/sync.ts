@@ -1,6 +1,6 @@
 import { Router, Request, Response, NextFunction } from "express";
 import { db, bookingsTable, facilitiesTable, paymentsTable, usersTable, gymMembershipsTable } from "@workspace/db";
-import { desc, gte, and, lte, eq } from "drizzle-orm";
+import { desc, gte, and, lte, eq, inArray, sql } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
 import { syncBookingToBizportal, syncMembershipToBizportal, bizportalSyncConfigured } from "../lib/bizportalSync";
 
@@ -100,12 +100,23 @@ router.get("/sync/bookings", apiKeyMiddleware, async (req, res) => {
 
     const bookingIds = paged.map((b) => b.id);
     const payments = bookingIds.length
-      ? await db.select().from(paymentsTable)
+      ? await db.select().from(paymentsTable).where(inArray(paymentsTable.bookingId, bookingIds))
       : [];
+
+    // Hitung group total per group_ref dari allBookings (sudah ada di memori, tidak perlu query baru)
+    const groupTotalMap: Record<string, number> = {};
+    for (const b of allBookings) {
+      const ref = (b as any).groupRef as string | null | undefined;
+      if (ref) {
+        groupTotalMap[ref] = (groupTotalMap[ref] ?? 0) + Number(b.totalPrice);
+      }
+    }
 
     const customerIds = [...new Set(paged.map((b) => b.customerId).filter(Boolean))] as number[];
     const users = customerIds.length
-      ? await db.select({ id: usersTable.id, name: usersTable.name, email: usersTable.email }).from(usersTable)
+      ? await db.select({ id: usersTable.id, name: usersTable.name, email: usersTable.email })
+          .from(usersTable)
+          .where(inArray(usersTable.id, customerIds))
       : [];
 
     const result = paged.map((b) => {
@@ -148,6 +159,9 @@ router.get("/sync/bookings", apiKeyMiddleware, async (req, res) => {
         completedAt: b.completedAt,
         createdAt: b.createdAt,
         updatedAt: b.updatedAt,
+        // Booking gabungan
+        groupRef: (b as any).groupRef ?? null,
+        groupTotal: (b as any).groupRef ? (groupTotalMap[(b as any).groupRef] ?? null) : null,
         // Rincian pajak (PPN)
         ppnRate,
         ppnAmount,
