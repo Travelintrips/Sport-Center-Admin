@@ -1,0 +1,11 @@
+import pg from "pg";
+const { Client } = pg;
+const rawUrl = process.env.SUPABASE_DATABASE_URL_DEV ?? process.env.SUPABASE_DATABASE_URL ?? "";
+const url = rawUrl.replace("pooler.supabase.com:6543", "pooler.supabase.com:5432");
+const c = new Client({ connectionString: url, ssl: { rejectUnauthorized: false } });
+await c.connect();
+const e = await c.query(`SELECT unnest(enum_range(NULL::accounting_entry_source))::text AS val`).catch(() => ({ rows: [] as any[] }));
+console.log("source enum:", e.rows.map((r: any) => r.val));
+const s = await c.query("SELECT DISTINCT source::text FROM public.accounting_entries ORDER BY 1");
+console.log("actual sources:", s.rows.map((r: any) => r.source));
+await c.end();

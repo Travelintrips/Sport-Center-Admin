@@ -1358,6 +1358,27 @@ paths:
               schema:
                 $ref: "#/components/schemas/GymMembership"
 
+  /memberships/lookup:
+    post:
+      operationId: lookupMembership
+      tags: [memberships]
+      summary: Look up a membership by phone number (public)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MembershipLookupInput"
+      responses:
+        "200":
+          description: Membership found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MembershipLookupResult"
+        "404":
+          description: Not found
+
   /memberships/{id}/payment-proof:
     post:
       operationId: submitMembershipPaymentProof
@@ -3059,6 +3080,11 @@ components:
           type: integer
         notes:
           type: string
+        customerType:
+          type: string
+          enum: [umum, angkasa_pura]
+        idCardNumber:
+          type: string
 
     RecurringBookingResult:
       type: object
@@ -3759,6 +3785,12 @@ components:
         createdAt:
           type: string
           nullable: true
+        groupRef:
+          type: string
+          nullable: true
+        customerName:
+          type: string
+          nullable: true
 
     Review:
       type: object
@@ -3939,6 +3971,37 @@ components:
           enum: [pending_payment, waiting_confirmation, active, expired, cancelled]
         notes:
           type: string
+
+    MembershipLookupInput:
+      type: object
+      required: [phone]
+      properties:
+        phone:
+          type: string
+
+    MembershipLookupResult:
+      type: object
+      required: [id, name, phone, email, status, startDate, endDate, months, totalPrice]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        phone:
+          type: string
+        email:
+          type: string
+        status:
+          type: string
+          enum: [pending_payment, waiting_confirmation, active, expired, cancelled]
+        startDate:
+          type: string
+        endDate:
+          type: string
+        months:
+          type: integer
+        totalPrice:
+          type: number
 
     MembershipPaymentProofInput:
       type: object
