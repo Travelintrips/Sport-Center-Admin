@@ -9,7 +9,7 @@ import { notifyPaymentConfirmed, notifyPaymentProofUploaded } from "../lib/notif
 import { logAudit, getClientInfo, getUserFromReq, logAccountingError } from "../lib/auditLog";
 import { syncStatusToBizportal } from "../lib/bizportalSync";
 import { uploadProofWithFallback } from "./storage";
-import { createJournalEntry, createPublicAccountingEntry } from "../lib/accounting";
+import { createJournalEntry, createPublicAccountingEntry, createPublicAccountingEntryForGroup } from "../lib/accounting";
 import { createWaToken } from "../lib/waTokens";
 import { logger } from "../lib/logger";
 import { getBaseUrl } from "../lib/appUrl";
@@ -473,12 +473,39 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
           const today = new Date().toISOString().split("T")[0];
           const subtotal = Number(booking.totalPrice);
           const ppnAmount = booking.ppnAmount != null ? Number(booking.ppnAmount) : 0;
+
+          // Jurnal internal per booking (tidak berubah)
           createJournalEntry(booking.id, booking.orderNumber, subtotal, ppnAmount, today).catch((err) =>
             logAccountingError({ operation: "createJournalEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
           );
-          createPublicAccountingEntry(booking.id, booking.orderNumber, subtotal, ppnAmount, booking.facilityId, today).catch((err) =>
-            logAccountingError({ operation: "createPublicAccountingEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
-          );
+
+          // BizPortal: grup booking → 1 entry total; booking tunggal → 1 entry per booking
+          if (booking.groupRef) {
+            // Ambil semua booking dalam grup (termasuk yang ini)
+            const allGroupBookings = await db.select({
+              id: bookingsTable.id,
+              orderNumber: bookingsTable.orderNumber,
+              totalPrice: bookingsTable.totalPrice,
+              ppnAmount: bookingsTable.ppnAmount,
+              facilityId: bookingsTable.facilityId,
+            }).from(bookingsTable).where(eq(bookingsTable.groupRef, booking.groupRef));
+
+            const groupEntries = allGroupBookings.map(b => ({
+              id: b.id,
+              orderNumber: b.orderNumber,
+              subtotal: Number(b.totalPrice),
+              ppnAmount: b.ppnAmount != null ? Number(b.ppnAmount) : 0,
+              facilityId: b.facilityId,
+            }));
+
+            createPublicAccountingEntryForGroup(booking.groupRef, groupEntries, today).catch((err) =>
+              logAccountingError({ operation: "createPublicAccountingEntryForGroup", orderNumber: booking.groupRef!, bookingId: booking.id, error: err }),
+            );
+          } else {
+            createPublicAccountingEntry(booking.id, booking.orderNumber, subtotal, ppnAmount, booking.facilityId, today).catch((err) =>
+              logAccountingError({ operation: "createPublicAccountingEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
+            );
+          }
         }
 
         await logAudit({

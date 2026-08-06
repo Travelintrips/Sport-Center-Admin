@@ -176,6 +176,99 @@ export async function createPublicAccountingEntry(
   console.info(`[accounting] ✓ Public accounting entry created: ${entryNumber} (${orderNumber})`);
 }
 
+/**
+ * Buat SATU accounting entry di BizPortal untuk seluruh booking dalam grup.
+ * Idempotent: jika correlation_id sc_group_<groupRef> sudah ada, skip.
+ */
+export async function createPublicAccountingEntryForGroup(
+  groupRef: string,
+  groupBookings: Array<{
+    id: number;
+    orderNumber: string;
+    subtotal: number;
+    ppnAmount: number;
+    facilityId: number | null;
+  }>,
+  journalDate: string,
+): Promise<void> {
+  const pool = getPublicPool();
+  if (!pool) {
+    console.warn("[accounting] Tidak ada Supabase URL — skip createPublicAccountingEntryForGroup");
+    return;
+  }
+
+  const correlationId = `sc_group_${groupRef}`;
+
+  // Idempotency: skip jika sudah ada entry untuk grup ini
+  const existing = await pool.query(
+    `SELECT id FROM public.accounting_entries WHERE correlation_id = $1 LIMIT 1`,
+    [correlationId]
+  );
+  if (existing.rows.length > 0) {
+    console.info(`[accounting] Group entry sudah ada untuk ${groupRef} (id=${existing.rows[0].id}) — skip`);
+    return;
+  }
+
+  const totalGross   = groupBookings.reduce((s, b) => s + b.subtotal, 0);
+  const totalPpn     = groupBookings.reduce((s, b) => s + b.ppnAmount, 0);
+  const totalRevenue = totalGross - totalPpn;
+  const hasPpn       = totalPpn > 0;
+  const year         = new Date(journalDate).getFullYear();
+  const period       = journalDate.slice(0, 7);
+  const entryNumber  = await nextPublicEntryNumber(pool, year);
+  const ids          = await getPublicIds();
+
+  const orderList = groupBookings.map(b => b.orderNumber).join(", ");
+  const description = `Pembayaran Grup Booking Sport Center (${groupRef} — ${groupBookings.length} sesi: ${orderList})`;
+
+  // Gunakan facilityId dari booking pertama (representatif)
+  const facilityId = groupBookings[0]?.facilityId ?? null;
+
+  // 1. Buat accounting entry
+  const entryResult = await pool.query(
+    `INSERT INTO public.accounting_entries
+      (entry_number, journal_id, date, ref, description, status, source, source_id,
+       total_debit, total_credit, company_id, facility_id, correlation_id, governance_flags)
+    VALUES ($1,$2,$3::date,$4,$5,'draft','sport_center_booking',$6,$7,$7,$8,$9,$10,'{}')
+    RETURNING id`,
+    [
+      entryNumber, ids.journalId, journalDate, groupRef,
+      description,
+      groupBookings[0]?.id ?? 0,  // source_id = first booking id
+      totalGross, COMPANY_ID, facilityId, correlationId,
+    ]
+  );
+  const entryId = Number(entryResult.rows[0]?.id);
+
+  // 2. GL lines — satu baris debit Kas, satu kredit Pendapatan, satu kredit PPN
+  if (hasPpn) {
+    await pool.query(
+      `INSERT INTO public.accounting_entry_lines (entry_id, account_id, description, debit, credit) VALUES
+        ($1,$2,$3,$4,0),
+        ($1,$5,$6,0,$7),
+        ($1,$8,$9,0,$10)`,
+      [
+        entryId,
+        ids.coaKas,         `Penerimaan grup booking ${groupRef}`, totalGross,
+        ids.coaPendapatan,  `Pendapatan grup booking ${groupRef}`, totalRevenue,
+        ids.coaPpnKeluaran, `PPN Keluaran grup booking ${groupRef}`, totalPpn,
+      ]
+    );
+  } else {
+    await pool.query(
+      `INSERT INTO public.accounting_entry_lines (entry_id, account_id, description, debit, credit) VALUES
+        ($1,$2,$3,$4,0),
+        ($1,$5,$6,0,$4)`,
+      [entryId, ids.coaKas, `Penerimaan grup booking ${groupRef}`, totalGross, ids.coaPendapatan, `Pendapatan grup booking ${groupRef}`]
+    );
+  }
+
+  // 3. Post entry
+  await pool.query(`UPDATE public.accounting_entries SET status = 'posted' WHERE id = $1`, [entryId]);
+
+  console.info(`[accounting] ✓ Group accounting entry created: ${entryNumber} (${groupRef}, ${groupBookings.length} sesi, total Rp ${totalGross.toLocaleString("id-ID")})`);
+}
+
 export async function reversePublicAccountingEntry(
   orderNumber: string,
   reason: string,
