@@ -415,4 +415,143 @@ router.post("/admin/sync-bizportal-memberships", adminMiddleware, async (req, re
   }
 });
 
+/**
+ * GET /api/sync/payment-groups
+ * Endpoint BizPortal: daftar pembayaran yang dikelompokkan per group_ref.
+ * - Booking grup → satu baris dengan total_group_amount + child_bookings
+ * - Booking individual → satu baris per booking seperti biasa
+ *
+ * Query params: from, to, status, limit, offset
+ */
+router.get("/sync/payment-groups", apiKeyMiddleware, async (req, res) => {
+  try {
+    const { from, to, status, limit: limitStr, offset: offsetStr } = req.query as Record<string, string>;
+    const limit  = Math.min(parseInt(limitStr  || "500"), 1000);
+    const offset = parseInt(offsetStr || "0");
+    const today        = new Date().toISOString().split("T")[0];
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+    const fromDate = from || thirtyDaysAgo;
+    const toDate   = to   || today;
+
+    let allBookings = await db
+      .select()
+      .from(bookingsTable)
+      .where(and(gte(bookingsTable.bookingDate, fromDate), lte(bookingsTable.bookingDate, toDate)))
+      .orderBy(desc(bookingsTable.createdAt));
+
+    if (status) {
+      const statuses = status.split(",").map((s) => s.trim());
+      allBookings = allBookings.filter((b) => statuses.includes(b.status));
+    }
+
+    const facilityIds = [...new Set(allBookings.map((b) => b.facilityId))];
+    const facilities = facilityIds.length
+      ? await db.select({ id: facilitiesTable.id, name: facilitiesTable.name, category: facilitiesTable.category }).from(facilitiesTable)
+      : [];
+    const facilityMap = new Map(facilities.map((f) => [f.id, f]));
+
+    const bookingIds = allBookings.map((b) => b.id);
+    const payments = bookingIds.length
+      ? await db.select().from(paymentsTable).where(inArray(paymentsTable.bookingId, bookingIds))
+      : [];
+    const paymentByBookingId = new Map(payments.map((p) => [p.bookingId, p]));
+
+    // Group by group_ref; individual bookings get their own entry
+    const groupMap = new Map<string, typeof allBookings>();
+    const individual: typeof allBookings = [];
+    for (const b of allBookings) {
+      const gRef = (b as any).groupRef as string | null;
+      if (gRef) {
+        const arr = groupMap.get(gRef) ?? [];
+        arr.push(b);
+        groupMap.set(gRef, arr);
+      } else {
+        individual.push(b);
+      }
+    }
+
+    const groupEntries = [...groupMap.entries()].map(([gRef, members]) => {
+      const rep  = members[0]!;
+      const totalGroupAmount = members.reduce((s, b) => s + Number(b.totalPrice), 0);
+      const payment = paymentByBookingId.get(rep.id);
+      return {
+        type: "group",
+        groupBookingId: gRef,
+        groupRef: gRef,
+        bookingCount: members.length,
+        totalGroupAmount,
+        customerName: rep.customerName,
+        customerPhone: rep.customerPhone,
+        customerEmail: rep.customerEmail,
+        status: rep.status,
+        firstBookingDate: members.map((b) => b.bookingDate).sort()[0],
+        lastBookingDate:  members.map((b) => b.bookingDate).sort().at(-1),
+        createdAt: rep.createdAt,
+        updatedAt: rep.updatedAt,
+        childBookings: members.map((b) => ({
+          orderNumber: b.orderNumber,
+          facilityName: facilityMap.get(b.facilityId)?.name ?? "",
+          bookingDate: b.bookingDate,
+          startTime: b.startTime,
+          endTime: b.endTime,
+          amount: Number(b.totalPrice),
+          status: b.status,
+        })),
+        payment: payment ? {
+          id: payment.id,
+          amount: Number(payment.amount),
+          method: payment.paymentMethod,
+          status: payment.status,
+          proofUrl: payment.proofUrl,
+          confirmedAt: payment.confirmedAt,
+        } : null,
+      };
+    });
+
+    const individualEntries = individual.map((b) => {
+      const facility = facilityMap.get(b.facilityId);
+      const payment  = paymentByBookingId.get(b.id);
+      return {
+        type: "individual",
+        groupBookingId: null,
+        groupRef: null,
+        bookingCount: 1,
+        totalGroupAmount: Number(b.totalPrice),
+        orderNumber: b.orderNumber,
+        customerName: b.customerName,
+        customerPhone: b.customerPhone,
+        customerEmail: b.customerEmail,
+        facilityName: facility?.name ?? "",
+        bookingDate: b.bookingDate,
+        startTime: b.startTime,
+        endTime: b.endTime,
+        status: b.status,
+        createdAt: b.createdAt,
+        updatedAt: b.updatedAt,
+        payment: payment ? {
+          id: payment.id,
+          amount: Number(payment.amount),
+          method: payment.paymentMethod,
+          status: payment.status,
+          proofUrl: payment.proofUrl,
+          confirmedAt: payment.confirmedAt,
+        } : null,
+      };
+    });
+
+    const allEntries = [...groupEntries, ...individualEntries]
+      .sort((a, b) => new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime());
+    const total  = allEntries.length;
+    const paged  = allEntries.slice(offset, offset + limit);
+
+    res.json({
+      meta: { total, limit, offset, from: fromDate, to: toDate, syncedAt: new Date().toISOString(), source: "sport-center" },
+      data: paged,
+    });
+  } catch (err) {
+    req.log.error({ err }, "Sync payment-groups error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 export default router;
