@@ -339,6 +339,13 @@ router.post("/admin/sync-bizportal", adminMiddleware, async (req, res) => {
 
     const facilityMap = new Map(facilities.map((f) => [f.id, { name: f.name, category: f.category }]));
 
+    // Pre-compute group totals so each booking carries the correct groupTotal
+    const groupTotalMap: Record<string, number> = {};
+    for (const b of allBookings) {
+      const gRef = (b as any).groupRef as string | null;
+      if (gRef) groupTotalMap[gRef] = (groupTotalMap[gRef] ?? 0) + Number(b.totalPrice);
+    }
+
     let synced = 0;
     let failed = 0;
     const errors: string[] = [];
@@ -347,8 +354,10 @@ router.post("/admin/sync-bizportal", adminMiddleware, async (req, res) => {
       const facilityInfo = facilityMap.get(booking.facilityId);
       const facilityName = facilityInfo?.name ?? "Unknown";
       const facilityCategory = facilityInfo?.category ?? null;
+      const gRef = (booking as any).groupRef as string | null;
+      const groupTotal = gRef ? (groupTotalMap[gRef] ?? null) : null;
       try {
-        await syncBookingToBizportal({ booking, facilityName, facilityCategory });
+        await syncBookingToBizportal({ booking, facilityName, facilityCategory, groupRef: gRef, groupTotal });
         synced++;
       } catch (err: any) {
         failed++;

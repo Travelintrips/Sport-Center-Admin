@@ -99,6 +99,43 @@ async function propagateApproval(
         await settleInvoice(invoiceItem.invoiceId!, parseFloat(invoiceItem.totalAmount ?? "0"), ctx);
       }
     }
+  } else if (type === "group_payment") {
+    // Konfirmasi semua booking + payment dalam satu grup sekaligus
+    const [repBooking] = await db
+      .select({ groupRef: bookingsTable.groupRef })
+      .from(bookingsTable)
+      .where(eq(bookingsTable.id, id))
+      .limit(1);
+
+    if (repBooking?.groupRef) {
+      // Ambil semua booking dalam grup yang masih bisa dikonfirmasi
+      const { rows: groupRows } = await db.execute(sql`
+        SELECT id FROM sport_center.bookings
+        WHERE group_ref = ${repBooking.groupRef}
+          AND status = ANY(ARRAY['pending_payment','waiting_confirmation','waiting_admin_approval','paid'])
+      `);
+      for (const row of groupRows as { id: number }[]) {
+        // Konfirmasi booking
+        await db.update(bookingsTable)
+          .set({ status: "confirmed", updatedAt: new Date() })
+          .where(eq(bookingsTable.id, row.id));
+
+        // Konfirmasi payment terkait
+        await db.update(paymentsTable)
+          .set({ status: "confirmed", updatedAt: new Date() })
+          .where(and(
+            eq(paymentsTable.bookingId, row.id),
+            inArray(paymentsTable.status, ["pending", "waiting_confirmation"] as any[])
+          ));
+
+        await db.insert(auditLogsTable).values({
+          userId: ctx.userId, userRole: ctx.userRole,
+          action: "booking_confirmed_via_recon_group", entity: "booking", entityId: row.id,
+          after: { status: "confirmed", source: "bank_reconciliation_group", groupRef: repBooking.groupRef },
+          ipAddress: ctx.ipAddress, userAgent: ctx.userAgent,
+        });
+      }
+    }
   }
   // type === 'expense': tidak ada booking/payment/invoice yang perlu di-update
 }
@@ -663,7 +700,11 @@ router.get("/bank-reconciliation/matches/:mutationId", adminMiddleware, async (r
         bo.booking_date      AS "orderBookingDate",
         bo.status            AS "orderBookingStatus",
         COALESCE(bo.grand_total, bo.total_price)::text AS "orderBookingAmount",
-        fo.name              AS "orderFacilityName"
+        fo.name              AS "orderFacilityName",
+        -- Group payment enrichment (candidateType = 'group_payment')
+        bgp.group_ref        AS "groupRef",
+        bgp.customer_name    AS "groupCustomerName",
+        bgp.customer_phone   AS "groupCustomerPhone"
       FROM sport_center.bank_reconciliation_matches m
       -- Payment join
       LEFT JOIN sport_center.payments p
@@ -678,12 +719,15 @@ router.get("/bank-reconciliation/matches/:mutationId", adminMiddleware, async (r
         ON bo.id = m.candidate_id AND m.candidate_type = 'order'
       LEFT JOIN sport_center.facilities fo
         ON fo.id = bo.facility_id AND m.candidate_type = 'order'
+      -- Group payment representative booking join
+      LEFT JOIN sport_center.bookings bgp
+        ON bgp.id = m.candidate_id AND m.candidate_type = 'group_payment'
       WHERE m.mutation_id = ${mutationId}
       ORDER BY m.match_score DESC
     `);
 
     // Normalise: untuk candidateType='order' salin field order* ke field utama agar UI konsisten
-    const matches = (rows as any[]).map((r) => {
+    const normalised = (rows as any[]).map((r) => {
       if (r.candidateType === "order") {
         return {
           ...r,
@@ -694,6 +738,61 @@ router.get("/bank-reconciliation/matches/:mutationId", adminMiddleware, async (r
           bookingStatus: r.orderBookingStatus ?? r.bookingStatus,
           bookingAmount: r.orderBookingAmount ?? r.bookingAmount,
           facilityName: r.orderFacilityName ?? r.facilityName,
+        };
+      }
+      if (r.candidateType === "group_payment") {
+        return {
+          ...r,
+          customerName: r.groupCustomerName ?? r.customerName,
+          customerPhone: r.groupCustomerPhone ?? r.customerPhone,
+        };
+      }
+      return r;
+    });
+
+    // Enrich group_payment candidates with child bookings data (batch query)
+    const groupRefs = normalised
+      .filter((r) => r.candidateType === "group_payment" && r.groupRef)
+      .map((r) => r.groupRef as string);
+
+    const groupChildMap = new Map<string, any[]>();
+    if (groupRefs.length) {
+      const refLiteral = groupRefs.map((g) => `'${g.replace(/'/g, "''")}'`).join(",");
+      const { rows: childRows } = await db.execute(sql`
+        SELECT
+          b.order_number AS "orderNumber",
+          b.group_ref    AS "groupRef",
+          b.booking_date AS "bookingDate",
+          b.start_time   AS "startTime",
+          b.end_time     AS "endTime",
+          b.status,
+          COALESCE(b.grand_total, b.total_price)::bigint AS "amount",
+          f.name         AS "facilityName"
+        FROM sport_center.bookings b
+        LEFT JOIN sport_center.facilities f ON f.id = b.facility_id
+        WHERE b.group_ref = ANY(ARRAY[${sql.raw(refLiteral)}]::text[])
+        ORDER BY b.booking_date, b.start_time
+      `);
+      for (const child of childRows as any[]) {
+        const ref = child.groupRef as string;
+        const arr = groupChildMap.get(ref) ?? [];
+        arr.push(child);
+        groupChildMap.set(ref, arr);
+      }
+    }
+
+    const matches = normalised.map((r) => {
+      if (r.candidateType === "group_payment" && r.groupRef) {
+        const children = groupChildMap.get(r.groupRef) ?? [];
+        const groupTotal = children.reduce((s: number, c: any) => s + Number(c.amount), 0);
+        return {
+          ...r,
+          isGroupPayment: true,
+          bookingCount: children.length,
+          groupTotal,
+          childBookings: children,
+          bookingAmount: String(groupTotal),
+          bookingOrderNumber: r.groupRef,
         };
       }
       return r;
@@ -775,7 +874,7 @@ router.post("/bank-reconciliation/:mutationId/approve", adminMiddleware, async (
         .set({
           status: "approved",
           matchedPaymentId: match?.candidateType === "payment" ? match.candidateId : null,
-          matchedOrderId: match?.candidateType === "order" ? match.candidateId : null,
+          matchedOrderId: (match?.candidateType === "order" || match?.candidateType === "group_payment") ? match.candidateId : null,
           updatedAt: new Date(),
         })
         .where(eq(bankMutationsTable.id, mutationId));
@@ -806,7 +905,7 @@ router.post("/bank-reconciliation/:mutationId/approve", adminMiddleware, async (
         .set({
           status: "approved",
           matchedPaymentId: candidateType === "payment" ? candidateId : null,
-          matchedOrderId: candidateType === "order" ? candidateId : null,
+          matchedOrderId: (candidateType === "order" || candidateType === "group_payment") ? candidateId : null,
           updatedAt: new Date(),
         })
         .where(eq(bankMutationsTable.id, mutationId));
