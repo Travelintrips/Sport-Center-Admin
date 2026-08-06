@@ -1,0 +1,56 @@
+runtime: nodejs20
+service: default
+
+# Entrypoint — compiled ESM bundle; PORT is injected by App Engine automatically.
+entrypoint: node --enable-source-maps ./dist/index.mjs
+
+# ── Scaling ────────────────────────────────────────────────────────────────────
+# min_instances: 0 for cost savings on first/staging deployment.
+# NOTE: The application runs a background scheduler (expire bookings, send
+#       reminders, nightly audit). When min_instances=0 the scheduler only runs
+#       while at least one instance is alive. Consider Cloud Scheduler + a
+#       dedicated cron endpoint for guaranteed scheduler execution.
+automatic_scaling:
+  min_instances: 0
+  max_instances: 3
+  target_cpu_utilization: 0.65
+  max_concurrent_requests: 80
+
+# ── Non-secret environment variables ──────────────────────────────────────────
+# Only non-sensitive, non-credential variables go here.
+# All secrets (DB, auth, storage, API keys) MUST be stored in Google Secret
+# Manager and loaded at runtime via the application's secret loader or set
+# via `gcloud app deploy --update-env-vars` after a verified deployment.
+#
+# Secret Manager naming convention (GCP project: sc-sport-center):
+#   sport-center-prod-supabase-database-url
+#   sport-center-prod-supabase-url
+#   sport-center-prod-supabase-anon-key
+#   sport-center-prod-supabase-service-role-key
+#   sport-center-prod-session-secret
+#   sport-center-prod-fonnte-token
+#   sport-center-prod-openai-api-key
+#   sport-center-prod-google-service-account-json
+#   sport-center-prod-google-client-id
+#   sport-center-prod-bizportal-sync-api-key
+#   sport-center-prod-cashier-token-secret
+#   sport-center-prod-vapid-public-key
+#   sport-center-prod-vapid-private-key
+#   sport-center-prod-admin-wa-phones
+#   sport-center-prod-wati-api-token
+#   sport-center-prod-wati-base-url
+#
+# IAM: Grant App Engine default service account roles/secretmanager.secretAccessor
+# on each of the secrets above before first deployment.
+env_variables:
+  NODE_ENV: "production"
+  VITE_PUBLIC_URL: "https://sc.travelintrips.co.id"
+  # PDF generation via headless Chromium.
+  # Set to "false" for first deployment — compatibility with App Engine Standard
+  # gVisor sandbox is unproven. Re-enable only after an isolated production test
+  # confirms Chromium starts and renders successfully.
+  PDF_ENABLED: "false"
+  # Base URL used in invoice links, WhatsApp messages, and tokenized action URLs.
+  # NOT a secret — set here rather than in Secret Manager.
+  # Also overridable at runtime via settings table (paymentDomain / appUrl).
+  APP_URL: "https://sc.travelintrips.co.id"

@@ -126,7 +126,9 @@ export const GetMyBookingsResponseItem = zod.object({
   "paymentStatus": zod.string().nullish(),
   "paymentProofUrl": zod.string().nullish(),
   "notes": zod.string().nullish(),
-  "createdAt": zod.string().nullable()
+  "createdAt": zod.string().nullable(),
+  "groupRef": zod.string().nullish(),
+  "customerName": zod.string().nullish()
 })
 export const GetMyBookingsResponse = zod.array(GetMyBookingsResponseItem)
 
@@ -1767,6 +1769,26 @@ export const CreateMembershipBody = zod.object({
   "startDate": zod.string(),
   "months": zod.number().min(1),
   "notes": zod.string().optional()
+})
+
+
+/**
+ * @summary Look up a membership by phone number (public)
+ */
+export const LookupMembershipBody = zod.object({
+  "phone": zod.string()
+})
+
+export const LookupMembershipResponse = zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "phone": zod.string(),
+  "email": zod.string(),
+  "status": zod.enum(['pending_payment', 'waiting_confirmation', 'active', 'expired', 'cancelled']),
+  "startDate": zod.string(),
+  "endDate": zod.string(),
+  "months": zod.number(),
+  "totalPrice": zod.number()
 })
 
 

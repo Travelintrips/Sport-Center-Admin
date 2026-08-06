@@ -1,0 +1,51 @@
+KOREKSI ENVIRONMENT PENGUJIAN
+
+Pengujian transaksi SC-0001 dilakukan melalui Replit Development/Preview URL:
+
+https://3ece6165-cb1e-4228-88e7-587923280708-00-240zfrudsoc7h.pike.replit.dev
+
+Ini bukan URL App Engine dan bukan production domain.
+
+Audit wajib membuktikan environment end-to-end untuk transaksi ini:
+
+1. Frontend booking URL yang digunakan.
+2. API base URL yang dipanggil frontend.
+3. Database/Supabase project yang dipakai API development.
+4. Paylabs environment harus Sandbox.
+5. Notification/webhook URL yang dikirim saat create transaction.
+6. Return URL.
+7. Apakah webhook URL menunjuk ke pike.replit.dev yang aktif saat ini,
+   domain lama, sc.travelintrips.co.id, atau URL lain.
+8. Apakah webhook dan frontend membaca database yang sama.
+9. Apakah Merchant Order ID SC-0001-1785993250454 ada pada database
+   yang sedang dibaca halaman development.
+10. Jangan memperbaiki record pada database production bila transaksi
+    ini dibuat dari environment development.
+
+PENTING:
+
+- Jangan mengubah konfigurasi Paylabs Production.
+- Jangan mengubah DNS.
+- Jangan melakukan deployment GAE.
+- Jangan menyatakan frontend bermasalah sebelum membuktikan API base URL,
+  database target, dan webhook target.
+- Jangan hanya memeriksa status pada dashboard Paylabs.
+- Trace request create transaction untuk mendapatkan notification URL aktual
+  yang dikirim kepada Paylabs.
+- Periksa apakah pike.replit.dev dapat menerima request eksternal ketika
+  workflow API sedang aktif.
+- Karena pike.replit.dev bersifat development dan dapat berubah, jangan
+  menjadikannya webhook permanen.
+
+Berikan salah satu diagnosis eksplisit:
+
+A. WEBHOOK NOT RECEIVED
+B. WEBHOOK SENT TO WRONG ENVIRONMENT
+C. WEBHOOK RECEIVED BUT REJECTED
+D. PAYMENT UPDATED IN DIFFERENT DATABASE
+E. BACKEND PAID BUT FRONTEND POLLING/STATUS MAPPING WRONG
+F. OTHER — dengan bukti
+
+Jika webhook diarahkan ke URL yang berbeda dari dev URL aktif, jangan membuat
+pembayaran baru dahulu. Perbaiki konfigurasi Sandbox, lalu gunakan inquiry atau
+reconciliation terhadap transaksi lama secara idempotent.

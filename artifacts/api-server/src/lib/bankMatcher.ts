@@ -192,6 +192,7 @@ export async function computeMatchesForMutation(mutation: BankMutation): Promise
       totalPrice: bookingsTable.totalPrice,
       grandTotal: bookingsTable.grandTotal,
       status: bookingsTable.status,
+      groupRef: bookingsTable.groupRef,
       updatedAt: sql<string>`${bookingsTable.updatedAt}`.as("updated_at"),
     })
     .from(bookingsTable)
@@ -389,6 +390,75 @@ export async function computeMatchesForMutation(mutation: BankMutation): Promise
 
     candidates.push(candidate);
   }
+
+  // ── Group Payment Detection ────────────────────────────────────────────────
+  // Kelompokkan booking berdasarkan group_ref.
+  // Jika total nominal grup cocok dengan nominal mutasi → buat kandidat group_payment.
+  const bookingsByGroupRef = new Map<string, typeof bookings[0][]>();
+  for (const b of bookings) {
+    const gRef = b.groupRef;
+    if (!gRef) continue;
+    const arr = bookingsByGroupRef.get(gRef) ?? [];
+    arr.push(b);
+    bookingsByGroupRef.set(gRef, arr);
+  }
+
+  for (const [gRef, groupBookings] of bookingsByGroupRef.entries()) {
+    if (groupBookings.length < 2) continue; // grup harus ≥ 2 booking
+
+    const groupTotal = groupBookings.reduce((sum, b) => {
+      return sum + (b.grandTotal ? Number(b.grandTotal) : Number(b.totalPrice));
+    }, 0);
+
+    if (!amountMatches(groupTotal, mutationAmount)) continue;
+
+    // Nominal grup cocok → buat kandidat group_payment
+    const rep = groupBookings[0]!;
+    const gParts: string[] = [];
+    let gScore = 45; // slightly higher base — grup match lebih spesifik
+    gParts.push(`nominal grup ${gRef} (${groupBookings.length} booking) = Rp${Math.round(groupTotal).toLocaleString("id-ID")} cocok +45`);
+
+    const custNorm = normalizeDescription(rep.customerName ?? "");
+    const custWords = custNorm.split(" ").filter((w) => w.length >= 4);
+    if (custWords.some((w) => normDesc.includes(w))) {
+      gScore += 15;
+      gParts.push(`nama customer "${rep.customerName}" ditemukan +15`);
+    }
+
+    // Date heuristic: cek apakah tanggal mutasi dekat dengan salah satu booking
+    const anyDateMatch = groupBookings.some((b) => {
+      const diff = dayDiff(mutation.transactionDate, b.bookingDate);
+      return diff <= 7;
+    });
+    if (anyDateMatch) {
+      gScore += 15;
+      gParts.push("tanggal mutasi dekat dengan booking dalam grup +15");
+    }
+
+    const hasProof = groupBookings.some((b) => {
+      const pays = paymentsByBookingId.get(b.id);
+      return pays?.some((p) => p.proofUrl);
+    });
+    if (hasProof) {
+      gScore += 5;
+      gParts.push("ada bukti transfer +5");
+    }
+
+    candidates.push({
+      candidateType: "group_payment" as any,
+      candidateId: rep.id, // ID booking representatif (pertama dalam grup)
+      score: Math.min(gScore, 100),
+      reason: gParts,
+      amountMatch: true,
+      dateMatch: anyDateMatch,
+      nameMatch: custWords.some((w) => normDesc.includes(w)),
+      orderIdMatch: false,
+      proofMatch: hasProof,
+      statusValidMatch: true,
+      toleranceUsed: false,
+    });
+  }
+  // ── End Group Payment Detection ───────────────────────────────────────────
 
   return candidates.sort((a, b) => b.score - a.score);
 }
