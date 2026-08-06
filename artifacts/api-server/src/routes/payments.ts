@@ -334,8 +334,16 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
         await db.update(paymentsTable)
           .set({ status: status as any, ...(status === "confirmed" ? { confirmedAt: new Date() } : {}) })
           .where(and(eq(paymentsTable.bookingId, sib.id), eq(paymentsTable.status, "pending")));
-        // Sync sibling ke BizPortal
-        syncStatusToBizportal(sib.orderNumber, targetStatus, proofUrl, paidAt, sib).catch(() => {});
+        // Sync sibling ke BizPortal dengan total_price = 0:
+        // Nilai finansial sudah tercatat di booking utama (primary) sehingga
+        // sibling tidak boleh menambah nominal di BizPortal (mencegah double counting).
+        syncStatusToBizportal(sib.orderNumber, targetStatus, proofUrl, paidAt, {
+          ...sib,
+          totalPrice: "0",
+          grandTotal: null,
+          dpp: null,
+          ppnAmount: null,
+        } as any).catch(() => {});
       }
     };
 
@@ -432,14 +440,41 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
               .catch((err) => logger.error({ err, orderNumber: booking.orderNumber }, "[InvoiceDelivery] Gagal kirim invoice PDF setelah payment confirmed"));
           }
           syncStatusToBizportal(booking.orderNumber, "confirmed", payment.proofUrl, new Date(), booking).catch(() => {});
-          pushConfirmedPaymentAsBankMutation(booking, new Date()).catch(() => {});
 
           const today = new Date().toISOString().split("T")[0];
-          const { dpp, ppnAmount } = extractBookingDpp(booking);
-          createJournalEntry(booking.id, booking.orderNumber, dpp, ppnAmount, today).catch((err) =>
+
+          // Hitung total jurnal: untuk grup pakai sum semua sesi, bukan hanya sesi utama
+          // Ini mencegah jurnal hanya mencatat 1/N dari total pembayaran grup
+          let journalDpp: number;
+          let journalPpn: number;
+          let journalBookingForMutation = booking;
+
+          if (booking.groupRef) {
+            const allGroupBookings = await db
+              .select({ totalPrice: bookingsTable.totalPrice, grandTotal: bookingsTable.grandTotal, dpp: bookingsTable.dpp, ppnAmount: bookingsTable.ppnAmount })
+              .from(bookingsTable)
+              .where(eq(bookingsTable.groupRef, booking.groupRef));
+            journalDpp = 0;
+            journalPpn = 0;
+            for (const gb of allGroupBookings) {
+              const extracted = extractBookingDpp(gb);
+              journalDpp += extracted.dpp;
+              journalPpn += extracted.ppnAmount;
+            }
+            // Override grandTotal pada booking utama untuk bank mutation (pakai total grup)
+            const groupGrandTotal = journalDpp + journalPpn;
+            journalBookingForMutation = { ...booking, grandTotal: String(groupGrandTotal), totalPrice: String(groupGrandTotal) } as any;
+          } else {
+            const extracted = extractBookingDpp(booking);
+            journalDpp = extracted.dpp;
+            journalPpn = extracted.ppnAmount;
+          }
+
+          pushConfirmedPaymentAsBankMutation(journalBookingForMutation, new Date()).catch(() => {});
+          createJournalEntry(booking.id, booking.orderNumber, journalDpp, journalPpn, today).catch((err) =>
             logAccountingError({ operation: "createJournalEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
           );
-          createPublicAccountingEntry(booking.id, booking.orderNumber, dpp, ppnAmount, booking.facilityId, today).catch((err) =>
+          createPublicAccountingEntry(booking.id, booking.orderNumber, journalDpp, journalPpn, booking.facilityId, today).catch((err) =>
             logAccountingError({ operation: "createPublicAccountingEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
           );
         }
