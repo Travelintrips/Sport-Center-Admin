@@ -51,6 +51,148 @@ router.get("/payments", async (req, res) => {
   }
 });
 
+// GET /payments/grouped — daftar pembayaran dikelompokkan per Group Booking (admin only)
+router.get("/payments/grouped", adminMiddleware, async (req, res) => {
+  try {
+    // Ambil semua payments beserta booking & fasilitas
+    const rows = await db.execute(sql`
+      SELECT
+        p.id            AS payment_id,
+        p.booking_id    AS booking_id,
+        p.amount,
+        p.status        AS payment_status,
+        p.payment_type,
+        p.proof_url,
+        p.created_at    AS payment_created_at,
+        b.id            AS bid,
+        b.order_number,
+        b.customer_name,
+        b.customer_phone,
+        b.booking_date,
+        b.start_time,
+        b.end_time,
+        b.total_price,
+        b.grand_total,
+        b.status        AS booking_status,
+        b.group_ref,
+        f.name          AS facility_name
+      FROM sport_center.payments p
+      JOIN sport_center.bookings b ON b.id = p.booking_id
+      LEFT JOIN sport_center.facilities f ON f.id = b.facility_id
+      ORDER BY p.created_at DESC
+    `);
+
+    type Row = {
+      payment_id: number; booking_id: number; amount: string;
+      payment_status: string; payment_type: string; proof_url: string | null;
+      payment_created_at: string;
+      bid: number; order_number: string; customer_name: string; customer_phone: string;
+      booking_date: string; start_time: string; end_time: string;
+      total_price: string; grand_total: string | null; booking_status: string;
+      group_ref: string | null; facility_name: string | null;
+    };
+
+    const allRows = rows.rows as Row[];
+
+    // Agregasi: kelompokkan berdasarkan groupRef
+    const groupMap = new Map<string, Row[]>(); // groupRef → rows
+    const singles: Row[] = []; // booking tanpa groupRef
+
+    for (const row of allRows) {
+      if (row.group_ref) {
+        const existing = groupMap.get(row.group_ref) ?? [];
+        // Deduplicate: satu booking per group entry
+        const alreadyHasBooking = existing.some(r => r.booking_id === row.booking_id);
+        if (!alreadyHasBooking) existing.push(row);
+        groupMap.set(row.group_ref, existing);
+      } else {
+        singles.push(row);
+      }
+    }
+
+    const result: any[] = [];
+
+    // Group entries
+    for (const [groupRef, groupRows] of groupMap) {
+      const repRow = groupRows[0]!;
+      // Cari payment yang punya proof untuk representative
+      const withProof = groupRows.find(r => r.proof_url);
+      const repPayment = withProof ?? repRow;
+
+      const totalAmount = groupRows.reduce((s, r) => s + Number(r.grand_total ?? r.total_price), 0);
+      const childBookings = groupRows.map(r => ({
+        bookingId: r.booking_id,
+        orderNumber: r.order_number,
+        facilityName: r.facility_name,
+        bookingDate: r.booking_date,
+        startTime: r.start_time,
+        endTime: r.end_time,
+        amount: Number(r.grand_total ?? r.total_price),
+        bookingStatus: r.booking_status,
+        paymentStatus: r.payment_status,
+      }));
+
+      result.push({
+        isGroup: true,
+        groupRef,
+        groupBookingId: groupRef,
+        bookingCount: groupRows.length,
+        totalGroupAmount: totalAmount,
+        customerName: repRow.customer_name,
+        customerPhone: repRow.customer_phone,
+        paymentId: repPayment.payment_id,
+        proofUrl: repPayment.proof_url,
+        paymentStatus: repRow.payment_status,
+        paymentType: repRow.payment_type,
+        bookingStatus: repRow.booking_status,
+        createdAt: repRow.payment_created_at,
+        childBookings,
+      });
+    }
+
+    // Single (non-group) entries — deduplicate by bookingId, use latest payment
+    const singleByBooking = new Map<number, Row>();
+    for (const row of singles) {
+      const existing = singleByBooking.get(row.booking_id);
+      if (!existing || new Date(row.payment_created_at) > new Date(existing.payment_created_at)) {
+        singleByBooking.set(row.booking_id, row);
+      }
+    }
+
+    for (const row of singleByBooking.values()) {
+      result.push({
+        isGroup: false,
+        groupRef: null,
+        groupBookingId: null,
+        bookingCount: 1,
+        totalGroupAmount: Number(row.grand_total ?? row.total_price),
+        customerName: row.customer_name,
+        customerPhone: row.customer_phone,
+        paymentId: row.payment_id,
+        proofUrl: row.proof_url,
+        paymentStatus: row.payment_status,
+        paymentType: row.payment_type,
+        bookingStatus: row.booking_status,
+        orderNumber: row.order_number,
+        facilityName: row.facility_name,
+        bookingDate: row.booking_date,
+        startTime: row.start_time,
+        endTime: row.end_time,
+        createdAt: row.payment_created_at,
+        childBookings: [],
+      });
+    }
+
+    // Sort by createdAt desc
+    result.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+    res.json(result);
+  } catch (err) {
+    req.log.error({ err }, "List grouped payments error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 router.post("/payments", async (req, res) => {
   try {
     const { bookingId, amount, proofUrl, notes } = req.body;

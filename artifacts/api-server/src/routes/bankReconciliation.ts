@@ -14,7 +14,7 @@ import {
   companyInvoicesTable,
   companyInvoiceItemsTable,
 } from "@workspace/db";
-import { eq, desc, and, inArray, sql, gte, lte, isNull } from "drizzle-orm";
+import { eq, desc, and, inArray, ne, sql, gte, lte, isNull } from "drizzle-orm";
 import { adminMiddleware, financeMiddleware, superAdminMiddleware } from "../lib/auth";
 import { runBankAudit } from "../lib/bankAudit";
 import {
@@ -67,6 +67,29 @@ async function propagateApproval(
           after: { status: "confirmed", source: "bank_reconciliation" },
           ipAddress: ctx.ipAddress, userAgent: ctx.userAgent,
         });
+      }
+
+      // ── Group Payment: konfirmasi semua sibling booking dalam grup ──────────
+      const [mainBooking] = await db.select({ groupRef: bookingsTable.groupRef })
+        .from(bookingsTable).where(eq(bookingsTable.id, pmt.bookingId)).limit(1);
+      if (mainBooking?.groupRef) {
+        const siblings = await db.select({ id: bookingsTable.id, status: bookingsTable.status })
+          .from(bookingsTable)
+          .where(and(eq(bookingsTable.groupRef, mainBooking.groupRef), ne(bookingsTable.id, pmt.bookingId)));
+        for (const sib of siblings) {
+          if (!CONFIRMABLE.includes(sib.status as any)) continue;
+          await db.update(bookingsTable).set({ status: "confirmed", updatedAt: new Date() })
+            .where(eq(bookingsTable.id, sib.id));
+          await db.update(paymentsTable)
+            .set({ status: "confirmed", updatedAt: new Date() })
+            .where(and(eq(paymentsTable.bookingId, sib.id), eq(paymentsTable.status, "pending")));
+          await db.insert(auditLogsTable).values({
+            userId: ctx.userId, userRole: ctx.userRole,
+            action: "booking_confirmed_via_recon_group", entity: "booking", entityId: sib.id,
+            after: { status: "confirmed", source: "bank_reconciliation", groupRef: mainBooking.groupRef },
+            ipAddress: ctx.ipAddress, userAgent: ctx.userAgent,
+          });
+        }
       }
 
       // Invoice partial payment settlement
@@ -1296,6 +1319,12 @@ router.get("/bank-reconciliation/mutations/:id/candidates", adminMiddleware, asy
       const facility = booking?.facilityId ? facilityMap.get(booking.facilityId) ?? null : null;
       const paymentDate = payment?.createdAt ? String(payment.createdAt).slice(0, 10) : null;
 
+      // Parse group metadata from note field
+      let groupMeta: { isGroupPayment?: boolean; groupRef?: string; groupBookingCount?: number; groupTotalAmount?: number } = {};
+      if (c.note) {
+        try { groupMeta = JSON.parse(c.note); } catch {}
+      }
+
       return {
         ...c,
         customerName: booking?.customerName ?? null,
@@ -1304,11 +1333,18 @@ router.get("/bank-reconciliation/mutations/:id/candidates", adminMiddleware, asy
         bookingOrderNumber: booking?.orderNumber ?? null,
         bookingDate: booking?.bookingDate ?? null,
         bookingStatus: booking?.status ?? null,
-        bookingAmount: String(booking?.grandTotal ?? booking?.totalPrice ?? 0),
+        bookingAmount: groupMeta.isGroupPayment
+          ? String(groupMeta.groupTotalAmount ?? 0)
+          : String(booking?.grandTotal ?? booking?.totalPrice ?? 0),
         paymentProofUrl: payment?.proofUrl ?? null,
         paymentStatus: payment?.status ?? null,
         paymentDate,
         facilityName: facility?.name ?? null,
+        // Group payment fields
+        isGroupPayment: groupMeta.isGroupPayment ?? false,
+        groupRef: groupMeta.groupRef ?? null,
+        groupBookingCount: groupMeta.groupBookingCount ?? null,
+        groupTotalAmount: groupMeta.groupTotalAmount ?? null,
       };
     });
 
