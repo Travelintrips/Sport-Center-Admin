@@ -468,15 +468,30 @@ export default function BookingDetail() {
 
         {/* Payment Section */}
         <div className="space-y-6">
-          {booking.status === "pending_payment" && (
+          {(booking.status === "pending_payment" || booking.status === "expired") && (
             <Card className="border-primary/30 shadow-md">
               <CardHeader className="bg-primary/5 pb-4 border-b border-primary/10">
                 <CardTitle className="flex items-center gap-2 text-primary">
                   <CreditCard size={20} />
-                  {t("Instruksi Pembayaran", "Payment Instructions")}
+                  {booking.status === "expired"
+                    ? t("Aktifkan Kembali & Bayar", "Reactivate & Pay")
+                    : t("Instruksi Pembayaran", "Payment Instructions")}
                 </CardTitle>
               </CardHeader>
               <CardContent className="p-6 space-y-5">
+                {booking.status === "expired" && (
+                  <div className="rounded-xl border border-orange-200 bg-orange-50 p-4 text-sm text-orange-800">
+                    <div className="font-semibold mb-1">
+                      {t("Booking ini bisa diaktifkan kembali", "This booking can be reactivated")}
+                    </div>
+                    <p>
+                      {t(
+                        "Silakan lakukan transfer sesuai total tagihan, lalu upload bukti transfer di bawah. Setelah dikirim, booking akan menunggu verifikasi admin.",
+                        "Make a transfer for the total amount, then upload your transfer proof below. After submission, the booking will wait for admin verification.",
+                      )}
+                    </p>
+                  </div>
+                )}
                 {/* DP Info Banner */}
                 {(booking as any).isDpPaid && (() => {
                   const bPayments = ((booking as any).payments as any[]) ?? [];
@@ -839,7 +854,7 @@ export default function BookingDetail() {
                 </div>
                 <h3 className="font-bold text-lg text-gray-800 mb-1">{t("Booking Expired", "Booking Expired")}</h3>
                 <p className="text-sm text-gray-600">
-                  {t("Batas waktu pembayaran terlewat. Silakan buat booking baru.", "Payment deadline has passed. Please create a new booking.")}
+                  {t("Upload bukti transfer di bagian pembayaran untuk mengaktifkan kembali booking ini.", "Upload your transfer proof in the payment section to reactivate this booking.")}
                 </p>
               </CardContent>
             </Card>
