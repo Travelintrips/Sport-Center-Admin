@@ -679,6 +679,13 @@ async function runStartupMigrations() {
        ADD COLUMN IF NOT EXISTS bg_template_type text`,
     `ALTER TABLE sport_center.company_document_settings
        ADD COLUMN IF NOT EXISTS bg_template_active boolean NOT NULL DEFAULT false`,
+     // Daily admin WhatsApp usage-list delivery state
+     `CREATE TABLE IF NOT EXISTS sport_center.wa_daily_usage_snapshots (
+        id serial PRIMARY KEY,
+        usage_date text NOT NULL UNIQUE,
+        fingerprint text NOT NULL,
+        sent_at timestamptz NOT NULL DEFAULT NOW()
+      )`,
   ];
 
   for (const stmt of migrations) {

@@ -357,7 +357,6 @@ export default function AdminExpenses() {
       expenseDate: form.expenseDate,
       coaAccountId: Number(form.coaAccountId),
       description: form.description,
-      vendorId: form.vendorId ? Number(form.vendorId) : null,
       vendorId: Number(form.vendorId),
       vendorName: selectedV?.name ?? form.vendorName ?? null,
       facilityId: form.facilityId ? Number(form.facilityId) : null,

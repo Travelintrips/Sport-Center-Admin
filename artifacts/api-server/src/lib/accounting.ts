@@ -66,15 +66,6 @@ async function nextPublicEntryNumber(year: number): Promise<string> {
   `);
   const seq = Number((result.rows[0] as any).seq ?? 1);
   return `CSH/${year}/${String(seq).padStart(6, "0")}`;
-      NULLIF(REGEXP_REPLACE(entry_number, '^SC-CSH/[0-9]+/', ''), '')::integer
-    ), 0) + 1 AS seq
-    FROM public.accounting_entries
-    WHERE entry_number LIKE ${'SC-CSH/' + year + '/%'}
-      AND source = 'sport_center_booking'
-  `);
-  const seq = Number((result.rows[0] as any).seq ?? 1);
-  return `SC-CSH/${year}/${String(seq).padStart(4, "0")}`;
-
 }
 
 export async function createPublicAccountingEntry(

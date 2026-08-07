@@ -1,6 +1,6 @@
-import { db, bookingsTable, facilitiesTable, bankReconciliationMatchesTable, waActionTokensTable } from "@workspace/db";
-import { eq, and, lt, lte, isNotNull, isNull, inArray, sql } from "drizzle-orm";
-import { notifyBookingExpired, notifyReminderH1, notifyWaDayReminder, notifyWaStaffCheckin, notifyAuditCritical, notifyPaymentReminder } from "./notifications";
+import { db, bookingsTable, facilitiesTable, bankReconciliationMatchesTable, waActionTokensTable, waDailyUsageSnapshotsTable } from "@workspace/db";
+import { eq, and, lt, lte, isNotNull, isNull, inArray, or, sql } from "drizzle-orm";
+import { notifyBookingExpired, notifyReminderH1, notifyWaDayReminder, notifyWaStaffCheckin, notifyAuditCritical, notifyPaymentReminder, notifyWaDailyUsageList } from "./notifications";
 import { createWaToken } from "./waTokens";
 import { reverseTaxTransaction } from "./tax";
 import { reverseJournalEntry } from "./accounting";
@@ -22,6 +22,8 @@ function getTomorrowWIB(): string {
 function getTodayWIB(): string {
   return getWIBNow().toISOString().split("T")[0];
 }
+
+let dailyUsageListInFlight = false;
 
 async function expireOverdueBookings(): Promise<void> {
   try {
@@ -224,6 +226,96 @@ async function sendDayOfReminder(): Promise<void> {
   }
 }
 
+/**
+ * Publishes the current operational list for today. Unlike the customer
+ * reminder above, this intentionally includes both confirmed and completed
+ * bookings: completed bookings still belong in the day's usage record.
+ *
+ * It runs every scheduler tick rather than only at 07:00 so bookings
+ * confirmed later in the day are not silently omitted from the admin group.
+ */
+async function syncDailyUsageList(): Promise<void> {
+  if (dailyUsageListInFlight) return;
+  dailyUsageListInFlight = true;
+
+  try {
+    const today = getTodayWIB();
+    const bookings = await db
+      .select()
+      .from(bookingsTable)
+      .where(
+        and(
+          eq(bookingsTable.bookingDate, today),
+          or(eq(bookingsTable.status, "confirmed"), eq(bookingsTable.status, "completed")),
+        ),
+      );
+
+    if (!bookings.length) return;
+
+    const facilities = await db
+      .select({ id: facilitiesTable.id, name: facilitiesTable.name })
+      .from(facilitiesTable);
+    const facilityMap = new Map(facilities.map((facility) => [facility.id, facility.name]));
+
+    const usageBookings = bookings
+      .map((booking) => ({
+        facilityName: facilityMap.get(booking.facilityId) ?? `Fasilitas #${booking.facilityId}`,
+        customerName: booking.customerName,
+        bookingDate: booking.bookingDate,
+        startTime: booking.startTime,
+        endTime: booking.endTime,
+        bookingType: booking.activityType ?? (booking.source === "whatsapp" ? "WhatsApp" : "Online"),
+        numberOfPeople: booking.numberOfPeople,
+        checkedIn: Boolean(booking.checkedInAt),
+        orderNumber: booking.orderNumber,
+        status: booking.status,
+      }))
+      .sort((a, b) =>
+        a.facilityName.localeCompare(b.facilityName) ||
+        a.startTime.localeCompare(b.startTime) ||
+        a.orderNumber.localeCompare(b.orderNumber),
+      );
+
+    const fingerprint = usageBookings
+      .map((booking) => [
+        booking.orderNumber,
+        booking.facilityName,
+        booking.customerName,
+        booking.startTime,
+        booking.endTime,
+        booking.bookingType,
+        booking.numberOfPeople ?? "",
+        booking.checkedIn ? "checked-in" : "not-checked-in",
+        booking.status,
+      ].join("|"))
+      .join("||");
+
+    const [previous] = await db
+      .select({ fingerprint: waDailyUsageSnapshotsTable.fingerprint })
+      .from(waDailyUsageSnapshotsTable)
+      .where(eq(waDailyUsageSnapshotsTable.usageDate, today))
+      .limit(1);
+
+    if (previous?.fingerprint === fingerprint) return;
+
+    await notifyWaDailyUsageList({ usageDate: today, bookings: usageBookings });
+
+    await db
+      .insert(waDailyUsageSnapshotsTable)
+      .values({ usageDate: today, fingerprint, sentAt: new Date() })
+      .onConflictDoUpdate({
+        target: waDailyUsageSnapshotsTable.usageDate,
+        set: { fingerprint, sentAt: new Date() },
+      });
+
+    console.log(`[scheduler] Daily usage list synced for ${today} (${bookings.length} booking(s))`);
+  } catch (err) {
+    console.error("[scheduler] syncDailyUsageList error:", err);
+  } finally {
+    dailyUsageListInFlight = false;
+  }
+}
+
 // Payment reminder: kirim 2 jam sebelum deadline (sekali saja per booking)
 async function sendPaymentReminder(): Promise<void> {
   try {
@@ -368,6 +460,7 @@ export function startScheduler(): void {
   // Run immediately on startup
   expireOverdueBookings();
   autoCompleteBookings();
+  syncDailyUsageList();
   checkConnections();
 
   // Every 5 minutes: expire overdue bookings + auto-complete + reminders + nightly audit + connection health
@@ -377,6 +470,7 @@ export function startScheduler(): void {
     await sendPaymentReminder();
     await sendReminderH1();
     await sendDayOfReminder();
+    await syncDailyUsageList();
     await runNightlyBankAudit();
     await checkConnections();
   }, 5 * 60 * 1000);

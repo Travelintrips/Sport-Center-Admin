@@ -496,6 +496,67 @@ export async function notifyWaStaffCheckin(data: WaStaffCheckinData): Promise<vo
   await sendWAToAdmins(msg);
 }
 
+export interface WaDailyUsageBooking {
+  facilityName: string;
+  customerName: string;
+  bookingDate: string;
+  startTime: string;
+  endTime: string;
+  bookingType: string;
+  numberOfPeople?: number | null;
+  checkedIn: boolean;
+}
+
+/**
+ * Sends the operational list to every configured admin destination. The
+ * scheduler decides when the list changed; this function only formats and
+ * delivers the message.
+ */
+export async function notifyWaDailyUsageList(params: {
+  usageDate: string;
+  bookings: WaDailyUsageBooking[];
+}): Promise<void> {
+  const { bookings } = params;
+  const dateLabel = new Date(`${params.usageDate}T00:00:00+07:00`).toLocaleDateString("id-ID", {
+    timeZone: "Asia/Jakarta",
+    weekday: "long",
+    day: "2-digit",
+    month: "long",
+    year: "numeric",
+  });
+
+  const byFacility = new Map<string, WaDailyUsageBooking[]>();
+  for (const booking of bookings) {
+    const group = byFacility.get(booking.facilityName) ?? [];
+    group.push(booking);
+    byFacility.set(booking.facilityName, group);
+  }
+
+  const sections = [...byFacility.entries()].map(([facilityName, facilityBookings]) => {
+    const lines = facilityBookings
+      .sort((a, b) => a.startTime.localeCompare(b.startTime) || a.customerName.localeCompare(b.customerName))
+      .map((booking, index) => {
+        const people = booking.numberOfPeople && booking.numberOfPeople > 1
+          ? ` · ${booking.numberOfPeople} orang`
+          : "";
+        const type = booking.bookingType ? ` · ${booking.bookingType}` : "";
+        const checkin = booking.checkedIn ? "✅" : "❌";
+        return `${index + 1}. ${booking.customerName} · ${booking.startTime}–${booking.endTime}${type}${people} ${checkin}`;
+      })
+      .join("\n");
+    return `🏟️ *${facilityName}*\n${lines}`;
+  });
+
+  const message =
+    `📋 *DAFTAR PEMAKAIAN SPORT CENTER*\n` +
+    `📅 *${dateLabel}*\n\n` +
+    `${sections.join("\n\n")}\n\n` +
+    `✅ Sudah check-in · ❌ Belum check-in\n` +
+    `_Daftar diperbarui otomatis saat ada perubahan booking._`;
+
+  await sendWAToAdmins(message);
+}
+
 export interface WaBookingPendingApprovalData {
   customerName: string;
   customerPhone: string;

@@ -276,6 +276,14 @@ ALTER TABLE sport_center.bookings
   ADD COLUMN IF NOT EXISTS reminder_day_sent_at timestamptz,
   ADD COLUMN IF NOT EXISTS payment_reminder_sent_at timestamptz;
 
+-- Daily admin WhatsApp usage-list delivery state
+CREATE TABLE IF NOT EXISTS sport_center.wa_daily_usage_snapshots (
+  id serial PRIMARY KEY,
+  usage_date text NOT NULL UNIQUE,
+  fingerprint text NOT NULL,
+  sent_at timestamptz NOT NULL DEFAULT NOW()
+);
+
 -- ============================================================
 -- 18. company_invoices table (idempotent) + bookings linkage
 -- ============================================================
