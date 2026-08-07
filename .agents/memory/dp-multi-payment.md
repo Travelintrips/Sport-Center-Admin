@@ -32,3 +32,8 @@ description: How DP + pelunasan settlement works — multiple payments per booki
 - `GET /bookings` and `GET /bookings/:order`: return `payments` (array, all payments) + `payment` (primary for backward compat) + `remainingAmount` (computed)
 
 **Why:** One payment record per booking was insufficient for DP split-payment; admins need to track each stage separately and confirm them independently.
+
+## Group booking DP total
+For bookings linked by `groupRef`, the DP ceiling, remaining balance, and payment-proof amount use the group's `totalPayment` across all sessions, not the individual session's `grandTotal`.
+
+**Why:** A recurring/group booking is presented and paid as one combined invoice; validating against one session incorrectly rejects a valid group DP.

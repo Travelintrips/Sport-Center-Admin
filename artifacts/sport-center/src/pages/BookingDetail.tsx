@@ -157,10 +157,14 @@ export default function BookingDetail() {
 
     // Deteksi payment_type dan amount yang tepat berdasarkan state booking
     const bPayments = ((booking as any).payments as any[]) ?? [];
+    const groupTotal = Number((booking as any).groupInfo?.groupTotalPayment ?? 0);
+    const paymentTotal = groupTotal > 0
+      ? groupTotal
+      : Number((booking as any).grandTotal ?? booking.totalPrice);
     const isDpMode =
       !!(booking as any).isDpPaid && Number((booking as any).downPayment || 0) > 0;
     let detectedType = "full_payment";
-    let detectedAmount: number = booking.totalPrice;
+    let detectedAmount: number = paymentTotal;
 
     if (isDpMode) {
       const hasDpActive = bPayments.some(
@@ -176,7 +180,7 @@ export default function BookingDetail() {
           (booking as any).remainingAmount ??
           Math.max(
             0,
-            booking.totalPrice - Number((booking as any).downPayment || 0),
+            paymentTotal - Number((booking as any).downPayment || 0),
           );
       }
     }
@@ -582,6 +586,14 @@ export default function BookingDetail() {
                       <div className="font-semibold text-sm text-violet-800 dark:text-violet-200">{t("Bayar Down Payment", "Pay Down Payment")}</div>
                       <button type="button" onClick={() => { setDpMode(false); setDpInputAmount(""); }} className="text-xs text-muted-foreground hover:text-foreground">✕</button>
                     </div>
+                    {(booking as any).groupInfo && (
+                      <div className="flex justify-between items-center rounded-lg bg-white/70 dark:bg-background/50 px-3 py-2 text-xs text-violet-800 dark:text-violet-200">
+                        <span>{t("Total semua sesi", "All sessions total")}</span>
+                        <span className="font-bold">
+                          Rp {Number((booking as any).groupInfo.groupTotalPayment).toLocaleString("id-ID")}
+                        </span>
+                      </div>
+                    )}
                     <div className="space-y-1.5">
                       <label className="text-xs text-muted-foreground font-medium">{t("Jumlah DP (Rp)", "DP Amount (Rp)")}</label>
                       <input
@@ -596,7 +608,7 @@ export default function BookingDetail() {
                     {dpInputAmount && Number(dpInputAmount) > 0 && (
                       <div className="text-xs space-y-1 text-muted-foreground">
                         <div className="flex justify-between"><span>{t("DP Dibayar", "DP Paid")}:</span><span className="font-bold text-violet-700 dark:text-violet-300">Rp {Number(dpInputAmount).toLocaleString("id-ID")}</span></div>
-                        <div className="flex justify-between"><span>{t("Sisa", "Remaining")}:</span><span className="font-bold">Rp {Math.max(0, Number(booking.totalPrice) - Number(dpInputAmount)).toLocaleString("id-ID")}</span></div>
+                        <div className="flex justify-between"><span>{t("Sisa", "Remaining")}:</span><span className="font-bold">Rp {Math.max(0, Number((booking as any).groupInfo?.groupTotalPayment ?? (booking as any).grandTotal ?? booking.totalPrice) - Number(dpInputAmount)).toLocaleString("id-ID")}</span></div>
                       </div>
                     )}
                     <Button

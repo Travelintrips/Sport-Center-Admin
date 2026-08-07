@@ -108,7 +108,8 @@ async function getBookingWithPayment(id: number) {
     payments: allPayments.map((p) => ({ ...p, amount: Number(p.amount) })),
     remainingAmount: (() => {
       const total =
-        booking.grandTotal != null ? Number(booking.grandTotal) : Number(booking.totalPrice);
+        groupInfo?.groupTotalPayment ??
+        (booking.grandTotal != null ? Number(booking.grandTotal) : Number(booking.totalPrice));
       const confirmedDp = allPayments
         .filter((p) => p.paymentType === "dp" && p.status === "confirmed")
         .reduce((s, p) => s + Number(p.amount), 0);
@@ -972,7 +973,14 @@ router.patch("/bookings/:id/dp", async (req, res) => {
     const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, id)).limit(1);
     if (!booking) { res.status(404).json({ error: "Booking tidak ditemukan" }); return; }
 
-    const grandTotal = Number(booking.grandTotal ?? booking.totalPrice);
+    let grandTotal = Number(booking.grandTotal ?? booking.totalPrice);
+    if (booking.groupRef) {
+      const [group] = await db.select({ totalPayment: bookingGroupsTable.totalPayment })
+        .from(bookingGroupsTable)
+        .where(eq(bookingGroupsTable.groupRef, booking.groupRef))
+        .limit(1);
+      if (group) grandTotal = Number(group.totalPayment);
+    }
     const dp = Number(downPaymentAmount);
 
     if (dp > grandTotal) {
