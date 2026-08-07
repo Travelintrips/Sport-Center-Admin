@@ -180,6 +180,51 @@ export async function notifyBookingCreated(data: BookingNotifData): Promise<void
   }
 }
 
+export interface RecurringBookingSessionNotif {
+  orderNumber: string;
+  facilityName: string;
+  bookingDate: string;
+  startTime: string;
+  endTime: string;
+  durationHours: number;
+  totalPrice: number;
+}
+
+export async function notifyRecurringBookingGroupCreated(data: {
+  customerName: string;
+  customerPhone: string;
+  groupRef?: string | null;
+  totalPayment: number;
+  sessions: RecurringBookingSessionNotif[];
+  skippedDates?: string[];
+}): Promise<void> {
+  if (data.sessions.length === 0) return;
+
+  const sessionLines = data.sessions
+    .map((session, index) =>
+      `${index + 1}. *${session.orderNumber}* — ${session.facilityName}\n` +
+      `   ${session.bookingDate} | ${session.startTime}–${session.endTime} | ${session.durationHours} jam | Rp ${session.totalPrice.toLocaleString("id-ID")}`,
+    )
+    .join("\n");
+
+  const skippedLine = data.skippedDates?.length
+    ? `\n\n⚠️ Tidak dibuat karena slot bentrok: ${data.skippedDates.join(", ")}`
+    : "";
+
+  const message =
+    `🏅 *BOOKING GRUP / BERULANG BARU*\n\n` +
+    `Customer: *${data.customerName}*\n` +
+    `WA: *${data.customerPhone}*\n` +
+    (data.groupRef ? `Grup: *${data.groupRef}*\n` : "") +
+    `Jumlah sesi: *${data.sessions.length}*\n\n` +
+    `📋 *Daftar sesi:*\n${sessionLines}\n\n` +
+    `💰 *Total semua sesi: Rp ${data.totalPayment.toLocaleString("id-ID")}*` +
+    `${skippedLine}\n\n` +
+    `Status: *Menunggu pembayaran* ⏳`;
+
+  await sendWAToAdmins(message);
+}
+
 export async function notifyPaymentConfirmed(data: BookingNotifData): Promise<void> {
   // Attempt to render WA message from company document template engine (kwitansi)
   if (data.bookingId) {

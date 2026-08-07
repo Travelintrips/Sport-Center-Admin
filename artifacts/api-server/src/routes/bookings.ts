@@ -3,7 +3,7 @@ import { db, bookingsTable, facilitiesTable, paymentsTable, promosTable, discoun
 import { eq, and, sql, or, ilike, desc, inArray } from "drizzle-orm";
 import { adminMiddleware, authMiddleware, verifyToken } from "../lib/auth";
 import { broadcastAvailabilityChange } from "../lib/supabase";
-import { notifyBookingCreated, notifyPaymentConfirmed, notifyBookingCancelled, notifyCompanyBookingCreated, notifyDpPaid, notifyWaAdminNewBooking } from "../lib/notifications";
+import { notifyBookingCreated, notifyPaymentConfirmed, notifyBookingCancelled, notifyCompanyBookingCreated, notifyDpPaid, notifyWaAdminNewBooking, notifyRecurringBookingGroupCreated } from "../lib/notifications";
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
 import { syncBookingToBizportal, syncStatusToBizportal } from "../lib/bizportalSync";
 import { calculateTax, recordTaxTransaction, reverseTaxTransaction } from "../lib/tax";
@@ -826,6 +826,25 @@ router.post("/bookings/recurring", async (req, res) => {
       // Update created array dengan groupRef
       for (const b of created) b.groupRef = groupRef;
     }
+
+    // Endpoint recurring membuat beberapa booking sekaligus, jadi kirim satu
+    // notifikasi admin yang merangkum semua sesi agar tidak terpecah/hilang.
+    notifyRecurringBookingGroupCreated({
+      customerName: String(customerName),
+      customerPhone,
+      groupRef,
+      totalPayment: grandTotalAmount,
+      sessions: created.map((b: any) => ({
+        orderNumber: String(b.orderNumber),
+        facilityName: String(b.facilityName ?? facility.name),
+        bookingDate: String(b.bookingDate),
+        startTime: String(b.startTime),
+        endTime: String(b.endTime),
+        durationHours: Number(b.durationHours),
+        totalPrice: Number(b.grandTotal ?? b.totalPrice),
+      })),
+      skippedDates: skipped,
+    }).catch((err) => console.error("[WA] notifyRecurringBookingGroupCreated error:", err));
 
     res.status(201).json({ created, skipped, totalBookings: created.length, grandTotal: grandTotalAmount, totalDpp, totalPpnAmount: totalPpn, groupRef });
   } catch (err) {
