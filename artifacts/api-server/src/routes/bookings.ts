@@ -4,9 +4,17 @@ import { eq, and, sql, or, ilike, desc, inArray, notExists, gte } from "drizzle-
 import { adminMiddleware, authMiddleware, verifyToken } from "../lib/auth";
 import { broadcastAvailabilityChange } from "../lib/supabase";
 
-import { notifyBookingCreated, notifyPaymentConfirmed, notifyBookingCancelled, notifyCompanyBookingCreated, notifyDpPaid, notifyWaAdminNewBooking, notifyRecurringBookingGroupCreated } from "../lib/notifications";
-
-import { notifyBookingCreated, notifyPaymentConfirmed, notifyBookingCancelled, notifyCompanyBookingCreated, notifyDpPaid, notifyWaAdminNewBooking, notifyAdminBookingApprovalRequest, notifyPaymentProofUploaded } from "../lib/notifications";
+import {
+  notifyBookingCreated,
+  notifyPaymentConfirmed,
+  notifyBookingCancelled,
+  notifyCompanyBookingCreated,
+  notifyDpPaid,
+  notifyWaAdminNewBooking,
+  notifyRecurringBookingGroupCreated,
+  notifyAdminBookingApprovalRequest,
+  notifyPaymentProofUploaded,
+} from "../lib/notifications";
 import { sendInvoiceToCustomer, sendGroupInvoiceToCustomer } from "../lib/invoiceDelivery";
 import { sendRekapPemakaianToAdmin } from "../lib/rekapPemakaian";
 import { createWaToken } from "../lib/waTokens";
@@ -138,10 +146,6 @@ async function getBookingWithPayment(id: number) {
     payment: payment ? { ...payment, amount: Number(payment.amount) } : null,
     payments: allPayments.map((p) => ({ ...p, amount: Number(p.amount) })),
     remainingAmount: (() => {
-
-      const total =
-        groupInfo?.groupTotalPayment ??
-        (booking.grandTotal != null ? Number(booking.grandTotal) : Number(booking.totalPrice));
 
       const total = payableTotal;
 

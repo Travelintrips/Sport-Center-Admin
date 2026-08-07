@@ -7,4 +7,4 @@ Admin booking payment-method selectors should read active method names from the 
 
 **Why:** Payment method configuration is environment-specific and administrators need to edit historical payments without losing or blanking an old method after configuration changes.
 
-**How to apply:** Keep the booking payment update endpoint independent from the current active-method list; validate a non-empty trimmed label, preserve existing payment status/proof/amount, and invalidate the booking list after saving.
+**How to apply:** Keep the booking payment update endpoint independent from the current active-method list; validate a non-empty trimmed label, preserve existing payment status/proof/amount, and invalidate the booking list after saving. For manual customer proof uploads, normalize the submitted method to exactly `QRIS` or `Transfer Bank`; the customer QRIS option should require both the configured QR image and an active `qris` admin method.
