@@ -1,9 +1,9 @@
 import { Router } from "express";
-import { db, expensesTable, facilitiesTable, usersTable, publicExpensesTable, coaAccountsTable } from "@workspace/db";
+import { db, expensesTable, facilitiesTable, usersTable, publicExpensesTable, coaAccountsTable, vendorsTable } from "@workspace/db";
 import { eq, desc, and, gte, lte, sql, asc, inArray } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
-import { createExpenseJournalEntry } from "../lib/accounting";
+import { createExpenseJournalEntry, createPublicExpenseAccountingEntry } from "../lib/accounting";
 
 const router = Router();
 
@@ -38,10 +38,22 @@ async function getFacilityName(facilityId: number | null): Promise<string | null
   return f?.name ?? null;
 }
 
+async function getVendor(vendorId: number | null) {
+  if (!vendorId) return null;
+  const [v] = await db.select().from(vendorsTable).where(eq(vendorsTable.id, vendorId)).limit(1);
+  return v ?? null;
+}
+
 async function getCoaAccount(coaAccountId: number | null) {
   if (!coaAccountId) return null;
   const [a] = await db.select().from(coaAccountsTable).where(eq(coaAccountsTable.id, coaAccountId)).limit(1);
   return a ?? null;
+}
+
+async function getVendorById(vendorId: number | null): Promise<{ id: number; name: string } | null> {
+  if (!vendorId) return null;
+  const [v] = await db.select({ id: vendorsTable.id, name: vendorsTable.name }).from(vendorsTable).where(eq(vendorsTable.id, vendorId)).limit(1);
+  return v ?? null;
 }
 
 async function syncToPublic(expense: typeof expensesTable.$inferSelect, facilityName: string | null) {
@@ -157,8 +169,18 @@ router.get("/admin/expenses", adminMiddleware, async (req, res) => {
       : [];
     const coaMap = Object.fromEntries(coaAccounts.map((a) => [a.id, a]));
 
+    // Fetch all vendors referenced by these expenses
+    const vendorIds = [...new Set(expenses.map((e) => (e as any).vendorId).filter(Boolean))] as number[];
+    const vendors = vendorIds.length
+      ? await db.select().from(vendorsTable).where(inArray(vendorsTable.id, vendorIds))
+      : [];
+    const vendorMap = Object.fromEntries(vendors.map((v) => [v.id, v]));
+
     const filtered = vendorName
-      ? expenses.filter((e) => e.vendorName?.toLowerCase().includes((vendorName as string).toLowerCase()))
+      ? expenses.filter((e) => {
+          const vName = (e as any).vendorId ? vendorMap[(e as any).vendorId]?.name ?? e.vendorName : e.vendorName;
+          return vName?.toLowerCase().includes((vendorName as string).toLowerCase());
+        })
       : expenses;
 
     const now = new Date();
@@ -178,14 +200,20 @@ router.get("/admin/expenses", adminMiddleware, async (req, res) => {
     };
 
     res.json({
-      expenses: filtered.map((e) => ({
-        ...e,
-        amount: Number(e.amount),
-        ppnAmount: Number(e.ppnAmount),
-        totalAmount: Number(e.totalAmount),
-        facilityName: e.facilityId ? facilityMap[e.facilityId] ?? null : null,
-        coaAccount: e.coaAccountId ? coaMap[e.coaAccountId] ?? null : null,
-      })),
+      expenses: filtered.map((e) => {
+        const vendorId = (e as any).vendorId as number | null;
+        const vendor = vendorId ? vendorMap[vendorId] ?? null : null;
+        return {
+          ...e,
+          amount: Number(e.amount),
+          ppnAmount: Number(e.ppnAmount),
+          totalAmount: Number(e.totalAmount),
+          facilityName: e.facilityId ? facilityMap[e.facilityId] ?? null : null,
+          coaAccount: e.coaAccountId ? coaMap[e.coaAccountId] ?? null : null,
+          vendor,
+          vendorName: vendor?.name ?? e.vendorName ?? null,
+        };
+      }),
       summary,
       categories: EXPENSE_CATEGORIES,
     });
@@ -219,6 +247,7 @@ router.get("/admin/expenses/:id", adminMiddleware, async (req, res) => {
     }
 
     const coaAccount = await getCoaAccount(expense.coaAccountId);
+    const vendor = await getVendor((expense as any).vendorId ?? null);
 
     res.json({
       ...expense,
@@ -229,6 +258,8 @@ router.get("/admin/expenses/:id", adminMiddleware, async (req, res) => {
       createdByName,
       approvedByName,
       coaAccount,
+      vendor,
+      vendorName: vendor?.name ?? expense.vendorName ?? null,
     });
   } catch (err) {
     req.log.error({ err }, "Get expense error");
@@ -241,7 +272,7 @@ router.post("/admin/expenses", adminMiddleware, async (req, res) => {
     const user = getUserFromReq(req);
     const { ipAddress, userAgent } = getClientInfo(req);
     const {
-      expenseDate, category, coaAccountId, description, vendorName, facilityId,
+      expenseDate, category, coaAccountId, description, vendorId, vendorName, facilityId,
       amount, ppnAmount = 0, paymentMethod, paymentAccount, receiptUrl, receiptUrls, notes,
     } = req.body;
 
@@ -263,6 +294,14 @@ router.post("/admin/expenses", adminMiddleware, async (req, res) => {
     }
     if (!resolvedCategory) resolvedCategory = "Lain-lain";
 
+    // Resolve vendor name snapshot from vendor master
+    const resolvedVendorId = vendorId ? Number(vendorId) : null;
+    let resolvedVendorName = vendorName || null;
+    if (resolvedVendorId && !resolvedVendorName) {
+      const v = await getVendorById(resolvedVendorId);
+      resolvedVendorName = v?.name ?? null;
+    }
+
     const amountNum = Number(amount);
     const ppnNum = Number(ppnAmount);
     const totalNum = amountNum + ppnNum;
@@ -275,7 +314,8 @@ router.post("/admin/expenses", adminMiddleware, async (req, res) => {
       category: resolvedCategory,
       coaAccountId: coaAccountId ? Number(coaAccountId) : null,
       description,
-      vendorName: vendorName || null,
+      vendorId: resolvedVendorId,
+      vendorName: resolvedVendorName,
       facilityId: facilityId ? Number(facilityId) : null,
       amount: String(amountNum),
       ppnAmount: String(ppnNum),
@@ -287,23 +327,35 @@ router.post("/admin/expenses", adminMiddleware, async (req, res) => {
       receiptUrls: Array.isArray(receiptUrls) ? receiptUrls : [],
       notes: notes || null,
       createdBy: user.userId ?? null,
-    }).returning();
+    } as any).returning();
 
     await logAudit({
       ...user, action: "EXPENSE_CREATED", entity: "expense", entityId: expense!.id,
-      after: expense, ipAddress, userAgent,
+      after: { ...expense, vendorId: resolvedVendorId, vendorName: resolvedVendorName },
+      ipAddress, userAgent,
     });
+
+    if (resolvedVendorId) {
+      await logAudit({
+        ...user, action: "EXPENSE_VENDOR_SELECTED", entity: "expense", entityId: expense!.id,
+        after: { vendorId: resolvedVendorId, vendorName: resolvedVendorName, expenseNo: expense!.expenseNo },
+        ipAddress, userAgent,
+      });
+    }
 
     const facilityName = await getFacilityName(expense!.facilityId);
     await syncToPublic(expense!, facilityName);
 
     const coaAccount = await getCoaAccount(expense!.coaAccountId);
+    const vendor = await getVendor(resolvedVendorId);
     res.status(201).json({
       ...expense!,
       amount: Number(expense!.amount),
       ppnAmount: Number(expense!.ppnAmount),
       totalAmount: Number(expense!.totalAmount),
       coaAccount,
+      vendor,
+      vendorName: vendor?.name ?? resolvedVendorName,
     });
   } catch (err) {
     req.log.error({ err }, "Create expense error");
@@ -328,7 +380,7 @@ router.patch("/admin/expenses/:id", adminMiddleware, async (req, res) => {
     }
 
     const {
-      expenseDate, category, coaAccountId, description, vendorName, facilityId,
+      expenseDate, category, coaAccountId, description, vendorId, vendorName, facilityId,
       amount, ppnAmount, paymentMethod, paymentAccount, receiptUrl, receiptUrls, notes,
     } = req.body;
 
@@ -340,6 +392,15 @@ router.patch("/admin/expenses/:id", adminMiddleware, async (req, res) => {
       if (coaAcc) resolvedCategory = coaAcc.name;
     }
 
+    // Resolve vendor
+    const existingVendorId = (existing as any).vendorId ?? null;
+    const newVendorId = vendorId !== undefined ? (vendorId ? Number(vendorId) : null) : existingVendorId;
+    let newVendorName = vendorName !== undefined ? vendorName || null : existing.vendorName;
+    if (newVendorId && vendorId !== undefined && !vendorName) {
+      const v = await getVendorById(newVendorId);
+      newVendorName = v?.name ?? null;
+    }
+
     const amountNum = amount !== undefined ? Number(amount) : Number(existing.amount);
     const ppnNum = ppnAmount !== undefined ? Number(ppnAmount) : Number(existing.ppnAmount);
     const totalNum = amountNum + ppnNum;
@@ -349,7 +410,8 @@ router.patch("/admin/expenses/:id", adminMiddleware, async (req, res) => {
       category: resolvedCategory,
       coaAccountId: newCoaId,
       description: description ?? existing.description,
-      vendorName: vendorName !== undefined ? vendorName || null : existing.vendorName,
+      vendorId: newVendorId,
+      vendorName: newVendorName,
       facilityId: facilityId !== undefined ? (facilityId ? Number(facilityId) : null) : existing.facilityId,
       amount: String(amountNum),
       ppnAmount: String(ppnNum),
@@ -359,16 +421,25 @@ router.patch("/admin/expenses/:id", adminMiddleware, async (req, res) => {
       receiptUrl: receiptUrl !== undefined ? receiptUrl || null : existing.receiptUrl,
       receiptUrls: receiptUrls !== undefined ? (Array.isArray(receiptUrls) ? receiptUrls : []) : (existing.receiptUrls ?? []),
       notes: notes !== undefined ? notes || null : existing.notes,
-    }).where(eq(expensesTable.id, id)).returning();
+    } as any).where(eq(expensesTable.id, id)).returning();
 
     await logAudit({
       ...user, action: "EXPENSE_UPDATED", entity: "expense", entityId: id,
       before: existing, after: updated, ipAddress, userAgent,
     });
 
+    if (newVendorId && newVendorId !== existingVendorId) {
+      await logAudit({
+        ...user, action: "EXPENSE_VENDOR_SELECTED", entity: "expense", entityId: id,
+        after: { vendorId: newVendorId, vendorName: newVendorName, expenseNo: existing.expenseNo },
+        ipAddress, userAgent,
+      });
+    }
+
     const facilityName = await getFacilityName(updated!.facilityId);
     await syncToPublic(updated!, facilityName);
     const coaAccount = await getCoaAccount(updated!.coaAccountId);
+    const vendor = await getVendor(newVendorId);
 
     res.json({
       ...updated!,
@@ -376,6 +447,8 @@ router.patch("/admin/expenses/:id", adminMiddleware, async (req, res) => {
       ppnAmount: Number(updated!.ppnAmount),
       totalAmount: Number(updated!.totalAmount),
       coaAccount,
+      vendor,
+      vendorName: vendor?.name ?? newVendorName,
     });
   } catch (err) {
     req.log.error({ err }, "Update expense error");
@@ -472,6 +545,20 @@ router.patch("/admin/expenses/:id/status", adminMiddleware, async (req, res) => 
           await db.update(expensesTable).set({ journalId: `JRN-${journalId}` }).where(eq(expensesTable.id, id));
           updated!.journalId = `JRN-${journalId}`;
         }
+
+        // Post ke public accounting: DEBIT expense account → CREDIT bank account (1-1020-CST dll)
+        // Ini memastikan pengeluaran TIDAK mendebit Bank Mandiri CST — hanya mengkreditnya.
+        createPublicExpenseAccountingEntry(
+          existing.id,
+          existing.expenseNo,
+          existing.description,
+          coaAccount?.code,
+          amountNum,
+          ppnNum,
+          totalNum,
+          existing.paymentMethod ?? "Transfer",
+          today,
+        ).catch((err) => req.log.warn({ err, expenseNo: existing.expenseNo }, "[accounting] createPublicExpenseAccountingEntry error (non-fatal)"));
       } catch (journalErr) {
         req.log.warn({ journalErr }, "Failed to create expense journal (non-fatal)");
       }

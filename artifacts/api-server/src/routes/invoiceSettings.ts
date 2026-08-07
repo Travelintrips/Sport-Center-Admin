@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
 import multer from "multer";
-import { BUCKETS, uploadToStorage } from "../lib/supabaseStorage";
+import { uploadFile, BUCKETS } from "../lib/storage";
 import { randomUUID } from "crypto";
 
 const router = Router();
@@ -106,7 +106,7 @@ router.post("/admin/invoice-settings/upload-logo", adminMiddleware, upload.singl
     if (!req.file) { res.status(400).json({ error: "File diperlukan" }); return; }
     const ext = req.file.originalname.split(".").pop() ?? "png";
     const filename = `invoice-logo-${randomUUID()}.${ext}`;
-    const url = await uploadToStorage(BUCKETS.facility, filename, req.file.buffer, req.file.mimetype);
+    const url = await uploadFile(BUCKETS.facility, filename, req.file.buffer, req.file.mimetype);
 
     const existing = await getOrCreate();
     const [updated] = await db
@@ -140,7 +140,7 @@ router.post("/admin/invoice-settings/upload-signature", adminMiddleware, upload.
     if (!req.file) { res.status(400).json({ error: "File diperlukan" }); return; }
     const ext = req.file.originalname.split(".").pop() ?? "png";
     const filename = `invoice-signature-${randomUUID()}.${ext}`;
-    const url = await uploadToStorage(BUCKETS.facility, filename, req.file.buffer, req.file.mimetype);
+    const url = await uploadFile(BUCKETS.facility, filename, req.file.buffer, req.file.mimetype);
 
     const existing = await getOrCreate();
     const [updated] = await db

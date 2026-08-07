@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import {
   useListCompanyInvoices, useGenerateCompanyInvoice, useUpdateCompanyInvoice,
   useListCustomers,
@@ -17,7 +17,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Building2, Plus, CheckCircle, FileText, AlertCircle, RefreshCw, Eye,
   User, Phone, Mail, MapPin, Download, MessageSquare, AlertTriangle,
-  Package, Settings, CheckSquare, XSquare, Send,
+  Package, Settings, CheckSquare, XSquare, Send, Upload, ImageIcon, X,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useQueryClient, useQuery, useMutation } from "@tanstack/react-query";
@@ -62,6 +62,11 @@ function getMonthOptions() {
   return opts;
 }
 
+function getCurrentPeriodMonth() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+}
+
 function periodLabel(periodMonth: string) {
   const [year, month] = periodMonth.split("-");
   return new Date(parseInt(year), parseInt(month) - 1, 1).toLocaleDateString("id-ID", { year: "numeric", month: "long" });
@@ -100,7 +105,7 @@ function taxBreakdown(totalAmountInclusive: number) {
 
 // ─── PDF Print Helpers ────────────────────────────────────────────────────────
 
-function printInvoicePdf(invoice: any) {
+function printInvoicePdf(invoice: any, signatureUrl?: string | null, financeName?: string | null, financeTitle?: string | null) {
   const items: any[] = invoice.items ?? [];
   const periodStr = periodLabel(invoice.periodMonth);
   const today = new Date().toLocaleDateString("id-ID", { day:"numeric", month:"long", year:"numeric" });
@@ -147,9 +152,6 @@ function printInvoicePdf(invoice: any) {
     .badge-paid { background:#dcfce7; color:#15803d; padding:3px 10px; border-radius:99px; font-size:11px; font-weight:700; }
     .section-title { font-size:11px; color:#9ca3af; font-weight:700; text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px; }
     .payment-box { border:1px solid #e5e7eb; border-radius:6px; padding:12px 14px; background:#f0fdf4; margin-top:14px; }
-    .sign-section { margin-top:28px; display:flex; justify-content:space-between; }
-    .sign-box { text-align:center; }
-    .sign-line { margin:52px 0 6px; border-bottom:1px solid #111; }
   </style></head><body>
 
   <!-- HEADER -->
@@ -232,27 +234,17 @@ function printInvoicePdf(invoice: any) {
   ${invoice.notes ? `<div style="margin-top:12px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;padding:10px;font-size:11px;"><strong>Catatan:</strong> ${invoice.notes}</div>` : ""}
   ${invoice.paidAt ? `<div style="margin-top:10px;color:#15803d;font-size:11px;">✓ Dibayar pada ${new Date(invoice.paidAt).toLocaleDateString("id-ID", { day:"numeric", month:"long", year:"numeric" })}</div>` : ""}
 
-  <!-- TANDA TANGAN & MATERAI -->
-  <div class="sign-section">
-    <div class="sign-box" style="width:180px;">
-      <div style="font-size:11px;">Diterima oleh,</div>
-      <div style="font-size:10px;color:#6b7280;">(${invoice.companyName})</div>
-      <div class="sign-line"></div>
-      <div style="font-size:11px;font-weight:600;">${invoice.picName ?? "......................................"}</div>
-      <div style="font-size:10px;color:#6b7280;">Jabatan: ...............................</div>
-    </div>
-    <div class="sign-box" style="width:200px;">
-      <div style="font-size:11px;">Hormat kami,</div>
-      <div style="font-size:10px;color:#6b7280;">Sport Center Soekarno-Hatta</div>
-      <div style="border:1px dashed #d1d5db;border-radius:50%;width:64px;height:64px;margin:8px auto 0;display:flex;align-items:center;justify-content:center;">
-        <span style="font-size:8px;color:#9ca3af;text-align:center;line-height:1.3;">Materai<br/>Rp 10.000</span>
-      </div>
-      <div style="border:2px dashed #ea580c;border-radius:50%;width:80px;height:80px;margin:-20px auto 0;display:flex;align-items:center;justify-content:center;">
-        <span style="font-size:7px;color:#ea580c;text-align:center;line-height:1.4;font-weight:700;">STEMPEL<br/>SPORT CENTER<br/>SOEKARNO-HATTA</span>
-      </div>
-      <div class="sign-line" style="margin-top:4px;"></div>
-      <div style="font-size:11px;font-weight:600;">Admin Sport Center</div>
-      <div style="font-size:10px;color:#6b7280;">Sport Center Soekarno-Hatta</div>
+  <!-- TANDA TANGAN -->
+  <div style="margin-top:28px;display:flex;justify-content:flex-end;">
+    <div style="text-align:center;min-width:200px;">
+      <div style="font-size:12px;color:#374151;margin-bottom:4px;">Hormat kami,</div>
+      ${signatureUrl
+        ? `<img src="${signatureUrl}" alt="Tanda Tangan" style="height:72px;width:auto;object-fit:contain;margin:4px 0;" />`
+        : `<div style="height:80px;"></div>`
+      }
+      <div style="border-bottom:1px solid #374151;width:140px;margin:0 auto 6px;"></div>
+      <div style="font-weight:700;font-size:11.5px;color:#111827;">${financeName || "Admin Sport Center"}</div>
+      <div style="font-size:10.5px;color:#374151;">${financeTitle || "Sport Center Soekarno-Hatta"}</div>
     </div>
   </div>
 
@@ -550,13 +542,13 @@ function printBeritaAcara(invoice: any) {
   if (win) { win.document.write(html); win.document.close(); }
 }
 
-async function downloadBillingPackage(invoice: any, requirements: any[]) {
+async function downloadBillingPackage(invoice: any, requirements: any[], signatureUrl?: string | null, financeName?: string | null, financeTitle?: string | null) {
   const docTypes = requirements.map((r: any) => r.documentType);
   const delays: Array<{ fn: () => void; delay: number; doc: string }> = [];
   let delay = 0;
 
   if (docTypes.includes("invoice")) {
-    delays.push({ fn: () => printInvoicePdf(invoice), delay, doc: "invoice" });
+    delays.push({ fn: () => printInvoicePdf(invoice, signatureUrl, financeName, financeTitle), delay, doc: "invoice" });
     delay += 800;
   }
   if (docTypes.includes("lampiran_pemakaian")) {
@@ -731,11 +723,17 @@ function BillingDocumentsTab({ companies }: { companies: any[] }) {
 
 // ─── Generate Invoice Dialog ──────────────────────────────────────────────────
 
-function GenerateInvoiceDialog({ onClose }: { onClose: () => void }) {
+function GenerateInvoiceDialog({
+  onClose,
+  initialCompanyId,
+}: {
+  onClose: () => void;
+  initialCompanyId?: number | null;
+}) {
   const { toast } = useToast();
   const qc = useQueryClient();
-  const [companyId, setCompanyId] = useState("");
-  const [periodMonth, setPeriodMonth] = useState(getMonthOptions()[0].value);
+  const [companyId, setCompanyId] = useState(initialCompanyId ? String(initialCompanyId) : "");
+  const [periodMonth, setPeriodMonth] = useState(getCurrentPeriodMonth());
   const [notes, setNotes] = useState("");
   const [showPreview, setShowPreview] = useState(false);
   const generateMutation = useGenerateCompanyInvoice();
@@ -763,7 +761,7 @@ function GenerateInvoiceDialog({ onClose }: { onClose: () => void }) {
 
   const handleGenerate = async () => {
     if (!companyId) { toast({ title: "Pilih perusahaan", variant: "destructive" }); return; }
-    if (!existingInvoice && preview?.bookingCount === 0) {
+    if (!existingInvoice && (preview?.bookingCount ?? 0) === 0) {
       toast({ title: "Tidak ada booking untuk ditagihkan pada periode ini", variant: "destructive" });
       return;
     }
@@ -921,6 +919,12 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
   const [sendingWa, setSendingWa] = useState(false);
   const [rebuilding, setRebuilding] = useState(false);
   const [generatingPackage, setGeneratingPackage] = useState(false);
+  const [proofFile, setProofFile] = useState<File | null>(null);
+  const [proofPreview, setProofPreview] = useState<string | null>(null);
+  const [paymentNotes, setPaymentNotes] = useState("");
+  const [uploadingProof, setUploadingProof] = useState(false);
+  const [markPaidOnUpload, setMarkPaidOnUpload] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { data: invoice, isLoading } = useQuery({
     queryKey: ["company-invoice-detail", invoiceId],
@@ -934,6 +938,16 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
     },
     staleTime: 0,
     refetchOnMount: "always",
+  });
+
+  const { data: invoiceSettings } = useQuery({
+    queryKey: ["invoice-settings-public"],
+    queryFn: async () => {
+      const res = await fetch("/api/invoice-settings/public");
+      if (!res.ok) return null;
+      return res.json();
+    },
+    staleTime: 5 * 60 * 1000,
   });
 
   const { data: billingDocStatus } = useQuery({
@@ -980,6 +994,51 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
     }
   };
 
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setProofFile(file);
+    if (file.type.startsWith("image/")) {
+      const reader = new FileReader();
+      reader.onload = (ev) => setProofPreview(ev.target?.result as string);
+      reader.readAsDataURL(file);
+    } else {
+      setProofPreview(null);
+    }
+  };
+
+  const handleUploadProof = async () => {
+    if (!proofFile && !paymentNotes.trim()) {
+      toast({ title: "Pilih file bukti atau isi catatan terlebih dahulu", variant: "destructive" });
+      return;
+    }
+    setUploadingProof(true);
+    try {
+      const token = getToken();
+      const formData = new FormData();
+      if (proofFile) formData.append("file", proofFile);
+      formData.append("paymentNotes", paymentNotes);
+      formData.append("markPaid", String(markPaidOnUpload));
+      const res = await fetch(`/api/company-invoices/${invoiceId}/upload-payment-proof`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token ?? ""}` },
+        body: formData,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Upload gagal");
+      toast({ title: "Bukti pembayaran berhasil disimpan" });
+      setProofFile(null);
+      setProofPreview(null);
+      setPaymentNotes("");
+      qc.invalidateQueries({ queryKey: ["company-invoice-detail", invoiceId] });
+      qc.invalidateQueries({ queryKey: getListCompanyInvoicesQueryKey() });
+    } catch (e: any) {
+      toast({ title: e?.message ?? "Gagal upload bukti", variant: "destructive" });
+    } finally {
+      setUploadingProof(false);
+    }
+  };
+
   const handleSendWa = async () => {
     setSendingWa(true);
     try {
@@ -1001,7 +1060,7 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
 
   const handleDownloadInvoice = async () => {
     if (!invoice) return;
-    printInvoicePdf(invoice);
+    printInvoicePdf(invoice, invoiceSettings?.signatureUrl, invoiceSettings?.financeName, invoiceSettings?.financeTitle);
     await auditBillingAction(invoiceId, "COMPANY_DOCUMENT_DOWNLOADED", ["invoice"]);
   };
 
@@ -1014,7 +1073,7 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
         { documentType: "lampiran_pemakaian" },
         { documentType: "kwitansi" },
       ];
-      const docs = await downloadBillingPackage(invoice, requirements);
+      const docs = await downloadBillingPackage(invoice, requirements, invoiceSettings?.signatureUrl, invoiceSettings?.financeName, invoiceSettings?.financeTitle);
       toast({
         title: "Billing Package sedang dibuka",
         description: `${docs.length} dokumen dibuka di tab baru untuk dicetak`,
@@ -1307,6 +1366,191 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
             Dibayar pada {new Date(invoice.paidAt).toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" })}
           </div>
         )}
+
+        {/* Upload Bukti Pembayaran */}
+        <div className="rounded-lg border p-4 space-y-3">
+          <div className="font-semibold text-sm flex items-center gap-2">
+            <Upload size={14} className="text-blue-600" />
+            Bukti Pembayaran Transfer
+          </div>
+
+          {/* Existing proof */}
+          {invoice.paymentProofUrl && (
+            <div className="space-y-2">
+              <div className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Bukti yang sudah diupload</div>
+              {invoice.paymentProofUrl.match(/\.(jpg|jpeg|png|webp|gif|heic)$/i) ? (
+                <a href={invoice.paymentProofUrl} target="_blank" rel="noopener noreferrer" className="block">
+                  <img
+                    src={invoice.paymentProofUrl}
+                    alt="Bukti pembayaran"
+                    className="max-h-48 rounded-lg border object-contain bg-muted/20 cursor-zoom-in hover:opacity-90 transition-opacity"
+                  />
+                </a>
+              ) : (
+                <a
+                  href={invoice.paymentProofUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-2 text-sm text-blue-600 hover:underline"
+                >
+                  <FileText size={14} /> Lihat Bukti Pembayaran (PDF)
+                </a>
+              )}
+              {invoice.paymentNotes && (
+                <div className="text-sm text-muted-foreground bg-muted/30 rounded p-2">{invoice.paymentNotes}</div>
+              )}
+            </div>
+          )}
+
+          {/* Upload area */}
+          {invoice.status !== "paid" && (
+            <div className="space-y-3 pt-1 border-t">
+              <div className="text-xs text-muted-foreground">
+                {invoice.paymentProofUrl ? "Perbarui bukti pembayaran" : "Upload bukti transfer dari perusahaan"}
+              </div>
+
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*,application/pdf"
+                className="hidden"
+                onChange={handleFileChange}
+              />
+
+              {proofPreview ? (
+                <div className="relative inline-block">
+                  <img src={proofPreview} alt="Preview" className="max-h-40 rounded-lg border object-contain bg-muted/20" />
+                  <button
+                    type="button"
+                    onClick={() => { setProofFile(null); setProofPreview(null); if (fileInputRef.current) fileInputRef.current.value = ""; }}
+                    className="absolute -top-2 -right-2 bg-destructive text-white rounded-full p-0.5 hover:bg-destructive/80"
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              ) : proofFile ? (
+                <div className="flex items-center gap-2 text-sm bg-muted/30 rounded p-2">
+                  <FileText size={14} className="text-blue-600" />
+                  <span className="truncate flex-1">{proofFile.name}</span>
+                  <button type="button" onClick={() => { setProofFile(null); if (fileInputRef.current) fileInputRef.current.value = ""; }}>
+                    <X size={13} className="text-muted-foreground hover:text-destructive" />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="w-full flex items-center justify-center gap-2 border-2 border-dashed border-border rounded-lg py-6 text-sm text-muted-foreground hover:border-primary hover:text-primary transition-colors"
+                >
+                  <ImageIcon size={16} />
+                  Pilih foto atau PDF bukti transfer
+                </button>
+              )}
+
+              {proofFile && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5 text-xs"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <Upload size={12} /> Ganti File
+                </Button>
+              )}
+
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1 block">Catatan (opsional)</label>
+                <Textarea
+                  value={paymentNotes}
+                  onChange={(e) => setPaymentNotes(e.target.value)}
+                  placeholder="Mis: Transfer BCA tgl 5 Agustus 2026, ref TXN-12345..."
+                  rows={2}
+                  className="text-sm"
+                />
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="mark-paid"
+                  checked={markPaidOnUpload}
+                  onCheckedChange={(v) => setMarkPaidOnUpload(!!v)}
+                />
+                <label htmlFor="mark-paid" className="text-sm cursor-pointer select-none">
+                  Tandai invoice ini sebagai <strong>Lunas</strong> setelah upload
+                </label>
+              </div>
+
+              <Button
+                onClick={handleUploadProof}
+                disabled={uploadingProof || (!proofFile && !paymentNotes.trim())}
+                className="w-full gap-2"
+                size="sm"
+              >
+                <Upload size={13} />
+                {uploadingProof ? "Mengupload..." : "Simpan Bukti Pembayaran"}
+              </Button>
+            </div>
+          )}
+
+          {/* Show update option even if paid */}
+          {invoice.status === "paid" && (
+            <div className="space-y-3 pt-1 border-t">
+              <div className="text-xs text-muted-foreground">
+                {invoice.paymentProofUrl ? "Perbarui bukti pembayaran" : "Upload bukti transfer"}
+              </div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*,application/pdf"
+                className="hidden"
+                onChange={handleFileChange}
+              />
+              {proofPreview ? (
+                <div className="relative inline-block">
+                  <img src={proofPreview} alt="Preview" className="max-h-40 rounded-lg border object-contain bg-muted/20" />
+                  <button
+                    type="button"
+                    onClick={() => { setProofFile(null); setProofPreview(null); if (fileInputRef.current) fileInputRef.current.value = ""; }}
+                    className="absolute -top-2 -right-2 bg-destructive text-white rounded-full p-0.5 hover:bg-destructive/80"
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              ) : proofFile ? (
+                <div className="flex items-center gap-2 text-sm bg-muted/30 rounded p-2">
+                  <FileText size={14} className="text-blue-600" />
+                  <span className="truncate flex-1">{proofFile.name}</span>
+                  <button type="button" onClick={() => { setProofFile(null); if (fileInputRef.current) fileInputRef.current.value = ""; }}>
+                    <X size={13} className="text-muted-foreground hover:text-destructive" />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="flex items-center gap-2 text-sm text-blue-600 hover:underline"
+                >
+                  <Upload size={13} /> {invoice.paymentProofUrl ? "Perbarui bukti" : "Upload bukti"}
+                </button>
+              )}
+              {proofFile && (
+                <div className="space-y-2">
+                  <Textarea
+                    value={paymentNotes}
+                    onChange={(e) => setPaymentNotes(e.target.value)}
+                    placeholder="Catatan (opsional)"
+                    rows={2}
+                    className="text-sm"
+                  />
+                  <Button onClick={handleUploadProof} disabled={uploadingProof} size="sm" variant="outline" className="gap-2">
+                    <Upload size={13} /> {uploadingProof ? "Mengupload..." : "Simpan"}
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </DialogContent>
   );
@@ -1319,16 +1563,26 @@ export default function AdminCompanyBilling() {
   const [filterCompany, setFilterCompany] = useState("all");
   const [filterStatus, setFilterStatus] = useState("all");
   const [showGenerate, setShowGenerate] = useState(false);
+  const [generateCompanyId, setGenerateCompanyId] = useState<number | null>(null);
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<number | null>(null);
 
   const { data: companies } = useListCustomers({ accountType: "company" });
-  const { data: invoices, isLoading, refetch } = useListCompanyInvoices({
+  const { data: allInvoices } = useListCompanyInvoices();
+  const { data: invoices, isLoading, isError, error, refetch } = useListCompanyInvoices({
     companyCustomerId: filterCompany !== "all" ? parseInt(filterCompany) : undefined,
     status: filterStatus !== "all" ? filterStatus as "unpaid" | "paid" : undefined,
   });
 
   const totalUnpaid = invoices?.filter((i) => i.status === "unpaid").reduce((s, i) => s + i.grandTotal, 0) ?? 0;
   const totalPaid = invoices?.filter((i) => i.status === "paid").reduce((s, i) => s + i.grandTotal, 0) ?? 0;
+  const companiesWithoutInvoice = (companies ?? []).filter(
+    (company) => !(allInvoices ?? []).some((invoice) => invoice.companyCustomerId === company.id),
+  );
+
+  const openGenerate = (companyId?: number) => {
+    setGenerateCompanyId(companyId ?? null);
+    setShowGenerate(true);
+  };
 
   return (
     <div className="space-y-6">
@@ -1339,7 +1593,7 @@ export default function AdminCompanyBilling() {
         </div>
         <div className="flex gap-2">
           <Button variant="ghost" size="icon" onClick={() => refetch()}><RefreshCw size={16} /></Button>
-          <Button onClick={() => setShowGenerate(true)} className="gap-2"><Plus size={16} /> Generate Invoice</Button>
+          <Button onClick={() => openGenerate()} className="gap-2"><Plus size={16} /> Generate Invoice</Button>
         </div>
       </div>
 
@@ -1423,6 +1677,14 @@ export default function AdminCompanyBilling() {
 
             {isLoading ? (
               <div className="space-y-3">{[...Array(4)].map((_, i) => <Skeleton key={i} className="h-16" />)}</div>
+            ) : isError ? (
+              <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-center text-sm text-red-700">
+                <div className="font-semibold">Gagal memuat daftar invoice</div>
+                <div className="mt-1 text-xs">{(error as any)?.message ?? "Periksa login admin dan koneksi API."}</div>
+                <Button variant="outline" size="sm" className="mt-3" onClick={() => refetch()}>
+                  Coba Lagi
+                </Button>
+              </div>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
@@ -1453,7 +1715,7 @@ export default function AdminCompanyBilling() {
                             </div>
                           </td>
                           <td className="py-3 pr-4 text-muted-foreground">{label}</td>
-                          <td className="py-3 pr-4">{formatCurrency(inv.dpp ?? Math.round((inv.totalAmount ?? 0) / 1.11))}</td>
+                          <td className="py-3 pr-4">{formatCurrency(Math.round((inv.totalAmount ?? 0) / 1.11))}</td>
                           <td className="py-3 pr-4 text-muted-foreground">{formatCurrency(inv.ppnAmount)}</td>
                           <td className="py-3 pr-4 font-semibold">{formatCurrency(inv.grandTotal)}</td>
                           <td className="py-3 pr-4"><StatusBadge status={inv.status} /></td>
@@ -1476,6 +1738,37 @@ export default function AdminCompanyBilling() {
         </Card>
       )}
 
+      {activeTab === "invoices" && !isLoading && !isError && companiesWithoutInvoice.length > 0 && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Perusahaan Belum Memiliki Invoice</CardTitle>
+            <p className="text-xs text-muted-foreground">
+              Generate invoice per perusahaan untuk periode yang dipilih.
+            </p>
+          </CardHeader>
+          <CardContent className="p-4 pt-0">
+            <div className="divide-y">
+              {companiesWithoutInvoice.map((company) => (
+                <div key={company.id} className="flex items-center justify-between gap-4 py-3">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Building2 size={15} className="text-orange-500 shrink-0" />
+                    <div className="min-w-0">
+                      <div className="font-medium truncate">{company.companyName ?? company.name}</div>
+                      <div className="text-xs text-muted-foreground">
+                        Belum ada invoice di daftar
+                      </div>
+                    </div>
+                  </div>
+                  <Button size="sm" variant="outline" className="gap-1 shrink-0" onClick={() => openGenerate(company.id)}>
+                    <Plus size={13} /> Generate
+                  </Button>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Tab: Dokumen Billing */}
       {activeTab === "documents" && (
         <Card>
@@ -1491,7 +1784,15 @@ export default function AdminCompanyBilling() {
       )}
 
       <Dialog open={showGenerate} onOpenChange={(v) => !v && setShowGenerate(false)}>
-        {showGenerate && <GenerateInvoiceDialog onClose={() => setShowGenerate(false)} />}
+        {showGenerate && (
+          <GenerateInvoiceDialog
+            initialCompanyId={generateCompanyId}
+            onClose={() => {
+              setShowGenerate(false);
+              setGenerateCompanyId(null);
+            }}
+          />
+        )}
       </Dialog>
 
       <Dialog open={!!selectedInvoiceId} onOpenChange={(v) => !v && setSelectedInvoiceId(null)}>
