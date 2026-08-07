@@ -2115,6 +2115,8 @@ export default function AdminBookings() {
   const paymentMethodOptions = useMemo<PaymentMethodOption[]>(() => {
     const options: PaymentMethodOption[] = [
       { value: "Transfer Bank", label: "Transfer Bank" },
+      { value: "QRIS", label: "QRIS" },
+      { value: "Cash", label: "Cash / Tunai" },
     ];
     const configured = Array.isArray(paymentSettings?.paymentMethodsConfig)
       ? paymentSettings.paymentMethodsConfig
@@ -2122,12 +2124,10 @@ export default function AdminBookings() {
 
     for (const method of configured) {
       if (!method?.active || typeof method.name !== "string" || !method.name.trim()) continue;
-      // QRIS is the canonical manual-payment label used by the customer flow.
-      // Keep the admin list aligned with it even when production's configured
-      // display name is "Paylabs - QRIS".
-      const label = String(method.id ?? "").trim().toLowerCase() === "qris"
-        ? "QRIS"
-        : method.name.trim();
+      // QRIS is already in the static list above — skip duplicates from Paylabs config.
+      const id = String(method.id ?? "").trim().toLowerCase();
+      if (id === "qris") continue;
+      const label = method.name.trim();
       if (!options.some((option) => option.value === label)) {
         options.push({ value: label, label });
       }
