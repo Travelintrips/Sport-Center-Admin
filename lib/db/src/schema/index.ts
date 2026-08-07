@@ -42,3 +42,6 @@ export * from "./publicMemberships";
 export * from "./vendors";
 export * from "./coaAccounts";
 export * from "./waDailyUsageSnapshots";
+export * from "./waNotifLogs";
+export * from "./corporateBookingDocumentation";
+export * from "./paylabsSettings";

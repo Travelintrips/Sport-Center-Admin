@@ -59,7 +59,7 @@ function buildDefaultKopHtml(vars: Record<string, string>): string {
 <div style="display:flex;align-items:center;gap:16px;border-bottom:3px solid #ea580c;padding-bottom:16px;margin-bottom:16px;">
   ${vars.headerLogoUrl ? `<img src="${vars.headerLogoUrl}" style="height:64px;object-fit:contain;" />` : ""}
   <div>
-    <h1 style="margin:0;font-size:20px;font-weight:900;color:#ea580c;">${vars.companyDisplayName || "Sport Center Jakarta"}</h1>
+    <h1 style="margin:0;font-size:20px;font-weight:900;color:#ea580c;">${vars.companyDisplayName || "Sport Center Bandara Soekarno Hatta"}</h1>
     ${vars.address ? `<div style="font-size:12px;color:#555;">${vars.address}</div>` : ""}
     ${vars.phone ? `<div style="font-size:12px;color:#555;">Telp: ${vars.phone}</div>` : ""}
     ${vars.email ? `<div style="font-size:12px;color:#555;">Email: ${vars.email}</div>` : ""}
@@ -80,7 +80,7 @@ function buildDefaultFooterHtml(vars: Record<string, string>): string {
   </div>
 </div>
 <div style="margin-top:24px;border-top:1px solid #e5e7eb;padding-top:12px;font-size:11px;color:#9ca3af;text-align:center;">
-  Dokumen ini diterbitkan secara resmi oleh ${vars.companyDisplayName || "Sport Center Jakarta"}
+  Dokumen ini diterbitkan secara resmi oleh ${vars.companyDisplayName || "Sport Center Bandara Soekarno Hatta"}
 </div>`;
 }
 
@@ -127,7 +127,7 @@ function wrapInHtmlPage(bodyContent: string, paperStyle = "A4", printMode = fals
 
   const pdfBgLayer = hasBgPdf
     ? `<div style="position:absolute;top:0;left:0;width:100%;height:100%;z-index:0;overflow:hidden;">
-        <iframe src="${bgTemplateUrl}#toolbar=0&navpanes=0&scrollbar=0" style="width:100%;height:100%;border:none;opacity:0.9;" />
+        <iframe src="${bgTemplateUrl}#toolbar=0&navpanes=0&scrollbar=0" style="width:100%;height:100%;border:none;opacity:0.9;"></iframe>
        </div>`
     : "";
 
@@ -208,7 +208,7 @@ export async function renderDocument(params: {
   const tpl = await getTemplate(documentType, companyId);
   const settings = await getSettings();
 
-  const centerName = settings?.centerName || "Sport Center Jakarta";
+  const centerName = settings?.centerName || "Sport Center Bandara Soekarno Hatta";
   const bankName = settings?.bankName || "";
   const bankAccount = settings?.bankAccount || "";
   const bankAccountName = settings?.bankAccountName || "";
@@ -432,7 +432,7 @@ export async function renderDocument(params: {
 
   const html = wrapInHtmlPage(bodyContent, tpl?.paperStyle || "A4", printMode, bgTemplateUrl, bgTemplateType);
 
-  return { html, templateId: tpl?.id ?? null, documentNumber, tplVars };
+  return { html, templateId: tpl?.id ?? null, documentNumber };
 }
 
 /**
@@ -450,7 +450,7 @@ export async function renderDocumentText(params: {
   try {
     const tpl = await getTemplate(documentType, companyId);
     const settings = await getSettings();
-    const centerName = settings?.centerName || "Sport Center Jakarta";
+    const centerName = settings?.centerName || "Sport Center Bandara Soekarno Hatta";
 
     const companyDisplayName = tpl?.companyDisplayName || centerName;
     const financeName = tpl?.financeName || "";

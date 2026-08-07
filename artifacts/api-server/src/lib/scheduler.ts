@@ -1,4 +1,4 @@
-import { db, bookingsTable, facilitiesTable, bankReconciliationMatchesTable, waActionTokensTable, waDailyUsageSnapshotsTable } from "@workspace/db";
+import { db, bookingsTable, facilitiesTable, bankReconciliationMatchesTable, waActionTokensTable, waDailyUsageSnapshotsTable, gymMembershipsTable } from "@workspace/db";
 import { eq, and, lt, lte, isNotNull, isNull, inArray, or, sql } from "drizzle-orm";
 import { notifyBookingExpired, notifyReminderH1, notifyWaDayReminder, notifyWaStaffCheckin, notifyAuditCritical, notifyPaymentReminder, notifyWaDailyUsageList } from "./notifications";
 import { createWaToken } from "./waTokens";
@@ -6,8 +6,17 @@ import { reverseTaxTransaction } from "./tax";
 import { reverseJournalEntry } from "./accounting";
 import { runBankAudit } from "./bankAudit";
 import { runConnectionHealthCheck } from "./connectionHealth";
+import { sendRekapPemakaianToAdmin } from "./rekapPemakaian";
+import { bulkPushPaymentsToBizportal } from "./bizportalSync";
+import { logger } from "./logger";
 
-const APP_URL = process.env.APP_URL ?? "";
+function getAppUrl(): string {
+  if (process.env.NODE_ENV !== "production" && process.env.REPLIT_DEV_DOMAIN) {
+    return `https://${process.env.REPLIT_DEV_DOMAIN}`;
+  }
+  return (process.env.APP_URL ?? "").replace(/\/$/, "");
+}
+const APP_URL = getAppUrl();
 
 function getWIBNow(): Date {
   return new Date(Date.now() + 7 * 60 * 60 * 1000);
@@ -25,17 +34,59 @@ function getTodayWIB(): string {
 
 let dailyUsageListInFlight = false;
 
+async function expireOverdueMemberships(): Promise<void> {
+  try {
+    const todayWIB = getTodayWIB();
+    // Find active memberships whose endDate is before today (WIB)
+    const expired = await db
+      .select({ id: gymMembershipsTable.id, name: gymMembershipsTable.name, endDate: gymMembershipsTable.endDate })
+      .from(gymMembershipsTable)
+      .where(and(eq(gymMembershipsTable.status, "active"), lt(gymMembershipsTable.endDate, todayWIB)));
+
+    if (expired.length === 0) return;
+
+    await db
+      .update(gymMembershipsTable)
+      .set({ status: "expired", updatedAt: new Date() })
+      .where(and(eq(gymMembershipsTable.status, "active"), lt(gymMembershipsTable.endDate, todayWIB)));
+
+    logger.info({ count: expired.length, members: expired.map(m => `${m.name} (s/d ${m.endDate})`) },
+      "[scheduler] expireOverdueMemberships: set expired");
+  } catch (err) {
+    logger.error({ err }, "[scheduler] expireOverdueMemberships error");
+  }
+}
+
 async function expireOverdueBookings(): Promise<void> {
   try {
     const now = new Date();
+    // Expire booking pending_payment yang booking_date-nya sudah lewat 7 hari
+    const sevenDaysAgo = new Date(now);
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    const sevenDaysAgoStr = sevenDaysAgo.toISOString().split("T")[0]; // YYYY-MM-DD
+
+
+    // Expire booking yang:
+    // (a) pending_payment atau waiting_confirmation dan 7 hari setelah tanggal main sudah lewat, ATAU
+    // (b) pending_payment dan paymentDeadline sudah lewat (deadline pembayaran singkat)
+
     const overdue = await db
       .select()
       .from(bookingsTable)
       .where(
-        and(
-          eq(bookingsTable.status, "pending_payment"),
-          isNotNull(bookingsTable.paymentDeadline),
-          lt(bookingsTable.paymentDeadline, now)
+        or(
+          and(
+            or(
+              eq(bookingsTable.status, "pending_payment"),
+              eq(bookingsTable.status, "waiting_confirmation"),
+            ),
+            lt(sql`(${bookingsTable.bookingDate}::date + interval '7 days')`, now),
+          ),
+          and(
+            eq(bookingsTable.status, "pending_payment"),
+            isNotNull(bookingsTable.paymentDeadline),
+            lt(bookingsTable.paymentDeadline, now),
+          ),
         )
       );
 
@@ -49,7 +100,7 @@ async function expireOverdueBookings(): Promise<void> {
       SELECT DISTINCT bp.booking_id
       FROM sport_center.bank_mutations bm
       JOIN sport_center.bank_reconciliation_matches brm ON brm.mutation_id = bm.id
-      JOIN sport_center.payments bp ON bp.id = brm.candidate_id AND brm.candidate_type = 'payment'
+      JOIN sport_center.sport_payments bp ON bp.id = brm.candidate_id AND brm.candidate_type = 'payment'
       WHERE bm.status IN ('auto_matched','need_review','duplicate_need_review')
         AND bp.booking_id = ANY(${idsLiteral})
       UNION
@@ -65,7 +116,7 @@ async function expireOverdueBookings(): Promise<void> {
     for (const booking of overdue) {
       // Skip booking yang ada kandidat rekonsiliasi aktif — biarkan admin konfirmasi dulu
       if (reconProtectedIds.has(booking.id)) {
-        console.log(`[scheduler] Booking ${booking.orderNumber} overdue tapi punya kandidat rekon aktif — dilewati`);
+        logger.info(`[scheduler] Booking ${booking.orderNumber} overdue tapi punya kandidat rekon aktif — dilewati`);
         continue;
       }
 
@@ -97,7 +148,7 @@ async function expireOverdueBookings(): Promise<void> {
         totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
       });
 
-      console.log(`[scheduler] Expired booking ${booking.orderNumber}`);
+      logger.info(`[scheduler] Expired booking ${booking.orderNumber}`);
     }
   } catch (err) {
     console.error("[scheduler] expireOverdueBookings error:", err);
@@ -147,7 +198,7 @@ async function sendReminderH1(): Promise<void> {
         totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
       });
 
-      console.log(`[scheduler] H-1 reminder sent for ${booking.orderNumber}`);
+      logger.info(`[scheduler] H-1 reminder sent for ${booking.orderNumber}`);
     }
   } catch (err) {
     console.error("[scheduler] sendReminderH1 error:", err);
@@ -187,7 +238,7 @@ async function sendDayOfReminder(): Promise<void> {
         .set({ reminderDaySentAt: new Date() })
         .where(eq(bookingsTable.id, booking.id));
 
-      const statusUrl = `${APP_URL}/wa/status/${booking.orderNumber}`;
+      const statusUrl = `${APP_URL}/status/${booking.orderNumber}`;
       const facilityName = facilityMap[booking.facilityId] ?? "";
 
       // Customer reminder
@@ -219,7 +270,7 @@ async function sendDayOfReminder(): Promise<void> {
         });
       }
 
-      console.log(`[scheduler] Day-of reminder sent for ${booking.orderNumber}`);
+      logger.info(`[scheduler] Day-of reminder sent for ${booking.orderNumber}`);
     }
   } catch (err) {
     console.error("[scheduler] sendDayOfReminder error:", err);
@@ -362,9 +413,9 @@ async function sendPaymentReminder(): Promise<void> {
         .where(and(eq(waActionTokensTable.bookingId, booking.id), eq(waActionTokensTable.action, "upload_proof")))
         .limit(1);
 
+      if (!tokenRow?.token) await createWaToken(booking.id, "upload_proof", 7);
       const proofToken = tokenRow?.token ?? (await createWaToken(booking.id, "upload_proof", 7));
-      const uploadProofUrl = `${APP_URL}/wa/proof/${proofToken}`;
-
+      const uploadProofUrl = `${APP_URL}/bukti/${proofToken}`;
       await notifyPaymentReminder({
         customerName: booking.customerName,
         customerPhone: booking.customerPhone,
@@ -379,7 +430,7 @@ async function sendPaymentReminder(): Promise<void> {
         hoursLeft,
       });
 
-      console.log(`[scheduler] Payment reminder sent for ${booking.orderNumber} (${hoursLeft}h left)`);
+      logger.info(`[scheduler] Payment reminder sent for ${booking.orderNumber} (${hoursLeft}h left)`);
     }
   } catch (err) {
     console.error("[scheduler] sendPaymentReminder error:", err);
@@ -409,7 +460,7 @@ async function autoCompleteBookings(): Promise<void> {
           .update(bookingsTable)
           .set({ status: "completed", completedAt: new Date(), updatedAt: new Date() })
           .where(eq(bookingsTable.id, booking.id));
-        console.log(`[scheduler] Auto-completed booking ${booking.orderNumber}`);
+        logger.info(`[scheduler] Auto-completed booking ${booking.orderNumber}`);
       }
     }
   } catch (err) {
@@ -437,9 +488,9 @@ async function runNightlyBankAudit(): Promise<void> {
         findings: result.findings,
         auditTimestamp: result.auditTimestamp,
       });
-      console.log(`[scheduler] Nightly bank audit: ${result.summary.critical} critical, ${result.summary.warning} warning — WA notif sent`);
+      logger.info(`[scheduler] Nightly bank audit: ${result.summary.critical} critical, ${result.summary.warning} warning — WA notif sent`);
     } else {
-      console.log("[scheduler] Nightly bank audit: ✅ production ready, no issues");
+      logger.info("[scheduler] Nightly bank audit: ✅ production ready, no issues");
     }
   } catch (err) {
     console.error("[scheduler] runNightlyBankAudit error:", err);
@@ -454,17 +505,67 @@ async function checkConnections(): Promise<void> {
   }
 }
 
+// ─── Daily Rekap Pemakaian ke Grup WA Admin ────────────────────────────────
+// Dikirim setiap hari jam 08:00 WIB (01:00 UTC), sekali per hari.
+let lastRekapSentDate = "";
+
+async function sendDailyRekap(): Promise<void> {
+  try {
+    const now = getWIBNow();
+    const hourUTC = now.getUTCHours();
+    // 08:00–09:00 WIB = 01:00–02:00 UTC
+    if (hourUTC !== 1) return;
+
+    const today = getTodayWIB();
+    if (lastRekapSentDate === today) return; // sudah terkirim hari ini
+
+    lastRekapSentDate = today; // tandai dulu, cegah double-send
+    await sendRekapPemakaianToAdmin(today);
+    logger.info({ date: today }, "[scheduler] Daily rekap pemakaian terkirim ke admin WA");
+  } catch (err) {
+    lastRekapSentDate = ""; // reset agar bisa retry di interval berikutnya
+    console.error("[scheduler] sendDailyRekap error:", err);
+  }
+}
+
+// ─── Nightly Rekap Update 23:30 WIB ───────────────────────────────────────
+// Kirim ulang rekap hari ini jam 23:30 WIB agar status pembayaran ter-update.
+// 23:30 WIB = 16:30 UTC
+let lastNightRekapSentDate = "";
+
+async function sendNightlyRekap(): Promise<void> {
+  try {
+    const now = getWIBNow();
+    const hourUTC = now.getUTCHours();
+    const minuteUTC = now.getUTCMinutes();
+    // 23:30–23:35 WIB = 16:30–16:35 UTC
+    if (hourUTC !== 16 || minuteUTC < 30 || minuteUTC >= 35) return;
+
+    const today = getTodayWIB();
+    if (lastNightRekapSentDate === today) return; // sudah terkirim malam ini
+
+    lastNightRekapSentDate = today; // tandai dulu, cegah double-send
+    await sendRekapPemakaianToAdmin(today);
+    logger.info({ date: today }, "[scheduler] Nightly rekap 23:30 terkirim ke admin WA");
+  } catch (err) {
+    lastNightRekapSentDate = ""; // reset agar bisa retry
+    console.error("[scheduler] sendNightlyRekap error:", err);
+  }
+}
+
 export function startScheduler(): void {
-  console.log("[scheduler] Starting background scheduler...");
+  logger.info("[scheduler] Starting background scheduler...");
 
   // Run immediately on startup
+  expireOverdueMemberships();
   expireOverdueBookings();
   autoCompleteBookings();
   syncDailyUsageList();
   checkConnections();
 
-  // Every 5 minutes: expire overdue bookings + auto-complete + reminders + nightly audit + connection health
+  // Every 5 minutes: expire overdue bookings + memberships + auto-complete + reminders + nightly audit + connection health + daily rekap
   setInterval(async () => {
+    await expireOverdueMemberships();
     await expireOverdueBookings();
     await autoCompleteBookings();
     await sendPaymentReminder();
@@ -472,6 +573,23 @@ export function startScheduler(): void {
     await sendDayOfReminder();
     await syncDailyUsageList();
     await runNightlyBankAudit();
+    await sendDailyRekap();
+    await sendNightlyRekap();
     await checkConnections();
   }, 5 * 60 * 1000);
+
+  // Every 60 minutes: auto-sync confirmed payments to BizPortal so both sides stay balanced
+  setInterval(async () => {
+    try {
+      const result = await bulkPushPaymentsToBizportal();
+      if (result.pushed > 0) {
+        logger.info(
+          { pushed: result.pushed, skipped: result.skipped, failed: result.failed },
+          "[scheduler] Auto BizPortal payment sync: pushed new payments",
+        );
+      }
+    } catch (err) {
+      logger.error({ err }, "[scheduler] Auto BizPortal payment sync failed");
+    }
+  }, 60 * 60 * 1000);
 }

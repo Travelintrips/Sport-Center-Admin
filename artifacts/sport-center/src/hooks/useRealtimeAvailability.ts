@@ -22,7 +22,7 @@ export function useRealtimeAvailability(facilityId: number, date: string) {
         .subscribe();
 
       return () => {
-        supabase.removeChannel(channel);
+        supabase!.removeChannel(channel);
       };
     } else {
       const interval = setInterval(invalidate, 30000);

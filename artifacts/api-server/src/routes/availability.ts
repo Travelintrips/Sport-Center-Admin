@@ -67,7 +67,8 @@ router.get("/availability", async (req, res) => {
     const bookings = await db.select().from(bookingsTable).where(
       and(eq(bookingsTable.facilityId, facilityId), eq(bookingsTable.bookingDate, date))
     );
-    const activeBookings = bookings.filter((b) => b.status !== "cancelled");
+    const INACTIVE_STATUSES = ["cancelled", "expired", "rejected", "refunded"];
+    const activeBookings = bookings.filter((b) => !INACTIVE_STATUSES.includes(b.status));
 
     const blocked = await db.select().from(blockedSchedulesTable).where(
       and(eq(blockedSchedulesTable.facilityId, facilityId), eq(blockedSchedulesTable.date, date))

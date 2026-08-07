@@ -6,6 +6,13 @@ description: Admin WA command flow, security, new booking columns, BizPortal end
 ## Admin Phone Lookup
 `getAdminPhones()` checks `settingsTable.adminWaPhones` FIRST, then env `ADMIN_WA_PHONES`. If DB has a value, env vars are ignored. Test with the DB phone, not env phone.
 
+## Admin Group Recipient Precedence
+Admin WhatsApp recipients must use the configured database/environment list as the primary source; `ADMIN_WA_GROUP` is fallback-only when no admin recipient is configured, so the same rekap does not go to two groups.
+
+**Why:** The database admin recipient list and `ADMIN_WA_GROUP` previously merged, causing identical rekap messages to appear in both the intended group and an older group.
+
+**How to apply:** Preserve the primary recipient list and only use `ADMIN_WA_GROUP` when that list is empty. Deduplicate normalized recipients before sending.
+
 ## WA Admin Commands (whatsapp.ts handleAdminCommand)
 - APPROVE SC-xxxx → waiting_admin_approval → pending_payment + sets approvedByAdminPhone/approvedAt
 - REJECT SC-xxxx [reason] → rejected + sets rejectedReason

@@ -126,7 +126,9 @@ export const GetMyBookingsResponseItem = zod.object({
   "paymentStatus": zod.string().nullish(),
   "paymentProofUrl": zod.string().nullish(),
   "notes": zod.string().nullish(),
-  "createdAt": zod.string().nullable()
+  "createdAt": zod.string().nullable(),
+  "groupRef": zod.string().nullish(),
+  "customerName": zod.string().nullish()
 })
 export const GetMyBookingsResponse = zod.array(GetMyBookingsResponseItem)
 
@@ -482,7 +484,9 @@ export const CreateRecurringBookingBody = zod.object({
   "durationHours": zod.number(),
   "repeatType": zod.enum(['weekly', 'monthly']),
   "repeatCount": zod.number(),
-  "notes": zod.string().optional()
+  "notes": zod.string().optional(),
+  "customerType": zod.enum(['umum', 'angkasa_pura']).optional(),
+  "idCardNumber": zod.string().optional()
 })
 
 
@@ -817,6 +821,7 @@ export const CreatePaymentBody = zod.object({
   "bookingId": zod.number(),
   "amount": zod.number(),
   "proofUrl": zod.string().optional(),
+  "paymentMethod": zod.enum(['Transfer Bank', 'QRIS']).optional(),
   "paymentType": zod.enum(['dp', 'pelunasan', 'full_payment']).optional(),
   "notes": zod.string().optional()
 })
@@ -831,6 +836,7 @@ export const UpdatePaymentParams = zod.object({
 
 export const UpdatePaymentBody = zod.object({
   "status": zod.enum(['pending', 'confirmed', 'rejected']).optional(),
+  "paymentMethod": zod.string().optional(),
   "notes": zod.string().optional()
 })
 
@@ -1769,6 +1775,26 @@ export const CreateMembershipBody = zod.object({
 
 
 /**
+ * @summary Look up a membership by phone number (public)
+ */
+export const LookupMembershipBody = zod.object({
+  "phone": zod.string()
+})
+
+export const LookupMembershipResponse = zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "phone": zod.string(),
+  "email": zod.string(),
+  "status": zod.enum(['pending_payment', 'waiting_confirmation', 'active', 'expired', 'cancelled']),
+  "startDate": zod.string(),
+  "endDate": zod.string(),
+  "months": zod.number(),
+  "totalPrice": zod.number()
+})
+
+
+/**
  * @summary Submit payment proof for a membership
  */
 export const SubmitMembershipPaymentProofParams = zod.object({
@@ -2168,6 +2194,40 @@ export const CheckInBookingResponse = zod.object({
 })).optional(),
   "remainingAmount": zod.number().optional(),
   "createdAt": zod.string().optional()
+})
+
+
+/**
+ * @summary Get WA notification logs for a booking (admin)
+ */
+export const GetBookingWaLogsParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetBookingWaLogsResponseItem = zod.object({
+  "id": zod.number(),
+  "bookingId": zod.number().nullish(),
+  "orderNumber": zod.string().nullish(),
+  "event": zod.string().nullish(),
+  "recipientPhone": zod.string(),
+  "messagePreview": zod.string().nullish(),
+  "status": zod.enum(['sent', 'failed']),
+  "errorMessage": zod.string().nullish(),
+  "sentAt": zod.string()
+})
+export const GetBookingWaLogsResponse = zod.array(GetBookingWaLogsResponseItem)
+
+
+/**
+ * @summary Resend WA notification to customer based on booking status (admin)
+ */
+export const ResendBookingWaParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const ResendBookingWaResponse = zod.object({
+  "success": zod.boolean(),
+  "message": zod.string()
 })
 
 

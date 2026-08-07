@@ -3,7 +3,7 @@ import { db, expensesTable, facilitiesTable, usersTable, publicExpensesTable, co
 import { eq, desc, and, gte, lte, sql, asc, inArray } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
-import { createExpenseJournalEntry } from "../lib/accounting";
+import { createExpenseJournalEntry, createPublicExpenseAccountingEntry } from "../lib/accounting";
 
 const router = Router();
 
@@ -545,6 +545,20 @@ router.patch("/admin/expenses/:id/status", adminMiddleware, async (req, res) => 
           await db.update(expensesTable).set({ journalId: `JRN-${journalId}` }).where(eq(expensesTable.id, id));
           updated!.journalId = `JRN-${journalId}`;
         }
+
+        // Post ke public accounting: DEBIT expense account → CREDIT bank account (1-1020-CST dll)
+        // Ini memastikan pengeluaran TIDAK mendebit Bank Mandiri CST — hanya mengkreditnya.
+        createPublicExpenseAccountingEntry(
+          existing.id,
+          existing.expenseNo,
+          existing.description,
+          coaAccount?.code,
+          amountNum,
+          ppnNum,
+          totalNum,
+          existing.paymentMethod ?? "Transfer",
+          today,
+        ).catch((err) => req.log.warn({ err, expenseNo: existing.expenseNo }, "[accounting] createPublicExpenseAccountingEntry error (non-fatal)"));
       } catch (journalErr) {
         req.log.warn({ journalErr }, "Failed to create expense journal (non-fatal)");
       }
