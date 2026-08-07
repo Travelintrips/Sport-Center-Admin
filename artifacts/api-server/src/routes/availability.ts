@@ -54,8 +54,12 @@ router.get("/availability", async (req, res) => {
       return;
     }
 
-    // Gym (walk_in) has no hourly slots
-    if (facility.bookingMode === "walk_in") {
+    // Gym has no hourly slots. Keep the name/category fallback for legacy
+    // rows that were created before booking_mode was corrected to walk_in.
+    const isGymFacility =
+      /gym|fitness/i.test(facility.name ?? "") ||
+      /gym|fitness/i.test(facility.category ?? "");
+    if (facility.bookingMode === "walk_in" || isGymFacility) {
       res.json([]);
       return;
     }

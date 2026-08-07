@@ -334,7 +334,12 @@ router.post("/bookings", async (req, res) => {
       return;
     }
 
-    const isWalkIn = facility.bookingMode === "walk_in";
+    // Legacy Gym records may still have booking_mode = time_slot. Gym access
+    // is per visit, so identify it by name/category as a safe fallback.
+    const isGymFacility =
+      /gym|fitness/i.test(facility.name ?? "") ||
+      /gym|fitness/i.test(facility.category ?? "");
+    const isWalkIn = facility.bookingMode === "walk_in" || isGymFacility;
 
     if (isWalkIn) {
       // Gym walk-in: no time slot required, flat rate per visit

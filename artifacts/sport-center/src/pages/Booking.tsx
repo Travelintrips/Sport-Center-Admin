@@ -66,13 +66,22 @@ export default function Booking() {
   const durationStr = queryParams.get("duration") || "1";
   const duration = parseInt(durationStr) || 1;
   const mode = queryParams.get("mode") || "time_slot";
-  const isWalkIn = mode === "walk_in";
   const urlActivityType = queryParams.get("activityType") || "";
   const bookingSource = queryParams.get("source") || "";
 
   const { data: facility, isLoading: isLoadingFacility } = useGetFacility(facilityId, {
     query: { enabled: !!facilityId, queryKey: getGetFacilityQueryKey(facilityId) },
   });
+
+  // Keep legacy Gym links correct even when they do not include
+  // mode=walk_in. Older facility rows may still be stored as time_slot.
+  const isGymFacility = Boolean(
+    facility && (
+      /gym|fitness/i.test(facility.name ?? "") ||
+      /gym|fitness/i.test(facility.category ?? "")
+    )
+  );
+  const isWalkIn = mode === "walk_in" || facility?.bookingMode === "walk_in" || isGymFacility;
 
   // --- Auth user ---
   const { data: currentUser, isLoading: isLoadingUser } = useGetMe({

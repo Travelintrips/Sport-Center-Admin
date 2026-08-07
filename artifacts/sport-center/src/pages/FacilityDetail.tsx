@@ -84,7 +84,16 @@ export default function FacilityDetail() {
     }
   );
 
-  const isWalkIn = facility?.bookingMode === "walk_in";
+  // Some older Gym records are still stored with booking_mode = time_slot.
+  // Keep the customer experience aligned with the business rule based on the
+  // facility identity as well as the persisted mode.
+  const isGymFacility = Boolean(
+    facility && (
+      /gym|fitness/i.test(facility.name ?? "") ||
+      /gym|fitness/i.test(facility.category ?? "")
+    )
+  );
+  const isWalkIn = facility?.bookingMode === "walk_in" || isGymFacility;
   const isMultiguna = facility?.category === "Multiguna";
 
   const { data: settings } = useGetSettings();
@@ -315,12 +324,16 @@ export default function FacilityDetail() {
               <div className="bg-secondary dark:bg-slate-900 p-6 text-white text-center relative overflow-hidden">
                 <div className="absolute top-0 right-0 w-32 h-32 bg-primary/20 rounded-full blur-[40px]" />
                 <div className="relative z-10">
-                  <div className="text-sm font-bold text-white/70 uppercase tracking-widest mb-1">{t("Tarif Sewa", "Rental Rate")}</div>
+                  <div className="text-sm font-bold text-white/70 uppercase tracking-widest mb-1">
+                    {isWalkIn ? t("Tarif Masuk", "Entry Rate") : t("Tarif Sewa", "Rental Rate")}
+                  </div>
                   <div className="text-3xl md:text-4xl font-black text-white mb-1">
                     <span className="text-xl mr-1 text-primary">Rp</span>
                     {facility.pricePerHour.toLocaleString('id-ID')}
                   </div>
-                  <div className="text-sm font-medium text-white/70">{t("per jam bermain", "per playing hour")}</div>
+                   <div className="text-sm font-medium text-white/70">
+                     {isWalkIn ? t("per orang / kunjungan", "per person / visit") : t("per jam bermain", "per playing hour")}
+                   </div>
                 </div>
               </div>
               
@@ -329,7 +342,9 @@ export default function FacilityDetail() {
                   <div className="w-8 h-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center">
                     <CalendarDays className="w-4 h-4" />
                   </div>
-                  {t("Atur Jadwal Bermain", "Set Your Playing Schedule")}
+                  {isWalkIn
+                    ? t("Atur Kunjungan", "Plan Your Visit")
+                    : t("Atur Jadwal Bermain", "Set Your Playing Schedule")}
                 </h3>
                 
                 <div className="space-y-6">
