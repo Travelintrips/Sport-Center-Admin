@@ -190,6 +190,51 @@ function formatDate(d: string) {
   });
 }
 
+type PaymentMethodOption = {
+  value: string;
+  label: string;
+};
+
+function PaymentMethodSelect({
+  payment,
+  options,
+  onChange,
+  disabled = false,
+}: {
+  payment: any;
+  options: PaymentMethodOption[];
+  onChange: (paymentId: number, paymentMethod: string) => void;
+  disabled?: boolean;
+}) {
+  if (!payment) {
+    return <span className="text-xs text-slate-300 dark:text-slate-600">—</span>;
+  }
+
+  const currentValue = String(payment.paymentMethod ?? "Transfer Bank");
+  const mergedOptions = options.some((option) => option.value === currentValue)
+    ? options
+    : [{ value: currentValue, label: `${currentValue} (tersimpan)` }, ...options];
+
+  return (
+    <Select
+      value={currentValue}
+      onValueChange={(value) => onChange(payment.id, value)}
+      disabled={disabled}
+    >
+      <SelectTrigger className="h-8 min-w-[150px] max-w-[190px] text-xs rounded-lg border-slate-200 dark:border-slate-700">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {mergedOptions.map((option) => (
+          <SelectItem key={option.value} value={option.value} className="text-xs">
+            {option.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
 /* ─── Invoice / Kwitansi Print ──────────────────────────────────── */
 
 async function printInvoice(booking: any, settings?: any) {
@@ -853,6 +898,8 @@ function BookingDetailDrawer({
   onRejectPayment,
   onClearProof,
   onDelete,
+  paymentMethodOptions,
+  onUpdatePaymentMethod,
   isUpdating,
   settings,
 }: {
@@ -863,6 +910,8 @@ function BookingDetailDrawer({
   onRejectPayment: (paymentId: number) => void;
   onClearProof: (paymentId: number) => void;
   onDelete: (id: number) => void;
+  paymentMethodOptions: PaymentMethodOption[];
+  onUpdatePaymentMethod: (paymentId: number, paymentMethod: string) => void;
   isUpdating: boolean;
   settings?: any;
 }) {
@@ -1183,6 +1232,17 @@ function BookingDetailDrawer({
                           </span>
                         </div>
                         <span className="font-bold text-sm">{formatCurrency(pmt.amount)}</span>
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-[10px] text-slate-500 uppercase tracking-wide">
+                          Metode Pembayaran
+                        </Label>
+                        <PaymentMethodSelect
+                          payment={pmt}
+                          options={paymentMethodOptions}
+                          onChange={onUpdatePaymentMethod}
+                          disabled={isUpdating}
+                        />
                       </div>
                       {pmt.proofUrl && <ProofImage proofUrl={pmt.proofUrl} />}
                       {pmt.status === "pending" && pmt.proofUrl && (
@@ -2040,6 +2100,36 @@ export default function AdminBookings() {
   const { data: rawBookings, isLoading } = useListBookings();
   const bookings = rawBookings ?? [];
 
+  const { data: paymentSettings } = useQuery<any>({
+    queryKey: ["paylabs-settings-payment-methods"],
+    queryFn: async () => {
+      const response = await fetch("/api/admin/paylabs/settings", {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      if (!response.ok) throw new Error("Gagal mengambil metode pembayaran");
+      return response.json();
+    },
+    staleTime: 60_000,
+  });
+
+  const paymentMethodOptions = useMemo<PaymentMethodOption[]>(() => {
+    const options: PaymentMethodOption[] = [
+      { value: "Transfer Bank", label: "Transfer Bank" },
+    ];
+    const configured = Array.isArray(paymentSettings?.paymentMethodsConfig)
+      ? paymentSettings.paymentMethodsConfig
+      : [];
+
+    for (const method of configured) {
+      if (!method?.active || typeof method.name !== "string" || !method.name.trim()) continue;
+      const label = method.name.trim();
+      if (!options.some((option) => option.value === label)) {
+        options.push({ value: label, label });
+      }
+    }
+    return options;
+  }, [paymentSettings]);
+
   const {
     data: waUnnotified = [],
     isLoading: waUnnotifiedLoading,
@@ -2157,10 +2247,25 @@ export default function AdminBookings() {
 
   const updatePaymentMutation = useUpdatePayment({
     mutation: {
-      onSuccess: () => {
+      onSuccess: (data, variables) => {
         queryClient.invalidateQueries({ queryKey: getListBookingsQueryKey() });
         toast({ title: "Pembayaran diperbarui" });
-        setSelectedBooking(null);
+        if (variables.data.paymentMethod !== undefined) {
+          setSelectedBooking((current: any) => {
+            if (!current) return current;
+            const currentPayments = current.payments ?? (current.payment ? [current.payment] : []);
+            const updatedPayments = currentPayments.map((payment: any) =>
+              payment.id === data.id ? data : payment,
+            );
+            return {
+              ...current,
+              payments: updatedPayments,
+              payment: current.payment?.id === data.id ? data : current.payment,
+            };
+          });
+        } else {
+          setSelectedBooking(null);
+        }
       },
       onError: () => toast({ title: "Gagal memperbarui pembayaran", variant: "destructive" }),
     },
@@ -2968,9 +3073,17 @@ export default function AdminBookings() {
                         </span>
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">
-                        <span className="text-xs text-slate-600 dark:text-slate-400">
-                          {b.payment?.paymentMethod ?? (b.payment ? "Transfer Bank" : "—")}
-                        </span>
+                         <PaymentMethodSelect
+                           payment={b.payment}
+                           options={paymentMethodOptions}
+                           onChange={(paymentId, paymentMethod) =>
+                             updatePaymentMutation.mutate({
+                               id: paymentId,
+                               data: { paymentMethod },
+                             })
+                           }
+                           disabled={updatePaymentMutation.isPending}
+                         />
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">
                         {b.payment?.confirmedAt ? (
@@ -3261,6 +3374,10 @@ export default function AdminBookings() {
           onRejectPayment={(paymentId) =>
             updatePaymentMutation.mutate({ id: paymentId, data: { status: "rejected" } })
           }
+           paymentMethodOptions={paymentMethodOptions}
+           onUpdatePaymentMethod={(paymentId, paymentMethod) =>
+             updatePaymentMutation.mutate({ id: paymentId, data: { paymentMethod } })
+           }
           onClearProof={(paymentId) => clearProofMutation.mutate(paymentId)}
           onDelete={handleDelete}
           isUpdating={isUpdating || clearProofMutation.isPending}

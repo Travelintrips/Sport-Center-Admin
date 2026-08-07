@@ -432,14 +432,29 @@ router.post("/payments", async (req, res) => {
 router.patch("/payments/:id", adminMiddleware, async (req, res) => {
   try {
     const id = parseInt(String(req.params.id));
-    const { status, notes } = req.body;
+    const { status, paymentMethod, notes } = req.body;
     const [before] = await db.select().from(paymentsTable).where(eq(paymentsTable.id, id)).limit(1);
     if (!before) { res.status(404).json({ error: "Not found" }); return; }
 
     const updateData: Record<string, unknown> = {};
     if (status) updateData.status = status;
     if (status === "confirmed") updateData.confirmedAt = new Date();
+    if (paymentMethod !== undefined) {
+      if (typeof paymentMethod !== "string" || !paymentMethod.trim()) {
+        res.status(400).json({ error: "Metode pembayaran wajib diisi" });
+        return;
+      }
+      if (paymentMethod.trim().length > 120) {
+        res.status(400).json({ error: "Metode pembayaran terlalu panjang" });
+        return;
+      }
+      updateData.paymentMethod = paymentMethod.trim();
+    }
     if (notes !== undefined) updateData.notes = notes;
+    if (Object.keys(updateData).length === 0) {
+      res.status(400).json({ error: "Tidak ada perubahan pembayaran" });
+      return;
+    }
     await db.update(paymentsTable).set(updateData).where(eq(paymentsTable.id, id));
 
     const [payment] = await db.select().from(paymentsTable).where(eq(paymentsTable.id, id)).limit(1);
@@ -708,8 +723,8 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
         action: "update_payment",
         entity: "payment",
         entityId: id,
-        before: { status: before?.status },
-        after: { status },
+        before: { status: before?.status, paymentMethod: before?.paymentMethod },
+        after: { status, paymentMethod: payment.paymentMethod },
         ...clientInfo,
       });
     }

@@ -441,6 +441,7 @@ export const PaymentUpdateStatus = {
 
 export interface PaymentUpdate {
   status?: PaymentUpdateStatus;
+  paymentMethod?: string;
   notes?: string;
 }
 

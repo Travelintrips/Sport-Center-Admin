@@ -835,6 +835,7 @@ export const UpdatePaymentParams = zod.object({
 
 export const UpdatePaymentBody = zod.object({
   "status": zod.enum(['pending', 'confirmed', 'rejected']).optional(),
+  "paymentMethod": zod.string().optional(),
   "notes": zod.string().optional()
 })
 

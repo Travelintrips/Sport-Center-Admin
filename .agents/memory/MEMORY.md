@@ -30,4 +30,5 @@
 - [Paylabs callback invariant](paylabs-callback-invariant.md) — persist merchantTradeNo→booking_id before provider calls; callback must use exact transaction lookup and raw-body signature verification.
 - [Paylabs public key verification](paylabs-pubkey-verification.md) — fail-closed webhook (no key = reject), admin UI redacts keys (configured bool only), normalizePaylabsPublicKey() for PEM normalization.
 - [Paylabs private key persistence](paylabs-private-key-persistence.md) — GET must never return private keys; PATCH only accepts them when explicitly provided + valid; badge+editor UI pattern is the correct fix.
+- [Booking payment method options](booking-payment-method-options.md) — admin booking dropdowns source active Paylabs methods and preserve legacy saved labels when methods are later disabled.
 

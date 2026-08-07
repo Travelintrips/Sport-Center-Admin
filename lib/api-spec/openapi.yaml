@@ -3230,6 +3230,8 @@ components:
         status:
           type: string
           enum: [pending, confirmed, rejected]
+        paymentMethod:
+          type: string
         notes:
           type: string
 
