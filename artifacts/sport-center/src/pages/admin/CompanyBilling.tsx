@@ -62,6 +62,11 @@ function getMonthOptions() {
   return opts;
 }
 
+function getCurrentPeriodMonth() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+}
+
 function periodLabel(periodMonth: string) {
   const [year, month] = periodMonth.split("-");
   return new Date(parseInt(year), parseInt(month) - 1, 1).toLocaleDateString("id-ID", { year: "numeric", month: "long" });
@@ -731,11 +736,17 @@ function BillingDocumentsTab({ companies }: { companies: any[] }) {
 
 // ─── Generate Invoice Dialog ──────────────────────────────────────────────────
 
-function GenerateInvoiceDialog({ onClose }: { onClose: () => void }) {
+function GenerateInvoiceDialog({
+  onClose,
+  initialCompanyId,
+}: {
+  onClose: () => void;
+  initialCompanyId?: number | null;
+}) {
   const { toast } = useToast();
   const qc = useQueryClient();
-  const [companyId, setCompanyId] = useState("");
-  const [periodMonth, setPeriodMonth] = useState(getMonthOptions()[0].value);
+  const [companyId, setCompanyId] = useState(initialCompanyId ? String(initialCompanyId) : "");
+  const [periodMonth, setPeriodMonth] = useState(getCurrentPeriodMonth());
   const [notes, setNotes] = useState("");
   const [showPreview, setShowPreview] = useState(false);
   const generateMutation = useGenerateCompanyInvoice();
@@ -763,7 +774,7 @@ function GenerateInvoiceDialog({ onClose }: { onClose: () => void }) {
 
   const handleGenerate = async () => {
     if (!companyId) { toast({ title: "Pilih perusahaan", variant: "destructive" }); return; }
-    if (!existingInvoice && preview?.bookingCount === 0) {
+    if (!existingInvoice && (preview?.bookingCount ?? 0) === 0) {
       toast({ title: "Tidak ada booking untuk ditagihkan pada periode ini", variant: "destructive" });
       return;
     }
@@ -1319,16 +1330,26 @@ export default function AdminCompanyBilling() {
   const [filterCompany, setFilterCompany] = useState("all");
   const [filterStatus, setFilterStatus] = useState("all");
   const [showGenerate, setShowGenerate] = useState(false);
+  const [generateCompanyId, setGenerateCompanyId] = useState<number | null>(null);
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<number | null>(null);
 
   const { data: companies } = useListCustomers({ accountType: "company" });
-  const { data: invoices, isLoading, refetch } = useListCompanyInvoices({
+  const { data: allInvoices } = useListCompanyInvoices();
+  const { data: invoices, isLoading, isError, error, refetch } = useListCompanyInvoices({
     companyCustomerId: filterCompany !== "all" ? parseInt(filterCompany) : undefined,
     status: filterStatus !== "all" ? filterStatus as "unpaid" | "paid" : undefined,
   });
 
   const totalUnpaid = invoices?.filter((i) => i.status === "unpaid").reduce((s, i) => s + i.grandTotal, 0) ?? 0;
   const totalPaid = invoices?.filter((i) => i.status === "paid").reduce((s, i) => s + i.grandTotal, 0) ?? 0;
+  const companiesWithoutInvoice = (companies ?? []).filter(
+    (company) => !(allInvoices ?? []).some((invoice) => invoice.companyCustomerId === company.id),
+  );
+
+  const openGenerate = (companyId?: number) => {
+    setGenerateCompanyId(companyId ?? null);
+    setShowGenerate(true);
+  };
 
   return (
     <div className="space-y-6">
@@ -1339,7 +1360,7 @@ export default function AdminCompanyBilling() {
         </div>
         <div className="flex gap-2">
           <Button variant="ghost" size="icon" onClick={() => refetch()}><RefreshCw size={16} /></Button>
-          <Button onClick={() => setShowGenerate(true)} className="gap-2"><Plus size={16} /> Generate Invoice</Button>
+          <Button onClick={() => openGenerate()} className="gap-2"><Plus size={16} /> Generate Invoice</Button>
         </div>
       </div>
 
@@ -1423,6 +1444,14 @@ export default function AdminCompanyBilling() {
 
             {isLoading ? (
               <div className="space-y-3">{[...Array(4)].map((_, i) => <Skeleton key={i} className="h-16" />)}</div>
+            ) : isError ? (
+              <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-center text-sm text-red-700">
+                <div className="font-semibold">Gagal memuat daftar invoice</div>
+                <div className="mt-1 text-xs">{(error as any)?.message ?? "Periksa login admin dan koneksi API."}</div>
+                <Button variant="outline" size="sm" className="mt-3" onClick={() => refetch()}>
+                  Coba Lagi
+                </Button>
+              </div>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
@@ -1476,6 +1505,37 @@ export default function AdminCompanyBilling() {
         </Card>
       )}
 
+      {activeTab === "invoices" && !isLoading && !isError && companiesWithoutInvoice.length > 0 && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Perusahaan Belum Memiliki Invoice</CardTitle>
+            <p className="text-xs text-muted-foreground">
+              Generate invoice per perusahaan untuk periode yang dipilih.
+            </p>
+          </CardHeader>
+          <CardContent className="p-4 pt-0">
+            <div className="divide-y">
+              {companiesWithoutInvoice.map((company) => (
+                <div key={company.id} className="flex items-center justify-between gap-4 py-3">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Building2 size={15} className="text-orange-500 shrink-0" />
+                    <div className="min-w-0">
+                      <div className="font-medium truncate">{company.companyName ?? company.name}</div>
+                      <div className="text-xs text-muted-foreground">
+                        Belum ada invoice di daftar
+                      </div>
+                    </div>
+                  </div>
+                  <Button size="sm" variant="outline" className="gap-1 shrink-0" onClick={() => openGenerate(company.id)}>
+                    <Plus size={13} /> Generate
+                  </Button>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Tab: Dokumen Billing */}
       {activeTab === "documents" && (
         <Card>
@@ -1491,7 +1551,15 @@ export default function AdminCompanyBilling() {
       )}
 
       <Dialog open={showGenerate} onOpenChange={(v) => !v && setShowGenerate(false)}>
-        {showGenerate && <GenerateInvoiceDialog onClose={() => setShowGenerate(false)} />}
+        {showGenerate && (
+          <GenerateInvoiceDialog
+            initialCompanyId={generateCompanyId}
+            onClose={() => {
+              setShowGenerate(false);
+              setGenerateCompanyId(null);
+            }}
+          />
+        )}
       </Dialog>
 
       <Dialog open={!!selectedInvoiceId} onOpenChange={(v) => !v && setSelectedInvoiceId(null)}>

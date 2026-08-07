@@ -17,3 +17,4 @@
 - [Expenses feature](expenses-feature.md) — sport_expenses table + expense_no_seq + expense_status/category enums; accounting_journals.booking_id made nullable for expense journal entries; /admin/expenses routes.
 - [Data Connection Monitor](data-connection-monitor.md) — connectionHealth.ts lib; Drizzle sql.raw() needed for IN queries on information_schema; blocked_schedules (not "schedules") is the table name; system_connection_baselines table in sport_center schema.
 - [Prod schema sync approach](prod-schema-sync.md) — drizzle-kit push hangs on shared Supabase (150+ tables); use targeted ALTER TABLE script via scripts/src/ instead.
+- [Company invoice list behavior](company-invoice-list.md) — distinguish empty data from API/auth errors and expose companies without invoices without allowing empty Rp0 invoices.
