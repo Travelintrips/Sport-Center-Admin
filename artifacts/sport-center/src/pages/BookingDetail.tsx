@@ -174,10 +174,7 @@ export default function BookingDetail() {
         detectedType = "pelunasan";
         detectedAmount =
           (booking as any).remainingAmount ??
-          Math.max(
-            0,
-            booking.totalPrice - Number((booking as any).downPayment || 0),
-          );
+          Math.max(0, payableTotal - Number((booking as any).downPayment || 0));
       }
     }
 
@@ -270,6 +267,11 @@ export default function BookingDetail() {
   const statusConfig = getStatusConfig(booking.status);
   const StatusIcon = statusConfig.icon;
   const isPending = uploadProgress === "uploading" || submitPayment.isPending;
+  const payableTotal = Number(
+    (booking as any).groupInfo?.groupTotalPayment ??
+    (booking as any).grandTotal ??
+    booking.totalPrice,
+  );
 
   const hasBankInfo = settings?.bankAccount && settings?.bankName;
   const hasQris = !!(settings as any)?.qrisImageUrl;
@@ -483,7 +485,7 @@ export default function BookingDetail() {
                   const dpConfirmed = bPayments.some((p: any) => p.paymentType === "dp" && p.status === "confirmed");
                   const dpPending = bPayments.some((p: any) => p.paymentType === "dp" && p.status === "pending");
                   const pelunasanPending = bPayments.some((p: any) => p.paymentType === "pelunasan" && p.status === "pending");
-                  const remaining = (booking as any).remainingAmount ?? Math.max(0, Number(booking.totalPrice) - Number((booking as any).downPayment || 0));
+                  const remaining = (booking as any).remainingAmount ?? Math.max(0, payableTotal - Number((booking as any).downPayment || 0));
 
                   if (dpConfirmed && pelunasanPending) {
                     return (
@@ -581,7 +583,7 @@ export default function BookingDetail() {
                     {dpInputAmount && Number(dpInputAmount) > 0 && (
                       <div className="text-xs space-y-1 text-muted-foreground">
                         <div className="flex justify-between"><span>{t("DP Dibayar", "DP Paid")}:</span><span className="font-bold text-violet-700 dark:text-violet-300">Rp {Number(dpInputAmount).toLocaleString("id-ID")}</span></div>
-                        <div className="flex justify-between"><span>{t("Sisa", "Remaining")}:</span><span className="font-bold">Rp {Math.max(0, Number(booking.totalPrice) - Number(dpInputAmount)).toLocaleString("id-ID")}</span></div>
+                        <div className="flex justify-between"><span>{t("Sisa", "Remaining")}:</span><span className="font-bold">Rp {Math.max(0, payableTotal - Number(dpInputAmount)).toLocaleString("id-ID")}</span></div>
                       </div>
                     )}
                     <Button
@@ -602,7 +604,7 @@ export default function BookingDetail() {
                 {(() => {
                   const remaining =
                     (booking as any).remainingAmount ??
-                    Math.max(0, Number(booking.totalPrice) - Number((booking as any).downPayment || 0));
+                    Math.max(0, payableTotal - Number((booking as any).downPayment || 0));
                   const isDpFullyPaid = (booking as any).isDpPaid && remaining <= 0;
 
                   if (isDpFullyPaid) {

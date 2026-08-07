@@ -85,6 +85,10 @@ async function getBookingWithPayment(id: number) {
     }
   }
 
+  const payableTotal = groupInfo?.groupTotalPayment ?? (
+    booking.grandTotal != null ? Number(booking.grandTotal) : Number(booking.totalPrice)
+  );
+
   // idCardNumber adalah PII — jangan ekspos di endpoint publik (customer invoice).
   const { idCardNumber: _redacted, ...rest } = booking;
   return {
@@ -107,8 +111,7 @@ async function getBookingWithPayment(id: number) {
     payment: payment ? { ...payment, amount: Number(payment.amount) } : null,
     payments: allPayments.map((p) => ({ ...p, amount: Number(p.amount) })),
     remainingAmount: (() => {
-      const total =
-        booking.grandTotal != null ? Number(booking.grandTotal) : Number(booking.totalPrice);
+      const total = payableTotal;
       const confirmedDp = allPayments
         .filter((p) => p.paymentType === "dp" && p.status === "confirmed")
         .reduce((s, p) => s + Number(p.amount), 0);
@@ -971,7 +974,17 @@ router.patch("/bookings/:id/dp", async (req, res) => {
     const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, id)).limit(1);
     if (!booking) { res.status(404).json({ error: "Booking tidak ditemukan" }); return; }
 
-    const grandTotal = Number(booking.grandTotal ?? booking.totalPrice);
+    // Recurring bookings are stored as separate rows but are paid through one
+    // booking group. Validate the DP against the group total, not the price
+    // of the individual session row.
+    let grandTotal = Number(booking.grandTotal ?? booking.totalPrice);
+    if (booking.groupRef) {
+      const [group] = await db.select({ totalPayment: bookingGroupsTable.totalPayment })
+        .from(bookingGroupsTable)
+        .where(eq(bookingGroupsTable.groupRef, booking.groupRef))
+        .limit(1);
+      if (group) grandTotal = Number(group.totalPayment);
+    }
     const dp = Number(downPaymentAmount);
 
     if (dp > grandTotal) {
