@@ -26,6 +26,52 @@ function getPublicPool(): pg.Pool | null {
 const TAX_ID_PPN_11 = 1;
 const COMPANY_ID = 1;
 
+type PublicPaymentMethod = "QRIS" | "Transfer Bank";
+
+function normalizePublicPaymentMethod(paymentMethod?: string): PublicPaymentMethod {
+  return String(paymentMethod ?? "").trim().toLowerCase().includes("qris")
+    ? "QRIS"
+    : "Transfer Bank";
+}
+
+async function getPublicPaymentAccount(
+  pool: pg.Pool,
+  paymentMethod?: string,
+): Promise<{ id: number; code: string; name: string; label: PublicPaymentMethod }> {
+  const label = normalizePublicPaymentMethod(paymentMethod);
+  const result = label === "QRIS"
+    ? await pool.query(
+        `SELECT id, code, name
+           FROM public.chart_of_accounts
+          WHERE is_active = true
+            AND (LOWER(name) LIKE '%qris%' OR LOWER(code) LIKE '%qris%')
+          ORDER BY id
+          LIMIT 2`,
+      )
+    : await pool.query(
+        `SELECT id, code, name
+           FROM public.chart_of_accounts
+          WHERE code = '1-1020-CST'
+            AND is_active = true
+          LIMIT 1`,
+      );
+
+  if (result.rows.length !== 1) {
+    throw new Error(
+      label === "QRIS"
+        ? "[accounting] COA QRIS public tidak ditemukan atau tidak unik; jurnal tidak diubah."
+        : "[accounting] COA Bank Mandiri CST (1-1020-CST) tidak ditemukan; jurnal tidak diubah.",
+    );
+  }
+
+  return {
+    id: Number(result.rows[0].id),
+    code: String(result.rows[0].code),
+    name: String(result.rows[0].name),
+    label,
+  };
+}
+
 // ─── Helper: ekstrak DPP dari booking ────────────────────────────────────────
 // Harga fasilitas di sport center sudah inklusif PPN (grandTotal = totalPrice).
 // Fungsi journal menerima DPP (sebelum PPN) sebagai subtotal.
@@ -111,6 +157,7 @@ export async function createPublicAccountingEntry(
   ppnAmount: number,
   facilityId: number | null,
   journalDate: string,
+  paymentMethod?: string,
 ): Promise<void> {
   const pool = getPublicPool();
   if (!pool) {
@@ -131,6 +178,7 @@ export async function createPublicAccountingEntry(
   const period = journalDate.slice(0, 7);
   const entryNumber = await nextPublicEntryNumber(pool, year);
   const ids = await getPublicIds();
+  const paymentAccount = await getPublicPaymentAccount(pool, paymentMethod);
 
   // 1. Buat accounting entry (draft)
   const entryResult = await pool.query(
@@ -141,7 +189,7 @@ export async function createPublicAccountingEntry(
     RETURNING id`,
     [
       entryNumber, ids.journalId, journalDate, orderNumber,
-      `Pembayaran Booking Sport Center (${orderNumber})`,
+      `Pembayaran Booking Sport Center (${orderNumber}) via ${paymentAccount.label}`,
       bookingId, grandTotal, COMPANY_ID, facilityId ?? null,
       `sc_booking_${orderNumber}`,
     ]
@@ -157,7 +205,7 @@ export async function createPublicAccountingEntry(
         ($1,$8,$9,0,$10)`,
       [
         entryId,
-        ids.coaKas,         `Penerimaan booking ${orderNumber}`, grandTotal,
+        paymentAccount.id,  `Penerimaan booking ${orderNumber} via ${paymentAccount.label}`, grandTotal,
         ids.coaPendapatan,  `Pendapatan booking ${orderNumber}`, netRevenue,
         ids.coaPpnKeluaran, `PPN Keluaran booking ${orderNumber}`, ppnAmount,
       ]
@@ -167,7 +215,7 @@ export async function createPublicAccountingEntry(
       `INSERT INTO public.accounting_entry_lines (entry_id, account_id, description, debit, credit) VALUES
         ($1,$2,$3,$4,0),
         ($1,$5,$6,0,$4)`,
-      [entryId, ids.coaKas, `Penerimaan booking ${orderNumber}`, grandTotal, ids.coaPendapatan, `Pendapatan booking ${orderNumber}`]
+      [entryId, paymentAccount.id, `Penerimaan booking ${orderNumber} via ${paymentAccount.label}`, grandTotal, ids.coaPendapatan, `Pendapatan booking ${orderNumber}`]
     );
   }
 
@@ -219,6 +267,7 @@ export async function createPublicAccountingEntryForGroup(
     facilityId: number | null;
   }>,
   journalDate: string,
+  paymentMethod?: string,
 ): Promise<void> {
   const pool = getPublicPool();
   if (!pool) {
