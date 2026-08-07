@@ -377,7 +377,7 @@ router.post("/bookings", async (req, res) => {
     const isPendingCompany = !isCompanyBilling && !!pendingCompanyUser;
     const effectiveCompanyCustomerId = companyBillingUser?.id ?? pendingCompanyUser?.id ?? null;
     const activityType = req.body.activityType || null;
-    const numberOfPeople = req.body.numberOfPeople ? Number(req.body.numberOfPeople) : null;
+    let numberOfPeople = req.body.numberOfPeople == null ? null : Number(req.body.numberOfPeople);
     const idCardNumber = String(req.body?.idCardNumber || "").trim().toUpperCase() || null;
 
     const isAp = customerType === "angkasa_pura";
@@ -416,9 +416,16 @@ router.post("/bookings", async (req, res) => {
 
     if (isWalkIn) {
       // Gym walk-in: no time slot required, flat rate per visit
+      if (numberOfPeople == null) numberOfPeople = 1;
+      if (!Number.isInteger(numberOfPeople) || numberOfPeople < 1 || numberOfPeople > 20) {
+        res.status(400).json({ error: "Jumlah orang harus berupa bilangan bulat antara 1 dan 20" });
+        return;
+      }
       startTime = facility.openTime;
       durationHours = 1;
     } else {
+      // Jumlah orang hanya berlaku untuk fasilitas walk-in seperti gym.
+      numberOfPeople = null;
       // Time slot booking validations
       if (!startTime || !durationHours) {
         res.status(400).json({ error: "startTime and durationHours required" });
@@ -478,7 +485,8 @@ router.post("/bookings", async (req, res) => {
     }
 
     const endTime = addHours(startTime, durationHours);
-    const basePrice = Number(facility.pricePerHour) * (isWalkIn ? 1 : durationHours);
+    // Gym/walk-in pricing is per person; time-slot facilities remain per duration.
+    const basePrice = Number(facility.pricePerHour) * (isWalkIn ? numberOfPeople! : durationHours);
 
     // ── Auto-verifikasi & diskon member AP2 ─────────────────────────────────
     // Jika customer adalah angkasa_pura dan ID card ditemukan di ap_members (aktif),

@@ -364,7 +364,9 @@ export default function Booking() {
     setCouponError(null);
     setCouponResult(null);
     try {
-      const baseAmt = facility ? facility.pricePerHour * duration : 0;
+      const baseAmt = facility
+        ? facility.pricePerHour * (isWalkIn ? bookingPeopleCount : duration)
+        : 0;
       const purchaseAmount = isRepeat ? baseAmt * effectiveCount : baseAmt;
       const res = await fetch("/api/promos/validate-code", {
         method: "POST",
@@ -473,7 +475,7 @@ export default function Booking() {
               bookingDate: date,
               ...(isWalkIn ? {} : { startTime, durationHours: duration }),
               activityType: urlActivityType || undefined,
-              numberOfPeople: isWalkIn ? parseInt(numberOfPeople) || 1 : undefined,
+              numberOfPeople: isWalkIn ? bookingPeopleCount : undefined,
               notes,
               customerType: "umum",
               payerType: "company",
@@ -568,7 +570,7 @@ export default function Booking() {
           bookingDate: date,
           ...(isWalkIn ? {} : { startTime, durationHours: duration }),
           activityType: urlActivityType || undefined,
-          numberOfPeople: isWalkIn ? parseInt(numberOfPeople) || 1 : undefined,
+          numberOfPeople: isWalkIn ? bookingPeopleCount : undefined,
           notes,
           customerType: bookingMode === "angkasa_pura" ? "angkasa_pura" : "umum",
           idCardNumber: isAP ? idCardNumber.trim() : undefined,
@@ -620,7 +622,12 @@ export default function Booking() {
   const endHours = hours + duration;
   const endTime = `${endHours.toString().padStart(2, "0")}:${(minutes || 0).toString().padStart(2, "0")}`;
 
-  const totalPrice = facility ? facility.pricePerHour * duration : 0;
+  const bookingPeopleCount = isWalkIn
+    ? Math.max(1, Math.min(20, parseInt(numberOfPeople, 10) || 1))
+    : 1;
+  const totalPrice = facility
+    ? facility.pricePerHour * (isWalkIn ? bookingPeopleCount : duration)
+    : 0;
 
   if (isLoadingFacility || isLoadingUser) {
     return (
@@ -1482,7 +1489,7 @@ export default function Booking() {
                         {facility && (
                           <div className="flex justify-between border-t border-violet-200 dark:border-violet-800 pt-1.5">
                             <span className="text-muted-foreground">{t("Sisa Pembayaran", "Remaining")}</span>
-                            <span className="font-bold text-foreground">Rp {Math.max(0, facility.pricePerHour * duration - Number(dpAmount)).toLocaleString("id-ID")}</span>
+                            <span className="font-bold text-foreground">Rp {Math.max(0, totalPrice - Number(dpAmount)).toLocaleString("id-ID")}</span>
                           </div>
                         )}
                       </div>
@@ -1584,13 +1591,22 @@ export default function Booking() {
 
               <div className="border-t pt-4 space-y-2 text-sm">
                 <div className="flex justify-between">
-                  <span className="text-muted-foreground">{t("Harga/jam", "Price/hour")}</span>
+                  <span className="text-muted-foreground">
+                    {isWalkIn ? t("Harga/orang", "Price/person") : t("Harga/jam", "Price/hour")}
+                  </span>
                   <span>{formatCurrency(facility.pricePerHour)}</span>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">{t("Durasi", "Duration")}</span>
-                  <span>× {duration} {t("jam", "hours")}</span>
-                </div>
+                {isWalkIn ? (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">{t("Jumlah orang", "People")}</span>
+                    <span>× {bookingPeopleCount} {t("orang", "people")}</span>
+                  </div>
+                ) : (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">{t("Durasi", "Duration")}</span>
+                    <span>× {duration} {t("jam", "hours")}</span>
+                  </div>
+                )}
                 {isRepeat && (
                   <>
                     <div className="flex justify-between">
