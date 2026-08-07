@@ -413,6 +413,14 @@ export interface BookingUpdate {
   adminNotes?: string;
 }
 
+export type PaymentInputPaymentMethod = typeof PaymentInputPaymentMethod[keyof typeof PaymentInputPaymentMethod];
+
+
+export const PaymentInputPaymentMethod = {
+  Transfer_Bank: 'Transfer Bank',
+  QRIS: 'QRIS',
+} as const;
+
 export type PaymentInputPaymentType = typeof PaymentInputPaymentType[keyof typeof PaymentInputPaymentType];
 
 
@@ -426,6 +434,7 @@ export interface PaymentInput {
   bookingId: number;
   amount: number;
   proofUrl?: string;
+  paymentMethod?: PaymentInputPaymentMethod;
   paymentType?: PaymentInputPaymentType;
   notes?: string;
 }

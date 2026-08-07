@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db, paymentsTable, bookingsTable, bookingHistoryTable, facilitiesTable, bookingGroupsTable } from "@workspace/db";
-import { eq, and, ne } from "drizzle-orm";
+import { eq, and, ne, sql } from "drizzle-orm";
 import { adminMiddleware, verifyToken } from "../lib/auth";
 import multer from "multer";
 import path from "path";
@@ -212,6 +212,19 @@ router.get("/payments/grouped", adminMiddleware, async (req, res) => {
 router.post("/payments", async (req, res) => {
   try {
     const { bookingId, amount, proofUrl, notes } = req.body;
+    const rawPaymentMethod = req.body.paymentMethod;
+    let paymentMethod: "QRIS" | "Transfer Bank" = "Transfer Bank";
+    if (rawPaymentMethod !== undefined) {
+      const method = String(rawPaymentMethod).trim().toLowerCase();
+      if (method === "qris") {
+        paymentMethod = "QRIS";
+      } else if (method === "transfer" || method === "bank_transfer" || method === "transfer bank") {
+        paymentMethod = "Transfer Bank";
+      } else {
+        res.status(400).json({ error: "Metode pembayaran tidak didukung. Pilih QRIS atau Transfer Bank." });
+        return;
+      }
+    }
     let paymentType: string = req.body.paymentType ?? "";
 
     const [booking] = await db.select().from(bookingsTable)
@@ -320,6 +333,7 @@ router.post("/payments", async (req, res) => {
         bookingId: Number(bookingId),
         amount: String(amount),
         proofUrl,
+        paymentMethod,
         notes,
         paymentType: paymentType as "dp" | "pelunasan" | "full_payment",
       })
@@ -366,6 +380,7 @@ router.post("/payments", async (req, res) => {
             bookingId: sib.id,
             amount: String(sib.grandTotal ?? sib.totalPrice),
             proofUrl,
+            paymentMethod,
             notes: `[Grup ${booking.groupRef}] ${notes || ""}`.trim(),
             paymentType: paymentType as "dp" | "pelunasan" | "full_payment",
           });
@@ -628,7 +643,7 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
             }));
 
             createPublicAccountingEntryForGroup(booking.groupRef, groupEntries, today).catch((err) =>
-              logAccountingError({ operation: "createPublicAccountingEntryForGroup", orderNumber: booking.groupRef!, bookingId: booking.id, error: err }),
+              logAccountingError({ operation: "createPublicAccountingEntry", orderNumber: booking.groupRef!, bookingId: booking.id, error: err }),
             );
           } else {
             createPublicAccountingEntry(booking.id, booking.orderNumber, subtotal, ppnAmount, booking.facilityId, today).catch((err) =>

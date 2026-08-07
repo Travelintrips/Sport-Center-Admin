@@ -821,6 +821,7 @@ export const CreatePaymentBody = zod.object({
   "bookingId": zod.number(),
   "amount": zod.number(),
   "proofUrl": zod.string().optional(),
+  "paymentMethod": zod.enum(['Transfer Bank', 'QRIS']).optional(),
   "paymentType": zod.enum(['dp', 'pelunasan', 'full_payment']).optional(),
   "notes": zod.string().optional()
 })

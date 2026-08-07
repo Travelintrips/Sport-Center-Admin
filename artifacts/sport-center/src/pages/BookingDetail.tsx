@@ -97,7 +97,11 @@ export default function BookingDetail() {
       .catch(() => {});
   }, []);
 
-  const hasPaylabs = paylabsConfig?.configured ?? false;
+  const isActiveAdminPaymentMethod = (id: string) =>
+    paylabsConfig?.paymentMethodsConfig?.some(
+      (method) => method.id.trim().toLowerCase() === id && method.active,
+    ) ?? false;
+  const hasPaylabs = isActiveAdminPaymentMethod("paylabs") && (paylabsConfig?.configured ?? false);
 
   const payDp = usePayBookingDp({
     mutation: {
@@ -191,10 +195,6 @@ export default function BookingDetail() {
 
     let detectedAmount: number = paymentTotal;
 
-    // Untuk grup booking: pakai total semua sesi, bukan hanya 1 booking
-    let detectedAmount: number = groupInfo ? groupInfo.groupTotalPayment : booking.totalPrice;
-
-
     if (isDpMode) {
       const hasDpActive = bPayments.some(
         (p: any) =>
@@ -207,14 +207,10 @@ export default function BookingDetail() {
         detectedType = "pelunasan";
         detectedAmount =
           (booking as any).remainingAmount ??
-
           Math.max(
             0,
             paymentTotal - Number((booking as any).downPayment || 0),
           );
-
-          Math.max(0, payableTotal - Number((booking as any).downPayment || 0));
-
       }
     }
 
@@ -242,6 +238,7 @@ export default function BookingDetail() {
           bookingId: booking.id,
           amount: detectedAmount,
           proofUrl: url ?? objectPath,
+          paymentMethod: paymentMethod === "qris" ? "QRIS" : "Transfer Bank",
           notes: notes || undefined,
           paymentType: detectedType as any,
         },
@@ -314,7 +311,10 @@ export default function BookingDetail() {
   );
 
   const hasBankInfo = settings?.bankAccount && settings?.bankName;
-  const hasQris = !!(settings as any)?.qrisImageUrl;
+  // Manual QRIS follows the same production toggle as the admin payment-method
+  // list, while still requiring the QR image configured in Settings.
+  const hasQris =
+    !!(settings as any)?.qrisImageUrl && isActiveAdminPaymentMethod("qris");
 
   return (
     <div className="container mx-auto px-4 py-8 md:py-12 max-w-4xl">

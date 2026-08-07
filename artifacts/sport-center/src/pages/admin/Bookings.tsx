@@ -2122,7 +2122,12 @@ export default function AdminBookings() {
 
     for (const method of configured) {
       if (!method?.active || typeof method.name !== "string" || !method.name.trim()) continue;
-      const label = method.name.trim();
+      // QRIS is the canonical manual-payment label used by the customer flow.
+      // Keep the admin list aligned with it even when production's configured
+      // display name is "Paylabs - QRIS".
+      const label = String(method.id ?? "").trim().toLowerCase() === "qris"
+        ? "QRIS"
+        : method.name.trim();
       if (!options.some((option) => option.value === label)) {
         options.push({ value: label, label });
       }
