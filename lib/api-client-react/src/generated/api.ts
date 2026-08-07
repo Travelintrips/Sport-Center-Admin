@@ -96,6 +96,8 @@ import type {
   ListPaymentsParams,
   ListPromosParams,
   LoginInput,
+  MembershipLookupInput,
+  MembershipLookupResult,
   MembershipPaymentProofInput,
   MyBookingItem,
   OkResult,
@@ -114,6 +116,7 @@ import type {
   RecurringBookingResult,
   RegisterInput,
   RejectVerificationInput,
+  ResendBookingWa200,
   Review,
   ReviewSummary,
   RevokeVerificationInput,
@@ -141,11 +144,13 @@ import type {
   ToggleBillingInput,
   UpdateProfileInput,
   User,
+  VendorSimple,
   VerificationLog,
   VerifyByOrderInput,
   VerifyInput,
   VerifyOtpInput,
-  VerifyResult
+  VerifyResult,
+  WaNotifLog
 } from './api.schemas';
 
 import { customFetch } from '../custom-fetch';
@@ -1404,6 +1409,83 @@ export function useCheckAvailability<TData = Awaited<ReturnType<typeof checkAvai
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getCheckAvailabilityQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getListVendorsUrl = () => {
+
+
+
+
+  return `/api/vendors`
+}
+
+/**
+ * @summary List active vendors (public dropdown)
+ */
+export const listVendors = async ( options?: RequestInit): Promise<VendorSimple[]> => {
+
+  return customFetch<VendorSimple[]>(getListVendorsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListVendorsQueryKey = () => {
+    return [
+    `/api/vendors`
+    ] as const;
+    }
+
+
+export const getListVendorsQueryOptions = <TData = Awaited<ReturnType<typeof listVendors>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listVendors>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListVendorsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listVendors>>> = ({ signal }) => listVendors({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listVendors>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListVendorsQueryResult = NonNullable<Awaited<ReturnType<typeof listVendors>>>
+export type ListVendorsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List active vendors (public dropdown)
+ */
+
+export function useListVendors<TData = Awaited<ReturnType<typeof listVendors>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listVendors>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListVendorsQueryOptions(options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 
@@ -4872,6 +4954,77 @@ export const useCreateMembership = <TError = ErrorType<unknown>,
       return useMutation(getCreateMembershipMutationOptions(options));
     }
 
+export const getLookupMembershipUrl = () => {
+
+
+
+
+  return `/api/memberships/lookup`
+}
+
+/**
+ * @summary Look up a membership by phone number (public)
+ */
+export const lookupMembership = async (membershipLookupInput: MembershipLookupInput, options?: RequestInit): Promise<MembershipLookupResult> => {
+
+  return customFetch<MembershipLookupResult>(getLookupMembershipUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      membershipLookupInput,)
+  }
+);}
+
+
+
+
+export const getLookupMembershipMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof lookupMembership>>, TError,{data: BodyType<MembershipLookupInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof lookupMembership>>, TError,{data: BodyType<MembershipLookupInput>}, TContext> => {
+
+const mutationKey = ['lookupMembership'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof lookupMembership>>, {data: BodyType<MembershipLookupInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  lookupMembership(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type LookupMembershipMutationResult = NonNullable<Awaited<ReturnType<typeof lookupMembership>>>
+    export type LookupMembershipMutationBody = BodyType<MembershipLookupInput>
+    export type LookupMembershipMutationError = ErrorType<void>
+
+    /**
+ * @summary Look up a membership by phone number (public)
+ */
+export const useLookupMembership = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof lookupMembership>>, TError,{data: BodyType<MembershipLookupInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof lookupMembership>>,
+        TError,
+        {data: BodyType<MembershipLookupInput>},
+        TContext
+      > => {
+      return useMutation(getLookupMembershipMutationOptions(options));
+    }
+
 export const getSubmitMembershipPaymentProofUrl = (id: number,) => {
 
 
@@ -6134,6 +6287,153 @@ export const useCheckInBooking = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getCheckInBookingMutationOptions(options));
+    }
+
+export const getGetBookingWaLogsUrl = (id: number,) => {
+
+
+
+
+  return `/api/bookings/${id}/wa-logs`
+}
+
+/**
+ * @summary Get WA notification logs for a booking (admin)
+ */
+export const getBookingWaLogs = async (id: number, options?: RequestInit): Promise<WaNotifLog[]> => {
+
+  return customFetch<WaNotifLog[]>(getGetBookingWaLogsUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetBookingWaLogsQueryKey = (id: number,) => {
+    return [
+    `/api/bookings/${id}/wa-logs`
+    ] as const;
+    }
+
+
+export const getGetBookingWaLogsQueryOptions = <TData = Awaited<ReturnType<typeof getBookingWaLogs>>, TError = ErrorType<void>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getBookingWaLogs>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetBookingWaLogsQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getBookingWaLogs>>> = ({ signal }) => getBookingWaLogs(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getBookingWaLogs>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetBookingWaLogsQueryResult = NonNullable<Awaited<ReturnType<typeof getBookingWaLogs>>>
+export type GetBookingWaLogsQueryError = ErrorType<void>
+
+
+/**
+ * @summary Get WA notification logs for a booking (admin)
+ */
+
+export function useGetBookingWaLogs<TData = Awaited<ReturnType<typeof getBookingWaLogs>>, TError = ErrorType<void>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getBookingWaLogs>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetBookingWaLogsQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getResendBookingWaUrl = (id: number,) => {
+
+
+
+
+  return `/api/bookings/${id}/resend-wa`
+}
+
+/**
+ * @summary Resend WA notification to customer based on booking status (admin)
+ */
+export const resendBookingWa = async (id: number, options?: RequestInit): Promise<ResendBookingWa200> => {
+
+  return customFetch<ResendBookingWa200>(getResendBookingWaUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getResendBookingWaMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resendBookingWa>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof resendBookingWa>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['resendBookingWa'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof resendBookingWa>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  resendBookingWa(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ResendBookingWaMutationResult = NonNullable<Awaited<ReturnType<typeof resendBookingWa>>>
+
+    export type ResendBookingWaMutationError = ErrorType<void>
+
+    /**
+ * @summary Resend WA notification to customer based on booking status (admin)
+ */
+export const useResendBookingWa = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resendBookingWa>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof resendBookingWa>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getResendBookingWaMutationOptions(options));
     }
 
 export const getVerifyBookingUrl = (id: number,) => {

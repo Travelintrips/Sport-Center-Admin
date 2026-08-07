@@ -4,6 +4,8 @@ import { z } from "zod/v4";
 import { facilitiesTable } from "./facilities";
 import { usersTable } from "./users";
 import { scSchema } from "./_schema";
+import { coaAccountsTable } from "./coaAccounts";
+import { vendorsTable } from "./vendors";
 
 export const expenseStatusEnum = scSchema.enum("expense_status", [
   "draft",
@@ -30,8 +32,10 @@ export const expensesTable = scSchema.table("sport_expenses", {
   id: serial("id").primaryKey(),
   expenseNo: text("expense_no").notNull(),
   expenseDate: text("expense_date").notNull(),
-  category: expenseCategoryEnum("category").notNull(),
+  category: expenseCategoryEnum("category").notNull().default("Lain-lain"),
+  coaAccountId: integer("coa_account_id").references(() => coaAccountsTable.id, { onDelete: "set null" }),
   description: text("description").notNull(),
+  vendorId: integer("vendor_id").references(() => vendorsTable.id, { onDelete: "set null" }),
   vendorName: text("vendor_name"),
   facilityId: integer("facility_id").references(() => facilitiesTable.id, { onDelete: "set null" }),
   amount: numeric("amount", { precision: 14, scale: 2 }).notNull(),

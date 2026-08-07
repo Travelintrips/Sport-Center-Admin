@@ -5,6 +5,19 @@ import { ensureDefaultTemplates } from "./lib/seedTemplates";
 import { initBizportalTables } from "./lib/bizportalSync";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
+import { validateEnv } from "./lib/envValidation";
+import { loadSecretsFromGSM } from "./lib/secretLoader";
+
+// ── 1. Load secrets from Google Secret Manager (production/GAE only) ──────────
+// Must run before any other import reads process.env for secrets.
+// Non-fatal: if GSM is unavailable, envValidation below catches missing vars.
+const gsmResult = await loadSecretsFromGSM();
+if (gsmResult.loaded.length > 0) {
+  logger.info({ loaded: gsmResult.loaded }, "[secretLoader] Secrets loaded from Google Secret Manager");
+}
+if (gsmResult.failed.length > 0) {
+  logger.warn({ failed: gsmResult.failed }, "[secretLoader] Some secrets could not be loaded from GSM");
+}
 
 const rawPort = process.env["PORT"];
 
@@ -20,64 +33,10 @@ if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
-/**
- * validateProductionEnv — runs BEFORE server listens.
- * Fails fast on missing critical secrets in production.
- * In development: only warns, never exits.
- */
-function validateProductionEnv(): void {
-  const isProd = process.env.NODE_ENV === "production";
-  if (!isProd) return;
-
-  const fatal: string[] = [];
-  const warn: string[] = [];
-
-  // Critical — DB
-  if (!process.env.SUPABASE_DATABASE_URL) {
-    fatal.push("SUPABASE_DATABASE_URL is not set — production DB unreachable");
-  }
-
-  // Critical — Storage
-  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    fatal.push("SUPABASE_SERVICE_ROLE_KEY is not set — file uploads will fail");
-  }
-
-  // Soft — Realtime (no-op allowed, but must be explicit)
-  if (!process.env.SUPABASE_URL) {
-    warn.push("SUPABASE_URL not set — realtime availability broadcasts are no-ops");
-  }
-  if (!process.env.SUPABASE_ANON_KEY) {
-    warn.push("SUPABASE_ANON_KEY not set — realtime availability broadcasts are no-ops");
-  }
-
-  // Warned flags in production — these bleed in from dev env in Replit deployments
-  // The db module correctly ignores ALLOW_DEV_ON_PROD_DB in production (always uses SUPABASE_DATABASE_URL)
-  if (process.env.ALLOW_DEV_ON_PROD_DB === "true") {
-    warn.push("ALLOW_DEV_ON_PROD_DB=true is set — harmless in production (db module ignores it), but remove from prod env when possible");
-  }
-  if (process.env.ALLOW_DEV_ON_PROD_STORAGE === "true") {
-    warn.push("ALLOW_DEV_ON_PROD_STORAGE=true is set — harmless in production (storage module ignores it), but remove from prod env when possible");
-  }
-  if (process.env.SUPABASE_DATABASE_URL_DEV) {
-    warn.push("SUPABASE_DATABASE_URL_DEV is set in production env — this var is for development only");
-  }
-
-  for (const w of warn) {
-    logger.warn(`[prod-env] ${w}`);
-  }
-
-  if (fatal.length > 0) {
-    logger.error(
-      { missing: fatal },
-      "[prod-env] FATAL: Production environment is missing required variables. Refusing to start."
-    );
-    for (const f of fatal) {
-      logger.error(`[prod-env] ✗ ${f}`);
-    }
-    process.exit(1);
-  }
-
-  logger.info("[prod-env] Production environment validation passed.");
+// ── 2. Validate environment variables — fails fast in production if critical vars are missing ──
+const envResult = validateEnv();
+if (!envResult.ok) {
+  process.exit(1);
 }
 
 async function runStartupMigrations() {
@@ -606,7 +565,7 @@ async function runStartupMigrations() {
     // Seed system default document templates
     `INSERT INTO sport_center.company_document_templates
        (company_id, document_type, is_default, company_display_name, finance_name, finance_title, number_format_prefix, paper_style)
-     SELECT NULL, t.dt, true, 'Sport Center Jakarta', 'Kepala Keuangan', 'Finance Manager', t.prefix, 'A4'
+     SELECT NULL, t.dt, true, 'Sport Center Bandara Soekarno Hatta', 'Kepala Keuangan', 'Finance Manager', t.prefix, 'A4'
      FROM (VALUES
        ('invoice','INV'), ('spp','SPP'), ('faktur','FAKTUR'),
        ('kwitansi','KWT'), ('lampiran','LMP'), ('berita_acara','BA')
@@ -655,6 +614,127 @@ async function runStartupMigrations() {
     `ALTER TABLE sport_center.company_invoices ADD COLUMN IF NOT EXISTS dpp_nilai_lain numeric(14,2) NOT NULL DEFAULT 0`,
     // Backfill dpp_nilai_lain for existing rows: DPP × (11/12)
     `UPDATE sport_center.company_invoices SET dpp_nilai_lain = ROUND((total_amount * 11 / 12), 2) WHERE dpp_nilai_lain = 0 AND total_amount > 0`,
+    // sport_vendors master table
+    `CREATE TABLE IF NOT EXISTS sport_center.sport_vendors (
+       id serial PRIMARY KEY,
+       name text NOT NULL,
+       contact_person text,
+       phone text,
+       email text,
+       address text,
+       category text,
+       is_active boolean NOT NULL DEFAULT true,
+       notes text,
+       created_at timestamptz NOT NULL DEFAULT NOW(),
+       updated_at timestamptz NOT NULL DEFAULT NOW()
+     )`,
+    // vendor_id FK on sport_expenses (nullable, idempotent)
+    `ALTER TABLE sport_center.sport_expenses
+       ADD COLUMN IF NOT EXISTS vendor_id int REFERENCES sport_center.sport_vendors(id) ON DELETE SET NULL`,
+    // company_document_settings — background template overlay columns
+    `ALTER TABLE sport_center.company_document_settings
+       ADD COLUMN IF NOT EXISTS bg_template_url text`,
+    `ALTER TABLE sport_center.company_document_settings
+       ADD COLUMN IF NOT EXISTS bg_template_type text`,
+    `ALTER TABLE sport_center.company_document_settings
+       ADD COLUMN IF NOT EXISTS bg_template_active boolean NOT NULL DEFAULT false`,
+    // ── gym_memberships (gym member bulanan) ─────────────────────────────
+    // membership_status enum (idempotent)
+    "DO $body$ BEGIN " +
+      "CREATE TYPE sport_center.membership_status AS ENUM " +
+      "('pending_payment','waiting_confirmation','active','expired','cancelled'); " +
+      "EXCEPTION WHEN duplicate_object THEN null; END $body$",
+    // enum values idempotently (required for pre-existing enums)
+    "DO $body$ BEGIN ALTER TYPE sport_center.membership_status ADD VALUE IF NOT EXISTS 'pending_payment'; EXCEPTION WHEN others THEN null; END $body$",
+    "DO $body$ BEGIN ALTER TYPE sport_center.membership_status ADD VALUE IF NOT EXISTS 'waiting_confirmation'; EXCEPTION WHEN others THEN null; END $body$",
+    "DO $body$ BEGIN ALTER TYPE sport_center.membership_status ADD VALUE IF NOT EXISTS 'active'; EXCEPTION WHEN others THEN null; END $body$",
+    "DO $body$ BEGIN ALTER TYPE sport_center.membership_status ADD VALUE IF NOT EXISTS 'expired'; EXCEPTION WHEN others THEN null; END $body$",
+    "DO $body$ BEGIN ALTER TYPE sport_center.membership_status ADD VALUE IF NOT EXISTS 'cancelled'; EXCEPTION WHEN others THEN null; END $body$",
+    `CREATE TABLE IF NOT EXISTS sport_center.sport_memberships (
+       id                serial PRIMARY KEY,
+       name              text NOT NULL,
+       email             text NOT NULL,
+       phone             text NOT NULL,
+       start_date        text NOT NULL,
+       end_date          text NOT NULL,
+       months            integer NOT NULL DEFAULT 1,
+       total_price       numeric(12,2) NOT NULL,
+       status            sport_center.membership_status NOT NULL DEFAULT 'active',
+       notes             text,
+       payment_method    text,
+       payment_proof_url text,
+       created_at        timestamptz NOT NULL DEFAULT NOW(),
+       updated_at        timestamptz NOT NULL DEFAULT NOW()
+     )`,
+    // ── ap_members (Angkasa Pura member list) ─────────────────────────────
+    `CREATE TABLE IF NOT EXISTS sport_center.ap_members (
+       id             serial PRIMARY KEY,
+       name           text NOT NULL,
+       phone          text,
+       email          text,
+       id_card_number text NOT NULL,
+       is_active      boolean NOT NULL DEFAULT true,
+       created_at     timestamptz NOT NULL DEFAULT NOW(),
+       updated_at     timestamptz NOT NULL DEFAULT NOW()
+     )`,
+    "DO $body$ BEGIN ALTER TABLE sport_center.ap_members ADD CONSTRAINT ap_members_id_card_number_unique UNIQUE (id_card_number); EXCEPTION WHEN others THEN null; END $body$",
+    // ── verification_logs ────────────────────────────────────────────────
+    `CREATE TABLE IF NOT EXISTS sport_center.verification_logs (
+       id                   serial PRIMARY KEY,
+       booking_id           integer REFERENCES sport_center.sport_bookings(id) ON DELETE CASCADE,
+       order_number         text,
+       verified_by_user_id  integer,
+       id_card_number_input text NOT NULL,
+       status               text NOT NULL,
+       notes                text,
+       ip_address           text,
+       created_at           timestamptz NOT NULL DEFAULT NOW()
+     )`,
+    // ── discount_settings ────────────────────────────────────────────────
+    `CREATE TABLE IF NOT EXISTS sport_center.discount_settings (
+       id                  serial PRIMARY KEY,
+       customer_type       text NOT NULL,
+       discount_percentage integer NOT NULL DEFAULT 0,
+       description         text,
+       is_active           boolean NOT NULL DEFAULT true,
+       updated_at          timestamptz NOT NULL DEFAULT NOW()
+     )`,
+    "DO $body$ BEGIN ALTER TABLE sport_center.discount_settings ADD CONSTRAINT discount_settings_customer_type_unique UNIQUE (customer_type); EXCEPTION WHEN others THEN null; END $body$",
+    // ── corporate_booking_documentation ──────────────────────────────────────
+    `CREATE TABLE IF NOT EXISTS sport_center.corporate_booking_documentation (
+       id          serial PRIMARY KEY,
+       booking_id  int NOT NULL REFERENCES sport_center.sport_bookings(id) ON DELETE CASCADE,
+       company_id  int REFERENCES sport_center.users(id) ON DELETE SET NULL,
+       uploaded_by text NOT NULL DEFAULT 'customer',
+       file_url    text NOT NULL,
+       file_name   text,
+       caption     text,
+       created_at  timestamptz NOT NULL DEFAULT NOW()
+     )`,
+    // ── company_invoices: payment_proof_url + waiting_verification status ────
+    `ALTER TABLE sport_center.company_invoices ADD COLUMN IF NOT EXISTS payment_proof_url text`,
+    `DO $mig$ BEGIN ALTER TYPE sport_center.invoice_status ADD VALUE IF NOT EXISTS 'waiting_verification'; EXCEPTION WHEN OTHERS THEN null; END $mig$`,
+    // ── paylabs_settings ─────────────────────────────────────────────────────
+    `CREATE TABLE IF NOT EXISTS sport_center.paylabs_settings (
+       id                     SERIAL PRIMARY KEY,
+       title                  TEXT    NOT NULL DEFAULT 'Online Payment (Bank Transfer, Virtual Account, QRIS)',
+       description            TEXT    NOT NULL DEFAULT '',
+       send_invoice           BOOLEAN NOT NULL DEFAULT TRUE,
+       charge_customer        BOOLEAN NOT NULL DEFAULT FALSE,
+       new_order_status       TEXT    NOT NULL DEFAULT 'completed',
+       debug_mode             BOOLEAN NOT NULL DEFAULT FALSE,
+       sandbox_mode           BOOLEAN NOT NULL DEFAULT TRUE,
+       store_id               TEXT    NOT NULL DEFAULT '',
+       sandbox_public_key     TEXT    NOT NULL DEFAULT '',
+       sandbox_private_key    TEXT    NOT NULL DEFAULT '',
+       sandbox_merchant_id    TEXT    NOT NULL DEFAULT '',
+       prod_public_key        TEXT    NOT NULL DEFAULT '',
+       prod_private_key       TEXT    NOT NULL DEFAULT '',
+       prod_merchant_id       TEXT    NOT NULL DEFAULT '',
+       payment_methods_config JSONB,
+       created_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+       updated_at             TIMESTAMPTZ NOT NULL DEFAULT NOW()
+     )`,
   ];
 
   for (const stmt of migrations) {
@@ -667,8 +747,7 @@ async function runStartupMigrations() {
   logger.info("Startup migrations OK");
 }
 
-// Run BEFORE listening — fails fast in production if env is incomplete
-validateProductionEnv();
+// env validation already ran above (step 2) — no-op placeholder kept for clarity
 
 app.listen(port, (err) => {
   if (err) {

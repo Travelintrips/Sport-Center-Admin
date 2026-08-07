@@ -1,8 +1,10 @@
 import { Router, Request, Response, NextFunction } from "express";
 import { db, bookingsTable, facilitiesTable, paymentsTable, usersTable, gymMembershipsTable } from "@workspace/db";
-import { desc, gte, and, lte, eq } from "drizzle-orm";
+
+import { desc, gte, and, lte, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { extractBookingDpp } from "../lib/accounting";
 import { adminMiddleware } from "../lib/auth";
-import { syncBookingToBizportal, syncMembershipToBizportal, bizportalSyncConfigured } from "../lib/bizportalSync";
+import { syncBookingToBizportal, syncMembershipToBizportal, bizportalSyncConfigured, bulkPushPaymentsToBizportal, type BulkPaymentPushResult } from "../lib/bizportalSync";
 
 const router = Router();
 
@@ -93,6 +95,16 @@ router.get("/sync/bookings", apiKeyMiddleware, async (req, res) => {
     const total = allBookings.length;
     const paged = allBookings.slice(offset, offset + limit);
 
+    // Hitung total revenue — konsisten dengan dashboard.ts:
+    // Pribadi: confirmed/completed; Perusahaan: billingStatus=paid
+    const totalRevenue = allBookings
+      .filter((b) =>
+        b.payerType === "company"
+          ? b.billingStatus === "paid"
+          : ["confirmed", "completed"].includes(b.status),
+      )
+      .reduce((sum, b) => sum + (b.grandTotal != null ? Number(b.grandTotal) : Number(b.totalPrice)), 0);
+
     const facilityIds = [...new Set(paged.map((b) => b.facilityId))];
     const facilities = facilityIds.length
       ? await db.select({ id: facilitiesTable.id, name: facilitiesTable.name, category: facilitiesTable.category }).from(facilitiesTable)
@@ -100,12 +112,23 @@ router.get("/sync/bookings", apiKeyMiddleware, async (req, res) => {
 
     const bookingIds = paged.map((b) => b.id);
     const payments = bookingIds.length
-      ? await db.select().from(paymentsTable)
+      ? await db.select().from(paymentsTable).where(inArray(paymentsTable.bookingId, bookingIds))
       : [];
+
+    // Hitung group total per group_ref dari allBookings (sudah ada di memori, tidak perlu query baru)
+    const groupTotalMap: Record<string, number> = {};
+    for (const b of allBookings) {
+      const ref = (b as any).groupRef as string | null | undefined;
+      if (ref) {
+        groupTotalMap[ref] = (groupTotalMap[ref] ?? 0) + Number(b.totalPrice);
+      }
+    }
 
     const customerIds = [...new Set(paged.map((b) => b.customerId).filter(Boolean))] as number[];
     const users = customerIds.length
-      ? await db.select({ id: usersTable.id, name: usersTable.name, email: usersTable.email }).from(usersTable)
+      ? await db.select({ id: usersTable.id, name: usersTable.name, email: usersTable.email })
+          .from(usersTable)
+          .where(inArray(usersTable.id, customerIds))
       : [];
 
     const result = paged.map((b) => {
@@ -148,6 +171,9 @@ router.get("/sync/bookings", apiKeyMiddleware, async (req, res) => {
         completedAt: b.completedAt,
         createdAt: b.createdAt,
         updatedAt: b.updatedAt,
+        // Booking gabungan
+        groupRef: (b as any).groupRef ?? null,
+        groupTotal: (b as any).groupRef ? (groupTotalMap[(b as any).groupRef] ?? null) : null,
         // Rincian pajak (PPN)
         ppnRate,
         ppnAmount,
@@ -176,6 +202,7 @@ router.get("/sync/bookings", apiKeyMiddleware, async (req, res) => {
         offset,
         from: fromDate,
         to: toDate,
+        totalRevenue,
         syncedAt: new Date().toISOString(),
         source: "sport-center",
       },
@@ -276,15 +303,19 @@ router.get("/sync/stats", apiKeyMiddleware, async (req, res) => {
     const todayBookings = allBookings.filter((b) => b.bookingDate === today);
     const monthBookings = allBookings.filter((b) => b.bookingDate.startsWith(thisMonth));
 
-    const confirmedStatuses = ["confirmed", "completed", "waiting_confirmation", "paid"];
+    // Filter konsisten dengan dashboard.ts: pribadi=confirmed/completed, perusahaan=billingStatus paid
+    const isPaidBooking = (b: typeof allBookings[number]) =>
+      b.payerType === "company"
+        ? b.billingStatus === "paid"
+        : ["confirmed", "completed"].includes(b.status);
 
     const totalRevenue = allBookings
-      .filter((b) => confirmedStatuses.includes(b.status))
-      .reduce((sum, b) => sum + Number(b.totalPrice), 0);
+      .filter(isPaidBooking)
+      .reduce((sum, b) => sum + (b.grandTotal != null ? Number(b.grandTotal) : Number(b.totalPrice)), 0);
 
     const monthRevenue = monthBookings
-      .filter((b) => confirmedStatuses.includes(b.status))
-      .reduce((sum, b) => sum + Number(b.totalPrice), 0);
+      .filter(isPaidBooking)
+      .reduce((sum, b) => sum + (b.grandTotal != null ? Number(b.grandTotal) : Number(b.totalPrice)), 0);
 
     const byStatus = allBookings.reduce<Record<string, number>>((acc, b) => {
       acc[b.status] = (acc[b.status] || 0) + 1;
@@ -309,12 +340,42 @@ router.get("/sync/stats", apiKeyMiddleware, async (req, res) => {
   }
 });
 
+// In-memory status untuk full re-sync (booking & membership) supaya
+// endpoint trigger tidak perlu menunggu (menghindari HTTP timeout untuk
+// dataset besar) dan progress-nya bisa dipantau lewat endpoint /status.
+type BulkSyncStatus = {
+  running: boolean;
+  startedAt: string | null;
+  finishedAt: string | null;
+  total: number;
+  processed: number;
+  synced: number;
+  failed: number;
+  errors: string[];
+};
+
+function freshStatus(): BulkSyncStatus {
+  return { running: false, startedAt: null, finishedAt: null, total: 0, processed: 0, synced: 0, failed: 0, errors: [] };
+}
+
+const bulkSyncStatus = {
+  bookings: freshStatus(),
+  memberships: freshStatus(),
+};
+
 /**
  * POST /api/admin/sync-bizportal
  * Trigger manual full re-sync semua booking ke PROD Bizportal.
+ * Berjalan di background (tidak menunggu selesai) supaya tidak timeout untuk
+ * dataset besar — pantau progress via GET /api/admin/sync-bizportal/status.
  * Hanya bisa diakses oleh admin yang sudah login.
  */
 router.post("/admin/sync-bizportal", adminMiddleware, async (req, res) => {
+  if (bulkSyncStatus.bookings.running) {
+    res.status(409).json({ error: "Resync booking sedang berjalan, tunggu sampai selesai." });
+    return;
+  }
+
   try {
     const allBookings = await db.select().from(bookingsTable).orderBy(desc(bookingsTable.createdAt));
 
@@ -322,72 +383,404 @@ router.post("/admin/sync-bizportal", adminMiddleware, async (req, res) => {
     const facilities = facilityIds.length
       ? await db.select({ id: facilitiesTable.id, name: facilitiesTable.name, category: facilitiesTable.category }).from(facilitiesTable)
       : [];
-
     const facilityMap = new Map(facilities.map((f) => [f.id, { name: f.name, category: f.category }]));
 
-    let synced = 0;
-    let failed = 0;
-    const errors: string[] = [];
+    bulkSyncStatus.bookings = {
+      ...freshStatus(),
+      running: true,
+      startedAt: new Date().toISOString(),
+      total: allBookings.length,
+    };
 
-    for (const booking of allBookings) {
-      const facilityInfo = facilityMap.get(booking.facilityId);
-      const facilityName = facilityInfo?.name ?? "Unknown";
-      const facilityCategory = facilityInfo?.category ?? null;
-      try {
-        await syncBookingToBizportal({ booking, facilityName, facilityCategory });
-        synced++;
-      } catch (err: any) {
-        failed++;
-        errors.push(`${booking.orderNumber}: ${err?.message}`);
+    // Respond immediately — sync jalan di background.
+    res.json({ success: true, started: true, total: allBookings.length, statusUrl: "/api/admin/sync-bizportal/status" });
+
+    // Hitung group total untuk setiap groupRef agar BizPortal tidak double-count:
+    // - Booking primary dalam grup → total_price = sum semua sesi dalam grup
+    // - Booking sibling → total_price = 0
+    // Primary ditentukan berdasarkan id terkecil dalam grup (booking pertama dibuat).
+    const groupTotals = new Map<string, number>(); // groupRef → total DPP + PPN
+    const groupPrimaryIds = new Map<string, number>(); // groupRef → id booking primary
+
+    for (const b of allBookings) {
+      if (!b.groupRef) continue;
+      const { dpp, ppnAmount } = extractBookingDpp(b);
+      groupTotals.set(b.groupRef, (groupTotals.get(b.groupRef) ?? 0) + dpp + ppnAmount);
+      const currentPrimary = groupPrimaryIds.get(b.groupRef);
+      if (currentPrimary === undefined || b.id < currentPrimary) {
+        groupPrimaryIds.set(b.groupRef, b.id);
+
       }
     }
 
-    res.json({
-      success: true,
-      synced,
-      failed,
-      total: allBookings.length,
-      errors: errors.slice(0, 10),
-      syncedAt: new Date().toISOString(),
-    });
+    // Sync paralel per-batch (bukan satu-satu) supaya cepat selesai untuk
+    // dataset besar. Batch kecil menjaga jumlah koneksi simultan ke Supabase
+    // tetap wajar (lihat pool `max` di bizportalSync.ts).
+    const CONCURRENCY = 8;
+    for (let i = 0; i < allBookings.length; i += CONCURRENCY) {
+      const batch = allBookings.slice(i, i + CONCURRENCY);
+      const results = await Promise.allSettled(
+        batch.map((booking) => {
+          const facilityInfo = facilityMap.get(booking.facilityId);
+          const facilityName = facilityInfo?.name ?? "Unknown";
+          const facilityCategory = facilityInfo?.category ?? null;
+
+          // Untuk booking dalam grup: override totalPrice agar tidak double-count di BizPortal
+          let bookingToSync = booking;
+          if (booking.groupRef) {
+            const isPrimary = groupPrimaryIds.get(booking.groupRef) === booking.id;
+            if (isPrimary) {
+              // Primary menanggung total seluruh grup
+              const groupTotal = groupTotals.get(booking.groupRef) ?? Number(booking.totalPrice);
+              bookingToSync = { ...booking, totalPrice: String(groupTotal), grandTotal: String(groupTotal) } as any;
+            } else {
+              // Sibling: total_price = 0 supaya tidak menambah nominal di BizPortal
+              bookingToSync = { ...booking, totalPrice: "0", grandTotal: null, dpp: null, ppnAmount: null } as any;
+            }
+          }
+
+          return syncBookingToBizportal({ booking: bookingToSync, facilityName, facilityCategory });
+        }),
+      );
+      results.forEach((result, idx) => {
+        bulkSyncStatus.bookings.processed++;
+        if (result.status === "fulfilled") {
+          bulkSyncStatus.bookings.synced++;
+        } else {
+          bulkSyncStatus.bookings.failed++;
+          bulkSyncStatus.bookings.errors.push(
+            `${batch[idx]!.orderNumber}: ${(result.reason as any)?.message ?? "unknown error"}`,
+          );
+        }
+      });
+    }
+
+    bulkSyncStatus.bookings.running = false;
+    bulkSyncStatus.bookings.finishedAt = new Date().toISOString();
+    bulkSyncStatus.bookings.errors = bulkSyncStatus.bookings.errors.slice(0, 20);
+    req.log.info(
+      { synced: bulkSyncStatus.bookings.synced, failed: bulkSyncStatus.bookings.failed, total: allBookings.length },
+      "[sync] Full booking resync finished",
+    );
   } catch (err) {
+    bulkSyncStatus.bookings.running = false;
+    bulkSyncStatus.bookings.finishedAt = new Date().toISOString();
     req.log.error({ err }, "Manual Bizportal sync error");
-    res.status(500).json({ error: "Internal server error" });
+    if (!res.headersSent) {
+      res.status(500).json({ error: "Internal server error" });
+    }
   }
+});
+
+/**
+ * GET /api/admin/sync-bizportal/status
+ * Cek progress full re-sync booking terakhir (mulai/berjalan/selesai + error).
+ */
+router.get("/admin/sync-bizportal/status", adminMiddleware, (_req, res) => {
+  res.json(bulkSyncStatus.bookings);
 });
 
 /**
  * POST /api/admin/sync-bizportal-memberships
  * Trigger manual full re-sync semua member gym ke PROD Bizportal.
+ * Sama seperti booking resync — berjalan di background dan bisa dipantau
+ * lewat GET /api/admin/sync-bizportal-memberships/status.
  */
 router.post("/admin/sync-bizportal-memberships", adminMiddleware, async (req, res) => {
+  if (bulkSyncStatus.memberships.running) {
+    res.status(409).json({ error: "Resync membership sedang berjalan, tunggu sampai selesai." });
+    return;
+  }
+
   try {
     const allMemberships = await db.select().from(gymMembershipsTable).orderBy(desc(gymMembershipsTable.createdAt));
 
-    let synced = 0;
-    let failed = 0;
-    const errors: string[] = [];
-
-    for (const membership of allMemberships) {
-      try {
-        await syncMembershipToBizportal(membership);
-        synced++;
-      } catch (err: any) {
-        failed++;
-        errors.push(`ID ${membership.id}: ${err?.message}`);
-      }
-    }
+    bulkSyncStatus.memberships = {
+      ...freshStatus(),
+      running: true,
+      startedAt: new Date().toISOString(),
+      total: allMemberships.length,
+    };
 
     res.json({
       success: true,
-      synced,
-      failed,
+      started: true,
       total: allMemberships.length,
-      errors: errors.slice(0, 10),
-      syncedAt: new Date().toISOString(),
+      statusUrl: "/api/admin/sync-bizportal-memberships/status",
+    });
+
+    const CONCURRENCY = 8;
+    for (let i = 0; i < allMemberships.length; i += CONCURRENCY) {
+      const batch = allMemberships.slice(i, i + CONCURRENCY);
+      const results = await Promise.allSettled(batch.map((membership) => syncMembershipToBizportal(membership)));
+      results.forEach((result, idx) => {
+        bulkSyncStatus.memberships.processed++;
+        if (result.status === "fulfilled") {
+          bulkSyncStatus.memberships.synced++;
+        } else {
+          bulkSyncStatus.memberships.failed++;
+          bulkSyncStatus.memberships.errors.push(
+            `ID ${batch[idx]!.id}: ${(result.reason as any)?.message ?? "unknown error"}`,
+          );
+        }
+      });
+    }
+
+    bulkSyncStatus.memberships.running = false;
+    bulkSyncStatus.memberships.finishedAt = new Date().toISOString();
+    bulkSyncStatus.memberships.errors = bulkSyncStatus.memberships.errors.slice(0, 20);
+  } catch (err) {
+    bulkSyncStatus.memberships.running = false;
+    bulkSyncStatus.memberships.finishedAt = new Date().toISOString();
+    req.log.error({ err }, "Manual Bizportal memberships sync error");
+    if (!res.headersSent) {
+      res.status(500).json({ error: "Internal server error" });
+    }
+  }
+});
+
+/**
+ * GET /api/admin/sync-bizportal-memberships/status
+ * Cek progress full re-sync membership terakhir.
+ */
+router.get("/admin/sync-bizportal-memberships/status", adminMiddleware, (_req, res) => {
+  res.json(bulkSyncStatus.memberships);
+});
+
+// In-memory status untuk payment sync
+type PaymentSyncStatus = {
+  running: boolean;
+  startedAt: string | null;
+  finishedAt: string | null;
+  total: number;
+  pushed: number;
+  skipped: number;
+  failed: number;
+  errors: string[];
+};
+
+let paymentSyncStatus: PaymentSyncStatus = {
+  running: false, startedAt: null, finishedAt: null,
+  total: 0, pushed: 0, skipped: 0, failed: 0, errors: [],
+};
+
+/**
+ * POST /api/admin/sync-bizportal-payments
+ * Push semua SC payment confirmed ke public.sport_payments BizPortal.
+ * Berjalan di background — pantau lewat GET /api/admin/sync-bizportal-payments/status.
+ */
+router.post("/admin/sync-bizportal-payments", adminMiddleware, async (req, res) => {
+  if (paymentSyncStatus.running) {
+    res.status(409).json({ error: "Sync payment sedang berjalan, tunggu sampai selesai." });
+    return;
+  }
+
+  paymentSyncStatus = {
+    running: true,
+    startedAt: new Date().toISOString(),
+    finishedAt: null,
+    total: 0, pushed: 0, skipped: 0, failed: 0, errors: [],
+  };
+
+  res.json({ success: true, started: true, statusUrl: "/api/admin/sync-bizportal-payments/status" });
+
+  try {
+    const result = await bulkPushPaymentsToBizportal();
+    paymentSyncStatus = {
+      ...paymentSyncStatus,
+      running: false,
+      finishedAt: new Date().toISOString(),
+      ...result,
+      errors: result.errors.slice(0, 20),
+    };
+    req.log.info(
+      { pushed: result.pushed, skipped: result.skipped, failed: result.failed, total: result.total },
+      "[sync] Payment sync to BizPortal finished",
+    );
+  } catch (err: any) {
+    paymentSyncStatus.running = false;
+    paymentSyncStatus.finishedAt = new Date().toISOString();
+    paymentSyncStatus.errors.push(`Fatal: ${err?.message}`);
+    req.log.error({ err }, "Payment sync to BizPortal error");
+  }
+});
+
+/**
+ * GET /api/admin/sync-bizportal-payments/status
+ * Cek progress payment sync terakhir.
+ */
+router.get("/admin/sync-bizportal-payments/status", adminMiddleware, (_req, res) => {
+  res.json(paymentSyncStatus);
+});
+
+/**
+ * GET /api/admin/sync-bizportal-payments/pending
+ * Rekonsiliasi: hitung berapa confirmed SC payments yang belum ada di BizPortal.
+ * Dipakai UI untuk menampilkan badge "X pending" di tombol Sync Bizportal.
+ */
+router.get("/admin/sync-bizportal-payments/pending", adminMiddleware, async (_req, res) => {
+  try {
+    const { getProdPool } = await import("../lib/bizportalSync");
+    const pool = getProdPool();
+    if (!pool) {
+      res.json({ pending: 0, configured: false });
+      return;
+    }
+
+    const { rows } = await pool.query(`
+      SELECT COUNT(*) AS pending
+      FROM sport_center.sport_payments sp
+      JOIN sport_center.sport_bookings sb ON sb.id = sp.booking_id
+      LEFT JOIN public.sport_bookings pb ON pb.sc_booking_id = sb.id
+      WHERE sp.status = 'confirmed'
+        AND pb.id IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM public.sport_payments bpay
+          WHERE bpay.payment_number = 'SCPAY-SC-' || sp.id::text
+        )
+    `);
+
+    res.json({ pending: parseInt(rows[0]?.pending ?? "0", 10), configured: true });
+  } catch (err: any) {
+    res.json({ pending: 0, configured: true, error: err.message });
+  }
+});
+
+/**
+ * GET /api/sync/payment-groups
+ * Endpoint BizPortal: daftar pembayaran yang dikelompokkan per group_ref.
+ * - Booking grup → satu baris dengan total_group_amount + child_bookings
+ * - Booking individual → satu baris per booking seperti biasa
+ *
+ * Query params: from, to, status, limit, offset
+ */
+router.get("/sync/payment-groups", apiKeyMiddleware, async (req, res) => {
+  try {
+    const { from, to, status, limit: limitStr, offset: offsetStr } = req.query as Record<string, string>;
+    const limit  = Math.min(parseInt(limitStr  || "500"), 1000);
+    const offset = parseInt(offsetStr || "0");
+    const today        = new Date().toISOString().split("T")[0];
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+    const fromDate = from || thirtyDaysAgo;
+    const toDate   = to   || today;
+
+    let allBookings = await db
+      .select()
+      .from(bookingsTable)
+      .where(and(gte(bookingsTable.bookingDate, fromDate), lte(bookingsTable.bookingDate, toDate)))
+      .orderBy(desc(bookingsTable.createdAt));
+
+    if (status) {
+      const statuses = status.split(",").map((s) => s.trim());
+      allBookings = allBookings.filter((b) => statuses.includes(b.status));
+    }
+
+    const facilityIds = [...new Set(allBookings.map((b) => b.facilityId))];
+    const facilities = facilityIds.length
+      ? await db.select({ id: facilitiesTable.id, name: facilitiesTable.name, category: facilitiesTable.category }).from(facilitiesTable)
+      : [];
+    const facilityMap = new Map(facilities.map((f) => [f.id, f]));
+
+    const bookingIds = allBookings.map((b) => b.id);
+    const payments = bookingIds.length
+      ? await db.select().from(paymentsTable).where(inArray(paymentsTable.bookingId, bookingIds))
+      : [];
+    const paymentByBookingId = new Map(payments.map((p) => [p.bookingId, p]));
+
+    // Group by group_ref; individual bookings get their own entry
+    const groupMap = new Map<string, typeof allBookings>();
+    const individual: typeof allBookings = [];
+    for (const b of allBookings) {
+      const gRef = (b as any).groupRef as string | null;
+      if (gRef) {
+        const arr = groupMap.get(gRef) ?? [];
+        arr.push(b);
+        groupMap.set(gRef, arr);
+      } else {
+        individual.push(b);
+      }
+    }
+
+    const groupEntries = [...groupMap.entries()].map(([gRef, members]) => {
+      const rep  = members[0]!;
+      const totalGroupAmount = members.reduce((s, b) => s + Number(b.totalPrice), 0);
+      const payment = paymentByBookingId.get(rep.id);
+      return {
+        type: "group",
+        groupBookingId: gRef,
+        groupRef: gRef,
+        bookingCount: members.length,
+        totalGroupAmount,
+        customerName: rep.customerName,
+        customerPhone: rep.customerPhone,
+        customerEmail: rep.customerEmail,
+        status: rep.status,
+        firstBookingDate: members.map((b) => b.bookingDate).sort()[0],
+        lastBookingDate:  members.map((b) => b.bookingDate).sort().at(-1),
+        createdAt: rep.createdAt,
+        updatedAt: rep.updatedAt,
+        childBookings: members.map((b) => ({
+          orderNumber: b.orderNumber,
+          facilityName: facilityMap.get(b.facilityId)?.name ?? "",
+          bookingDate: b.bookingDate,
+          startTime: b.startTime,
+          endTime: b.endTime,
+          amount: Number(b.totalPrice),
+          status: b.status,
+        })),
+        payment: payment ? {
+          id: payment.id,
+          amount: Number(payment.amount),
+          method: payment.paymentMethod,
+          status: payment.status,
+          proofUrl: payment.proofUrl,
+          confirmedAt: payment.confirmedAt,
+        } : null,
+      };
+    });
+
+    const individualEntries = individual.map((b) => {
+      const facility = facilityMap.get(b.facilityId);
+      const payment  = paymentByBookingId.get(b.id);
+      return {
+        type: "individual",
+        groupBookingId: null,
+        groupRef: null,
+        bookingCount: 1,
+        totalGroupAmount: Number(b.totalPrice),
+        orderNumber: b.orderNumber,
+        customerName: b.customerName,
+        customerPhone: b.customerPhone,
+        customerEmail: b.customerEmail,
+        facilityName: facility?.name ?? "",
+        bookingDate: b.bookingDate,
+        startTime: b.startTime,
+        endTime: b.endTime,
+        status: b.status,
+        createdAt: b.createdAt,
+        updatedAt: b.updatedAt,
+        payment: payment ? {
+          id: payment.id,
+          amount: Number(payment.amount),
+          method: payment.paymentMethod,
+          status: payment.status,
+          proofUrl: payment.proofUrl,
+          confirmedAt: payment.confirmedAt,
+        } : null,
+      };
+    });
+
+    const allEntries = [...groupEntries, ...individualEntries]
+      .sort((a, b) => new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime());
+    const total  = allEntries.length;
+    const paged  = allEntries.slice(offset, offset + limit);
+
+    res.json({
+      meta: { total, limit, offset, from: fromDate, to: toDate, syncedAt: new Date().toISOString(), source: "sport-center" },
+      data: paged,
     });
   } catch (err) {
-    req.log.error({ err }, "Manual Bizportal memberships sync error");
+    req.log.error({ err }, "Sync payment-groups error");
     res.status(500).json({ error: "Internal server error" });
   }
 });

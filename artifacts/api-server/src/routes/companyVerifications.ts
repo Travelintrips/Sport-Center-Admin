@@ -151,9 +151,15 @@ router.get("/company-verifications/my", authMiddleware, async (req, res) => {
 // ─── GET /company-verifications/billing-status — customer: check if can use corporate billing
 router.get("/company-verifications/billing-status", authMiddleware, async (req, res) => {
   try {
-    const { userId } = (req as any).user;
+    const { userId, role } = (req as any).user;
+    // Admin/operator booking on behalf of another customer can check that
+    // customer's corporate-billing eligibility via ?customerId=.
+    const requestedCustomerId = req.query.customerId ? parseInt(String(req.query.customerId)) : undefined;
+    const isAdminRole = role === "admin" || role === "admin_booking";
+    const targetUserId = isAdminRole && requestedCustomerId && requestedCustomerId > 0 ? requestedCustomerId : userId;
+
     const [companyUser] = await db.select().from(companyUsersTable)
-      .where(and(eq(companyUsersTable.customerId, userId), eq(companyUsersTable.verificationStatus, "approved"), eq(companyUsersTable.corporateBillingEnabled, true)))
+      .where(and(eq(companyUsersTable.customerId, targetUserId), eq(companyUsersTable.verificationStatus, "approved"), eq(companyUsersTable.corporateBillingEnabled, true)))
       .limit(1);
 
     if (!companyUser) {
@@ -740,7 +746,7 @@ function htmlPage(title: string, body: string): string {
 <body>
 <div class="card">
   <div class="header">
-    <h1>Sport Center Jakarta</h1>
+    <h1>Sport Center Bandara Soekarno Hatta</h1>
     <p>Verifikasi Karyawan</p>
   </div>
   <div class="content">

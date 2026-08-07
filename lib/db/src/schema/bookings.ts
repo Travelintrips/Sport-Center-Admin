@@ -61,6 +61,8 @@ export const bookingsTable = scSchema.table("sport_bookings", {
   verificationStatus: verificationStatusEnum("verification_status").notNull().default("not_required"),
   basePrice: numeric("base_price", { precision: 12, scale: 2 }),
   apDiscountAmount: numeric("ap_discount_amount", { precision: 12, scale: 2 }).notNull().default("0"),
+  bookingType: text("booking_type").notNull().default("regular"), // 'regular' | 'event'
+  eventDiscountAmount: numeric("event_discount_amount", { precision: 12, scale: 2 }),
   status: bookingStatusEnum("status").notNull().default("pending_payment"),
   activityType: text("activity_type"),
   numberOfPeople: integer("number_of_people"),
@@ -91,10 +93,12 @@ export const bookingsTable = scSchema.table("sport_bookings", {
   isDpPaid: boolean("is_dp_paid").notNull().default(false),
   bookedByUserId: integer("booked_by_user_id").references(() => usersTable.id, { onDelete: "set null" }),
   groupRef: text("group_ref"),
+  vendorId: integer("vendor_id"),
   approvedByAdminPhone: text("approved_by_admin_phone"),
   approvedAt: timestamp("approved_at", { withTimezone: true }),
   rejectedReason: text("rejected_reason"),
   paidAt: timestamp("paid_at", { withTimezone: true }),
+  invoicePdfUrl: text("invoice_pdf_url"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });
