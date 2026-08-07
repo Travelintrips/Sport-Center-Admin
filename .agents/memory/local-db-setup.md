@@ -51,3 +51,11 @@ The API server workflow should use `DATABASE_URL` (Replit Helium DB) in developm
 
 ## Scheduler race condition at startup
 Scheduler runs before startup migrations complete → first tick shows "column X does not exist". This is cosmetic — after startup migrations OK, subsequent scheduler ticks work fine.
+
+## Migration target alignment
+
+When `DATABASE_URL` is present in development, migration helpers must prioritize it as well; otherwise the schema can be applied to Supabase dev while the API still queries HeliumDB.
+
+**Why:** The billing page failed because the API and migration runner pointed at different development databases.
+
+**How to apply:** Use `DATABASE_URL` first for local development migrations, then restart the API and verify an authenticated endpoint.
