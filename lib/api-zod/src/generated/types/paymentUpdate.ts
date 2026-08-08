@@ -5,10 +5,12 @@
  * Sport Center API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { PaymentUpdatePaymentProvider } from './paymentUpdatePaymentProvider';
 import type { PaymentUpdateStatus } from './paymentUpdateStatus';
 
 export interface PaymentUpdate {
   status?: PaymentUpdateStatus;
   paymentMethod?: string;
+  paymentProvider?: PaymentUpdatePaymentProvider;
   notes?: string;
 }

@@ -277,6 +277,10 @@ export type SportCenterBookingPaymentPosting = {
   paymentType?: string | null;
   paidAt?: Date | string | null;
   ppnRate?: number | null;
+  paymentProvider?: string | null;
+  providerReference?: string | null;
+  merchantTradeNo?: string | null;
+  providerTradeNo?: string | null;
 };
 
 export type SportCenterBookingPaymentPostingResult = {

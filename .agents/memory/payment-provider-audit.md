@@ -3,8 +3,8 @@ name: Payment provider audit
 description: Current payment-provider boundary for the Sport Center booking flow.
 ---
 
-The active booking flow supports manual bank transfer and QRIS proof upload. Paylabs is not present in the current application source, API routes, database settings, environment configuration, or repository history reviewed on 2026-08-08.
+Sport Center now exposes canonical payment metadata on `sport_payments`: QRIS/manual flows must carry an explicit provider (`mandiri_direct` or `unknown`), while successful Paylabs flows carry `paylabs`, provider references, merchant/provider trade numbers, and a canonical `paid_at`.
 
-**Why:** Showing a Paylabs option without a real create-payment endpoint, callback verification, and credentials would let customers start a payment that the admin flow cannot reconcile.
+**Why:** CST reconciliation needs provider-aware gross payment events, while Sport Center must not infer manual QRIS provider or calculate MDR.
 
-**How to apply:** Treat Paylabs as a separate integration restoration project. Before exposing it in the customer UI, obtain the official API contract and connect its credentials through the approved integration/secrets flow, then implement server-side status verification and webhook handling.
+**How to apply:** Keep Paylabs transaction relation persistence before provider calls, verify raw callback signatures, key replay idempotency by merchant trade number/payment mirror, and leave successful callbacks for terminal bookings in manual review rather than silently confirming them.

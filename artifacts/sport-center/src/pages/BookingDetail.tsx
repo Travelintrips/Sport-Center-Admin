@@ -242,6 +242,7 @@ export default function BookingDetail() {
           amount: detectedAmount,
           proofUrl: url ?? objectPath,
           paymentMethod: paymentMethod === "qris" ? "QRIS" : "Transfer Bank",
+          ...(paymentMethod === "qris" ? { paymentProvider: "mandiri_direct" as const } : {}),
           notes: notes || undefined,
           paymentType: detectedType as any,
         },

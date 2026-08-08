@@ -22,6 +22,7 @@ import { logger } from "../lib/logger";
 import { getBaseUrl } from "../lib/appUrl";
 import { sendRekapPemakaianToAdmin } from "../lib/rekapPemakaian";
 import { sendInvoiceToCustomer, sendGroupInvoiceToCustomer } from "../lib/invoiceDelivery";
+import { normalizePaymentProvider } from "../lib/paymentProvider";
 
 // Helper: kirim rekap ke admin WA hanya jika tanggal booking = hari ini (WIB)
 function todayWIB(): string {
@@ -218,11 +219,21 @@ router.post("/payments", async (req, res) => {
   try {
     const { bookingId, amount, proofUrl, notes } = req.body;
     const rawPaymentMethod = req.body.paymentMethod;
+    const requestedProvider = req.body.paymentProvider;
     let paymentMethod: "QRIS" | "Transfer Bank" = "Transfer Bank";
+    let paymentProvider: "mandiri_direct" | "unknown" | null = null;
     if (rawPaymentMethod !== undefined) {
       const method = String(rawPaymentMethod).trim().toLowerCase();
       if (method === "qris") {
         paymentMethod = "QRIS";
+        const normalizedProvider = normalizePaymentProvider(requestedProvider);
+        if (!normalizedProvider || normalizedProvider === "paylabs") {
+          res.status(400).json({
+            error: "Pembayaran QRIS manual wajib menyertakan paymentProvider mandiri_direct atau unknown.",
+          });
+          return;
+        }
+        paymentProvider = normalizedProvider;
       } else if (method === "transfer" || method === "bank_transfer" || method === "transfer bank") {
         paymentMethod = "Transfer Bank";
       } else {
@@ -340,6 +351,7 @@ router.post("/payments", async (req, res) => {
         amount: String(amount),
         proofUrl,
         paymentMethod,
+          paymentProvider,
         notes,
         paymentType: paymentType as "dp" | "pelunasan" | "full_payment",
       })
@@ -387,6 +399,7 @@ router.post("/payments", async (req, res) => {
             amount: String(sib.grandTotal ?? sib.totalPrice),
             proofUrl,
             paymentMethod,
+            paymentProvider,
             notes: `[Grup ${booking.groupRef}] ${notes || ""}`.trim(),
             paymentType: paymentType as "dp" | "pelunasan" | "full_payment",
           });
@@ -453,7 +466,7 @@ router.post("/payments", async (req, res) => {
 router.patch("/payments/:id", adminMiddleware, async (req, res) => {
   try {
     const id = parseInt(String(req.params.id));
-    const { status, paymentMethod, notes } = req.body;
+    const { status, paymentMethod, paymentProvider: requestedProvider, notes } = req.body;
     const [before] = await db.select().from(paymentsTable).where(eq(paymentsTable.id, id)).limit(1);
     if (!before) { res.status(404).json({ error: "Not found" }); return; }
     // A repeated confirmation callback must be a no-op. Besides avoiding
@@ -466,7 +479,11 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
 
     const updateData: Record<string, unknown> = {};
     if (status) updateData.status = status;
-    if (status === "confirmed") updateData.confirmedAt = new Date();
+    if (status === "confirmed") {
+      const canonicalPaidAt = before.paidAt ?? new Date();
+      updateData.confirmedAt = before.confirmedAt ?? canonicalPaidAt;
+      updateData.paidAt = canonicalPaidAt;
+    }
     if (paymentMethod !== undefined) {
       if (typeof paymentMethod !== "string" || !paymentMethod.trim()) {
         res.status(400).json({ error: "Metode pembayaran wajib diisi" });
@@ -477,6 +494,23 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
         return;
       }
       updateData.paymentMethod = paymentMethod.trim();
+      if (paymentMethod.trim().toUpperCase() === "QRIS") {
+        const provider = normalizePaymentProvider(requestedProvider ?? before.paymentProvider);
+        if (!provider || provider === "paylabs") {
+          res.status(400).json({
+            error: "Pembayaran QRIS wajib memiliki paymentProvider mandiri_direct atau unknown.",
+          });
+          return;
+        }
+        updateData.paymentProvider = provider;
+      } else if (requestedProvider !== undefined) {
+        const provider = normalizePaymentProvider(requestedProvider);
+        if (!provider) {
+          res.status(400).json({ error: "paymentProvider tidak valid." });
+          return;
+        }
+        updateData.paymentProvider = provider;
+      }
     }
     if (notes !== undefined) updateData.notes = notes;
     if (Object.keys(updateData).length === 0) {
@@ -541,7 +575,12 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
         });
         // Update juga sibling payment records ke status yang sama
         await db.update(paymentsTable)
-          .set({ status: status as any, ...(status === "confirmed" ? { confirmedAt: new Date() } : {}) })
+         .set({
+           status: status as any,
+           ...(status === "confirmed"
+             ? { confirmedAt: payment.paidAt ?? payment.confirmedAt ?? new Date(), paidAt: payment.paidAt ?? payment.confirmedAt ?? new Date() }
+             : {}),
+         })
           .where(and(eq(paymentsTable.bookingId, sib.id), eq(paymentsTable.status, "pending")));
         // Sync sibling ke BizPortal dengan total_price = 0:
         // Nilai finansial sudah tercatat di booking utama (primary) sehingga

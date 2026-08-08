@@ -63,6 +63,19 @@ ALTER TABLE sport_center.sport_bookings
   ADD COLUMN IF NOT EXISTS completed_at timestamptz;
 
 -- ============================================================
+-- 2b. Canonical payment provider metadata (backward-compatible)
+-- ============================================================
+DO $$ BEGIN
+  CREATE TYPE sport_center.payment_provider AS ENUM ('mandiri_direct','paylabs','unknown');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TABLE sport_center.sport_payments
+  ADD COLUMN IF NOT EXISTS payment_provider sport_center.payment_provider,
+  ADD COLUMN IF NOT EXISTS provider_reference text,
+  ADD COLUMN IF NOT EXISTS merchant_trade_no text,
+  ADD COLUMN IF NOT EXISTS provider_trade_no text,
+  ADD COLUMN IF NOT EXISTS paid_at timestamptz;
+
+-- ============================================================
 -- 3. booking_history
 -- ============================================================
 CREATE TABLE IF NOT EXISTS sport_center.booking_history (
