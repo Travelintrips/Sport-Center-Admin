@@ -29,7 +29,7 @@ import {
   type ProductInfo,
 } from "../lib/paylabs";
 import { notifyPaymentConfirmed } from "../lib/notifications";
-import { createJournalEntry, createPublicAccountingEntry, extractBookingDpp } from "../lib/accounting";
+import { extractBookingDpp, postConfirmedPaymentAccounting } from "../lib/accounting";
 import { logAccountingError } from "../lib/auditLog";
 
 const router = Router();
@@ -93,6 +93,7 @@ interface FinalizePaymentOptions {
 interface FinalizePaymentResult {
   outcome: "confirmed" | "already_confirmed" | "transaction_not_found" | "booking_not_found" | "error";
   bookingId?:    number;
+  paymentId?:    number;
   transactionId?: number;
   orderNumber?:  string;
   previousPaymentStatus?: string;
@@ -122,7 +123,7 @@ async function finalizePayment(opts: FinalizePaymentOptions): Promise<FinalizePa
     return await db.transaction(async (tx: any) => {
       // Exact merchantTradeNo lookup is the only entry point into the relation.
       const txRows = await tx.execute(sql`
-        SELECT id, booking_id, order_number, status, amount, payment_method
+        SELECT id, booking_id, order_number, status, amount, payment_method, paylabs_trade_no
         FROM sport_center.paylabs_transactions
         WHERE merchant_trade_no = ${merchantTradeNo}
         LIMIT 1
@@ -167,9 +168,16 @@ async function finalizePayment(opts: FinalizePaymentOptions): Promise<FinalizePa
       );
 
       if (previousPaymentStatus === "SUCCESS") {
+        const paymentProof = `paylabs:${paylabsTradeNo || String(txRow.paylabs_trade_no ?? "")}`;
+        const [existingPayment] = await tx
+          .select({ id: paymentsTable.id })
+          .from(paymentsTable)
+          .where(eq(paymentsTable.proofUrl, paymentProof))
+          .limit(1);
         return {
           outcome: "already_confirmed" as const,
           bookingId,
+          paymentId: existingPayment?.id,
           transactionId,
           orderNumber: String(txRow.order_number),
           previousPaymentStatus,
@@ -203,14 +211,15 @@ async function finalizePayment(opts: FinalizePaymentOptions): Promise<FinalizePa
       );
 
       const amountPaid = Number(txRow.amount ?? booking.grandTotal ?? booking.totalPrice);
-      await tx.insert(paymentsTable).values({
+      const [insertedPayment] = await tx.insert(paymentsTable).values({
         bookingId,
         amount     : String(amountPaid),
         proofUrl   : `paylabs:${paylabsTradeNo}`,
         notes      : `Auto-confirmed via Paylabs ${source} (${merchantTradeNo}) | reason: ${reason ?? "payment_notification"}`,
+        paymentMethod: resolvePaylabsPaymentMethod(String(txRow.payment_method ?? "")),
         status     : "confirmed",
         paymentType: "full_payment",
-      } as any).onConflictDoNothing();
+      } as any).returning({ id: paymentsTable.id });
 
       const auditNote = [
         `Paylabs payment confirmed.`,
@@ -244,6 +253,7 @@ async function finalizePayment(opts: FinalizePaymentOptions): Promise<FinalizePa
       return {
         outcome: "confirmed" as const,
         bookingId,
+        paymentId: insertedPayment?.id,
         transactionId,
         orderNumber: String(booking.orderNumber),
         previousPaymentStatus,
@@ -656,7 +666,7 @@ router.post("/paylabs/webhook", async (req, res) => {
     logger.error({ requestId, merchantTradeNo, error: result.error }, "[paylabs:webhook] finalization error");
   }
 
-  if (result.outcome === "confirmed" && result.bookingId) {
+  if ((result.outcome === "confirmed" || result.outcome === "already_confirmed") && result.bookingId) {
     const confirmedBookingId = result.bookingId;
     const confirmedPaymentMethod = result.paymentMethod ?? "Transfer Bank";
 
@@ -685,10 +695,16 @@ router.post("/paylabs/webhook", async (req, res) => {
         // Jurnal akuntansi — wajib untuk semua pembayaran Paylabs
         const today = new Date().toISOString().split("T")[0];
         const { dpp, ppnAmount } = extractBookingDpp(bk);
-        createJournalEntry(bk.id, bk.orderNumber ?? "", dpp, ppnAmount, today, confirmedPaymentMethod)
-          .catch((err) => logAccountingError({ operation: "createJournalEntry", orderNumber: bk.orderNumber ?? "", bookingId: bk.id, error: err }));
-        createPublicAccountingEntry(bk.id, bk.orderNumber ?? "", dpp, ppnAmount, bk.facilityId, today, confirmedPaymentMethod)
-          .catch((err) => logAccountingError({ operation: "createPublicAccountingEntry", orderNumber: bk.orderNumber ?? "", bookingId: bk.id, error: err }));
+        postConfirmedPaymentAccounting({
+          bookingId: bk.id,
+          orderNumber: bk.orderNumber ?? "",
+          dpp,
+          ppnAmount,
+          facilityId: bk.facilityId,
+          journalDate: today,
+          paymentMethod: confirmedPaymentMethod,
+          paymentId: result.paymentId,
+        }).catch((err) => logAccountingError({ operation: "postConfirmedPaymentAccounting", orderNumber: bk.orderNumber ?? "", bookingId: bk.id, error: err }));
       })
       .catch(() => {});
   }
@@ -778,7 +794,7 @@ router.post("/paylabs/reconcile", authMiddleware, adminMiddleware, async (req, r
   );
 
   // Jurnal akuntansi untuk reconcile manual
-  if (result.outcome === "confirmed" && result.bookingId) {
+  if ((result.outcome === "confirmed" || result.outcome === "already_confirmed") && result.bookingId) {
     const reconBookingId = result.bookingId;
     const reconPaymentMethod = result.paymentMethod ?? String(txRow.payment_method ?? "Transfer Bank");
     db.select().from(bookingsTable)
@@ -789,10 +805,16 @@ router.post("/paylabs/reconcile", authMiddleware, adminMiddleware, async (req, r
         if (!bk) return;
         const today = new Date().toISOString().split("T")[0];
         const { dpp, ppnAmount } = extractBookingDpp(bk);
-        createJournalEntry(bk.id, bk.orderNumber ?? "", dpp, ppnAmount, today, reconPaymentMethod)
-          .catch((err) => logAccountingError({ operation: "createJournalEntry", orderNumber: bk.orderNumber ?? "", bookingId: bk.id, error: err }));
-        createPublicAccountingEntry(bk.id, bk.orderNumber ?? "", dpp, ppnAmount, bk.facilityId, today, reconPaymentMethod)
-          .catch((err) => logAccountingError({ operation: "createPublicAccountingEntry", orderNumber: bk.orderNumber ?? "", bookingId: bk.id, error: err }));
+        postConfirmedPaymentAccounting({
+          bookingId: bk.id,
+          orderNumber: bk.orderNumber ?? "",
+          dpp,
+          ppnAmount,
+          facilityId: bk.facilityId,
+          journalDate: today,
+          paymentMethod: reconPaymentMethod,
+          paymentId: result.paymentId,
+        }).catch((err) => logAccountingError({ operation: "postConfirmedPaymentAccounting", orderNumber: bk.orderNumber ?? "", bookingId: bk.id, error: err }));
       })
       .catch(() => {});
   }

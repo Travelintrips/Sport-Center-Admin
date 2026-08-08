@@ -1,6 +1,9 @@
 import { db, accountingJournalsTable, accountingJournalLinesTable, taxTransactionsTable } from "@workspace/db";
 import { eq, and, sql } from "drizzle-orm";
 import pg from "pg";
+import { extractBookingDpp } from "./accountingMath";
+
+export { extractBookingDpp } from "./accountingMath";
 
 // ─── Public Accounting (public.accounting_entries) ───────────────────────────
 // Gunakan direct pg.Pool ke Supabase (PROD atau DEV fallback).
@@ -70,23 +73,6 @@ async function getPublicPaymentAccount(
 //
 // Contoh: badminton 100.000 (inklusif 11%)
 //   → dpp = 90.090, ppnAmount = 9.910, grandTotal = 100.000 ✅
-export function extractBookingDpp(booking: {
-  totalPrice: string | number | null;
-  dpp?: string | number | null;
-  ppnAmount?: string | number | null;
-  grandTotal?: string | number | null;
-}): { dpp: number; ppnAmount: number } {
-  const ppnAmount = booking.ppnAmount != null ? Number(booking.ppnAmount) : 0;
-  const grandTotalAmt = booking.grandTotal != null
-    ? Number(booking.grandTotal)
-    : Number(booking.totalPrice);
-  // Prioritaskan kolom dpp yang tersimpan; fallback: grandTotal - ppnAmount
-  const dpp = booking.dpp != null && Number(booking.dpp) > 0
-    ? Number(booking.dpp)
-    : ppnAmount > 0 ? grandTotalAmt - ppnAmount : grandTotalAmt;
-  return { dpp, ppnAmount };
-}
-
 // Cache COA/journal IDs dari public schema
 let _publicIds: {
   journalId: number;
@@ -149,11 +135,34 @@ export async function createPublicAccountingEntry(
   facilityId: number | null,
   journalDate: string,
   paymentMethod?: string,
+  paymentId?: number,
 ): Promise<void> {
   const pool = getPublicPool();
   if (!pool) {
     console.warn("[accounting] Tidak ada Supabase URL — skip createPublicAccountingEntry");
     return;
+  }
+
+  // A booking may have more than one payment (DP + pelunasan). When the
+  // payment id is available, use it as the accounting correlation key rather
+  // than the booking/order number.
+  const correlationId = paymentId != null
+    ? `sc_payment_${paymentId}`
+    : `sc_booking_${orderNumber}`;
+  if (paymentId != null) {
+    const existing = await pool.query(
+      `SELECT id, status
+         FROM public.accounting_entries
+        WHERE correlation_id = $1
+        LIMIT 1`,
+      [correlationId],
+    );
+    if (existing.rows.length > 0) {
+      console.info(
+        `[accounting] Payment entry sudah ada untuk payment=${paymentId} (id=${existing.rows[0].id}, status=${existing.rows[0].status}) — skip`,
+      );
+      return;
+    }
   }
 
   // subtotal  = DPP (harga SEBELUM PPN — bukan totalPrice inklusif).
@@ -182,7 +191,7 @@ export async function createPublicAccountingEntry(
       entryNumber, ids.journalId, journalDate, orderNumber,
       `Pembayaran Booking Sport Center (${orderNumber}) via ${paymentAccount.label}`,
       bookingId, grandTotal, COMPANY_ID, facilityId ?? null,
-      `sc_booking_${orderNumber}`,
+      correlationId,
     ]
   );
   const entryId = Number(entryResult.rows[0]?.id);
@@ -215,20 +224,36 @@ export async function createPublicAccountingEntry(
 
   // 4. sport_center.tax_transactions — hanya jika ada PPN
   if (hasPpn) {
-    await db.insert(taxTransactionsTable).values({
-      referenceType: "sport_center_booking",
-      referenceId: bookingId,
-      referenceNumber: orderNumber,
-      taxCode: "PPN_OUT_11",
-      taxRate: "11",
-      dpp: String(subtotal),
-      dppNilaiLain: String(Math.round((subtotal * 11) / 12 * 100) / 100),
-      grandTotal: String(grandTotal),
-      taxAmount: String(ppnAmount),
-      transactionDate: period,
-      status: "posted",
-      transactionType: "original",
-    });
+    const taxReferenceType = paymentId != null ? "sport_center_payment" : "sport_center_booking";
+    const taxReferenceId = paymentId ?? bookingId;
+    const existingTax = await db
+      .select({ id: taxTransactionsTable.id })
+      .from(taxTransactionsTable)
+      .where(
+        and(
+          eq(taxTransactionsTable.referenceType, taxReferenceType),
+          eq(taxTransactionsTable.referenceId, taxReferenceId),
+          eq(taxTransactionsTable.transactionType, "original"),
+          eq(taxTransactionsTable.status, "posted"),
+        ),
+      )
+      .limit(1);
+    if (existingTax.length === 0) {
+      await db.insert(taxTransactionsTable).values({
+        referenceType: taxReferenceType,
+        referenceId: taxReferenceId,
+        referenceNumber: orderNumber,
+        taxCode: "PPN_OUT_11",
+        taxRate: "11",
+        dpp: String(subtotal),
+        dppNilaiLain: String(Math.round((subtotal * 11) / 12 * 100) / 100),
+        grandTotal: String(grandTotal),
+        taxAmount: String(ppnAmount),
+        transactionDate: period,
+        status: "posted",
+        transactionType: "original",
+      });
+    }
 
     // 5. public.gl_tax_lines
     await pool.query(
@@ -932,12 +957,38 @@ export async function createJournalEntry(
   ppnAmount: number,
   journalDate: string,
   paymentMethod?: string,
+  paymentId?: number,
 ): Promise<void> {
   // subtotal = DPP (sebelum PPN), grandTotal = DPP + PPN = jumlah yang masuk ke bank
   const grandTotal = subtotal + ppnAmount;
   const netRevenue = subtotal;
   const { debitAccount, accountCode } = resolvePaymentAccount(paymentMethod);
   const methodLabel = paymentMethod ? ` via ${paymentMethod}` : "";
+  const paymentMarker = paymentId != null ? ` [paymentId=${paymentId}]` : "";
+
+  // Internal journals do not have a payment_id column. Keep the payment
+  // identity in the existing notes field so retries are idempotent without a
+  // schema migration, while still allowing DP and pelunasan to have separate
+  // journals for the same booking.
+  if (paymentId != null) {
+    const existing = await db
+      .select({ id: accountingJournalsTable.id })
+      .from(accountingJournalsTable)
+      .where(
+        and(
+          eq(accountingJournalsTable.bookingId, bookingId),
+          eq(accountingJournalsTable.journalType, "payment_confirmed"),
+          sql`${accountingJournalsTable.notes} LIKE ${`%[paymentId=${paymentId}]%`}`,
+        ),
+      )
+      .limit(1);
+    if (existing.length > 0) {
+      console.info(
+        `[accounting] Internal journal sudah ada untuk payment=${paymentId} (id=${existing[0].id}) — skip`,
+      );
+      return;
+    }
+  }
 
   const [journal] = await db
     .insert(accountingJournalsTable)
@@ -953,7 +1004,7 @@ export async function createJournalEntry(
       creditPpnAmount: String(ppnAmount),
       journalDate,
       isReversal: false,
-      notes: `Pembayaran dikonfirmasi untuk booking ${orderNumber}${methodLabel}`,
+      notes: `Pembayaran dikonfirmasi untuk booking ${orderNumber}${methodLabel}${paymentMarker}`,
     })
     .returning();
 
@@ -968,6 +1019,61 @@ export async function createJournalEntry(
   }
 
   await postJournalLines(journal.id, lines);
+}
+
+type ConfirmedPaymentAccountingInput = {
+  bookingId: number;
+  orderNumber: string;
+  dpp: number;
+  ppnAmount: number;
+  facilityId: number | null;
+  journalDate: string;
+  paymentMethod?: string;
+  paymentId?: number;
+};
+
+const paymentAccountingInFlight = new Map<number, Promise<void>>();
+
+/**
+ * Post the internal journal and public accounting entry as one ordered
+ * operation. The payment id is the idempotency key, so a duplicate callback
+ * shares the same in-flight work instead of creating another journal.
+ */
+export function postConfirmedPaymentAccounting(
+  input: ConfirmedPaymentAccountingInput,
+): Promise<void> {
+  const key = input.paymentId ?? input.bookingId;
+  const running = paymentAccountingInFlight.get(key);
+  if (running) return running;
+
+  const work = (async () => {
+    await createJournalEntry(
+      input.bookingId,
+      input.orderNumber,
+      input.dpp,
+      input.ppnAmount,
+      input.journalDate,
+      input.paymentMethod,
+      input.paymentId,
+    );
+    await createPublicAccountingEntry(
+      input.bookingId,
+      input.orderNumber,
+      input.dpp,
+      input.ppnAmount,
+      input.facilityId,
+      input.journalDate,
+      input.paymentMethod,
+      input.paymentId,
+    );
+  })();
+
+  paymentAccountingInFlight.set(key, work);
+  return work.finally(() => {
+    if (paymentAccountingInFlight.get(key) === work) {
+      paymentAccountingInFlight.delete(key);
+    }
+  });
 }
 
 // ─── Sport Center Internal Journal: Member Gym & Invoice Perusahaan ──────────

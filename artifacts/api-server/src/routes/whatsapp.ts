@@ -39,7 +39,7 @@ import {
 } from "../lib/notifications";
 import { calculatePrice } from "../lib/pricing";
 import { logAudit, logAccountingError } from "../lib/auditLog";
-import { createJournalEntry, createPublicAccountingEntry, extractBookingDpp } from "../lib/accounting";
+import { extractBookingDpp, postConfirmedPaymentAccounting } from "../lib/accounting";
 import { hashPassword } from "../lib/auth";
 import { syncStatusToBizportal, pushConfirmedPaymentAsBankMutation } from "../lib/bizportalSync";
 import { calculateTax, recordTaxTransaction } from "../lib/tax";
@@ -931,11 +931,17 @@ router.post("/wa/action/:token", async (req, res) => {
         const _today = new Date().toISOString().split("T")[0];
         const { dpp: _dpp, ppnAmount: _ppnAmount } = extractBookingDpp(booking);
         const _paymentMethod = payment?.paymentMethod ?? "Transfer Bank";
-        createJournalEntry(booking.id, booking.orderNumber, _dpp, _ppnAmount, _today, _paymentMethod).catch((err) =>
-          logAccountingError({ operation: "createJournalEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
-        );
-        createPublicAccountingEntry(booking.id, booking.orderNumber, _dpp, _ppnAmount, booking.facilityId, _today, _paymentMethod).catch((err) =>
-          logAccountingError({ operation: "createPublicAccountingEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
+        postConfirmedPaymentAccounting({
+          bookingId: booking.id,
+          orderNumber: booking.orderNumber,
+          dpp: _dpp,
+          ppnAmount: _ppnAmount,
+          facilityId: booking.facilityId,
+          journalDate: _today,
+          paymentMethod: _paymentMethod,
+          paymentId: payment.id,
+        }).catch((err) =>
+          logAccountingError({ operation: "postConfirmedPaymentAccounting", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
         );
 
         res.json({ success: true, message: "Pembayaran dikonfirmasi. Customer diberitahu." });
@@ -1277,11 +1283,17 @@ router.post("/wa/review/:token", async (req, res) => {
       const _today = new Date().toISOString().split("T")[0];
       const { dpp: _dpp, ppnAmount: _ppnAmount } = extractBookingDpp(booking);
       const _paymentMethod = payment?.paymentMethod ?? "Transfer Bank";
-      createJournalEntry(booking.id, booking.orderNumber, _dpp, _ppnAmount, _today, _paymentMethod).catch((err) =>
-        logAccountingError({ operation: "createJournalEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
-      );
-      createPublicAccountingEntry(booking.id, booking.orderNumber, _dpp, _ppnAmount, booking.facilityId, _today, _paymentMethod).catch((err) =>
-        logAccountingError({ operation: "createPublicAccountingEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
+      postConfirmedPaymentAccounting({
+        bookingId: booking.id,
+        orderNumber: booking.orderNumber,
+        dpp: _dpp,
+        ppnAmount: _ppnAmount,
+        facilityId: booking.facilityId,
+        journalDate: _today,
+        paymentMethod: _paymentMethod,
+        paymentId: payment.id,
+      }).catch((err) =>
+        logAccountingError({ operation: "postConfirmedPaymentAccounting", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
       );
 
       res.json({ success: true, message: "Pembayaran dikonfirmasi. Customer diberitahu." });
@@ -1621,13 +1633,13 @@ async function execAdminApprove(adminPhone: string, orderNumber: string) {
     await db.update(paymentsTable).set({ status: "confirmed", confirmedAt: new Date() })
       .where(eq(paymentsTable.bookingId, booking.id));
   } else {
-    await db.insert(paymentsTable).values({
+    const [createdPayment] = await db.insert(paymentsTable).values({
       bookingId: booking.id,
       amount: String(Number(booking.grandTotal ?? booking.totalPrice)),
       paymentMethod: "Manual (Admin WA)",
       status: "confirmed",
       confirmedAt: new Date(),
-    });
+    }).returning();
   }
 
   await db.update(bookingsTable)
@@ -1803,17 +1815,19 @@ async function execAdminPaid(adminPhone: string, orderNumber: string) {
 
   const [existingPay] = await db.select().from(paymentsTable)
     .where(eq(paymentsTable.bookingId, booking.id)).limit(1);
+  let paymentForAccounting = existingPay;
   if (existingPay) {
     await db.update(paymentsTable).set({ status: "confirmed", confirmedAt: new Date() })
       .where(eq(paymentsTable.bookingId, booking.id));
   } else {
-    await db.insert(paymentsTable).values({
+    const [createdPayment] = await db.insert(paymentsTable).values({
       bookingId: booking.id,
       amount: String(Number(booking.grandTotal ?? booking.totalPrice)),
       paymentMethod: "Manual (Admin WA)",
       status: "confirmed",
       confirmedAt: new Date(),
-    });
+    }).returning();
+    paymentForAccounting = createdPayment;
   }
 
   await db.update(bookingsTable)
@@ -1866,11 +1880,17 @@ async function execAdminPaid(adminPhone: string, orderNumber: string) {
   const _paidToday = new Date().toISOString().split("T")[0];
   const { dpp: _paidDpp, ppnAmount: _paidPpnAmount } = extractBookingDpp(booking);
   const _paidPaymentMethod = existingPay?.paymentMethod ?? "Transfer Bank";
-  createJournalEntry(booking.id, booking.orderNumber, _paidDpp, _paidPpnAmount, _paidToday, _paidPaymentMethod).catch((err) =>
-    logAccountingError({ operation: "createJournalEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
-  );
-  createPublicAccountingEntry(booking.id, booking.orderNumber, _paidDpp, _paidPpnAmount, booking.facilityId, _paidToday, _paidPaymentMethod).catch((err) =>
-    logAccountingError({ operation: "createPublicAccountingEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
+  postConfirmedPaymentAccounting({
+    bookingId: booking.id,
+    orderNumber: booking.orderNumber,
+    dpp: _paidDpp,
+    ppnAmount: _paidPpnAmount,
+    facilityId: booking.facilityId,
+    journalDate: _paidToday,
+    paymentMethod: _paidPaymentMethod,
+    paymentId: paymentForAccounting?.id,
+  }).catch((err) =>
+    logAccountingError({ operation: "postConfirmedPaymentAccounting", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
   );
 
   await sendWAMsg(adminPhone,

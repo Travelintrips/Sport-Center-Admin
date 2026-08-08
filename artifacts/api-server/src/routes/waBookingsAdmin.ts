@@ -12,7 +12,7 @@ import {
 import { eq, and, desc, or, sql, ilike } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
 import { logAudit, logAccountingError } from "../lib/auditLog";
-import { createJournalEntry, createPublicAccountingEntry, extractBookingDpp } from "../lib/accounting";
+import { extractBookingDpp, postConfirmedPaymentAccounting } from "../lib/accounting";
 import { createWaToken } from "../lib/waTokens";
 import {
   notifyWaBookingApproved,
@@ -297,17 +297,19 @@ router.post("/admin/wa-bookings/:orderNumber/paid", adminMiddleware, async (req,
 
   const [existingPay] = await db.select().from(paymentsTable)
     .where(eq(paymentsTable.bookingId, booking.id)).limit(1);
+  let paymentForAccounting = existingPay;
   if (existingPay) {
     await db.update(paymentsTable).set({ status: "confirmed", confirmedAt: new Date() })
       .where(eq(paymentsTable.bookingId, booking.id));
   } else {
-    await db.insert(paymentsTable).values({
+    const [createdPayment] = await db.insert(paymentsTable).values({
       bookingId: booking.id,
       amount: String(Number(booking.grandTotal ?? booking.totalPrice)),
       paymentMethod: "Manual (Admin BizPortal)",
       status: "confirmed",
       confirmedAt: new Date(),
-    });
+    }).returning();
+    paymentForAccounting = createdPayment;
   }
 
   await db.update(bookingsTable).set({
@@ -362,11 +364,17 @@ router.post("/admin/wa-bookings/:orderNumber/paid", adminMiddleware, async (req,
   const today = new Date().toISOString().split("T")[0];
   const { dpp, ppnAmount } = extractBookingDpp(booking);
   const paymentMethod = existingPay?.paymentMethod ?? "Transfer Bank";
-  createJournalEntry(booking.id, booking.orderNumber, dpp, ppnAmount, today, paymentMethod).catch((err) =>
-    logAccountingError({ operation: "createJournalEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
-  );
-  createPublicAccountingEntry(booking.id, booking.orderNumber, dpp, ppnAmount, booking.facilityId, today, paymentMethod).catch((err) =>
-    logAccountingError({ operation: "createPublicAccountingEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
+  postConfirmedPaymentAccounting({
+    bookingId: booking.id,
+    orderNumber: booking.orderNumber,
+    dpp,
+    ppnAmount,
+    facilityId: booking.facilityId,
+    journalDate: today,
+    paymentMethod,
+    paymentId: paymentForAccounting?.id,
+  }).catch((err) =>
+    logAccountingError({ operation: "postConfirmedPaymentAccounting", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
   );
 
   res.json({ success: true, status: "confirmed" });
