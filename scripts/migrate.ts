@@ -4,6 +4,31 @@ const { Client } = pg;
 
 export const CUSTOM_MIGRATION_SQL = `
 -- ============================================================
+-- 0. sport_vendors table (idempotent)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS sport_center.sport_vendors (
+  id serial PRIMARY KEY,
+  name text NOT NULL,
+  contact_person text,
+  phone text,
+  email text,
+  address text,
+  notes text,
+  is_active boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- Add vendor_id FK to sport_expenses (idempotent)
+ALTER TABLE sport_center.sport_expenses
+  ADD COLUMN IF NOT EXISTS vendor_id integer REFERENCES sport_center.sport_vendors(id) ON DELETE SET NULL;
+
+-- Add vendor_id FK to sport_bookings (idempotent)
+ALTER TABLE sport_center.sport_bookings
+  ADD COLUMN IF NOT EXISTS vendor_id integer REFERENCES sport_center.sport_vendors(id) ON DELETE SET NULL;
+
+
+-- ============================================================
 -- 1. Extend enums (safe, idempotent via IF NOT EXISTS)
 -- ============================================================
 DO $$ BEGIN
@@ -31,7 +56,7 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 -- ============================================================
 -- 2. Add new columns to bookings
 -- ============================================================
-ALTER TABLE sport_center.bookings
+ALTER TABLE sport_center.sport_bookings
   ADD COLUMN IF NOT EXISTS resource_name text,
   ADD COLUMN IF NOT EXISTS payment_deadline timestamptz,
   ADD COLUMN IF NOT EXISTS checked_in_at timestamptz,
@@ -42,7 +67,7 @@ ALTER TABLE sport_center.bookings
 -- ============================================================
 CREATE TABLE IF NOT EXISTS sport_center.booking_history (
   id serial PRIMARY KEY,
-  booking_id integer NOT NULL REFERENCES sport_center.bookings(id) ON DELETE CASCADE,
+  booking_id integer NOT NULL REFERENCES sport_center.sport_bookings(id) ON DELETE CASCADE,
   from_status text,
   to_status text NOT NULL,
   changed_by integer REFERENCES sport_center.users(id) ON DELETE SET NULL,
@@ -74,7 +99,7 @@ CREATE TABLE IF NOT EXISTS sport_center.audit_logs (
 -- ============================================================
 CREATE TABLE IF NOT EXISTS sport_center.pricing_rules (
   id serial PRIMARY KEY,
-  facility_id integer REFERENCES sport_center.facilities(id) ON DELETE CASCADE,
+  facility_id integer REFERENCES sport_center.sport_facilities(id) ON DELETE CASCADE,
   name text NOT NULL,
   rule_type text NOT NULL,
   day_type text,
@@ -109,7 +134,7 @@ CREATE TABLE IF NOT EXISTS sport_center.notification_templates (
 -- ============================================================
 CREATE TABLE IF NOT EXISTS sport_center.maintenance_schedules (
   id serial PRIMARY KEY,
-  facility_id integer NOT NULL REFERENCES sport_center.facilities(id) ON DELETE CASCADE,
+  facility_id integer NOT NULL REFERENCES sport_center.sport_facilities(id) ON DELETE CASCADE,
   title text NOT NULL,
   maintenance_type text NOT NULL DEFAULT 'maintenance',
   start_date text NOT NULL,
@@ -129,7 +154,7 @@ CREATE TABLE IF NOT EXISTS sport_center.maintenance_schedules (
 -- ============================================================
 CREATE TABLE IF NOT EXISTS sport_center.reschedule_requests (
   id serial PRIMARY KEY,
-  booking_id integer NOT NULL REFERENCES sport_center.bookings(id) ON DELETE CASCADE,
+  booking_id integer NOT NULL REFERENCES sport_center.sport_bookings(id) ON DELETE CASCADE,
   requested_by integer REFERENCES sport_center.users(id) ON DELETE SET NULL,
   new_date text NOT NULL,
   new_start_time text NOT NULL,
@@ -148,8 +173,8 @@ CREATE TABLE IF NOT EXISTS sport_center.reschedule_requests (
 -- ============================================================
 CREATE TABLE IF NOT EXISTS sport_center.booking_reviews (
   id serial PRIMARY KEY,
-  booking_id integer NOT NULL REFERENCES sport_center.bookings(id) ON DELETE CASCADE UNIQUE,
-  facility_id integer NOT NULL REFERENCES sport_center.facilities(id) ON DELETE CASCADE,
+  booking_id integer NOT NULL REFERENCES sport_center.sport_bookings(id) ON DELETE CASCADE UNIQUE,
+  facility_id integer NOT NULL REFERENCES sport_center.sport_facilities(id) ON DELETE CASCADE,
   rating integer NOT NULL CHECK (rating BETWEEN 1 AND 5),
   comment text,
   reviewer_name text,
@@ -163,7 +188,7 @@ CREATE TABLE IF NOT EXISTS sport_center.booking_reviews (
 
 CREATE TABLE IF NOT EXISTS sport_center.booking_cancellations (
   id serial PRIMARY KEY,
-  booking_id integer NOT NULL REFERENCES sport_center.bookings(id) ON DELETE CASCADE UNIQUE,
+  booking_id integer NOT NULL REFERENCES sport_center.sport_bookings(id) ON DELETE CASCADE UNIQUE,
   cancelled_by text NOT NULL DEFAULT 'customer',
   cancelled_by_user_id integer REFERENCES sport_center.users(id) ON DELETE SET NULL,
   reason text,
@@ -228,14 +253,14 @@ DO $$ BEGIN
   ALTER TYPE sport_center.membership_status ADD VALUE IF NOT EXISTS 'waiting_confirmation';
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
-ALTER TABLE sport_center.gym_memberships
+ALTER TABLE sport_center.sport_memberships
   ADD COLUMN IF NOT EXISTS payment_method text,
   ADD COLUMN IF NOT EXISTS payment_proof_url text;
 
 -- ============================================================
 -- 14. payments: payment_method + confirmed_at
 -- ============================================================
-ALTER TABLE sport_center.payments
+ALTER TABLE sport_center.sport_payments
   ADD COLUMN IF NOT EXISTS payment_method text DEFAULT 'Transfer Bank',
   ADD COLUMN IF NOT EXISTS confirmed_at timestamptz;
 
@@ -250,10 +275,18 @@ ALTER TABLE sport_center.users
 -- ============================================================
 -- 17. bookings: reminder sent flags (prevent duplicate WA)
 -- ============================================================
-ALTER TABLE sport_center.bookings
+ALTER TABLE sport_center.sport_bookings
   ADD COLUMN IF NOT EXISTS reminder_h1_sent_at timestamptz,
   ADD COLUMN IF NOT EXISTS reminder_day_sent_at timestamptz,
   ADD COLUMN IF NOT EXISTS payment_reminder_sent_at timestamptz;
+
+-- Daily admin WhatsApp usage-list delivery state
+CREATE TABLE IF NOT EXISTS sport_center.wa_daily_usage_snapshots (
+  id serial PRIMARY KEY,
+  usage_date text NOT NULL UNIQUE,
+  fingerprint text NOT NULL,
+  sent_at timestamptz NOT NULL DEFAULT NOW()
+);
 
 -- ============================================================
 -- 18. company_invoices table (idempotent) + bookings linkage
@@ -311,7 +344,7 @@ ALTER TABLE sport_center.users
   ADD COLUMN IF NOT EXISTS monthly_credit_limit numeric(14,2),
   ADD COLUMN IF NOT EXISTS account_status text DEFAULT 'active';
 
-ALTER TABLE sport_center.bookings
+ALTER TABLE sport_center.sport_bookings
   ADD COLUMN IF NOT EXISTS payer_type sport_center.payer_type DEFAULT 'personal',
   ADD COLUMN IF NOT EXISTS company_customer_id integer REFERENCES sport_center.users(id) ON DELETE SET NULL,
   ADD COLUMN IF NOT EXISTS booked_for_name text,
@@ -329,7 +362,7 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 CREATE TABLE IF NOT EXISTS sport_center.verification_logs (
   id serial PRIMARY KEY,
-  booking_id integer REFERENCES sport_center.bookings(id) ON DELETE CASCADE,
+  booking_id integer REFERENCES sport_center.sport_bookings(id) ON DELETE CASCADE,
   order_number text,
   verified_by_user_id integer,
   id_card_number_input text NOT NULL,
@@ -345,11 +378,11 @@ CREATE INDEX IF NOT EXISTS verification_logs_created_at_idx ON sport_center.veri
 -- ============================================================
 -- 21. bookings: booked_by_user_id (siapa yang membuat booking)
 -- ============================================================
-ALTER TABLE sport_center.bookings
+ALTER TABLE sport_center.sport_bookings
   ADD COLUMN IF NOT EXISTS booked_by_user_id integer REFERENCES sport_center.users(id) ON DELETE SET NULL;
 
 -- Backfill: booking yang customer_email cocok dengan email user → set booked_by_user_id ke user tersebut
-UPDATE sport_center.bookings b
+UPDATE sport_center.sport_bookings b
 SET booked_by_user_id = u.id
 FROM sport_center.users u
 WHERE b.booked_by_user_id IS NULL
@@ -370,7 +403,7 @@ ALTER TABLE sport_center.tax_transactions
 -- ============================================================
 CREATE TABLE IF NOT EXISTS sport_center.accounting_journals (
   id serial PRIMARY KEY,
-  booking_id integer NOT NULL REFERENCES sport_center.bookings(id) ON DELETE CASCADE,
+  booking_id integer NOT NULL REFERENCES sport_center.sport_bookings(id) ON DELETE CASCADE,
   order_number text NOT NULL,
   journal_type text NOT NULL,
   debit_account text NOT NULL DEFAULT 'Kas/Bank',
@@ -510,10 +543,10 @@ CREATE TABLE IF NOT EXISTS sport_center.booking_groups (
   updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-ALTER TABLE sport_center.bookings
+ALTER TABLE sport_center.sport_bookings
   ADD COLUMN IF NOT EXISTS group_ref TEXT REFERENCES sport_center.booking_groups(group_ref) ON DELETE SET NULL;
 
-CREATE INDEX IF NOT EXISTS bookings_group_ref_idx ON sport_center.bookings(group_ref);
+CREATE INDEX IF NOT EXISTS bookings_group_ref_idx ON sport_center.sport_bookings(group_ref);
 
 -- ============================================================
 -- Company Document Templates
@@ -627,5 +660,185 @@ WHERE NOT EXISTS (
   SELECT 1 FROM sport_center.company_document_templates
   WHERE company_id IS NULL AND document_type = t.dt AND is_default = true
 );
+
+-- ============================================================
+-- require_per_booking_approval per company (opsional)
+-- ============================================================
+ALTER TABLE sport_center.users
+  ADD COLUMN IF NOT EXISTS require_per_booking_approval boolean NOT NULL DEFAULT false;
+
+-- ============================================================
+-- public.sport_center_expenses mirror table (sync dari sport_center.sport_expenses)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS public.sport_center_expenses (
+  id              SERIAL PRIMARY KEY,
+  source_id       INTEGER,
+  expense_no      TEXT NOT NULL,
+  expense_date    TEXT NOT NULL,
+  category        TEXT NOT NULL,
+  description     TEXT NOT NULL,
+  vendor_name     TEXT,
+  facility_id     INTEGER,
+  facility_name   TEXT,
+  amount          NUMERIC(14,2) NOT NULL,
+  ppn_amount      NUMERIC(14,2) NOT NULL DEFAULT 0,
+  total_amount    NUMERIC(14,2) NOT NULL,
+  payment_method  TEXT,
+  payment_account TEXT,
+  payment_status  TEXT NOT NULL DEFAULT 'draft',
+  receipt_url     TEXT,
+  receipt_urls    JSONB DEFAULT '[]',
+  notes           TEXT,
+  rejected_reason TEXT,
+  journal_id      TEXT,
+  source          TEXT NOT NULL DEFAULT 'sport_center',
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS sc_expenses_expense_no_idx ON public.sport_center_expenses(expense_no);
+CREATE INDEX IF NOT EXISTS sc_expenses_source_id_idx ON public.sport_center_expenses(source_id);
+CREATE INDEX IF NOT EXISTS sc_expenses_expense_date_idx ON public.sport_center_expenses(expense_date DESC);
+CREATE INDEX IF NOT EXISTS sc_expenses_payment_status_idx ON public.sport_center_expenses(payment_status);
+
+-- ============================================================
+-- public.sport_center_memberships mirror table (sync dari sport_center.sport_memberships)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS public.sport_center_memberships (
+  id              SERIAL PRIMARY KEY,
+  source_id       INTEGER,
+  name            TEXT NOT NULL,
+  email           TEXT NOT NULL,
+  phone           TEXT NOT NULL,
+  start_date      TEXT NOT NULL,
+  end_date        TEXT NOT NULL,
+  months          INTEGER NOT NULL DEFAULT 1,
+  total_price     NUMERIC(12,2) NOT NULL,
+  status          TEXT NOT NULL DEFAULT 'pending_payment',
+  notes           TEXT,
+  payment_method  TEXT,
+  payment_proof_url TEXT,
+  source          TEXT NOT NULL DEFAULT 'sport_center',
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS sc_memberships_source_id_idx ON public.sport_center_memberships(source_id);
+CREATE INDEX IF NOT EXISTS sc_memberships_status_idx ON public.sport_center_memberships(status);
+CREATE INDEX IF NOT EXISTS sc_memberships_start_date_idx ON public.sport_center_memberships(start_date DESC);
+
+-- ============================================================
+-- company_document_settings (kop surat, bank, finance, TTD)
+-- ============================================================
+DO $$ BEGIN
+  CREATE TYPE sport_center.document_type_enum AS ENUM (
+    'general', 'invoice', 'spp', 'kwitansi', 'lampiran', 'berita_acara', 'surat_pengantar'
+  );
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+CREATE TABLE IF NOT EXISTS sport_center.company_document_settings (
+  id              SERIAL PRIMARY KEY,
+  document_type   sport_center.document_type_enum NOT NULL DEFAULT 'general',
+  logo_url        TEXT,
+  kop_surat_html  TEXT,
+  footer_html     TEXT,
+  bank_name       TEXT NOT NULL DEFAULT '',
+  bank_account    TEXT NOT NULL DEFAULT '',
+  bank_holder     TEXT NOT NULL DEFAULT '',
+  finance_name    TEXT NOT NULL DEFAULT '',
+  finance_title   TEXT NOT NULL DEFAULT 'Finance Manager',
+  signature_url   TEXT,
+  prefix_number   TEXT NOT NULL DEFAULT 'INV',
+  tax_rate        NUMERIC(5,2) NOT NULL DEFAULT 11,
+  is_active       BOOLEAN NOT NULL DEFAULT true,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- ============================================================
+-- coa_accounts (chart of accounts for expense categorization)
+-- ============================================================
+DO $$ BEGIN
+  CREATE TYPE sport_center.coa_account_type AS ENUM (
+    'asset', 'liability', 'equity', 'revenue', 'expense'
+  );
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+CREATE TABLE IF NOT EXISTS sport_center.coa_accounts (
+  id           SERIAL PRIMARY KEY,
+  code         TEXT NOT NULL UNIQUE,
+  name         TEXT NOT NULL,
+  account_type sport_center.coa_account_type NOT NULL,
+  parent_code  TEXT,
+  is_active    BOOLEAN NOT NULL DEFAULT true,
+  sort_order   INTEGER NOT NULL DEFAULT 0,
+  notes        TEXT,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- receipt_urls column on sport_expenses (jsonb multi-attachment)
+ALTER TABLE sport_center.sport_expenses
+  ADD COLUMN IF NOT EXISTS receipt_urls JSONB DEFAULT '[]';
+
+-- ============================================================
+-- sport_vendors master table
+-- ============================================================
+CREATE TABLE IF NOT EXISTS sport_center.sport_vendors (
+  id           SERIAL PRIMARY KEY,
+  name         TEXT NOT NULL,
+  contact_person TEXT,
+  phone        TEXT,
+  email        TEXT,
+  address      TEXT,
+  notes        TEXT,
+  is_active    BOOLEAN NOT NULL DEFAULT true,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- vendor_id FK on sport_expenses
+ALTER TABLE sport_center.sport_expenses
+  ADD COLUMN IF NOT EXISTS vendor_id INTEGER
+    REFERENCES sport_center.sport_vendors(id)
+    ON DELETE SET NULL;
+
+-- ============================================================
+-- wa_notif_logs: log pengiriman notifikasi WhatsApp per booking
+-- ============================================================
+CREATE TABLE IF NOT EXISTS sport_center.wa_notif_logs (
+  id              SERIAL PRIMARY KEY,
+  booking_id      INTEGER,
+  order_number    TEXT,
+  event           TEXT,
+  recipient_phone TEXT NOT NULL,
+  message_preview TEXT,
+  status          TEXT NOT NULL DEFAULT 'sent',
+  error_message   TEXT,
+  sent_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- ============================================================
+-- gym_checkins: rekam check-in harian member gym
+-- ============================================================
+CREATE TABLE IF NOT EXISTS sport_center.gym_checkins (
+  id              SERIAL PRIMARY KEY,
+  membership_id   INTEGER NOT NULL REFERENCES sport_center.sport_memberships(id) ON DELETE CASCADE,
+  checkin_date    TEXT NOT NULL,
+  checked_in_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  notes           TEXT,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS gym_checkins_date_idx       ON sport_center.gym_checkins(checkin_date);
+CREATE INDEX IF NOT EXISTS gym_checkins_membership_idx ON sport_center.gym_checkins(membership_id);
+
+-- ============================================================
+-- Event booking: booking_type + event_discount_amount
+-- ============================================================
+ALTER TABLE sport_center.sport_bookings
+  ADD COLUMN IF NOT EXISTS booking_type TEXT NOT NULL DEFAULT 'regular';
+
+ALTER TABLE sport_center.sport_bookings
+  ADD COLUMN IF NOT EXISTS event_discount_amount NUMERIC(12,2);
 `;
 

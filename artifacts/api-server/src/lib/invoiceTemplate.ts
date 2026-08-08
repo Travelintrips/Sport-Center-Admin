@@ -5,6 +5,20 @@
 //
 // Template ID: invoice_template_sport_center_v1
 
+export interface InvoiceSession {
+  orderNumber: string;
+  facilityName: string;
+  bookingDate: string;
+  startTime: string;
+  endTime: string;
+  durationHours: number;
+  basePrice: number;       // harga asli sebelum diskon
+  grandTotal: number;      // harga final setelah diskon+pajak
+  discountAmount?: number;
+  bookingType?: string;
+  status: string;
+}
+
 export interface InvoiceData {
   invoiceNumber: string;
   invoiceDate: string;
@@ -30,6 +44,11 @@ export interface InvoiceData {
 
   promoCode?: string | null;
   discountAmount?: number;
+  bookingType?: string;
+
+  // Group invoice support
+  groupRef?: string | null;
+  sessions?: InvoiceSession[];
 
   centerName: string;
   centerAddress: string;
@@ -37,6 +56,18 @@ export interface InvoiceData {
   bankName: string;
   bankAccount: string;
   bankAccountName: string;
+
+  // Dynamic invoice settings
+  logoUrl?: string | null;
+  kopSuratHtml?: string | null;
+  financeName?: string | null;
+  financeTitle?: string | null;
+  signatureUrl?: string | null;
+  footerText?: string | null;
+  invoicePrefix?: string | null;
+
+  // Dokumentasi kegiatan (corporate booking)
+  documentation?: Array<{ fileUrl: string; fileName: string | null; caption: string | null }>;
 }
 
 // ─── Terbilang Converter (Indonesian number to words) ────────────────────────
@@ -135,7 +166,36 @@ export function buildInvoiceHtml(data: InvoiceData, opts: BuildOptions = {}): st
   const bookingDateFmt = formatTanggal(data.bookingDate);
   const invoiceDateFmt = formatTanggal(data.invoiceDate);
 
-  const priceRows = `
+  // Gunakan sessions[] jika ada (grup), fallback ke single booking
+  const isGroup = data.sessions && data.sessions.length > 0;
+  const priceRows = isGroup
+    ? data.sessions!.map((s, i) => {
+        const hasSessionDiscount = (s.discountAmount ?? 0) > 0;
+        // Tampilkan harga asli di kolom, diskon di baris bawah, final di total bawah
+        const displayPrice = hasSessionDiscount ? s.basePrice : s.grandTotal;
+        return `
+          <tr>
+            <td style="padding:10px 12px;font-size:13px;">${i + 1}</td>
+            <td style="padding:10px 12px;font-size:13px;font-weight:600;">${s.facilityName}</td>
+            <td style="padding:10px 12px;font-size:13px;">${formatTanggal(s.bookingDate)}</td>
+            <td style="padding:10px 12px;font-size:13px;">${s.startTime} – ${s.endTime}</td>
+            <td style="padding:10px 12px;font-size:13px;text-align:center;">${s.durationHours} jam</td>
+            <td style="padding:10px 12px;font-size:13px;text-align:right;">Rp ${rp(displayPrice)}</td>
+          </tr>
+          ${hasSessionDiscount ? `
+          <tr style="background:#fff7ed;">
+            <td></td>
+            <td colspan="4" style="padding:4px 12px;font-size:11.5px;color:#92400e;">${s.bookingType === "event" ? "Diskon Event" : "Diskon AP2"}${data.promoCode ? ` (${data.promoCode})` : ""}</td>
+            <td style="padding:4px 12px;font-size:11.5px;text-align:right;color:#92400e;">-Rp ${rp(s.discountAmount ?? 0)}</td>
+          </tr>
+          <tr style="background:#f0fdf4;">
+            <td></td>
+            <td colspan="4" style="padding:4px 12px;font-size:11.5px;color:#15803d;font-weight:600;">Harga Setelah Diskon</td>
+            <td style="padding:4px 12px;font-size:11.5px;text-align:right;color:#15803d;font-weight:700;">Rp ${rp(s.grandTotal)}</td>
+          </tr>` : ""}
+        `;
+      }).join("")
+    : `
     <tr>
       <td style="padding:10px 12px;font-size:13px;">1</td>
       <td style="padding:10px 12px;font-size:13px;font-weight:600;">${data.facilityName}</td>
@@ -147,7 +207,7 @@ export function buildInvoiceHtml(data: InvoiceData, opts: BuildOptions = {}): st
     ${hasDiscount ? `
     <tr style="background:#fff7ed;">
       <td></td>
-      <td colspan="4" style="padding:6px 12px;font-size:12px;color:#92400e;">Diskon${data.promoCode ? ` (${data.promoCode})` : ""}</td>
+      <td colspan="4" style="padding:6px 12px;font-size:12px;color:#92400e;">${data.bookingType === "event" ? "Diskon Event" : data.bookingType === "angkasa_pura" || (data.discountAmount && data.discountAmount > 0 && !data.promoCode) ? "Diskon AP2" : "Diskon"}${data.promoCode ? ` (${data.promoCode})` : ""}</td>
       <td style="padding:6px 12px;font-size:12px;text-align:right;color:#92400e;">-Rp ${rp(data.discountAmount ?? 0)}</td>
     </tr>` : ""}
   `;
@@ -158,8 +218,11 @@ export function buildInvoiceHtml(data: InvoiceData, opts: BuildOptions = {}): st
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Invoice ${data.invoiceNumber}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet"/>
   <style>
-    @page { margin: 16mm 18mm; size: A4; }
+    @page { margin: 10mm 14mm; size: A4; }
     @media print {
       body { margin: 0 !important; }
       .no-print { display: none !important; }
@@ -167,12 +230,14 @@ export function buildInvoiceHtml(data: InvoiceData, opts: BuildOptions = {}): st
     }
     * { box-sizing: border-box; }
     body {
-      font-family: Arial, 'Segoe UI', sans-serif;
+      font-family: 'Inter', Arial, 'Segoe UI', sans-serif;
       color: #111827;
       margin: 0;
-      padding: 28px 36px;
-      font-size: 13px;
+      padding: 32px 24px 16px;
+      font-size: 12px;
+      line-height: 1.5;
       background: #fff;
+      -webkit-font-smoothing: antialiased;
     }
 
     /* ── Header ── */
@@ -180,116 +245,126 @@ export function buildInvoiceHtml(data: InvoiceData, opts: BuildOptions = {}): st
       display: flex;
       justify-content: space-between;
       align-items: flex-start;
-      padding-bottom: 18px;
+      padding-bottom: 12px;
       border-bottom: 3px solid #ea580c;
-      margin-bottom: 22px;
+      margin-bottom: 14px;
     }
     .sc-brand-name {
-      font-size: 22px;
-      font-weight: 900;
+      font-size: 20px;
+      font-weight: 800;
       color: #ea580c;
-      letter-spacing: -0.5px;
-      margin: 0;
+      letter-spacing: -0.3px;
+      margin: 0 0 2px;
+      line-height: 1.2;
     }
     .sc-brand-sub {
-      font-size: 13px;
-      font-weight: 700;
-      color: #374151;
-      margin: 2px 0 4px;
+      font-size: 11px;
+      font-weight: 600;
+      color: #111827;
+      margin: 2px 0 2px;
+      letter-spacing: 0.1px;
     }
     .sc-brand-addr {
-      font-size: 11px;
-      color: #6b7280;
+      font-size: 10.5px;
+      color: #374151;
       margin: 0;
-      max-width: 260px;
+      max-width: 280px;
+      line-height: 1.55;
+      font-weight: 400;
     }
     .sc-invoice-label {
       text-align: right;
     }
     .sc-invoice-title {
-      font-size: 28px;
-      font-weight: 900;
+      font-size: 26px;
+      font-weight: 800;
       color: #ea580c;
-      letter-spacing: 4px;
+      letter-spacing: 5px;
       text-transform: uppercase;
+      line-height: 1;
     }
     .sc-template-id {
       font-size: 9px;
       color: #d1d5db;
-      margin-top: 2px;
+      margin-top: 4px;
+      letter-spacing: 0.3px;
     }
 
     /* ── Info Row ── */
     .sc-info-row {
       display: flex;
-      gap: 24px;
-      margin-bottom: 22px;
+      gap: 14px;
+      margin-bottom: 14px;
     }
     .sc-info-box {
       flex: 1;
       background: #f9fafb;
       border: 1px solid #e5e7eb;
       border-radius: 8px;
-      padding: 14px 16px;
+      padding: 10px 14px;
     }
     .sc-info-box h4 {
-      margin: 0 0 10px;
-      font-size: 11px;
+      margin: 0 0 8px;
+      font-size: 9.5px;
       font-weight: 700;
       text-transform: uppercase;
-      letter-spacing: 1px;
-      color: #6b7280;
+      letter-spacing: 1.2px;
+      color: #374151;
       border-bottom: 1px solid #e5e7eb;
-      padding-bottom: 6px;
+      padding-bottom: 5px;
     }
     .sc-info-table td {
       padding: 3px 0;
-      font-size: 12px;
+      font-size: 11.5px;
       vertical-align: top;
+      line-height: 1.45;
     }
     .sc-info-table td:first-child {
-      color: #6b7280;
+      color: #4b5563;
       width: 115px;
-      font-size: 11.5px;
+      font-weight: 400;
     }
     .sc-info-table td:nth-child(2) {
-      color: #6b7280;
-      width: 8px;
+      color: #4b5563;
+      width: 10px;
+      padding: 3px 4px;
     }
     .sc-info-table td:last-child {
       font-weight: 600;
       color: #111827;
     }
     .sc-notice {
-      font-size: 10.5px;
-      color: #9ca3af;
+      font-size: 9.5px;
+      color: #4b5563;
       font-style: italic;
-      margin-top: 8px;
-      padding-top: 8px;
+      margin-top: 6px;
+      padding-top: 6px;
       border-top: 1px dashed #e5e7eb;
+      line-height: 1.4;
     }
 
     /* ── Detail Table ── */
     .sc-section-title {
-      font-size: 11px;
+      font-size: 9.5px;
       font-weight: 700;
       text-transform: uppercase;
-      letter-spacing: 1px;
-      color: #6b7280;
-      margin: 0 0 8px;
+      letter-spacing: 1.2px;
+      color: #374151;
+      margin: 0 0 6px;
     }
     .sc-detail-table {
       width: 100%;
       border-collapse: collapse;
-      margin-bottom: 20px;
+      margin-bottom: 12px;
     }
     .sc-detail-table thead th {
       background: #ea580c;
       color: #fff;
-      padding: 9px 12px;
-      font-size: 11.5px;
-      font-weight: 700;
+      padding: 8px 12px;
+      font-size: 10.5px;
+      font-weight: 600;
       text-align: left;
+      letter-spacing: 0.2px;
     }
     .sc-detail-table thead th:last-child {
       text-align: right;
@@ -309,23 +384,25 @@ export function buildInvoiceHtml(data: InvoiceData, opts: BuildOptions = {}): st
     .sc-total-wrap {
       display: flex;
       justify-content: flex-end;
-      margin-bottom: 20px;
+      margin-bottom: 12px;
     }
     .sc-total-table {
       border-collapse: collapse;
-      min-width: 320px;
+      min-width: 300px;
     }
     .sc-total-table td {
-      padding: 7px 14px;
-      font-size: 13px;
+      padding: 6px 14px;
+      font-size: 12px;
+      line-height: 1.4;
     }
     .sc-total-table tr.subtotal td {
       background: #f9fafb;
       color: #374151;
+      font-weight: 400;
     }
     .sc-total-table tr.subtotal td:last-child {
       text-align: right;
-      font-family: 'Courier New', monospace;
+      font-weight: 600;
     }
     .sc-total-table tr.ppn td {
       background: #fff7ed;
@@ -333,98 +410,102 @@ export function buildInvoiceHtml(data: InvoiceData, opts: BuildOptions = {}): st
     }
     .sc-total-table tr.ppn td:last-child {
       text-align: right;
-      font-family: 'Courier New', monospace;
+      font-weight: 600;
     }
     .sc-total-table tr.grand td {
       background: #ea580c;
       color: #fff;
-      font-weight: 900;
-      font-size: 15px;
+      font-weight: 800;
+      font-size: 14px;
+      letter-spacing: 0.2px;
     }
     .sc-total-table tr.grand td:last-child {
       text-align: right;
-      font-family: 'Courier New', monospace;
     }
     .sc-terbilang {
       background: #fff7ed;
       border: 1px solid #fed7aa;
-      border-radius: 6px;
-      padding: 10px 14px;
-      font-size: 12px;
+      border-radius: 8px;
+      padding: 8px 14px;
+      font-size: 11.5px;
       color: #92400e;
-      margin-bottom: 20px;
+      margin-bottom: 12px;
+      line-height: 1.5;
     }
     .sc-terbilang strong { font-weight: 700; }
 
     /* ── Payment Info ── */
     .sc-bottom-row {
       display: flex;
-      gap: 20px;
-      margin-bottom: 28px;
+      gap: 14px;
+      margin-bottom: 14px;
     }
     .sc-payment-box {
       flex: 1;
       background: #f0f9ff;
       border: 1px solid #bae6fd;
       border-radius: 8px;
-      padding: 14px 16px;
+      padding: 10px 14px;
     }
     .sc-payment-box h4 {
-      margin: 0 0 10px;
-      font-size: 11px;
+      margin: 0 0 8px;
+      font-size: 9.5px;
       font-weight: 700;
       text-transform: uppercase;
-      letter-spacing: 1px;
+      letter-spacing: 1.2px;
       color: #0369a1;
       border-bottom: 1px solid #bae6fd;
-      padding-bottom: 6px;
+      padding-bottom: 5px;
     }
     .sc-notes-box {
       flex: 1;
       background: #fafafa;
       border: 1px dashed #d1d5db;
       border-radius: 8px;
-      padding: 14px 16px;
+      padding: 10px 14px;
     }
     .sc-notes-box h4 {
-      margin: 0 0 10px;
-      font-size: 11px;
+      margin: 0 0 8px;
+      font-size: 9.5px;
       font-weight: 700;
       text-transform: uppercase;
-      letter-spacing: 1px;
-      color: #6b7280;
+      letter-spacing: 1.2px;
+      color: #374151;
       border-bottom: 1px solid #e5e7eb;
-      padding-bottom: 6px;
+      padding-bottom: 5px;
     }
 
     /* ── Footer ── */
     .sc-footer {
       border-top: 1px solid #e5e7eb;
-      padding-top: 16px;
+      padding-top: 12px;
       display: flex;
       justify-content: space-between;
       align-items: flex-end;
     }
     .sc-footer-left {
-      font-size: 11px;
-      color: #9ca3af;
+      font-size: 10.5px;
+      color: #4b5563;
+      line-height: 1.6;
     }
     .sc-signature {
       text-align: center;
-      font-size: 12px;
+      font-size: 11px;
     }
     .sc-signature-line {
       border-bottom: 1px solid #374151;
       width: 140px;
-      margin: 40px auto 6px;
+      margin: 0 auto 6px;
     }
     .sc-signature-name {
       font-weight: 700;
-      font-size: 12px;
+      font-size: 11.5px;
+      color: #111827;
     }
     .sc-signature-role {
-      font-size: 11px;
-      color: #6b7280;
+      font-size: 10.5px;
+      color: #374151;
+      font-weight: 400;
     }
   </style>
   ${autoPrint ? `<script>window.onload = function(){ setTimeout(function(){ window.print(); }, 500); }</script>` : ""}
@@ -434,18 +515,31 @@ export function buildInvoiceHtml(data: InvoiceData, opts: BuildOptions = {}): st
   <!-- ═══════════════════════════════════════════════════════════════
        A. HEADER
   ═══════════════════════════════════════════════════════════════ -->
-  <div class="sc-header">
-    <div>
-      <div class="sc-brand-name">SPORT CENTER</div>
-      <div class="sc-brand-sub">Bandara Soekarno-Hatta</div>
-      <div class="sc-brand-addr">${data.centerAddress || "Kawasan Bandara Soekarno-Hatta, Tangerang 19110"}</div>
-      ${data.centerPhone ? `<div class="sc-brand-addr" style="margin-top:3px;">Telp: ${data.centerPhone}</div>` : ""}
+  ${data.kopSuratHtml
+    ? `<div class="sc-header-custom">${data.kopSuratHtml
+        .replace(/\{\{companyName\}\}/g, data.centerName)
+        .replace(/\{\{centerName\}\}/g, data.centerName)
+        .replace(/\{\{address\}\}/g, data.centerAddress)
+        .replace(/\{\{phone\}\}/g, data.centerPhone)
+        .replace(/\{\{logoUrl\}\}/g, data.logoUrl ?? "")
+        .replace(/\{\{financeName\}\}/g, data.financeName ?? "")
+        .replace(/\{\{financeTitle\}\}/g, data.financeTitle ?? "Finance Manager")
+      }</div>`
+    : `<div class="sc-header">
+    <div style="display:flex;align-items:center;gap:12px;">
+      ${data.logoUrl ? `<img src="${data.logoUrl}" alt="Logo" style="height:80px;width:auto;object-fit:contain;" />` : ""}
+      <div>
+        <div class="sc-brand-name">${data.centerName}</div>
+        ${data.centerAddress ? `<div class="sc-brand-addr">${data.centerAddress}</div>` : ""}
+        ${data.centerPhone ? `<div class="sc-brand-addr" style="margin-top:3px;">Telp: ${data.centerPhone}</div>` : ""}
+      </div>
     </div>
     <div class="sc-invoice-label">
       <div class="sc-invoice-title">INVOICE</div>
       <div class="sc-template-id">Template: ${templateVersion}</div>
     </div>
-  </div>
+  </div>`
+  }
 
   <!-- ═══════════════════════════════════════════════════════════════
        B. INVOICE INFO + C. CUSTOMER INFO
@@ -459,7 +553,7 @@ export function buildInvoiceHtml(data: InvoiceData, opts: BuildOptions = {}): st
         <tr>
           <td>No Invoice</td>
           <td>:</td>
-          <td style="font-family:'Courier New',monospace;font-size:13px;color:#ea580c;">${data.invoiceNumber}</td>
+          <td style="font-size:13px;font-weight:700;color:#ea580c;letter-spacing:0.3px;">${data.invoiceNumber}</td>
         </tr>
         <tr>
           <td>Tanggal Invoice</td>
@@ -469,7 +563,7 @@ export function buildInvoiceHtml(data: InvoiceData, opts: BuildOptions = {}): st
         <tr>
           <td>No Pesanan</td>
           <td>:</td>
-          <td style="font-family:'Courier New',monospace;">${data.orderNumber}</td>
+          <td style="font-weight:600;letter-spacing:0.2px;">${data.orderNumber}</td>
         </tr>
       </table>
       <div class="sc-notice">
@@ -518,7 +612,7 @@ export function buildInvoiceHtml(data: InvoiceData, opts: BuildOptions = {}): st
         <th>Tanggal</th>
         <th style="text-align:center;">Jam</th>
         <th style="text-align:center;">Durasi</th>
-        <th style="text-align:right;">Harga</th>
+        <th style="text-align:right;">Harga (Inc. PPN)</th>
       </tr>
     </thead>
     <tbody>
@@ -531,29 +625,29 @@ export function buildInvoiceHtml(data: InvoiceData, opts: BuildOptions = {}): st
   ═══════════════════════════════════════════════════════════════ -->
   <div class="sc-total-wrap">
     <table class="sc-total-table">
+      ${data.ppnAmount > 0 ? `
       <tr class="subtotal">
         <td>DPP</td>
-        <td style="text-align:right;font-family:'Courier New',monospace;">Rp ${rp(data.dpp)}</td>
+        <td style="text-align:right;">Rp ${rp(data.dpp)}</td>
       </tr>
-      ${data.dppNilaiLain > 0 ? `
       <tr class="subtotal">
-        <td style="color:#6b7280;font-size:12px;">DPP Nilai Lain <span style="font-weight:400;font-size:11px;">(11/12 × DPP)</span></td>
-        <td style="text-align:right;font-family:'Courier New',monospace;color:#6b7280;font-size:12px;">Rp ${rp(data.dppNilaiLain)}</td>
-      </tr>` : ""}
-      <tr class="ppn">
-        <td>PPN ${data.ppnRate}%</td>
-        <td style="text-align:right;font-family:'Courier New',monospace;">Rp ${rp(data.ppnAmount)}</td>
+        <td style="color:#4b5563;font-size:11.5px;">DPP Nilai Lain</td>
+        <td style="text-align:right;color:#4b5563;font-size:11.5px;">Rp ${rp(data.dppNilaiLain)}</td>
       </tr>
+      <tr class="ppn">
+        <td>PPN ${data.ppnRate ? data.ppnRate + '%' : '12%'}</td>
+        <td style="text-align:right;">Rp ${rp(data.ppnAmount)}</td>
+      </tr>` : ""}
       <tr class="grand">
         <td>TOTAL</td>
-        <td style="text-align:right;font-family:'Courier New',monospace;">Rp ${rp(data.grandTotal)}</td>
+        <td style="text-align:right;">Rp ${rp(data.grandTotal)}</td>
       </tr>
     </table>
   </div>
   ${data.dppNilaiLain > 0 ? `
   <div style="text-align:right;margin-top:-14px;margin-bottom:16px;">
     <span style="font-size:10px;color:#9ca3af;font-style:italic;">
-      Perhitungan pajak menggunakan DPP Nilai Lain (11/12 dari DPP) sesuai konfigurasi sistem.
+      Perhitungan pajak menggunakan DPP Nilai Lain sesuai konfigurasi sistem.
     </span>
   </div>` : ""}
 
@@ -562,39 +656,43 @@ export function buildInvoiceHtml(data: InvoiceData, opts: BuildOptions = {}): st
   </div>
 
   <!-- ═══════════════════════════════════════════════════════════════
+       E2. DOKUMENTASI KEGIATAN (corporate booking)
+  ═══════════════════════════════════════════════════════════════ -->
+  ${(data.documentation && data.documentation.length > 0) ? `
+  <div class="sc-section-title" style="margin-top:24px;">Dokumentasi Kegiatan</div>
+  <table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:8px;">
+    <thead>
+      <tr style="background:#f8fafc;">
+        <th style="padding:6px 10px;text-align:left;border-bottom:1px solid #e2e8f0;color:#64748b;font-weight:600;">No</th>
+        <th style="padding:6px 10px;text-align:left;border-bottom:1px solid #e2e8f0;color:#64748b;font-weight:600;">Nama File</th>
+        <th style="padding:6px 10px;text-align:left;border-bottom:1px solid #e2e8f0;color:#64748b;font-weight:600;">Keterangan</th>
+        <th style="padding:6px 10px;text-align:left;border-bottom:1px solid #e2e8f0;color:#64748b;font-weight:600;">Link</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${data.documentation.map((doc, i) => `
+      <tr style="border-bottom:1px solid #f1f5f9;">
+        <td style="padding:6px 10px;color:#374151;">${i + 1}</td>
+        <td style="padding:6px 10px;color:#374151;">${doc.fileName ?? "—"}</td>
+        <td style="padding:6px 10px;color:#374151;">${doc.caption ?? "—"}</td>
+        <td style="padding:6px 10px;">
+          <a href="${doc.fileUrl}" style="color:#0369a1;text-decoration:underline;font-size:11px;" target="_blank">Buka File ↗</a>
+        </td>
+      </tr>`).join("")}
+    </tbody>
+  </table>
+  ` : ""}
+
+  <!-- ═══════════════════════════════════════════════════════════════
        F. PAYMENT INFO
   ═══════════════════════════════════════════════════════════════ -->
   <div class="sc-bottom-row">
     <div class="sc-payment-box">
       <h4>Informasi Pembayaran</h4>
-      <table class="sc-info-table">
-        <tr>
-          <td>Bank</td>
-          <td>:</td>
-          <td style="font-weight:700;color:#0369a1;">${data.bankName || "Bank Mandiri"}</td>
-        </tr>
-        <tr>
-          <td>No Rekening</td>
-          <td>:</td>
-          <td style="font-family:'Courier New',monospace;font-weight:700;">${data.bankAccount || "-"}</td>
-        </tr>
-        <tr>
-          <td>Atas Nama</td>
-          <td>:</td>
-          <td>${data.bankAccountName || "Sport Center Soekarno-Hatta"}</td>
-        </tr>
-      </table>
-    </div>
-
-    <div class="sc-notes-box">
-      <h4>Petunjuk Pembayaran</h4>
-      <div style="font-size:12px;color:#374151;line-height:1.7;">
-        <div>1. Transfer sesuai jumlah total invoice</div>
-        <div>2. Cantumkan No Pesanan sebagai referensi</div>
-        <div>3. Kirim bukti transfer via WhatsApp</div>
-        <div style="margin-top:8px;font-size:11px;color:#9ca3af;">
-          Pembayaran berlaku <strong>setelah dikonfirmasi</strong> oleh tim Finance
-        </div>
+      <div style="font-size:12px;color:#111827;line-height:1.9;">
+        <div style="font-weight:700;color:#0369a1;">${data.bankAccountName || data.centerName}</div>
+        ${data.bankName ? `<div>${data.bankName}</div>` : ""}
+        ${data.bankAccount ? `<div style="font-weight:700;font-size:13px;letter-spacing:0.3px;">No. Rek: ${data.bankAccount}</div>` : ""}
       </div>
     </div>
   </div>
@@ -604,15 +702,22 @@ export function buildInvoiceHtml(data: InvoiceData, opts: BuildOptions = {}): st
   ═══════════════════════════════════════════════════════════════ -->
   <div class="sc-footer">
     <div class="sc-footer-left">
-      <div>Invoice dicetak: ${new Date().toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" })}</div>
-      <div style="margin-top:4px;">Dokumen ini sah tanpa tanda tangan basah</div>
+      ${data.footerText
+        ? `<div>${data.footerText}</div>`
+        : `<div>Invoice dicetak: ${new Date().toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" })}</div>
+      <div style="margin-top:4px;">Dokumen ini sah tanpa tanda tangan basah</div>`
+      }
       <div style="margin-top:2px;font-size:10px;color:#d1d5db;">${templateVersion}</div>
     </div>
     <div class="sc-signature">
       <div style="font-size:12px;color:#374151;margin-bottom:4px;">Hormat kami,</div>
+      ${data.signatureUrl
+        ? `<img src="${data.signatureUrl}" alt="Tanda Tangan" style="height:72px;width:auto;object-fit:contain;margin:4px 0;" />`
+        : `<div style="height:80px;"></div>`
+      }
       <div class="sc-signature-line"></div>
-      <div class="sc-signature-name">${data.centerName || "Sport Center Soekarno-Hatta"}</div>
-      <div class="sc-signature-role">Tim Finance</div>
+      <div class="sc-signature-name">${data.financeName || data.centerName}</div>
+      ${data.financeTitle ? `<div class="sc-signature-role">${data.financeTitle}</div>` : ""}
     </div>
   </div>
 

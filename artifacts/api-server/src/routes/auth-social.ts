@@ -4,6 +4,7 @@ import { eq, or } from "drizzle-orm";
 import { OAuth2Client } from "google-auth-library";
 import { createToken, authMiddleware, hashPassword, verifyToken } from "../lib/auth";
 import crypto from "crypto";
+import { logger } from "../lib/logger";
 
 const router = Router();
 
@@ -13,6 +14,7 @@ const FONNTE_TOKEN = process.env.FONNTE_TOKEN || "";
 const googleClient = new OAuth2Client(GOOGLE_CLIENT_ID);
 
 const otpStore = new Map<string, { otp: string; expires: number; name?: string }>();
+const resetOtpStore = new Map<string, { otp: string; expires: number; email: string }>();
 
 function cleanPhone(raw: string): string {
   return raw.replace(/^0/, "62").replace(/\D/g, "");
@@ -136,7 +138,7 @@ router.post("/auth/send-otp", async (req, res) => {
         // swallow
       }
     } else {
-      console.log(`[DEV] OTP for ${cleaned}: ${otp}`);
+      logger.debug(`[DEV] OTP for ${cleaned}: ${otp}`);
     }
 
     res.json({ success: true, message: "OTP berhasil dikirim via WhatsApp" });
@@ -212,6 +214,99 @@ router.post("/auth/verify-otp", async (req, res) => {
     });
   } catch (err) {
     req.log.error({ err }, "Verify OTP error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.post("/auth/forgot-password", async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) {
+      res.status(400).json({ error: "Email wajib diisi" });
+      return;
+    }
+
+    const [user] = await db.select().from(usersTable).where(eq(usersTable.email, email)).limit(1);
+    if (!user) {
+      res.status(404).json({ error: "Email tidak terdaftar" });
+      return;
+    }
+    if (!user.phone) {
+      res.status(422).json({ error: "Akun ini tidak memiliki nomor WhatsApp. Gunakan login Google atau hubungi admin." });
+      return;
+    }
+
+    const cleaned = cleanPhone(user.phone);
+    const otp = generateOtp();
+    const expires = Date.now() + 5 * 60 * 1000;
+    resetOtpStore.set(cleaned, { otp, expires, email });
+
+    if (FONNTE_TOKEN) {
+      try {
+        await fetch("https://api.fonnte.com/send", {
+          method: "POST",
+          headers: { Authorization: FONNTE_TOKEN, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            target: cleaned,
+            message: `Kode reset password Sport Center Anda: *${otp}*\n\nBerlaku 5 menit. Jangan bagikan ke siapapun.`,
+          }),
+        });
+      } catch {
+        // swallow
+      }
+    } else {
+      logger.debug(`[DEV] Reset OTP for ${cleaned}: ${otp}`);
+    }
+
+    const maskedPhone = user.phone.replace(/(\d{3})\d+(\d{3})/, "$1****$2");
+    res.json({ success: true, maskedPhone });
+  } catch (err) {
+    req.log.error({ err }, "Forgot password error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.post("/auth/reset-password", async (req, res) => {
+  try {
+    const { email, otp, newPassword } = req.body;
+    if (!email || !otp || !newPassword) {
+      res.status(400).json({ error: "Email, OTP, dan password baru wajib diisi" });
+      return;
+    }
+    if (newPassword.length < 6) {
+      res.status(400).json({ error: "Password baru minimal 6 karakter" });
+      return;
+    }
+
+    const [user] = await db.select().from(usersTable).where(eq(usersTable.email, email)).limit(1);
+    if (!user || !user.phone) {
+      res.status(404).json({ error: "Akun tidak ditemukan" });
+      return;
+    }
+
+    const cleaned = cleanPhone(user.phone);
+    const record = resetOtpStore.get(cleaned);
+
+    if (!record || record.email !== email) {
+      res.status(400).json({ error: "OTP tidak ditemukan. Minta OTP baru." });
+      return;
+    }
+    if (Date.now() > record.expires) {
+      resetOtpStore.delete(cleaned);
+      res.status(400).json({ error: "OTP sudah kadaluarsa. Minta OTP baru." });
+      return;
+    }
+    if (record.otp !== String(otp)) {
+      res.status(400).json({ error: "OTP salah" });
+      return;
+    }
+
+    resetOtpStore.delete(cleaned);
+    await db.update(usersTable).set({ passwordHash: hashPassword(newPassword) }).where(eq(usersTable.id, user.id));
+
+    res.json({ success: true, message: "Password berhasil diubah. Silakan login dengan password baru." });
+  } catch (err) {
+    req.log.error({ err }, "Reset password error");
     res.status(500).json({ error: "Internal server error" });
   }
 });

@@ -67,36 +67,44 @@ if (IS_DEV) {
 } else {
   const prodKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
   if (!prodKey) {
-    console.error(
-      "\n╔══════════════════════════════════════════════════════════════════╗\n" +
-      "║  FATAL: SUPABASE_SERVICE_ROLE_KEY is not set in production.     ║\n" +
-      "║                                                                  ║\n" +
-      "║  File uploads (payment proofs, facility images, QRIS) will      ║\n" +
-      "║  fail without this key. Set it in the production environment.   ║\n" +
-      "╚══════════════════════════════════════════════════════════════════╝\n"
+    // Non-fatal in production: storage features will be unavailable, but the
+    // server starts normally. Google Secret Manager loads this key after ESM
+    // module graph initialization completes — a module-level process.exit(1)
+    // would fire BEFORE secretLoader.ts can inject the value. The env
+    // validator (envValidation.ts) handles the startup-fatal check after GSM
+    // loading completes. File upload/download endpoints will return 500 until
+    // the key is available.
+    console.warn(
+      "[supabaseStorage] SUPABASE_SERVICE_ROLE_KEY not set — " +
+      "storage features (file uploads/downloads) will be unavailable until the key is provided."
     );
-    process.exit(1);
+    SERVICE_KEY = "";
+    storageProjectSource = "NOT CONFIGURED";
+  } else {
+    SERVICE_KEY = prodKey;
+    // Do NOT log project ref in production — keep it out of logs
+    storageProjectSource = "SUPABASE_SERVICE_ROLE_KEY (production)";
   }
-  SERVICE_KEY = prodKey;
-  // Do NOT log project ref in production — keep it out of logs
-  storageProjectSource = "SUPABASE_SERVICE_ROLE_KEY (production)";
 }
 
 const PROJECT_REF = getProjectRef(SERVICE_KEY);
 const STORAGE_URL = PROJECT_REF ? `https://${PROJECT_REF}.supabase.co` : "";
 
-// NOTE: SUPABASE_STORAGE_BUCKET env var is set but NOT used — buckets are
-// addressed explicitly via the BUCKETS constant below. It is documented as
-// DEPRECATED in docs/supabase-env-audit.md.
 export const BUCKETS = {
   facility: "facility-images",
   proof: "payment-proofs",
+  docTemplates: "doc-templates",
+  corporateDocs: "corporate-docs",
+  invoicePdfs: "invoice-pdfs",
 } as const;
 
 // In-memory bucket health for diagnostic endpoint
 export const bucketStatus: Record<string, { ok: boolean; checkedAt: string | null; error: string | null }> = {
   [BUCKETS.facility]: { ok: false, checkedAt: null, error: null },
   [BUCKETS.proof]: { ok: false, checkedAt: null, error: null },
+  [BUCKETS.docTemplates]: { ok: false, checkedAt: null, error: null },
+  [BUCKETS.corporateDocs]: { ok: false, checkedAt: null, error: null },
+  [BUCKETS.invoicePdfs]: { ok: false, checkedAt: null, error: null },
 };
 
 let client: SupabaseClient | null = null;
@@ -139,27 +147,23 @@ export async function validateBuckets(): Promise<void> {
     try {
       const { data, error } = await supabase.storage.getBucket(bucket);
       if (error || !data) {
-        if (isProd) {
-          console.error(
-            `[Storage] ❌ Bucket "${bucket}" not found in production. ` +
-            `Create it manually in Supabase Dashboard → Storage. Error: ${error?.message}`
-          );
-          bucketStatus[bucket] = { ok: false, checkedAt: now, error: error?.message ?? "Not found" };
+        // Auto-create in both dev and prod — idempotent, safe
+        const mimeTypes = bucket === BUCKETS.facility
+          ? ["image/jpeg", "image/png", "image/webp"]
+          : ["image/jpeg", "image/png", "image/webp", "application/pdf", "application/octet-stream"];
+        const sizeLimit = bucket === BUCKETS.facility ? 5 * 1024 * 1024 : 10 * 1024 * 1024;
+        const { error: createErr } = await supabase.storage.createBucket(bucket, {
+          public: true,
+          allowedMimeTypes: mimeTypes,
+          fileSizeLimit: sizeLimit,
+        });
+        if (createErr && !createErr.message.toLowerCase().includes("already exists")) {
+          console.error(`[Storage] ❌ Failed to create bucket "${bucket}": ${createErr.message}`);
+          bucketStatus[bucket] = { ok: false, checkedAt: now, error: createErr.message };
         } else {
-          const { error: createErr } = await supabase.storage.createBucket(bucket, {
-            public: true,
-            allowedMimeTypes: bucket === BUCKETS.facility
-              ? ["image/jpeg", "image/png", "image/webp"]
-              : ["image/jpeg", "image/png", "image/webp", "application/pdf"],
-            fileSizeLimit: bucket === BUCKETS.facility ? 5 * 1024 * 1024 : 10 * 1024 * 1024,
-          });
-          if (createErr && !createErr.message.includes("already exists")) {
-            console.error(`[Storage] ❌ Failed to create bucket "${bucket}": ${createErr.message}`);
-            bucketStatus[bucket] = { ok: false, checkedAt: now, error: createErr.message };
-          } else {
-            console.info(`[Storage] ✓ Bucket "${bucket}" exists/created (dev).`);
-            bucketStatus[bucket] = { ok: true, checkedAt: now, error: null };
-          }
+          const env = IS_DEV ? "dev" : "prod";
+          console.info(`[Storage] ✓ Bucket "${bucket}" created/ensured (${env}).`);
+          bucketStatus[bucket] = { ok: true, checkedAt: now, error: null };
         }
       } else {
         const source = IS_DEV ? "dev" : "prod";
@@ -180,9 +184,23 @@ export async function uploadToStorage(
   contentType: string,
 ): Promise<string> {
   const supabase = getClient();
-  const { error } = await supabase.storage
+  let { error } = await supabase.storage
     .from(bucket)
     .upload(objectPath, body, { contentType, upsert: true });
+
+  // If bucket not found, create it on-the-fly and retry once
+  if (error && (error.message?.toLowerCase().includes("bucket") || (error as any).statusCode === 404)) {
+    await supabase.storage.createBucket(bucket, {
+      public: true,
+      allowedMimeTypes: ["image/jpeg", "image/png", "image/webp", "application/pdf", "application/octet-stream"],
+      fileSizeLimit: 10 * 1024 * 1024,
+    }).catch(() => {});
+    const retry = await supabase.storage
+      .from(bucket)
+      .upload(objectPath, body, { contentType, upsert: true });
+    error = retry.error;
+  }
+
   if (error) throw error;
   const { data } = supabase.storage.from(bucket).getPublicUrl(objectPath);
   return data.publicUrl;

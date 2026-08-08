@@ -1,0 +1,98 @@
+CORRECT AND AUDIT BOOKING FLOW - SPORT CENTER
+
+TUJUAN:
+Mengoreksi alur booking Personal / Angkasa Pura / Corporate, memperbaiki risiko, menambahkan validasi, dan menyiapkan sistem untuk opsi Personal vs Member Perusahaan.
+
+1. FORM BOOKING VALIDATION
+- startTime wajib hanya untuk fasilitas berjadwal. Walk-in gym tetap optional.
+- customerType: ubah menjadi enum: 'personal', 'angkasapura', 'corporate'.
+- idCardNumber wajib hanya untuk angkasapura atau corporate billing (jika employee verification required).
+- companyCustomerId hanya boleh diisi admin atau verified employee.
+- payerType wajib backend validasi: personal / company, personal tidak boleh submit company.
+
+2. CUSTOMER TYPE HANDLING
+- Pisahkan logika:
+  - Personal
+  - Angkasa Pura
+  - Corporate
+- Corporate booking:
+  - Cek login user adalah company account + allow_monthly_billing = true
+  - Employee verified: verificationStatus='approved', corporateBillingEnabled=true
+  - companyCustomerId diisi otomatis dari login user
+  - payerType='company'
+  - payment_required_now=FALSE
+  - billing_status='unbilled'
+  - Jika company require per-booking approval, tambah step approval sebelum confirmed
+- Personal booking:
+  - payerType='personal'
+  - payment_required_now=TRUE
+  - billing_status=NULL
+  - payment_deadline configurable (default 24 jam)
+
+3. PAYMENT FLOW
+- Personal booking:
+  - status pending_payment
+  - customer upload bukti
+  - admin konfirmasi → booking status confirmed
+- Corporate booking:
+  - status langsung confirmed (jika employee verified)
+  - billing_status unbilled → generate invoice bulanan
+  - kirim invoice ke PIC via WhatsApp / PDF
+  - PIC bayar → admin tandai paid → semua booking terkait status completed
+- Angkasa Pura:
+  - wajib ID Card
+  - verifikasi admin sebelum lanjut ke payment seperti Personal
+
+4. SLOT VALIDATION
+- Slot conflict check harus membedakan Personal vs Corporate
+- Corporate tidak boleh override slot Personal
+- Pastikan check bentrok dengan blocked_schedules
+
+5. DATABASE
+- bookings: simpan payer_type, company_customer_id, bookedForName, bookedForPhone
+- company_users / users digunakan untuk validasi employee
+- Pastikan semua booking corporate memiliki companyCustomerId yang valid
+
+6. AUDIT LOG
+- Pisahkan event log:
+  - PERSONAL_BOOKING_CREATED
+  - CORPORATE_BOOKING_CREATED
+- Tambahkan field payer_type untuk filter mudah
+
+7. EDGE CASES
+- Personal mencoba kirim companyCustomerId → reject backend
+- Employee belum verified pilih corporate → alert “Belum diverifikasi”
+- Corporate per-booking approval flag harus dicek
+- Payment deadline personal configurable dari admin settings
+
+8. UI UPDATE
+- Tambahkan toggle Personal / Member Perusahaan
+- Jika Member Perusahaan → kolom nama perusahaan read-only sesuai login
+- Jika Personal → tombol “Lanjut ke Pembayaran” muncul
+- Badge di booking detail: Corporate / Personal
+- Tampilkan informasi billing_status sesuai tipe
+
+9. NOTIFIKASI
+- Saat corporate booking dibuat:
+  - Kirim WA ke PIC perusahaan
+  - Email optional
+
+10. TEST CASES
+- Booking Personal
+- Booking Corporate employee verified
+- Booking Corporate employee non-verified → reject
+- Slot conflict test Personal vs Corporate
+- DP booking frontend exposure
+- Audit log filter Corporate / Personal
+
+11. PRIORITAS FIX
+- High: UI Corporate Booking + verification + companyBillingEnabled
+- Medium: Payment deadline Personal → 24 jam configurable
+- Medium: Pisahkan audit log event Personal vs Corporate
+- Low: Badge / filter booking list admin
+
+OUTPUT:
+- Updated booking validation logic
+- Database linkage corrected
+- Audit log separation added
+- UI prepared for Personal vs Member Perusahaan toggle
