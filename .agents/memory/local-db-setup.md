@@ -4,11 +4,11 @@ description: Workflow uses local heliumdb (DATABASE_URL), not Supabase; drizzle-
 ---
 
 ## The Rule
-The API server workflow does NOT have access to `SUPABASE_DATABASE_URL_DEV` or `SUPABASE_DATABASE_URL` from `.replit` userenv.shared — it always falls back to `DATABASE_URL` (Replit's local heliumdb). Shell/bash commands also cannot read those env vars.
+The development API now uses the development-scoped `SUPABASE_DATABASE_URL` secret when it is present; otherwise it falls back to `DATABASE_URL` (Replit's local heliumdb). Shell/bash commands may not expose the secret even when the workflow does.
 
-**Why:** Replit's userenv.shared variables from `.replit` are only available to workflows via the Replit UI secrets system, NOT exported to shell or sub-processes in the same way. In practice, the Node.js process started by the workflow only receives `DATABASE_URL` from Replit's built-in DB provisioning.
+**Why:** Replit environment scopes and workflow secret injection can differ from shell subprocess environments. The runtime selection is defined in `lib/db/src/index.ts`, so verify the running API rather than assuming the shell's variables reflect the workflow.
 
-**How to apply:** When the local PG is empty/missing tables, apply migrations manually — do NOT rely on drizzle-kit push.
+**How to apply:** Keep Supabase runtime traffic on the pooler connection, and apply schema changes with a direct `pg` client using the session pooler (port 5432). If development intentionally uses local PG, apply local migrations manually — do NOT rely on `drizzle-kit push`.
 
 ## Correct local PG migration approach
 
