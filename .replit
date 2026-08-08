@@ -98,7 +98,6 @@ WATI_BASE_URL = "https://live-mt-server.wati.io/10176503"
 VITE_GOOGLE_CLIENT_ID = "751551151000-fqrgt8si0pgnchqkn3pfo6nmqienv38f.apps.googleusercontent.com"
 
 [userenv.development]
-SUPABASE_DATABASE_URL = "postgresql://postgres.xssrfshdrtdfupgqwfdw:admcst0012026@aws-1-ap-southeast-2.pooler.supabase.com:6543/postgres"
 SUPABASE_SERVICE_ROLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhzc3Jmc2hkcnRkZnVwZ3F3ZmR3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3ODg5NjcyOCwiZXhwIjoyMDk0NDcyNzI4fQ.VFPcBxsVJkYwNo3ojy3uOHglqUA9zILhjw4_0JAhZYI"
 SUPABASE_URL = "https://xssrfshdrtdfupgqwfdw.supabase.co"
 VITE_SUPABASE_URL = "https://xssrfshdrtdfupgqwfdw.supabase.co"
