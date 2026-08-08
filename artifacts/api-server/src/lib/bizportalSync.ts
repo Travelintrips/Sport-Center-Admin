@@ -77,7 +77,14 @@ export async function initBizportalTables(): Promise<void> {
       );
       ALTER TABLE public.sport_payments
         ADD COLUMN IF NOT EXISTS entry_id BIGINT,
-        ADD COLUMN IF NOT EXISTS posting_error TEXT;
+        ADD COLUMN IF NOT EXISTS posting_error TEXT,
+        ADD COLUMN IF NOT EXISTS source_payment_id BIGINT,
+        ADD COLUMN IF NOT EXISTS payment_provider TEXT,
+        ADD COLUMN IF NOT EXISTS provider_reference TEXT,
+        ADD COLUMN IF NOT EXISTS merchant_trade_no TEXT,
+        ADD COLUMN IF NOT EXISTS provider_trade_no TEXT;
+      CREATE INDEX IF NOT EXISTS idx_public_sport_payments_source_payment_id
+        ON public.sport_payments (source_payment_id);
       ALTER TABLE public.sport_payments
         ALTER COLUMN posting_status SET DEFAULT 'unposted';
     `);
@@ -816,8 +823,12 @@ export async function bulkPushPaymentsToBizportal(): Promise<BulkPaymentPushResu
         sp.id             AS sc_payment_id,
         sp.amount         AS payment_amount,
         sp.payment_method,
+        sp.payment_provider,
+        sp.provider_reference,
+        sp.merchant_trade_no,
+        sp.provider_trade_no,
         sp.payment_type,
-        sp.confirmed_at,
+        COALESCE(sp.paid_at, sp.confirmed_at, sp.created_at) AS paid_at,
         sp.created_at     AS payment_created_at,
         sb.order_number,
         sb.ppn_rate,
@@ -851,21 +862,49 @@ export async function bulkPushPaymentsToBizportal(): Promise<BulkPaymentPushResu
         // INSERT ... ON CONFLICT DO NOTHING — atomik dan idempotent tanpa race condition
         const { rowCount } = await pool.query(
           `INSERT INTO public.sport_payments
-             (booking_id, payment_number, amount, method, status, paid_at,
-              payment_type, tax_rate, tax_amount, source, posting_status, created_at, updated_at)
-           VALUES ($1,$2,$3,$4,'paid',$5,$6,$7,$8,'SPORT_CENTER_SUPABASE','unposted',$9,NOW())
+             (booking_id, source_payment_id, payment_number, amount, method, status, paid_at,
+              payment_type, tax_rate, tax_amount, source, payment_provider,
+              provider_reference, merchant_trade_no, provider_trade_no,
+              posting_status, created_at, updated_at)
+           VALUES ($1,$2,$3,$4,'paid',$5,$6,$7,$8,$9,'SPORT_CENTER_SUPABASE',
+                   $10,$11,$12,$13,'unposted',$14,NOW())
            ON CONFLICT (payment_number) DO NOTHING`,
           [
             p.biz_booking_id,
+            p.sc_payment_id,
             paymentNumber,
             String(amount),
             p.payment_method || 'Transfer Bank',
-            p.confirmed_at || p.payment_created_at,
+            p.paid_at || p.payment_created_at,
             p.payment_type || 'booking',
             taxRate,
             taxAmount,
+            p.payment_provider || null,
+            p.provider_reference || null,
+            p.merchant_trade_no || null,
+            p.provider_trade_no || null,
             p.payment_created_at,
           ]
+        );
+        await pool.query(
+          `UPDATE public.sport_payments
+              SET source_payment_id = COALESCE(source_payment_id, $2),
+                  payment_provider = COALESCE(payment_provider, $3),
+                  provider_reference = COALESCE(provider_reference, $4),
+                  merchant_trade_no = COALESCE(merchant_trade_no, $5),
+                  provider_trade_no = COALESCE(provider_trade_no, $6),
+                  paid_at = COALESCE(paid_at, $7),
+                  updated_at = NOW()
+            WHERE payment_number = $1`,
+          [
+            paymentNumber,
+            p.sc_payment_id,
+            p.payment_provider || null,
+            p.provider_reference || null,
+            p.merchant_trade_no || null,
+            p.provider_trade_no || null,
+            p.paid_at || p.payment_created_at,
+          ],
         );
 
         const mirroredPaymentResult = await pool.query(
@@ -892,7 +931,7 @@ export async function bulkPushPaymentsToBizportal(): Promise<BulkPaymentPushResu
             amount,
             paymentMethod: p.payment_method,
             paymentType: p.payment_type,
-            paidAt: p.confirmed_at || p.payment_created_at,
+            paidAt: p.paid_at || p.payment_created_at,
             ppnRate: taxRate,
           });
 

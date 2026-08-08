@@ -3193,6 +3193,15 @@ components:
           type: ["string", "null"]
         paymentMethod:
           type: ["string", "null"]
+        paymentProvider:
+          type: ["string", "null"]
+          enum: [mandiri_direct, paylabs, unknown, null]
+        providerReference:
+          type: ["string", "null"]
+        merchantTradeNo:
+          type: ["string", "null"]
+        providerTradeNo:
+          type: ["string", "null"]
         paymentType:
           type: string
           enum: [dp, pelunasan, full_payment]
@@ -3200,6 +3209,8 @@ components:
           type: string
           enum: [pending, confirmed, rejected]
         confirmedAt:
+          type: ["string", "null"]
+        paidAt:
           type: ["string", "null"]
         notes:
           type: ["string", "null"]
@@ -3221,6 +3232,9 @@ components:
         paymentMethod:
           type: string
           enum: [Transfer Bank, QRIS]
+        paymentProvider:
+          type: string
+          enum: [mandiri_direct, paylabs, unknown]
         paymentType:
           type: string
           enum: [dp, pelunasan, full_payment]
@@ -3235,6 +3249,9 @@ components:
           enum: [pending, confirmed, rejected]
         paymentMethod:
           type: string
+        paymentProvider:
+          type: string
+          enum: [mandiri_direct, paylabs, unknown]
         notes:
           type: string
 

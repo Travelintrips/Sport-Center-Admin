@@ -260,9 +260,26 @@ ALTER TABLE sport_center.sport_memberships
 -- ============================================================
 -- 14. payments: payment_method + confirmed_at
 -- ============================================================
+DO $$ BEGIN
+  CREATE TYPE sport_center.payment_provider AS ENUM ('mandiri_direct','paylabs','unknown');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
 ALTER TABLE sport_center.sport_payments
   ADD COLUMN IF NOT EXISTS payment_method text DEFAULT 'Transfer Bank',
-  ADD COLUMN IF NOT EXISTS confirmed_at timestamptz;
+  ADD COLUMN IF NOT EXISTS confirmed_at timestamptz,
+  ADD COLUMN IF NOT EXISTS payment_provider sport_center.payment_provider,
+  ADD COLUMN IF NOT EXISTS provider_reference text,
+  ADD COLUMN IF NOT EXISTS merchant_trade_no text,
+  ADD COLUMN IF NOT EXISTS provider_trade_no text,
+  ADD COLUMN IF NOT EXISTS paid_at timestamptz;
+
+ALTER TABLE sport_center.paylabs_transactions
+  ADD COLUMN IF NOT EXISTS paid_at timestamptz;
+
+CREATE INDEX IF NOT EXISTS idx_sport_payments_provider
+  ON sport_center.sport_payments (payment_provider);
+CREATE INDEX IF NOT EXISTS idx_sport_payments_merchant_trade_no
+  ON sport_center.sport_payments (merchant_trade_no);
 
 -- ============================================================
 -- 15. users: google_id + make email/password_hash nullable

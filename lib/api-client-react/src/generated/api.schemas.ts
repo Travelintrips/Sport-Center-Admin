@@ -178,6 +178,18 @@ export const BookingVerificationStatus = {
   rejected: 'rejected',
 } as const;
 
+/**
+ * @nullable
+ */
+export type PaymentPaymentProvider = typeof PaymentPaymentProvider[keyof typeof PaymentPaymentProvider] | null;
+
+
+export const PaymentPaymentProvider = {
+  mandiri_direct: 'mandiri_direct',
+  paylabs: 'paylabs',
+  unknown: 'unknown',
+} as const;
+
 export type PaymentPaymentType = typeof PaymentPaymentType[keyof typeof PaymentPaymentType];
 
 
@@ -204,10 +216,20 @@ export interface Payment {
   proofUrl?: string | null;
   /** @nullable */
   paymentMethod?: string | null;
+  /** @nullable */
+  paymentProvider?: PaymentPaymentProvider;
+  /** @nullable */
+  providerReference?: string | null;
+  /** @nullable */
+  merchantTradeNo?: string | null;
+  /** @nullable */
+  providerTradeNo?: string | null;
   paymentType?: PaymentPaymentType;
   status: PaymentStatus;
   /** @nullable */
   confirmedAt?: string | null;
+  /** @nullable */
+  paidAt?: string | null;
   /** @nullable */
   notes?: string | null;
   createdAt?: string;
@@ -421,6 +443,15 @@ export const PaymentInputPaymentMethod = {
   QRIS: 'QRIS',
 } as const;
 
+export type PaymentInputPaymentProvider = typeof PaymentInputPaymentProvider[keyof typeof PaymentInputPaymentProvider];
+
+
+export const PaymentInputPaymentProvider = {
+  mandiri_direct: 'mandiri_direct',
+  paylabs: 'paylabs',
+  unknown: 'unknown',
+} as const;
+
 export type PaymentInputPaymentType = typeof PaymentInputPaymentType[keyof typeof PaymentInputPaymentType];
 
 
@@ -435,6 +466,7 @@ export interface PaymentInput {
   amount: number;
   proofUrl?: string;
   paymentMethod?: PaymentInputPaymentMethod;
+  paymentProvider?: PaymentInputPaymentProvider;
   paymentType?: PaymentInputPaymentType;
   notes?: string;
 }
@@ -448,9 +480,19 @@ export const PaymentUpdateStatus = {
   rejected: 'rejected',
 } as const;
 
+export type PaymentUpdatePaymentProvider = typeof PaymentUpdatePaymentProvider[keyof typeof PaymentUpdatePaymentProvider];
+
+
+export const PaymentUpdatePaymentProvider = {
+  mandiri_direct: 'mandiri_direct',
+  paylabs: 'paylabs',
+  unknown: 'unknown',
+} as const;
+
 export interface PaymentUpdate {
   status?: PaymentUpdateStatus;
   paymentMethod?: string;
+  paymentProvider?: PaymentUpdatePaymentProvider;
   notes?: string;
 }
 

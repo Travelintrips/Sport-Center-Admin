@@ -22,6 +22,7 @@ import { logger } from "../lib/logger";
 import { getBaseUrl } from "../lib/appUrl";
 import { sendRekapPemakaianToAdmin } from "../lib/rekapPemakaian";
 import { sendInvoiceToCustomer, sendGroupInvoiceToCustomer } from "../lib/invoiceDelivery";
+import { normalizePaymentProvider } from "../lib/paymentProvider";
 
 // Helper: kirim rekap ke admin WA hanya jika tanggal booking = hari ini (WIB)
 function todayWIB(): string {
@@ -218,7 +219,9 @@ router.post("/payments", async (req, res) => {
   try {
     const { bookingId, amount, proofUrl, notes } = req.body;
     const rawPaymentMethod = req.body.paymentMethod;
+    const rawPaymentProvider = req.body.paymentProvider;
     let paymentMethod: "QRIS" | "Transfer Bank" = "Transfer Bank";
+    let paymentProvider: "mandiri_direct" | "paylabs" | "unknown" | null = null;
     if (rawPaymentMethod !== undefined) {
       const method = String(rawPaymentMethod).trim().toLowerCase();
       if (method === "qris") {
@@ -229,6 +232,18 @@ router.post("/payments", async (req, res) => {
         res.status(400).json({ error: "Metode pembayaran tidak didukung. Pilih QRIS atau Transfer Bank." });
         return;
       }
+    }
+    if (paymentMethod === "QRIS") {
+      paymentProvider = normalizePaymentProvider(rawPaymentProvider);
+      if (!paymentProvider) {
+        res.status(400).json({
+          error: "Provider QRIS wajib diisi: mandiri_direct, paylabs, atau unknown.",
+        });
+        return;
+      }
+    } else if (rawPaymentProvider !== undefined && rawPaymentProvider !== null && rawPaymentProvider !== "") {
+      res.status(400).json({ error: "Provider hanya boleh diisi untuk pembayaran QRIS." });
+      return;
     }
 
     let paymentType: string = req.body.paymentType ?? "";
@@ -340,6 +355,7 @@ router.post("/payments", async (req, res) => {
         amount: String(amount),
         proofUrl,
         paymentMethod,
+          paymentProvider,
         notes,
         paymentType: paymentType as "dp" | "pelunasan" | "full_payment",
       })
@@ -387,6 +403,7 @@ router.post("/payments", async (req, res) => {
             amount: String(sib.grandTotal ?? sib.totalPrice),
             proofUrl,
             paymentMethod,
+            paymentProvider,
             notes: `[Grup ${booking.groupRef}] ${notes || ""}`.trim(),
             paymentType: paymentType as "dp" | "pelunasan" | "full_payment",
           });
@@ -453,7 +470,7 @@ router.post("/payments", async (req, res) => {
 router.patch("/payments/:id", adminMiddleware, async (req, res) => {
   try {
     const id = parseInt(String(req.params.id));
-    const { status, paymentMethod, notes } = req.body;
+    const { status, paymentMethod, paymentProvider: rawPaymentProvider, notes } = req.body;
     const [before] = await db.select().from(paymentsTable).where(eq(paymentsTable.id, id)).limit(1);
     if (!before) { res.status(404).json({ error: "Not found" }); return; }
     // A repeated confirmation callback must be a no-op. Besides avoiding
@@ -466,7 +483,11 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
 
     const updateData: Record<string, unknown> = {};
     if (status) updateData.status = status;
-    if (status === "confirmed") updateData.confirmedAt = new Date();
+    if (status === "confirmed") {
+      const paidAt = before.paidAt ?? new Date();
+      updateData.confirmedAt = before.confirmedAt ?? paidAt;
+      updateData.paidAt = paidAt;
+    }
     if (paymentMethod !== undefined) {
       if (typeof paymentMethod !== "string" || !paymentMethod.trim()) {
         res.status(400).json({ error: "Metode pembayaran wajib diisi" });
@@ -477,6 +498,19 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
         return;
       }
       updateData.paymentMethod = paymentMethod.trim();
+    }
+    if (rawPaymentProvider !== undefined) {
+      const normalizedProvider = normalizePaymentProvider(rawPaymentProvider);
+      const effectiveMethod = paymentMethod !== undefined ? paymentMethod.trim() : before.paymentMethod;
+      if (effectiveMethod?.toUpperCase() === "QRIS" && !normalizedProvider) {
+        res.status(400).json({ error: "Provider QRIS tidak valid atau belum diisi." });
+        return;
+      }
+      if (effectiveMethod?.toUpperCase() !== "QRIS" && rawPaymentProvider) {
+        res.status(400).json({ error: "Provider hanya boleh diisi untuk pembayaran QRIS." });
+        return;
+      }
+      updateData.paymentProvider = effectiveMethod?.toUpperCase() === "QRIS" ? normalizedProvider : null;
     }
     if (notes !== undefined) updateData.notes = notes;
     if (Object.keys(updateData).length === 0) {

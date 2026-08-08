@@ -459,8 +459,21 @@ async function runStartupMigrations() {
     `DO $$ BEGIN
        CREATE TYPE sport_center.payment_type AS ENUM ('dp', 'pelunasan', 'full_payment');
      EXCEPTION WHEN duplicate_object THEN null; END $$`,
+    `DO $$ BEGIN
+       CREATE TYPE sport_center.payment_provider AS ENUM ('mandiri_direct', 'paylabs', 'unknown');
+      EXCEPTION WHEN duplicate_object THEN null; END $$`,
     `ALTER TABLE sport_center.sport_payments
        ADD COLUMN IF NOT EXISTS payment_type sport_center.payment_type NOT NULL DEFAULT 'full_payment'`,
+    `ALTER TABLE sport_center.sport_payments
+       ADD COLUMN IF NOT EXISTS payment_provider sport_center.payment_provider`,
+    `ALTER TABLE sport_center.sport_payments
+       ADD COLUMN IF NOT EXISTS provider_reference text`,
+    `ALTER TABLE sport_center.sport_payments
+       ADD COLUMN IF NOT EXISTS merchant_trade_no text`,
+    `ALTER TABLE sport_center.sport_payments
+       ADD COLUMN IF NOT EXISTS provider_trade_no text`,
+    `ALTER TABLE sport_center.sport_payments
+       ADD COLUMN IF NOT EXISTS paid_at timestamptz`,
     // Hapus unique constraint booking_id agar bisa ada multiple payments per booking
     `ALTER TABLE sport_center.sport_payments
        DROP CONSTRAINT IF EXISTS payments_booking_id_unique`,
