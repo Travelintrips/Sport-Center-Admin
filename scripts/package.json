@@ -17,6 +17,8 @@
     "fix-ppn-journals": "tsx ./src/fix-ppn-journals.ts",
     "backfill-payment-providers": "tsx ./src/backfill-payment-providers.ts",
     "prepare:uat-qris": "tsx ./src/prepare-uat-qris-dataset.ts",
+    "repair:uat-qris": "tsx ./src/repair-uat-qris-fixture.ts",
+    "test:uat-qris": "tsx ./src/uat-qris-harness.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

@@ -6,6 +6,12 @@ import {
   type BankMutation,
 } from "@workspace/db";
 import { eq, inArray, notInArray, sql, and, gte, lte } from "drizzle-orm";
+import {
+  evaluateQrisMutation,
+  type QrisMdrRule,
+  type QrisPaymentInput,
+  type QrisMutationInput,
+} from "./qrisCandidateEngine";
 
 const GOPAY_PATTERN = /DOMPET ANAK BANGSA|GOPAY|OVO|DANA|LINKAJA|SHOPEEPAY/i;
 const ORDER_ID_PATTERN = /\b(ID\d{15,25}[A-Z]{0,4}|TRX\d{10,}|INV-\d{8,})\b/i;
@@ -99,6 +105,125 @@ interface MatchCandidate {
   groupRef?: string;
   groupBookingCount?: number;
   groupTotalAmount?: number;
+  hardReview?: boolean;
+}
+
+function isCanonicalQrisProvider(value: unknown): value is "mandiri_direct" | "paylabs" | "unknown" {
+  return value === "mandiri_direct" || value === "paylabs" || value === "unknown";
+}
+
+async function computeStrictQrisCandidate(mutation: BankMutation): Promise<MatchCandidate[] | null> {
+  const provider = isCanonicalQrisProvider(mutation.providerName)
+    ? mutation.providerName
+    : null;
+  const rawPayload = mutation.rawPayload && typeof mutation.rawPayload === "object"
+    ? mutation.rawPayload as Record<string, unknown>
+    : null;
+  const rawProvider = typeof rawPayload?.provider === "string" ? rawPayload.provider : null;
+  const isQris = provider !== null ||
+    rawProvider === "mandiri_direct" ||
+    rawProvider === "paylabs" ||
+    rawProvider === "unknown";
+  if (!isQris) return null;
+
+  const paymentRows = await db.execute(sql`
+    SELECT
+      p.id,
+      p.company_id AS "companyId",
+      p.bank_account_id AS "bankAccountId",
+      p.amount,
+      p.payment_method AS "paymentMethod",
+      p.payment_provider AS "provider",
+      p.expected_settlement_date AS "expectedSettlementDate",
+      p.provider_reference AS "providerReference",
+      p.merchant_trade_no AS "merchantTradeNo",
+      p.provider_trade_no AS "providerTradeNo",
+      p.notes
+    FROM sport_center.sport_payments p
+    WHERE p.payment_method = 'QRIS'
+       OR p.payment_provider IN ('mandiri_direct', 'paylabs', 'unknown')
+  `);
+  const payments = (paymentRows.rows as Array<Record<string, unknown>>).map((row): QrisPaymentInput => ({
+    id: Number(row.id),
+    companyId: row.companyId == null ? null : Number(row.companyId),
+    bankAccountId: typeof row.bankAccountId === "string" ? row.bankAccountId : null,
+    amount: Number(row.amount),
+    provider: isCanonicalQrisProvider(row.provider) ? row.provider : null,
+    expectedSettlementDate: typeof row.expectedSettlementDate === "string" ? row.expectedSettlementDate.slice(0, 10) : null,
+    providerReference: typeof row.providerReference === "string" ? row.providerReference : null,
+    merchantTradeNo: typeof row.merchantTradeNo === "string" ? row.merchantTradeNo : null,
+    providerTradeNo: typeof row.providerTradeNo === "string" ? row.providerTradeNo : null,
+    notes: typeof row.notes === "string" ? row.notes : null,
+  }));
+
+  const ruleRows = await db.execute(sql`
+    SELECT
+      company_id AS "companyId",
+      bank_account_id AS "bankAccountId",
+      provider_code AS provider,
+      expected_mdr_rate AS "expectedMdrRate",
+      rate_tolerance AS "rateTolerance",
+      effective_from AS "effectiveFrom",
+      effective_until AS "effectiveUntil"
+    FROM sport_center.uat_qris_mdr_configs
+    WHERE active IS NOT FALSE
+  `).catch(() => ({ rows: [] as Array<Record<string, unknown>> }));
+  const rules = (ruleRows.rows as Array<Record<string, unknown>>)
+    .filter((row) => isCanonicalQrisProvider(row.provider) && row.provider !== "unknown")
+    .map((row): QrisMdrRule => ({
+      companyId: Number(row.companyId),
+      bankAccountId: String(row.bankAccountId),
+      provider: row.provider as "mandiri_direct" | "paylabs",
+      expectedMdrRate: Number(row.expectedMdrRate),
+      rateTolerance: Number(row.rateTolerance),
+      effectiveFrom: String(row.effectiveFrom).slice(0, 10),
+      effectiveUntil: row.effectiveUntil == null ? null : String(row.effectiveUntil).slice(0, 10),
+    }));
+
+  const qrisMutation: QrisMutationInput = {
+    id: mutation.id,
+    companyId: mutation.companyId == null ? null : Number(mutation.companyId),
+    bankAccountId: mutation.bankAccountId,
+    transactionDate: mutation.transactionDate.slice(0, 10),
+    creditAmount: Number(mutation.creditAmount ?? mutation.amount ?? 0),
+    amount: Number(mutation.amount),
+    provider: provider ?? (isCanonicalQrisProvider(rawProvider) ? rawProvider : null),
+    providerDetectionSource: rawPayload?.provider
+      ? "canonical provider field + sanitized raw payload"
+      : "canonical mutation provider field",
+    description: mutation.description,
+    providerOrderId: mutation.providerOrderId,
+    rawPayload,
+  };
+  const evaluation = evaluateQrisMutation(qrisMutation, payments, rules);
+  const candidateId = evaluation.paymentIds[0] ?? 0;
+
+  if (evaluation.decision === "UNMATCHED" && !evaluation.paymentIds.length) return [];
+
+  return [{
+    candidateType: "payment",
+    candidateId,
+    score: evaluation.decision === "MATCHED" ? 100 : 50,
+    reason: [
+      evaluation.reason,
+      `provider=${evaluation.provider ?? "unknown"}`,
+      `payment_ids=${evaluation.paymentIds.join(",") || "none"}`,
+      `gross=${evaluation.gross}`,
+      `credit=${evaluation.bankCredit}`,
+      `deduction=${evaluation.observedDeduction}`,
+      `effective_rate=${evaluation.effectiveRate ?? "n/a"}`,
+      `expected_mdr=${evaluation.expectedMdrRate ?? "n/a"}`,
+      `reference=${evaluation.referenceEvidence ?? "none"}`,
+    ],
+    amountMatch: evaluation.gross > 0 && evaluation.observedDeduction >= 0,
+    dateMatch: evaluation.reason !== "SETTLEMENT_DATE_MISMATCH",
+    nameMatch: false,
+    orderIdMatch: false,
+    proofMatch: false,
+    statusValidMatch: true,
+    toleranceUsed: evaluation.expectedMdrRate != null,
+    hardReview: evaluation.decision !== "MATCHED",
+  }];
 }
 
 /**
@@ -171,6 +296,9 @@ function scoreOcr(
  */
 export async function computeMatchesForMutation(mutation: BankMutation): Promise<MatchCandidate[]> {
   if (mutation.direction !== "IN") return computeMatchesForOutMutation(mutation);
+
+  const strictQrisCandidates = await computeStrictQrisCandidate(mutation);
+  if (strictQrisCandidates) return strictQrisCandidates;
 
   const candidates: MatchCandidate[] = [];
   const mutationAmount = Number(mutation.amount);
@@ -866,7 +994,7 @@ async function _runMatchingImpl(mutationIds?: number[]): Promise<{
 
     const best = candidates[0]!;
 
-    if (best.score >= 80) {
+    if (best.score >= 80 && !best.hardReview) {
       // Auto matched — skor tinggi, sistem yakin tapi admin belum approve
       await db
         .update(bankMutationsTable)
@@ -878,7 +1006,7 @@ async function _runMatchingImpl(mutationIds?: number[]): Promise<{
         })
         .where(eq(bankMutationsTable.id, mutation.id));
       autoMatched++;
-    } else if (best.score >= 50) {
+    } else if (best.score >= 50 || best.hardReview) {
       // Need review — ada kandidat tapi skor tidak cukup tinggi
       await db
         .update(bankMutationsTable)

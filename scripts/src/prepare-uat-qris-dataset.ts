@@ -249,7 +249,7 @@ const mutationSpecs: MutationSpec[] = [
     key: `WEEKEND_SETTLEMENT_${index + 1}`,
     paymentKeys: [paymentKey],
     provider: "mandiri_direct" as const,
-    transactionDate: ["2026-08-10", "2026-08-11", "2026-08-11"][index]!,
+      transactionDate: ["2026-08-11", "2026-08-11", "2026-08-11"][index]!,
     amount: 398800,
     bankAccountId: MANDIRI_ACCOUNT_ID,
     description: `${MARKER} | MANDIRI_DIRECT | WEEKEND ${index + 1} | REF MD-UAT-WEEKEND-00${index + 1}`,
@@ -300,7 +300,7 @@ const mutationSpecs: MutationSpec[] = [
     paymentKeys: ["DETERMINISTIC_A"],
     provider: "paylabs",
     transactionDate: "2026-08-05",
-    amount: 348950,
+    amount: 347550,
     bankAccountId: MANDIRI_ACCOUNT_ID,
     description: `${MARKER} | PAYLABS | BATCH A | REF PL-UAT-SAME-DATE-A`,
     scenario: "multiple_settlement_deterministic",
@@ -496,11 +496,14 @@ async function main() {
         ADD COLUMN IF NOT EXISTS source_id text,
         ADD COLUMN IF NOT EXISTS provenance jsonb,
         ADD COLUMN IF NOT EXISTS uat_marker text;
-      CREATE UNIQUE INDEX IF NOT EXISTS sport_bookings_uat_marker_uidx
+      DROP INDEX IF EXISTS sport_bookings_uat_marker_uidx;
+      DROP INDEX IF EXISTS sport_payments_uat_marker_uidx;
+      DROP INDEX IF EXISTS bank_mutations_uat_marker_uidx;
+      CREATE INDEX IF NOT EXISTS sport_bookings_uat_marker_idx
         ON sport_center.sport_bookings (uat_marker) WHERE uat_marker IS NOT NULL;
-      CREATE UNIQUE INDEX IF NOT EXISTS sport_payments_uat_marker_uidx
+      CREATE INDEX IF NOT EXISTS sport_payments_uat_marker_idx
         ON sport_center.sport_payments (uat_marker) WHERE uat_marker IS NOT NULL;
-      CREATE UNIQUE INDEX IF NOT EXISTS bank_mutations_uat_marker_uidx
+      CREATE INDEX IF NOT EXISTS bank_mutations_uat_marker_idx
         ON sport_center.bank_mutations (uat_marker) WHERE uat_marker IS NOT NULL;
     `);
 
@@ -565,8 +568,6 @@ async function main() {
 
     const paymentIds = new Map<string, number>();
     for (const [index, spec] of paymentSpecs.entries()) {
-      const bookingMarker = `${MARKER}_${spec.key}_BOOKING`;
-      const paymentMarker = `${MARKER}_${spec.key}_PAYMENT`;
       const gross = roundMoney(spec.amount);
       const dpp = roundMoney(gross / 1.11);
       const ppn = roundMoney(gross - dpp);
@@ -585,9 +586,9 @@ async function main() {
           FACILITY_ID,
           spec.paidAt.slice(0, 10),
           gross,
-          `${MARKER} | scenario=${spec.scenario}`,
+           `${MARKER} | scenario=${spec.scenario}`,
           ppn,
-          bookingMarker,
+           MARKER,
         ],
       );
       const bookingId = booking.rows[0].id as number;
@@ -614,7 +615,7 @@ async function main() {
           spec.bankAccountId,
           spec.expectedSettlementDate,
           spec.ruleVersion,
-          paymentMarker,
+           MARKER,
         ],
       );
       paymentIds.set(spec.key, payment.rows[0].id as number);
@@ -693,7 +694,7 @@ async function main() {
           batchId,
           sourceId,
           provenance,
-          `${MARKER}_${spec.key}_MUTATION`,
+           MARKER,
         ],
       );
     }
