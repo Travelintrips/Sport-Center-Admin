@@ -139,6 +139,7 @@ export default function AdminTaxReport() {
       "Kode Pajak": t.taxCode,
       "Tarif PPN (%)": t.taxRate,
       "DPP (Rp)": t.dpp,
+      "DPP Nilai Lain (Rp)": t.dppNilaiLain ?? 0,
       "PPN (Rp)": t.taxAmount,
       "Grand Total (Rp)": t.grandTotal,
       "Tanggal Transaksi": t.transactionDate,
@@ -150,8 +151,8 @@ export default function AdminTaxReport() {
     ws1["!cols"] = [
       { wch: 5 }, { wch: 18 }, { wch: 12 }, { wch: 24 }, { wch: 20 },
       { wch: 14 }, { wch: 14 }, { wch: 22 }, { wch: 14 }, { wch: 12 },
-      { wch: 16 }, { wch: 16 }, { wch: 16 }, { wch: 14 }, { wch: 12 },
-      { wch: 14 }, { wch: 20 },
+      { wch: 16 }, { wch: 18 }, { wch: 16 }, { wch: 16 }, { wch: 14 },
+      { wch: 12 }, { wch: 14 }, { wch: 20 },
     ];
     XLSX.utils.book_append_sheet(wb, ws1, "Detail Transaksi PPN");
 
@@ -160,11 +161,12 @@ export default function AdminTaxReport() {
       "Periode": p.period,
       "Jumlah Transaksi": p.count,
       "DPP (Rp)": p.dpp,
-      "PPN 11% (Rp)": p.taxAmount,
+      "DPP Nilai Lain (Rp)": p.dppNilaiLain ?? 0,
+      "PPN (Rp)": p.taxAmount,
       "Grand Total (Rp)": p.grandTotal,
     }));
     const ws2 = XLSX.utils.json_to_sheet(periodeRows);
-    ws2["!cols"] = [{ wch: 14 }, { wch: 16 }, { wch: 16 }, { wch: 16 }, { wch: 16 }];
+    ws2["!cols"] = [{ wch: 14 }, { wch: 16 }, { wch: 16 }, { wch: 18 }, { wch: 16 }, { wch: 16 }];
     XLSX.utils.book_append_sheet(wb, ws2, "Rekap Per Periode");
 
     // Sheet 3: SPT Masa PPN
@@ -179,6 +181,7 @@ export default function AdminTaxReport() {
           "NPWP": item.npwp ?? "",
           "Keterangan": item.npwpKeterangan,
           "DPP (Rp)": item.dpp,
+          "DPP Nilai Lain (Rp)": item.dppNilaiLain ?? 0,
           "PPN Keluaran (Rp)": item.ppnKeluaran,
           "Kode Pajak": item.taxCode,
         });
@@ -187,13 +190,14 @@ export default function AdminTaxReport() {
     const ws3 = XLSX.utils.json_to_sheet(sptRows);
     ws3["!cols"] = [
       { wch: 12 }, { wch: 18 }, { wch: 12 }, { wch: 24 },
-      { wch: 18 }, { wch: 18 }, { wch: 16 }, { wch: 18 }, { wch: 12 },
+      { wch: 18 }, { wch: 18 }, { wch: 16 }, { wch: 18 }, { wch: 18 }, { wch: 12 },
     ];
     XLSX.utils.book_append_sheet(wb, ws3, "SPT Masa PPN");
 
     // Ringkasan
     const ringkasanRows = [
       { "Keterangan": "Total DPP", "Nilai (Rp)": summary.totalDpp ?? 0 },
+      { "Keterangan": "Total DPP Nilai Lain (PMK-131/2024)", "Nilai (Rp)": summary.totalDppNilaiLain ?? 0 },
       { "Keterangan": "Total PPN Keluaran (11%)", "Nilai (Rp)": summary.totalTaxAmount ?? 0 },
       { "Keterangan": "Grand Total", "Nilai (Rp)": summary.totalGrandTotal ?? 0 },
       { "Keterangan": "Jumlah Transaksi", "Nilai (Rp)": summary.totalTransactions ?? 0 },
@@ -352,12 +356,19 @@ export default function AdminTaxReport() {
                 <p className="text-sm text-muted-foreground mt-1">Periode: {startDate} s/d {endDate} · Dicetak: {new Date().toLocaleDateString("id-ID")}</p>
               </div>
 
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
                 <Card>
                   <CardContent className="pt-5 pb-5">
                     <div className="text-xs text-muted-foreground mb-1 font-medium uppercase tracking-wide">Total DPP</div>
                     <div className="text-xl font-black">{currency(summary.totalDpp ?? 0)}</div>
                     <div className="text-[11px] text-muted-foreground mt-0.5">Dasar Pengenaan Pajak</div>
+                  </CardContent>
+                </Card>
+                <Card className="border-blue-200 bg-blue-50/50 dark:bg-blue-950/20">
+                  <CardContent className="pt-5 pb-5">
+                    <div className="text-xs text-blue-600 mb-1 font-medium uppercase tracking-wide">DPP Nilai Lain</div>
+                    <div className="text-xl font-black text-blue-700">{currency(summary.totalDppNilaiLain ?? 0)}</div>
+                    <div className="text-[11px] text-muted-foreground mt-0.5">11/12 × DPP (PMK-131)</div>
                   </CardContent>
                 </Card>
                 <Card className="border-orange-200 bg-orange-50/50 dark:bg-orange-950/20">
@@ -458,6 +469,7 @@ export default function AdminTaxReport() {
                                 <th className="text-left py-2 pr-3 font-semibold">Status Pajak</th>
                                 <th className="text-left py-2 pr-3 font-semibold">Pembayaran</th>
                                 <th className="text-right py-2 pr-3 font-semibold">DPP</th>
+                                <th className="text-right py-2 pr-3 font-semibold">DPP Nilai Lain</th>
                                 <th className="text-right py-2 pr-3 font-semibold">PPN 11%</th>
                                 <th className="text-right py-2 font-semibold">Grand Total</th>
                               </tr>
@@ -489,6 +501,9 @@ export default function AdminTaxReport() {
                                   <td className={`py-2 pr-3 text-right tabular-nums text-xs ${t.transactionType === "reversal" ? "line-through text-red-400" : ""}`}>
                                     {currency(Math.abs(t.dpp))}
                                   </td>
+                                  <td className={`py-2 pr-3 text-right tabular-nums text-xs ${t.transactionType === "reversal" ? "line-through text-red-400" : "text-blue-600"}`}>
+                                    {currency(Math.abs(t.dppNilaiLain ?? 0))}
+                                  </td>
                                   <td className={`py-2 pr-3 text-right tabular-nums text-xs font-semibold ${t.transactionType === "reversal" ? "line-through text-red-400" : "text-orange-600"}`}>
                                     {currency(Math.abs(t.taxAmount))}
                                   </td>
@@ -502,6 +517,7 @@ export default function AdminTaxReport() {
                               <tr className="border-t-2 font-bold bg-muted/30">
                                 <td colSpan={7} className="py-2 pr-3 text-sm">TOTAL</td>
                                 <td className="py-2 pr-3 text-right text-sm">{currency(summary.totalDpp ?? 0)}</td>
+                                <td className="py-2 pr-3 text-right text-sm text-blue-600">{currency(summary.totalDppNilaiLain ?? 0)}</td>
                                 <td className="py-2 pr-3 text-right text-sm text-orange-600">{currency(summary.totalTaxAmount ?? 0)}</td>
                                 <td className="py-2 text-right text-sm">{currency(summary.totalGrandTotal ?? 0)}</td>
                               </tr>
@@ -530,6 +546,7 @@ export default function AdminTaxReport() {
                                 <th className="text-left py-2 font-semibold">Periode</th>
                                 <th className="text-right py-2 font-semibold">Transaksi</th>
                                 <th className="text-right py-2 font-semibold">DPP</th>
+                                <th className="text-right py-2 font-semibold">DPP Nilai Lain</th>
                                 <th className="text-right py-2 font-semibold">PPN 11%</th>
                                 <th className="text-right py-2 font-semibold">Grand Total</th>
                                 <th className="text-right py-2 font-semibold">% PPN</th>
@@ -541,6 +558,7 @@ export default function AdminTaxReport() {
                                   <td className="py-2 font-medium">{p.period}</td>
                                   <td className="py-2 text-right tabular-nums">{p.count}</td>
                                   <td className="py-2 text-right tabular-nums">{currency(p.dpp)}</td>
+                                  <td className="py-2 text-right tabular-nums text-blue-600">{currency(p.dppNilaiLain ?? 0)}</td>
                                   <td className="py-2 text-right tabular-nums font-semibold text-orange-600">{currency(p.taxAmount)}</td>
                                   <td className="py-2 text-right tabular-nums font-bold">{currency(p.grandTotal)}</td>
                                   <td className="py-2 text-right text-muted-foreground text-xs">
@@ -554,6 +572,7 @@ export default function AdminTaxReport() {
                                 <td className="py-2">TOTAL</td>
                                 <td className="py-2 text-right">{summary.totalTransactions ?? 0}</td>
                                 <td className="py-2 text-right">{currency(summary.totalDpp ?? 0)}</td>
+                                <td className="py-2 text-right text-blue-600">{currency(summary.totalDppNilaiLain ?? 0)}</td>
                                 <td className="py-2 text-right text-orange-600">{currency(summary.totalTaxAmount ?? 0)}</td>
                                 <td className="py-2 text-right">{currency(summary.totalGrandTotal ?? 0)}</td>
                                 <td className="py-2 text-right text-muted-foreground text-xs">
@@ -611,6 +630,7 @@ export default function AdminTaxReport() {
                                   <th className="text-left py-2 font-semibold">Masa Pajak</th>
                                   <th className="text-right py-2 font-semibold">Jml Faktur</th>
                                   <th className="text-right py-2 font-semibold">DPP</th>
+                                  <th className="text-right py-2 font-semibold">DPP Nilai Lain</th>
                                   <th className="text-right py-2 font-semibold">PPN Keluaran</th>
                                   <th className="text-right py-2 font-semibold no-print">Detail</th>
                                 </tr>
@@ -622,6 +642,9 @@ export default function AdminTaxReport() {
                                       <td className="py-2.5 font-semibold">{fmt(masa.masaPajak)}</td>
                                       <td className="py-2.5 text-right tabular-nums">{masa.count}</td>
                                       <td className="py-2.5 text-right tabular-nums">{currency(masa.dpp)}</td>
+                                      <td className="py-2.5 text-right tabular-nums text-blue-600">
+                                        {currency(masa.items.reduce((s: number, i: any) => s + (i.dppNilaiLain ?? 0), 0))}
+                                      </td>
                                       <td className="py-2.5 text-right tabular-nums font-semibold text-orange-600">
                                         {currency(masa.ppnKeluaran)}
                                       </td>
@@ -648,6 +671,7 @@ export default function AdminTaxReport() {
                                                   <th className="text-left py-1.5 font-medium">NPWP / Keterangan</th>
                                                   <th className="text-left py-1.5 font-medium">Kode Pajak</th>
                                                   <th className="text-right py-1.5 font-medium">DPP</th>
+                                                  <th className="text-right py-1.5 font-medium">DPP Nilai Lain</th>
                                                   <th className="text-right py-1.5 font-medium">PPN Keluaran</th>
                                                 </tr>
                                               </thead>
@@ -672,6 +696,7 @@ export default function AdminTaxReport() {
                                                       </span>
                                                     </td>
                                                     <td className="py-1.5 text-right tabular-nums">{currency(item.dpp)}</td>
+                                                    <td className="py-1.5 text-right tabular-nums text-blue-600">{currency(item.dppNilaiLain ?? 0)}</td>
                                                     <td className="py-1.5 text-right tabular-nums font-semibold text-orange-600">
                                                       {currency(item.ppnKeluaran)}
                                                     </td>
@@ -691,6 +716,7 @@ export default function AdminTaxReport() {
                                   <td className="py-2">TOTAL</td>
                                   <td className="py-2 text-right">{summary.totalTransactions ?? 0}</td>
                                   <td className="py-2 text-right">{currency(summary.totalDpp ?? 0)}</td>
+                                  <td className="py-2 text-right text-blue-600">{currency(summary.totalDppNilaiLain ?? 0)}</td>
                                   <td className="py-2 text-right text-orange-600">{currency(summary.totalTaxAmount ?? 0)}</td>
                                   <td className="no-print" />
                                 </tr>

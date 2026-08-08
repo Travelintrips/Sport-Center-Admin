@@ -8,4 +8,5 @@
 
 export interface SheetConnectInput {
   sheetId: string;
+  sheetName?: string;
 }

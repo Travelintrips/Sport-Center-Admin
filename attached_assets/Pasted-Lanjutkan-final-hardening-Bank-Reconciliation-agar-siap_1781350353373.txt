@@ -1,0 +1,107 @@
+Lanjutkan final hardening Bank Reconciliation agar siap audit accounting.
+
+Kerjakan dalam 6 fase berikut:
+
+FASE 1 — Partial Payment & Invoice Settlement
+- Audit apakah approval mutasi bank sudah update invoice AR/AP.
+- Jika payment masuk hanya sebagian dari invoice, set invoice status = partial_paid.
+- Jika total payment sudah lunas, set invoice status = paid.
+- Tambahkan paid_amount, remaining_amount, paid_at jika belum ada.
+- Saat approve mutasi IN yang terhubung ke booking/payment/invoice, otomatis update:
+  payment confirmed
+  booking confirmed
+  invoice paid/partial_paid
+  AR balance berkurang.
+- Buat test:
+  invoice 10 juta, mutasi 3 juta = partial_paid
+  mutasi kedua 7 juta = paid.
+
+FASE 2 — Multi Bank Account & COA Mapping
+- Pastikan setiap import mutasi punya bank_account_id.
+- Saat posting jurnal, akun bank harus mengikuti bank_account_id, bukan hardcode.
+- Buat tabel bank_reconciliation_account_rules:
+  id
+  company_id
+  bank_account_id nullable
+  transaction_type
+  direction IN/OUT
+  debit_coa_id
+  credit_coa_id
+  is_active
+  created_at
+  updated_at
+- Buat UI setting mapping COA rekonsiliasi bank.
+- Jangan pakai ACCOUNT_MAP hardcode kecuali fallback darurat.
+- Tambahkan audit log saat mapping dibuat/diubah.
+
+FASE 3 — Tax Liability Reconciliation
+- Untuk mutasi OUT dengan tipe TAX_PAYMENT, jangan langsung masuk expense.
+- Cocokkan ke hutang pajak:
+  Utang PPN
+  Utang PPh 21
+  Utang PPh 23
+  Utang PPh Final
+  Utang PPh Badan
+- Jika match ke tax payable:
+  Debit Utang Pajak
+  Credit Bank
+- Jika tidak jelas jenis pajaknya, masuk need_review.
+- Tambahkan field tax_type, tax_period, tax_payment_reference jika belum ada.
+- Tampilkan kandidat tax payable di UI.
+
+FASE 4 — Monthly Bank Closing
+- Buat fitur Bank Closing bulanan.
+- Tabel bank_reconciliation_closing:
+  id
+  company_id
+  bank_account_id
+  period_year
+  period_month
+  opening_balance
+  total_in
+  total_out
+  system_ending_balance
+  statement_ending_balance
+  difference
+  status balanced/unreconciled/closed
+  closed_by
+  closed_at
+  created_at
+  updated_at
+- Sistem hitung:
+  system_ending_balance = opening_balance + approved_in - approved_out
+  difference = statement_ending_balance - system_ending_balance
+- Jika difference = 0, status balanced.
+- Admin bisa close hanya jika balanced.
+- Setelah closed, mutasi bulan tersebut tidak boleh diubah tanpa reopen.
+- Buat endpoint dan UI tab “Closing Bank”.
+
+FASE 5 — Approval Matrix & Access Control
+- Tambahkan rule approval:
+  Staff Finance boleh import dan review.
+  Supervisor Finance boleh approve/reject.
+  Manager Finance boleh force approve, reopen closing, dan manual journal.
+- Pastikan semua endpoint approve/reject/post-journal/closing dicek role.
+- Semua action wajib masuk audit log:
+  user_id
+  role
+  action
+  before_value
+  after_value
+  timestamp
+
+FASE 6 — Final Audit & Test
+- Pastikan tidak ada status lama "matched".
+- Pastikan jurnal tidak duplicate walau approve ditekan 2 kali.
+- Pastikan rejected tidak membuat jurnal.
+- Pastikan need_review tidak membuat jurnal.
+- Pastikan duplicate_need_review tidak membuat jurnal.
+- Pastikan mutasi approved tapi belum dijurnal muncul di laporan.
+- Pastikan closing bank cocok dengan laporan bulanan.
+- Jalankan typecheck, build, dan test.
+- Berikan laporan akhir:
+  file yang diubah
+  migration yang dibuat
+  endpoint baru
+  test result
+  known limitation jika ada.

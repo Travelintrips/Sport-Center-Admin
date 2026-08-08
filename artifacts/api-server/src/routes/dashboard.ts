@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { db, bookingsTable, facilitiesTable, gymMembershipsTable } from "@workspace/db";
+import { db, bookingsTable, facilitiesTable, gymMembershipsTable, expensesTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
 
@@ -7,10 +7,11 @@ const router = Router();
 
 router.get("/admin/dashboard", adminMiddleware, async (req, res) => {
   try {
-    const [bookings, facilities, memberships] = await Promise.all([
+    const [bookings, facilities, memberships, expenses] = await Promise.all([
       db.select().from(bookingsTable),
       db.select().from(facilitiesTable),
       db.select().from(gymMembershipsTable),
+      db.select().from(expensesTable),
     ]);
 
     const today = new Date().toISOString().split("T")[0];
@@ -20,9 +21,18 @@ router.get("/admin/dashboard", adminMiddleware, async (req, res) => {
     const paidMemberships = memberships.filter((m) => PAID_MEMBERSHIP_STATUSES.includes(m.status));
 
     const totalBookings = bookings.length;
-    const bookingRevenue = bookings
-      .filter((b) => !["cancelled", "expired", "rejected"].includes(b.status))
-      .reduce((sum, b) => sum + Number(b.totalPrice), 0);
+
+    // Hanya hitung booking yang sudah LUNAS:
+    // - Pribadi (non-company): status confirmed atau completed
+    // - Perusahaan (company): billingStatus = paid (invoice sudah lunas)
+    const isPaidBooking = (b: typeof bookings[number]) =>
+      b.payerType === "company"
+        ? b.billingStatus === "paid"
+        : ["confirmed", "completed"].includes(b.status);
+
+    const paidBookings = bookings.filter(isPaidBooking);
+    // Pakai grandTotal (DPP + PPN) bila ada, fallback ke totalPrice — konsisten dengan BizPortal
+    const bookingRevenue = paidBookings.reduce((sum, b) => sum + (b.grandTotal != null ? Number(b.grandTotal) : Number(b.totalPrice)), 0);
     const membershipRevenue = paidMemberships.reduce((sum, m) => sum + Number(m.totalPrice), 0);
     const totalRevenue = bookingRevenue + membershipRevenue;
 
@@ -37,22 +47,22 @@ router.get("/admin/dashboard", adminMiddleware, async (req, res) => {
     }));
 
     const facilityStats: Record<number, { facilityId: number; facilityName: string; bookingCount: number; revenue: number }> = {};
-    bookings.filter((b) => !["cancelled", "expired", "rejected"].includes(b.status)).forEach((b) => {
+    paidBookings.forEach((b) => {
       if (!facilityStats[b.facilityId]) {
         const fac = facilities.find((f) => f.id === b.facilityId);
         facilityStats[b.facilityId] = { facilityId: b.facilityId, facilityName: fac?.name ?? "", bookingCount: 0, revenue: 0 };
       }
       facilityStats[b.facilityId].bookingCount++;
-      facilityStats[b.facilityId].revenue += Number(b.totalPrice);
+      facilityStats[b.facilityId].revenue += b.grandTotal != null ? Number(b.grandTotal) : Number(b.totalPrice);
     });
     const topFacilities = Object.values(facilityStats).sort((a, b) => b.bookingCount - a.bookingCount).slice(0, 5);
 
-    // Gabung revenue booking + membership per bulan
+    // Gabung revenue booking + membership per bulan (hanya yang sudah lunas)
     const monthlyData: Record<string, { month: string; revenue: number; bookings: number; membershipRevenue: number }> = {};
-    bookings.filter((b) => !["cancelled", "expired", "rejected"].includes(b.status)).forEach((b) => {
+    paidBookings.forEach((b) => {
       const month = b.bookingDate.slice(0, 7);
       if (!monthlyData[month]) monthlyData[month] = { month, revenue: 0, bookings: 0, membershipRevenue: 0 };
-      monthlyData[month].revenue += Number(b.totalPrice);
+      monthlyData[month].revenue += b.grandTotal != null ? Number(b.grandTotal) : Number(b.totalPrice);
       monthlyData[month].bookings++;
     });
     paidMemberships.forEach((m) => {
@@ -68,11 +78,24 @@ router.get("/admin/dashboard", adminMiddleware, async (req, res) => {
       return { ...b, totalPrice: Number(b.totalPrice), facilityName: fac?.name ?? "", facilityCategory: fac?.category ?? "", payment: null };
     });
 
+    const now = new Date();
+    const thisMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+    const totalExpenses = expenses
+      .filter((e) => !["cancelled", "rejected", "draft"].includes(e.paymentStatus) && e.expenseDate.startsWith(thisMonth))
+      .reduce((s, e) => s + Number(e.totalAmount), 0);
+    const paidExpenses = expenses
+      .filter((e) => e.paymentStatus === "paid" && e.expenseDate.startsWith(thisMonth))
+      .reduce((s, e) => s + Number(e.totalAmount), 0);
+    const netProfit = totalRevenue - totalExpenses;
+
     res.json({
       totalBookings,
       totalRevenue,
       bookingRevenue,
       membershipRevenue,
+      totalExpenses,
+      paidExpenses,
+      netProfit,
       todayBookings,
       pendingBookings,
       activeMemberships,

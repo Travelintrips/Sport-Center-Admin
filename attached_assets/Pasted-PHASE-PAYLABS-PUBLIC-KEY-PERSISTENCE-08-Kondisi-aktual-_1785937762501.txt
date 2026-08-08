@@ -1,0 +1,325 @@
+PHASE PAYLABS-PUBLIC-KEY-PERSISTENCE-08
+
+Kondisi aktual:
+
+1. Pada halaman /admin/paylabs, Paylabs Public Key Sandbox ditempel.
+2. Tombol Simpan Perubahan berhasil.
+3. UI menampilkan:
+   "Pengaturan disimpan — Konfigurasi Paylabs berhasil disimpan ke database."
+4. Setelah halaman dimuat ulang, badge kembali:
+   "Not configured"
+5. Merchant Private Key Sandbox dan Merchant ID masih terlihat configured.
+6. Jangan mengubah create-payment, webhook, signature algorithm, notifyUrl, Store ID, atau payment flow.
+
+Tujuan:
+
+Pastikan Paylabs Public Key Sandbox benar-benar:
+
+- tersimpan di database;
+- dibaca kembali oleh backend;
+- dilaporkan sebagai sandboxPublicKeyConfigured: true;
+- digunakan untuk verifikasi webhook sandbox;
+- tidak pernah dikembalikan penuh ke frontend.
+
+PHASE 1 — TRACE PATCH REQUEST
+
+Reproduksi proses berikut:
+
+1. Buka /admin/paylabs.
+2. Klik Set Paylabs Public Key.
+3. Tempel public key sandbox.
+4. Klik Simpan Perubahan.
+
+Trace request PATCH settings.
+
+Laporkan tanpa menampilkan nilai key:
+
+- endpoint PATCH;
+- field name yang dikirim frontend;
+- apakah field public key ada di request;
+- detected PEM type;
+- normalized length;
+- database setting key yang ditulis;
+- jumlah row affected;
+- transaction commit berhasil atau tidak;
+- audit log tercatat atau tidak.
+
+Jangan hanya percaya toast frontend.
+
+Pastikan toast sukses hanya ditampilkan jika database commit benar-benar berhasil.
+
+PHASE 2 — VERIFY DATABASE DIRECTLY
+
+Setelah PATCH berhasil, query tabel settings secara langsung.
+
+Cari seluruh key yang mengandung:
+
+- paylabs
+- public
+- sandbox
+- sit
+
+Laporkan hanya:
+
+- setting key;
+- exists true/false;
+- nonEmpty true/false;
+- stored length;
+- detected PEM type.
+
+Jangan tampilkan nilai key.
+
+Pastikan ada satu canonical key:
+
+paylabs_public_key_sandbox
+
+Jika terdapat key lama atau variasi lain, laporkan:
+
+- paylabs_sandbox_public_key
+- sandbox_public_key
+- paylabs_public_key_sit
+- paylabs_public_key
+
+Jangan membuat duplicate source of truth.
+
+PHASE 3 — ALIGN PATCH DAN GET KEY NAME
+
+Audit file:
+
+artifacts/api-server/src/routes/paylabsSettings.ts
+
+Periksa bagian PATCH dan GET.
+
+Pastikan keduanya menggunakan konstanta yang sama:
+
+const PAYLABS_SETTINGS_KEYS = {
+  sandboxPublicKey: "paylabs_public_key_sandbox",
+  productionPublicKey: "paylabs_public_key",
+  sandboxPrivateKey: "paylabs_private_key_sandbox",
+  productionPrivateKey: "paylabs_private_key",
+  sandboxMerchantId: "paylabs_merchant_id_sandbox",
+  productionMerchantId: "paylabs_merchant_id",
+};
+
+Jangan menulis string key secara terpisah di banyak tempat.
+
+PATCH:
+
+- menulis ke PAYLABS_SETTINGS_KEYS.sandboxPublicKey.
+
+GET:
+
+- membaca PAYLABS_SETTINGS_KEYS.sandboxPublicKey.
+
+Config resolver webhook:
+
+- membaca key yang sama.
+
+Configured boolean:
+
+sandboxPublicKeyConfigured =
+  typeof storedValue === "string" &&
+  storedValue.trim().length > 0;
+
+Jangan menghitung configured hanya dari environment variable.
+
+PHASE 4 — PATCH SEMANTICS
+
+Pastikan public key baru hanya diperbarui ketika field benar-benar dikirim.
+
+Contoh:
+
+if ("sandboxPublicKey" in body) {
+  const normalized =
+    normalizePaylabsPublicKey(body.sandboxPublicKey);
+
+  validatePaylabsPublicKey(normalized);
+
+  await upsertSetting(
+    PAYLABS_SETTINGS_KEYS.sandboxPublicKey,
+    normalized
+  );
+}
+
+Jangan memakai:
+
+body.sandboxPublicKey || existingValue
+
+jika empty string dapat menyebabkan perilaku tidak jelas.
+
+Jangan memakai:
+
+sandboxPublicKeyConfigured
+
+sebagai nilai public key.
+
+Jangan menghapus key lama ketika field public key tidak dikirim.
+
+PHASE 5 — UPSERT DATABASE
+
+Audit fungsi upsert settings.
+
+Pastikan:
+
+- conflict target memakai kolom key yang benar;
+- update value benar-benar terjadi;
+- tidak hanya insert yang diam-diam gagal;
+- row count diperiksa;
+- transaction commit ditunggu dengan await;
+- tidak ada fire-and-forget;
+- tidak ada rollback setelah toast sukses;
+- tidak ada middleware yang membersihkan secret field sebelum DB save.
+
+Tambahkan log aman:
+
+[paylabs-settings] sandbox public key update
+{
+  received: true,
+  normalized: true,
+  stored: true,
+  storedLength: <number>,
+  configuredAfterSave: true
+}
+
+Jangan log nilai key.
+
+PHASE 6 — GET RESPONSE
+
+GET /api/paylabs/settings harus mengembalikan:
+
+{
+  "sandboxPublicKeyConfigured": true,
+  "productionPublicKeyConfigured": false,
+  ...
+}
+
+Jangan mengembalikan public key penuh.
+
+Jangan mengembalikan:
+
+sandboxPublicKey: ""
+
+karena frontend dapat salah menganggapnya tidak configured.
+
+Pastikan response menggunakan nilai database terbaru, bukan cache lama.
+
+Jika settings menggunakan cache:
+
+- invalidasi cache setelah PATCH;
+- atau update cache setelah commit;
+- atau bypass cache untuk configured flags.
+
+PHASE 7 — FRONTEND STATE
+
+Audit:
+
+artifacts/sport-center/src/pages/admin/PaylabsGateway.tsx
+
+Setelah PATCH sukses:
+
+1. await save request selesai.
+2. await refetch settings.
+3. perbarui state dari response GET baru.
+4. tutup textarea edit public key.
+5. kosongkan local key input.
+6. badge harus berubah menjadi Configured.
+
+Jangan langsung set toast sukses sebelum response PATCH sukses.
+
+Jangan mempertahankan:
+
+sandboxPublicKeyConfigured: false
+
+dari state awal setelah refetch.
+
+Tambahkan loading state pada tombol Simpan agar tidak double-submit.
+
+PHASE 8 — PUBLIC KEY VALIDATION
+
+Pastikan public key yang ditempel memiliki PEM lengkap:
+
+-----BEGIN PUBLIC KEY-----
+...
+-----END PUBLIC KEY-----
+
+Backend harus:
+
+- normalize literal \n;
+- normalize CRLF;
+- validasi dengan crypto.createPublicKey();
+- tolak key invalid dengan HTTP 422;
+- jangan menyimpan key invalid;
+- jangan menampilkan toast sukses bila key invalid.
+
+Catatan:
+Jangan menampilkan atau mencatat isi key pada laporan.
+
+PHASE 9 — TESTS
+
+Tambahkan test:
+
+1. PATCH sandboxPublicKey valid → DB row tersimpan.
+2. GET setelah PATCH → sandboxPublicKeyConfigured true.
+3. GET tidak mengembalikan nilai key.
+4. PATCH tanpa sandboxPublicKey → key lama tetap ada.
+5. PATCH field lain → configured tetap true.
+6. Reload page → badge tetap Configured.
+7. Cache diinvalidasi setelah PATCH.
+8. Invalid PEM → HTTP 422 dan DB tidak berubah.
+9. Database upsert failure → HTTP 500 dan frontend tidak menampilkan toast sukses.
+10. Audit log tidak mengandung key.
+11. Config resolver webhook membaca key yang sama.
+12. Public key tersimpan dapat dipakai verify signature test.
+
+PHASE 10 — MANUAL RETEST
+
+Setelah fix:
+
+1. Restart API server.
+2. Buka /admin/paylabs.
+3. Klik Set Paylabs Public Key.
+4. Tempel Paylabs Public Key Sandbox.
+5. Klik Simpan Perubahan.
+6. Pastikan response PATCH sukses.
+7. Pastikan query DB menunjukkan:
+   paylabs_public_key_sandbox exists = true
+   nonEmpty = true
+8. Pastikan GET settings menunjukkan:
+   sandboxPublicKeyConfigured = true
+9. Refresh browser penuh.
+10. Badge harus tetap:
+    Configured
+11. Restart API lagi.
+12. Badge harus tetap:
+    Configured
+13. Buat transaksi sandbox baru.
+14. Pastikan webhook log:
+    hasPublicKey: true
+15. Pastikan:
+    verificationResult: VALID
+
+PHASE 11 — FINAL REPORT
+
+Laporkan:
+
+- field name dari frontend;
+- DB key yang ditulis;
+- DB key yang dibaca;
+- root cause ketidaksesuaian;
+- apakah cache terlibat;
+- apakah row benar-benar tersimpan;
+- configured boolean setelah save;
+- configured boolean setelah refresh;
+- configured boolean setelah restart;
+- webhook verification result;
+- tests;
+- TypeScript;
+- build;
+- file yang diubah.
+
+Verdict hanya:
+
+- PUBLIC KEY PERSISTENCE VERIFIED
+- SANDBOX SIGNATURE VERIFIED
+- KEY MAPPING FAILED
+- BLOCKED

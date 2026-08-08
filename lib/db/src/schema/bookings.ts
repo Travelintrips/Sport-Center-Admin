@@ -8,6 +8,7 @@ import { scSchema } from "./_schema";
 export const bookingStatusEnum = scSchema.enum("booking_status", [
   "pending_payment",
   "waiting_confirmation",
+  "waiting_admin_approval",
   "paid",
   "confirmed",
   "completed",
@@ -40,7 +41,7 @@ export const billingStatusEnum = scSchema.enum("billing_status", [
   "paid",
 ]);
 
-export const bookingsTable = scSchema.table("bookings", {
+export const bookingsTable = scSchema.table("sport_bookings", {
   id: serial("id").primaryKey(),
   orderNumber: text("order_number").notNull().unique(),
   customerId: integer("customer_id").references(() => usersTable.id, { onDelete: "set null" }),
@@ -60,11 +61,14 @@ export const bookingsTable = scSchema.table("bookings", {
   verificationStatus: verificationStatusEnum("verification_status").notNull().default("not_required"),
   basePrice: numeric("base_price", { precision: 12, scale: 2 }),
   apDiscountAmount: numeric("ap_discount_amount", { precision: 12, scale: 2 }).notNull().default("0"),
+  bookingType: text("booking_type").notNull().default("regular"), // 'regular' | 'event'
+  eventDiscountAmount: numeric("event_discount_amount", { precision: 12, scale: 2 }),
   status: bookingStatusEnum("status").notNull().default("pending_payment"),
   activityType: text("activity_type"),
   numberOfPeople: integer("number_of_people"),
   resourceName: text("resource_name"),
   source: text("source").default("web"),
+  bookerName: text("booker_name"),
   notes: text("notes"),
   adminNotes: text("admin_notes"),
   paymentDeadline: timestamp("payment_deadline", { withTimezone: true }),
@@ -72,6 +76,7 @@ export const bookingsTable = scSchema.table("bookings", {
   completedAt: timestamp("completed_at", { withTimezone: true }),
   reminderH1SentAt: timestamp("reminder_h1_sent_at", { withTimezone: true }),
   reminderDaySentAt: timestamp("reminder_day_sent_at", { withTimezone: true }),
+  paymentReminderSentAt: timestamp("payment_reminder_sent_at", { withTimezone: true }),
   // Company billing fields
   payerType: payerTypeEnum("payer_type").default("personal"),
   companyCustomerId: integer("company_customer_id").references(() => usersTable.id, { onDelete: "set null" }),
@@ -81,9 +86,19 @@ export const bookingsTable = scSchema.table("bookings", {
   billingStatus: billingStatusEnum("billing_status"),
   companyInvoiceId: integer("company_invoice_id"),
   ppnRate: numeric("ppn_rate", { precision: 5, scale: 2 }),
+  dpp: numeric("dpp", { precision: 14, scale: 2 }),
   ppnAmount: numeric("ppn_amount", { precision: 12, scale: 2 }),
   grandTotal: numeric("grand_total", { precision: 12, scale: 2 }),
+  downPayment: numeric("down_payment", { precision: 12, scale: 2 }).notNull().default("0"),
+  isDpPaid: boolean("is_dp_paid").notNull().default(false),
   bookedByUserId: integer("booked_by_user_id").references(() => usersTable.id, { onDelete: "set null" }),
+  groupRef: text("group_ref"),
+  vendorId: integer("vendor_id"),
+  approvedByAdminPhone: text("approved_by_admin_phone"),
+  approvedAt: timestamp("approved_at", { withTimezone: true }),
+  rejectedReason: text("rejected_reason"),
+  paidAt: timestamp("paid_at", { withTimezone: true }),
+  invoicePdfUrl: text("invoice_pdf_url"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });

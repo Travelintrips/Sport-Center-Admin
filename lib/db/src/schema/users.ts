@@ -27,6 +27,7 @@ export const usersTable = scSchema.table("users", {
   paymentTermsDays: integer("payment_terms_days").default(30),
   monthlyCreditLimit: numeric("monthly_credit_limit", { precision: 14, scale: 2 }),
   allowMonthlyBilling: boolean("allow_monthly_billing").default(false),
+  requirePerBookingApproval: boolean("require_per_booking_approval").default(false),
   accountStatus: text("account_status").default("active"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),

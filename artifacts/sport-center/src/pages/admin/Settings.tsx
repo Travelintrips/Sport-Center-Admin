@@ -9,7 +9,7 @@ import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { Save, Upload, Trash2, QrCode, ImageIcon, Plane, MessageCircle, Eye, EyeOff, CheckCircle2, AlertCircle, Receipt } from "lucide-react";
+import { Save, Upload, Trash2, QrCode, ImageIcon, Plane, MessageCircle, Eye, EyeOff, CheckCircle2, AlertCircle, Receipt, FlaskConical, RefreshCw, Link2, Send, CalendarDays } from "lucide-react";
 import { getToken } from "@/lib/auth";
 
 function ApDiscountCard() {
@@ -181,8 +181,8 @@ function PpnSettingsCard() {
           Pengaturan PPN (Pajak Pertambahan Nilai)
         </CardTitle>
         <p className="text-xs text-muted-foreground mt-1">
-          PPN 11% wajib dikenakan pada booking Sport Center. Data lama tidak diubah otomatis — hanya booking
-          pada/setelah tanggal berlaku yang dikenai PPN.
+          Harga lapangan bersifat <strong>inklusif PPN</strong> — artinya PPN sudah termasuk dalam harga yang tertera.
+          Grand Total = harga yang diinput. DPP diekstrak otomatis dari harga.
         </p>
       </CardHeader>
       <CardContent className="space-y-5">
@@ -265,6 +265,179 @@ function PpnSettingsCard() {
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
+function SeedDemoCard() {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [result, setResult] = useState<{ bookings: number; payments: number; reviews: number; promoRegistrations: number } | null>(null);
+
+  const mutation = useMutation({
+    mutationFn: async () => {
+      const token = getToken();
+      const res = await fetch("/api/admin/seed-demo", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Gagal" }));
+        throw new Error(err.error ?? "Terjadi kesalahan");
+      }
+      return res.json();
+    },
+    onSuccess: (data) => {
+      setResult(data.summary);
+      queryClient.invalidateQueries();
+      toast({ title: "✅ Data demo berhasil di-seed!", description: `${data.summary.bookings} booking, ${data.summary.payments} pembayaran, ${data.summary.reviews} ulasan` });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Gagal seed data demo", description: err.message, variant: "destructive" });
+    },
+  });
+
+  return (
+    <Card className="border-dashed border-2 border-amber-300 bg-amber-50/40">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base font-bold flex items-center gap-2 text-amber-700">
+          <FlaskConical size={18} />
+          Data Demo (Development Only)
+        </CardTitle>
+        <p className="text-xs text-amber-600 mt-1">
+          Hapus semua transaksi lama dan isi ulang dengan data demo realistis — booking, pembayaran, ulasan, dll.
+          <strong className="block mt-0.5">⚠ Tidak tersedia di production. Data lama akan dihapus permanen.</strong>
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {result && (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {[
+              { label: "Booking", value: result.bookings },
+              { label: "Pembayaran", value: result.payments },
+              { label: "Ulasan", value: result.reviews },
+              { label: "Registrasi Promo", value: result.promoRegistrations },
+            ].map(({ label, value }) => (
+              <div key={label} className="bg-white rounded-lg border border-amber-200 p-3 text-center">
+                <p className="text-2xl font-black text-amber-700">{value}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">{label}</p>
+              </div>
+            ))}
+          </div>
+        )}
+        <Button
+          onClick={() => mutation.mutate()}
+          disabled={mutation.isPending}
+          className="bg-amber-500 hover:bg-amber-600 text-white gap-2"
+        >
+          {mutation.isPending ? (
+            <><RefreshCw size={16} className="animate-spin" /> Memproses...</>
+          ) : (
+            <><FlaskConical size={16} /> Reset & Seed Data Demo</>
+          )}
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+function RekapPemakaianCard() {
+  const { toast } = useToast();
+  const token = getToken();
+  const [sending, setSending] = useState(false);
+  const [date, setDate] = useState(() => {
+    const wib = new Date(Date.now() + 7 * 60 * 60 * 1000);
+    return wib.toISOString().split("T")[0];
+  });
+
+  const handleSend = async () => {
+    setSending(true);
+    try {
+      const res = await fetch("/api/admin/rekap-pemakaian/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ date }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Gagal mengirim rekap");
+      toast({ title: "✅ Rekap terkirim!", description: data.message });
+    } catch (err: any) {
+      toast({ title: "Gagal kirim rekap", description: err.message, variant: "destructive" });
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base font-bold flex items-center gap-2">
+          <Send size={18} className="text-green-600" />
+          Rekap Pemakaian Harian — Grup WA Admin
+        </CardTitle>
+        <p className="text-xs text-muted-foreground mt-1">
+          Laporan pemakaian fasilitas per kategori dikirim otomatis ke grup WA admin setiap hari jam <strong>08:00 WIB</strong>. Bisa juga dikirim manual di bawah.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="rounded-lg bg-muted/50 border p-3 text-xs text-muted-foreground space-y-1">
+          <p className="font-semibold text-foreground">📋 Format pesan rekap:</p>
+          <pre className="whitespace-pre text-xs font-mono leading-relaxed">
+{`PEMAKAIAN SPORT CENTER
+Senin 7 Juli 2026
+
+Ket: ✅ Lunas  ⏳ Verifikasi  ❌ Belum Bayar
+
+*GYM*
+1. Oce (m) ✅
+2. Cahyo (m) ⏳
+3. Budi (m) ❌
+
+*BASKET/VOLI/FUTSAL*
+1. Tim A 08:00-10:00 (m) ✅
+
+*TENIS*
+1.
+
+*BADMINTON*
+1. Rudi 09:00-10:00 (m) ❌
+
+*BILIARD*
+1.
+
+SELAMAT BEROLAHRAGA 🏆`}
+          </pre>
+        </div>
+
+        <div className="flex items-end gap-3 flex-wrap">
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
+              <CalendarDays size={12} /> Tanggal rekap
+            </label>
+            <input
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              className="border border-input rounded-md px-3 py-1.5 text-sm bg-background focus:outline-none focus:ring-1 focus:ring-primary"
+            />
+          </div>
+          <Button
+            type="button"
+            onClick={handleSend}
+            disabled={sending}
+            className="bg-green-600 hover:bg-green-700 gap-2"
+          >
+            {sending ? (
+              <><RefreshCw size={14} className="animate-spin" /> Mengirim...</>
+            ) : (
+              <><Send size={14} /> Kirim Rekap Sekarang</>
+            )}
+          </Button>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Pastikan <strong>FONNTE_TOKEN</strong> dan <strong>ADMIN_WA_GROUP</strong> sudah dikonfigurasi di Secrets agar rekap terkirim ke grup WA.
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function AdminSettings() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -274,11 +447,14 @@ export default function AdminSettings() {
   const [form, setForm] = useState({
     centerName: "", address: "", phone: "", whatsapp: "", email: "",
     openHour: "", closeHour: "", logoUrl: "", bankName: "", bankAccount: "", bankAccountName: "",
+    paymentDeadlineHours: "24",
   });
   const [waForm, setWaForm] = useState({
-    fonnteToken: "", fonnteAdminWa: "", adminWaPhones: "", appUrl: "",
+    fonnteToken: "", fonnteCustomerToken: "", fonnteAdminWa: "", adminWaPhones: "", appUrl: "",
   });
+  const [paymentDomain, setPaymentDomain] = useState("");
   const [showToken, setShowToken] = useState(false);
+  const [showCustomerToken, setShowCustomerToken] = useState(false);
   const [qrisPreview, setQrisPreview] = useState<string | null>(null);
   const [qrisUploading, setQrisUploading] = useState(false);
   const [qrisDeleting, setQrisDeleting] = useState(false);
@@ -297,13 +473,16 @@ export default function AdminSettings() {
         bankName: settings.bankName ?? "",
         bankAccount: settings.bankAccount ?? "",
         bankAccountName: settings.bankAccountName ?? "",
+        paymentDeadlineHours: (settings as any).paymentDeadlineHours ?? "24",
       });
       setWaForm({
         fonnteToken: (settings as any).fonnteToken ?? "",
+        fonnteCustomerToken: (settings as any).fonnteCustomerToken ?? "",
         fonnteAdminWa: (settings as any).fonnteAdminWa ?? "",
         adminWaPhones: (settings as any).adminWaPhones ?? "",
         appUrl: (settings as any).appUrl ?? "",
       });
+      setPaymentDomain((settings as any).paymentDomain ?? "");
       setQrisPreview((settings as any).qrisImageUrl ?? null);
     }
   }, [settings]);
@@ -330,6 +509,11 @@ export default function AdminSettings() {
     const payload: any = { ...waForm };
     Object.keys(payload).forEach(k => { if (!payload[k]) delete payload[k]; });
     updateMutation.mutate({ data: payload });
+  };
+
+  const handlePaymentDomainSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    updateMutation.mutate({ data: { paymentDomain: paymentDomain.trim() || null } as any });
   };
 
   const handleQrisUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -423,6 +607,18 @@ export default function AdminSettings() {
                 <Label>Jam Tutup</Label>
                 <Input type="time" value={form.closeHour} onChange={(e) => setForm(f => ({ ...f, closeHour: e.target.value }))} />
               </div>
+              <div className="space-y-2">
+                <Label>Batas Waktu Pembayaran Personal (jam)</Label>
+                <Input
+                  type="number"
+                  min="1"
+                  max="72"
+                  value={form.paymentDeadlineHours}
+                  onChange={(e) => setForm(f => ({ ...f, paymentDeadlineHours: e.target.value }))}
+                  placeholder="24"
+                />
+                <p className="text-xs text-muted-foreground">Waktu yang diberikan customer personal untuk upload bukti bayar (default: 24 jam)</p>
+              </div>
               <div className="md:col-span-2 space-y-2">
                 <Label>URL Logo</Label>
                 <Input value={form.logoUrl} onChange={(e) => setForm(f => ({ ...f, logoUrl: e.target.value }))} placeholder="https://..." />
@@ -465,6 +661,8 @@ export default function AdminSettings() {
 
       <PpnSettingsCard />
 
+      <SeedDemoCard />
+
       {/* ─── WhatsApp Notification Settings ─────────────────────── */}
       <form onSubmit={handleWaSubmit}>
         <Card>
@@ -494,7 +692,7 @@ export default function AdminSettings() {
           <CardContent className="space-y-4">
             <div className="grid md:grid-cols-2 gap-4">
               <div className="md:col-span-2 space-y-2">
-                <Label>Fonnte API Token</Label>
+                <Label>Token Fonnte — Nomor Admin (085121073537)</Label>
                 <div className="relative">
                   <Input
                     type={showToken ? "text" : "password"}
@@ -512,11 +710,35 @@ export default function AdminSettings() {
                   </button>
                 </div>
                 <p className="text-xs text-muted-foreground">
+                  Token nomor WhatsApp admin (<strong>085121073537</strong>). Digunakan untuk mengirim notifikasi ke admin.
                   Dapatkan token di{" "}
                   <a href="https://fonnte.com" target="_blank" rel="noreferrer" className="text-primary underline">
                     fonnte.com
-                  </a>
-                  . Token digunakan untuk mengirim pesan WA ke customer dan admin.
+                  </a>.
+                </p>
+              </div>
+
+              <div className="md:col-span-2 space-y-2">
+                <Label>Token Fonnte — Nomor Customer (081216104734)</Label>
+                <div className="relative">
+                  <Input
+                    type={showCustomerToken ? "text" : "password"}
+                    value={waForm.fonnteCustomerToken}
+                    onChange={(e) => setWaForm(f => ({ ...f, fonnteCustomerToken: e.target.value }))}
+                    placeholder="Token dari dashboard.fonnte.com untuk nomor customer"
+                    className="pr-10 font-mono text-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowCustomerToken(v => !v)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  >
+                    {showCustomerToken ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Token nomor WhatsApp customer (<strong>081216104734</strong>). Digunakan untuk mengirim notifikasi ke customer (booking, konfirmasi, reminder, dll).
+                  Jika kosong, sistem pakai token admin di atas.
                 </p>
               </div>
 
@@ -533,14 +755,15 @@ export default function AdminSettings() {
               </div>
 
               <div className="space-y-2">
-                <Label>Nomor Admin Tambahan</Label>
+                <Label>Nomor Admin &amp; Grup WA</Label>
                 <Input
                   value={waForm.adminWaPhones}
                   onChange={(e) => setWaForm(f => ({ ...f, adminWaPhones: e.target.value }))}
-                  placeholder="6281234,6289876 (pisahkan dengan koma)"
+                  placeholder="6281234,6289876,1203456789-1234567890@g.us"
                 />
                 <p className="text-xs text-muted-foreground">
-                  Semua nomor ini akan menerima notifikasi admin (booking baru, bukti bayar, dll).
+                  Pisahkan dengan koma. Bisa nomor individu (<strong>628xxx</strong>) atau ID grup WA (<strong>1234567890-123456@g.us</strong>).
+                  Semua penerima ini akan mendapat notifikasi booking baru, bukti bayar, dll.
                 </p>
               </div>
 
@@ -583,6 +806,56 @@ export default function AdminSettings() {
           </CardContent>
         </Card>
       </form>
+
+      {/* ─── Domain Link Pembayaran ─────────────────────────────── */}
+      <form onSubmit={handlePaymentDomainSubmit}>
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base font-bold flex items-center gap-2">
+              <Link2 size={18} className="text-blue-600" />
+              Domain Link Pembayaran Tenant
+            </CardTitle>
+            <p className="text-xs text-muted-foreground mt-1">
+              Domain yang digunakan pada link bayar yang dikirim via WhatsApp ke customer.
+              Jika diisi, akan menimpa konfigurasi server secara otomatis.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="payment-domain">URL Domain</Label>
+              <Input
+                id="payment-domain"
+                type="url"
+                value={paymentDomain}
+                onChange={(e) => setPaymentDomain(e.target.value)}
+                placeholder="https://sportcenter.domain.co.id"
+                className="font-mono text-sm"
+              />
+              <p className="text-xs text-muted-foreground">
+                Format: <code className="bg-muted px-1 rounded">https://domain.anda.com</code> — tanpa garis miring di akhir.
+                {paymentDomain ? (
+                  <span className="block mt-1 text-blue-700 bg-blue-50 border border-blue-200 rounded px-2 py-1">
+                    Link bukti bayar akan menjadi: <strong>{paymentDomain.replace(/\/$/, "")}/bukti/&#123;token&#125;</strong>
+                  </span>
+                ) : (
+                  <span className="block mt-1">
+                    Jika kosong, sistem menggunakan URL dari environment variable server.
+                  </span>
+                )}
+              </p>
+            </div>
+            <div className="flex justify-end">
+              <Button type="submit" disabled={updateMutation.isPending}>
+                <Save size={16} className="mr-2" />
+                {updateMutation.isPending ? "Menyimpan..." : "Simpan Domain"}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </form>
+
+      {/* ─── Kirim Rekap Pemakaian ke Grup WA Admin ─────────────────────────── */}
+      <RekapPemakaianCard />
 
       <Card>
         <CardHeader className="pb-3">

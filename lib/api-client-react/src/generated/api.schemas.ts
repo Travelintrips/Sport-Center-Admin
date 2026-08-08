@@ -178,6 +178,15 @@ export const BookingVerificationStatus = {
   rejected: 'rejected',
 } as const;
 
+export type PaymentPaymentType = typeof PaymentPaymentType[keyof typeof PaymentPaymentType];
+
+
+export const PaymentPaymentType = {
+  dp: 'dp',
+  pelunasan: 'pelunasan',
+  full_payment: 'full_payment',
+} as const;
+
 export type PaymentStatus = typeof PaymentStatus[keyof typeof PaymentStatus];
 
 
@@ -195,6 +204,7 @@ export interface Payment {
   proofUrl?: string | null;
   /** @nullable */
   paymentMethod?: string | null;
+  paymentType?: PaymentPaymentType;
   status: PaymentStatus;
   /** @nullable */
   confirmedAt?: string | null;
@@ -250,8 +260,17 @@ export interface Booking {
   ppnAmount?: number | null;
   /** @nullable */
   grandTotal?: number | null;
+  downPayment?: number;
+  isDpPaid?: boolean;
   payment?: Payment | null;
+  payments?: Payment[];
+  remainingAmount?: number;
   createdAt?: string;
+}
+
+export interface DpPaymentInput {
+  /** @minimum 0 */
+  downPaymentAmount: number;
 }
 
 export type RecurringBookingCheckInputRepeatType = typeof RecurringBookingCheckInputRepeatType[keyof typeof RecurringBookingCheckInputRepeatType];
@@ -297,6 +316,14 @@ export const RecurringBookingInputRepeatType = {
   monthly: 'monthly',
 } as const;
 
+export type RecurringBookingInputCustomerType = typeof RecurringBookingInputCustomerType[keyof typeof RecurringBookingInputCustomerType];
+
+
+export const RecurringBookingInputCustomerType = {
+  umum: 'umum',
+  angkasa_pura: 'angkasa_pura',
+} as const;
+
 export interface RecurringBookingInput {
   customerName: string;
   customerEmail: string;
@@ -308,6 +335,8 @@ export interface RecurringBookingInput {
   repeatType: RecurringBookingInputRepeatType;
   repeatCount: number;
   notes?: string;
+  customerType?: RecurringBookingInputCustomerType;
+  idCardNumber?: string;
 }
 
 export interface RecurringBookingResult {
@@ -315,6 +344,29 @@ export interface RecurringBookingResult {
   skipped: string[];
   totalBookings: number;
   grandTotal: number;
+}
+
+export interface Vendor {
+  id: number;
+  name: string;
+  /** @nullable */
+  contactPerson?: string | null;
+  /** @nullable */
+  phone?: string | null;
+  /** @nullable */
+  email?: string | null;
+  /** @nullable */
+  address?: string | null;
+  /** @nullable */
+  notes?: string | null;
+  isActive?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface VendorSimple {
+  id: number;
+  name: string;
 }
 
 export type BookingInputCustomerType = typeof BookingInputCustomerType[keyof typeof BookingInputCustomerType];
@@ -338,6 +390,7 @@ export interface BookingInput {
   customerType?: BookingInputCustomerType;
   idCardNumber?: string;
   notes?: string;
+  vendorId?: number | null;
 }
 
 export type BookingUpdateStatus = typeof BookingUpdateStatus[keyof typeof BookingUpdateStatus];
@@ -360,10 +413,29 @@ export interface BookingUpdate {
   adminNotes?: string;
 }
 
+export type PaymentInputPaymentMethod = typeof PaymentInputPaymentMethod[keyof typeof PaymentInputPaymentMethod];
+
+
+export const PaymentInputPaymentMethod = {
+  Transfer_Bank: 'Transfer Bank',
+  QRIS: 'QRIS',
+} as const;
+
+export type PaymentInputPaymentType = typeof PaymentInputPaymentType[keyof typeof PaymentInputPaymentType];
+
+
+export const PaymentInputPaymentType = {
+  dp: 'dp',
+  pelunasan: 'pelunasan',
+  full_payment: 'full_payment',
+} as const;
+
 export interface PaymentInput {
   bookingId: number;
   amount: number;
   proofUrl?: string;
+  paymentMethod?: PaymentInputPaymentMethod;
+  paymentType?: PaymentInputPaymentType;
   notes?: string;
 }
 
@@ -378,6 +450,7 @@ export const PaymentUpdateStatus = {
 
 export interface PaymentUpdate {
   status?: PaymentUpdateStatus;
+  paymentMethod?: string;
   notes?: string;
 }
 
@@ -633,6 +706,8 @@ export interface DashboardStats {
   totalRevenue: number;
   todayBookings: number;
   pendingBookings: number;
+  membershipRevenue?: number | null;
+  activeMemberships?: number | null;
   topFacilities: FacilityStat[];
   recentBookings: Booking[];
   bookingsByStatus: StatusCount[];
@@ -751,6 +826,8 @@ export interface MyBookingItem {
   paymentProofUrl?: string | null;
   notes?: string | null;
   createdAt: string | null;
+  groupRef?: string | null;
+  customerName?: string | null;
 }
 
 export interface Review {
@@ -900,6 +977,33 @@ export const GymMembershipUpdateStatus = {
 export interface GymMembershipUpdate {
   status?: GymMembershipUpdateStatus;
   notes?: string;
+}
+
+export interface MembershipLookupInput {
+  phone: string;
+}
+
+export type MembershipLookupResultStatus = typeof MembershipLookupResultStatus[keyof typeof MembershipLookupResultStatus];
+
+
+export const MembershipLookupResultStatus = {
+  pending_payment: 'pending_payment',
+  waiting_confirmation: 'waiting_confirmation',
+  active: 'active',
+  expired: 'expired',
+  cancelled: 'cancelled',
+} as const;
+
+export interface MembershipLookupResult {
+  id: number;
+  name: string;
+  phone: string;
+  email: string;
+  status: MembershipLookupResultStatus;
+  startDate: string;
+  endDate: string;
+  months: number;
+  totalPrice: number;
 }
 
 export type MembershipPaymentProofInputPaymentMethod = typeof MembershipPaymentProofInputPaymentMethod[keyof typeof MembershipPaymentProofInputPaymentMethod];
@@ -1184,6 +1288,7 @@ export interface TaxReport {
 
 export interface SheetConnectInput {
   sheetId: string;
+  sheetName?: string;
 }
 
 export interface SheetConnectResult {
@@ -1284,6 +1389,7 @@ export interface BankReconciliationMatch {
   note?: string | null;
   status: BankReconciliationMatchStatus;
   createdAt: string;
+  ocrAmount?: string | null;
 }
 
 export type EnrichedBankCandidateCandidateType = typeof EnrichedBankCandidateCandidateType[keyof typeof EnrichedBankCandidateCandidateType];
@@ -1372,11 +1478,14 @@ export interface BankMutationImportResult {
   matching?: BankMutationImportResultMatching;
 }
 
+export type BankMutationListResultStatusCounts = {[key: string]: number};
+
 export interface BankMutationListResult {
   mutations: BankMutation[];
   total: number;
   page: number;
   pageSize: number;
+  statusCounts?: BankMutationListResultStatusCounts;
 }
 
 export interface BankMutationWithMatches {
@@ -1438,6 +1547,179 @@ export interface BankSheetPushInput {
 export interface BankSheetPushResult {
   ok: boolean;
   updatedRows: number;
+}
+
+export type ExpensePaymentStatus = typeof ExpensePaymentStatus[keyof typeof ExpensePaymentStatus];
+
+
+export const ExpensePaymentStatus = {
+  draft: 'draft',
+  pending_approval: 'pending_approval',
+  approved: 'approved',
+  paid: 'paid',
+  rejected: 'rejected',
+  cancelled: 'cancelled',
+} as const;
+
+export interface Expense {
+  id: number;
+  expenseNo: string;
+  expenseDate: string;
+  category: string;
+  description: string;
+  vendorName?: string | null;
+  facilityId?: number | null;
+  facilityName?: string | null;
+  amount: number;
+  ppnAmount: number;
+  totalAmount: number;
+  paymentMethod?: string | null;
+  paymentAccount?: string | null;
+  paymentStatus: ExpensePaymentStatus;
+  receiptUrl?: string | null;
+  notes?: string | null;
+  createdBy?: number | null;
+  approvedBy?: number | null;
+  approvedAt?: string | null;
+  paidAt?: string | null;
+  rejectedReason?: string | null;
+  journalId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type ExpenseDetail = Expense & ({
+  createdByName?: string | null;
+  approvedByName?: string | null;
+});
+
+export type ExpenseListResultSummary = {
+  totalThisMonth: number;
+  pendingApproval: number;
+  paid: number;
+  unpaid: number;
+};
+
+export interface ExpenseListResult {
+  expenses: Expense[];
+  summary: ExpenseListResultSummary;
+  categories: string[];
+}
+
+export interface ExpenseInput {
+  expenseDate: string;
+  category: string;
+  description: string;
+  vendorName?: string;
+  facilityId?: number;
+  amount: number;
+  ppnAmount?: number;
+  paymentMethod?: string;
+  paymentAccount?: string;
+  receiptUrl?: string;
+  notes?: string;
+}
+
+export type ExpenseStatusInputAction = typeof ExpenseStatusInputAction[keyof typeof ExpenseStatusInputAction];
+
+
+export const ExpenseStatusInputAction = {
+  submit: 'submit',
+  approve: 'approve',
+  reject: 'reject',
+  pay: 'pay',
+  cancel: 'cancel',
+} as const;
+
+export interface ExpenseStatusInput {
+  action: ExpenseStatusInputAction;
+  rejectedReason?: string;
+}
+
+export type DocumentTemplateDocumentType = typeof DocumentTemplateDocumentType[keyof typeof DocumentTemplateDocumentType];
+
+
+export const DocumentTemplateDocumentType = {
+  invoice: 'invoice',
+  spp: 'spp',
+  faktur: 'faktur',
+  kwitansi: 'kwitansi',
+  lampiran: 'lampiran',
+  berita_acara: 'berita_acara',
+} as const;
+
+export interface DocumentTemplate {
+  id?: number;
+  companyId?: number | null;
+  companyName?: string;
+  documentType?: DocumentTemplateDocumentType;
+  isDefault?: boolean;
+  headerLogoUrl?: string | null;
+  kopSuratHtml?: string | null;
+  footerHtml?: string | null;
+  companyDisplayName?: string | null;
+  financeName?: string | null;
+  financeTitle?: string | null;
+  financeSignature?: string | null;
+  address?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  numberFormatPrefix?: string | null;
+  numberFormatPattern?: string | null;
+  paperStyle?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export type DocumentTemplateInputDocumentType = typeof DocumentTemplateInputDocumentType[keyof typeof DocumentTemplateInputDocumentType];
+
+
+export const DocumentTemplateInputDocumentType = {
+  invoice: 'invoice',
+  spp: 'spp',
+  faktur: 'faktur',
+  kwitansi: 'kwitansi',
+  lampiran: 'lampiran',
+  berita_acara: 'berita_acara',
+} as const;
+
+export interface DocumentTemplateInput {
+  companyId?: number | null;
+  documentType: DocumentTemplateInputDocumentType;
+  isDefault?: boolean;
+  headerLogoUrl?: string;
+  kopSuratHtml?: string;
+  footerHtml?: string;
+  companyDisplayName?: string;
+  financeName?: string;
+  financeTitle?: string;
+  financeSignature?: string;
+  address?: string;
+  phone?: string;
+  email?: string;
+  numberFormatPrefix?: string;
+  numberFormatPattern?: string;
+  paperStyle?: string;
+}
+
+export type WaNotifLogStatus = typeof WaNotifLogStatus[keyof typeof WaNotifLogStatus];
+
+
+export const WaNotifLogStatus = {
+  sent: 'sent',
+  failed: 'failed',
+} as const;
+
+export interface WaNotifLog {
+  id: number;
+  bookingId?: number | null;
+  orderNumber?: string | null;
+  event?: string | null;
+  recipientPhone: string;
+  messagePreview?: string | null;
+  status: WaNotifLogStatus;
+  errorMessage?: string | null;
+  sentAt: string;
 }
 
 export type SendOtp200 = {
@@ -1565,6 +1847,11 @@ export type GetReviewsParams = {
 facilityId?: number;
 };
 
+export type ResendBookingWa200 = {
+  success: boolean;
+  message: string;
+};
+
 export type GetVerificationLogsParams = {
 bookingId?: number;
 limit?: number;
@@ -1585,5 +1872,39 @@ maxAmount?: number;
 search?: string;
 page?: number;
 pageSize?: number;
+};
+
+export type ListExpensesParams = {
+startDate?: string;
+endDate?: string;
+category?: string;
+status?: string;
+vendorName?: string;
+facilityId?: number;
+};
+
+export type ListDocumentTemplatesParams = {
+companyId?: string;
+documentType?: string;
+};
+
+export type DeleteDocumentTemplate200 = {
+  success?: boolean;
+};
+
+export type PreviewDocumentParams = {
+companyId?: number;
+/**
+ * JWT token for browser window.open() flows (alternative to Authorization header)
+ */
+_token?: string;
+};
+
+export type GenerateDocumentPdfParams = {
+companyId?: number;
+/**
+ * JWT token for browser window.open() flows (alternative to Authorization header)
+ */
+_token?: string;
 };
 

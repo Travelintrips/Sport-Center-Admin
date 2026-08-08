@@ -7,10 +7,13 @@
     "dev": "export NODE_ENV=development && pnpm run build && pnpm run start",
     "build": "node ./build.mjs",
     "start": "node --enable-source-maps ./dist/index.mjs",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "NODE_OPTIONS=--experimental-vm-modules jest"
   },
   "dependencies": {
     "@google-cloud/storage": "^7.19.0",
+    "@replit/object-storage": "^1.0.0",
+    "@sparticuz/chromium-min": "^149.0.0",
     "@supabase/supabase-js": "^2.106.1",
     "@types/pg": "^8.20.0",
     "@workspace/api-zod": "workspace:*",
@@ -21,25 +24,35 @@
     "express": "^5.2.1",
     "google-auth-library": "^10.6.2",
     "googleapis": "^173.0.0",
-    "multer": "^2.1.1",
+    "multer": "^2.2.0",
+    "nodemailer": "^9.0.3",
+    "openai": "^6.42.0",
     "pg": "^8.20.0",
     "pino": "^9.14.0",
     "pino-http": "^10.5.0",
+    "playwright": "^1.61.1",
+    "puppeteer-core": "^25.1.0",
     "tesseract.js": "^7.0.0",
     "uuid": "^14.0.0",
     "ws": "^8.21.0",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@jest/globals": "^30.4.1",
     "@types/cookie-parser": "^1.4.10",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/multer": "^2.1.0",
     "@types/node": "catalog:",
+    "@types/nodemailer": "^8.0.1",
+    "@types/supertest": "^7.2.1",
     "@types/ws": "^8.18.1",
     "esbuild": "0.27.3",
     "esbuild-plugin-pino": "^2.3.3",
+    "jest": "^30.4.2",
     "pino-pretty": "^13.1.3",
-    "thread-stream": "3.1.0"
+    "supertest": "^7.2.2",
+    "thread-stream": "3.1.0",
+    "ts-jest": "^29.4.12"
   }
 }

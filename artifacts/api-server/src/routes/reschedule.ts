@@ -116,8 +116,8 @@ router.patch("/reschedule-requests/:id", adminMiddleware, async (req, res) => {
 
     // Resolve customer phone: from booking.customerPhone or linked user
     let customerPhone = booking.customerPhone ?? "";
-    if (!customerPhone && booking.userId) {
-      const [user] = await db.select().from(usersTable).where(eq(usersTable.id, booking.userId)).limit(1);
+    if (!customerPhone && booking.customerId) {
+      const [user] = await db.select().from(usersTable).where(eq(usersTable.id, booking.customerId)).limit(1);
       customerPhone = user?.phone ?? "";
     }
 

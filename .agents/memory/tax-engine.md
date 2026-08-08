@@ -4,28 +4,30 @@ description: How PPN tax is calculated, stored, and reported for all sport facil
 ---
 
 ## Rule
-All new bookings automatically get PPN 11% calculated and stored at booking creation time. Old bookings with null ppnRate/ppnAmount/grandTotal are backward-compatible — UI falls back to totalPrice.
+Harga lapangan adalah **inklusif PPN** (tax-inclusive). Grand Total = harga yang diinput. DPP diekstrak dari harga inklusif.
 
 ## How it works
-- `artifacts/api-server/src/lib/tax.ts` — `calculateTax(subtotal)` fetches active tax_settings row, returns `{dpp, taxRate, taxAmount, grandTotal, taxCode}`. Returns zero-tax if no active setting.
+- `calculateTax(subtotal)` — subtotal = harga inklusif PPN. Returns: `dpp = round(subtotal/1.11)`, `taxAmount = subtotal - dpp`, `grandTotal = subtotal` (tidak ditambah lagi).
+- `totalPrice` di DB = harga inklusif (= grandTotal). `ppnAmount` = PPN yang diekstrak. `grandTotal` = harga inklusif.
+- Frontend DPP display = `grandTotal - ppnAmount` (bukan `totalPrice` karena keduanya sama sekarang).
 - `recordTaxTransaction(...)` inserts to tax_transactions table (non-blocking, fire-and-forget).
-- Booking insert gets: `ppnRate`, `ppnAmount`, `grandTotal` (all nullable strings, null if no active tax setting).
-- Company invoices: PPN is summed from `booking.ppnAmount` (already stored), NOT recalculated. Old unbilled bookings with null ppnAmount contribute 0 PPN.
+- Company invoices: PPN is summed from `booking.ppnAmount` (already stored), NOT recalculated.
 
-## DB tables added
-- `sport_center.tax_settings` — tax config (taxCode, taxRate, appliesTo, isActive). Seeded with `PPN_OUT_11` at 11%.
+## DB tables
+- `sport_center.tax_settings` — seeded with `PPN_OUT_11` at 11%.
 - `sport_center.tax_transactions` — tax ledger per booking/invoice.
-- `sport_center.bookings.ppn_rate/ppn_amount/grand_total` — nullable numeric columns.
+- `sport_center.bookings.ppn_rate/ppn_amount/grand_total` — nullable columns.
 
 ## Frontend
-- Booking.tsx summary: shows DPP + PPN 11% + Grand Total breakdown (calculated frontend-side at 11%).
-- BookingDetail.tsx: shows DPP/PPN/Grand Total if ppnAmount > 0, otherwise shows legacy "Total".
-- Payment amount submitted = `booking.grandTotal ?? booking.totalPrice`.
-- CompanyBilling.tsx: removed manual includePpn toggle; PPN from stored booking.ppnAmount.
-- Reports.tsx: added "Laporan Pajak (PPN)" tab with summary cards, bar chart, period table, and transaction ledger.
+- `Booking.tsx`: grand = harga-diskon, dpp = round(grand/1.11), ppn = grand - dpp. Label "Harga/jam (incl. PPN)".
+- `BookingDetail.tsx`, `wa/ProofUpload.tsx`, `wa/BookingStatus.tsx`, `wa/BookingForm.tsx`: DPP = `grandTotal - ppnAmount`.
+- Payment amount = `booking.grandTotal ?? booking.totalPrice`.
+
+## Build
+- `xlsx` harus ada di externals list di `build.mjs` — tidak bisa dibundle oleh esbuild.
 
 **Why:**
-Tax logic was scattered (hardcoded 0.11 in companyInvoices.ts). Centralized in tax.ts so rate changes happen in one place (update tax_settings row, no code change needed).
+Pengguna ingin harga yang tertera (mis. 50rb) sudah termasuk PPN, bukan ditambah PPN di atas harga. Consistent dengan praktik umum usaha ritel Indonesia.
 
-**Migration:**
-Run `scripts/migrate-ppn.ts` via `scripts/node_modules/.bin/tsx ../scripts/migrate-ppn.ts` for any new environment.
+**How to apply:**
+Jika tax rate perlu diubah, update baris di `tax_settings` DB saja. Kalkulasi inklusif: dpp = harga / (1 + rate/100).

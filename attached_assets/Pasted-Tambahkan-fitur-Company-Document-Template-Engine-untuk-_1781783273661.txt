@@ -1,0 +1,105 @@
+Tambahkan fitur Company Document Template Engine untuk semua dokumen (Invoice, SPP, Faktur, Kwitansi, dll).
+
+TUJUAN:
+Setiap perusahaan memiliki template surat sendiri termasuk kop surat, finance name, nomor surat, layout, dan footer.
+
+-----------------------------------------
+1. DATABASE
+
+Buat tabel:
+
+sport_company_document_templates
+
+- id
+- company_id
+- document_type
+- header_logo_url
+- kop_surat_html
+- footer_html
+- company_display_name
+- finance_name
+- finance_title
+- finance_signature
+- address
+- phone
+- email
+- number_format_prefix
+- number_format_pattern
+- paper_style
+- created_at
+- updated_at
+
+-----------------------------------------
+2. TEMPLATE PER COMPANY
+
+Setiap perusahaan bisa memiliki template berbeda untuk:
+- invoice
+- spp
+- faktur
+- kwitansi
+- lampiran
+- berita acara
+
+-----------------------------------------
+3. RENDERING ENGINE
+
+Saat generate dokumen:
+
+1. Ambil company_id
+2. Ambil template sesuai document_type
+3. Render dokumen menggunakan template HTML
+4. Inject data:
+   - booking
+   - invoice
+   - customer
+   - company
+
+-----------------------------------------
+4. NOMOR SURAT
+
+Gunakan format per company:
+
+Contoh:
+INV-GMCGK-2026-0001
+SPP-APIA-2026-0001
+
+-----------------------------------------
+5. PREVIEW MODE
+
+Sebelum generate PDF:
+- tampilkan preview HTML sesuai template company
+- user bisa melihat hasil akhir surat
+
+-----------------------------------------
+6. PDF GENERATION
+
+PDF harus mengikuti:
+- kop surat
+- layout HTML company
+- footer company
+- signature finance
+
+-----------------------------------------
+7. WHATSAPP / EMAIL
+
+Saat kirim dokumen:
+- gunakan versi final template company
+- bukan template default sistem
+
+-----------------------------------------
+8. FALLBACK
+
+Jika company belum punya template:
+- gunakan default system template
+
+-----------------------------------------
+9. AUDIT LOG
+
+- COMPANY_DOCUMENT_TEMPLATE_CREATED
+- COMPANY_DOCUMENT_TEMPLATE_UPDATED
+- DOCUMENT_RENDERED_WITH_TEMPLATE
+- DOCUMENT_PDF_GENERATED
+
+-----------------------------------------
+OUTPUT:
+Semua dokumen (Invoice, SPP, Faktur, Kwitansi) harus bisa mengikuti template masing-masing perusahaan 100%.

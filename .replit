@@ -1,4 +1,4 @@
-modules = ["web", "bash", "nodejs-24", "python-3.11", "postgresql-16"]
+modules = ["web", "bash", "nodejs-24", "postgresql-16", "python-3.11"]
 
 
 [deployment]
@@ -23,6 +23,10 @@ author = "agent"
 task = "workflow.run"
 args = "Start application"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Start API server"
+
 [[workflows.workflow]]
 name = "Start application"
 author = "agent"
@@ -35,6 +39,18 @@ task = "shell.exec"
 args = "PORT=5000 BASE_PATH=/ pnpm --filter @workspace/sport-center run dev"
 waitForPort = 5000
 
+[[workflows.workflow]]
+name = "Start API server"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "PORT=8080 pnpm --filter @workspace/api-server run dev"
+waitForPort = 8080
+
+[workflows.workflow.metadata]
+outputType = "console"
+
 [agent]
 stack = "BEST_EFFORT_FALLBACK"
 expertMode = true
@@ -45,7 +61,7 @@ timeoutMs = 20000
 
 [[ports]]
 localPort = 5000
-externalPort = 80
+externalPort = 5000
 
 [[ports]]
 localPort = 8080
@@ -57,15 +73,11 @@ externalPort = 8081
 
 [[ports]]
 localPort = 8082
-externalPort = 3002
-
-[[ports]]
-localPort = 8083
-externalPort = 3003
+externalPort = 3000
 
 [[ports]]
 localPort = 21089
-externalPort = 3000
+externalPort = 80
 
 [userenv]
 
@@ -98,6 +110,7 @@ WATI_BASE_URL = "https://live-mt-server.wati.io/10176503"
 VITE_GOOGLE_CLIENT_ID = "751551151000-fqrgt8si0pgnchqkn3pfo6nmqienv38f.apps.googleusercontent.com"
 
 [userenv.development]
+SUPABASE_DATABASE_URL = "postgresql://postgres.xssrfshdrtdfupgqwfdw:admcst0012026@aws-1-ap-southeast-2.pooler.supabase.com:6543/postgres"
 SUPABASE_SERVICE_ROLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhzc3Jmc2hkcnRkZnVwZ3F3ZmR3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3ODg5NjcyOCwiZXhwIjoyMDk0NDcyNzI4fQ.VFPcBxsVJkYwNo3ojy3uOHglqUA9zILhjw4_0JAhZYI"
 SUPABASE_URL = "https://xssrfshdrtdfupgqwfdw.supabase.co"
 VITE_SUPABASE_URL = "https://xssrfshdrtdfupgqwfdw.supabase.co"

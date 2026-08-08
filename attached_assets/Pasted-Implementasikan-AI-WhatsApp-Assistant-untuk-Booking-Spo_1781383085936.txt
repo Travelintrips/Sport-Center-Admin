@@ -1,0 +1,236 @@
+Implementasikan AI WhatsApp Assistant untuk Booking Sport Center berbasis data database + Fonnte.
+
+Tujuan:
+- Customer bisa bertanya dan booking langsung via WA dengan bahasa bebas.
+- AI menjawab berdasarkan data aplikasi yang ada.
+- AI tidak boleh mengarang jadwal, harga, promo, fasilitas, atau status booking.
+- Admin tetap approve/reject/paid via command WA agar aman.
+
+FASE 1 — AI Knowledge dari Database
+
+1. Audit modul yang sudah ada:
+   - Fonnte webhook
+   - WA service
+   - sport_customers
+   - sport_facilities
+   - sport_bookings
+   - sport_pricing_rules
+   - sport_members
+   - sport_payments
+   - sport_settings
+   - sport_promos
+   - sport_audit_logs
+
+2. Buat service:
+   aiSportCenterService.ts
+
+3. AI hanya boleh menjawab dari data berikut:
+   - daftar fasilitas aktif
+   - harga dari pricing rules
+   - slot kosong dari tabel booking
+   - promo aktif
+   - jam operasional
+   - status booking customer
+   - membership customer
+   - aturan refund/reschedule dari settings
+   - instruksi pembayaran dari settings
+
+4. Tambahkan ENV:
+   OPENAI_API_KEY
+   OPENAI_MODEL=gpt-4o-mini
+   AI_SPORTCENTER_ENABLED=true
+   AI_SPORTCENTER_MAX_REPLY_LENGTH=900
+
+5. Buat guardrail:
+   - Jika data tidak ada, AI harus jawab: “Data belum tersedia di sistem.”
+   - Jika jadwal belum dicek database, AI tidak boleh bilang tersedia.
+   - Jika harga tidak ditemukan, AI tidak boleh membuat estimasi.
+   - Jika customer minta diskon/promo di luar database, AI harus minta admin approval.
+   - AI tidak boleh approve booking.
+   - AI tidak boleh menandai paid.
+   - AI tidak boleh cancel booking tanpa admin command.
+
+6. Semua interaksi AI wajib masuk audit log:
+   - ai_wa_message_received
+   - ai_intent_detected
+   - ai_db_context_loaded
+   - ai_reply_sent
+   - ai_fallback_to_admin
+
+
+FASE 2 — AI Chat Flow Customer via WhatsApp
+
+1. Update endpoint:
+   POST /api/wa/fonnte/webhook
+
+2. Webhook harus membedakan:
+   - pesan customer
+   - command admin
+   - payment proof
+   - pesan tidak dikenal
+
+3. Untuk pesan customer, panggil AI intent classifier.
+
+4. Intent minimal:
+   - ask_facility_list
+   - ask_price
+   - ask_available_slot
+   - create_booking
+   - ask_booking_status
+   - ask_membership
+   - ask_payment_instruction
+   - ask_reschedule_policy
+   - ask_location
+   - ask_operating_hour
+   - talk_to_admin
+
+5. AI harus bisa memahami pesan seperti:
+   - “Ada lapangan badminton kosong malam ini?”
+   - “Saya mau booking futsal besok jam 8 malam 2 jam”
+   - “Harga tennis weekend berapa?”
+   - “Gym masih buka?”
+   - “Booking saya sudah dibayar belum?”
+   - “Saya member gym, masih aktif gak?”
+   - “Bisa booking lapangan yang kosong paling malam?”
+   - “Ada promo hari ini?”
+
+6. Untuk setiap intent, AI wajib ambil data dari database sebelum menjawab.
+
+7. Untuk booking:
+   AI harus mengumpulkan data:
+   - nama customer
+   - nomor WA
+   - fasilitas
+   - tanggal
+   - jam mulai
+   - durasi
+
+8. Jika data belum lengkap, AI bertanya natural:
+   - “Mau booking fasilitas apa?”
+   - “Untuk tanggal berapa?”
+   - “Jam berapa?”
+   - “Durasi berapa jam?”
+   - “Atas nama siapa?”
+
+9. Simpan percakapan sementara di:
+   wa_booking_sessions
+
+10. Setelah data lengkap:
+   - cek jadwal bentrok dari database
+   - hitung harga dari pricing rules
+   - tampilkan ringkasan ke customer
+   - minta konfirmasi customer
+
+11. Format konfirmasi customer:
+   “Saya cek tersedia. Berikut detail booking:
+   Fasilitas:
+   Tanggal:
+   Jam:
+   Durasi:
+   Total:
+   Balas YA untuk lanjut dibuatkan booking.”
+
+12. Jika customer balas YA:
+   - buat booking status = waiting_admin_approval
+   - payment_status = waiting_admin_approval
+   - source = whatsapp_ai
+   - kirim WA ke customer bahwa booking menunggu approval admin
+   - kirim WA approval ke admin
+
+13. Jika jadwal bentrok:
+   - AI jawab jadwal tidak tersedia
+   - tawarkan slot alternatif dari database
+
+14. AI harus bisa menjawab status booking berdasarkan nomor WA customer:
+   - booking aktif
+   - booking pending
+   - booking paid
+   - booking rejected
+   - booking cancelled
+
+
+FASE 3 — Admin Command WA + Payment + BizPortal Monitoring
+
+1. Admin command tetap rule-based, bukan AI.
+
+2. Command admin:
+   - STATUS BK-xxxx
+   - APPROVE BK-xxxx
+   - REJECT BK-xxxx alasan
+   - PAID BK-xxxx
+   - CANCEL BK-xxxx alasan
+   - RESEND BK-xxxx
+   - HELP
+
+3. Hanya nomor di ENV FONNTE_ADMIN_PHONES yang boleh menjalankan command admin.
+
+4. Jika admin approve:
+   - update booking status = pending_payment
+   - payment_status = waiting_payment
+   - approved_at
+   - approved_by_admin_phone
+   - kirim WA customer berisi instruksi pembayaran/link pembayaran
+
+5. Jika admin reject:
+   - update booking status = rejected
+   - simpan rejected_reason
+   - kirim WA customer alasan ditolak
+
+6. Jika admin paid:
+   - update booking status = confirmed
+   - payment_status = paid
+   - paid_at
+   - buat sport_payments
+   - kirim WA customer booking confirmed
+   - kirim WA admin notifikasi paid
+
+7. Jika customer mengirim bukti bayar:
+   - simpan attachment/payment proof
+   - update payment_status = waiting_verification
+   - kirim WA ke admin untuk verifikasi
+   - jangan otomatis paid kecuali payment gateway success
+
+8. Tambahkan menu BizPortal:
+   Sport Center > AI WA Assistant
+
+9. Isi halaman:
+   - histori chat AI
+   - daftar session booking
+   - intent yang terdeteksi
+   - booking dari whatsapp_ai
+   - status approval
+   - tombol approve/reject
+   - tombol ambil alih chat
+   - tombol resend WA
+   - log error AI
+
+10. Tambahkan fallback:
+   Jika AI tidak yakin atau data tidak tersedia:
+   - kirim jawaban sopan ke customer
+   - teruskan chat ke admin
+   - buat log ai_fallback_to_admin
+
+11. Testing wajib:
+   - tanya daftar fasilitas
+   - tanya harga
+   - tanya slot kosong
+   - booking lengkap via bahasa bebas
+   - booking tidak lengkap lalu AI bertanya lanjutan
+   - jadwal bentrok ditolak
+   - slot alternatif muncul
+   - customer balas YA lalu booking dibuat
+   - admin approve via WA
+   - admin reject via WA
+   - customer kirim bukti bayar
+   - admin PAID via WA
+   - AI tidak mengarang harga
+   - AI tidak mengarang jadwal
+   - nomor bukan admin tidak bisa approve
+
+12. Setelah selesai laporkan:
+   - file yang diubah
+   - endpoint baru
+   - tabel baru
+   - ENV baru
+   - prompt system AI
+   - hasil testing

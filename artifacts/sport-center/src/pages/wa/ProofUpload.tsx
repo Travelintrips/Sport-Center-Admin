@@ -99,7 +99,7 @@ export default function WaProofUpload() {
               </p>
             </div>
             <a
-              href={`/wa/status/${orderNumber}`}
+              href={`/status/${orderNumber}`}
               className="block w-full bg-orange-500 hover:bg-orange-600 text-white font-bold py-3 px-4 rounded-lg text-sm transition-colors">
               🔍 Cek Status Booking
             </a>
@@ -143,15 +143,7 @@ export default function WaProofUpload() {
               <Row label="Fasilitas" value={b.facilityName} />
               <Row label="Tanggal" value={b.bookingDate} />
               <Row label="Jam" value={`${b.startTime} – ${b.endTime}`} />
-              {b.ppnAmount != null && Number(b.ppnAmount) > 0 ? (
-                <>
-                  <Row label="Subtotal (DPP)" value={`Rp ${b.totalPrice.toLocaleString("id-ID")}`} />
-                  <Row label={`PPN ${Number(b.ppnRate ?? 11)}%`} value={`+Rp ${Number(b.ppnAmount).toLocaleString("id-ID")}`} />
-                  <Row label="Grand Total" value={`Rp ${Number(b.grandTotal).toLocaleString("id-ID")}`} accent />
-                </>
-              ) : (
-                <Row label="Total" value={`Rp ${b.totalPrice.toLocaleString("id-ID")}`} accent />
-              )}
+              <Row label="Grand Total" value={`Rp ${b.totalPrice.toLocaleString("id-ID")}`} accent />
             </CardContent>
           </Card>
         )}
@@ -173,7 +165,6 @@ export default function WaProofUpload() {
                 ref={fileRef}
                 type="file"
                 accept="image/*"
-                capture="environment"
                 className="hidden"
                 onChange={handleFileChange}
               />

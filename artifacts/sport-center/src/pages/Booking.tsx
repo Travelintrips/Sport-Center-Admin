@@ -9,6 +9,7 @@ import {
   useCreateRecurringBooking,
   useGetMe,
   getGetMeQueryKey,
+  useListVendors,
 } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -32,7 +33,7 @@ import { id as idLocale, enUS } from "date-fns/locale";
 import {
   MapPin, Calendar, Clock, Receipt, ChevronLeft,
   RefreshCw, CheckCircle2, XCircle, AlertTriangle, Loader2, Pencil, X as IconX,
-  Plane, ShieldCheck, User, Building2
+  Plane, ShieldCheck, User, Building2, CreditCard, Banknote, PartyPopper, Tag
 } from "lucide-react";
 import { getToken } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
@@ -65,12 +66,22 @@ export default function Booking() {
   const durationStr = queryParams.get("duration") || "1";
   const duration = parseInt(durationStr) || 1;
   const mode = queryParams.get("mode") || "time_slot";
-  const isWalkIn = mode === "walk_in";
   const urlActivityType = queryParams.get("activityType") || "";
+  const bookingSource = queryParams.get("source") || "";
 
   const { data: facility, isLoading: isLoadingFacility } = useGetFacility(facilityId, {
     query: { enabled: !!facilityId, queryKey: getGetFacilityQueryKey(facilityId) },
   });
+
+  // Keep legacy Gym links correct even when they do not include
+  // mode=walk_in. Older facility rows may still be stored as time_slot.
+  const isGymFacility = Boolean(
+    facility && (
+      /gym|fitness/i.test(facility.name ?? "") ||
+      /gym|fitness/i.test(facility.category ?? "")
+    )
+  );
+  const isWalkIn = mode === "walk_in" || facility?.bookingMode === "walk_in" || isGymFacility;
 
   // --- Auth user ---
   const { data: currentUser, isLoading: isLoadingUser } = useGetMe({
@@ -79,6 +90,8 @@ export default function Booking() {
   const isLoggedIn = !!currentUser && currentUser.role !== "admin";
   // Akun admin_booking: bisa booking atas nama customer lain
   const isAdminBooking = currentUser?.role === "admin_booking";
+  // Akun perusahaan: user IS the company account
+  const isCompanyAccount = (currentUser as any)?.accountType === "company";
 
   // --- Customer selector (hanya untuk admin_booking) ---
   const [customers, setCustomers] = useState<{ id: number; name: string; email: string | null; phone: string | null }[]>([]);
@@ -121,11 +134,16 @@ export default function Booking() {
   }, [isAdminBooking, selectedCustomerId, customers, currentUser]);
   const [notes, setNotes] = useState("");
   const [numberOfPeople, setNumberOfPeople] = useState<string>("1");
+  const [vendorId, setVendorId] = useState<string>("");
+
+  const { data: vendors = [] } = useListVendors();
 
   // --- Booking mode: umum / angkasa_pura / perusahaan ---
-  const [bookingMode, setBookingMode] = useState<"umum" | "angkasa_pura" | "perusahaan">("umum");
+  const [bookingMode, setBookingMode] = useState<"umum" | "angkasa_pura" | "perusahaan" | "event">("umum");
   const isAP = bookingMode === "angkasa_pura";
   const isCompanyMode = bookingMode === "perusahaan";
+  const isEvent = bookingMode === "event";
+  const EVENT_DISCOUNT_RATE = 3 / 14; // ≈ 21.43% — 350.000 → 275.000 tepat
   const [idCardNumber, setIdCardNumber] = useState("");
 
   // --- Company mode state ---
@@ -138,15 +156,33 @@ export default function Booking() {
   const [bookedForName, setBookedForName] = useState("");
   const [isPreparing, setIsPreparing] = useState(false);
 
-  // Fetch daftar perusahaan aktif saat login
+  // Fetch daftar perusahaan aktif saat login (hanya untuk non-company account)
   useEffect(() => {
-    if (!isLoggedIn) return;
+    if (!isLoggedIn || isCompanyAccount) return;
     const token = getToken();
     fetch("/api/companies?status=active", { headers: token ? { Authorization: `Bearer ${token}` } : {} })
       .then((r) => r.json())
       .then((data) => { if (Array.isArray(data)) setCompanies(data); })
       .catch(() => {});
-  }, [isLoggedIn]);
+  }, [isLoggedIn, isCompanyAccount]);
+
+  // Auto-fill company jika user adalah akun perusahaan
+  useEffect(() => {
+    if (isCompanyMode && isCompanyAccount && currentUser) {
+      setSelectedCompanyId(String((currentUser as any).id));
+    }
+  }, [isCompanyMode, isCompanyAccount, currentUser]);
+
+  // Track audit event ketika user ganti payer mode
+  function trackPayerSelection(selection: "personal" | "corporate") {
+    const token = getToken();
+    if (!token) return;
+    fetch("/api/bookings/track-payer-selection", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ selection }),
+    }).catch(() => {});
+  }
 
   // --- Corporate billing ---
   const [isCompanyBilling, setIsCompanyBilling] = useState(false);
@@ -194,22 +230,37 @@ export default function Booking() {
   } | null>(null);
   const [couponError, setCouponError] = useState<string | null>(null);
 
+  // --- DP (Down Payment) ---
+  const [paymentType, setPaymentType] = useState<"full" | "dp">("full");
+  const [dpAmount, setDpAmount] = useState("");
+
   // --- Submit success ---
   const [recurringResult, setRecurringResult] = useState<{
     totalBookings: number;
     grandTotal: number;
     skipped: string[];
     firstOrder?: string;
+    groupRef?: string;
   } | null>(null);
 
   // ---- Single booking ----
   const createBooking = useCreateBooking({
     mutation: {
-      onSuccess: (data: any) => {
+      onSuccess: async (data: any) => {
         if (data.customerAutoCreated) {
           toast({ title: t("Customer baru berhasil dibuat otomatis.", "New customer auto-created."), description: data.customerName });
         } else if (data.customerReused) {
           toast({ title: t("Nomor WA sudah terdaftar, booking menggunakan akun customer yang sudah ada.", "WA number found, using existing customer.") });
+        }
+        if (paymentType === "dp" && dpAmount && data.id) {
+          const parsedDp = parseFloat(dpAmount.replace(/[^0-9]/g, ""));
+          if (parsedDp > 0) {
+            await fetch(`/api/bookings/${data.id}/dp`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ downPaymentAmount: parsedDp }),
+            }).catch(() => {});
+          }
         }
         toast({ title: t("Booking Berhasil", "Booking Successful"), description: t("Silakan lanjutkan ke pembayaran.", "Please proceed to payment.") });
         setLocation(`/booking/${data.orderNumber}`);
@@ -233,6 +284,7 @@ export default function Booking() {
           grandTotal: data.grandTotal,
           skipped: data.skipped,
           firstOrder: data.created[0]?.orderNumber,
+          groupRef: (data as any).groupRef ?? undefined,
         });
       },
       onError: (error: any) => {
@@ -272,13 +324,13 @@ export default function Booking() {
           },
           onError: () => {
             setIsChecking(false);
-            toast({ title: t("Gagal cek jadwal", "Failed to check schedule"), variant: "destructive" });
           },
         }
       );
     }, 400);
     return () => clearTimeout(timer);
-  }, [isRepeat, repeatType, repeatCount, facilityId, date, startTime, duration, checkRecurringMutate, toast]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isRepeat, repeatType, repeatCount, facilityId, date, startTime, duration, checkRecurringMutate]);
 
   // Redirect if missing params
   useEffect(() => {
@@ -312,7 +364,9 @@ export default function Booking() {
     setCouponError(null);
     setCouponResult(null);
     try {
-      const baseAmt = facility ? facility.pricePerHour * duration : 0;
+      const baseAmt = facility
+        ? facility.pricePerHour * (isWalkIn ? bookingPeopleCount : duration)
+        : 0;
       const purchaseAmount = isRepeat ? baseAmt * effectiveCount : baseAmt;
       const res = await fetch("/api/promos/validate-code", {
         method: "POST",
@@ -389,25 +443,50 @@ export default function Booking() {
           return;
         }
 
-        createBooking.mutate({
-          data: {
-            customerName: effName,
-            customerEmail: email || undefined,
-            customerPhone: effPhone,
-            facilityId,
-            bookingDate: date,
-            ...(isWalkIn ? {} : { startTime, durationHours: duration }),
-            activityType: urlActivityType || undefined,
-            numberOfPeople: isWalkIn ? parseInt(numberOfPeople) || 1 : undefined,
-            notes,
-            customerType: "umum",
-            payerType: "company",
-            companyCustomerId: Number(selectedCompanyId),
-            customerId: isAdminBooking ? prepData.customerId : undefined,
-            bookedForName: bookedForName.trim() || effName,
-            bookedForPhone: effPhone,
-          } as any,
-        });
+        if (isRepeat && checkResult && effectiveCount > 0) {
+          createRecurring.mutate({
+            data: {
+              customerName: effName,
+              customerEmail: email || "",
+              customerPhone: effPhone,
+              facilityId,
+              startDate: date,
+              startTime,
+              durationHours: duration,
+              notes,
+              repeatType,
+              repeatCount,
+              specificDates: selectedDates,
+              payerType: "company",
+              companyCustomerId: Number(selectedCompanyId),
+              customerId: isAdminBooking ? prepData.customerId : undefined,
+              bookedForName: bookedForName.trim() || effName,
+              bookedForPhone: effPhone,
+              vendorId: (vendorId && vendorId !== "__none__") ? Number(vendorId) : undefined,
+            } as any,
+          });
+        } else {
+          createBooking.mutate({
+            data: {
+              customerName: effName,
+              customerEmail: email || undefined,
+              customerPhone: effPhone,
+              facilityId,
+              bookingDate: date,
+              ...(isWalkIn ? {} : { startTime, durationHours: duration }),
+              activityType: urlActivityType || undefined,
+              numberOfPeople: isWalkIn ? bookingPeopleCount : undefined,
+              notes,
+              customerType: "umum",
+              payerType: "company",
+              companyCustomerId: Number(selectedCompanyId),
+              customerId: isAdminBooking ? prepData.customerId : undefined,
+              bookedForName: bookedForName.trim() || effName,
+              bookedForPhone: effPhone,
+              vendorId: (vendorId && vendorId !== "__none__") ? Number(vendorId) : undefined,
+            } as any,
+          });
+        }
       } catch {
         toast({ title: t("Gagal menghubungi server", "Failed to reach server"), variant: "destructive" });
       } finally {
@@ -417,8 +496,8 @@ export default function Booking() {
     }
 
     // ─── Mode Umum & Angkasa Pura ────────────────────────────────────────────
-    if (isAdminBooking && !selectedCustomerId) {
-      toast({ title: t("Pilih nama pelanggan", "Select customer name"), description: t("Harap pilih nama dari daftar pelanggan.", "Please select a name from the customer list."), variant: "destructive" });
+    if (isAdminBooking && !selectedCustomerId && !name.trim()) {
+      toast({ title: t("Pilih nama pelanggan", "Select customer name"), description: t("Harap pilih nama dari daftar pelanggan atau ketik nama baru.", "Please select a customer or type a new name."), variant: "destructive" });
       return;
     }
     e.preventDefault();
@@ -436,8 +515,8 @@ export default function Booking() {
       toast({ title: t("Format nomor tidak valid", "Invalid phone format"), description: t("Gunakan format Indonesia, contoh: 08123456789", "Use Indonesian format, e.g. 08123456789"), variant: "destructive" });
       return;
     }
-    if (!email) {
-      toast({ title: t("Form tidak lengkap", "Incomplete form"), description: t("Harap isi semua field yang wajib.", "Please fill in all required fields."), variant: "destructive" });
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      toast({ title: t("Format email tidak valid", "Invalid email format"), description: t("Masukkan email yang benar, contoh: nama@email.com", "Enter a valid email, e.g. nama@email.com"), variant: "destructive" });
       return;
     }
     const normalizedPhone = normalizePhoneInput(phone);
@@ -470,8 +549,14 @@ export default function Booking() {
           repeatCount,
           notes,
           specificDates: selectedDates,
-          promoCode: couponResult?.code || undefined,
-          discountAmountPerSession: discountPerSession || undefined,
+          customerType: bookingMode === "angkasa_pura" ? "angkasa_pura" : "umum",
+          idCardNumber: isAP ? idCardNumber.trim() : undefined,
+          promoCode: isAP || isEvent ? undefined : couponResult?.code || undefined,
+          discountAmountPerSession: isAP || isEvent ? undefined : discountPerSession || undefined,
+          bookingType: isEvent ? "event" : "regular",
+          payerType: isCompanyBilling ? "company" : "personal",
+          companyCustomerId: isCompanyBilling && billingStatus?.companyId ? billingStatus.companyId : undefined,
+          vendorId: vendorId ? Number(vendorId) : undefined,
         } as any,
       });
     } else {
@@ -485,15 +570,18 @@ export default function Booking() {
           bookingDate: date,
           ...(isWalkIn ? {} : { startTime, durationHours: duration }),
           activityType: urlActivityType || undefined,
-          numberOfPeople: isWalkIn ? parseInt(numberOfPeople) || 1 : undefined,
+          numberOfPeople: isWalkIn ? bookingPeopleCount : undefined,
           notes,
           customerType: bookingMode === "angkasa_pura" ? "angkasa_pura" : "umum",
           idCardNumber: isAP ? idCardNumber.trim() : undefined,
-          promoCode: isAP ? undefined : couponResult?.code || undefined,
-          discountAmount: isAP ? undefined : discountPerSession || undefined,
+          promoCode: isAP || isEvent ? undefined : couponResult?.code || undefined,
+          discountAmount: isAP || isEvent ? undefined : discountPerSession || undefined,
+          bookingType: isEvent ? "event" : "regular",
           payerType: isCompanyBilling ? "company" : "personal",
           companyCustomerId: isCompanyBilling && billingStatus?.companyId ? billingStatus.companyId : undefined,
           ...(existingCustomerId ? { customerId: existingCustomerId } : {}),
+          ...(bookingSource ? { source: bookingSource } : {}),
+          vendorId: vendorId ? Number(vendorId) : undefined,
         } as any,
       });
     }
@@ -534,7 +622,12 @@ export default function Booking() {
   const endHours = hours + duration;
   const endTime = `${endHours.toString().padStart(2, "0")}:${(minutes || 0).toString().padStart(2, "0")}`;
 
-  const totalPrice = facility ? facility.pricePerHour * duration : 0;
+  const bookingPeopleCount = isWalkIn
+    ? Math.max(1, Math.min(20, parseInt(numberOfPeople, 10) || 1))
+    : 1;
+  const totalPrice = facility
+    ? facility.pricePerHour * (isWalkIn ? bookingPeopleCount : duration)
+    : 0;
 
   if (isLoadingFacility || isLoadingUser) {
     return (
@@ -557,6 +650,14 @@ export default function Booking() {
         <p className="text-muted-foreground mb-6">
           <span className="font-semibold text-foreground">{recurringResult.totalBookings}</span> {t("booking berhasil dibuat untuk", "bookings successfully created for")} <span className="font-semibold text-foreground">{facility.name}</span>.
         </p>
+        {recurringResult.groupRef && (
+          <div className="mb-4 flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-violet-50 border border-violet-200 dark:bg-violet-900/20 dark:border-violet-700">
+            <span className="text-violet-600 dark:text-violet-400 text-sm font-semibold">
+              🔗 {t("Semua booking digabung dalam 1 grup bayar", "All bookings grouped under one payment group")}:
+            </span>
+            <span className="font-mono font-bold text-violet-700 dark:text-violet-300 text-sm">{recurringResult.groupRef}</span>
+          </div>
+        )}
         <Card className="mb-6 text-left">
           <CardContent className="p-5 space-y-3">
             <div className="flex justify-between text-sm">
@@ -567,6 +668,12 @@ export default function Booking() {
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">{t("Dilewati (konflik)", "Skipped (conflict)")}</span>
                 <span className="text-orange-600 font-semibold">{recurringResult.skipped.length} {t("booking", "bookings")}</span>
+              </div>
+            )}
+            {recurringResult.groupRef && (
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">{t("Kode Grup Bayar", "Payment Group")}</span>
+                <span className="font-mono font-bold text-violet-600">{recurringResult.groupRef}</span>
               </div>
             )}
             <div className="border-t pt-3 flex justify-between font-bold text-lg">
@@ -760,6 +867,22 @@ export default function Booking() {
                     <Input id="phone" required value={phone} onChange={e => setPhone(e.target.value)} placeholder="08123456789" />
                   </div>
                 </div>
+                {vendors.length > 0 && (
+                  <div className="space-y-2">
+                    <Label htmlFor="vendor">{t("Vendor (Opsional)", "Vendor (Optional)")}</Label>
+                    <Select value={vendorId} onValueChange={setVendorId}>
+                      <SelectTrigger id="vendor">
+                        <SelectValue placeholder={t("Pilih vendor...", "Select vendor...")} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">{t("— Tanpa vendor —", "— No vendor —")}</SelectItem>
+                        {vendors.map((v) => (
+                          <SelectItem key={v.id} value={String(v.id)}>{v.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
                 <div className="space-y-2">
                   <Label htmlFor="notes">{t("Catatan Tambahan (Opsional)", "Additional Notes (Optional)")}</Label>
                   <Textarea id="notes" value={notes} onChange={e => setNotes(e.target.value)} placeholder={t("Permintaan khusus...", "Special requests...")} />
@@ -776,10 +899,10 @@ export default function Booking() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className={`grid gap-2 ${isLoggedIn ? "grid-cols-3" : "grid-cols-2"}`}>
+              <div className="grid grid-cols-2 gap-2">
                 <button
                   type="button"
-                  onClick={() => setBookingMode("umum")}
+                  onClick={() => { setBookingMode("umum"); if (isLoggedIn) trackPayerSelection("personal"); }}
                   className={`flex flex-col items-center gap-2 p-3 rounded-lg border text-center transition-colors ${bookingMode === "umum" ? "bg-primary text-primary-foreground border-primary" : "bg-background border-border hover:border-primary/50"}`}
                 >
                   <User size={18} className="shrink-0" />
@@ -790,7 +913,7 @@ export default function Booking() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setBookingMode("angkasa_pura")}
+                  onClick={() => { setBookingMode("angkasa_pura"); if (isLoggedIn) trackPayerSelection("personal"); }}
                   className={`flex flex-col items-center gap-2 p-3 rounded-lg border text-center transition-colors ${isAP ? "bg-primary text-primary-foreground border-primary" : "bg-background border-border hover:border-primary/50"}`}
                 >
                   <Plane size={18} className="shrink-0" />
@@ -799,20 +922,49 @@ export default function Booking() {
                     <div className={`text-xs ${isAP ? "text-primary-foreground/80" : "text-muted-foreground"}`}>{t("Diskon khusus", "Discount")}</div>
                   </div>
                 </button>
+                {isAdminBooking && (
+                  <button
+                    type="button"
+                    onClick={() => { setBookingMode("event"); trackPayerSelection("personal"); }}
+                    className={`flex flex-col items-center gap-2 p-3 rounded-lg border text-center transition-colors ${isEvent ? "bg-purple-600 text-white border-purple-600" : "bg-background border-border hover:border-purple-400/50"}`}
+                  >
+                    <PartyPopper size={18} className="shrink-0" />
+                    <div>
+                      <div className="font-semibold text-xs">{t("Event", "Event")}</div>
+                      <div className={`text-xs ${isEvent ? "text-purple-100" : "text-muted-foreground"}`}>{t("Diskon 21,43%", "21.43% off")}</div>
+                    </div>
+                  </button>
+                )}
                 {isLoggedIn && (
                   <button
                     type="button"
-                    onClick={() => setBookingMode("perusahaan")}
-                    className={`flex flex-col items-center gap-2 p-3 rounded-lg border text-center transition-colors ${isCompanyMode ? "bg-blue-600 text-white border-blue-600" : "bg-background border-border hover:border-blue-400/50"}`}
+                    onClick={() => { setBookingMode("perusahaan"); trackPayerSelection("corporate"); }}
+                    className={`flex flex-col items-center gap-2 p-3 rounded-lg border text-center transition-colors relative ${isCompanyMode ? "bg-blue-600 text-white border-blue-600" : "bg-background border-border hover:border-blue-400/50"}`}
                   >
                     <Building2 size={18} className="shrink-0" />
                     <div>
                       <div className="font-semibold text-xs">{t("Perusahaan", "Company")}</div>
-                      <div className={`text-xs ${isCompanyMode ? "text-blue-100" : "text-muted-foreground"}`}>{t("Tagihan bulanan", "Monthly bill")}</div>
+                      <div className={`text-xs ${isCompanyMode ? "text-blue-100" : "text-muted-foreground"}`}>
+                        {isCompanyAccount
+                          ? t("Tagihan bulanan", "Monthly bill")
+                          : billingStatus?.eligible
+                          ? t("Tagihan bulanan", "Monthly bill")
+                          : t("Perlu verifikasi", "Needs verification")}
+                      </div>
                     </div>
                   </button>
                 )}
               </div>
+
+              {isEvent && (
+                <div className="flex items-center gap-2 rounded-lg bg-purple-50 border border-purple-200 px-3 py-2.5 text-sm">
+                  <Tag size={14} className="shrink-0 text-purple-600" />
+                  <div>
+                    <span className="font-semibold text-purple-800">{t("Diskon Event 21,4% sudah diterapkan", "21.4% Event Discount Applied")}</span>
+                    <div className="text-xs text-purple-600 mt-0.5">{t("Diskon 21,43% otomatis diterapkan untuk booking event.", "21.43% discount automatically applied for event bookings.")}</div>
+                  </div>
+                </div>
+              )}
 
               {isAP && (
                 <div className="space-y-2">
@@ -845,48 +997,58 @@ export default function Booking() {
                 {/* Company Selector */}
                 <div className="space-y-2">
                   <Label>{t("Nama Perusahaan", "Company Name")} <span className="text-destructive">*</span></Label>
-                  <Popover open={companyComboOpen} onOpenChange={setCompanyComboOpen}>
-                    <PopoverTrigger asChild>
-                      <button
-                        type="button"
-                        role="combobox"
-                        aria-expanded={companyComboOpen}
-                        className="w-full flex items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 h-10"
-                      >
-                        <span className={!selectedCompanyId ? "text-muted-foreground" : ""}>
-                          {selectedCompanyId
-                            ? (companies.find((c) => String(c.id) === selectedCompanyId)?.companyName || companies.find((c) => String(c.id) === selectedCompanyId)?.name || t("Pilih perusahaan...", "Select company..."))
-                            : t("Pilih perusahaan...", "Select company...")}
-                        </span>
-                        <ChevronsUpDown size={14} className="ml-2 shrink-0 text-muted-foreground" />
-                      </button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-full p-0" align="start">
-                      <Command>
-                        <CommandInput placeholder={t("Cari perusahaan...", "Search company...")} />
-                        <CommandList>
-                          <CommandEmpty>{t("Perusahaan tidak ditemukan.", "Company not found.")}</CommandEmpty>
-                          <CommandGroup>
-                            {companies.map((c) => (
-                              <CommandItem
-                                key={c.id}
-                                value={c.companyName || c.name}
-                                onSelect={() => { setSelectedCompanyId(String(c.id)); setCompanyComboOpen(false); }}
-                              >
-                                <Check size={14} className={`mr-2 ${selectedCompanyId === String(c.id) ? "opacity-100" : "opacity-0"}`} />
-                                <div>
-                                  <div className="font-medium text-sm">{c.companyName || c.name}</div>
-                                  {c.picName && <div className="text-xs text-muted-foreground">PIC: {c.picName}</div>}
-                                  {!c.allowMonthlyBilling && <div className="text-xs text-orange-500">{t("Billing belum aktif", "Billing not active")}</div>}
-                                </div>
-                              </CommandItem>
-                            ))}
-                          </CommandGroup>
-                        </CommandList>
-                      </Command>
-                    </PopoverContent>
-                  </Popover>
-                  {companies.length === 0 && (
+                  {isCompanyAccount ? (
+                    <div className="flex items-center gap-2 rounded-md border border-input bg-muted/50 px-3 py-2 h-10">
+                      <Building2 size={14} className="text-blue-600 shrink-0" />
+                      <span className="text-sm font-medium">
+                        {(currentUser as any)?.companyName || currentUser?.name || t("Perusahaan Anda", "Your Company")}
+                      </span>
+                      <Badge variant="outline" className="ml-auto text-xs text-blue-600 border-blue-300 bg-blue-50">{t("Akun Perusahaan", "Company Account")}</Badge>
+                    </div>
+                  ) : (
+                    <Popover open={companyComboOpen} onOpenChange={setCompanyComboOpen}>
+                      <PopoverTrigger asChild>
+                        <button
+                          type="button"
+                          role="combobox"
+                          aria-expanded={companyComboOpen}
+                          className="w-full flex items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 h-10"
+                        >
+                          <span className={!selectedCompanyId ? "text-muted-foreground" : ""}>
+                            {selectedCompanyId
+                              ? (companies.find((c) => String(c.id) === selectedCompanyId)?.companyName || companies.find((c) => String(c.id) === selectedCompanyId)?.name || t("Pilih perusahaan...", "Select company..."))
+                              : t("Pilih perusahaan...", "Select company...")}
+                          </span>
+                          <ChevronsUpDown size={14} className="ml-2 shrink-0 text-muted-foreground" />
+                        </button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-full p-0" align="start">
+                        <Command>
+                          <CommandInput placeholder={t("Cari perusahaan...", "Search company...")} />
+                          <CommandList>
+                            <CommandEmpty>{t("Perusahaan tidak ditemukan.", "Company not found.")}</CommandEmpty>
+                            <CommandGroup>
+                              {companies.map((c) => (
+                                <CommandItem
+                                  key={c.id}
+                                  value={c.companyName || c.name}
+                                  onSelect={() => { setSelectedCompanyId(String(c.id)); setCompanyComboOpen(false); }}
+                                >
+                                  <Check size={14} className={`mr-2 ${selectedCompanyId === String(c.id) ? "opacity-100" : "opacity-0"}`} />
+                                  <div>
+                                    <div className="font-medium text-sm">{c.companyName || c.name}</div>
+                                    {c.picName && <div className="text-xs text-muted-foreground">PIC: {c.picName}</div>}
+                                    {!c.allowMonthlyBilling && <div className="text-xs text-orange-500">{t("Billing belum aktif", "Billing not active")}</div>}
+                                  </div>
+                                </CommandItem>
+                              ))}
+                            </CommandGroup>
+                          </CommandList>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
+                  )}
+                  {!isCompanyAccount && companies.length === 0 && (
                     <p className="text-xs text-muted-foreground">{t("Belum ada perusahaan aktif terdaftar.", "No active companies registered yet.")}</p>
                   )}
                 </div>
@@ -935,13 +1097,31 @@ export default function Booking() {
                   </div>
                 </div>
 
+                {/* Warning: belum diverifikasi sebagai karyawan (hanya untuk non-company account) */}
+                {!isCompanyAccount && !billingStatus?.eligible && (
+                  <div className="flex items-start gap-2 text-xs bg-orange-50 border border-orange-200 rounded-md p-3">
+                    <AlertTriangle size={13} className="mt-0.5 shrink-0 text-orange-500" />
+                    <span className="text-orange-700">
+                      {t(
+                        "Akun Anda belum terverifikasi sebagai karyawan perusahaan. Status booking akan menjadi Menunggu Konfirmasi dan perlu approval admin.",
+                        "Your account is not yet verified as a company employee. Booking status will be Waiting Confirmation and requires admin approval."
+                      )}
+                    </span>
+                  </div>
+                )}
+
                 <div className="flex items-start gap-2 text-xs text-muted-foreground bg-blue-50 border border-blue-200 rounded-md p-3">
                   <AlertTriangle size={13} className="mt-0.5 shrink-0 text-blue-500" />
                   <span>
-                    {t(
-                      "Booking akan ditagihkan ke perusahaan. Jika verifikasi belum selesai, status booking menjadi Menunggu Konfirmasi.",
-                      "Booking will be billed to the company. If verification is pending, booking status will be Waiting Confirmation."
-                    )}
+                    {billingStatus?.eligible
+                      ? t(
+                          "Booking akan ditagihkan ke perusahaan. Tidak perlu bayar sekarang — masuk dalam tagihan bulanan.",
+                          "Booking will be billed to the company. No payment needed now — included in monthly billing."
+                        )
+                      : t(
+                          "Booking akan ditagihkan ke perusahaan. Jika verifikasi belum selesai, status booking menjadi Menunggu Konfirmasi.",
+                          "Booking will be billed to the company. If verification is pending, booking status will be Waiting Confirmation."
+                        )}
                   </span>
                 </div>
               </CardContent>
@@ -949,7 +1129,7 @@ export default function Booking() {
           )}
 
           {/* Corporate Billing */}
-          {isLoggedIn && billingStatus?.eligible && !isAP && !isCompanyMode && (
+          {isLoggedIn && billingStatus?.eligible && !isAP && !isCompanyMode && !isEvent && (
             <Card className={isCompanyBilling ? "border-primary/40 bg-primary/5" : ""}>
               <CardContent className="p-4">
                 <label className="flex items-start gap-3 cursor-pointer">
@@ -977,7 +1157,7 @@ export default function Booking() {
           )}
 
           {/* Coupon Code */}
-          {!isAP && (
+          {!isAP && !isEvent && (
           <Card className={couponResult ? "border-green-300 bg-green-50/50" : ""}>
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
@@ -1036,7 +1216,6 @@ export default function Booking() {
           )}
 
           {/* Repeat Booking */}
-          {!isAP && (
           <Card className={isRepeat ? "border-primary/40 bg-primary/5" : ""}>
             <CardHeader className="pb-4">
               <div className="flex items-center gap-3">
@@ -1261,7 +1440,65 @@ export default function Booking() {
               </CardContent>
             )}
           </Card>
-          )}
+
+          {/* Down Payment Option */}
+          <Card className={paymentType === "dp" ? "border-violet-300 bg-violet-50/50 dark:bg-violet-900/10" : ""}>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Banknote size={16} className="text-primary" /> {t("Pilihan Pembayaran", "Payment Option")}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPaymentType("full")}
+                    className={`flex items-center justify-center gap-2 py-3 rounded-xl border-2 text-sm font-semibold transition-all ${paymentType === "full" ? "border-primary bg-primary text-primary-foreground" : "border-border hover:border-primary/50 bg-background"}`}
+                  >
+                    <CheckCircle2 size={15} />
+                    {t("Bayar Penuh", "Full Payment")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPaymentType("dp")}
+                    className={`flex items-center justify-center gap-2 py-3 rounded-xl border-2 text-sm font-semibold transition-all ${paymentType === "dp" ? "border-violet-500 bg-violet-600 text-white" : "border-border hover:border-violet-400/60 bg-background"}`}
+                  >
+                    <CreditCard size={15} />
+                    {t("Bayar DP", "Down Payment")}
+                  </button>
+                </div>
+                {paymentType === "dp" && (
+                  <div className="space-y-2.5 pt-1">
+                    <div className="space-y-1.5">
+                      <Label className="text-sm font-semibold">{t("Jumlah Down Payment", "Down Payment Amount")} <span className="text-destructive">*</span></Label>
+                      <Input
+                        type="text"
+                        inputMode="numeric"
+                        value={dpAmount ? Number(dpAmount).toLocaleString("id-ID") : ""}
+                        onChange={(e) => setDpAmount(e.target.value.replace(/[^0-9]/g, ""))}
+                        placeholder="Contoh: 150.000"
+                        className="font-mono"
+                      />
+                    </div>
+                    {dpAmount && Number(dpAmount) > 0 && (
+                      <div className="text-sm bg-violet-50 dark:bg-violet-900/20 border border-violet-200 dark:border-violet-800 rounded-lg p-3 space-y-1.5">
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">{t("DP Dibayar Sekarang", "DP Paid Now")}</span>
+                          <span className="font-bold text-violet-700 dark:text-violet-300">Rp {Number(dpAmount).toLocaleString("id-ID")}</span>
+                        </div>
+                        {facility && (
+                          <div className="flex justify-between border-t border-violet-200 dark:border-violet-800 pt-1.5">
+                            <span className="text-muted-foreground">{t("Sisa Pembayaran", "Remaining")}</span>
+                            <span className="font-bold text-foreground">Rp {Math.max(0, totalPrice - Number(dpAmount)).toLocaleString("id-ID")}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    <p className="text-xs text-muted-foreground">{t("Sisa pembayaran harus dilunasi sebelum sesi dimulai.", "Remaining payment must be settled before the session starts.")}</p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
 
           {/* Submit Button (mobile) */}
           <div className="lg:hidden">
@@ -1354,13 +1591,22 @@ export default function Booking() {
 
               <div className="border-t pt-4 space-y-2 text-sm">
                 <div className="flex justify-between">
-                  <span className="text-muted-foreground">{t("Harga/jam", "Price/hour")}</span>
+                  <span className="text-muted-foreground">
+                    {isWalkIn ? t("Harga/orang", "Price/person") : t("Harga/jam", "Price/hour")}
+                  </span>
                   <span>{formatCurrency(facility.pricePerHour)}</span>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">{t("Durasi", "Duration")}</span>
-                  <span>× {duration} {t("jam", "hours")}</span>
-                </div>
+                {isWalkIn ? (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">{t("Jumlah orang", "People")}</span>
+                    <span>× {bookingPeopleCount} {t("orang", "people")}</span>
+                  </div>
+                ) : (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">{t("Durasi", "Duration")}</span>
+                    <span>× {duration} {t("jam", "hours")}</span>
+                  </div>
+                )}
                 {isRepeat && (
                   <>
                     <div className="flex justify-between">
@@ -1378,7 +1624,31 @@ export default function Booking() {
                     </div>
                   </>
                 )}
-                {couponResult && (
+                {isAP && (
+                  <div className="flex items-start gap-1.5 text-xs text-orange-600 bg-orange-50 border border-orange-200 rounded-md px-2.5 py-2">
+                    <AlertTriangle size={12} className="shrink-0 mt-0.5" />
+                    <span>{t("Diskon AP2 diterapkan setelah verifikasi ID Card.", "AP2 discount applied after ID Card verification.")}</span>
+                  </div>
+                )}
+                {isEvent && (() => {
+                  const eventDisc = Math.round(totalPrice * EVENT_DISCOUNT_RATE);
+                  const eventDiscRepeat = isRepeat
+                    ? Math.round((checkResult ? effectiveTotalPrice : totalPrice * repeatCount) * EVENT_DISCOUNT_RATE)
+                    : eventDisc;
+                  return (
+                    <>
+                      <div className="flex justify-between text-muted-foreground text-sm">
+                        <span>{t("Harga Normal", "Normal Price")}</span>
+                        <span className="line-through">{isRepeat ? (isChecking ? "..." : formatCurrency(checkResult ? effectiveTotalPrice : totalPrice * repeatCount)) : formatCurrency(totalPrice)}</span>
+                      </div>
+                      <div className="flex justify-between text-purple-700 font-medium">
+                        <span className="flex items-center gap-1"><Tag size={12} /> {t("Diskon Event 21,43%", "Event Discount 21.43%")}</span>
+                        <span>−{isRepeat ? (isChecking ? "..." : formatCurrency(eventDiscRepeat)) : formatCurrency(eventDisc)}</span>
+                      </div>
+                    </>
+                  );
+                })()}
+                {couponResult && !isEvent && (
                   <div className="flex justify-between text-green-700 font-medium">
                     <span className="flex items-center gap-1">
                       <Receipt size={12} /> {t("Diskon", "Discount")} ({couponResult.code})
@@ -1387,32 +1657,23 @@ export default function Booking() {
                   </div>
                 )}
                 {(() => {
-                  const PPN_RATE = 0.11;
-                  const disc = couponResult?.discountAmount ?? 0;
-                  const dpp = isRepeat
+                  const disc = isEvent
+                    ? (isRepeat
+                        ? Math.round((checkResult ? effectiveTotalPrice : totalPrice * repeatCount) * EVENT_DISCOUNT_RATE)
+                        : Math.round(totalPrice * EVENT_DISCOUNT_RATE))
+                    : (couponResult?.discountAmount ?? 0);
+                  const grand = isRepeat
                     ? (isChecking ? null : Math.max(0, (checkResult ? effectiveTotalPrice : totalPrice * repeatCount) - disc))
                     : Math.max(0, totalPrice - disc);
-                  const ppn = dpp == null ? null : Math.round(dpp * PPN_RATE);
-                  const grand = dpp == null || ppn == null ? null : dpp + ppn;
                   return (
                     <>
-                      <div className="pt-2 border-t space-y-1.5">
-                        <div className="flex justify-between text-muted-foreground">
-                          <span>DPP</span>
-                          <span>{dpp == null ? "..." : formatCurrency(dpp)}</span>
-                        </div>
-                        <div className="flex justify-between text-orange-600">
-                          <span>PPN 11%</span>
-                          <span>{ppn == null ? "..." : `+${formatCurrency(ppn)}`}</span>
-                        </div>
-                      </div>
                       <div className="flex justify-between font-bold text-lg pt-2 border-t">
                         <span>{t("Grand Total", "Grand Total")}</span>
                         <span className="text-primary">{grand == null ? "..." : formatCurrency(grand)}</span>
                       </div>
                       {isRepeat && !isChecking && checkResult && effectiveCount > 0 && (
                         <div className="text-xs text-muted-foreground text-right">
-                          {effectiveCount} {t("sesi", "sessions")} × {formatCurrency(dpp! / effectiveCount)} DPP + PPN 11%
+                          {effectiveCount} {t("sesi", "sessions")} × {formatCurrency(grand! / effectiveCount)}
                         </div>
                       )}
                     </>

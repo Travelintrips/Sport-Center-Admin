@@ -1,6 +1,6 @@
 import { useState } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useListMemberships, useUpdateMembership, useDeleteMembership, getListMembershipsQueryKey } from "@workspace/api-client-react";
-import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -10,7 +10,16 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { Users, Search, Trash2, CheckCircle, Dumbbell, Clock, XCircle, ImageIcon, ExternalLink } from "lucide-react";
+import { Users, Search, Trash2, CheckCircle, Dumbbell, Clock, XCircle, ImageIcon, ExternalLink, LogIn, CalendarCheck, BadgeCheck, Download } from "lucide-react";
+import { Label } from "@/components/ui/label";
+import { getToken } from "@/lib/auth";
+
+const API = import.meta.env.VITE_API_BASE_URL ?? "/api";
+const authHeaders = () => ({ Authorization: `Bearer ${getToken()}`, "Content-Type": "application/json" });
+
+function todayStr() {
+  return new Date().toISOString().split("T")[0]!;
+}
 
 function formatCurrency(n: number) {
   return new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(n);
@@ -25,6 +34,16 @@ function StatusBadge({ status }: { status: string }) {
   return <Badge variant="outline">{status}</Badge>;
 }
 
+interface Checkin {
+  id: number;
+  membershipId: number;
+  checkinDate: string;
+  checkedInAt: string;
+  notes: string | null;
+  memberName: string | null;
+  memberPhone: string | null;
+}
+
 export default function AdminMemberships() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -35,7 +54,92 @@ export default function AdminMemberships() {
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const [imgError, setImgError] = useState(false);
 
+  // Export CSV
+  const now = new Date();
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [exportMonth, setExportMonth] = useState(String(now.getMonth() + 1).padStart(2, "0"));
+  const [exportYear, setExportYear] = useState(String(now.getFullYear()));
+  const [exportAllData, setExportAllData] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+
+  const MONTHS = [
+    { value: "01", label: "Januari" }, { value: "02", label: "Februari" },
+    { value: "03", label: "Maret" }, { value: "04", label: "April" },
+    { value: "05", label: "Mei" }, { value: "06", label: "Juni" },
+    { value: "07", label: "Juli" }, { value: "08", label: "Agustus" },
+    { value: "09", label: "September" }, { value: "10", label: "Oktober" },
+    { value: "11", label: "November" }, { value: "12", label: "Desember" },
+  ];
+  const YEARS = Array.from({ length: 5 }, (_, i) => String(now.getFullYear() - 2 + i));
+
+  const handleExportCsv = async () => {
+    const token = getToken();
+    setIsExporting(true);
+    try {
+      let url = `${API}/memberships/export`;
+      let filename = "members-gym.csv";
+      if (!exportAllData) {
+        const lastDay = new Date(Number(exportYear), Number(exportMonth), 0).getDate();
+        const startDate = `${exportYear}-${exportMonth}-01`;
+        const endDate = `${exportYear}-${exportMonth}-${String(lastDay).padStart(2, "0")}`;
+        const monthName = MONTHS.find((m) => m.value === exportMonth)?.label ?? exportMonth;
+        filename = `members-gym-${monthName}-${exportYear}.csv`;
+        url += `?startDate=${startDate}&endDate=${endDate}`;
+      }
+      const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+      const blob = await r.blob();
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = filename;
+      a.click();
+      setShowExportModal(false);
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const today = todayStr();
+
   const { data: memberships, isLoading } = useListMemberships({});
+
+  // Check-in hari ini
+  const { data: rawCheckins } = useQuery<Checkin[]>({
+    queryKey: ["gym-checkins", today],
+    queryFn: () =>
+      fetch(`${API}/memberships/checkins?date=${today}`, { headers: authHeaders() }).then((r) => r.json()),
+    refetchInterval: 30000,
+  });
+  const checkins: Checkin[] = Array.isArray(rawCheckins) ? rawCheckins : [];
+
+  const checkedInIds = new Set(checkins.map((c) => c.membershipId));
+  const checkinById = new Map(checkins.map((c) => [c.membershipId, c]));
+
+  const checkInMutation = useMutation({
+    mutationFn: (id: number) =>
+      fetch(`${API}/memberships/${id}/checkin`, {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ checkinDate: today }),
+      }).then(async (r) => {
+        if (!r.ok) throw new Error((await r.json()).error ?? "Gagal check-in");
+        return r.json();
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["gym-checkins", today] });
+      toast({ title: "Check-in berhasil ✅" });
+    },
+    onError: (err: any) => toast({ title: err.message || "Gagal check-in", variant: "destructive" }),
+  });
+
+  const undoCheckinMutation = useMutation({
+    mutationFn: (checkinId: number) =>
+      fetch(`${API}/memberships/checkins/${checkinId}`, { method: "DELETE", headers: authHeaders() }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["gym-checkins", today] });
+      toast({ title: "Check-in dibatalkan" });
+    },
+    onError: () => toast({ title: "Gagal membatalkan check-in", variant: "destructive" }),
+  });
 
   const updateMutation = useUpdateMembership({
     mutation: {
@@ -44,7 +148,7 @@ export default function AdminMemberships() {
         toast({ title: "Status berhasil diperbarui" });
         setViewMember(null);
       },
-      onError: () => { toast({ title: "Gagal memperbarui", variant: "destructive" }); },
+      onError: () => toast({ title: "Gagal memperbarui", variant: "destructive" }),
     },
   });
 
@@ -55,23 +159,24 @@ export default function AdminMemberships() {
         toast({ title: "Member berhasil dihapus" });
         setDeleteId(null);
       },
-      onError: () => { toast({ title: "Gagal menghapus", variant: "destructive" }); },
+      onError: () => toast({ title: "Gagal menghapus", variant: "destructive" }),
     },
   });
 
   const filtered = (memberships || []).filter((m) => {
-    const matchSearch = !search || m.name.toLowerCase().includes(search.toLowerCase()) || m.email.toLowerCase().includes(search.toLowerCase()) || m.phone.includes(search);
+    const matchSearch = !search ||
+      (m.name ?? "").toLowerCase().includes(search.toLowerCase()) ||
+      (m.email ?? "").toLowerCase().includes(search.toLowerCase()) ||
+      (m.phone ?? "").includes(search);
     const matchStatus = filterStatus === "all" || m.status === filterStatus;
     return matchSearch && matchStatus;
   });
 
   const totalActive = (memberships || []).filter((m) => m.status === "active").length;
   const totalPending = (memberships || []).filter((m) => m.status === "waiting_confirmation" || m.status === "pending_payment").length;
-  const totalRevenue = (memberships || []).filter((m) => m.status === "active" || m.status === "expired").reduce((s, m) => s + m.totalPrice, 0);
-
-  function handleUpdateStatus(id: number, status: string) {
-    updateMutation.mutate({ id, data: { status: status as any } });
-  }
+  const totalRevenue = (memberships || [])
+    .filter((m) => m.status === "active" || m.status === "expired")
+    .reduce((s, m) => s + m.totalPrice, 0);
 
   function openMember(m: any) {
     setViewMember(m);
@@ -80,17 +185,105 @@ export default function AdminMemberships() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-3">
-        <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
-          <Dumbbell size={22} />
+      {/* Header */}
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
+            <Dumbbell size={22} />
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">Member Gym Bulanan</h1>
+            <p className="text-muted-foreground text-sm">Kelola data member gym per bulan</p>
+          </div>
         </div>
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Member Gym Bulanan</h1>
-          <p className="text-muted-foreground text-sm">Kelola data member gym per bulan</p>
-        </div>
+        <button
+          onClick={() => setShowExportModal(true)}
+          className="flex items-center gap-1.5 h-9 px-3 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+        >
+          <Download size={13} />
+          Ekspor CSV
+        </button>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      {/* Modal Export CSV */}
+      <Dialog open={showExportModal} onOpenChange={setShowExportModal}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <Download size={16} className="text-slate-500" />
+              Ekspor CSV Member Gym
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-1">
+            <div className="flex items-center gap-3 p-3 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700">
+              <input
+                type="checkbox"
+                id="export-all-gym"
+                checked={exportAllData}
+                onChange={(e) => setExportAllData(e.target.checked)}
+                className="w-4 h-4 rounded accent-emerald-500"
+              />
+              <Label htmlFor="export-all-gym" className="text-sm cursor-pointer">
+                Ekspor semua data (tanpa filter bulan)
+              </Label>
+            </div>
+
+            {!exportAllData && (
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-slate-500">Bulan</Label>
+                    <Select value={exportMonth} onValueChange={setExportMonth}>
+                      <SelectTrigger className="h-9 text-sm">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {MONTHS.map((m) => (
+                          <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-slate-500">Tahun</Label>
+                    <Select value={exportYear} onValueChange={setExportYear}>
+                      <SelectTrigger className="h-9 text-sm">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {YEARS.map((y) => (
+                          <SelectItem key={y} value={y}>{y}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <p className="text-xs text-slate-400 dark:text-slate-500">
+                  Mengekspor member dengan tanggal mulai di bulan{" "}
+                  {MONTHS.find((m) => m.value === exportMonth)?.label} {exportYear}.
+                </p>
+              </div>
+            )}
+
+            <div className="flex gap-2 pt-1">
+              <Button variant="outline" className="flex-1 h-9 text-sm" onClick={() => setShowExportModal(false)}>
+                Batal
+              </Button>
+              <Button
+                className="flex-1 h-9 text-sm gap-1.5 bg-emerald-600 hover:bg-emerald-700"
+                onClick={handleExportCsv}
+                disabled={isExporting}
+              >
+                <Download size={14} />
+                {isExporting ? "Mengunduh..." : "Unduh CSV"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Stat cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <Card>
           <CardContent className="p-5 flex items-center gap-4">
             <div className="w-10 h-10 rounded-lg bg-green-100 flex items-center justify-center text-green-600">
@@ -109,7 +302,7 @@ export default function AdminMemberships() {
             </div>
             <div>
               <div className="text-2xl font-bold">{totalPending}</div>
-              <div className="text-sm text-muted-foreground">Menunggu Konfirmasi</div>
+              <div className="text-sm text-muted-foreground">Menunggu</div>
             </div>
           </CardContent>
         </Card>
@@ -119,13 +312,52 @@ export default function AdminMemberships() {
               <Users size={20} />
             </div>
             <div>
-              <div className="text-lg font-bold">{formatCurrency(totalRevenue)}</div>
+              <div className="text-base font-bold leading-tight">{formatCurrency(totalRevenue)}</div>
               <div className="text-sm text-muted-foreground">Total Revenue</div>
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="border-blue-200 bg-blue-50/50">
+          <CardContent className="p-5 flex items-center gap-4">
+            <div className="w-10 h-10 rounded-lg bg-blue-100 flex items-center justify-center text-blue-600">
+              <CalendarCheck size={20} />
+            </div>
+            <div>
+              <div className="text-2xl font-bold text-blue-700">{checkins.length}</div>
+              <div className="text-sm text-muted-foreground">Check-in Hari Ini</div>
             </div>
           </CardContent>
         </Card>
       </div>
 
+      {/* Daftar check-in hari ini */}
+      {checkins.length > 0 && (
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <CalendarCheck size={15} className="text-blue-600" />
+              <span className="font-semibold text-sm">Hadir Hari Ini — {today}</span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {checkins.map((c) => (
+                <Badge
+                  key={c.id}
+                  variant="outline"
+                  className="bg-green-50 border-green-200 text-green-800 gap-1 py-1 px-3"
+                >
+                  <CheckCircle size={11} />
+                  {c.memberName}
+                  <span className="text-green-600 ml-1 text-xs opacity-70">
+                    {new Date(c.checkedInAt).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}
+                  </span>
+                </Badge>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Filter */}
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1">
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
@@ -151,6 +383,7 @@ export default function AdminMemberships() {
         </Select>
       </div>
 
+      {/* Tabel member */}
       {isLoading ? (
         <div className="space-y-3">
           {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-20 w-full rounded-xl" />)}
@@ -171,56 +404,98 @@ export default function AdminMemberships() {
                 <th className="text-left px-4 py-3 font-semibold hidden sm:table-cell">Periode</th>
                 <th className="text-left px-4 py-3 font-semibold hidden lg:table-cell">Bayar</th>
                 <th className="text-left px-4 py-3 font-semibold">Status</th>
+                <th className="text-center px-4 py-3 font-semibold">Check-in</th>
                 <th className="text-right px-4 py-3 font-semibold">Aksi</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {filtered.map((m) => (
-                <tr key={m.id} className="hover:bg-muted/30 transition-colors">
-                  <td className="px-4 py-4">
-                    <div className="font-medium">{m.name}</div>
-                    <div className="text-xs text-muted-foreground md:hidden">{m.email}</div>
-                  </td>
-                  <td className="px-4 py-4 hidden md:table-cell">
-                    <div>{m.email}</div>
-                    <div className="text-xs text-muted-foreground">{m.phone}</div>
-                  </td>
-                  <td className="px-4 py-4 hidden sm:table-cell">
-                    <div>{m.startDate}</div>
-                    <div className="text-xs text-muted-foreground">s/d {m.endDate}</div>
-                  </td>
-                  <td className="px-4 py-4 hidden lg:table-cell font-semibold text-primary">
-                    {formatCurrency(m.totalPrice)}
-                    <div className="text-xs font-normal text-muted-foreground">{m.months} bulan</div>
-                  </td>
-                  <td className="px-4 py-4">
-                    <StatusBadge status={m.status} />
-                    {(m as any).paymentMethod && (
-                      <div className="text-xs text-muted-foreground mt-1">{(m as any).paymentMethod === "qris" ? "QRIS" : "Transfer"}</div>
-                    )}
-                  </td>
-                  <td className="px-4 py-4">
-                    <div className="flex items-center justify-end gap-1">
-                      <Button size="sm" variant="ghost" onClick={() => openMember(m)}>
-                        Detail
-                      </Button>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                        onClick={() => setDeleteId(m.id)}
-                      >
-                        <Trash2 size={15} />
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              {filtered.map((m) => {
+                const isCheckedIn = checkedInIds.has(m.id);
+                const checkin = checkinById.get(m.id);
+                return (
+                  <tr
+                    key={m.id}
+                    className={`hover:bg-muted/30 transition-colors ${isCheckedIn ? "bg-green-50/40" : ""}`}
+                  >
+                    <td className="px-4 py-4">
+                      <div className="font-medium">{m.name}</div>
+                      <div className="text-xs text-muted-foreground md:hidden">{m.email}</div>
+                    </td>
+                    <td className="px-4 py-4 hidden md:table-cell">
+                      <div>{m.email}</div>
+                      <div className="text-xs text-muted-foreground">{m.phone}</div>
+                    </td>
+                    <td className="px-4 py-4 hidden sm:table-cell">
+                      <div>{m.startDate}</div>
+                      <div className="text-xs text-muted-foreground">s/d {m.endDate}</div>
+                    </td>
+                    <td className="px-4 py-4 hidden lg:table-cell font-semibold text-primary">
+                      {formatCurrency(m.totalPrice)}
+                      <div className="text-xs font-normal text-muted-foreground">{m.months} bulan</div>
+                    </td>
+                    <td className="px-4 py-4">
+                      <StatusBadge status={m.status} />
+                      {(m as any).paymentMethod && (
+                        <div className="text-xs text-muted-foreground mt-1">
+                          {(m as any).paymentMethod === "qris" ? "QRIS" : "Transfer"}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-4 py-4 text-center">
+                      {m.status === "active" ? (
+                        isCheckedIn ? (
+                          <div className="flex flex-col items-center gap-1">
+                            <Badge className="bg-green-100 text-green-700 border-green-200 gap-1 text-xs">
+                              <CheckCircle size={10} /> Hadir
+                            </Badge>
+                            <button
+                              className="text-xs text-muted-foreground hover:text-destructive underline leading-none"
+                              onClick={() => checkin && undoCheckinMutation.mutate(checkin.id)}
+                              disabled={undoCheckinMutation.isPending}
+                            >
+                              Batal
+                            </button>
+                          </div>
+                        ) : (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="gap-1 border-blue-300 text-blue-700 hover:bg-blue-50"
+                            disabled={checkInMutation.isPending}
+                            onClick={() => checkInMutation.mutate(m.id)}
+                          >
+                            <LogIn size={13} />
+                            Check In
+                          </Button>
+                        )
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-4">
+                      <div className="flex items-center justify-end gap-1">
+                        <Button size="sm" variant="ghost" onClick={() => openMember(m)}>
+                          Detail
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                          onClick={() => setDeleteId(m.id)}
+                        >
+                          <Trash2 size={15} />
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
       )}
 
+      {/* Dialog detail member */}
       {viewMember && (
         <Dialog open={!!viewMember} onOpenChange={() => setViewMember(null)}>
           <DialogContent className="max-w-md">
@@ -248,13 +523,23 @@ export default function AdminMemberships() {
                 {viewMember.paymentMethod && (
                   <>
                     <div className="text-muted-foreground">Metode Bayar</div>
-                    <div className="font-medium">{viewMember.paymentMethod === "qris" ? "QRIS" : "Transfer Bank"}</div>
+                    <div className="font-medium">
+                      {viewMember.paymentMethod === "qris" ? "QRIS" : "Transfer Bank"}
+                    </div>
                   </>
                 )}
                 {viewMember.notes && (
                   <>
                     <div className="text-muted-foreground">Catatan</div>
                     <div className="text-sm">{viewMember.notes}</div>
+                  </>
+                )}
+                {checkedInIds.has(viewMember.id) && (
+                  <>
+                    <div className="text-muted-foreground">Check-in Hari Ini</div>
+                    <div className="text-green-700 font-medium flex items-center gap-1">
+                      <CheckCircle size={13} /> Sudah hadir
+                    </div>
                   </>
                 )}
               </div>
@@ -303,12 +588,31 @@ export default function AdminMemberships() {
 
               {!viewMember.paymentProofUrl && viewMember.status === "pending_payment" && (
                 <div className="rounded-xl bg-blue-50 border border-blue-200 p-3 text-sm text-blue-700">
-                  Customer belum melakukan pembayaran.
+                  Customer belum melakukan pembayaran / upload bukti.
+                </div>
+              )}
+
+              {/* Tombol konfirmasi menonjol untuk status yang butuh tindakan */}
+              {(viewMember.status === "pending_payment" || viewMember.status === "waiting_confirmation") && (
+                <div className="rounded-xl bg-green-50 border border-green-200 p-4 space-y-2">
+                  <p className="text-sm font-semibold text-green-800">
+                    {viewMember.status === "waiting_confirmation"
+                      ? "Bukti pembayaran sudah diupload — siap dikonfirmasi"
+                      : "Aktifkan membership secara manual (pembayaran diterima di luar sistem)"}
+                  </p>
+                  <Button
+                    className="w-full gap-2 bg-green-600 hover:bg-green-700 text-white"
+                    disabled={updateMutation.isPending}
+                    onClick={() => updateMutation.mutate({ id: viewMember.id, data: { status: "active" as any } })}
+                  >
+                    <BadgeCheck size={16} />
+                    Aktifkan Membership
+                  </Button>
                 </div>
               )}
 
               <div className="border-t pt-4">
-                <p className="text-sm text-muted-foreground mb-3">Ubah Status</p>
+                <p className="text-sm text-muted-foreground mb-3">Ubah Status Manual</p>
                 <div className="flex gap-2 flex-wrap">
                   {[
                     { value: "active", label: "Aktif" },
@@ -322,7 +626,7 @@ export default function AdminMemberships() {
                       size="sm"
                       variant={viewMember.status === s.value ? "default" : "outline"}
                       disabled={viewMember.status === s.value || updateMutation.isPending}
-                      onClick={() => handleUpdateStatus(viewMember.id, s.value)}
+                      onClick={() => updateMutation.mutate({ id: viewMember.id, data: { status: s.value as any } })}
                     >
                       {s.label}
                     </Button>
@@ -337,6 +641,7 @@ export default function AdminMemberships() {
         </Dialog>
       )}
 
+      {/* Konfirmasi hapus */}
       <AlertDialog open={!!deleteId} onOpenChange={() => setDeleteId(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -357,6 +662,7 @@ export default function AdminMemberships() {
         </AlertDialogContent>
       </AlertDialog>
 
+      {/* Lightbox bukti bayar */}
       {lightboxUrl && (
         <div
           className="fixed inset-0 z-[100] bg-black/90 flex items-center justify-center p-4"

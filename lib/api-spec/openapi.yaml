@@ -41,6 +41,10 @@ tags:
     description: Tax settings and tax reporting (PPN)
   - name: bank-reconciliation
     description: Bank mutation import and reconciliation matching
+  - name: expenses
+    description: Operational expense management
+  - name: document-templates
+    description: Company document template management (invoice, SPP, faktur, kwitansi, etc.)
 paths:
   /healthz:
     get:
@@ -382,6 +386,21 @@ paths:
                 items:
                   $ref: "#/components/schemas/TimeSlot"
 
+  /vendors:
+    get:
+      operationId: listVendors
+      tags: [vendors]
+      summary: List active vendors (public dropdown)
+      responses:
+        "200":
+          description: List of active vendors
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/VendorSimple"
+
   /bookings:
     get:
       operationId: listBookings
@@ -512,6 +531,35 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Booking"
+
+  /bookings/{id}/dp:
+    patch:
+      operationId: payBookingDp
+      tags: [bookings]
+      summary: Set down payment for a booking
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DpPaymentInput"
+      responses:
+        "200":
+          description: DP recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Booking"
+        "400":
+          description: Invalid DP amount
+        "404":
+          description: Not found
 
   /bookings/order/{orderNumber}:
     get:
@@ -1310,6 +1358,27 @@ paths:
               schema:
                 $ref: "#/components/schemas/GymMembership"
 
+  /memberships/lookup:
+    post:
+      operationId: lookupMembership
+      tags: [memberships]
+      summary: Look up a membership by phone number (public)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MembershipLookupInput"
+      responses:
+        "200":
+          description: Membership found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MembershipLookupResult"
+        "404":
+          description: Not found
+
   /memberships/{id}/payment-proof:
     post:
       operationId: submitMembershipPaymentProof
@@ -1628,6 +1697,62 @@ paths:
                 $ref: "#/components/schemas/Booking"
         "400":
           description: Already checked in
+        "404":
+          description: Booking not found
+
+  /bookings/{id}/wa-logs:
+    get:
+      operationId: getBookingWaLogs
+      tags: [bookings]
+      summary: Get WA notification logs for a booking (admin)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: WA notification logs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/WaNotifLog"
+        "404":
+          description: Booking not found
+
+  /bookings/{id}/resend-wa:
+    post:
+      operationId: resendBookingWa
+      tags: [bookings]
+      summary: Resend WA notification to customer based on booking status (admin)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: WA sent
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, message]
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+        "400":
+          description: Cannot resend for this status
         "404":
           description: Booking not found
 
@@ -2253,6 +2378,327 @@ paths:
               schema:
                 $ref: "#/components/schemas/BankSheetPushResult"
 
+  /admin/expenses:
+    get:
+      operationId: listExpenses
+      tags: [expenses]
+      summary: List expenses with filters and summary
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: startDate
+          schema:
+            type: string
+        - in: query
+          name: endDate
+          schema:
+            type: string
+        - in: query
+          name: category
+          schema:
+            type: string
+        - in: query
+          name: status
+          schema:
+            type: string
+        - in: query
+          name: vendorName
+          schema:
+            type: string
+        - in: query
+          name: facilityId
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Expense list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExpenseListResult"
+    post:
+      operationId: createExpense
+      tags: [expenses]
+      summary: Create a new expense (draft)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ExpenseInput"
+      responses:
+        "201":
+          description: Created expense
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Expense"
+
+  /admin/expenses/{id}:
+    get:
+      operationId: getExpense
+      tags: [expenses]
+      summary: Get expense detail
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Expense detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExpenseDetail"
+    patch:
+      operationId: updateExpense
+      tags: [expenses]
+      summary: Update expense (only draft/rejected)
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ExpenseInput"
+      responses:
+        "200":
+          description: Updated expense
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Expense"
+
+  /admin/expenses/{id}/status:
+    patch:
+      operationId: updateExpenseStatus
+      tags: [expenses]
+      summary: Change expense status (submit/approve/reject/pay/cancel)
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ExpenseStatusInput"
+      responses:
+        "200":
+          description: Updated expense
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Expense"
+
+  /admin/document-templates:
+    get:
+      operationId: listDocumentTemplates
+      tags: [document-templates]
+      summary: List document templates with optional filters
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: companyId
+          schema:
+            type: string
+        - in: query
+          name: documentType
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of document templates
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DocumentTemplate"
+    post:
+      operationId: createDocumentTemplate
+      tags: [document-templates]
+      summary: Create a new document template
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DocumentTemplateInput"
+      responses:
+        "201":
+          description: Created template
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentTemplate"
+
+  /admin/document-templates/{id}:
+    get:
+      operationId: getDocumentTemplate
+      tags: [document-templates]
+      summary: Get a document template by ID
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Document template
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentTemplate"
+    put:
+      operationId: updateDocumentTemplate
+      tags: [document-templates]
+      summary: Update a document template
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DocumentTemplateInput"
+      responses:
+        "200":
+          description: Updated template
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentTemplate"
+    delete:
+      operationId: deleteDocumentTemplate
+      tags: [document-templates]
+      summary: Delete a document template (non-default only)
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+
+  /admin/documents/{documentType}/{entityId}/preview:
+    get:
+      operationId: previewDocument
+      tags: [document-templates]
+      summary: Render document as HTML preview (no number issuance)
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: documentType
+          required: true
+          schema:
+            type: string
+            enum: [invoice, spp, faktur, kwitansi, lampiran, berita_acara]
+        - in: path
+          name: entityId
+          required: true
+          schema:
+            type: integer
+        - in: query
+          name: companyId
+          schema:
+            type: integer
+        - in: query
+          name: _token
+          description: JWT token for browser window.open() flows (alternative to Authorization header)
+          schema:
+            type: string
+      responses:
+        "200":
+          description: HTML document preview
+          content:
+            text/html:
+              schema:
+                type: string
+
+  /admin/documents/{documentType}/{entityId}/pdf:
+    get:
+      operationId: generateDocumentPdf
+      tags: [document-templates]
+      summary: Generate PDF binary (Puppeteer) or print-ready HTML fallback; issues document number
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: documentType
+          required: true
+          schema:
+            type: string
+            enum: [invoice, spp, faktur, kwitansi, lampiran, berita_acara]
+        - in: path
+          name: entityId
+          required: true
+          schema:
+            type: integer
+        - in: query
+          name: companyId
+          schema:
+            type: integer
+        - in: query
+          name: _token
+          description: JWT token for browser window.open() flows (alternative to Authorization header)
+          schema:
+            type: string
+      responses:
+        "200":
+          description: PDF binary (application/pdf) or HTML fallback (text/html)
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+            text/html:
+              schema:
+                type: string
+
 components:
   schemas:
     HealthStatus:
@@ -2539,11 +2985,29 @@ components:
           type: ["number", "null"]
         grandTotal:
           type: ["number", "null"]
+        downPayment:
+          type: number
+        isDpPaid:
+          type: boolean
         payment:
           $ref: "#/components/schemas/Payment"
           nullable: true
+        payments:
+          type: array
+          items:
+            $ref: "#/components/schemas/Payment"
+        remainingAmount:
+          type: number
         createdAt:
           type: string
+
+    DpPaymentInput:
+      type: object
+      required: [downPaymentAmount]
+      properties:
+        downPaymentAmount:
+          type: number
+          minimum: 0
 
     RecurringBookingCheckInput:
       type: object
@@ -2616,6 +3080,11 @@ components:
           type: integer
         notes:
           type: string
+        customerType:
+          type: string
+          enum: [umum, angkasa_pura]
+        idCardNumber:
+          type: string
 
     RecurringBookingResult:
       type: object
@@ -2633,6 +3102,40 @@ components:
           type: integer
         grandTotal:
           type: number
+
+    Vendor:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        contactPerson:
+          type: ["string", "null"]
+        phone:
+          type: ["string", "null"]
+        email:
+          type: ["string", "null"]
+        address:
+          type: ["string", "null"]
+        notes:
+          type: ["string", "null"]
+        isActive:
+          type: boolean
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+
+    VendorSimple:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
 
     BookingInput:
       type: object
@@ -2663,6 +3166,9 @@ components:
           type: string
         notes:
           type: string
+        vendorId:
+          type: integer
+          nullable: true
 
     BookingUpdate:
       type: object
@@ -2687,6 +3193,9 @@ components:
           type: ["string", "null"]
         paymentMethod:
           type: ["string", "null"]
+        paymentType:
+          type: string
+          enum: [dp, pelunasan, full_payment]
         status:
           type: string
           enum: [pending, confirmed, rejected]
@@ -2709,6 +3218,12 @@ components:
           type: number
         proofUrl:
           type: string
+        paymentMethod:
+          type: string
+          enum: [Transfer Bank, QRIS]
+        paymentType:
+          type: string
+          enum: [dp, pelunasan, full_payment]
         notes:
           type: string
 
@@ -2718,6 +3233,8 @@ components:
         status:
           type: string
           enum: [pending, confirmed, rejected]
+        paymentMethod:
+          type: string
         notes:
           type: string
 
@@ -3030,6 +3547,12 @@ components:
           type: integer
         pendingBookings:
           type: integer
+        membershipRevenue:
+          type: number
+          nullable: true
+        activeMemberships:
+          type: integer
+          nullable: true
         topFacilities:
           type: array
           items:
@@ -3267,6 +3790,12 @@ components:
         createdAt:
           type: string
           nullable: true
+        groupRef:
+          type: string
+          nullable: true
+        customerName:
+          type: string
+          nullable: true
 
     Review:
       type: object
@@ -3447,6 +3976,37 @@ components:
           enum: [pending_payment, waiting_confirmation, active, expired, cancelled]
         notes:
           type: string
+
+    MembershipLookupInput:
+      type: object
+      required: [phone]
+      properties:
+        phone:
+          type: string
+
+    MembershipLookupResult:
+      type: object
+      required: [id, name, phone, email, status, startDate, endDate, months, totalPrice]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        phone:
+          type: string
+        email:
+          type: string
+        status:
+          type: string
+          enum: [pending_payment, waiting_confirmation, active, expired, cancelled]
+        startDate:
+          type: string
+        endDate:
+          type: string
+        months:
+          type: integer
+        totalPrice:
+          type: number
 
     MembershipPaymentProofInput:
       type: object
@@ -3793,6 +4353,8 @@ components:
       properties:
         sheetId:
           type: string
+        sheetName:
+          type: string
 
     SheetConnectResult:
       type: object
@@ -3941,6 +4503,9 @@ components:
           enum: [candidate, approved, rejected]
         createdAt:
           type: string
+        ocrAmount:
+          type: string
+          nullable: true
 
     EnrichedBankCandidate:
       type: object
@@ -4074,6 +4639,10 @@ components:
           type: integer
         pageSize:
           type: integer
+        statusCounts:
+          type: object
+          additionalProperties:
+            type: integer
 
     BankMutationWithMatches:
       type: object
@@ -4186,3 +4755,270 @@ components:
           type: boolean
         updatedRows:
           type: integer
+
+    Expense:
+      type: object
+      required: [id, expenseNo, expenseDate, category, description, amount, ppnAmount, totalAmount, paymentStatus, createdAt, updatedAt]
+      properties:
+        id:
+          type: integer
+        expenseNo:
+          type: string
+        expenseDate:
+          type: string
+        category:
+          type: string
+        description:
+          type: string
+        vendorName:
+          type: string
+          nullable: true
+        facilityId:
+          type: integer
+          nullable: true
+        facilityName:
+          type: string
+          nullable: true
+        amount:
+          type: number
+        ppnAmount:
+          type: number
+        totalAmount:
+          type: number
+        paymentMethod:
+          type: string
+          nullable: true
+        paymentAccount:
+          type: string
+          nullable: true
+        paymentStatus:
+          type: string
+          enum: [draft, pending_approval, approved, paid, rejected, cancelled]
+        receiptUrl:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        createdBy:
+          type: integer
+          nullable: true
+        approvedBy:
+          type: integer
+          nullable: true
+        approvedAt:
+          type: string
+          nullable: true
+        paidAt:
+          type: string
+          nullable: true
+        rejectedReason:
+          type: string
+          nullable: true
+        journalId:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+
+    ExpenseDetail:
+      allOf:
+        - $ref: "#/components/schemas/Expense"
+        - type: object
+          properties:
+            createdByName:
+              type: string
+              nullable: true
+            approvedByName:
+              type: string
+              nullable: true
+
+    ExpenseListResult:
+      type: object
+      required: [expenses, summary, categories]
+      properties:
+        expenses:
+          type: array
+          items:
+            $ref: "#/components/schemas/Expense"
+        summary:
+          type: object
+          required: [totalThisMonth, pendingApproval, paid, unpaid]
+          properties:
+            totalThisMonth:
+              type: number
+            pendingApproval:
+              type: integer
+            paid:
+              type: number
+            unpaid:
+              type: number
+        categories:
+          type: array
+          items:
+            type: string
+
+    ExpenseInput:
+      type: object
+      required: [expenseDate, category, description, amount]
+      properties:
+        expenseDate:
+          type: string
+        category:
+          type: string
+        description:
+          type: string
+        vendorName:
+          type: string
+        facilityId:
+          type: integer
+        amount:
+          type: number
+        ppnAmount:
+          type: number
+        paymentMethod:
+          type: string
+        paymentAccount:
+          type: string
+        receiptUrl:
+          type: string
+        notes:
+          type: string
+
+    ExpenseStatusInput:
+      type: object
+      required: [action]
+      properties:
+        action:
+          type: string
+          enum: [submit, approve, reject, pay, cancel]
+        rejectedReason:
+          type: string
+
+    DocumentTemplate:
+      type: object
+      properties:
+        id:
+          type: integer
+        companyId:
+          type: integer
+          nullable: true
+        companyName:
+          type: string
+        documentType:
+          type: string
+          enum: [invoice, spp, faktur, kwitansi, lampiran, berita_acara]
+        isDefault:
+          type: boolean
+        headerLogoUrl:
+          type: string
+          nullable: true
+        kopSuratHtml:
+          type: string
+          nullable: true
+        footerHtml:
+          type: string
+          nullable: true
+        companyDisplayName:
+          type: string
+          nullable: true
+        financeName:
+          type: string
+          nullable: true
+        financeTitle:
+          type: string
+          nullable: true
+        financeSignature:
+          type: string
+          nullable: true
+        address:
+          type: string
+          nullable: true
+        phone:
+          type: string
+          nullable: true
+        email:
+          type: string
+          nullable: true
+        numberFormatPrefix:
+          type: string
+          nullable: true
+        numberFormatPattern:
+          type: string
+          nullable: true
+        paperStyle:
+          type: string
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+
+    DocumentTemplateInput:
+      type: object
+      required: [documentType]
+      properties:
+        companyId:
+          type: integer
+          nullable: true
+        documentType:
+          type: string
+          enum: [invoice, spp, faktur, kwitansi, lampiran, berita_acara]
+        isDefault:
+          type: boolean
+        headerLogoUrl:
+          type: string
+        kopSuratHtml:
+          type: string
+        footerHtml:
+          type: string
+        companyDisplayName:
+          type: string
+        financeName:
+          type: string
+        financeTitle:
+          type: string
+        financeSignature:
+          type: string
+        address:
+          type: string
+        phone:
+          type: string
+        email:
+          type: string
+        numberFormatPrefix:
+          type: string
+        numberFormatPattern:
+          type: string
+        paperStyle:
+          type: string
+
+    WaNotifLog:
+      type: object
+      required: [id, recipientPhone, status, sentAt]
+      properties:
+        id:
+          type: integer
+        bookingId:
+          type: integer
+          nullable: true
+        orderNumber:
+          type: string
+          nullable: true
+        event:
+          type: string
+          nullable: true
+        recipientPhone:
+          type: string
+        messagePreview:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [sent, failed]
+        errorMessage:
+          type: string
+          nullable: true
+        sentAt:
+          type: string

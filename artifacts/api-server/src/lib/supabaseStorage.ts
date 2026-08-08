@@ -1,16 +1,89 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import ws from "ws";
 
-const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
+// ─── Dev/Prod Storage Isolation ────────────────────────────────────────────
+// Development: SUPABASE_SERVICE_ROLE_KEY_DEV (isolated dev Supabase project)
+// Production:  SUPABASE_SERVICE_ROLE_KEY (prod Supabase project)
+//
+// Guard:
+//   Dev + no _DEV key + ALLOW_DEV_ON_PROD_STORAGE=true → warning, use prod key
+//   Dev + no _DEV key + no override                    → FATAL, process.exit(1)
+
+const IS_DEV = process.env.NODE_ENV === "development";
+export const allowDevOnProdStorage = process.env.ALLOW_DEV_ON_PROD_STORAGE === "true";
 
 function getProjectRef(key: string): string | null {
   try {
-    const payload = JSON.parse(
-      Buffer.from(key.split(".")[1], "base64").toString(),
-    );
+    const payload = JSON.parse(Buffer.from(key.split(".")[1], "base64").toString());
     return payload.ref ?? null;
   } catch {
     return null;
+  }
+}
+
+let SERVICE_KEY: string;
+export let storageProjectSource: string;
+export let isDevUsingProdStorage = false;
+
+if (IS_DEV) {
+  const devKey = process.env.SUPABASE_SERVICE_ROLE_KEY_DEV ?? "";
+  if (devKey) {
+    SERVICE_KEY = devKey;
+    const ref = getProjectRef(devKey) ?? "unknown";
+    storageProjectSource = `SUPABASE_SERVICE_ROLE_KEY_DEV (dev — isolated, ref=${ref})`;
+  } else if (allowDevOnProdStorage) {
+    const prodKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
+    SERVICE_KEY = prodKey;
+    isDevUsingProdStorage = true;
+    const ref = getProjectRef(prodKey) ?? "unknown";
+    storageProjectSource = `SUPABASE_SERVICE_ROLE_KEY (PROD — EMERGENCY OVERRIDE, ref=${ref})`;
+    console.warn(
+      "\n╔══════════════════════════════════════════════════════════╗\n" +
+      "║  ⚠️  STORAGE DANGER: DEV IS UPLOADING TO PRODUCTION      ║\n" +
+      "║  ALLOW_DEV_ON_PROD_STORAGE=true is active.               ║\n" +
+      "║  Every file upload from dev hits the prod Supabase.      ║\n" +
+      "║  Remove this override and set SUPABASE_SERVICE_ROLE_KEY_DEV. ║\n" +
+      "╚══════════════════════════════════════════════════════════╝\n"
+    );
+  } else {
+    console.error(
+      "\n╔══════════════════════════════════════════════════════════╗\n" +
+      "║  FATAL: Storage isolation not configured for dev          ║\n" +
+      "║                                                            ║\n" +
+      "║  NODE_ENV=development but SUPABASE_SERVICE_ROLE_KEY_DEV   ║\n" +
+      "║  is not set. Dev uploads would hit production storage.    ║\n" +
+      "║                                                            ║\n" +
+      "║  Fix:                                                      ║\n" +
+      "║    Set SUPABASE_SERVICE_ROLE_KEY_DEV to an isolated dev    ║\n" +
+      "║    Supabase project service role key.                     ║\n" +
+      "║                                                            ║\n" +
+      "║  Emergency override (discouraged):                        ║\n" +
+      "║    Set ALLOW_DEV_ON_PROD_STORAGE=true to allow dev        ║\n" +
+      "║    uploads to production (EMERGENCY USE ONLY).            ║\n" +
+      "╚══════════════════════════════════════════════════════════╝\n"
+    );
+    process.exit(1);
+  }
+} else {
+  const prodKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
+  if (!prodKey) {
+    // Non-fatal in production: storage features will be unavailable, but the
+    // server starts normally. Google Secret Manager loads this key after ESM
+    // module graph initialization completes — a module-level process.exit(1)
+    // would fire BEFORE secretLoader.ts can inject the value. The env
+    // validator (envValidation.ts) handles the startup-fatal check after GSM
+    // loading completes. File upload/download endpoints will return 500 until
+    // the key is available.
+    console.warn(
+      "[supabaseStorage] SUPABASE_SERVICE_ROLE_KEY not set — " +
+      "storage features (file uploads/downloads) will be unavailable until the key is provided."
+    );
+    SERVICE_KEY = "";
+    storageProjectSource = "NOT CONFIGURED";
+  } else {
+    SERVICE_KEY = prodKey;
+    // Do NOT log project ref in production — keep it out of logs
+    storageProjectSource = "SUPABASE_SERVICE_ROLE_KEY (production)";
   }
 }
 
@@ -20,14 +93,26 @@ const STORAGE_URL = PROJECT_REF ? `https://${PROJECT_REF}.supabase.co` : "";
 export const BUCKETS = {
   facility: "facility-images",
   proof: "payment-proofs",
+  docTemplates: "doc-templates",
+  corporateDocs: "corporate-docs",
+  invoicePdfs: "invoice-pdfs",
 } as const;
+
+// In-memory bucket health for diagnostic endpoint
+export const bucketStatus: Record<string, { ok: boolean; checkedAt: string | null; error: string | null }> = {
+  [BUCKETS.facility]: { ok: false, checkedAt: null, error: null },
+  [BUCKETS.proof]: { ok: false, checkedAt: null, error: null },
+  [BUCKETS.docTemplates]: { ok: false, checkedAt: null, error: null },
+  [BUCKETS.corporateDocs]: { ok: false, checkedAt: null, error: null },
+  [BUCKETS.invoicePdfs]: { ok: false, checkedAt: null, error: null },
+};
 
 let client: SupabaseClient | null = null;
 
 function getClient(): SupabaseClient {
   if (!SERVICE_KEY || !STORAGE_URL) {
     throw new Error(
-      "Supabase Storage is not configured: SUPABASE_SERVICE_ROLE_KEY missing or invalid",
+      "Supabase Storage is not configured: service role key missing or invalid"
     );
   }
   if (!client) {
@@ -43,6 +128,55 @@ export function isStorageConfigured(): boolean {
   return Boolean(SERVICE_KEY && STORAGE_URL);
 }
 
+/**
+ * Validate that required buckets exist at startup.
+ * In production: logs error only, never auto-creates.
+ * In development: auto-creates missing buckets (in the dev Supabase project).
+ */
+export async function validateBuckets(): Promise<void> {
+  if (!isStorageConfigured()) {
+    console.warn("[Storage] Supabase Storage not configured — skipping bucket validation.");
+    return;
+  }
+
+  const isProd = process.env.NODE_ENV === "production";
+  const supabase = getClient();
+
+  for (const bucket of Object.values(BUCKETS)) {
+    const now = new Date().toISOString();
+    try {
+      const { data, error } = await supabase.storage.getBucket(bucket);
+      if (error || !data) {
+        // Auto-create in both dev and prod — idempotent, safe
+        const mimeTypes = bucket === BUCKETS.facility
+          ? ["image/jpeg", "image/png", "image/webp"]
+          : ["image/jpeg", "image/png", "image/webp", "application/pdf", "application/octet-stream"];
+        const sizeLimit = bucket === BUCKETS.facility ? 5 * 1024 * 1024 : 10 * 1024 * 1024;
+        const { error: createErr } = await supabase.storage.createBucket(bucket, {
+          public: true,
+          allowedMimeTypes: mimeTypes,
+          fileSizeLimit: sizeLimit,
+        });
+        if (createErr && !createErr.message.toLowerCase().includes("already exists")) {
+          console.error(`[Storage] ❌ Failed to create bucket "${bucket}": ${createErr.message}`);
+          bucketStatus[bucket] = { ok: false, checkedAt: now, error: createErr.message };
+        } else {
+          const env = IS_DEV ? "dev" : "prod";
+          console.info(`[Storage] ✓ Bucket "${bucket}" created/ensured (${env}).`);
+          bucketStatus[bucket] = { ok: true, checkedAt: now, error: null };
+        }
+      } else {
+        const source = IS_DEV ? "dev" : "prod";
+        console.info(`[Storage] ✓ Bucket "${bucket}" exists (public=${data.public}, env=${source}).`);
+        bucketStatus[bucket] = { ok: true, checkedAt: now, error: null };
+      }
+    } catch (err: any) {
+      console.error(`[Storage] ❌ Error checking bucket "${bucket}": ${err?.message}`);
+      bucketStatus[bucket] = { ok: false, checkedAt: now, error: err?.message };
+    }
+  }
+}
+
 export async function uploadToStorage(
   bucket: string,
   objectPath: string,
@@ -50,9 +184,23 @@ export async function uploadToStorage(
   contentType: string,
 ): Promise<string> {
   const supabase = getClient();
-  const { error } = await supabase.storage
+  let { error } = await supabase.storage
     .from(bucket)
     .upload(objectPath, body, { contentType, upsert: true });
+
+  // If bucket not found, create it on-the-fly and retry once
+  if (error && (error.message?.toLowerCase().includes("bucket") || (error as any).statusCode === 404)) {
+    await supabase.storage.createBucket(bucket, {
+      public: true,
+      allowedMimeTypes: ["image/jpeg", "image/png", "image/webp", "application/pdf", "application/octet-stream"],
+      fileSizeLimit: 10 * 1024 * 1024,
+    }).catch(() => {});
+    const retry = await supabase.storage
+      .from(bucket)
+      .upload(objectPath, body, { contentType, upsert: true });
+    error = retry.error;
+  }
+
   if (error) throw error;
   const { data } = supabase.storage.from(bucket).getPublicUrl(objectPath);
   return data.publicUrl;

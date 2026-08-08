@@ -1,0 +1,89 @@
+FASE 2 — AI Chat Flow Customer via WhatsApp
+
+1. Update endpoint:
+   POST /api/wa/fonnte/webhook
+
+2. Webhook harus membedakan:
+   - pesan customer
+   - command admin
+   - payment proof
+   - pesan tidak dikenal
+
+3. Untuk pesan customer, panggil AI intent classifier.
+
+4. Intent minimal:
+   - ask_facility_list
+   - ask_price
+   - ask_available_slot
+   - create_booking
+   - ask_booking_status
+   - ask_membership
+   - ask_payment_instruction
+   - ask_reschedule_policy
+   - ask_location
+   - ask_operating_hour
+   - talk_to_admin
+
+5. AI harus bisa memahami pesan seperti:
+   - “Ada lapangan badminton kosong malam ini?”
+   - “Saya mau booking futsal besok jam 8 malam 2 jam”
+   - “Harga tennis weekend berapa?”
+   - “Gym masih buka?”
+   - “Booking saya sudah dibayar belum?”
+   - “Saya member gym, masih aktif gak?”
+   - “Bisa booking lapangan yang kosong paling malam?”
+   - “Ada promo hari ini?”
+
+6. Untuk setiap intent, AI wajib ambil data dari database sebelum menjawab.
+
+7. Untuk booking:
+   AI harus mengumpulkan data:
+   - nama customer
+   - nomor WA
+   - fasilitas
+   - tanggal
+   - jam mulai
+   - durasi
+
+8. Jika data belum lengkap, AI bertanya natural:
+   - “Mau booking fasilitas apa?”
+   - “Untuk tanggal berapa?”
+   - “Jam berapa?”
+   - “Durasi berapa jam?”
+   - “Atas nama siapa?”
+
+9. Simpan percakapan sementara di:
+   wa_booking_sessions
+
+10. Setelah data lengkap:
+   - cek jadwal bentrok dari database
+   - hitung harga dari pricing rules
+   - tampilkan ringkasan ke customer
+   - minta konfirmasi customer
+
+11. Format konfirmasi customer:
+   “Saya cek tersedia. Berikut detail booking:
+   Fasilitas:
+   Tanggal:
+   Jam:
+   Durasi:
+   Total:
+   Balas YA untuk lanjut dibuatkan booking.”
+
+12. Jika customer balas YA:
+   - buat booking status = waiting_admin_approval
+   - payment_status = waiting_admin_approval
+   - source = whatsapp_ai
+   - kirim WA ke customer bahwa booking menunggu approval admin
+   - kirim WA approval ke admin
+
+13. Jika jadwal bentrok:
+   - AI jawab jadwal tidak tersedia
+   - tawarkan slot alternatif dari database
+
+14. AI harus bisa menjawab status booking berdasarkan nomor WA customer:
+   - booking aktif
+   - booking pending
+   - booking paid
+   - booking rejected
+   - booking cancelled

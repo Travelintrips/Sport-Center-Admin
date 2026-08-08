@@ -5,13 +5,15 @@ import { bookingsTable } from "./bookings";
 import { scSchema } from "./_schema";
 
 export const paymentStatusEnum = scSchema.enum("payment_status", ["pending", "confirmed", "rejected"]);
+export const paymentTypeEnum = scSchema.enum("payment_type", ["dp", "pelunasan", "full_payment"]);
 
-export const paymentsTable = scSchema.table("payments", {
+export const paymentsTable = scSchema.table("sport_payments", {
   id: serial("id").primaryKey(),
-  bookingId: integer("booking_id").notNull().references(() => bookingsTable.id, { onDelete: "cascade" }).unique(),
+  bookingId: integer("booking_id").notNull().references(() => bookingsTable.id, { onDelete: "cascade" }),
   amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
   proofUrl: text("proof_url"),
   paymentMethod: text("payment_method").default("Transfer Bank"),
+  paymentType: paymentTypeEnum("payment_type").notNull().default("full_payment"),
   status: paymentStatusEnum("status").notNull().default("pending"),
   confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
   notes: text("notes"),

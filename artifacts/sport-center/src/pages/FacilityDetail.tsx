@@ -8,6 +8,8 @@ import {
   useGetReviews,
   useGetReviewsSummary,
   useGetSettings,
+  useGetMe,
+  getGetMeQueryKey,
 } from "@workspace/api-client-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -30,12 +32,15 @@ import {
   CheckCircle2,
   AlertCircle,
   Star,
-  MessageCircle
+  MessageCircle,
+  ShoppingCart,
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import AvailabilityCalendar from "@/components/AvailabilityCalendar";
 import { getFacilityImage } from "@/lib/utils";
 import { useLang } from "@/lib/i18n";
+import { useCart } from "@/lib/cart";
+import { useToast } from "@/hooks/use-toast";
 
 const MULTIGUNA_ACTIVITIES = [
   { value: "futsal", label: "Futsal", icon: "⚽" },
@@ -45,10 +50,15 @@ const MULTIGUNA_ACTIVITIES = [
 
 export default function FacilityDetail() {
   const { t, lang } = useLang();
+  const { addItem, items } = useCart();
+  const { toast } = useToast();
   const [, params] = useRoute("/facilities/:id");
   const [, setLocation] = useLocation();
   const facilityId = params?.id ? parseInt(params.id) : 0;
-  
+
+  const { data: meData } = useGetMe({ query: { retry: false, queryKey: getGetMeQueryKey() } });
+  const isAdminOrOperator = !!meData && (meData as { role?: string }).role !== "customer";
+
   const [date, setDate] = useState<Date | undefined>(new Date());
   const [selectedTime, setSelectedTime] = useState<string>("");
   const [duration, setDuration] = useState<string>("1");
@@ -79,7 +89,16 @@ export default function FacilityDetail() {
     }
   );
 
-  const isWalkIn = facility?.bookingMode === "walk_in";
+  // Some older Gym records are still stored with booking_mode = time_slot.
+  // Keep the customer experience aligned with the business rule based on the
+  // facility identity as well as the persisted mode.
+  const isGymFacility = Boolean(
+    facility && (
+      /gym|fitness/i.test(facility.name ?? "") ||
+      /gym|fitness/i.test(facility.category ?? "")
+    )
+  );
+  const isWalkIn = facility?.bookingMode === "walk_in" || isGymFacility;
   const isMultiguna = facility?.category === "Multiguna";
 
   const { data: settings } = useGetSettings();
@@ -148,6 +167,38 @@ export default function FacilityDetail() {
     
     setLocation(`/booking?${searchParams.toString()}`);
   };
+
+  const handleAddToCart = () => {
+    if (!facility || !date) return;
+    if (!isWalkIn && (!selectedTime || (isMultiguna && !activityType))) return;
+
+    addItem({
+      facilityId: facility.id,
+      facilityName: facility.name,
+      facilityCategory: facility.category,
+      facilityPricePerHour: facility.pricePerHour,
+      date: formattedDate,
+      startTime: isWalkIn ? "" : selectedTime,
+      duration: parseInt(duration),
+      activityType: isMultiguna && activityType ? activityType : undefined,
+      mode: isWalkIn ? "walk_in" : "time_slot",
+    });
+
+    toast({
+      title: t("Ditambahkan ke Keranjang!", "Added to Cart!"),
+      description: t(
+        `${facility.name} berhasil ditambahkan. Lanjut pilih lapangan lain atau checkout sekarang.`,
+        `${facility.name} added. Keep selecting or checkout now.`
+      ),
+    });
+  };
+
+  const isInCart = items.some(
+    (item) =>
+      item.facilityId === facilityId &&
+      item.date === formattedDate &&
+      (isWalkIn ? item.mode === "walk_in" : item.startTime === selectedTime && item.mode === "time_slot")
+  );
 
   if (isLoadingFacility) {
     return (
@@ -310,12 +361,16 @@ export default function FacilityDetail() {
               <div className="bg-secondary dark:bg-slate-900 p-6 text-white text-center relative overflow-hidden">
                 <div className="absolute top-0 right-0 w-32 h-32 bg-primary/20 rounded-full blur-[40px]" />
                 <div className="relative z-10">
-                  <div className="text-sm font-bold text-white/70 uppercase tracking-widest mb-1">{t("Tarif Sewa", "Rental Rate")}</div>
+                  <div className="text-sm font-bold text-white/70 uppercase tracking-widest mb-1">
+                    {isWalkIn ? t("Tarif Masuk", "Entry Rate") : t("Tarif Sewa", "Rental Rate")}
+                  </div>
                   <div className="text-3xl md:text-4xl font-black text-white mb-1">
                     <span className="text-xl mr-1 text-primary">Rp</span>
                     {facility.pricePerHour.toLocaleString('id-ID')}
                   </div>
-                  <div className="text-sm font-medium text-white/70">{t("per jam bermain", "per playing hour")}</div>
+                   <div className="text-sm font-medium text-white/70">
+                     {isWalkIn ? t("per orang / kunjungan", "per person / visit") : t("per jam bermain", "per playing hour")}
+                   </div>
                 </div>
               </div>
               
@@ -324,7 +379,9 @@ export default function FacilityDetail() {
                   <div className="w-8 h-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center">
                     <CalendarDays className="w-4 h-4" />
                   </div>
-                  {t("Atur Jadwal Bermain", "Set Your Playing Schedule")}
+                  {isWalkIn
+                    ? t("Atur Kunjungan", "Plan Your Visit")
+                    : t("Atur Jadwal Bermain", "Set Your Playing Schedule")}
                 </h3>
                 
                 <div className="space-y-6">
@@ -338,7 +395,7 @@ export default function FacilityDetail() {
                         mode="single"
                         selected={date}
                         onSelect={setDate}
-                        disabled={(d) => d < new Date(new Date().setHours(0,0,0,0))}
+                        disabled={isAdminOrOperator ? undefined : (d) => d < new Date(new Date().setHours(0,0,0,0))}
                         className="rounded-xl bg-transparent"
                         locale={lang === "en" ? enUS : id}
                       />
@@ -404,6 +461,14 @@ export default function FacilityDetail() {
                           <SelectItem value="2" className="font-medium py-3">{t("2 Jam", "2 Hours")}</SelectItem>
                           <SelectItem value="3" className="font-medium py-3">{t("3 Jam", "3 Hours")}</SelectItem>
                           <SelectItem value="4" className="font-medium py-3">{t("4 Jam", "4 Hours")}</SelectItem>
+                          <SelectItem value="5" className="font-medium py-3">{t("5 Jam", "5 Hours")}</SelectItem>
+                          <SelectItem value="6" className="font-medium py-3">{t("6 Jam", "6 Hours")}</SelectItem>
+                          <SelectItem value="7" className="font-medium py-3">{t("7 Jam", "7 Hours")}</SelectItem>
+                          <SelectItem value="8" className="font-medium py-3">{t("8 Jam", "8 Hours")}</SelectItem>
+                          <SelectItem value="9" className="font-medium py-3">{t("9 Jam", "9 Hours")}</SelectItem>
+                          <SelectItem value="10" className="font-medium py-3">{t("10 Jam", "10 Hours")}</SelectItem>
+                          <SelectItem value="11" className="font-medium py-3">{t("11 Jam", "11 Hours")}</SelectItem>
+                          <SelectItem value="12" className="font-medium py-3">{t("12 Jam", "12 Hours")}</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -447,25 +512,55 @@ export default function FacilityDetail() {
                       </span>
                     </div>
                     
-                    <Button 
-                      size="lg" 
-                      className="w-full text-base font-bold h-14 rounded-full shadow-lg shadow-primary/20 transition-all hover:-translate-y-1" 
-                      onClick={handleBook}
-                      disabled={
-                        !date || 
-                        (!isWalkIn && !selectedTime) ||
-                        (isMultiguna && !activityType)
-                      }
-                    >
-                      {isWalkIn
-                        ? (date ? t("Booking Masuk Gym", "Book Gym Entry") : t("Pilih Tanggal Dulu", "Choose Date First"))
-                        : (!selectedTime
-                          ? t("Lengkapi Jadwal Dulu", "Complete the Schedule First")
-                          : (isMultiguna && !activityType)
-                            ? t("Pilih Jenis Olahraga", "Choose Sport Type")
-                            : t("Lanjut ke Pembayaran", "Continue to Payment"))
-                      }
-                    </Button>
+                    <div className="space-y-3">
+                      {/* Tombol langsung checkout */}
+                      <Button 
+                        size="lg" 
+                        className="w-full text-base font-bold h-14 rounded-full shadow-lg shadow-primary/20 transition-all hover:-translate-y-1" 
+                        onClick={handleBook}
+                        disabled={
+                          !date || 
+                          (!isWalkIn && !selectedTime) ||
+                          (isMultiguna && !activityType)
+                        }
+                      >
+                        {isWalkIn
+                          ? (date ? t("Booking Masuk Gym", "Book Gym Entry") : t("Pilih Tanggal Dulu", "Choose Date First"))
+                          : (!selectedTime
+                            ? t("Lengkapi Jadwal Dulu", "Complete the Schedule First")
+                            : (isMultiguna && !activityType)
+                              ? t("Pilih Jenis Olahraga", "Choose Sport Type")
+                              : t("Lanjut ke Pembayaran", "Continue to Payment"))
+                        }
+                      </Button>
+
+                      {/* Tombol tambah ke keranjang (hanya untuk time_slot) */}
+                      {!isWalkIn && (
+                        <Button
+                          size="lg"
+                          variant="outline"
+                          className={`w-full text-base font-bold h-14 rounded-full transition-all hover:-translate-y-1 flex items-center justify-center gap-2 ${
+                            isInCart
+                              ? "border-green-500 text-green-600 bg-green-50 dark:bg-green-950/20 hover:bg-green-100"
+                              : "border-primary/50 text-primary hover:bg-primary/5"
+                          }`}
+                          onClick={() => {
+                            if (isInCart) {
+                              setLocation("/cart");
+                            } else {
+                              handleAddToCart();
+                            }
+                          }}
+                          disabled={!date || !selectedTime || (isMultiguna && !activityType)}
+                        >
+                          <ShoppingCart className="w-4 h-4" />
+                          {isInCart
+                            ? t("Sudah di Keranjang → Lihat", "In Cart → View Cart")
+                            : t("Tambah ke Keranjang", "Add to Cart")
+                          }
+                        </Button>
+                      )}
+                    </div>
 
                     {/* WhatsApp Booking Button */}
                     {settings?.whatsapp && (

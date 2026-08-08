@@ -27,13 +27,14 @@ async function main() {
       centerName: "Sport Center Jakarta",
       address: "Jl. Sudirman No. 123, Jakarta Pusat",
       phone: "+62-21-1234567",
-      whatsapp: "+6281234567890",
+      whatsapp: "+6281216104734",
       email: "info@sportcenterjakarta.com",
       openHour: "06:00",
       closeHour: "22:00",
       bankName: "BCA",
       bankAccount: "1234567890",
       bankAccountName: "Sport Center Jakarta",
+      qrisImageUrl: "https://nzdweipzckfszczzqtuw.supabase.co/storage/v1/object/public/facility-images/qris-263226c1-c51d-4353-9165-cedaba32adb4.jpeg",
     });
     console.log("Settings created");
   }

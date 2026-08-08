@@ -1,16 +1,34 @@
 import { Router } from "express";
-import { db, paymentsTable, bookingsTable, bookingHistoryTable, facilitiesTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
-import { adminMiddleware } from "../lib/auth";
+import { db, paymentsTable, bookingsTable, bookingHistoryTable, facilitiesTable, bookingGroupsTable } from "@workspace/db";
+import { eq, and, ne, sql } from "drizzle-orm";
+import { adminMiddleware, verifyToken } from "../lib/auth";
 import multer from "multer";
 import path from "path";
 import { randomUUID } from "crypto";
 import { notifyPaymentConfirmed, notifyPaymentProofUploaded } from "../lib/notifications";
-import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
-import { syncStatusToBizportal } from "../lib/bizportalSync";
-import { BUCKETS, uploadToStorage } from "../lib/supabaseStorage";
-import { createJournalEntry, reverseJournalEntry } from "../lib/accounting";
-import { recordTaxTransaction, reverseTaxTransaction, calculateTax } from "../lib/tax";
+import { logAudit, getClientInfo, getUserFromReq, logAccountingError } from "../lib/auditLog";
+import { syncStatusToBizportal, pushConfirmedPaymentAsBankMutation } from "../lib/bizportalSync";
+import { uploadProofWithFallback } from "./storage";
+
+import { createJournalEntry, createPublicAccountingEntry, createPublicAccountingEntryForGroup, extractBookingDpp } from "../lib/accounting";
+
+import { createWaToken } from "../lib/waTokens";
+import { logger } from "../lib/logger";
+import { getBaseUrl } from "../lib/appUrl";
+import { sendRekapPemakaianToAdmin } from "../lib/rekapPemakaian";
+import { sendInvoiceToCustomer, sendGroupInvoiceToCustomer } from "../lib/invoiceDelivery";
+
+// Helper: kirim rekap ke admin WA hanya jika tanggal booking = hari ini (WIB)
+function todayWIB(): string {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" });
+}
+function triggerRekapIfToday(bookingDate: string): void {
+  if (bookingDate === todayWIB()) {
+    sendRekapPemakaianToAdmin(bookingDate).catch((err) =>
+      logger.error({ err }, "[REKAP] Gagal kirim rekap pemakaian (payments)"),
+    );
+  }
+}
 
 const router = Router();
 
@@ -18,22 +36,18 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
-    const validMime = /image\/(jpeg|png|webp)|application\/pdf/.test(file.mimetype);
-    cb(null, validMime);
+    const ok =
+      file.mimetype.startsWith("image/") ||
+      file.mimetype === "application/pdf" ||
+      file.mimetype === "application/octet-stream";
+    cb(null, ok);
   },
 });
 
 router.post("/payments/proof-upload", upload.single("proof"), async (req, res) => {
   try {
     if (!req.file) { res.status(400).json({ error: "No file provided" }); return; }
-    const ext = path.extname(req.file.originalname).toLowerCase() || ".jpg";
-    const objectName = `proof-${randomUUID()}${ext}`;
-    const url = await uploadToStorage(
-      BUCKETS.proof,
-      objectName,
-      req.file.buffer,
-      req.file.mimetype,
-    );
+    const url = await uploadProofWithFallback(req.file.buffer, req.file.originalname, req.file.mimetype);
     res.json({ objectPath: url, url });
   } catch (err) {
     req.log.error({ err }, "Upload proof error");
@@ -41,7 +55,7 @@ router.post("/payments/proof-upload", upload.single("proof"), async (req, res) =
   }
 });
 
-router.get("/payments", async (req, res) => {
+router.get("/payments", adminMiddleware, async (req, res) => {
   try {
     const { bookingId } = req.query;
     let payments = await db.select().from(paymentsTable);
@@ -53,70 +67,381 @@ router.get("/payments", async (req, res) => {
   }
 });
 
+// GET /payments/grouped — daftar pembayaran dikelompokkan per Group Booking (admin only)
+router.get("/payments/grouped", adminMiddleware, async (req, res) => {
+  try {
+    // Ambil semua payments beserta booking & fasilitas
+    const rows = await db.execute(sql`
+      SELECT
+        p.id            AS payment_id,
+        p.booking_id    AS booking_id,
+        p.amount,
+        p.status        AS payment_status,
+        p.payment_type,
+        p.proof_url,
+        p.created_at    AS payment_created_at,
+        b.id            AS bid,
+        b.order_number,
+        b.customer_name,
+        b.customer_phone,
+        b.booking_date,
+        b.start_time,
+        b.end_time,
+        b.total_price,
+        b.grand_total,
+        b.status        AS booking_status,
+        b.group_ref,
+        f.name          AS facility_name
+      FROM sport_center.payments p
+      JOIN sport_center.bookings b ON b.id = p.booking_id
+      LEFT JOIN sport_center.facilities f ON f.id = b.facility_id
+      ORDER BY p.created_at DESC
+    `);
+
+    type Row = {
+      payment_id: number; booking_id: number; amount: string;
+      payment_status: string; payment_type: string; proof_url: string | null;
+      payment_created_at: string;
+      bid: number; order_number: string; customer_name: string; customer_phone: string;
+      booking_date: string; start_time: string; end_time: string;
+      total_price: string; grand_total: string | null; booking_status: string;
+      group_ref: string | null; facility_name: string | null;
+    };
+
+    const allRows = rows.rows as Row[];
+
+    // Agregasi: kelompokkan berdasarkan groupRef
+    const groupMap = new Map<string, Row[]>(); // groupRef → rows
+    const singles: Row[] = []; // booking tanpa groupRef
+
+    for (const row of allRows) {
+      if (row.group_ref) {
+        const existing = groupMap.get(row.group_ref) ?? [];
+        // Deduplicate: satu booking per group entry
+        const alreadyHasBooking = existing.some(r => r.booking_id === row.booking_id);
+        if (!alreadyHasBooking) existing.push(row);
+        groupMap.set(row.group_ref, existing);
+      } else {
+        singles.push(row);
+      }
+    }
+
+    const result: any[] = [];
+
+    // Group entries
+    for (const [groupRef, groupRows] of groupMap) {
+      const repRow = groupRows[0]!;
+      // Cari payment yang punya proof untuk representative
+      const withProof = groupRows.find(r => r.proof_url);
+      const repPayment = withProof ?? repRow;
+
+      const totalAmount = groupRows.reduce((s, r) => s + Number(r.grand_total ?? r.total_price), 0);
+      const childBookings = groupRows.map(r => ({
+        bookingId: r.booking_id,
+        orderNumber: r.order_number,
+        facilityName: r.facility_name,
+        bookingDate: r.booking_date,
+        startTime: r.start_time,
+        endTime: r.end_time,
+        amount: Number(r.grand_total ?? r.total_price),
+        bookingStatus: r.booking_status,
+        paymentStatus: r.payment_status,
+      }));
+
+      result.push({
+        isGroup: true,
+        groupRef,
+        groupBookingId: groupRef,
+        bookingCount: groupRows.length,
+        totalGroupAmount: totalAmount,
+        customerName: repRow.customer_name,
+        customerPhone: repRow.customer_phone,
+        paymentId: repPayment.payment_id,
+        proofUrl: repPayment.proof_url,
+        paymentStatus: repRow.payment_status,
+        paymentType: repRow.payment_type,
+        bookingStatus: repRow.booking_status,
+        createdAt: repRow.payment_created_at,
+        childBookings,
+      });
+    }
+
+    // Single (non-group) entries — deduplicate by bookingId, use latest payment
+    const singleByBooking = new Map<number, Row>();
+    for (const row of singles) {
+      const existing = singleByBooking.get(row.booking_id);
+      if (!existing || new Date(row.payment_created_at) > new Date(existing.payment_created_at)) {
+        singleByBooking.set(row.booking_id, row);
+      }
+    }
+
+    for (const row of singleByBooking.values()) {
+      result.push({
+        isGroup: false,
+        groupRef: null,
+        groupBookingId: null,
+        bookingCount: 1,
+        totalGroupAmount: Number(row.grand_total ?? row.total_price),
+        customerName: row.customer_name,
+        customerPhone: row.customer_phone,
+        paymentId: row.payment_id,
+        proofUrl: row.proof_url,
+        paymentStatus: row.payment_status,
+        paymentType: row.payment_type,
+        bookingStatus: row.booking_status,
+        orderNumber: row.order_number,
+        facilityName: row.facility_name,
+        bookingDate: row.booking_date,
+        startTime: row.start_time,
+        endTime: row.end_time,
+        createdAt: row.payment_created_at,
+        childBookings: [],
+      });
+    }
+
+    // Sort by createdAt desc
+    result.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+    res.json(result);
+  } catch (err) {
+    req.log.error({ err }, "List grouped payments error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 router.post("/payments", async (req, res) => {
   try {
+    const { bookingId, amount, proofUrl, paymentMethod, notes } = req.body;
     const { bookingId, amount, proofUrl, notes } = req.body;
-    const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, Number(bookingId))).limit(1);
-
-    const [existing] = await db.select().from(paymentsTable)
-      .where(eq(paymentsTable.bookingId, Number(bookingId))).limit(1);
-
-    if (existing) {
-      await db.update(paymentsTable).set({ proofUrl, notes, status: "pending" })
-        .where(eq(paymentsTable.bookingId, Number(bookingId)));
-      await db.update(bookingsTable).set({ status: "waiting_confirmation", updatedAt: new Date() })
-        .where(eq(bookingsTable.id, Number(bookingId)));
-
-      if (booking) {
-        await db.insert(bookingHistoryTable).values({
-          bookingId: Number(bookingId),
-          fromStatus: booking.status,
-          toStatus: "waiting_confirmation",
-          changedByName: booking.customerName,
-          note: "Bukti transfer diupload (update)",
-        });
-        const [facility] = await db.select({ name: facilitiesTable.name }).from(facilitiesTable)
-          .where(eq(facilitiesTable.id, booking.facilityId)).limit(1);
-        notifyPaymentProofUploaded({
-          customerName: booking.customerName, customerPhone: booking.customerPhone,
-          orderNumber: booking.orderNumber, facilityName: facility?.name ?? "",
-          bookingDate: booking.bookingDate, startTime: booking.startTime, endTime: booking.endTime,
-          totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
-        });
+    const rawPaymentMethod = req.body.paymentMethod;
+    let paymentMethod: "QRIS" | "Transfer Bank" = "Transfer Bank";
+    if (rawPaymentMethod !== undefined) {
+      const method = String(rawPaymentMethod).trim().toLowerCase();
+      if (method === "qris") {
+        paymentMethod = "QRIS";
+      } else if (method === "transfer" || method === "bank_transfer" || method === "transfer bank") {
+        paymentMethod = "Transfer Bank";
+      } else {
+        res.status(400).json({ error: "Metode pembayaran tidak didukung. Pilih QRIS atau Transfer Bank." });
+        return;
       }
+    }
 
-      const [updated] = await db.select().from(paymentsTable)
-        .where(eq(paymentsTable.bookingId, Number(bookingId))).limit(1);
-      if (booking) syncStatusToBizportal(booking.orderNumber, "waiting_confirmation", proofUrl).catch(() => {});
-      res.status(201).json({ ...updated, amount: Number(updated.amount) });
+    let paymentType: string = req.body.paymentType ?? "";
+
+    const [booking] = await db.select().from(bookingsTable)
+      .where(eq(bookingsTable.id, Number(bookingId))).limit(1);
+    if (!booking) { res.status(404).json({ error: "Booking not found" }); return; }
+
+    // Validasi status: hanya booking pending_payment yang boleh menerima bukti bayar
+    if (booking.status !== "pending_payment") {
+      res.status(409).json({ error: "Booking tidak dalam status menunggu pembayaran" });
       return;
     }
 
+    // Validasi kepemilikan: jika request membawa token, pastikan customer yang mengirim adalah pemilik booking
+    const authHeader = req.headers.authorization;
+    if (authHeader?.startsWith("Bearer ")) {
+      const payload = verifyToken(authHeader.slice(7));
+      if (payload?.userId) {
+        const isOwner = booking.customerId === payload.userId || booking.bookedByUserId === payload.userId;
+        const isAdmin = !!payload.role && payload.role !== "customer";
+        if (!isOwner && !isAdmin) {
+          res.status(403).json({ error: "Tidak diizinkan mengupload bukti untuk booking ini" });
+          return;
+        }
+      }
+    }
+
+    const existingPayments = await db.select().from(paymentsTable)
+      .where(eq(paymentsTable.bookingId, Number(bookingId)));
+
+    // Auto-detect payment_type jika tidak dikirim dari client
+    // Gunakan downPayment > 0 (bukan isDpPaid) untuk cek apakah booking pakai skema DP
+    // isDpPaid baru true setelah admin konfirmasi DP — tidak bisa dipakai untuk detect di sini
+    if (!paymentType) {
+      if (Number(booking.downPayment) > 0) {
+        const hasDpConfirmed = existingPayments.some(
+          (p) => p.paymentType === "dp" && p.status === "confirmed",
+        );
+        paymentType = hasDpConfirmed ? "pelunasan" : "dp";
+      } else {
+        paymentType = "full_payment";
+      }
+    }
+
+    // Validasi: jangan buat duplicate pending payment untuk tipe yang sama
+    if (paymentType === "dp") {
+      const hasPendingDp = existingPayments.some(
+        (p) => p.paymentType === "dp" && p.status === "pending",
+      );
+      if (hasPendingDp) {
+        res.status(409).json({ error: "Bukti DP sudah dikirim, mohon tunggu konfirmasi admin" });
+        return;
+      }
+    }
+
+    if (paymentType === "pelunasan") {
+      const hasPendingPelunasan = existingPayments.some(
+        (p) => p.paymentType === "pelunasan" && p.status === "pending",
+      );
+      if (hasPendingPelunasan) {
+        res.status(409).json({ error: "Bukti pelunasan sudah dikirim, mohon tunggu konfirmasi admin" });
+        return;
+      }
+    }
+
+    // ── Validasi nominal pembayaran ───────────────────────────────────────────
+    // For group bookings, use the group's total payment as the ceiling, not the per-session price
+    let grandTotalVal = booking.grandTotal != null ? Number(booking.grandTotal) : Number(booking.totalPrice);
+    if (booking.groupRef) {
+      const [group] = await db.select().from(bookingGroupsTable)
+        .where(eq(bookingGroupsTable.groupRef, booking.groupRef)).limit(1);
+      if (group) grandTotalVal = Number(group.totalPayment);
+    }
+    const amountNum = Number(amount);
+    const PAYMENT_TOLERANCE = 1000;
+
+    if (!amount || isNaN(amountNum) || amountNum <= 0) {
+      res.status(400).json({ error: "Nominal pembayaran harus lebih dari 0" });
+      return;
+    }
+
+    if (paymentType === "full_payment") {
+      if (amountNum > grandTotalVal + PAYMENT_TOLERANCE) {
+        res.status(400).json({
+          error: `Nominal pembayaran (Rp ${amountNum.toLocaleString("id-ID")}) melebihi total tagihan (Rp ${grandTotalVal.toLocaleString("id-ID")})`,
+        });
+        return;
+      }
+    }
+
+    if (paymentType === "pelunasan") {
+      const confirmedDpTotal = existingPayments
+        .filter((p) => p.paymentType === "dp" && p.status === "confirmed")
+        .reduce((sum, p) => sum + Number(p.amount), 0);
+      const remainingAmount = grandTotalVal - confirmedDpTotal;
+      if (amountNum > remainingAmount + PAYMENT_TOLERANCE) {
+        res.status(400).json({
+          error: `Nominal pelunasan (Rp ${amountNum.toLocaleString("id-ID")}) melebihi sisa tagihan (Rp ${remainingAmount.toLocaleString("id-ID")})`,
+        });
+        return;
+      }
+    }
+
+    // Insert payment record baru (no upsert)
     const [payment] = await db.insert(paymentsTable)
-      .values({ bookingId: Number(bookingId), amount: String(amount), proofUrl, notes })
+      .values({
+        bookingId: Number(bookingId),
+        amount: String(amount),
+        proofUrl,
+
+        paymentMethod: paymentMethod || "Transfer Bank",
+
+        paymentMethod,
+
+        notes,
+        paymentType: paymentType as "dp" | "pelunasan" | "full_payment",
+      })
       .returning();
 
-    await db.update(bookingsTable).set({ status: "waiting_confirmation", updatedAt: new Date() })
+    const prevStatus = booking.status;
+    await db.update(bookingsTable)
+      .set({ status: "waiting_confirmation", updatedAt: new Date() })
       .where(eq(bookingsTable.id, Number(bookingId)));
 
-    if (booking) {
-      await db.insert(bookingHistoryTable).values({
-        bookingId: Number(bookingId),
-        fromStatus: booking.status,
-        toStatus: "waiting_confirmation",
-        changedByName: booking.customerName,
-        note: "Bukti transfer diupload",
-      });
-      const [facility] = await db.select({ name: facilitiesTable.name }).from(facilitiesTable)
-        .where(eq(facilitiesTable.id, booking.facilityId)).limit(1);
-      notifyPaymentProofUploaded({
-        customerName: booking.customerName, customerPhone: booking.customerPhone,
-        orderNumber: booking.orderNumber, facilityName: facility?.name ?? "",
-        bookingDate: booking.bookingDate, startTime: booking.startTime, endTime: booking.endTime,
-        totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
-      });
-      syncStatusToBizportal(booking.orderNumber, "waiting_confirmation", proofUrl).catch(() => {});
+    const historyNote =
+      paymentType === "dp"
+        ? "Bukti DP diupload"
+        : paymentType === "pelunasan"
+        ? "Bukti pelunasan diupload"
+        : "Bukti transfer diupload";
+
+    await db.insert(bookingHistoryTable).values({
+      bookingId: Number(bookingId),
+      fromStatus: prevStatus,
+      toStatus: "waiting_confirmation",
+      changedByName: booking.customerName,
+      note: historyNote,
+    });
+
+    // Grup repeat booking: propagasi waiting_confirmation + proof ke semua sibling
+    if (booking.groupRef) {
+      const siblings = await db.select().from(bookingsTable).where(
+        and(
+          eq(bookingsTable.groupRef, booking.groupRef),
+          ne(bookingsTable.id, Number(bookingId)),
+        )
+      );
+      for (const sib of siblings) {
+        // Buat payment record untuk sibling agar bukti transfer tercatat di semua sesi
+        const hasPendingPayment = await db.select({ id: paymentsTable.id })
+          .from(paymentsTable)
+          .where(and(
+            eq(paymentsTable.bookingId, sib.id),
+            eq(paymentsTable.status, "pending"),
+          ));
+        if (hasPendingPayment.length === 0) {
+          await db.insert(paymentsTable).values({
+            bookingId: sib.id,
+            amount: String(sib.grandTotal ?? sib.totalPrice),
+            proofUrl,
+            paymentMethod,
+            notes: `[Grup ${booking.groupRef}] ${notes || ""}`.trim(),
+            paymentType: paymentType as "dp" | "pelunasan" | "full_payment",
+          });
+        }
+        const sibPrev = sib.status;
+        await db.update(bookingsTable)
+          .set({ status: "waiting_confirmation", updatedAt: new Date() })
+          .where(eq(bookingsTable.id, sib.id));
+        await db.insert(bookingHistoryTable).values({
+          bookingId: sib.id,
+          fromStatus: sibPrev,
+          toStatus: "waiting_confirmation",
+          changedByName: booking.customerName,
+          note: `${historyNote} (grup ${booking.groupRef})`,
+        });
+        // Sync sibling ke BizPortal
+        syncStatusToBizportal(sib.orderNumber, "waiting_confirmation", proofUrl, null, sib).catch(() => {});
+      }
     }
+
+    const [facility] = await db
+      .select({ name: facilitiesTable.name })
+      .from(facilitiesTable)
+      .where(eq(facilitiesTable.id, booking.facilityId))
+      .limit(1);
+
+    // Generate single review token so admin gets ONE link (proof + approve/reject in one page)
+    const APP_URL = await getBaseUrl();
+    const reviewToken = await createWaToken(Number(bookingId), "review_payment", 7);
+    notifyPaymentProofUploaded({
+      customerName: booking.customerName,
+      customerPhone: booking.customerPhone,
+      orderNumber: booking.orderNumber,
+      facilityName: facility?.name ?? "",
+      bookingDate: booking.bookingDate,
+      startTime: booking.startTime,
+      endTime: booking.endTime,
+      totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
+      reviewUrl: `${APP_URL}/ulasan/${reviewToken}`,
+    });
+    syncStatusToBizportal(booking.orderNumber, "waiting_confirmation", proofUrl, null, booking).catch(() => {});
+
+    // Rekap otomatis jika booking hari ini
+    triggerRekapIfToday(booking.bookingDate);
+
+    const auditAction =
+      paymentType === "dp" ? "DP_PAYMENT_CREATED" : "FINAL_PAYMENT_CREATED";
+    const clientInfo = getClientInfo(req);
+    await logAudit({
+      action: auditAction,
+      entity: "payment",
+      entityId: payment.id,
+      after: { bookingId: Number(bookingId), paymentType, amount },
+      ...clientInfo,
+    });
 
     res.status(201).json({ ...payment, amount: Number(payment.amount) });
   } catch (err) {
@@ -128,63 +453,265 @@ router.post("/payments", async (req, res) => {
 router.patch("/payments/:id", adminMiddleware, async (req, res) => {
   try {
     const id = parseInt(String(req.params.id));
-    const { status, notes } = req.body;
+    const { status, paymentMethod, notes } = req.body;
     const [before] = await db.select().from(paymentsTable).where(eq(paymentsTable.id, id)).limit(1);
+    if (!before) { res.status(404).json({ error: "Not found" }); return; }
 
     const updateData: Record<string, unknown> = {};
     if (status) updateData.status = status;
     if (status === "confirmed") updateData.confirmedAt = new Date();
+    if (paymentMethod !== undefined) {
+      if (typeof paymentMethod !== "string" || !paymentMethod.trim()) {
+        res.status(400).json({ error: "Metode pembayaran wajib diisi" });
+        return;
+      }
+      if (paymentMethod.trim().length > 120) {
+        res.status(400).json({ error: "Metode pembayaran terlalu panjang" });
+        return;
+      }
+      updateData.paymentMethod = paymentMethod.trim();
+    }
     if (notes !== undefined) updateData.notes = notes;
+    if (Object.keys(updateData).length === 0) {
+      res.status(400).json({ error: "Tidak ada perubahan pembayaran" });
+      return;
+    }
     await db.update(paymentsTable).set(updateData).where(eq(paymentsTable.id, id));
 
-    const [payment] = await db.select().from(paymentsTable).where(eq(paymentsTable.id, id));
+    const [payment] = await db.select().from(paymentsTable).where(eq(paymentsTable.id, id)).limit(1);
     if (!payment) { res.status(404).json({ error: "Not found" }); return; }
 
-    const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, payment.bookingId)).limit(1);
+    const [booking] = await db.select().from(bookingsTable)
+      .where(eq(bookingsTable.id, payment.bookingId)).limit(1);
     const userInfo = getUserFromReq(req);
     const clientInfo = getClientInfo(req);
 
-    if (status === "confirmed") {
-      const prevStatus = booking?.status ?? "waiting_confirmation";
-      await db.update(bookingsTable).set({ status: "confirmed", updatedAt: new Date() })
-        .where(eq(bookingsTable.id, payment.bookingId));
-
-      if (booking) {
+    // Helper: propagasi status ke semua sibling dalam grup
+    const propagateGroupStatus = async (
+      targetStatus: string,
+      note: string,
+      proofUrl?: string | null,
+      paidAt?: Date | null,
+      extraFields?: Record<string, unknown>,
+    ) => {
+      if (!booking?.groupRef) return;
+      const siblings = await db.select().from(bookingsTable).where(
+        and(eq(bookingsTable.groupRef, booking.groupRef), ne(bookingsTable.id, payment.bookingId))
+      );
+      for (const sib of siblings) {
+        const sibPrev = sib.status;
+        await db.update(bookingsTable)
+          .set({ status: targetStatus as any, updatedAt: new Date(), ...(extraFields ?? {}) })
+          .where(eq(bookingsTable.id, sib.id));
         await db.insert(bookingHistoryTable).values({
-          bookingId: payment.bookingId,
-          fromStatus: prevStatus,
-          toStatus: "confirmed",
+          bookingId: sib.id,
+          fromStatus: sibPrev,
+          toStatus: targetStatus,
           changedByName: userInfo.userName || "admin",
-          note: "Pembayaran dikonfirmasi oleh admin",
+          note: `${note} (grup ${booking.groupRef})`,
         });
-        const [facility] = await db.select({ name: facilitiesTable.name }).from(facilitiesTable)
-          .where(eq(facilitiesTable.id, booking.facilityId)).limit(1);
-        notifyPaymentConfirmed({
-          customerName: booking.customerName, customerPhone: booking.customerPhone,
-          orderNumber: booking.orderNumber, facilityName: facility?.name ?? "",
-          bookingDate: booking.bookingDate, startTime: booking.startTime, endTime: booking.endTime,
-          totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
+        // Update juga sibling payment records ke status yang sama
+        await db.update(paymentsTable)
+          .set({ status: status as any, ...(status === "confirmed" ? { confirmedAt: new Date() } : {}) })
+          .where(and(eq(paymentsTable.bookingId, sib.id), eq(paymentsTable.status, "pending")));
+        // Sync sibling ke BizPortal dengan total_price = 0:
+        // Nilai finansial sudah tercatat di booking utama (primary) sehingga
+        // sibling tidak boleh menambah nominal di BizPortal (mencegah double counting).
+        syncStatusToBizportal(sib.orderNumber, targetStatus, proofUrl, paidAt, {
+          ...sib,
+          totalPrice: "0",
+          grandTotal: null,
+          dpp: null,
+          ppnAmount: null,
+        } as any).catch(() => {});
+      }
+    };
+
+    if (status === "confirmed") {
+      const isDP = payment.paymentType === "dp";
+
+      if (isDP) {
+        // DP dikonfirmasi — set isDpPaid=true, booking kembali ke pending_payment untuk upload pelunasan
+        const prevStatus = booking?.status ?? "waiting_confirmation";
+        await db.update(bookingsTable)
+          .set({ status: "pending_payment", isDpPaid: true, updatedAt: new Date() })
+          .where(eq(bookingsTable.id, payment.bookingId));
+
+        if (booking) {
+          await db.insert(bookingHistoryTable).values({
+            bookingId: payment.bookingId,
+            fromStatus: prevStatus,
+            toStatus: "pending_payment",
+            changedByName: userInfo.userName || "admin",
+            note: "DP dikonfirmasi oleh admin, menunggu pelunasan",
+          });
+          // Sync status ke BizPortal — booking sudah DP, menunggu pelunasan
+          syncStatusToBizportal(booking.orderNumber, "pending_payment", payment.proofUrl).catch(() => {});
+
+          await propagateGroupStatus("pending_payment", "DP dikonfirmasi oleh admin, menunggu pelunasan", null, null, { isDpPaid: true });
+        }
+
+        await logAudit({
+          ...userInfo,
+          action: "DP_PAYMENT_APPROVED",
+          entity: "payment",
+          entityId: id,
+          before: { status: before.status },
+          after: { status, paymentType: payment.paymentType },
+          ...clientInfo,
         });
-        syncStatusToBizportal(booking.orderNumber, "confirmed", payment.proofUrl, new Date()).catch(() => {});
+      } else {
+        // Pelunasan / full_payment dikonfirmasi → booking confirmed
+        const prevStatus = booking?.status ?? "waiting_confirmation";
+        await db.update(bookingsTable)
+          .set({ status: "confirmed", updatedAt: new Date() })
+          .where(eq(bookingsTable.id, payment.bookingId));
 
-        // FASE 4 & 5: Catat tax transaction (jika belum ada) + buat jurnal akuntansi
-        const today = new Date().toISOString().split("T")[0];
-        const subtotal = Number(booking.totalPrice);
-        const ppnAmount = booking.ppnAmount != null ? Number(booking.ppnAmount) : 0;
-        const grandTotal = booking.grandTotal != null ? Number(booking.grandTotal) : subtotal + ppnAmount;
+        if (booking) {
+          await db.insert(bookingHistoryTable).values({
+            bookingId: payment.bookingId,
+            fromStatus: prevStatus,
+            toStatus: "confirmed",
+            changedByName: userInfo.userName || "admin",
+            note:
+              payment.paymentType === "pelunasan"
+                ? "Pelunasan dikonfirmasi oleh admin"
+                : "Pembayaran dikonfirmasi oleh admin",
+          });
 
-        // Buat jurnal akuntansi (non-blocking)
-        createJournalEntry(
-          booking.id,
-          booking.orderNumber,
-          subtotal,
-          ppnAmount,
-          today
-        ).catch(() => {});
+          // Propagasi confirmed ke semua sibling dalam grup
+          await propagateGroupStatus(
+            "confirmed",
+            payment.paymentType === "pelunasan"
+              ? "Pelunasan dikonfirmasi oleh admin"
+              : "Pembayaran dikonfirmasi oleh admin",
+            payment.proofUrl,
+            new Date(),
+          );
+
+          const [facility] = await db
+            .select({ name: facilitiesTable.name })
+            .from(facilitiesTable)
+            .where(eq(facilitiesTable.id, booking.facilityId))
+            .limit(1);
+
+          logger.info({ orderNumber: booking.orderNumber, phone: booking.customerPhone }, "[WA] Mengirim notif konfirmasi pembayaran ke customer");
+          notifyPaymentConfirmed({
+            customerName: booking.customerName,
+            customerPhone: booking.customerPhone,
+            orderNumber: booking.orderNumber,
+            facilityName: facility?.name ?? "",
+            bookingDate: booking.bookingDate,
+            startTime: booking.startTime,
+            endTime: booking.endTime,
+            totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
+            bookingId: booking.id,
+            groupRef: booking.groupRef,
+          }).catch((err) => logger.error({ err, orderNumber: booking.orderNumber, phone: booking.customerPhone }, "[WA] notifyPaymentConfirmed error"));
+
+          // Kirim invoice PDF ke customer via email & WA (fire-and-forget)
+          // Jika booking bagian dari grup, kirim invoice gabungan
+          const invoiceAudit = { userId: userInfo.userId, userName: userInfo.userName ?? "admin", ...clientInfo };
+          if (booking.groupRef) {
+            sendGroupInvoiceToCustomer(booking.groupRef, invoiceAudit)
+              .catch((err) => logger.error({ err, groupRef: booking.groupRef }, "[InvoiceDelivery] Gagal kirim invoice grup setelah payment confirmed"));
+          } else {
+            sendInvoiceToCustomer(booking.orderNumber, invoiceAudit)
+              .catch((err) => logger.error({ err, orderNumber: booking.orderNumber }, "[InvoiceDelivery] Gagal kirim invoice PDF setelah payment confirmed"));
+          }
+          const today = new Date().toISOString().split("T")[0];
+          const subtotal = Number(booking.totalPrice);
+          const ppnAmount = booking.ppnAmount != null ? Number(booking.ppnAmount) : 0;
+          const paymentMethodLabel = payment.paymentMethod ?? "Transfer Bank";
+
+          // Jurnal internal per booking (tidak berubah)
+          createJournalEntry(booking.id, booking.orderNumber, subtotal, ppnAmount, today, paymentMethodLabel).catch((err) =>
+            logAccountingError({ operation: "createJournalEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
+          );
+
+          // BizPortal: grup booking → 1 entry total; booking tunggal → 1 entry per booking
+          if (booking.groupRef) {
+            // Ambil semua booking dalam grup (termasuk yang ini)
+            const allGroupBookings = await db.select({
+              id: bookingsTable.id,
+              orderNumber: bookingsTable.orderNumber,
+              totalPrice: bookingsTable.totalPrice,
+              ppnAmount: bookingsTable.ppnAmount,
+              facilityId: bookingsTable.facilityId,
+            }).from(bookingsTable).where(eq(bookingsTable.groupRef, booking.groupRef));
+
+            const groupEntries = allGroupBookings.map(b => ({
+              id: b.id,
+              orderNumber: b.orderNumber,
+              subtotal: Number(b.totalPrice),
+              ppnAmount: b.ppnAmount != null ? Number(b.ppnAmount) : 0,
+              facilityId: b.facilityId,
+            }));
+
+            createPublicAccountingEntryForGroup(booking.groupRef, groupEntries, today).catch((err) =>
+              logAccountingError({ operation: "createPublicAccountingEntry", orderNumber: booking.groupRef!, bookingId: booking.id, error: err }),
+            );
+          } else {
+            createPublicAccountingEntry(booking.id, booking.orderNumber, subtotal, ppnAmount, booking.facilityId, today).catch((err) =>
+              logAccountingError({ operation: "createPublicAccountingEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
+            );
+          }
+
+          // Hitung total finansial: untuk grup pakai sum semua sesi, bukan hanya sesi utama
+          // Ini memastikan BizPortal, bank mutation, dan jurnal mencatat nilai yang benar
+          let journalDpp: number;
+          let journalPpn: number;
+          let bookingForFinancial: typeof booking;
+
+          if (booking.groupRef) {
+            const allGroupBookings = await db
+              .select({ totalPrice: bookingsTable.totalPrice, grandTotal: bookingsTable.grandTotal, dpp: bookingsTable.dpp, ppnAmount: bookingsTable.ppnAmount })
+              .from(bookingsTable)
+              .where(eq(bookingsTable.groupRef, booking.groupRef));
+            journalDpp = 0;
+            journalPpn = 0;
+            for (const gb of allGroupBookings) {
+              const extracted = extractBookingDpp(gb);
+              journalDpp += extracted.dpp;
+              journalPpn += extracted.ppnAmount;
+            }
+            // Override grandTotal & totalPrice → total grup, bukan per-sesi
+            const groupGrandTotal = journalDpp + journalPpn;
+            bookingForFinancial = { ...booking, grandTotal: String(groupGrandTotal), totalPrice: String(groupGrandTotal) } as any;
+          } else {
+            const extracted = extractBookingDpp(booking);
+            journalDpp = extracted.dpp;
+            journalPpn = extracted.ppnAmount;
+            bookingForFinancial = booking;
+          }
+
+          // Sync ke BizPortal pakai total grup (bukan per-sesi) agar nominal tidak terbelah
+          syncStatusToBizportal(booking.orderNumber, "confirmed", payment.proofUrl, new Date(), bookingForFinancial).catch(() => {});
+          pushConfirmedPaymentAsBankMutation(bookingForFinancial, new Date()).catch(() => {});
+          createJournalEntry(booking.id, booking.orderNumber, journalDpp, journalPpn, today, paymentMethodLabel).catch((err) =>
+            logAccountingError({ operation: "createJournalEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
+          );
+          createPublicAccountingEntry(booking.id, booking.orderNumber, journalDpp, journalPpn, booking.facilityId, today).catch((err) =>
+            logAccountingError({ operation: "createPublicAccountingEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
+          );
+
+        }
+
+        await logAudit({
+          ...userInfo,
+          action: "FINAL_PAYMENT_APPROVED",
+          entity: "payment",
+          entityId: id,
+          before: { status: before.status },
+          after: { status, paymentType: payment.paymentType },
+          ...clientInfo,
+        });
       }
     } else if (status === "rejected") {
+      // Tolak DP atau pelunasan — booking kembali ke pending_payment
       const prevStatus = booking?.status ?? "waiting_confirmation";
-      await db.update(bookingsTable).set({ status: "pending_payment", updatedAt: new Date() })
+      await db.update(bookingsTable)
+        .set({ status: "pending_payment", updatedAt: new Date() })
         .where(eq(bookingsTable.id, payment.bookingId));
 
       if (booking) {
@@ -195,24 +722,198 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
           changedByName: userInfo.userName || "admin",
           note: `Pembayaran ditolak: ${notes ?? ""}`,
         });
-        syncStatusToBizportal(booking.orderNumber, "pending_payment").catch(() => {});
+        // Propagasi rejected ke semua sibling dalam grup
+        await propagateGroupStatus("pending_payment", `Pembayaran ditolak: ${notes ?? ""}`, null, null);
+        syncStatusToBizportal(booking.orderNumber, "pending_payment", null, null, booking).catch(() => {});
       }
+
+      const auditAction =
+        payment.paymentType === "dp" ? "DP_PAYMENT_REJECTED" : "FINAL_PAYMENT_REJECTED";
+      await logAudit({
+        ...userInfo,
+        action: auditAction,
+        entity: "payment",
+        entityId: id,
+        before: { status: before.status },
+        after: { status, notes },
+        ...clientInfo,
+      });
+    } else {
+      await logAudit({
+        ...userInfo,
+        action: "update_payment",
+        entity: "payment",
+        entityId: id,
+        before: { status: before?.status, paymentMethod: before?.paymentMethod },
+        after: { status, paymentMethod: payment.paymentMethod },
+        ...clientInfo,
+      });
     }
 
-    await logAudit({
-      ...userInfo,
-      action: "update_payment",
-      entity: "payment",
-      entityId: id,
-      before: { status: before?.status },
-      after: { status },
-      ...clientInfo,
-    });
+    // Rekap otomatis hanya jika status BENAR-BENAR berubah & booking hari ini
+    if (booking && (status === "confirmed" || status === "rejected") && before.status !== status) {
+      triggerRekapIfToday(booking.bookingDate);
+    }
 
     res.json({ ...payment, amount: Number(payment.amount) });
   } catch (err) {
     req.log.error({ err }, "Update payment error");
     res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// DELETE /payments/:id/proof — admin: hapus bukti transfer, kembalikan status booking ke pending_payment
+router.delete("/payments/:id/proof", adminMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(String(req.params.id));
+    const [payment] = await db.select().from(paymentsTable).where(eq(paymentsTable.id, id)).limit(1);
+    if (!payment) { res.status(404).json({ error: "Not found" }); return; }
+
+    // Hanya boleh hapus bukti jika payment masih pending
+    if (payment.status !== "pending") {
+      res.status(400).json({ error: "Bukti transfer hanya bisa dihapus jika pembayaran masih pending" });
+      return;
+    }
+
+    await db.update(paymentsTable).set({
+      proofUrl: null,
+      ocrName: null,
+      ocrAmount: null,
+      ocrDate: null,
+      ocrRaw: null,
+      ocrData: null,
+    }).where(eq(paymentsTable.id, id));
+
+    // Kembalikan status booking ke pending_payment jika masih waiting_confirmation
+    const [booking] = await db.select().from(bookingsTable)
+      .where(eq(bookingsTable.id, payment.bookingId)).limit(1);
+
+    if (booking && booking.status === "waiting_confirmation") {
+      await db.update(bookingsTable)
+        .set({ status: "pending_payment" })
+        .where(eq(bookingsTable.id, booking.id));
+
+      // Propagasi ke sibling jika booking grup
+      if (booking.groupRef) {
+        const siblings = await db.select().from(bookingsTable).where(
+          and(eq(bookingsTable.groupRef, booking.groupRef), ne(bookingsTable.id, booking.id))
+        );
+        for (const sib of siblings) {
+          // Hapus payment record pending sibling yang dibuat saat upload grup
+          await db.delete(paymentsTable)
+            .where(and(eq(paymentsTable.bookingId, sib.id), eq(paymentsTable.status, "pending")));
+          if (sib.status === "waiting_confirmation") {
+            await db.update(bookingsTable)
+              .set({ status: "pending_payment" })
+              .where(eq(bookingsTable.id, sib.id));
+          }
+        }
+      }
+    }
+
+    const userInfo = getUserFromReq(req);
+    const clientInfo = getClientInfo(req);
+    await logAudit({
+      ...userInfo,
+      action: "delete_payment_proof",
+      entity: "payment",
+      entityId: id,
+      before: { proofUrl: payment.proofUrl },
+      after: { proofUrl: null },
+      ...clientInfo,
+    });
+
+    res.json({ success: true });
+  } catch (err) {
+    req.log.error({ err }, "Delete payment proof error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// POST /payments/backfill-group-accounting
+// Backfill BizPortal entries untuk semua grup booking lama yang sudah confirmed/completed
+// tapi belum punya group entry (correlation_id = sc_group_<groupRef>).
+// Idempotent — aman dijalankan berulang kali.
+router.post("/payments/backfill-group-accounting", adminMiddleware, async (req, res) => {
+  try {
+    // 1. Ambil semua groupRef unik yang punya booking confirmed/completed
+    const groupRows = await db
+      .selectDistinct({ groupRef: bookingsTable.groupRef })
+      .from(bookingsTable)
+      .where(
+        and(
+          ne(bookingsTable.groupRef, ""),
+        )
+      );
+
+    const groupRefs = groupRows
+      .map(r => r.groupRef)
+      .filter((g): g is string => !!g);
+
+    let processed = 0;
+    let skipped = 0;
+    let failed = 0;
+    const errors: string[] = [];
+
+    for (const groupRef of groupRefs) {
+      try {
+        // Ambil semua booking dalam grup ini
+        const bookingsInGroup = await db
+          .select({
+            id: bookingsTable.id,
+            orderNumber: bookingsTable.orderNumber,
+            totalPrice: bookingsTable.totalPrice,
+            ppnAmount: bookingsTable.ppnAmount,
+            grandTotal: bookingsTable.grandTotal,
+            facilityId: bookingsTable.facilityId,
+            status: bookingsTable.status,
+            updatedAt: bookingsTable.updatedAt,
+          })
+          .from(bookingsTable)
+          .where(eq(bookingsTable.groupRef, groupRef));
+
+        // Hanya proses grup yang minimal ada 1 booking confirmed/completed
+        const hasConfirmed = bookingsInGroup.some(
+          b => b.status === "confirmed" || b.status === "completed"
+        );
+        if (!hasConfirmed) { skipped++; continue; }
+
+        // Pakai tanggal updatedAt booking pertama yang confirmed sebagai journal date
+        const confirmedBooking = bookingsInGroup.find(
+          b => b.status === "confirmed" || b.status === "completed"
+        );
+        const journalDate = confirmedBooking?.updatedAt
+          ? new Date(confirmedBooking.updatedAt).toISOString().slice(0, 10)
+          : new Date().toISOString().slice(0, 10);
+
+        const groupEntries = bookingsInGroup.map(b => ({
+          id: b.id,
+          orderNumber: b.orderNumber,
+          subtotal: Number(b.totalPrice),
+          ppnAmount: b.ppnAmount != null ? Number(b.ppnAmount) : 0,
+          facilityId: b.facilityId,
+        }));
+
+        await createPublicAccountingEntryForGroup(groupRef, groupEntries, journalDate);
+        processed++;
+      } catch (err: any) {
+        failed++;
+        errors.push(`${groupRef}: ${err?.message ?? "unknown error"}`);
+        logger.error({ err, groupRef }, "[backfill-group-accounting] Gagal proses grup");
+      }
+    }
+
+    res.json({
+      ok: true,
+      totalGroups: groupRefs.length,
+      processed,
+      skipped,
+      failed,
+      errors: errors.slice(0, 10),
+    });
+  } catch (err: any) {
+    req.log.error({ err }, "Backfill group accounting error");
+    res.status(500).json({ error: err?.message ?? "Gagal backfill group accounting" });
   }
 });
 

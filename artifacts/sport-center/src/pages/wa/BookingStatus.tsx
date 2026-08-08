@@ -31,6 +31,7 @@ interface BookingStatus {
     confirmedAt: string | null;
   } | null;
   uploadProofUrl: string | null;
+  invoicePdfUrl: string | null;
 }
 
 const STATUS_LABEL: Record<string, string> = {
@@ -179,15 +180,7 @@ export default function WaBookingStatus() {
             <Row label="Fasilitas" value={`${booking.facilityName} (${booking.facilityCategory})`} />
             <Row label="Tanggal" value={formatDate(booking.bookingDate)} />
             <Row label="Jam" value={`${booking.startTime} – ${booking.endTime} (${booking.durationHours} jam)`} />
-            {booking.ppnAmount != null && Number(booking.ppnAmount) > 0 ? (
-              <>
-                <Row label="Subtotal (DPP)" value={`Rp ${booking.totalPrice.toLocaleString("id-ID")}`} />
-                <Row label={`PPN ${Number(booking.ppnRate ?? 11)}%`} value={`+Rp ${Number(booking.ppnAmount).toLocaleString("id-ID")}`} />
-                <Row label="Grand Total" value={`Rp ${Number(booking.grandTotal).toLocaleString("id-ID")}`} bold accent />
-              </>
-            ) : (
-              <Row label="Total Bayar" value={`Rp ${booking.totalPrice.toLocaleString("id-ID")}`} bold accent />
-            )}
+            <Row label="Grand Total" value={`Rp ${booking.totalPrice.toLocaleString("id-ID")}`} bold accent />
             {booking.notes && <Row label="Catatan" value={booking.notes} />}
           </CardContent>
         </Card>
@@ -243,6 +236,17 @@ export default function WaBookingStatus() {
               className="flex items-center justify-center gap-2 w-full bg-orange-500 hover:bg-orange-600 text-white font-bold py-4 px-4 rounded-xl text-sm transition-colors">
               <Upload className="w-5 h-5" />
               Upload Bukti Pembayaran
+            </a>
+          )}
+
+          {booking.invoicePdfUrl && (
+            <a
+              href={booking.invoicePdfUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center justify-center gap-2 w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-xl text-sm transition-colors">
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+              Download Invoice PDF
             </a>
           )}
 

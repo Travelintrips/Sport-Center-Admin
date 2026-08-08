@@ -7,25 +7,13 @@ import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
 const rawPort = process.env.PORT;
 const isBuild = process.argv.includes("build");
 
-if (!rawPort && !isBuild) {
-  throw new Error(
-    "PORT environment variable is required but was not provided.",
-  );
-}
-
-const port = Number(rawPort ?? "3000");
+const port = Number(rawPort ?? "5000");
 
 if (!isBuild && (Number.isNaN(port) || port <= 0)) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
-const basePath = process.env.BASE_PATH;
-
-if (!basePath && !isBuild) {
-  throw new Error(
-    "BASE_PATH environment variable is required but was not provided.",
-  );
-}
+const basePath = process.env.BASE_PATH ?? "/";
 
 export default defineConfig({
   base: basePath,
@@ -47,10 +35,18 @@ export default defineConfig({
         ]
       : []),
   ],
+  optimizeDeps: {
+    include: ["xlsx"],
+  },
   resolve: {
     alias: {
       "@": path.resolve(import.meta.dirname, "src"),
-      "@assets": path.resolve(import.meta.dirname, "..", "..", "attached_assets"),
+      "@assets": path.resolve(
+        import.meta.dirname,
+        "..",
+        "..",
+        "attached_assets",
+      ),
     },
     dedupe: ["react", "react-dom"],
   },
@@ -68,6 +64,27 @@ export default defineConfig({
       "/api": {
         target: "http://localhost:8080",
         changeOrigin: true,
+        configure: (proxy) => {
+          proxy.on("error", (err, _req, res) => {
+            // When the API server is unavailable (e.g. restarting), return a
+            // proper JSON 503 instead of falling through to Vite's static-file
+            // handler which returns an HTML 404 that the frontend can't parse.
+            if (
+              "writeHead" in res &&
+              typeof (res as any).writeHead === "function"
+            ) {
+              (res as any).writeHead(503, {
+                "Content-Type": "application/json",
+              });
+              (res as any).end(
+                JSON.stringify({
+                  error:
+                    "API server unavailable. Please try again in a moment.",
+                }),
+              );
+            }
+          });
+        },
       },
     },
     fs: {

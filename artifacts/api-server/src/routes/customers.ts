@@ -1,16 +1,23 @@
 import { Router } from "express";
 import { db, usersTable, bookingsTable } from "@workspace/db";
-import { eq, or, ilike, isNull, desc } from "drizzle-orm";
+import { eq, or, ilike, isNull, isNotNull, desc } from "drizzle-orm";
 import { adminMiddleware, authMiddleware } from "../lib/auth";
 import { createHmac } from "crypto";
 import { normalizePhone } from "./bookings";
 
 const router = Router();
 
+async function generateCustomerCode(): Promise<string> {
+  const [last] = await db.select({ code: usersTable.customerCode }).from(usersTable)
+    .where(isNotNull(usersTable.customerCode)).orderBy(desc(usersTable.customerCode)).limit(1);
+  const lastNum = last?.code ? parseInt(last.code.replace("C", "")) || 0 : 0;
+  return "C" + String(lastNum + 1).padStart(4, "0");
+}
+
 function mapUser(u: typeof usersTable.$inferSelect, userBookings: (typeof bookingsTable.$inferSelect)[]) {
   const totalSpent = userBookings
     .filter((b) => b.status !== "cancelled" && b.status !== "expired" && b.status !== "rejected" && b.status !== "refunded")
-    .reduce((sum, b) => sum + Number(b.totalPrice), 0);
+    .reduce((sum, b) => sum + (b.grandTotal != null ? Number(b.grandTotal) : Number(b.totalPrice)), 0);
   return {
     id: u.id,
     name: u.name,
@@ -40,7 +47,7 @@ router.get("/customers/simple", authMiddleware, async (req, res) => {
   try {
     // 1. Registered customers
     const registeredUsers = await db
-      .select({ id: usersTable.id, name: usersTable.name, email: usersTable.email, phone: usersTable.phone })
+      .select({ id: usersTable.id, name: usersTable.name, email: usersTable.email, phone: usersTable.phone, accountType: usersTable.accountType })
       .from(usersTable)
       .where(eq(usersTable.role, "customer"));
 
@@ -63,6 +70,7 @@ router.get("/customers/simple", authMiddleware, async (req, res) => {
         name: b.customerName,
         email: b.customerEmail,
         phone: b.customerPhone,
+        accountType: "personal" as const,
       }));
 
     res.json([...registeredUsers, ...pastCustomers]);
@@ -109,7 +117,7 @@ router.get("/customers", adminMiddleware, async (req, res) => {
         const guestBookings = bookings.filter((bk) => bk.customerPhone === phone);
         const totalSpent = guestBookings
           .filter((bk) => !INACTIVE.includes(bk.status))
-          .reduce((sum, bk) => sum + Number(bk.totalPrice), 0);
+          .reduce((sum, bk) => sum + (bk.grandTotal != null ? Number(bk.grandTotal) : Number(bk.totalPrice)), 0);
         guestEntries.push({
           id: -(guestEntries.length + 1),
           name: b.customerName,

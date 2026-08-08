@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db, usersTable, bookingsTable, facilitiesTable } from "@workspace/db";
-import { eq, isNotNull, or } from "drizzle-orm";
+import { eq, isNotNull, ilike, or } from "drizzle-orm";
 import { createToken, hashPassword, authMiddleware } from "../lib/auth";
 
 async function generateCustomerCode(): Promise<string> {
@@ -20,7 +20,8 @@ const router = Router();
 
 router.post("/auth/login", async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const email = String(req.body?.email ?? "").trim().toLowerCase();
+    const password = String(req.body?.password ?? "");
     if (!email || !password) {
       res.status(400).json({ error: "Email and password required" });
       return;
@@ -107,7 +108,8 @@ router.post("/auth/setup-admin", async (req, res) => {
 
 router.post("/auth/admin-login", async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const email = String(req.body?.email ?? "").trim().toLowerCase();
+    const password = String(req.body?.password ?? "");
     if (!email || !password) {
       res.status(400).json({ error: "Email dan password wajib diisi" });
       return;
@@ -118,8 +120,8 @@ router.post("/auth/admin-login", async (req, res) => {
       res.status(401).json({ error: "Email atau password salah" });
       return;
     }
-    if (user.role !== "admin") {
-      res.status(403).json({ error: "Akses ditolak. Halaman ini hanya untuk admin." });
+    if (user.role !== "admin" && user.role !== "super_admin" && user.role !== "admin_booking") {
+      res.status(403).json({ error: "Akses ditolak. Akun ini bukan akun admin/operator." });
       return;
     }
     const token = createToken(user.id, user.role, null);
@@ -163,12 +165,12 @@ router.get("/my-bookings", authMiddleware, async (req, res) => {
     const [user] = await db.select().from(usersTable).where(eq(usersTable.id, userId)).limit(1);
     if (!user) { res.status(401).json({ error: "User not found" }); return; }
 
-    // Tampilkan booking jika customerId cocok (booker = user ini, meski booking atas nama lain)
-    // ATAU customerEmail cocok (backward compat booking lama tanpa customerId)
+    // Cocokkan via customerId ATAU bookedByUserId ATAU customerEmail (case-insensitive)
     const bookings = await db.select().from(bookingsTable).where(
       or(
         eq(bookingsTable.customerId, userId),
-        eq(bookingsTable.customerEmail, user.email)
+        eq(bookingsTable.bookedByUserId, userId),
+        user.email ? ilike(bookingsTable.customerEmail, user.email) : undefined,
       )
     );
     const facilities = await db.select().from(facilitiesTable);
