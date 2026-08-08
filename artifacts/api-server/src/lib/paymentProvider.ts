@@ -2,8 +2,6 @@ export const PAYMENT_PROVIDERS = ["mandiri_direct", "paylabs", "unknown"] as con
 export type PaymentProvider = (typeof PAYMENT_PROVIDERS)[number];
 
 export function normalizePaymentProvider(value: unknown): PaymentProvider | null {
-  if (typeof value !== "string") return null;
-  const normalized = value.trim().toLowerCase();
   if (value === undefined || value === null || String(value).trim() === "") return null;
   const normalized = String(value).trim().toLowerCase();
   return (PAYMENT_PROVIDERS as readonly string[]).includes(normalized)
@@ -46,8 +44,6 @@ export function parseProviderPaidAt(body: Record<string, unknown>, now = new Dat
   return null;
 }
 
-export function isTerminalBookingStatus(status: string | null | undefined): boolean {
-  return ["cancelled", "expired", "rejected", "refunded"].includes(String(status ?? ""));
 export function isTerminalBookingStatus(status: unknown): boolean {
   return ["cancelled", "expired", "rejected", "refunded"].includes(String(status ?? ""));
 }

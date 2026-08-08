@@ -31,7 +31,6 @@ import {
 import { notifyPaymentConfirmed } from "../lib/notifications";
 import { extractBookingDpp, postConfirmedPaymentAccounting } from "../lib/accounting";
 import { logAccountingError } from "../lib/auditLog";
-import { isTerminalBookingStatus, parseProviderPaidAt } from "../lib/paymentProvider";
 import {
   isTerminalBookingStatus,
   resolvePaylabsPaidAt,
@@ -96,16 +95,11 @@ interface FinalizePaymentOptions {
   adminId?:        number;
   rawNotification?: Record<string, unknown>;
   paidAt?: Date;
-}
-
-interface FinalizePaymentResult {
-  outcome: "confirmed" | "already_confirmed" | "terminal_booking_manual_review" | "transaction_not_found" | "booking_not_found" | "error";
-  paidAt:          Date;
   providerReference?: string | null;
 }
 
 interface FinalizePaymentResult {
-  outcome: "confirmed" | "already_confirmed" | "terminal_booking" | "transaction_not_found" | "booking_not_found" | "error";
+  outcome: "confirmed" | "already_confirmed" | "terminal_booking_manual_review" | "transaction_not_found" | "booking_not_found" | "error";
   bookingId?:    number;
   paymentId?:    number;
   transactionId?: number;
@@ -137,9 +131,8 @@ async function finalizePayment(opts: FinalizePaymentOptions): Promise<FinalizePa
     return await db.transaction(async (tx: any) => {
       // Exact merchantTradeNo lookup is the only entry point into the relation.
       const txRows = await tx.execute(sql`
-        SELECT id, booking_id, order_number, status, amount, payment_method, paylabs_trade_no, paid_at
         SELECT id, booking_id, order_number, status, amount, payment_method,
-               paylabs_trade_no, merchant_trade_no
+               paylabs_trade_no, merchant_trade_no, paid_at
         FROM sport_center.paylabs_transactions
         WHERE merchant_trade_no = ${merchantTradeNo}
         LIMIT 1
@@ -184,22 +177,7 @@ async function finalizePayment(opts: FinalizePaymentOptions): Promise<FinalizePa
       );
 
       if (previousPaymentStatus === "SUCCESS") {
-        const [existingPayment] = await tx
-          .select({ id: paymentsTable.id })
-          .from(paymentsTable)
-          .where(eq(paymentsTable.merchantTradeNo, merchantTradeNo))
-          .limit(1);
         const existingBookingStatus = String(booking.status ?? "");
-        if (isTerminalBookingStatus(existingBookingStatus) && !existingPayment) {
-          return {
-            outcome: "terminal_booking_manual_review" as const,
-            bookingId,
-            transactionId,
-            orderNumber: String(txRow.order_number),
-            previousPaymentStatus,
-            previousBookingStatus: existingBookingStatus,
-          };
-        }
         const paymentProof = `paylabs:${paylabsTradeNo || String(txRow.paylabs_trade_no ?? "")}`;
         const existingPaymentRows = await tx.execute(sql`
           SELECT id, payment_method
@@ -210,6 +188,16 @@ async function finalizePayment(opts: FinalizePaymentOptions): Promise<FinalizePa
           LIMIT 1
         `);
         const existingPayment = (existingPaymentRows as any).rows?.[0] ?? (existingPaymentRows as any)[0];
+        if (isTerminalBookingStatus(existingBookingStatus) && !existingPayment) {
+          return {
+            outcome: "terminal_booking_manual_review" as const,
+            bookingId,
+            transactionId,
+            orderNumber: String(txRow.order_number),
+            previousPaymentStatus,
+            previousBookingStatus: existingBookingStatus,
+          };
+        }
         return {
           outcome: "already_confirmed" as const,
           bookingId,
@@ -245,7 +233,7 @@ async function finalizePayment(opts: FinalizePaymentOptions): Promise<FinalizePa
           "[paylabs] successful callback requires manual review because booking is terminal",
         );
         return {
-          outcome: "terminal_booking" as const,
+          outcome: "terminal_booking_manual_review" as const,
           bookingId,
           transactionId,
           orderNumber: String(txRow.order_number),
@@ -267,7 +255,6 @@ async function finalizePayment(opts: FinalizePaymentOptions): Promise<FinalizePa
           AND status != 'SUCCESS'
       `);
 
-      const previousBookingStatus = String(booking.status ?? "");
       if (isTerminalBookingStatus(previousBookingStatus)) {
         await tx.insert(bookingHistoryTable).values({
           bookingId,
@@ -306,20 +293,14 @@ async function finalizePayment(opts: FinalizePaymentOptions): Promise<FinalizePa
         bookingId,
         amount     : String(amountPaid),
         proofUrl   : `paylabs:${paylabsTradeNo}`,
+        notes      : `Auto-confirmed via Paylabs ${source} (${merchantTradeNo}) | reason: ${reason ?? "payment_notification"}`,
+        paymentMethod: resolvePaylabsPaymentMethod(String(txRow.payment_method ?? "")),
         paymentProvider: "paylabs",
         providerReference: (opts.providerReference ?? paylabsTradeNo) || null,
         merchantTradeNo,
         providerTradeNo: paylabsTradeNo || null,
-        notes      : `Auto-confirmed via Paylabs ${source} (${merchantTradeNo}) | reason: ${reason ?? "payment_notification"}`,
-        paymentMethod: resolvePaylabsPaymentMethod(String(txRow.payment_method ?? "")),
-        paymentProvider: "paylabs",
-        providerReference: paylabsTradeNo || merchantTradeNo,
-        merchantTradeNo,
-        providerTradeNo: paylabsTradeNo || null,
         status     : "confirmed",
         paymentType: "full_payment",
-        confirmedAt: paidAt ?? new Date(),
-        paidAt: paidAt ?? new Date(),
         confirmedAt: opts.paidAt,
         paidAt: opts.paidAt,
       } as any).returning({ id: paymentsTable.id });
@@ -604,7 +585,6 @@ router.post("/paylabs/webhook", async (req, res) => {
     "",
   );
   const paylabsTradeNo    = String(body.paylabsTradeNo ?? body.platformTradeNo ?? body.tradeNo ?? "");
-  const providerPaidAt    = parseProviderPaidAt(body);
   let transactionId: number | null = null;
   let bookingId: number | null = null;
 
@@ -753,7 +733,6 @@ router.post("/paylabs/webhook", async (req, res) => {
     source          : "webhook",
     requestId,
     rawNotification : body,
-    paidAt          : providerPaidAt ?? new Date(),
     paidAt: resolvePaylabsPaidAt(body, new Date()),
     providerReference: resolvePaylabsProviderReference(body, paylabsTradeNo),
   });

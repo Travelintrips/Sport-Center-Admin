@@ -828,7 +828,6 @@ export async function bulkPushPaymentsToBizportal(): Promise<BulkPaymentPushResu
         sp.merchant_trade_no,
         sp.provider_trade_no,
         sp.payment_type,
-        COALESCE(sp.paid_at, sp.confirmed_at, sp.created_at) AS paid_at,
         COALESCE(sp.paid_at, sp.confirmed_at) AS paid_at,
         sp.created_at     AS payment_created_at,
         sb.order_number,
@@ -863,12 +862,6 @@ export async function bulkPushPaymentsToBizportal(): Promise<BulkPaymentPushResu
         // INSERT ... ON CONFLICT DO NOTHING — atomik dan idempotent tanpa race condition
         const { rowCount } = await pool.query(
           `INSERT INTO public.sport_payments
-             (booking_id, source_payment_id, payment_number, amount, method, status, paid_at,
-              payment_type, tax_rate, tax_amount, source, payment_provider,
-              provider_reference, merchant_trade_no, provider_trade_no,
-              posting_status, created_at, updated_at)
-           VALUES ($1,$2,$3,$4,'paid',$5,$6,$7,$8,$9,'SPORT_CENTER_SUPABASE',
-                   $10,$11,$12,$13,'unposted',$14,NOW())
              (booking_id, payment_number, amount, method, status, paid_at,
               payment_type, tax_rate, tax_amount, source, posting_status, source_payment_id,
               payment_provider, provider_reference, merchant_trade_no, provider_trade_no,
@@ -894,27 +887,6 @@ export async function bulkPushPaymentsToBizportal(): Promise<BulkPaymentPushResu
             p.payment_created_at,
           ]
         );
-        await pool.query(
-          `UPDATE public.sport_payments
-              SET source_payment_id = COALESCE(source_payment_id, $2),
-                  payment_provider = COALESCE(payment_provider, $3),
-                  provider_reference = COALESCE(provider_reference, $4),
-                  merchant_trade_no = COALESCE(merchant_trade_no, $5),
-                  provider_trade_no = COALESCE(provider_trade_no, $6),
-                  paid_at = COALESCE(paid_at, $7),
-                  updated_at = NOW()
-            WHERE payment_number = $1`,
-          [
-            paymentNumber,
-            p.sc_payment_id,
-            p.payment_provider || null,
-            p.provider_reference || null,
-            p.merchant_trade_no || null,
-            p.provider_trade_no || null,
-            p.paid_at || p.payment_created_at,
-          ],
-        );
-
         // Replays also repair metadata on an already-existing mirror without
         // overwriting a non-null provider value with an older/null payload.
         await pool.query(

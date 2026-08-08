@@ -221,22 +221,19 @@ router.post("/payments", async (req, res) => {
     const rawPaymentMethod = req.body.paymentMethod;
     const rawPaymentProvider = req.body.paymentProvider;
     let paymentMethod: "QRIS" | "Transfer Bank" = "Transfer Bank";
-    let paymentProvider: "mandiri_direct" | "paylabs" | "unknown" | null = null;
-    const requestedProvider = req.body.paymentProvider;
-    let paymentMethod: "QRIS" | "Transfer Bank" = "Transfer Bank";
     let paymentProvider: "mandiri_direct" | "unknown" | null = null;
     if (rawPaymentMethod !== undefined) {
       const method = String(rawPaymentMethod).trim().toLowerCase();
       if (method === "qris") {
         paymentMethod = "QRIS";
-        const normalizedProvider = normalizePaymentProvider(requestedProvider);
-        if (!normalizedProvider || normalizedProvider === "paylabs") {
+        const normalizedProvider = normalizePaymentProvider(rawPaymentProvider);
+        if (normalizedProvider !== "mandiri_direct" && normalizedProvider !== "unknown") {
           res.status(400).json({
             error: "Pembayaran QRIS manual wajib menyertakan paymentProvider mandiri_direct atau unknown.",
           });
           return;
         }
-        paymentProvider = normalizedProvider;
+        paymentProvider = normalizedProvider as "mandiri_direct" | "unknown";
       } else if (method === "transfer" || method === "bank_transfer" || method === "transfer bank") {
         paymentMethod = "Transfer Bank";
       } else {
@@ -245,13 +242,14 @@ router.post("/payments", async (req, res) => {
       }
     }
     if (paymentMethod === "QRIS") {
-      paymentProvider = normalizePaymentProvider(rawPaymentProvider);
-      if (!paymentProvider) {
+      const normalizedProvider = normalizePaymentProvider(rawPaymentProvider);
+      if (normalizedProvider === "paylabs" || !normalizedProvider) {
         res.status(400).json({
           error: "Provider QRIS wajib diisi: mandiri_direct, paylabs, atau unknown.",
         });
         return;
       }
+      paymentProvider = normalizedProvider as "mandiri_direct" | "unknown";
     } else if (rawPaymentProvider !== undefined && rawPaymentProvider !== null && rawPaymentProvider !== "") {
       res.status(400).json({ error: "Provider hanya boleh diisi untuk pembayaran QRIS." });
       return;
@@ -482,7 +480,6 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
   try {
     const id = parseInt(String(req.params.id));
     const { status, paymentMethod, paymentProvider: rawPaymentProvider, notes } = req.body;
-    const { status, paymentMethod, paymentProvider: requestedProvider, notes } = req.body;
     const [before] = await db.select().from(paymentsTable).where(eq(paymentsTable.id, id)).limit(1);
     if (!before) { res.status(404).json({ error: "Not found" }); return; }
     // A repeated confirmation callback must be a no-op. Besides avoiding
@@ -496,9 +493,6 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
     const updateData: Record<string, unknown> = {};
     if (status) updateData.status = status;
     if (status === "confirmed") {
-      const paidAt = before.paidAt ?? new Date();
-      updateData.confirmedAt = before.confirmedAt ?? paidAt;
-      updateData.paidAt = paidAt;
       const canonicalPaidAt = before.paidAt ?? new Date();
       updateData.confirmedAt = before.confirmedAt ?? canonicalPaidAt;
       updateData.paidAt = canonicalPaidAt;
@@ -514,18 +508,11 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
       }
       updateData.paymentMethod = paymentMethod.trim();
       if (paymentMethod.trim().toUpperCase() === "QRIS") {
-        const provider = normalizePaymentProvider(requestedProvider ?? before.paymentProvider);
+        const provider = normalizePaymentProvider(rawPaymentProvider ?? before.paymentProvider);
         if (!provider || provider === "paylabs") {
           res.status(400).json({
             error: "Pembayaran QRIS wajib memiliki paymentProvider mandiri_direct atau unknown.",
           });
-          return;
-        }
-        updateData.paymentProvider = provider;
-      } else if (requestedProvider !== undefined) {
-        const provider = normalizePaymentProvider(requestedProvider);
-        if (!provider) {
-          res.status(400).json({ error: "paymentProvider tidak valid." });
           return;
         }
         updateData.paymentProvider = provider;
