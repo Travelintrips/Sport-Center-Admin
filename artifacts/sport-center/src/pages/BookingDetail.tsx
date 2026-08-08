@@ -42,6 +42,9 @@ import ExtendBookingDialog from "@/components/ExtendBookingDialog";
 import { useLang } from "@/lib/i18n";
 
 const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "") || "";
+// QRIS lama masih tersimpan sebagai aset publik. Gunakan sebagai fallback ketika
+// konfigurasi qris_image_url di database lokal belum ikut tersinkron.
+const DEFAULT_QRIS_IMAGE = `${BASE}/uploads/qris-263226c1-c51d-4353-9165-cedaba32adb4.jpeg`;
 
 type PaymentMethod = "transfer" | "qris";
 
@@ -205,6 +208,7 @@ export default function BookingDetail() {
           bookingId: booking.id,
           amount: detectedAmount,
           proofUrl: url ?? objectPath,
+          paymentMethod: paymentMethod === "qris" ? "QRIS" : "Transfer Bank",
           notes: notes || undefined,
           paymentType: detectedType as any,
         },
@@ -272,7 +276,8 @@ export default function BookingDetail() {
   const isPending = uploadProgress === "uploading" || submitPayment.isPending;
 
   const hasBankInfo = settings?.bankAccount && settings?.bankName;
-  const hasQris = !!(settings as any)?.qrisImageUrl;
+  const qrisImageUrl = (settings as any)?.qrisImageUrl || DEFAULT_QRIS_IMAGE;
+  const hasQris = Boolean(qrisImageUrl);
 
   return (
     <div className="container mx-auto px-4 py-8 md:py-12 max-w-4xl">
@@ -713,7 +718,7 @@ export default function BookingDetail() {
                       </div>
                       <div className="p-4 flex justify-center">
                         <img
-                          src={(settings as any)?.qrisImageUrl}
+                          src={qrisImageUrl}
                           alt="QRIS Payment Code"
                           className="max-w-xs w-full rounded-lg border border-border"
                         />

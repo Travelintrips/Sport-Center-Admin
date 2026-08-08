@@ -15,3 +15,4 @@
 - [Dev DB full migration recipe](dev-db-migration.md) — Base SQLs (0000/0001/0002) create core tables; all ALTER TABLE extras (account_type, booker_name, fonnte_token, payer_type, etc.) live in scripts/migrate.ts + scripts/fix_settings_cols.ts; must apply both after fresh dev DB setup.
 - [DP multi-payment flow](dp-multi-payment.md) — payments table has payment_type (dp/pelunasan/full_payment); no unique constraint on booking_id; confirm DP → booking stays pending_payment; confirm pelunasan → booking confirmed.
 - [Expenses feature](expenses-feature.md) — sport_expenses table + expense_no_seq + expense_status/category enums; accounting_journals.booking_id made nullable for expense journal entries; /admin/expenses routes.
+- [Payment provider audit](payment-provider-audit.md) — Booking payment currently supports manual transfer/QRIS; Paylabs has no active source, route, config, or repository history.

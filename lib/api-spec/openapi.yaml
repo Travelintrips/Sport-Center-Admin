@@ -3084,6 +3084,9 @@ components:
           type: number
         proofUrl:
           type: string
+        paymentMethod:
+          type: string
+          enum: [Transfer Bank, QRIS]
         paymentType:
           type: string
           enum: [dp, pelunasan, full_payment]

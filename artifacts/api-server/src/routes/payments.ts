@@ -54,7 +54,7 @@ router.get("/payments", async (req, res) => {
 
 router.post("/payments", async (req, res) => {
   try {
-    const { bookingId, amount, proofUrl, notes } = req.body;
+    const { bookingId, amount, proofUrl, paymentMethod, notes } = req.body;
     let paymentType: string = req.body.paymentType ?? "";
 
     const [booking] = await db.select().from(bookingsTable)
@@ -103,6 +103,7 @@ router.post("/payments", async (req, res) => {
         bookingId: Number(bookingId),
         amount: String(amount),
         proofUrl,
+        paymentMethod: paymentMethod || "Transfer Bank",
         notes,
         paymentType: paymentType as "dp" | "pelunasan" | "full_payment",
       })
