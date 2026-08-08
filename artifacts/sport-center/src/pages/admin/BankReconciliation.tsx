@@ -501,13 +501,26 @@ function MatchCandidateRow({
 
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <Badge variant="outline" className="text-xs capitalize">{match.candidateType}</Badge>
+
+            {match.isGroupPayment ? (
+              <Badge className="bg-violet-100 text-violet-700 border-violet-200 text-xs font-semibold">
+                🏷️ Group Booking · {match.groupBookingCount} sesi
+              </Badge>
+            ) : (
+              <Badge variant="outline" className="text-xs capitalize">{match.candidateType}</Badge>
+            )}
             {match.customerName ? (
               <span className="text-sm font-semibold truncate max-w-[180px]" title={match.customerName}>{match.customerName}</span>
             ) : (
               <span className="text-sm font-medium text-muted-foreground">ID #{match.candidateId}</span>
             )}
-            {match.facilityName && (
+
+            {match.isGroupPayment && match.bookingCount > 0 && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-100 font-medium">
+                {match.bookingCount} Booking
+              </span>
+            )}
+            {match.facilityName && match.candidateType !== "group_payment" && (
               <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-100">{match.facilityName}</span>
             )}
             <ScoreBadge score={match.matchScore} />
@@ -518,8 +531,63 @@ function MatchCandidateRow({
               <Badge className="bg-red-100 text-red-700 border-red-200 text-xs">Ditolak</Badge>
             )}
           </div>
-          {/* Booking detail row */}
-          {(match.bookingOrderNumber || match.bookingDate || match.bookingAmount || match.bookingStatus) && (
+
+          {/* Group Payment detail */}
+          {match.isGroupPayment && (
+            <div className="mt-1.5 p-2 rounded-lg bg-violet-50 border border-violet-100 space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-semibold text-violet-700 uppercase tracking-wide">
+                  Group: {match.groupRef}
+                </span>
+                <span className="text-xs font-bold text-violet-800">
+                  {new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(Number(match.groupTotalAmount ?? match.bookingAmount))}
+                </span>
+              </div>
+              <p className="text-[10px] text-violet-600">
+                Total {match.groupBookingCount} booking akan dikonfirmasi sekaligus
+              </p>
+            </div>
+          )}
+
+          {/* Group Payment Detail */}
+          {match.candidateType === "group_payment" && (
+            <div className="mt-1.5 space-y-1">
+              <div className="flex flex-wrap gap-2 text-[10px] text-muted-foreground">
+                <span className="font-mono">{match.groupRef}</span>
+                {match.groupTotal > 0 && (
+                  <span className="font-semibold text-purple-700">
+                    Total: {new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(Number(match.groupTotal))}
+                  </span>
+                )}
+              </div>
+              {match.childBookings?.length > 0 && (
+                <div className="mt-1 rounded-md border border-purple-100 bg-purple-50/50 overflow-hidden">
+                  <div className="px-2 py-1 bg-purple-100/60 text-[9px] font-semibold text-purple-700 uppercase tracking-wide">
+                    Rincian Booking Gabungan
+                  </div>
+                  <div className="divide-y divide-purple-100">
+                    {(match.childBookings as any[]).map((child: any, i: number) => (
+                      <div key={i} className="px-2 py-1 flex items-center justify-between gap-2 text-[10px]">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span className="font-mono text-muted-foreground">{child.orderNumber}</span>
+                          <span className="truncate text-muted-foreground">{child.facilityName}</span>
+                          <span className="text-muted-foreground">📅 {child.bookingDate}</span>
+                          <span className="text-muted-foreground">{child.startTime}–{child.endTime}</span>
+                        </div>
+                        <span className="font-semibold text-foreground shrink-0">
+                          {new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(Number(child.amount))}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Booking detail row (individual bookings only) */}
+          {match.candidateType !== "group_payment" && (match.bookingOrderNumber || match.bookingDate || match.bookingAmount || match.bookingStatus) && (
+
             <div className="mt-1 flex flex-wrap gap-2 text-[10px] text-muted-foreground">
               {match.bookingOrderNumber && (
                 <span className="font-mono">{match.bookingOrderNumber}</span>

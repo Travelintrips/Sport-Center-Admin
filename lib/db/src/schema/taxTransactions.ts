@@ -11,6 +11,8 @@ export const taxTransactionsTable = scSchema.table("tax_transactions", {
   taxCode: text("tax_code").notNull(),
   taxRate: numeric("tax_rate", { precision: 5, scale: 2 }).notNull(),
   dpp: numeric("dpp", { precision: 14, scale: 2 }).notNull(),
+  dppNilaiLain: numeric("dpp_nilai_lain", { precision: 14, scale: 2 }),
+  grandTotal: numeric("grand_total", { precision: 14, scale: 2 }),
   taxAmount: numeric("tax_amount", { precision: 14, scale: 2 }).notNull(),
   transactionDate: text("transaction_date").notNull(),
   status: text("status").notNull().default("posted"),

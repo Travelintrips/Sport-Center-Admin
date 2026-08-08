@@ -1,6 +1,7 @@
+import SEOHead from "@/components/SEOHead";
 import { useState, useMemo, useRef } from "react";
 import { Link } from "wouter";
-import { useListFacilities, useCreateMembership, useSubmitMembershipPaymentProof, useGetSettings } from "@workspace/api-client-react";
+import { useListFacilities, useSubmitMembershipPaymentProof, useGetSettings } from "@workspace/api-client-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Search, MapPin, Dumbbell, CheckCircle2, Star, Users, ArrowRight, Building2, QrCode, Upload, X, ImageIcon, Loader2 } from "lucide-react";
+import { Search, MapPin, Dumbbell, CheckCircle2, Star, Users, ArrowRight, Building2, QrCode, Upload, X, ImageIcon, Loader2, RefreshCw, UserPlus } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { getFacilityImage } from "@/lib/utils";
@@ -36,14 +37,17 @@ function addMonths(dateStr: string, months: number): string {
   return date.toISOString().split("T")[0];
 }
 
-type DialogStep = "form" | "payment" | "upload" | "success";
+type DialogMode = "register" | "renew";
+type DialogStep = "form" | "lookup" | "payment" | "upload" | "success";
 
-interface CreatedMem { id: number; name: string; endDate: string; totalPrice: number; months: number; }
+interface CreatedMem { id: number; name: string; endDate: string; totalPrice: number; months: number; startDate?: string; }
+interface LookupResult { id: number; name: string; phone: string; email: string; status: string; endDate: string; }
 
-function MembershipDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+function MembershipDialog({ open, onClose, initialMode = "register" }: { open: boolean; onClose: () => void; initialMode?: DialogMode }) {
   const { toast } = useToast();
   const { t } = useLang();
-  const [step, setStep] = useState<DialogStep>("form");
+  const [mode] = useState<DialogMode>(initialMode);
+  const [step, setStep] = useState<DialogStep>(initialMode === "renew" ? "lookup" : "form");
   const [months, setMonths] = useState(1);
   const [form, setForm] = useState({ name: "", email: "", phone: "", startDate: today, notes: "" });
   const [created, setCreated] = useState<CreatedMem | null>(null);
@@ -54,17 +58,18 @@ function MembershipDialog({ open, onClose }: { open: boolean; onClose: () => voi
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { data: settings } = useGetSettings();
 
-  const createMutation = useCreateMembership({
-    mutation: {
-      onSuccess: (data) => {
-        setCreated({ id: data.id, name: data.name, endDate: data.endDate, totalPrice: data.totalPrice, months: data.months });
-        setStep("payment");
-      },
-      onError: () => {
-        toast({ title: t("Gagal mendaftar", "Registration failed"), description: t("Terjadi kesalahan. Silakan coba lagi.", "An error occurred. Please try again."), variant: "destructive" });
-      },
-    },
-  });
+  // Renew-mode state
+  const [lookupMode, setLookupMode] = useState<"phone" | "name">("phone");
+  const [lookupPhone, setLookupPhone] = useState("");
+  const [lookupName, setLookupName] = useState("");
+  const [lookupResults, setLookupResults] = useState<LookupResult[]>([]);
+  const [lookupResult, setLookupResult] = useState<LookupResult | null>(null);
+  const [lookupError, setLookupError] = useState<string | null>(null);
+  const [lookupLoading, setLookupLoading] = useState(false);
+  const [renewMonths, setRenewMonths] = useState(1);
+  const [renewLoading, setRenewLoading] = useState(false);
+
+  const [registerLoading, setRegisterLoading] = useState(false);
 
   const proofMutation = useSubmitMembershipPaymentProof({
     mutation: {
@@ -75,13 +80,104 @@ function MembershipDialog({ open, onClose }: { open: boolean; onClose: () => voi
     },
   });
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!form.name || !form.email || !form.phone || !form.startDate) {
       toast({ title: t("Form tidak lengkap", "Incomplete form"), description: t("Harap isi semua field yang wajib.", "Please fill in all required fields."), variant: "destructive" });
       return;
     }
-    createMutation.mutate({ data: { ...form, months } });
+    setRegisterLoading(true);
+    try {
+      const res = await fetch("/api/memberships", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...form, months }),
+      });
+      const data = await res.json();
+      if (res.status === 409) {
+        toast({
+          title: t("Sudah terdaftar", "Already registered"),
+          description: t(
+            "Nomor HP ini sudah memiliki membership aktif. Gunakan tombol Perpanjang untuk memperpanjang.",
+            "This phone number already has an active membership. Use the Renew button."
+          ),
+          variant: "destructive",
+        });
+        return;
+      }
+      if (!res.ok) {
+        toast({ title: t("Gagal mendaftar", "Registration failed"), description: data.error || t("Terjadi kesalahan.", "An error occurred."), variant: "destructive" });
+        return;
+      }
+      setCreated({ id: data.id, name: data.name, endDate: data.endDate, totalPrice: data.totalPrice, months: data.months });
+      setStep("payment");
+    } catch {
+      toast({ title: t("Gagal terhubung", "Connection failed"), description: t("Coba lagi.", "Please try again."), variant: "destructive" });
+    } finally {
+      setRegisterLoading(false);
+    }
+  }
+
+  async function handleLookup() {
+    const phone = lookupPhone.trim();
+    const name  = lookupName.trim();
+    if (!phone && !name) return;
+    setLookupLoading(true);
+    setLookupError(null);
+    setLookupResult(null);
+    setLookupResults([]);
+    try {
+      const res = await fetch("/api/memberships/lookup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(phone ? { phone } : { name }),
+      });
+      if (!res.ok) {
+        const e = await res.json();
+        setLookupError(e.error || t("Member tidak ditemukan.", "Member not found."));
+        return;
+      }
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        // pencarian by nama → bisa banyak hasil
+        if (data.length === 1) {
+          setLookupResult(data[0]);
+        } else {
+          setLookupResults(data);
+        }
+      } else {
+        // pencarian by phone → satu hasil
+        setLookupResult(data);
+      }
+    } catch {
+      setLookupError(t("Gagal terhubung. Coba lagi.", "Connection failed. Try again."));
+    } finally {
+      setLookupLoading(false);
+    }
+  }
+
+  async function handleRenew() {
+    if (!lookupResult) return;
+    setRenewLoading(true);
+    try {
+      const res = await fetch(`/api/memberships/${lookupResult.id}/renew`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ months: renewMonths }),
+      });
+      if (!res.ok) {
+        const e = await res.json();
+        toast({ title: t("Gagal memperpanjang", "Renewal failed"), description: e.error || t("Terjadi kesalahan.", "An error occurred."), variant: "destructive" });
+        return;
+      }
+      const data = await res.json();
+      setCreated({ id: data.id, name: data.name, endDate: data.endDate, totalPrice: data.totalPrice, months: data.months, startDate: data.startDate });
+      setStep("payment");
+    } catch {
+      toast({ title: t("Gagal terhubung", "Connection failed"), description: t("Coba lagi.", "Please try again."), variant: "destructive" });
+    } finally {
+      setRenewLoading(false);
+    }
   }
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -107,18 +203,30 @@ function MembershipDialog({ open, onClose }: { open: boolean; onClose: () => voi
   }
 
   function handleClose() {
-    setStep("form");
+    setStep(initialMode === "renew" ? "lookup" : "form");
     setCreated(null);
     setPaymentMethod(null);
     setProofFile(null);
     setProofPreview(null);
     setForm({ name: "", email: "", phone: "", startDate: today, notes: "" });
     setMonths(1);
+    setLookupMode("phone");
+    setLookupPhone("");
+    setLookupName("");
+    setLookupResult(null);
+    setLookupResults([]);
+    setLookupError(null);
+    setRenewMonths(1);
     onClose();
   }
 
-  const stepLabels = [t("Formulir", "Form"), t("Metode Bayar", "Payment"), t("Upload Bukti", "Upload Proof")];
-  const stepIndex = step === "form" ? 0 : step === "payment" ? 1 : step === "upload" ? 2 : 3;
+  const stepLabels = mode === "renew"
+    ? [t("Cari Member", "Find Member"), t("Metode Bayar", "Payment"), t("Upload Bukti", "Upload Proof")]
+    : [t("Formulir", "Form"), t("Metode Bayar", "Payment"), t("Upload Bukti", "Upload Proof")];
+  const stepIndex = (step === "form" || step === "lookup") ? 0 : step === "payment" ? 1 : step === "upload" ? 2 : 3;
+
+  const statusColor = (s: string) => s === "active" ? "bg-green-100 text-green-700" : s === "expired" ? "bg-red-100 text-red-700" : "bg-yellow-100 text-yellow-700";
+  const statusLabel = (s: string) => s === "active" ? t("Aktif", "Active") : s === "expired" ? t("Kedaluwarsa", "Expired") : t("Menunggu", "Pending");
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
@@ -126,9 +234,9 @@ function MembershipDialog({ open, onClose }: { open: boolean; onClose: () => voi
         <DialogHeader className="p-6 pb-3 border-b bg-muted/30 sticky top-0 z-10">
           <DialogTitle className="flex items-center gap-2 text-lg font-black text-secondary dark:text-white">
             <div className="w-8 h-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0">
-              <Dumbbell size={18} />
+              {mode === "renew" ? <RefreshCw size={18} /> : <UserPlus size={18} />}
             </div>
-            {t("Daftar Member Gym Bulanan", "Monthly Gym Membership")}
+            {mode === "renew" ? t("Perpanjang Membership Gym", "Renew Gym Membership") : t("Daftar Member Gym Bulanan", "Monthly Gym Membership")}
           </DialogTitle>
           {step !== "success" && (
             <div className="flex items-center gap-1 mt-3">
@@ -148,6 +256,148 @@ function MembershipDialog({ open, onClose }: { open: boolean; onClose: () => voi
         </DialogHeader>
 
         <div className="p-6">
+          {/* STEP: LOOKUP (renew mode) */}
+          {step === "lookup" && (
+            <div className="space-y-5">
+              {/* Tab toggle: cari by phone atau by nama */}
+              <div className="flex rounded-xl border border-border overflow-hidden">
+                <button
+                  type="button"
+                  className={`flex-1 py-2.5 text-sm font-bold transition-colors ${lookupMode === "phone" ? "bg-primary text-white" : "bg-[#F8FAFC] dark:bg-slate-900 text-muted-foreground hover:text-foreground"}`}
+                  onClick={() => { setLookupMode("phone"); setLookupName(""); setLookupError(null); setLookupResult(null); setLookupResults([]); }}
+                >
+                  {t("No. WhatsApp", "WhatsApp No.")}
+                </button>
+                <button
+                  type="button"
+                  className={`flex-1 py-2.5 text-sm font-bold transition-colors ${lookupMode === "name" ? "bg-primary text-white" : "bg-[#F8FAFC] dark:bg-slate-900 text-muted-foreground hover:text-foreground"}`}
+                  onClick={() => { setLookupMode("name"); setLookupPhone(""); setLookupError(null); setLookupResult(null); setLookupResults([]); }}
+                >
+                  {t("Nama Member", "Member Name")}
+                </button>
+              </div>
+
+              {lookupMode === "phone" ? (
+                <div className="space-y-1.5">
+                  <Label htmlFor="lookup-phone" className="font-bold text-foreground/80">
+                    {t("No. WhatsApp / Telepon", "WhatsApp / Phone No.")} <span className="text-destructive">*</span>
+                  </Label>
+                  <p className="text-xs text-muted-foreground">{t("Masukkan nomor WhatsApp yang terdaftar saat mendaftar.", "Enter the WhatsApp number used during registration.")}</p>
+                  <div className="flex gap-2">
+                    <Input
+                      id="lookup-phone"
+                      type="tel"
+                      value={lookupPhone}
+                      onChange={(e) => { setLookupPhone(e.target.value); setLookupError(null); setLookupResult(null); setLookupResults([]); }}
+                      onKeyDown={(e) => e.key === "Enter" && handleLookup()}
+                      placeholder="08xxxxxxxxxx"
+                      className="h-12 rounded-xl bg-[#F8FAFC] dark:bg-slate-900 border-border font-medium"
+                    />
+                    <Button type="button" onClick={handleLookup} disabled={lookupLoading || !lookupPhone.trim()} className="h-12 px-5 rounded-xl shrink-0">
+                      {lookupLoading ? <Loader2 size={16} className="animate-spin" /> : t("Cari", "Search")}
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-1.5">
+                  <Label htmlFor="lookup-name" className="font-bold text-foreground/80">
+                    {t("Nama Member", "Member Name")} <span className="text-destructive">*</span>
+                  </Label>
+                  <p className="text-xs text-muted-foreground">{t("Ketik sebagian nama untuk mencari member yang terdaftar.", "Type part of the name to search registered members.")}</p>
+                  <div className="flex gap-2">
+                    <Input
+                      id="lookup-name"
+                      type="text"
+                      value={lookupName}
+                      onChange={(e) => { setLookupName(e.target.value); setLookupError(null); setLookupResult(null); setLookupResults([]); }}
+                      onKeyDown={(e) => e.key === "Enter" && handleLookup()}
+                      placeholder={t("cth: Budi Santoso", "e.g. John Doe")}
+                      className="h-12 rounded-xl bg-[#F8FAFC] dark:bg-slate-900 border-border font-medium"
+                    />
+                    <Button type="button" onClick={handleLookup} disabled={lookupLoading || !lookupName.trim()} className="h-12 px-5 rounded-xl shrink-0">
+                      {lookupLoading ? <Loader2 size={16} className="animate-spin" /> : t("Cari", "Search")}
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {lookupError && <p className="text-sm text-destructive font-medium">{lookupError}</p>}
+
+              {/* Multiple results (nama search) */}
+              {lookupResults.length > 1 && !lookupResult && (
+                <div className="space-y-2 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                  <p className="text-sm font-semibold text-muted-foreground">
+                    {t("Ditemukan", "Found")} {lookupResults.length} {t("member. Pilih yang sesuai:", "members. Select one:")}
+                  </p>
+                  {lookupResults.map((r) => (
+                    <button
+                      key={r.id}
+                      type="button"
+                      onClick={() => setLookupResult(r)}
+                      className="w-full flex items-center justify-between rounded-2xl bg-[#F8FAFC] dark:bg-slate-900 border border-border p-4 hover:border-primary/60 hover:bg-primary/5 transition-colors text-left"
+                    >
+                      <div>
+                        <div className="font-black text-secondary dark:text-white text-sm">{r.name}</div>
+                        <div className="text-xs text-muted-foreground">{r.phone} · {t("s/d", "until")} {r.endDate}</div>
+                      </div>
+                      <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${r.status === "active" ? "bg-green-100 text-green-700" : r.status === "expired" ? "bg-red-100 text-red-700" : "bg-yellow-100 text-yellow-700"}`}>
+                        {r.status === "active" ? t("Aktif", "Active") : r.status === "expired" ? t("Expired", "Expired") : t("Menunggu", "Pending")}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {lookupResult && (
+                <div className="animate-in fade-in slide-in-from-bottom-2 duration-300 space-y-4">
+                  <div className="rounded-2xl bg-[#F8FAFC] dark:bg-slate-900 border border-border p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="font-black text-secondary dark:text-white text-base">{lookupResult.name}</div>
+                        <div className="text-xs text-muted-foreground font-medium">{lookupResult.phone}</div>
+                      </div>
+                      <Badge className={`text-xs font-bold border-none ${statusColor(lookupResult.status)}`}>{statusLabel(lookupResult.status)}</Badge>
+                    </div>
+                    <div className="h-px bg-border" />
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">{t("Aktif hingga", "Active until")}</span>
+                      <span className="font-semibold">{lookupResult.endDate}</span>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label className="font-bold text-foreground/80">{t("Durasi Perpanjangan", "Renewal Duration")}</Label>
+                    <div className="grid grid-cols-5 gap-2">
+                      {[1, 2, 3, 6, 12].map((m) => (
+                        <button key={m} type="button" onClick={() => setRenewMonths(m)}
+                          className={`h-12 rounded-xl text-sm font-bold border-2 transition-all ${renewMonths === m ? "bg-primary/10 text-primary border-primary shadow-sm" : "bg-[#F8FAFC] dark:bg-slate-900 border-border text-foreground/70 hover:border-primary/40"}`}>
+                          {m}<span className="block text-[10px] uppercase font-semibold opacity-70">{t("Bulan", "Mo")}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl bg-primary/5 border border-primary/20 p-4 space-y-2 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">{t("Perpanjang", "Extend by")}</span>
+                      <span className="font-semibold">{renewMonths} {t("bulan", "months")}</span>
+                    </div>
+                    <div className="flex justify-between border-t border-primary/20 pt-2">
+                      <span className="font-bold">{t("Total Bayar", "Total Payment")}</span>
+                      <span className="font-black text-primary">{formatCurrency(PRICE_PER_MONTH * renewMonths)}</span>
+                    </div>
+                  </div>
+
+                  <Button className="w-full h-12 rounded-full font-bold shadow-md" onClick={handleRenew} disabled={renewLoading}>
+                    {renewLoading
+                      ? <><Loader2 size={16} className="mr-2 animate-spin" />{t("Memproses...", "Processing...")}</>
+                      : <><RefreshCw size={16} className="mr-2" />{t("Perpanjang Sekarang", "Renew Now")} <ArrowRight size={15} className="ml-2" /></>}
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* STEP: SUCCESS */}
           {step === "success" && created && (
             <div className="text-center py-4 animate-in fade-in zoom-in duration-500">
@@ -338,7 +588,7 @@ function MembershipDialog({ open, onClose }: { open: boolean; onClose: () => voi
                 </div>
                 <div className="space-y-1.5">
                   <Label htmlFor="m-start" className="font-bold text-foreground/80">{t("Mulai Tanggal", "Start Date")} <span className="text-destructive">*</span></Label>
-                  <Input id="m-start" type="date" value={form.startDate} min={today} onChange={(e) => setForm(f => ({ ...f, startDate: e.target.value }))} required className="h-12 rounded-xl bg-[#F8FAFC] dark:bg-slate-900 border-border font-medium" />
+                  <Input id="m-start" type="date" value={form.startDate} onChange={(e) => setForm(f => ({ ...f, startDate: e.target.value }))} required className="h-12 rounded-xl bg-[#F8FAFC] dark:bg-slate-900 border-border font-medium" />
                 </div>
               </div>
               <div className="space-y-2 pt-2">
@@ -367,8 +617,8 @@ function MembershipDialog({ open, onClose }: { open: boolean; onClose: () => voi
                   <span className="text-2xl font-black text-primary">{formatCurrency(PRICE_PER_MONTH * months)}</span>
                 </div>
               </div>
-              <Button type="submit" size="lg" className="w-full h-14 rounded-full font-bold shadow-lg shadow-primary/20 text-base" disabled={createMutation.isPending}>
-                {createMutation.isPending
+              <Button type="submit" size="lg" className="w-full h-14 rounded-full font-bold shadow-lg shadow-primary/20 text-base" disabled={registerLoading}>
+                {registerLoading
                   ? <><Loader2 size={16} className="mr-2 animate-spin" />{t("Memproses...", "Processing...")}</>
                   : <>{t("Lanjut ke Pembayaran", "Continue to Payment")} <ArrowRight size={16} className="ml-2" /></>}
               </Button>
@@ -385,6 +635,12 @@ export default function Facilities() {
   const [search, setSearch] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [membershipOpen, setMembershipOpen] = useState(false);
+  const [membershipMode, setMembershipMode] = useState<"register" | "renew">("register");
+
+  function openMembership(mode: "register" | "renew") {
+    setMembershipMode(mode);
+    setMembershipOpen(true);
+  }
 
   const { data: facilities, isLoading } = useListFacilities({ activeOnly: true });
 
@@ -408,6 +664,11 @@ export default function Facilities() {
 
   return (
     <div className="min-h-screen bg-[#F8FAFC] dark:bg-slate-950 pb-20">
+      <SEOHead
+        title="Fasilitas Olahraga | Sport Center Soekarno-Hatta"
+        description="Temukan fasilitas olahraga terlengkap di Sport Center Soekarno-Hatta. Lapangan futsal, basket, badminton, gym, dan banyak lagi — tersedia untuk booking online."
+        path="/facilities"
+      />
       {/* Header section */}
       <div className="bg-white dark:bg-slate-900 border-b border-border/50 pt-12 pb-16">
         <div className="container mx-auto px-4 md:px-8">
@@ -527,10 +788,7 @@ export default function Facilities() {
 
             {/* Special Gym Membership Card */}
             {showMembershipCard && !search && (
-              <Card 
-                className="group relative border-2 border-primary/20 shadow-lg hover:shadow-primary/30 transition-all duration-500 rounded-3xl overflow-hidden cursor-pointer h-full flex flex-col transform hover:-translate-y-1" 
-                onClick={() => setMembershipOpen(true)}
-              >
+              <Card className="group relative border-2 border-primary/20 shadow-lg hover:shadow-primary/30 transition-all duration-500 rounded-3xl overflow-hidden h-full flex flex-col transform hover:-translate-y-1">
                 <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-primary/10 pointer-events-none" />
                 
                 <div className="p-8 pb-4 relative z-10 flex-1 flex flex-col">
@@ -556,17 +814,28 @@ export default function Facilities() {
                     ))}
                   </div>
                   
-                  <div className="mt-auto pt-6 border-t border-primary/20 flex items-center justify-between">
+                  <div className="mt-auto pt-6 border-t border-primary/20 space-y-3">
                     <div>
                       <div className="text-xs font-bold text-muted-foreground uppercase tracking-widest mb-0.5">{t("Biaya Langganan", "Subscription Fee")}</div>
                       <div className="font-black text-xl text-primary">Rp 300.000<span className="text-sm font-bold text-muted-foreground ml-1">{t("/bln", "/mo")}</span></div>
                     </div>
-                    <Button 
-                      className="rounded-full font-bold h-12 px-6 shadow-md"
-                      onClick={(e) => { e.stopPropagation(); setMembershipOpen(true); }}
-                    >
-                      {t("Daftar", "Register")}
-                    </Button>
+                    <div className="flex gap-2">
+                      <Button
+                        className="flex-1 rounded-full font-bold h-12 shadow-md"
+                        onClick={() => openMembership("register")}
+                      >
+                        <UserPlus size={16} className="mr-2" />
+                        {t("Daftar", "Register")}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        className="flex-1 rounded-full font-bold h-12 border-primary/40 text-primary hover:bg-primary/5"
+                        onClick={() => openMembership("renew")}
+                      >
+                        <RefreshCw size={16} className="mr-2" />
+                        {t("Perpanjang", "Renew")}
+                      </Button>
+                    </div>
                   </div>
                 </div>
               </Card>
@@ -588,7 +857,7 @@ export default function Facilities() {
         )}
       </div>
 
-      <MembershipDialog open={membershipOpen} onClose={() => setMembershipOpen(false)} />
+      <MembershipDialog key={membershipMode} open={membershipOpen} onClose={() => setMembershipOpen(false)} initialMode={membershipMode} />
     </div>
   );
 }

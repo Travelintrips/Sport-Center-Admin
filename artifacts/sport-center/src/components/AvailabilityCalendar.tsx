@@ -1,6 +1,4 @@
-import { useEffect } from "react";
-import { useQueryClient } from "@tanstack/react-query";
-import { getCheckAvailabilityQueryKey } from "@workspace/api-client-react";
+import { useRealtimeAvailability } from "@/hooks/useRealtimeAvailability";
 import { Skeleton } from "@/components/ui/skeleton";
 
 interface Slot {
@@ -25,7 +23,7 @@ function timeToMin(t: string) {
 }
 
 function minToTime(m: number) {
-  return `${Math.floor(m / 60).toString().padStart(2, "0")}:${(m % 60).toString().padStart(2, "0")}`;
+  return `${Math.floor(m / 60).toString().padStart(2, "0")}:${(m % 60).toString().padStart(2, "00")}`;
 }
 
 export default function AvailabilityCalendar({
@@ -37,17 +35,7 @@ export default function AvailabilityCalendar({
   duration,
   onSelectTime,
 }: Props) {
-  const queryClient = useQueryClient();
-
-  useEffect(() => {
-    if (!facilityId || !date) return;
-    const interval = setInterval(() => {
-      queryClient.invalidateQueries({
-        queryKey: getCheckAvailabilityQueryKey({ facilityId, date }),
-      });
-    }, 30000);
-    return () => clearInterval(interval);
-  }, [facilityId, date, queryClient]);
+  useRealtimeAvailability(facilityId, date);
 
   if (isLoading) {
     return (

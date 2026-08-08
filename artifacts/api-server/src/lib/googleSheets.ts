@@ -26,6 +26,10 @@ function getClient() {
   const raw = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
   if (!raw) throw new Error("GOOGLE_SERVICE_ACCOUNT_JSON tidak tersedia");
   const creds = JSON.parse(raw);
+  // Env var sering menyimpan \n sebagai literal \\n — normalisasi agar JWT signing tidak gagal
+  if (creds.private_key && typeof creds.private_key === "string") {
+    creds.private_key = creds.private_key.replace(/\\n/g, "\n");
+  }
   const auth = new google.auth.GoogleAuth({
     credentials: creds,
     scopes: ["https://www.googleapis.com/auth/spreadsheets"],

@@ -1,0 +1,80 @@
+Perbaiki modul Sport Center Payment pada BizPortal agar mendukung Group Payment.
+
+Kondisi saat ini:
+- Setiap booking menghasilkan satu baris payment.
+- Untuk booking grup (1 customer memesan beberapa lapangan/jam), BizPortal menampilkan beberapa payment dengan nominal kecil.
+- Di dunia nyata customer biasanya melakukan satu kali transfer dengan total seluruh booking.
+- Akibatnya Bank Reconciliation sulit mencocokkan karena mutasi bank berisi satu transaksi besar sedangkan Sport Center Payment berisi banyak transaksi kecil.
+
+Target:
+
+1. Deteksi Booking Grup
+- Jika beberapa booking berasal dari Group Booking yang sama (group_booking_id/master_booking_id yang sama), BizPortal harus menampilkan satu Master Payment.
+- Jika struktur group booking belum ada, gunakan struktur existing yang paling tepat dan jangan membuat duplikasi data.
+
+2. Payment List
+Pada daftar Payment Sport Center:
+- Tampilkan satu baris saja untuk Group Booking.
+- Nominal = total seluruh booking dalam grup.
+- Tambahkan badge "Group Booking".
+- Tambahkan jumlah booking, misalnya:
+  4 Booking.
+
+3. Detail Payment
+Saat dibuka:
+- tampilkan seluruh booking anggota grup.
+- tampilkan nomor booking.
+- lapangan.
+- tanggal.
+- jam.
+- nominal masing-masing.
+- subtotal.
+- total pembayaran.
+
+4. Rekonsiliasi
+Pastikan modul Bank Reconciliation menggunakan nominal Master Payment.
+Contoh:
+Mutasi Bank:
+Rp640.000
+
+Sport Center Payment:
+Rp640.000
+
+Bukan empat transaksi Rp160.000.
+
+5. Accounting
+Jangan mengubah logika jurnal.
+Payment boleh satu,
+tetapi revenue tetap boleh diposting per booking jika memang desain accounting saat ini seperti itu.
+
+6. Existing Data
+Jangan menghapus data lama.
+Gunakan agregasi pada query atau view jika memungkinkan.
+Jika harus menambah field, lakukan migration yang aman.
+
+7. API
+Pastikan endpoint payment mengembalikan:
+- total_group_amount
+- booking_count
+- group_booking_id
+- child_bookings
+
+8. UI
+Tambahkan badge:
+"Group Booking"
+
+Tambahkan tombol expand/detail untuk melihat seluruh booking.
+
+9. Testing
+Uji:
+- booking tunggal tetap satu payment.
+- booking grup 4 booking menjadi satu payment Rp total.
+- booking grup dengan DP.
+- pelunasan booking grup.
+- refund booking grup.
+- Bank Reconciliation membaca nominal total group.
+- tidak ada perubahan pada jurnal accounting.
+- laporan revenue tetap benar.
+- build, typecheck, dan test harus PASS.
+
+Berikan laporan file yang diubah, endpoint yang diperbarui, hasil build, hasil test, dan konfirmasi bahwa Bank Reconciliation kini menggunakan nominal total Group Payment.

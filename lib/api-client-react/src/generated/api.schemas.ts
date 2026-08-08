@@ -316,6 +316,14 @@ export const RecurringBookingInputRepeatType = {
   monthly: 'monthly',
 } as const;
 
+export type RecurringBookingInputCustomerType = typeof RecurringBookingInputCustomerType[keyof typeof RecurringBookingInputCustomerType];
+
+
+export const RecurringBookingInputCustomerType = {
+  umum: 'umum',
+  angkasa_pura: 'angkasa_pura',
+} as const;
+
 export interface RecurringBookingInput {
   customerName: string;
   customerEmail: string;
@@ -327,6 +335,8 @@ export interface RecurringBookingInput {
   repeatType: RecurringBookingInputRepeatType;
   repeatCount: number;
   notes?: string;
+  customerType?: RecurringBookingInputCustomerType;
+  idCardNumber?: string;
 }
 
 export interface RecurringBookingResult {
@@ -334,6 +344,29 @@ export interface RecurringBookingResult {
   skipped: string[];
   totalBookings: number;
   grandTotal: number;
+}
+
+export interface Vendor {
+  id: number;
+  name: string;
+  /** @nullable */
+  contactPerson?: string | null;
+  /** @nullable */
+  phone?: string | null;
+  /** @nullable */
+  email?: string | null;
+  /** @nullable */
+  address?: string | null;
+  /** @nullable */
+  notes?: string | null;
+  isActive?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface VendorSimple {
+  id: number;
+  name: string;
 }
 
 export type BookingInputCustomerType = typeof BookingInputCustomerType[keyof typeof BookingInputCustomerType];
@@ -357,6 +390,7 @@ export interface BookingInput {
   customerType?: BookingInputCustomerType;
   idCardNumber?: string;
   notes?: string;
+  vendorId?: number | null;
 }
 
 export type BookingUpdateStatus = typeof BookingUpdateStatus[keyof typeof BookingUpdateStatus];
@@ -379,6 +413,14 @@ export interface BookingUpdate {
   adminNotes?: string;
 }
 
+export type PaymentInputPaymentMethod = typeof PaymentInputPaymentMethod[keyof typeof PaymentInputPaymentMethod];
+
+
+export const PaymentInputPaymentMethod = {
+  Transfer_Bank: 'Transfer Bank',
+  QRIS: 'QRIS',
+} as const;
+
 export type PaymentInputPaymentType = typeof PaymentInputPaymentType[keyof typeof PaymentInputPaymentType];
 
 
@@ -392,6 +434,7 @@ export interface PaymentInput {
   bookingId: number;
   amount: number;
   proofUrl?: string;
+  paymentMethod?: PaymentInputPaymentMethod;
   paymentType?: PaymentInputPaymentType;
   notes?: string;
 }
@@ -407,6 +450,7 @@ export const PaymentUpdateStatus = {
 
 export interface PaymentUpdate {
   status?: PaymentUpdateStatus;
+  paymentMethod?: string;
   notes?: string;
 }
 
@@ -782,6 +826,8 @@ export interface MyBookingItem {
   paymentProofUrl?: string | null;
   notes?: string | null;
   createdAt: string | null;
+  groupRef?: string | null;
+  customerName?: string | null;
 }
 
 export interface Review {
@@ -931,6 +977,33 @@ export const GymMembershipUpdateStatus = {
 export interface GymMembershipUpdate {
   status?: GymMembershipUpdateStatus;
   notes?: string;
+}
+
+export interface MembershipLookupInput {
+  phone: string;
+}
+
+export type MembershipLookupResultStatus = typeof MembershipLookupResultStatus[keyof typeof MembershipLookupResultStatus];
+
+
+export const MembershipLookupResultStatus = {
+  pending_payment: 'pending_payment',
+  waiting_confirmation: 'waiting_confirmation',
+  active: 'active',
+  expired: 'expired',
+  cancelled: 'cancelled',
+} as const;
+
+export interface MembershipLookupResult {
+  id: number;
+  name: string;
+  phone: string;
+  email: string;
+  status: MembershipLookupResultStatus;
+  startDate: string;
+  endDate: string;
+  months: number;
+  totalPrice: number;
 }
 
 export type MembershipPaymentProofInputPaymentMethod = typeof MembershipPaymentProofInputPaymentMethod[keyof typeof MembershipPaymentProofInputPaymentMethod];
@@ -1563,6 +1636,92 @@ export interface ExpenseStatusInput {
   rejectedReason?: string;
 }
 
+export type DocumentTemplateDocumentType = typeof DocumentTemplateDocumentType[keyof typeof DocumentTemplateDocumentType];
+
+
+export const DocumentTemplateDocumentType = {
+  invoice: 'invoice',
+  spp: 'spp',
+  faktur: 'faktur',
+  kwitansi: 'kwitansi',
+  lampiran: 'lampiran',
+  berita_acara: 'berita_acara',
+} as const;
+
+export interface DocumentTemplate {
+  id?: number;
+  companyId?: number | null;
+  companyName?: string;
+  documentType?: DocumentTemplateDocumentType;
+  isDefault?: boolean;
+  headerLogoUrl?: string | null;
+  kopSuratHtml?: string | null;
+  footerHtml?: string | null;
+  companyDisplayName?: string | null;
+  financeName?: string | null;
+  financeTitle?: string | null;
+  financeSignature?: string | null;
+  address?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  numberFormatPrefix?: string | null;
+  numberFormatPattern?: string | null;
+  paperStyle?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export type DocumentTemplateInputDocumentType = typeof DocumentTemplateInputDocumentType[keyof typeof DocumentTemplateInputDocumentType];
+
+
+export const DocumentTemplateInputDocumentType = {
+  invoice: 'invoice',
+  spp: 'spp',
+  faktur: 'faktur',
+  kwitansi: 'kwitansi',
+  lampiran: 'lampiran',
+  berita_acara: 'berita_acara',
+} as const;
+
+export interface DocumentTemplateInput {
+  companyId?: number | null;
+  documentType: DocumentTemplateInputDocumentType;
+  isDefault?: boolean;
+  headerLogoUrl?: string;
+  kopSuratHtml?: string;
+  footerHtml?: string;
+  companyDisplayName?: string;
+  financeName?: string;
+  financeTitle?: string;
+  financeSignature?: string;
+  address?: string;
+  phone?: string;
+  email?: string;
+  numberFormatPrefix?: string;
+  numberFormatPattern?: string;
+  paperStyle?: string;
+}
+
+export type WaNotifLogStatus = typeof WaNotifLogStatus[keyof typeof WaNotifLogStatus];
+
+
+export const WaNotifLogStatus = {
+  sent: 'sent',
+  failed: 'failed',
+} as const;
+
+export interface WaNotifLog {
+  id: number;
+  bookingId?: number | null;
+  orderNumber?: string | null;
+  event?: string | null;
+  recipientPhone: string;
+  messagePreview?: string | null;
+  status: WaNotifLogStatus;
+  errorMessage?: string | null;
+  sentAt: string;
+}
+
 export type SendOtp200 = {
   success?: boolean;
   message?: string;
@@ -1688,6 +1847,11 @@ export type GetReviewsParams = {
 facilityId?: number;
 };
 
+export type ResendBookingWa200 = {
+  success: boolean;
+  message: string;
+};
+
 export type GetVerificationLogsParams = {
 bookingId?: number;
 limit?: number;
@@ -1717,5 +1881,30 @@ category?: string;
 status?: string;
 vendorName?: string;
 facilityId?: number;
+};
+
+export type ListDocumentTemplatesParams = {
+companyId?: string;
+documentType?: string;
+};
+
+export type DeleteDocumentTemplate200 = {
+  success?: boolean;
+};
+
+export type PreviewDocumentParams = {
+companyId?: number;
+/**
+ * JWT token for browser window.open() flows (alternative to Authorization header)
+ */
+_token?: string;
+};
+
+export type GenerateDocumentPdfParams = {
+companyId?: number;
+/**
+ * JWT token for browser window.open() flows (alternative to Authorization header)
+ */
+_token?: string;
 };
 

@@ -56,7 +56,7 @@ router.post("/customers/sheets/push", adminMiddleware, async (req, res) => {
       );
       const totalSpent = userBookings
         .filter((b) => !["cancelled", "expired", "rejected", "refunded"].includes(b.status))
-        .reduce((sum, b) => sum + Number(b.totalPrice), 0);
+        .reduce((sum, b) => sum + (b.grandTotal != null ? Number(b.grandTotal) : Number(b.totalPrice)), 0);
       return {
         id: u.id,
         customerCode: u.customerCode,

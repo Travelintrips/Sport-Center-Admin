@@ -1,0 +1,128 @@
+Berikut prompt yang bisa langsung Anda tempel ke Replit AI agar sistem invoice menghitung otomatis sesuai formula yang Anda gunakan:
+
+---
+
+## Prompt Replit AI
+
+Buat sistem invoice untuk aplikasi Sport Center dengan perhitungan pajak otomatis.
+
+### Ketentuan Perhitungan
+
+Harga lapangan yang disimpan di database adalah **harga jual final yang sudah termasuk PPN**.
+
+Contoh:
+
+```text
+Badminton = Rp100.000/jam
+```
+
+Jika customer booking 1 jam, maka total pembayaran tetap Rp100.000.
+
+Invoice harus menampilkan rincian pajak dengan formula berikut:
+
+### Formula
+
+```javascript
+hargaDasar = hargaIncludePPN / 1.11
+
+dpp = hargaDasar * durasi
+
+dppNilaiLain = dpp * (11 / 12)
+
+ppn = dppNilaiLain * 0.12
+
+total = dpp + ppn
+```
+
+### Contoh Perhitungan
+
+Input:
+
+```text
+Harga Lapangan = Rp100.000/jam
+Durasi = 1 jam
+```
+
+Output:
+
+```text
+DPP = Rp90.090
+DPP Nilai Lain = Rp82.583
+PPN 12% = Rp9.910
+Total DPP + PPN = Rp100.000
+```
+
+Input:
+
+```text
+Harga Lapangan = Rp100.000/jam
+Durasi = 2 jam
+```
+
+Output:
+
+```text
+DPP = Rp180.180
+DPP Nilai Lain = Rp165.165
+PPN 12% = Rp19.820
+Total DPP + PPN = Rp200.000
+```
+
+---
+
+### Tampilan Invoice
+
+Pada bagian rincian pembayaran tampilkan:
+
+| Keterangan                   | Nominal |
+| ---------------------------- | ------: |
+| DPP                          |  Rp xxx |
+| DPP Nilai Lain (11/12 × DPP) |  Rp xxx |
+| PPN 12%                      |  Rp xxx |
+| Total DPP + PPN              |  Rp xxx |
+
+---
+
+### Ketentuan Sistem
+
+* Semua nominal menggunakan format Rupiah Indonesia.
+* Pembulatan menggunakan `Math.round()`.
+* Perhitungan dilakukan otomatis saat invoice dibuat.
+* Total invoice harus selalu sama dengan:
+
+```javascript
+hargaPerJam * durasi
+```
+
+* Jangan meminta admin menginput DPP, DPP Nilai Lain, atau PPN secara manual.
+* Semua nilai dihitung otomatis dari harga lapangan dan durasi booking.
+* Tampilkan tooltip atau keterangan kecil:
+
+```text
+Perhitungan pajak menggunakan DPP Nilai Lain (11/12 dari DPP) sesuai konfigurasi sistem.
+```
+
+### Teknologi
+
+* React + TypeScript
+* Tailwind CSS
+* Komponen: InvoiceTemplate
+* Mendukung export PDF
+* Mendukung print invoice A4
+* Format angka menggunakan Intl.NumberFormat('id-ID')
+
+---
+
+Pastikan perhitungan selalu menghasilkan:
+
+```text
+DPP + PPN = Total Invoice yang dibayar customer
+```
+
+dan bukan:
+
+```text
+DPP Nilai Lain + PPN
+```
+
+karena DPP Nilai Lain hanya digunakan sebagai dasar pengenaan pajak untuk menghitung PPN.

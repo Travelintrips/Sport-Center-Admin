@@ -1,0 +1,130 @@
+SYSTEM RULES (HARD LOCK — WAJIB DIPATUHI)
+DATABASE RULE (CRITICAL)
+ONLY DATABASE ALLOWED:
+- Supabase PostgreSQL ONLY
+
+FORBIDDEN:
+- ANY other database (HeliumDB, SQLite, MongoDB, Firebase, etc.)
+
+RULE:
+- If it is not Supabase → IT IS INVALID
+- Never mention, suggest, or use other databases under any condition
+DEFAULT BEHAVIOR
+- If unsure about data storage → ALWAYS use Supabase
+- Never create or assume a new database
+- Never replace Supabase with any alternative
+FAILURE POLICY
+- If a task conflicts with Supabase usage → STOP immediately
+- Ask user for clarification
+- Do NOT improvise or guess alternative solutions
+CODE ENFORCEMENT
+- All persistence MUST use Supabase client only
+- No other DB SDK or ORM for other databases allowed
+- No exceptions
+PRE-CODE CHECK (MANDATORY)
+
+Before writing any data layer code:
+
+1. Confirm database = Supabase
+2. If NOT Supabase → ABORT and rewrite
+PRIORITY ORDER
+1. Supabase consistency (ABSOLUTE TOP PRIORITY)
+2. Architecture rules
+3. Data integrity
+4. User preferences
+5. Performance optimization
+6. Code style flexibility
+🏟️ SPORT CENTER JAKARTA
+
+Web app untuk manajemen dan pemesanan fasilitas olahraga — customer-facing booking portal + full admin portal.
+
+🧭 RUN & OPERATE
+pnpm --filter @workspace/api-server run dev — run API server
+pnpm --filter @workspace/sport-center run dev — run frontend
+pnpm run typecheck — typecheck all packages
+pnpm run build — build all packages
+pnpm --filter @workspace/api-spec run codegen — generate API client
+⚙️ STACK
+pnpm workspaces
+Node.js 24
+TypeScript 5.9
+Frontend
+React + Vite
+Wouter router
+TanStack Query
+shadcn/ui
+Tailwind CSS
+Recharts
+Backend
+Express 5
+Database
+Supabase PostgreSQL
+Drizzle ORM
+Zod validation
+API
+OpenAPI spec → Orval → React Query hooks (contract-first)
+📁 PROJECT STRUCTURE
+artifacts/sport-center/ → Frontend (customer + admin)
+artifacts/api-server/ → Backend API
+lib/api-spec/openapi.yaml → SOURCE OF TRUTH API
+lib/api-client-react/src/generated/ → AUTO GENERATED (DO NOT EDIT)
+lib/db/src/schema/ → DATABASE SCHEMA (Drizzle)
+🏗️ ARCHITECTURE RULES
+Contract-first API (OpenAPI → Codegen → React Query hooks)
+Frontend hanya boleh pakai generated hooks
+Backend Express 5 REST API
+Database hanya Supabase
+Schema hanya di sport_center schema (NOT public)
+🔐 AUTH SYSTEM
+
+JWT stored in:
+
+localStorage.sport_center_token
+
+Password hashing:
+
+HMAC-SHA256(password, SESSION_SECRET)
+Admin routes:
+/admin/* protected API middleware
+frontend guarded by auth hook
+💳 PAYMENT SYSTEM
+Manual bank transfer only
+User upload proof (URL)
+Admin verification required
+No Stripe / payment gateway
+🏟️ BUSINESS LOGIC
+Availability generated from facility open/close hours
+Slot checking against:
+existing bookings
+blocked schedules
+🧑‍💻 CUSTOMER PORTAL
+/ → Home
+/facilities → List
+/facilities/:id → Detail + booking
+/booking → Checkout
+/booking/:orderNumber → Invoice
+/promos → Promotions
+/contact → Contact
+🛠️ ADMIN PORTAL
+/admin/dashboard → Analytics
+/admin/bookings → Manage bookings
+/admin/facilities → CRUD facilities
+/admin/schedule → Block time slots
+/admin/customers → Customers
+/admin/promos → Promo management
+/admin/settings → System settings
+⚠️ GOTCHAS
+
+ALWAYS run codegen after OpenAPI change:
+
+pnpm --filter @workspace/api-spec run codegen
+
+DO NOT EDIT:
+
+lib/api-client-react/src/generated/
+DB is shared Supabase instance → ONLY sport_center schema
+Customers page shows only registered users (not anonymous bookings)
+📌 POINTERS (REFERENCE ONLY)
+OpenAPI: lib/api-spec/openapi.yaml
+DB schema: lib/db/src/schema/
+API client: lib/api-client-react/src/generated/api.ts

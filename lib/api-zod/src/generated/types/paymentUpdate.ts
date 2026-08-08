@@ -9,5 +9,6 @@ import type { PaymentUpdateStatus } from './paymentUpdateStatus';
 
 export interface PaymentUpdate {
   status?: PaymentUpdateStatus;
+  paymentMethod?: string;
   notes?: string;
 }

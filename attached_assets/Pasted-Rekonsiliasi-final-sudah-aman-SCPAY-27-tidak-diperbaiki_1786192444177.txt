@@ -1,0 +1,39 @@
+Rekonsiliasi final sudah aman: SCPAY-27 tidak diperbaiki otomatis karena ada dua accounting_payments yang terkait booking yang sama, dan entry yang benar sudah dipakai oleh payment canonical. Saya akan simpan aturan ini sebagai catatan permanen lalu melakukan satu pengecekan read-only terakhir untuk memastikan tidak ada data yang berubah.
+
+
+2 actions
+Dry-run dan guard repair sudah selesai. Hasilnya menunjukkan belum ada perubahan yang aman untuk dijalankan otomatis:
+
+Development scan: 9 confirmed payments
+Mismatch: 10
+repairable_link: 0
+manual_review: 10
+Untuk SCPAY-27:
+
+Source payment: sport_payments.id=27, booking 78, SC-0012, Rp100.000.
+Link canonical yang benar: accounting_payments.id=178, ref SCPAY-27, entry 641, status posted, debit Rp100.000.
+Link bermasalah: accounting_payments.id=9906, ref SC-0012, source_doc_id=7153, entry 27981, status draft, source_id=6053, debit Rp240.000.
+Karena entry 641 sudah dipakai oleh link canonical, skrip tidak memindahkan atau menghapus link 9906 secara otomatis.
+Skrip yang ditambahkan:
+
+pnpm --filter @workspace/scripts reconcile:accounting -- --payment-id=27
+pnpm --filter @workspace/scripts reconcile:accounting
+
+Repair hanya dapat berjalan dengan approval eksplisit, hash dry-run yang sama, dan tidak mengubah nominal/journal lines. Namun pada kondisi saat ini seluruh mismatch tertahan sebagai manual_review, sehingga approval saja belum akan melakukan perubahan.
+
+Bagaimana menangani accounting payment duplikat yang salah?
+Pilih langkah berikutnya
+Buat dry-run void/reversal terpisah untuk link 9906
+
+Worked for 6 minutes
+
+Checkpoint made
+12 minutes ago
+Considering dry-run implementation
+
+Considering dry-run implementation
+Saya akan membuat dry-run terpisah untuk rencana void/reversal accounting_payment 9906, tanpa mengubah ledger. Rencana ini akan memeriksa entry 27981, payment 9906, entry canonical SCPAY-27, dan memastikan reversal tidak dijalankan otomatis sebelum approval berikutnya.
+
+
+4 actions
+You've reached your daily free quota limit. It will reset at 12:00 AM UTC.

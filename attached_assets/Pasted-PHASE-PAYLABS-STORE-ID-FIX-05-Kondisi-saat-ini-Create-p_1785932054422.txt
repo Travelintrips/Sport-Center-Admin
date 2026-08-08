@@ -1,0 +1,216 @@
+PHASE PAYLABS-STORE-ID-FIX-05
+
+Kondisi saat ini:
+
+Create payment gagal dengan error:
+
+storeId: length must be between 6 and 32
+
+Error muncul setelah konfigurasi Paylabs Public Key Sandbox diperbarui.
+
+Tujuan:
+
+Perbaiki validasi dan pembentukan payload storeId tanpa mengubah flow webhook, signature verification, database finalization, atau credential lainnya.
+
+Jangan mengganti merchant ID sandbox.
+Jangan mengganti private key sandbox.
+Jangan mengganti Paylabs public key sandbox.
+Jangan mengubah notifyUrl.
+Jangan mengaktifkan production.
+
+PHASE 1 — TRACE SUMBER STORE ID
+
+Cari seluruh referensi:
+
+- storeId
+- store_id
+- paylabs_store_id
+- PAYLABS_STORE_ID
+
+Periksa sumber nilai storeId pada:
+
+- database settings;
+- environment variables;
+- request body frontend;
+- createVAPayment();
+- createQRISPayment();
+- createH5Payment();
+- payload builder.
+
+Laporkan nilai secara aman:
+
+- configured: true/false
+- trimmedLength
+- source: database/environment/default
+
+Jangan menampilkan nilai Store ID penuh di log.
+
+Pastikan frontend tidak boleh menentukan storeId sendiri.
+
+PHASE 2 — ATURAN STORE ID
+
+Terapkan aturan:
+
+1. Trim whitespace.
+2. Jika kosong setelah trim:
+   - anggap tidak dikonfigurasi;
+   - jangan sertakan properti storeId dalam payload Paylabs.
+3. Jika tersedia:
+   - panjang minimum 6;
+   - panjang maksimum 32.
+4. Jika panjang tidak valid:
+   - tolak penyimpanan di admin settings;
+   - tampilkan error yang jelas;
+   - jangan menunggu sampai request Paylabs gagal.
+5. Jangan memakai nilai default pendek seperti:
+   SC
+   SIT
+   DEV
+   001
+6. Jangan membuat Store ID buatan tanpa konfirmasi Paylabs.
+
+Gunakan helper terpusat, misalnya:
+
+function normalizeOptionalPaylabsStoreId(value?: string | null): string | undefined {
+  const normalized = value?.trim();
+
+  if (!normalized) {
+    return undefined;
+  }
+
+  if (normalized.length < 6 || normalized.length > 32) {
+    throw new Error(
+      "Paylabs Store ID must contain between 6 and 32 characters"
+    );
+  }
+
+  return normalized;
+}
+
+PHASE 3 — PAYLOAD BUILDER
+
+Jangan membuat payload seperti:
+
+{
+  storeId: storeId || ""
+}
+
+Jangan membuat:
+
+{
+  storeId: undefined
+}
+
+jika serializer atau validator tetap mempertahankan properti tersebut.
+
+Gunakan conditional spread:
+
+const normalizedStoreId =
+  normalizeOptionalPaylabsStoreId(config.storeId);
+
+const payload = {
+  merchantId,
+  merchantTradeNo,
+  amount,
+  notifyUrl,
+  ...(
+    normalizedStoreId
+      ? { storeId: normalizedStoreId }
+      : {}
+  ),
+};
+
+Pastikan JSON.stringify(payload) benar-benar tidak memiliki key storeId jika tidak dikonfigurasi.
+
+Terapkan konsisten pada:
+
+- VA create;
+- QRIS create;
+- H5 create link;
+- inquiry hanya jika endpoint memang memerlukan storeId.
+
+PHASE 4 — ADMIN SETTINGS
+
+Pada halaman /admin/paylabs:
+
+Label:
+
+Paylabs Store ID (Opsional)
+
+Tambahkan keterangan:
+
+"Kosongkan jika Paylabs tidak memberikan Store ID. Jika diisi, panjang harus 6–32 karakter."
+
+Saat menyimpan:
+
+- trim nilai;
+- empty string disimpan sebagai null atau dihapus;
+- nilai 1–5 karakter ditolak;
+- nilai lebih dari 32 karakter ditolak;
+- nilai valid disimpan.
+
+Jangan otomatis mengisi Store ID berdasarkan booking, merchant ID, nama aplikasi, atau kode SC.
+
+PHASE 5 — TEST
+
+Tambahkan test:
+
+1. undefined → storeId tidak ada di payload.
+2. null → storeId tidak ada di payload.
+3. "" → storeId tidak ada di payload.
+4. whitespace → storeId tidak ada di payload.
+5. panjang 5 → ditolak.
+6. panjang 6 → diterima.
+7. panjang 32 → diterima.
+8. panjang 33 → ditolak.
+9. payload VA tanpa Store ID berhasil dibentuk.
+10. payload QRIS tanpa Store ID berhasil dibentuk.
+11. payload H5 tanpa Store ID berhasil dibentuk.
+12. frontend tidak dapat override Store ID.
+
+PHASE 6 — SANDBOX RETEST
+
+Setelah fix:
+
+1. Pastikan Paylabs Store ID dikosongkan jika tidak ada nilai resmi dari Paylabs.
+2. Restart API server.
+3. Buat booking sandbox baru.
+4. Pilih satu VA.
+5. Pastikan create-payment tidak lagi menghasilkan:
+   storeId:length must be between 6 and 32
+6. Pastikan VA number berhasil diterima.
+7. Bayar sandbox.
+8. Pastikan real webhook masuk.
+9. Pastikan:
+   hasPublicKey: true
+10. Pastikan:
+    verificationResult: VALID
+11. Pastikan payment:
+    PENDING → SUCCESS
+12. Pastikan booking:
+    pending_payment → confirmed
+13. Ulangi webhook dan pastikan idempotent.
+
+PHASE 7 — FINAL REPORT
+
+Laporkan:
+
+- sumber Store ID sebelumnya;
+- apakah nilainya kosong atau terlalu pendek;
+- panjang sebelumnya;
+- file yang diubah;
+- apakah storeId sekarang dihilangkan dari JSON saat kosong;
+- hasil tests;
+- hasil create payment sandbox;
+- signature verification result;
+- payment status;
+- booking status;
+- build;
+- TypeScript.
+
+Verdict hanya:
+
+- STORE ID FIX VERIFIED
+- SANDBOX SIGNATURE VERIFIED
+- END TO END SUCCESS
+- BLOCKED

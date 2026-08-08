@@ -3,7 +3,7 @@ import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { scSchema } from "./_schema";
 
-export const facilitiesTable = scSchema.table("facilities", {
+export const facilitiesTable = scSchema.table("sport_facilities", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
   category: text("category").notNull(),

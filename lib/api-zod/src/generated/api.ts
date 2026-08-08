@@ -126,7 +126,9 @@ export const GetMyBookingsResponseItem = zod.object({
   "paymentStatus": zod.string().nullish(),
   "paymentProofUrl": zod.string().nullish(),
   "notes": zod.string().nullish(),
-  "createdAt": zod.string().nullable()
+  "createdAt": zod.string().nullable(),
+  "groupRef": zod.string().nullish(),
+  "customerName": zod.string().nullish()
 })
 export const GetMyBookingsResponse = zod.array(GetMyBookingsResponseItem)
 
@@ -336,6 +338,16 @@ export const CheckAvailabilityResponse = zod.array(CheckAvailabilityResponseItem
 
 
 /**
+ * @summary List active vendors (public dropdown)
+ */
+export const ListVendorsResponseItem = zod.object({
+  "id": zod.number(),
+  "name": zod.string()
+})
+export const ListVendorsResponse = zod.array(ListVendorsResponseItem)
+
+
+/**
  * @summary List bookings
  */
 export const ListBookingsQueryParams = zod.object({
@@ -426,7 +438,8 @@ export const CreateBookingBody = zod.object({
   "numberOfPeople": zod.number().optional(),
   "customerType": zod.enum(['umum', 'angkasa_pura']).optional(),
   "idCardNumber": zod.string().optional(),
-  "notes": zod.string().optional()
+  "notes": zod.string().optional(),
+  "vendorId": zod.number().nullish()
 })
 
 
@@ -471,7 +484,9 @@ export const CreateRecurringBookingBody = zod.object({
   "durationHours": zod.number(),
   "repeatType": zod.enum(['weekly', 'monthly']),
   "repeatCount": zod.number(),
-  "notes": zod.string().optional()
+  "notes": zod.string().optional(),
+  "customerType": zod.enum(['umum', 'angkasa_pura']).optional(),
+  "idCardNumber": zod.string().optional()
 })
 
 
@@ -806,6 +821,7 @@ export const CreatePaymentBody = zod.object({
   "bookingId": zod.number(),
   "amount": zod.number(),
   "proofUrl": zod.string().optional(),
+  "paymentMethod": zod.enum(['Transfer Bank', 'QRIS']).optional(),
   "paymentType": zod.enum(['dp', 'pelunasan', 'full_payment']).optional(),
   "notes": zod.string().optional()
 })
@@ -820,6 +836,7 @@ export const UpdatePaymentParams = zod.object({
 
 export const UpdatePaymentBody = zod.object({
   "status": zod.enum(['pending', 'confirmed', 'rejected']).optional(),
+  "paymentMethod": zod.string().optional(),
   "notes": zod.string().optional()
 })
 
@@ -1758,6 +1775,26 @@ export const CreateMembershipBody = zod.object({
 
 
 /**
+ * @summary Look up a membership by phone number (public)
+ */
+export const LookupMembershipBody = zod.object({
+  "phone": zod.string()
+})
+
+export const LookupMembershipResponse = zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "phone": zod.string(),
+  "email": zod.string(),
+  "status": zod.enum(['pending_payment', 'waiting_confirmation', 'active', 'expired', 'cancelled']),
+  "startDate": zod.string(),
+  "endDate": zod.string(),
+  "months": zod.number(),
+  "totalPrice": zod.number()
+})
+
+
+/**
  * @summary Submit payment proof for a membership
  */
 export const SubmitMembershipPaymentProofParams = zod.object({
@@ -2157,6 +2194,40 @@ export const CheckInBookingResponse = zod.object({
 })).optional(),
   "remainingAmount": zod.number().optional(),
   "createdAt": zod.string().optional()
+})
+
+
+/**
+ * @summary Get WA notification logs for a booking (admin)
+ */
+export const GetBookingWaLogsParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetBookingWaLogsResponseItem = zod.object({
+  "id": zod.number(),
+  "bookingId": zod.number().nullish(),
+  "orderNumber": zod.string().nullish(),
+  "event": zod.string().nullish(),
+  "recipientPhone": zod.string(),
+  "messagePreview": zod.string().nullish(),
+  "status": zod.enum(['sent', 'failed']),
+  "errorMessage": zod.string().nullish(),
+  "sentAt": zod.string()
+})
+export const GetBookingWaLogsResponse = zod.array(GetBookingWaLogsResponseItem)
+
+
+/**
+ * @summary Resend WA notification to customer based on booking status (admin)
+ */
+export const ResendBookingWaParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const ResendBookingWaResponse = zod.object({
+  "success": zod.boolean(),
+  "message": zod.string()
 })
 
 
@@ -3128,6 +3199,183 @@ export const UpdateExpenseStatusResponse = zod.object({
   "journalId": zod.string().nullish(),
   "createdAt": zod.string(),
   "updatedAt": zod.string()
+})
+
+
+/**
+ * @summary List document templates with optional filters
+ */
+export const ListDocumentTemplatesQueryParams = zod.object({
+  "companyId": zod.coerce.string().optional(),
+  "documentType": zod.coerce.string().optional()
+})
+
+export const ListDocumentTemplatesResponseItem = zod.object({
+  "id": zod.number().optional(),
+  "companyId": zod.number().nullish(),
+  "companyName": zod.string().optional(),
+  "documentType": zod.enum(['invoice', 'spp', 'faktur', 'kwitansi', 'lampiran', 'berita_acara']).optional(),
+  "isDefault": zod.boolean().optional(),
+  "headerLogoUrl": zod.string().nullish(),
+  "kopSuratHtml": zod.string().nullish(),
+  "footerHtml": zod.string().nullish(),
+  "companyDisplayName": zod.string().nullish(),
+  "financeName": zod.string().nullish(),
+  "financeTitle": zod.string().nullish(),
+  "financeSignature": zod.string().nullish(),
+  "address": zod.string().nullish(),
+  "phone": zod.string().nullish(),
+  "email": zod.string().nullish(),
+  "numberFormatPrefix": zod.string().nullish(),
+  "numberFormatPattern": zod.string().nullish(),
+  "paperStyle": zod.string().optional(),
+  "createdAt": zod.string().optional(),
+  "updatedAt": zod.string().optional()
+})
+export const ListDocumentTemplatesResponse = zod.array(ListDocumentTemplatesResponseItem)
+
+
+/**
+ * @summary Create a new document template
+ */
+export const CreateDocumentTemplateBody = zod.object({
+  "companyId": zod.number().nullish(),
+  "documentType": zod.enum(['invoice', 'spp', 'faktur', 'kwitansi', 'lampiran', 'berita_acara']),
+  "isDefault": zod.boolean().optional(),
+  "headerLogoUrl": zod.string().optional(),
+  "kopSuratHtml": zod.string().optional(),
+  "footerHtml": zod.string().optional(),
+  "companyDisplayName": zod.string().optional(),
+  "financeName": zod.string().optional(),
+  "financeTitle": zod.string().optional(),
+  "financeSignature": zod.string().optional(),
+  "address": zod.string().optional(),
+  "phone": zod.string().optional(),
+  "email": zod.string().optional(),
+  "numberFormatPrefix": zod.string().optional(),
+  "numberFormatPattern": zod.string().optional(),
+  "paperStyle": zod.string().optional()
+})
+
+
+/**
+ * @summary Get a document template by ID
+ */
+export const GetDocumentTemplateParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetDocumentTemplateResponse = zod.object({
+  "id": zod.number().optional(),
+  "companyId": zod.number().nullish(),
+  "companyName": zod.string().optional(),
+  "documentType": zod.enum(['invoice', 'spp', 'faktur', 'kwitansi', 'lampiran', 'berita_acara']).optional(),
+  "isDefault": zod.boolean().optional(),
+  "headerLogoUrl": zod.string().nullish(),
+  "kopSuratHtml": zod.string().nullish(),
+  "footerHtml": zod.string().nullish(),
+  "companyDisplayName": zod.string().nullish(),
+  "financeName": zod.string().nullish(),
+  "financeTitle": zod.string().nullish(),
+  "financeSignature": zod.string().nullish(),
+  "address": zod.string().nullish(),
+  "phone": zod.string().nullish(),
+  "email": zod.string().nullish(),
+  "numberFormatPrefix": zod.string().nullish(),
+  "numberFormatPattern": zod.string().nullish(),
+  "paperStyle": zod.string().optional(),
+  "createdAt": zod.string().optional(),
+  "updatedAt": zod.string().optional()
+})
+
+
+/**
+ * @summary Update a document template
+ */
+export const UpdateDocumentTemplateParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const UpdateDocumentTemplateBody = zod.object({
+  "companyId": zod.number().nullish(),
+  "documentType": zod.enum(['invoice', 'spp', 'faktur', 'kwitansi', 'lampiran', 'berita_acara']),
+  "isDefault": zod.boolean().optional(),
+  "headerLogoUrl": zod.string().optional(),
+  "kopSuratHtml": zod.string().optional(),
+  "footerHtml": zod.string().optional(),
+  "companyDisplayName": zod.string().optional(),
+  "financeName": zod.string().optional(),
+  "financeTitle": zod.string().optional(),
+  "financeSignature": zod.string().optional(),
+  "address": zod.string().optional(),
+  "phone": zod.string().optional(),
+  "email": zod.string().optional(),
+  "numberFormatPrefix": zod.string().optional(),
+  "numberFormatPattern": zod.string().optional(),
+  "paperStyle": zod.string().optional()
+})
+
+export const UpdateDocumentTemplateResponse = zod.object({
+  "id": zod.number().optional(),
+  "companyId": zod.number().nullish(),
+  "companyName": zod.string().optional(),
+  "documentType": zod.enum(['invoice', 'spp', 'faktur', 'kwitansi', 'lampiran', 'berita_acara']).optional(),
+  "isDefault": zod.boolean().optional(),
+  "headerLogoUrl": zod.string().nullish(),
+  "kopSuratHtml": zod.string().nullish(),
+  "footerHtml": zod.string().nullish(),
+  "companyDisplayName": zod.string().nullish(),
+  "financeName": zod.string().nullish(),
+  "financeTitle": zod.string().nullish(),
+  "financeSignature": zod.string().nullish(),
+  "address": zod.string().nullish(),
+  "phone": zod.string().nullish(),
+  "email": zod.string().nullish(),
+  "numberFormatPrefix": zod.string().nullish(),
+  "numberFormatPattern": zod.string().nullish(),
+  "paperStyle": zod.string().optional(),
+  "createdAt": zod.string().optional(),
+  "updatedAt": zod.string().optional()
+})
+
+
+/**
+ * @summary Delete a document template (non-default only)
+ */
+export const DeleteDocumentTemplateParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const DeleteDocumentTemplateResponse = zod.object({
+  "success": zod.boolean().optional()
+})
+
+
+/**
+ * @summary Render document as HTML preview (no number issuance)
+ */
+export const PreviewDocumentParams = zod.object({
+  "documentType": zod.enum(['invoice', 'spp', 'faktur', 'kwitansi', 'lampiran', 'berita_acara']),
+  "entityId": zod.coerce.number()
+})
+
+export const PreviewDocumentQueryParams = zod.object({
+  "companyId": zod.coerce.number().optional(),
+  "_token": zod.coerce.string().optional().describe('JWT token for browser window.open() flows (alternative to Authorization header)')
+})
+
+
+/**
+ * @summary Generate PDF binary (Puppeteer) or print-ready HTML fallback; issues document number
+ */
+export const GenerateDocumentPdfParams = zod.object({
+  "documentType": zod.enum(['invoice', 'spp', 'faktur', 'kwitansi', 'lampiran', 'berita_acara']),
+  "entityId": zod.coerce.number()
+})
+
+export const GenerateDocumentPdfQueryParams = zod.object({
+  "companyId": zod.coerce.number().optional(),
+  "_token": zod.coerce.string().optional().describe('JWT token for browser window.open() flows (alternative to Authorization header)')
 })
 
 

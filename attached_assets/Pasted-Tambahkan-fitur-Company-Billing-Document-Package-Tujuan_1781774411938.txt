@@ -1,0 +1,184 @@
+Tambahkan fitur Company Billing Document Package.
+
+Tujuan:
+Setiap perusahaan dapat memiliki persyaratan dokumen tagihan yang berbeda, tidak hanya invoice.
+
+Database:
+
+sport_company_billing_requirements
+
+* id
+* company_id
+* document_type
+* required
+* active
+* created_at
+
+document_type:
+
+* invoice
+* faktur_pajak
+* kwitansi
+* spp
+* lampiran_pemakaian
+* dokumentasi
+* berita_acara
+* surat_pengantar
+* materai
+* custom_document
+
+==================================
+
+Master Perusahaan
+
+Tambahkan tab:
+
+Billing Documents
+
+Admin dapat menentukan dokumen wajib per perusahaan.
+
+Contoh:
+
+APIA Teknik
+☑ Invoice
+☑ Faktur Pajak
+☑ Lampiran Pemakaian
+☑ Materai
+
+JAS Aero
+☑ Invoice
+☑ Faktur Pajak
+☑ Lampiran Pemakaian
+
+PT PP Triono
+☑ Invoice
+
+GMC GKY PT Angkasa Pura
+☑ SPP
+☑ Invoice
+☑ Lampiran
+☑ Dokumentasi
+☑ Kwitansi
+
+==================================
+
+Saat Generate Invoice
+
+Selain PDF Invoice, sistem harus membuat Billing Package.
+
+Contoh:
+
+INV-202606-0001
+
+Dokumen:
+
+☑ Invoice.pdf
+☑ FakturPajak.pdf
+☑ LampiranPemakaian.pdf
+☑ Dokumentasi.zip
+☑ Kwitansi.pdf
+
+==================================
+
+Lampiran Pemakaian
+
+Otomatis berisi:
+
+* Nama Customer
+* Fasilitas
+* Tanggal
+* Jam
+* Durasi
+* Harga
+* Total
+
+==================================
+
+Dokumentasi
+
+Jika booking memiliki foto:
+
+* Check-in
+* Aktivitas
+* Check-out
+
+Maka otomatis dikumpulkan menjadi:
+Dokumentasi.zip
+
+==================================
+
+Kwitansi
+
+Generate otomatis:
+
+Sudah Terima Dari:
+[Nama Perusahaan]
+
+Jumlah:
+Rp xxx
+
+Untuk Pembayaran:
+Tagihan Sport Center Periode xxx
+
+==================================
+
+SPP
+
+Template surat permohonan pembayaran.
+
+Data otomatis:
+
+* Nomor
+* Perusahaan
+* Invoice
+* Total Tagihan
+* Jatuh Tempo
+
+==================================
+
+Tagihan Perusahaan
+
+Tambahkan kolom:
+
+Document Status
+
+Contoh:
+
+Invoice      ✅
+Lampiran     ✅
+Faktur       ✅
+Kwitansi     ❌
+
+Status:
+Belum Lengkap
+
+==================================
+
+Tombol baru:
+
+[Download Invoice]
+[Download Billing Package]
+[Kirim WA]
+[Kirim Email]
+
+==================================
+
+WA & Email
+
+Saat follow up:
+
+Kirim:
+
+* Invoice
+* Semua dokumen pendukung
+
+Dalam satu paket tagihan.
+
+==================================
+
+Audit Log
+
+* COMPANY_BILLING_PACKAGE_GENERATED
+* COMPANY_DOCUMENT_GENERATED
+* COMPANY_DOCUMENT_SENT
+* COMPANY_DOCUMENT_DOWNLOADED

@@ -1,0 +1,319 @@
+PHASE PAYLABS-PRIVATE-KEY-PERSISTENCE-09
+
+Kondisi aktual:
+
+1. Paylabs Public Key Sandbox sudah berhasil disimpan.
+2. Badge menunjukkan Configured.
+3. Create payment masih gagal dengan:
+
+RSA signing failed
+DECODER routines::unsupported
+
+4. Merchant Private Key Sandbox ditampilkan pada textarea sebagai deretan karakter masker/titik.
+5. Kemungkinan besar masked value atau placeholder terkirim kembali saat Simpan Perubahan dan menimpa private key asli.
+
+Tujuan:
+
+Pastikan Merchant Private Key Sandbox:
+
+- tidak pernah dikembalikan ke frontend;
+- tidak pernah ditampilkan sebagai masked textarea value;
+- tidak tertimpa saat user hanya mengganti public key atau settings lain;
+- hanya diperbarui ketika user secara eksplisit memasukkan private key baru;
+- tervalidasi dengan crypto.createPrivateKey() sebelum disimpan;
+- dapat digunakan untuk RSA signing request Paylabs sandbox.
+
+Jangan mengubah Paylabs Public Key Sandbox.
+Jangan mengubah Merchant ID Sandbox.
+Jangan mengubah Store ID.
+Jangan mengubah notifyUrl atau webhook flow.
+Jangan masuk production.
+
+PHASE 1 — TRACE NILAI PRIVATE KEY SAAT INI
+
+Audit sumber Merchant Private Key Sandbox:
+
+- DB key paylabs_private_key_sandbox
+- env PAYLABS_PRIVATE_KEY_SANDBOX
+- fallback PAYLABS_PRIVATE_KEY
+- admin PATCH payload
+- config resolver
+
+Laporkan hanya metadata:
+
+- source
+- configured true/false
+- stored length
+- detected PEM type
+- begins with PRIVATE KEY / RSA PRIVATE KEY / UNKNOWN
+- contains real newlines true/false
+- contains literal \n true/false
+- contains only mask characters true/false
+- crypto.createPrivateKey succeeds true/false
+
+Jangan menampilkan isi private key.
+
+Cari apakah database sekarang berisi:
+
+- bullet characters
+- asterisks
+- masked placeholder
+- string "configured"
+- string "[REDACTED]"
+
+Jika iya, konfirmasi root cause:
+MASKED VALUE OVERWROTE PRIVATE KEY.
+
+PHASE 2 — FIX GET SETTINGS
+
+GET /api/paylabs/settings tidak boleh pernah mengembalikan private key, baik asli maupun masked.
+
+Response hanya boleh berisi:
+
+sandboxPrivateKeyConfigured: boolean
+productionPrivateKeyConfigured: boolean
+
+Hapus field seperti:
+
+sandboxPrivateKey
+privateKeySandbox
+paylabsPrivateKeySandbox
+
+Jangan mengirim panjang key dalam bentuk jumlah titik ke frontend.
+
+Frontend harus menampilkan:
+
+Merchant Private Key Sandbox
+Configured
+[Ganti Merchant Private Key]
+
+atau:
+
+Not configured
+[Set Merchant Private Key]
+
+Tidak boleh menampilkan textarea berisi deretan titik secara default.
+
+PHASE 3 — FIX FRONTEND STATE
+
+Audit:
+
+artifacts/sport-center/src/pages/admin/PaylabsGateway.tsx
+
+Aturan:
+
+1. Default private key input harus kosong.
+2. Textarea private key hanya muncul setelah tombol:
+   Set Merchant Private Key
+   atau
+   Ganti Merchant Private Key
+3. Jika user tidak membuka editor private key:
+   field private key tidak boleh dikirim dalam PATCH.
+4. Jangan mengisi textarea dengan:
+   ••••••
+   ********
+   Configured
+   [REDACTED]
+5. Setelah save sukses:
+   - kosongkan local private key input;
+   - tutup editor;
+   - refetch settings;
+   - tampilkan badge Configured.
+6. Menyimpan public key tidak boleh mengirim private key field.
+
+Gunakan patch semantics:
+
+const payload = {
+  sandboxMode,
+  merchantIdSandbox,
+  storeId,
+  ...
+};
+
+if (isEditingSandboxPrivateKey &&
+    sandboxPrivateKeyInput.trim()) {
+  payload.sandboxPrivateKey =
+    sandboxPrivateKeyInput;
+}
+
+PHASE 4 — FIX BACKEND PATCH SEMANTICS
+
+Pada PATCH settings:
+
+- jika field sandboxPrivateKey tidak ada:
+  pertahankan private key lama;
+- jika field ada tetapi empty:
+  jangan menimpa key lama;
+- jika field berisi masker atau placeholder:
+  return HTTP 422;
+- jika field berisi key baru:
+  normalize dan validate sebelum upsert.
+
+Tolak nilai berikut:
+
+/^[•*]+$/
+"Configured"
+"[REDACTED]"
+"********"
+empty string
+
+Jangan gunakan:
+
+sandboxPrivateKey =
+  body.sandboxPrivateKey || ""
+
+Jangan menggunakan object spread yang selalu memasukkan key kosong.
+
+PHASE 5 — PRIVATE KEY NORMALIZATION
+
+Buat atau gunakan helper:
+
+normalizePaylabsPrivateKey()
+
+Mendukung:
+
+-----BEGIN PRIVATE KEY-----
+PKCS#8
+-----END PRIVATE KEY-----
+
+dan:
+
+-----BEGIN RSA PRIVATE KEY-----
+PKCS#1
+-----END RSA PRIVATE KEY-----
+
+Helper harus:
+
+- trim outer whitespace;
+- ubah literal \\n menjadi newline asli;
+- ubah CRLF ke LF;
+- preserve header type;
+- jangan mengubah key menjadi public key;
+- jangan membungkus raw base64 secara asal;
+- jangan menghapus karakter base64.
+
+Setelah normalisasi, wajib:
+
+crypto.createPrivateKey(normalizedKey)
+
+Jika gagal:
+
+- jangan simpan;
+- pertahankan key lama;
+- return HTTP 422;
+- frontend tampilkan pesan:
+  "Merchant Private Key Sandbox tidak valid."
+
+PHASE 6 — REPAIR CONFIGURATION
+
+Setelah code fix:
+
+1. Periksa apakah DB private key saat ini invalid atau masked.
+2. Jika invalid:
+   - jangan mencoba memperbaiki string masker;
+   - tandai sandboxPrivateKeyConfigured false.
+3. Buka admin Paylabs.
+4. Klik Set/Ganti Merchant Private Key Sandbox.
+5. Tempel Merchant RSA Private Key Sandbox yang benar.
+6. Private key harus berasal dari merchant keypair Anda.
+7. Jangan tempel Paylabs Public Key.
+8. Simpan.
+9. Backend harus memvalidasi crypto.createPrivateKey.
+10. Badge harus menjadi Configured.
+11. Refresh browser.
+12. Badge harus tetap Configured.
+13. Textarea private key tidak boleh muncul lagi sampai tombol Ganti diklik.
+
+PHASE 7 — SIGNING TEST
+
+Tambahkan internal validation test:
+
+1. Load Merchant Private Key Sandbox dari resolver.
+2. Build canonical Paylabs request.
+3. Sign menggunakan RSA-SHA256.
+4. Signature harus berupa Base64 non-empty.
+5. Derive merchant public key dari private key.
+6. Verify signature menggunakan derived merchant public key.
+7. Hasil harus true.
+
+Jangan memanggil Paylabs production.
+
+PHASE 8 — AUTOMATED TESTS
+
+Tambahkan test:
+
+1. GET settings tidak mengembalikan private key.
+2. Configured boolean true jika DB key valid.
+3. PATCH public key saja tidak mengubah private key.
+4. PATCH Store ID saja tidak mengubah private key.
+5. PATCH tanpa private key mempertahankan key lama.
+6. Masked bullets ditolak.
+7. Asterisks ditolak.
+8. Configured placeholder ditolak.
+9. PKCS#8 valid tersimpan.
+10. PKCS#1 valid tersimpan.
+11. Invalid PEM return 422.
+12. createPrivateKey valid.
+13. RSA signing valid.
+14. OpenSSL detail tidak dikirim ke frontend.
+
+PHASE 9 — SANDBOX END-TO-END RETEST
+
+Setelah private key valid tersimpan:
+
+1. Restart API.
+2. Buat booking sandbox baru.
+3. Pilih VA.
+4. Pastikan create-payment berhasil.
+5. Pastikan nomor VA diterima.
+6. Pastikan tidak ada RSA signing error.
+7. Bayar di sandbox.
+8. Pastikan webhook masuk.
+9. Pastikan:
+   hasPublicKey: true
+10. Pastikan:
+    verificationResult: VALID
+11. Payment:
+    PENDING → SUCCESS
+12. Booking:
+    pending_payment → confirmed
+13. Duplicate webhook:
+    already_confirmed
+
+PHASE 10 — SAFE ERROR MESSAGE
+
+Frontend tidak boleh menampilkan detail OpenSSL seperti:
+
+DECODER routines::unsupported
+
+Ganti dengan pesan:
+
+"Gagal membuat pembayaran karena konfigurasi payment gateway belum valid. Hubungi administrator."
+
+Detail teknis hanya di server log yang telah disanitasi.
+
+PHASE 11 — FINAL REPORT
+
+Laporkan:
+
+- root cause;
+- apakah masked value menimpa private key;
+- DB private key valid sebelum/sesudah;
+- detected PEM type;
+- createPrivateKey result;
+- signing result;
+- create-payment result;
+- webhook verification result;
+- payment result;
+- booking result;
+- tests;
+- TypeScript;
+- build;
+- file yang diubah.
+
+Verdict hanya:
+
+- PRIVATE KEY PERSISTENCE VERIFIED
+- REQUEST SIGNATURE VERIFIED
+- SANDBOX END TO END VERIFIED
+- BLOCKED

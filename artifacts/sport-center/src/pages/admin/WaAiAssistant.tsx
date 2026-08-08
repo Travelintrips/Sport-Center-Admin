@@ -894,7 +894,7 @@ export default function AdminWaAiAssistant() {
                 {[
                   {
                     label: "👋 Salam",
-                    text: `Halo${takeoverDialog.customerName ? ` *${takeoverDialog.customerName}*` : ""}! Saya admin Sport Center Jakarta. Ada yang bisa saya bantu? 😊`,
+                    text: `Halo${takeoverDialog.customerName ? ` *${takeoverDialog.customerName}*` : ""}! Saya admin Sport Center Bandara Soekarno Hatta. Ada yang bisa saya bantu? 😊`,
                   },
                   {
                     label: "⏳ Ditindaklanjuti",
@@ -902,7 +902,7 @@ export default function AdminWaAiAssistant() {
                   },
                   {
                     label: "💳 Instruksi Bayar",
-                    text: `Halo${takeoverDialog.customerName ? ` *${takeoverDialog.customerName}*` : ""}! Berikut instruksi pembayaran booking Anda:\n\n🏦 *Transfer Bank*\nBNI – 1234567890 a/n Sport Center Jakarta\nMandiri – 0987654321 a/n Sport Center Jakarta\n\nSetelah transfer, kirim bukti bayar ke WhatsApp ini. Tim kami akan konfirmasi dalam 1×24 jam. 🙏`,
+                    text: `Halo${takeoverDialog.customerName ? ` *${takeoverDialog.customerName}*` : ""}! Berikut instruksi pembayaran booking Anda:\n\n🏦 *Transfer Bank*\nBNI – 1234567890 a/n Sport Center Bandara Soekarno Hatta\nMandiri – 0987654321 a/n Sport Center Bandara Soekarno Hatta\n\nSetelah transfer, kirim bukti bayar ke WhatsApp ini. Tim kami akan konfirmasi dalam 1×24 jam. 🙏`,
                   },
                   {
                     label: "✅ Booking Dikonfirmasi",
@@ -914,11 +914,11 @@ export default function AdminWaAiAssistant() {
                   },
                   {
                     label: "🕐 Info Jam Buka",
-                    text: `Sport Center Jakarta buka setiap hari *Senin–Minggu pukul 06:00–22:00*.\n\nUntuk info lebih lanjut atau booking, balas pesan ini atau kunjungi website kami. 😊`,
+                    text: `Sport Center Bandara Soekarno Hatta buka setiap hari *Senin–Minggu pukul 06:00–22:00*.\n\nUntuk info lebih lanjut atau booking, balas pesan ini atau kunjungi website kami. 😊`,
                   },
                   {
                     label: "📍 Info Lokasi",
-                    text: `Sport Center Jakarta berlokasi di:\n📍 *[Alamat lengkap]*\n\nMudah dijangkau dengan kendaraan umum maupun pribadi. Parkir tersedia. 🚗`,
+                    text: `Sport Center Bandara Soekarno Hatta berlokasi di:\n📍 *[Alamat lengkap]*\n\nMudah dijangkau dengan kendaraan umum maupun pribadi. Parkir tersedia. 🚗`,
                   },
                   {
                     label: "🔁 Reschedule",

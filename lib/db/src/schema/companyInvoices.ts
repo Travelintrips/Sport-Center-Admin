@@ -4,7 +4,7 @@ import { z } from "zod/v4";
 import { usersTable } from "./users";
 import { scSchema } from "./_schema";
 
-export const invoiceStatusEnum = scSchema.enum("invoice_status", ["unpaid", "partial_paid", "paid"]);
+export const invoiceStatusEnum = scSchema.enum("invoice_status", ["unpaid", "partial_paid", "paid", "waiting_verification"]);
 
 export const companyInvoicesTable = scSchema.table("company_invoices", {
   id: serial("id").primaryKey(),
@@ -12,12 +12,15 @@ export const companyInvoicesTable = scSchema.table("company_invoices", {
   companyCustomerId: integer("company_customer_id").notNull().references(() => usersTable.id),
   periodMonth: text("period_month").notNull(),
   totalAmount: numeric("total_amount", { precision: 14, scale: 2 }).notNull().default("0"),
+  dppNilaiLain: numeric("dpp_nilai_lain", { precision: 14, scale: 2 }).notNull().default("0"),
   ppnAmount: numeric("ppn_amount", { precision: 14, scale: 2 }).notNull().default("0"),
   grandTotal: numeric("grand_total", { precision: 14, scale: 2 }).notNull().default("0"),
   paidAmount: numeric("paid_amount", { precision: 14, scale: 2 }).notNull().default("0"),
   remainingAmount: numeric("remaining_amount", { precision: 14, scale: 2 }).notNull().default("0"),
   status: invoiceStatusEnum("invoice_status").notNull().default("unpaid"),
   paidAt: timestamp("paid_at", { withTimezone: true }),
+  paymentProofUrl: text("payment_proof_url"),
+  paymentNotes: text("payment_notes"),
   notes: text("notes"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({

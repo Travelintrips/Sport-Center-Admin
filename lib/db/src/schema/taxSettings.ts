@@ -9,7 +9,7 @@ export const taxSettingsTable = scSchema.table("tax_settings", {
   taxName: text("tax_name").notNull(),
   taxRate: numeric("tax_rate", { precision: 5, scale: 2 }).notNull(),
   taxType: text("tax_type").notNull().default("output_vat"),
-  appliesTo: text("applies_to").notNull().default("sport_center_booking"),
+  appliesTo: text("applies_to").notNull().default("sport_booking"),
   isActive: boolean("is_active").notNull().default(true),
   // Backward compatibility: PPN only applies to bookings on/after this date.
   // NULL means PPN always applies (no restriction).

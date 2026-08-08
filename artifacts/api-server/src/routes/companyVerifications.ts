@@ -16,7 +16,10 @@ router.get("/companies", async (req, res) => {
       id: usersTable.id,
       name: usersTable.name,
       companyName: usersTable.companyName,
+      email: usersTable.email,
+      phone: usersTable.phone,
       allowMonthlyBilling: usersTable.allowMonthlyBilling,
+      requirePerBookingApproval: usersTable.requirePerBookingApproval,
       picName: usersTable.picName,
       picPhone: usersTable.picPhone,
       picEmail: usersTable.picEmail,
@@ -148,9 +151,15 @@ router.get("/company-verifications/my", authMiddleware, async (req, res) => {
 // ─── GET /company-verifications/billing-status — customer: check if can use corporate billing
 router.get("/company-verifications/billing-status", authMiddleware, async (req, res) => {
   try {
-    const { userId } = (req as any).user;
+    const { userId, role } = (req as any).user;
+    // Admin/operator booking on behalf of another customer can check that
+    // customer's corporate-billing eligibility via ?customerId=.
+    const requestedCustomerId = req.query.customerId ? parseInt(String(req.query.customerId)) : undefined;
+    const isAdminRole = role === "admin" || role === "admin_booking";
+    const targetUserId = isAdminRole && requestedCustomerId && requestedCustomerId > 0 ? requestedCustomerId : userId;
+
     const [companyUser] = await db.select().from(companyUsersTable)
-      .where(and(eq(companyUsersTable.customerId, userId), eq(companyUsersTable.verificationStatus, "approved"), eq(companyUsersTable.corporateBillingEnabled, true)))
+      .where(and(eq(companyUsersTable.customerId, targetUserId), eq(companyUsersTable.verificationStatus, "approved"), eq(companyUsersTable.corporateBillingEnabled, true)))
       .limit(1);
 
     if (!companyUser) {
@@ -454,6 +463,25 @@ router.patch("/company-verifications/:id/revoke", adminMiddleware, async (req, r
   }
 });
 
+// ─── PATCH /companies/:id/settings — admin toggle company settings ──────────
+router.patch("/companies/:id/settings", adminMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(String(req.params.id));
+    const { allowMonthlyBilling, requirePerBookingApproval, accountStatus } = req.body;
+    const setValues: Record<string, unknown> = {};
+    if (typeof allowMonthlyBilling === "boolean") setValues.allowMonthlyBilling = allowMonthlyBilling;
+    if (typeof requirePerBookingApproval === "boolean") setValues.requirePerBookingApproval = requirePerBookingApproval;
+    if (accountStatus) setValues.accountStatus = accountStatus;
+    if (Object.keys(setValues).length === 0) { res.status(400).json({ error: "Nothing to update" }); return; }
+    const [updated] = await db.update(usersTable).set(setValues as any).where(eq(usersTable.id, id)).returning();
+    if (!updated) { res.status(404).json({ error: "Company not found" }); return; }
+    res.json(updated);
+  } catch (err) {
+    req.log.error({ err }, "Update company settings error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 // ─── PATCH /company-users/:id/toggle-billing — admin toggle corporate_billing_enabled ──
 router.patch("/company-users/:id/toggle-billing", adminMiddleware, async (req, res) => {
   try {
@@ -718,7 +746,7 @@ function htmlPage(title: string, body: string): string {
 <body>
 <div class="card">
   <div class="header">
-    <h1>Sport Center Jakarta</h1>
+    <h1>Sport Center Bandara Soekarno Hatta</h1>
     <p>Verifikasi Karyawan</p>
   </div>
   <div class="content">

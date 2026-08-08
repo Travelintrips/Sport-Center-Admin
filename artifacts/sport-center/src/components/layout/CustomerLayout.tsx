@@ -1,12 +1,32 @@
 import { ReactNode, useState, useEffect } from "react";
 import { Link, useLocation } from "wouter";
-import { Menu, X, LogOut, CalendarDays, ChevronDown, MapPin, Phone, Instagram, Facebook, ShieldCheck, ArrowUp, UserCircle, BadgeCheck } from "lucide-react";
+import { Menu, X, LogOut, CalendarDays, ChevronDown, MapPin, Phone, Instagram, Facebook, ShieldCheck, ArrowUp, UserCircle, BadgeCheck, ShoppingCart } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useGetMe, useLogout, getGetMeQueryKey, useGetSettings } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { removeToken } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
+import { useCart } from "@/lib/cart";
 import logoUrl from "@assets/logosc_1780088803724.png";
+
+function CartButton() {
+  const { totalItems } = useCart();
+  const { t } = useLang();
+  if (totalItems === 0) return null;
+  return (
+    <Link href="/cart">
+      <button
+        className="relative flex items-center justify-center w-9 h-9 rounded-full border border-primary/30 bg-primary/10 text-primary hover:bg-primary hover:text-white transition-all duration-200"
+        title={t("Keranjang Booking", "Booking Cart")}
+      >
+        <ShoppingCart size={16} />
+        <span className="absolute -top-1.5 -right-1.5 w-4.5 h-4.5 min-w-[1.1rem] px-1 bg-primary text-white text-[10px] font-black rounded-full flex items-center justify-center leading-none">
+          {totalItems}
+        </span>
+      </button>
+    </Link>
+  );
+}
 
 function LangToggle({ className = "" }: { className?: string }) {
   const { lang, setLang } = useLang();
@@ -193,16 +213,20 @@ export default function CustomerLayout({ children }: { children: ReactNode }) {
 
           {/* Actions – desktop */}
           <div className="hidden md:flex items-center gap-2">
+            <CartButton />
             <UserMenu />
           </div>
 
           {/* Hamburger – mobile */}
-          <button
-            className="md:hidden w-9 h-9 flex items-center justify-center rounded-full border border-border/50 bg-background/60 backdrop-blur-md text-foreground"
-            onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-          >
-            {isMobileMenuOpen ? <X size={18} /> : <Menu size={18} />}
-          </button>
+          <div className="md:hidden flex items-center gap-2">
+            <CartButton />
+            <button
+              className="w-9 h-9 flex items-center justify-center rounded-full border border-border/50 bg-background/60 backdrop-blur-md text-foreground"
+              onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+            >
+              {isMobileMenuOpen ? <X size={18} /> : <Menu size={18} />}
+            </button>
+          </div>
         </div>
 
         {/* ── Mobile menu ── */}

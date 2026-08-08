@@ -3,9 +3,11 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
-    "codegen": "orval --config ./orval.config.ts && pnpm -w run typecheck:libs"
+    "patch-zod-index": "node ./patch-zod-index.js",
+    "codegen": "orval --config ./orval.config.ts && pnpm run patch-zod-index && pnpm -w run typecheck:libs"
   },
   "devDependencies": {
     "orval": "^8.9.1"
   }
 }
+

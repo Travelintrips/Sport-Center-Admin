@@ -20,4 +20,5 @@ export interface BookingInput {
   customerType?: BookingInputCustomerType;
   idCardNumber?: string;
   notes?: string;
+  vendorId?: number | null;
 }

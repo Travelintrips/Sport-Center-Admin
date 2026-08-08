@@ -76,17 +76,19 @@ function toNum(v: unknown): number {
 }
 
 function buildSummary(rows: Awaited<ReturnType<typeof fetchTaxRows>>) {
-  let totalDpp = 0, totalTaxAmount = 0, totalGrandTotal = 0;
+  let totalDpp = 0, totalDppNilaiLain = 0, totalTaxAmount = 0, totalGrandTotal = 0;
   const activeRows = rows.filter((r) => r.transactionType === "original" && r.status !== "reversed");
   for (const r of activeRows) {
     const dpp = toNum(r.dpp);
     const tax = toNum(r.taxAmount);
     totalDpp += dpp;
+    totalDppNilaiLain += Math.round(dpp * 11 / 12);
     totalTaxAmount += tax;
     totalGrandTotal += dpp + tax;
   }
   return {
     totalDpp: Math.round(totalDpp),
+    totalDppNilaiLain: Math.round(totalDppNilaiLain),
     totalTaxAmount: Math.round(totalTaxAmount),
     totalGrandTotal: Math.round(totalGrandTotal),
     totalTransactions: activeRows.length,
@@ -94,14 +96,15 @@ function buildSummary(rows: Awaited<ReturnType<typeof fetchTaxRows>>) {
 }
 
 function buildByPeriod(rows: Awaited<ReturnType<typeof fetchTaxRows>>) {
-  const map = new Map<string, { count: number; dpp: number; taxAmount: number; grandTotal: number }>();
+  const map = new Map<string, { count: number; dpp: number; dppNilaiLain: number; taxAmount: number; grandTotal: number }>();
   for (const r of rows) {
     const period = r.transactionDate.slice(0, 7); // YYYY-MM
     const dpp = toNum(r.dpp);
     const tax = toNum(r.taxAmount);
-    const entry = map.get(period) ?? { count: 0, dpp: 0, taxAmount: 0, grandTotal: 0 };
+    const entry = map.get(period) ?? { count: 0, dpp: 0, dppNilaiLain: 0, taxAmount: 0, grandTotal: 0 };
     entry.count++;
     entry.dpp += dpp;
+    entry.dppNilaiLain += Math.round(dpp * 11 / 12);
     entry.taxAmount += tax;
     entry.grandTotal += dpp + tax;
     map.set(period, entry);
@@ -112,6 +115,7 @@ function buildByPeriod(rows: Awaited<ReturnType<typeof fetchTaxRows>>) {
       period,
       count: v.count,
       dpp: Math.round(v.dpp),
+      dppNilaiLain: Math.round(v.dppNilaiLain),
       taxAmount: Math.round(v.taxAmount),
       grandTotal: Math.round(v.grandTotal),
     }));
@@ -138,6 +142,7 @@ function buildSptMasa(rows: Awaited<ReturnType<typeof fetchTaxRows>>) {
       npwp: null,
       npwpKeterangan: r.payerType === "company" ? "Perusahaan" : "Retail/Non-NPWP",
       dpp: Math.round(dpp),
+      dppNilaiLain: Math.round(dpp * 11 / 12),
       ppnKeluaran: Math.round(ppn),
       taxCode: r.taxCode,
     });
@@ -170,6 +175,7 @@ function formatTransactions(rows: Awaited<ReturnType<typeof fetchTaxRows>>) {
       taxCode: r.taxCode,
       taxRate: Number(r.taxRate),
       dpp: Math.round(dpp),
+      dppNilaiLain: Math.round(dpp * 11 / 12),
       taxAmount: Math.round(tax),
       grandTotal: Math.round(dpp + tax),
       transactionDate: r.transactionDate,
@@ -206,7 +212,7 @@ router.get("/admin/tax-report/export/csv", adminMiddleware, async (req, res) => 
     const headers = [
       "No", "Nomor Invoice", "Tipe Ref", "Customer", "Fasilitas",
       "Tipe Customer", "Tipe Pembayar", "Status Pembayaran",
-      "Kode Pajak", "Tarif PPN (%)", "DPP (Rp)", "PPN (Rp)",
+      "Kode Pajak", "Tarif PPN (%)", "DPP (Rp)", "DPP Nilai Lain (Rp)", "PPN (Rp)",
       "Grand Total (Rp)", "Tanggal Transaksi", "Status Pajak", "Tipe Transaksi",
     ];
 
@@ -225,6 +231,7 @@ router.get("/admin/tax-report/export/csv", adminMiddleware, async (req, res) => 
           t.taxCode,
           t.taxRate,
           t.dpp,
+          t.dppNilaiLain,
           t.taxAmount,
           t.grandTotal,
           t.transactionDate,
@@ -252,7 +259,7 @@ router.get("/admin/tax-report/export/spt-masa", adminMiddleware, async (req, res
 
     const headers = [
       "Masa Pajak", "Nomor Invoice", "Tanggal", "Customer",
-      "NPWP", "Keterangan", "DPP (Rp)", "PPN Keluaran (Rp)", "Kode Pajak",
+      "NPWP", "Keterangan", "DPP (Rp)", "DPP Nilai Lain (Rp)", "PPN Keluaran (Rp)", "Kode Pajak",
     ];
 
     const csvLines = [headers.join(",")];
@@ -266,6 +273,7 @@ router.get("/admin/tax-report/export/spt-masa", adminMiddleware, async (req, res
           item.npwp ?? "",
           `"${item.npwpKeterangan}"`,
           item.dpp,
+          item.dppNilaiLain,
           item.ppnKeluaran,
           item.taxCode,
         ].join(","));

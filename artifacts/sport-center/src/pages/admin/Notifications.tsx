@@ -48,21 +48,23 @@ interface SendResult {
   id?: number;
 }
 
+const APP_ORIGIN = typeof window !== "undefined" ? window.location.origin : "";
+
 const QUICK_TEMPLATES = [
   {
     label: "Reminder Pembayaran",
     message:
-      "Halo! Ini pengingat dari *Sport Center Jakarta* 🏟️\n\nAnda memiliki booking yang menunggu pembayaran. Segera selesaikan pembayaran sebelum deadline agar slot tidak dibatalkan.\n\nInfo: https://sportcenter.travelintrips.co.id",
+      `Halo! Ini pengingat dari *Sport Center* 🏟️\n\nAnda memiliki booking yang menunggu pembayaran. Segera selesaikan pembayaran sebelum deadline agar slot tidak dibatalkan.\n\nInfo: ${APP_ORIGIN}`,
   },
   {
     label: "Info Operasional",
     message:
-      "Halo dari *Sport Center Jakarta* 🏟️\n\nKami ingin menyampaikan informasi penting mengenai operasional kami. Silakan hubungi admin jika ada pertanyaan.\n\nTerima kasih! 🙏",
+      "Halo dari *Sport Center* 🏟️\n\nKami ingin menyampaikan informasi penting mengenai operasional kami. Silakan hubungi admin jika ada pertanyaan.\n\nTerima kasih! 🙏",
   },
   {
     label: "Promo Spesial",
     message:
-      "🎉 *PROMO SPESIAL Sport Center Jakarta!*\n\nDapatkan penawaran terbaik untuk booking fasilitas olahraga pilihan Anda.\n\nInfo & booking: https://sportcenter.travelintrips.co.id/promos\n\nJangan lewatkan! 🏅",
+      `🎉 *PROMO SPESIAL Sport Center!*\n\nDapatkan penawaran terbaik untuk booking fasilitas olahraga pilihan Anda.\n\nInfo & booking: ${APP_ORIGIN}/promos\n\nJangan lewatkan! 🏅`,
   },
 ];
 

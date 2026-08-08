@@ -28,6 +28,21 @@ deployment still carried the old value (the dev URL).
 **Why this matters:** changing a production-scoped secret has NO effect on a
 running deployment until you redeploy. Always re-publish after changing prod env.
 
+## Dev Supabase project credentials are dead — both scopes point at prod DB
+The dev Supabase project (ref `xssrf...`) DB password in `SUPABASE_DATABASE_URL_DEV`
+is invalid (auth fails → Supabase PgBouncer trips `(ECIRCUITBREAKER) too many
+authentication failures`, self-resets after ~30s revealing the real `password
+authentication failed`). User repeatedly declined to provide the correct dev
+password. Only the prod DB (ref `nzdw...`) has a working password. Resolution:
+point `SUPABASE_DATABASE_URL_DEV` (dev scope) AND `SUPABASE_DATABASE_URL` +
+`SUPABASE_PG_URL` (prod scope) all at the prod DB connection string so login works
+in both. Trade-off: dev now writes to the prod DB (no isolated dev DB available).
+**Why:** without the dev project password there is no other reachable DB.
+**Gotcha:** these env changes have been observed to REVERT after republish/rollback
+from an older checkpoint — re-applying via `setEnvVars` and confirming `.replit`
+reflects the value is required; tell the user not to roll back to a pre-fix
+checkpoint.
+
 ## How to prove which DB the live site uses
 Compare a row-count fingerprint of each DB (connect with `pg` via
 `createRequire('/home/runner/workspace/scripts/package.json')` inside code

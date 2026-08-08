@@ -1,20 +1,23 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Link, useLocation, useSearch } from "wouter";
-import { useLogin, useSendOtp, useVerifyOtp, useLoginWithGoogle } from "@workspace/api-client-react";
+import { useLogin, useSendOtp, useVerifyOtp, useLoginWithGoogle, getGetMeQueryKey } from "@workspace/api-client-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { setToken } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { useLang } from "@/lib/i18n";
-import { LogIn, Eye, EyeOff, Phone, ArrowLeft, RefreshCw } from "lucide-react";
+import { LogIn, Eye, EyeOff, Phone, ArrowLeft, RefreshCw, KeyRound, CheckCircle2 } from "lucide-react";
 import { FcGoogle } from "react-icons/fc";
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string;
 
 type LoginTab = "email" | "phone";
 type PhoneStep = "input" | "otp";
+type ForgotStep = "email" | "otp" | "done";
 
 declare global {
   interface Window {
@@ -30,15 +33,244 @@ declare global {
   }
 }
 
+function ForgotPasswordDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const { t } = useLang();
+  const { toast } = useToast();
+
+  const [step, setStep] = useState<ForgotStep>("email");
+  const [email, setEmail] = useState("");
+  const [maskedPhone, setMaskedPhone] = useState("");
+  const [otp, setOtp] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [showPw, setShowPw] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [countdown, setCountdown] = useState(0);
+
+  useEffect(() => {
+    if (!open) {
+      setTimeout(() => {
+        setStep("email");
+        setEmail("");
+        setMaskedPhone("");
+        setOtp("");
+        setNewPassword("");
+        setShowPw(false);
+        setCountdown(0);
+      }, 300);
+    }
+  }, [open]);
+
+  useEffect(() => {
+    if (countdown <= 0) return;
+    const t = setTimeout(() => setCountdown((c) => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [countdown]);
+
+  async function handleSendOtp(e: React.FormEvent) {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      const res = await fetch("/api/auth/forgot-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast({ title: t("Gagal", "Failed"), description: data.error, variant: "destructive" });
+        return;
+      }
+      setMaskedPhone(data.maskedPhone);
+      setStep("otp");
+      setCountdown(60);
+      toast({ title: t("OTP Terkirim", "OTP Sent"), description: t("Cek WhatsApp Anda", "Check your WhatsApp") });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleResendOtp() {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/auth/forgot-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast({ title: t("Gagal", "Failed"), description: data.error, variant: "destructive" });
+        return;
+      }
+      setCountdown(60);
+      toast({ title: t("OTP Terkirim", "OTP Sent"), description: t("Kode baru telah dikirim", "New code sent") });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleResetPassword(e: React.FormEvent) {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      const res = await fetch("/api/auth/reset-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, otp, newPassword }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast({ title: t("Gagal", "Failed"), description: data.error, variant: "destructive" });
+        return;
+      }
+      setStep("done");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <div className="mx-auto w-11 h-11 rounded-full bg-primary/10 flex items-center justify-center mb-1">
+            <KeyRound size={20} className="text-primary" />
+          </div>
+          <DialogTitle className="text-center text-xl font-black">
+            {t("Lupa Password", "Forgot Password")}
+          </DialogTitle>
+          <DialogDescription className="text-center text-sm">
+            {step === "email" && t("Masukkan email akun Anda. Kami akan kirim kode OTP ke WhatsApp yang terdaftar.", "Enter your account email. We'll send an OTP to your registered WhatsApp.")}
+            {step === "otp" && t(`Kode OTP dikirim ke WhatsApp ${maskedPhone}`, `OTP sent to WhatsApp ${maskedPhone}`)}
+            {step === "done" && t("Password berhasil diubah!", "Password successfully changed!")}
+          </DialogDescription>
+        </DialogHeader>
+
+        {step === "email" && (
+          <form onSubmit={handleSendOtp} className="space-y-4 pt-1">
+            <div className="space-y-1.5">
+              <Label htmlFor="fp-email">Email</Label>
+              <Input
+                id="fp-email"
+                type="email"
+                placeholder="nama@email.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+                autoComplete="email"
+              />
+            </div>
+            <Button type="submit" className="w-full" disabled={loading}>
+              {loading ? t("Mengirim...", "Sending...") : t("Kirim Kode OTP", "Send OTP Code")}
+            </Button>
+          </form>
+        )}
+
+        {step === "otp" && (
+          <form onSubmit={handleResetPassword} className="space-y-4 pt-1">
+            <button
+              type="button"
+              onClick={() => setStep("email")}
+              className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
+            >
+              <ArrowLeft size={14} />
+              {t("Ganti email", "Change email")}
+            </button>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="fp-otp">{t("Kode OTP", "OTP Code")}</Label>
+              <Input
+                id="fp-otp"
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]{6}"
+                maxLength={6}
+                placeholder="123456"
+                value={otp}
+                onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))}
+                required
+                autoComplete="one-time-code"
+                className="text-center text-xl tracking-[0.4em] font-bold"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="fp-pw">{t("Password Baru", "New Password")}</Label>
+              <div className="relative">
+                <Input
+                  id="fp-pw"
+                  type={showPw ? "text" : "password"}
+                  placeholder="Min. 6 karakter"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  required
+                  minLength={6}
+                  autoComplete="new-password"
+                  className="pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPw((v) => !v)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  {showPw ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+            </div>
+
+            <Button type="submit" className="w-full" disabled={loading || otp.length !== 6 || newPassword.length < 6}>
+              {loading ? t("Memproses...", "Processing...") : t("Simpan Password Baru", "Save New Password")}
+            </Button>
+
+            <div className="text-center">
+              {countdown > 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  {t("Kirim ulang dalam", "Resend in")} <span className="font-semibold text-primary">{countdown}s</span>
+                </p>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleResendOtp}
+                  disabled={loading}
+                  className="text-sm text-primary font-semibold hover:underline flex items-center gap-1 mx-auto"
+                >
+                  <RefreshCw size={13} />
+                  {t("Kirim ulang OTP", "Resend OTP")}
+                </button>
+              )}
+            </div>
+          </form>
+        )}
+
+        {step === "done" && (
+          <div className="space-y-4 pt-1 text-center">
+            <div className="mx-auto w-14 h-14 rounded-full bg-green-100 flex items-center justify-center">
+              <CheckCircle2 size={30} className="text-green-600" />
+            </div>
+            <p className="text-sm text-muted-foreground">
+              {t("Password Anda berhasil diubah. Silakan login menggunakan password baru.", "Your password has been changed. Please log in with your new password.")}
+            </p>
+            <Button className="w-full" onClick={onClose}>
+              {t("Kembali ke Login", "Back to Login")}
+            </Button>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export default function Login() {
   const [, setLocation] = useLocation();
   const search = useSearch();
   const { toast } = useToast();
   const { t } = useLang();
+  const queryClient = useQueryClient();
 
   const [tab, setTab] = useState<LoginTab>("email");
   const [form, setForm] = useState({ email: "", password: "" });
   const [showPw, setShowPw] = useState(false);
+  const [forgotOpen, setForgotOpen] = useState(false);
 
   const [phone, setPhone] = useState("");
   const [otp, setOtp] = useState("");
@@ -49,8 +281,9 @@ export default function Login() {
 
   const redirectTo = new URLSearchParams(search).get("redirect");
 
-  function handleSuccess(data: { token: string; user: { name: string } }) {
+  function handleSuccess(data: { token: string; user: any }) {
     setToken(data.token);
+    queryClient.setQueryData(getGetMeQueryKey(), data.user);
     toast({ title: t("Selamat datang!", "Welcome!"), description: `${t("Halo", "Hello")}, ${data.user.name}` });
     setLocation(redirectTo ?? "/my-bookings");
   }
@@ -172,6 +405,8 @@ export default function Login() {
 
   return (
     <div className="min-h-[80vh] flex items-center justify-center px-4 py-12">
+      <ForgotPasswordDialog open={forgotOpen} onClose={() => setForgotOpen(false)} />
+
       <Card className="w-full max-w-md shadow-lg">
         <CardHeader className="text-center pb-2">
           <div className="mx-auto w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center mb-3">
@@ -217,7 +452,16 @@ export default function Login() {
                 />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="password">Password</Label>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="password">Password</Label>
+                  <button
+                    type="button"
+                    onClick={() => setForgotOpen(true)}
+                    className="text-xs text-primary hover:underline font-medium"
+                  >
+                    {t("Lupa Password?", "Forgot Password?")}
+                  </button>
+                </div>
                 <div className="relative">
                   <Input
                     id="password"

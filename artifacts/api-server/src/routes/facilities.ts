@@ -4,11 +4,8 @@ import { eq, inArray } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
 import multer from "multer";
 import path from "path";
-import {
-  BUCKETS,
-  uploadToStorage,
-  deleteFromStorage,
-} from "../lib/supabaseStorage";
+import { deleteFromStorage } from "../lib/supabaseStorage";
+import { uploadFile, BUCKETS } from "../lib/storage";
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -178,7 +175,7 @@ router.post(
       const objectPath = `facility-${Date.now()}-${Math.random()
         .toString(36)
         .slice(2, 7)}${ext}`;
-      const publicUrl = await uploadToStorage(
+      const publicUrl = await uploadFile(
         BUCKETS.facility,
         objectPath,
         req.file.buffer,

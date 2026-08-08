@@ -1,0 +1,217 @@
+# cloudbuild.yaml — Cloud Build pipeline for Sport Center GAE deployment
+#
+# GCP Project : sc-sport-center
+# App Engine  : default service, asia-southeast2
+# Branch      : main
+# Trigger     : push to main (configure in Cloud Build console — source: GitHub,
+#               repository: Travelintrips/Sport-Center-Admin, branch: ^main$)
+#
+# ── SECRET MANAGEMENT ─────────────────────────────────────────────────────────
+# Build steps do NOT receive production runtime secrets.
+# All runtime secrets are stored in Google Secret Manager under the project
+# sc-sport-center with the naming convention:
+#   sport-center-prod-<secret-name>
+#
+# Runtime secrets are NOT injected during build. They are read by the running
+# GAE instance at startup using Application Default Credentials (ADC), which
+# are automatically available on App Engine via the service account.
+#
+# Required IAM before first deployment:
+#   App Engine default SA  : roles/secretmanager.secretAccessor (on each prod secret)
+#   Cloud Build SA         : roles/appengine.deployer + roles/storage.objectCreator
+#                            roles/cloudbuild.builds.builder (default)
+# ─────────────────────────────────────────────────────────────────────────────
+
+steps:
+  # ── Step 1: Install pnpm ───────────────────────────────────────────────────
+  - name: "node:20"
+    id: install-pnpm
+    entrypoint: npm
+    args: ["install", "--global", "pnpm@10"]
+
+  # ── Step 2: Install workspace dependencies ─────────────────────────────────
+  - name: "node:20"
+    id: pnpm-install
+    entrypoint: pnpm
+    args: ["install", "--frozen-lockfile"]
+    waitFor: ["install-pnpm"]
+
+  # ── Step 3a: Build shared libs (generate .d.ts for TypeScript project references) ─
+  - name: "node:20"
+    id: build-libs
+    entrypoint: bash
+    args:
+      - "-c"
+      - |
+          set -e
+          pnpm --filter @workspace/db run build
+          pnpm --filter @workspace/api-zod run build
+          echo "=== Shared libs built ==="
+    waitFor: ["pnpm-install"]
+
+  # ── Step 3b: TypeScript typecheck ──────────────────────────────────────────
+  # Fails the build on any type error — must pass before bundling.
+  - name: "node:20"
+    id: typecheck-api
+    entrypoint: pnpm
+    args: ["--filter", "@workspace/api-server", "run", "typecheck"]
+    waitFor: ["build-libs"]
+
+  # ── Step 3c: Build API server (esbuild) ────────────────────────────────────
+  - name: "node:20"
+    id: build-api
+    entrypoint: pnpm
+    args: ["--filter", "@workspace/api-server", "run", "build"]
+    waitFor: ["typecheck-api"]
+
+  # ── Step 4: Build frontend + prerender (VITE_PUBLIC_URL baked at build time) ─
+  # IMPORTANT: VITE_PUBLIC_URL is a build-time variable for canonical URLs in
+  # the prerendered HTML. It is NOT a runtime secret. Changing the domain
+  # requires a new frontend build — app.yaml's env_variables do NOT affect
+  # an already-built bundle.
+  - name: "node:20"
+    id: build-frontend
+    entrypoint: pnpm
+    args: ["--filter", "@workspace/sport-center", "run", "build"]
+    env:
+      - "VITE_PUBLIC_URL=https://sc.travelintrips.co.id"
+    waitFor: ["build-libs"]
+
+  # ── Step 5: Assemble gae-deploy/ package ──────────────────────────────────
+  - name: "node:20"
+    id: assemble-deploy
+    entrypoint: bash
+    args:
+      - "-c"
+      - |
+          set -e
+          echo "=== Assembling gae-deploy/ ==="
+
+          # Ensure dist/ directory exists in gae-deploy/
+          mkdir -p gae-deploy/dist
+
+          # Copy compiled API server bundle
+          cp -r artifacts/api-server/dist/. gae-deploy/dist/
+
+          # Copy prerendered frontend static files
+          mkdir -p gae-deploy/artifacts/sport-center/dist
+          cp -r artifacts/sport-center/dist/public gae-deploy/artifacts/sport-center/dist/
+
+          echo "=== API bundle files ==="
+          ls -lh gae-deploy/dist/
+
+          echo "=== Frontend routes (prerendered) ==="
+          find gae-deploy/artifacts/sport-center/dist/public -name "index.html" | sort
+
+          echo "=== Verify no workspace symlinks ==="
+          SYMLINKS=$(find gae-deploy/dist -type l)
+          if [ -n "$SYMLINKS" ]; then
+            echo "WARNING: symlinks found:"
+            echo "$SYMLINKS"
+          else
+            echo "No symlinks — OK"
+          fi
+    waitFor: ["build-api", "build-frontend"]
+
+  # ── Step 6: Install production runtime dependencies ───────────────────────
+  - name: "node:20"
+    id: npm-install-prod
+    entrypoint: bash
+    args:
+      - "-c"
+      - |
+          set -e
+          cd gae-deploy
+          npm install --omit=dev --no-audit --no-fund
+          echo "=== Runtime node_modules installed ==="
+          du -sh node_modules/
+          echo "=== Verify pg is present ==="
+          ls node_modules/pg/package.json && echo "pg OK"
+          echo "=== Verify nodemailer is present ==="
+          ls node_modules/nodemailer/package.json && echo "nodemailer OK"
+    waitFor: ["assemble-deploy"]
+
+  # ── Step 7: Health + static routing smoke test before deploying ──────────────
+  # Starts the assembled server in production mode with stub credentials.
+  # The env validator only checks presence (not validity) of required vars,
+  # so stub values pass. The DB pool lazy-connects so the server starts
+  # immediately; startup migration errors are non-fatal.
+  #
+  # Tests:
+  #   - /health (200) — liveness endpoint
+  #   - / and 3 prerendered routes (200) — static routing
+  #
+  # If any check fails, the build stops before deploy.
+  - name: "node:20"
+    id: smoke-test
+    entrypoint: bash
+    args:
+      - "-c"
+      - |
+          set -e
+          echo "=== Smoke test: assembled production server ==="
+          cd gae-deploy
+
+          # Start the server in the background
+          node ./dist/index.mjs &
+          SERVER_PID=$!
+
+          # Wait for startup (DB connection errors are non-fatal and logged)
+          sleep 5
+
+          echo "--- /health ---"
+          HEALTH_STATUS=$(curl -sf -o /dev/null -w "%{http_code}" http://localhost:9999/health)
+          if [ "$HEALTH_STATUS" != "200" ]; then
+            echo "FAIL: /health returned HTTP $HEALTH_STATUS"
+            kill $SERVER_PID 2>/dev/null
+            exit 1
+          fi
+          echo "PASS: /health HTTP 200"
+          curl -s http://localhost:9999/health
+
+          echo "--- Static routes ---"
+          for route in "/" "/facilities" "/promos" "/membership"; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:9999${route}")
+            if [ "$STATUS" != "200" ]; then
+              echo "FAIL: $route returned HTTP $STATUS"
+              kill $SERVER_PID 2>/dev/null
+              exit 1
+            fi
+            echo "PASS: $route HTTP 200"
+          done
+
+          kill $SERVER_PID 2>/dev/null
+          wait $SERVER_PID 2>/dev/null || true
+          echo "=== Smoke test passed ==="
+    env:
+      - "PORT=9999"
+      - "NODE_ENV=production"
+      - "SESSION_SECRET=smoke-test-secret-not-real"
+      - "SUPABASE_DATABASE_URL=postgresql://stub:stub@localhost:65432/stub"
+      - "SUPABASE_SERVICE_ROLE_KEY=smoke-test-stub-not-a-real-key"
+    waitFor: ["npm-install-prod"]
+
+  # ── Step 8: Deploy to App Engine ──────────────────────────────────────────
+  # Deploys gae-deploy/ as the deployment root. Runtime secrets must already
+  # exist in Google Secret Manager and be readable by the App Engine SA.
+  # Secrets are NOT passed via --set-env-vars — they are loaded at runtime
+  # from Secret Manager using ADC.
+  - name: "gcr.io/cloud-builders/gcloud"
+    id: deploy-gae
+    entrypoint: bash
+    args:
+      - "-c"
+      - |
+          set -e
+          gcloud app deploy gae-deploy/app.yaml \
+            --project=sc-sport-center \
+            --quiet
+          echo "=== Deployment complete ==="
+          gcloud app versions list --service=default --project=sc-sport-center --limit=3
+    waitFor: ["smoke-test"]
+
+timeout: "1200s"
+
+options:
+  machineType: "E2_HIGHCPU_8"
+  logging: CLOUD_LOGGING_ONLY

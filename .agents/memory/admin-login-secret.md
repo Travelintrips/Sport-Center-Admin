@@ -26,3 +26,7 @@ on the affected DB. Connect with `pg` over the pooler URL from `.env.local` (dev
 `ssl:{rejectUnauthorized:false}`. `scripts/src/seed-admin.ts` does the same upsert but
 relies on the db-client URL precedence (`SUPABASE_DATABASE_URL || ... || _DEV`), so be
 sure the right URL wins or it will fix the wrong DB.
+
+**Operator login:** `admin_booking` accounts use the same password hashing as admins but
+must also be accepted by the admin portal login endpoint. A valid operator can log in via
+the general login endpoint, but the admin portal must explicitly allow `admin_booking`.

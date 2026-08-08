@@ -5,6 +5,7 @@
  * Sport Center API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { RecurringBookingInputCustomerType } from './recurringBookingInputCustomerType';
 import type { RecurringBookingInputRepeatType } from './recurringBookingInputRepeatType';
 
 export interface RecurringBookingInput {
@@ -18,4 +19,6 @@ export interface RecurringBookingInput {
   repeatType: RecurringBookingInputRepeatType;
   repeatCount: number;
   notes?: string;
+  customerType?: RecurringBookingInputCustomerType;
+  idCardNumber?: string;
 }

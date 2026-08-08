@@ -1,0 +1,235 @@
+PHASE PAYLABS-SANDBOX-PUBKEY-04
+
+Tujuan:
+Mengaktifkan verifikasi signature webhook Paylabs sandbox menggunakan Paylabs Public Key Sandbox yang sudah tersedia atau akan diisi melalui halaman admin.
+
+Kondisi saat ini:
+
+- notifyUrl sudah benar
+- callback Paylabs sandbox sudah masuk
+- payment berhasil berubah PENDING → SUCCESS
+- sport_bookings berhasil berubah pending_payment → confirmed
+- duplicate webhook sudah idempotent
+- signature verification masih:
+  SKIPPED_NO_PUBLIC_KEY
+
+Jangan mengubah flow pembayaran lain.
+Jangan mengaktifkan production.
+Jangan mengganti merchant ID sandbox.
+Jangan mengganti private key sandbox.
+Jangan membuat bypass signature baru.
+
+PHASE 1 — AUDIT PUBLIC KEY SANDBOX
+
+Periksa sumber konfigurasi public key sandbox:
+
+- DB key: paylabs_public_key_sandbox
+- environment fallback jika ada:
+  PAYLABS_PUBLIC_KEY_SANDBOX
+
+Pastikan key yang dimaksud adalah:
+
+Paylabs Public Key Sandbox
+
+Bukan:
+
+- merchant public key
+- merchant private key
+- production public key
+- certificate lain
+
+Gunakan penamaan internal yang tegas:
+
+paylabsSandboxPublicKey
+merchantSandboxPrivateKey
+
+Jangan memakai nama generik seperti publicKey saja.
+
+PHASE 2 — ADMIN SETTINGS
+
+Pastikan halaman:
+
+/admin/paylabs
+
+memiliki field:
+
+Paylabs Public Key (Sandbox)
+
+Ketentuan:
+
+1. Field menerima PEM public key.
+2. Mendukung format:
+   -----BEGIN PUBLIC KEY-----
+   ...
+   -----END PUBLIC KEY-----
+3. Mendukung literal \n jika ditempel dari secret manager.
+4. Saat disimpan, normalize PEM.
+5. Jangan mengubah key menjadi satu baris permanen jika merusak format.
+6. Setelah disimpan, UI hanya menampilkan:
+   Configured
+   atau
+   Not configured
+7. Jangan menampilkan ulang public key penuh setelah tersimpan.
+8. Jangan memasukkan public key sandbox ke export config JSON jika export tersebut dapat dibagikan sembarangan.
+9. Catat audit log perubahan konfigurasi tanpa menyimpan nilai key di audit log.
+
+PHASE 3 — CONFIG RESOLUTION
+
+Atur urutan resolution sandbox:
+
+1. paylabs_public_key_sandbox dari database jika configured
+2. PAYLABS_PUBLIC_KEY_SANDBOX dari environment sebagai fallback
+3. jika keduanya kosong:
+   - development sandbox boleh start
+   - tetapi webhook Paylabs real harus ditolak
+   - jangan lagi memproses callback dengan SKIPPED_NO_PUBLIC_KEY
+
+Penting:
+
+Hapus perilaku:
+
+SKIPPED_NO_PUBLIC_KEY → tetap proses payment
+
+Ganti menjadi:
+
+SKIPPED_NO_PUBLIC_KEY → fail closed untuk real webhook
+
+Response harus sesuai kontrak integrasi dan tidak membocorkan detail internal.
+
+Mock endpoint terpisah masih boleh berjalan hanya jika:
+
+PAYLABS_MOCK=true
+dan
+APP_ENV bukan production
+
+PHASE 4 — SIGNATURE VERIFICATION
+
+Gunakan raw body asli:
+
+req.rawBody
+
+Verifikasi signature menggunakan:
+
+Paylabs Public Key Sandbox
+
+Pastikan canonical verification mengikuti format Paylabs yang sudah digunakan di service.
+
+Periksa header:
+
+- X-SIGNATURE
+- X-TIMESTAMP
+- X-PARTNER-ID
+- X-REQUEST-ID
+
+Log hanya:
+
+- hasSignature
+- hasTimestamp
+- hasPartnerId
+- hasPublicKey
+- verificationResult
+- requestId
+- merchantTradeNo
+
+Jangan log:
+
+- public key
+- private key
+- signature penuh
+- raw credential
+
+Expected result webhook sandbox nyata:
+
+verificationResult: VALID
+
+Jika INVALID:
+
+- jangan update payment
+- jangan update booking
+- jangan membuat journal
+- return error acknowledgement yang sesuai
+- simpan sanitized diagnostic log
+
+PHASE 5 — STARTUP VALIDATION
+
+Tambahkan validation:
+
+Sandbox development:
+- merchant ID sandbox wajib ada
+- merchant private key sandbox wajib ada
+- Paylabs public key sandbox wajib ada jika real Paylabs webhook diaktifkan
+- jika public key kosong, tampilkan warning jelas dan disable real webhook processing
+
+Production:
+- Paylabs production public key wajib ada
+- jika kosong, startup fail
+- tidak boleh ada fallback ke sandbox public key
+- tidak boleh ada fallback ke signature skip
+
+PHASE 6 — TEST PUBLIC KEY
+
+Tambahkan test:
+
+1. PEM sandbox valid berhasil dinormalisasi.
+2. Literal \n berhasil dinormalisasi.
+3. Flat PEM ditolak jika tidak dapat dipulihkan.
+4. Merchant public key tidak tertukar dengan Paylabs public key.
+5. Signature valid → webhook diproses.
+6. Signature invalid → webhook ditolak.
+7. Public key kosong → real webhook ditolak.
+8. Sandbox key tidak dipakai di production.
+9. Production key tidak dipakai di sandbox.
+10. Duplicate webhook valid tetap idempotent.
+
+PHASE 7 — REAL SANDBOX RETEST
+
+Setelah Paylabs Public Key Sandbox diisi:
+
+1. Restart API server.
+2. Verifikasi log:
+   hasPublicKey: true
+3. Buat satu transaksi sandbox baru.
+4. Bayar transaksi sampai dashboard Paylabs menunjukkan SUCCESS.
+5. Pastikan webhook real masuk.
+6. Pastikan log:
+   verificationResult: VALID
+7. Pastikan payment:
+   PENDING → SUCCESS
+8. Pastikan booking:
+   pending_payment → confirmed
+9. Kirim duplicate webhook.
+10. Pastikan hasil:
+    already_confirmed
+11. Pastikan tidak ada duplicate journal, history, atau notification.
+
+Jangan menggunakan transaksi lama sebagai satu-satunya bukti.
+
+PHASE 8 — FINAL REPORT
+
+Laporkan:
+
+1. Sumber public key sandbox yang digunakan:
+   database atau environment
+2. Apakah PEM berhasil dinormalisasi
+3. hasPublicKey
+4. verificationResult
+5. HTTP callback response
+6. payment before/after
+7. booking before/after
+8. duplicate webhook result
+9. hasil negative test invalid signature
+10. hasil test public key kosong
+11. TypeScript
+12. build
+13. daftar file yang diubah
+
+Verdict hanya boleh:
+
+- SANDBOX SIGNATURE VERIFIED
+- SANDBOX SIGNATURE INVALID
+- PUBLIC KEY NOT CONFIGURED
+- BLOCKED
+
+Jangan memberikan SANDBOX SIGNATURE VERIFIED apabila log masih menunjukkan:
+
+SKIPPED_NO_PUBLIC_KEY

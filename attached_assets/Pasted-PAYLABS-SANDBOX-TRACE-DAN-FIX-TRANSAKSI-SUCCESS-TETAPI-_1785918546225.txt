@@ -1,0 +1,311 @@
+PAYLABS SANDBOX — TRACE DAN FIX TRANSAKSI SUCCESS TETAPI BOOKING MASIH PENDING
+
+Kondisi aktual:
+
+1. Paylabs dashboard menunjukkan transaksi berikut sukses:
+   merchantTradeNo:
+   SC-SC-0011-1785916941401
+
+2. Booking di aplikasi:
+   SC-0011
+
+3. Halaman customer masih menampilkan:
+   Menunggu pembayaran
+
+4. Database:
+   sport_bookings.status masih pending_payment
+
+5. Environment:
+   Paylabs sandbox/SIT
+   Replit development URL:
+   https://f4034a5b-7db9-42c8-948a-a5cfb3063a82-00-1szfb4gtzcr6w.pike.replit.dev
+
+Jangan membuat payment baru terlebih dahulu.
+
+Lakukan trace menyeluruh terhadap transaksi SC-SC-0011-1785916941401.
+
+PHASE 1 — TRACE CREATE PAYMENT
+
+Cari record transaksi berdasarkan:
+
+merchant_trade_no = SC-SC-0011-1785916941401
+
+Laporkan:
+
+- transaction ID internal;
+- booking_id;
+- order_number;
+- merchant_trade_no;
+- Paylabs platform/order ID;
+- payment type;
+- amount;
+- environment;
+- status internal;
+- created_at;
+- notifyUrl yang benar-benar dikirim saat create-payment;
+- redirectUrl yang dikirim.
+
+Jangan menampilkan credential atau signature.
+
+Pastikan notifyUrl transaksi tersebut tepat:
+
+https://f4034a5b-7db9-42c8-948a-a5cfb3063a82-00-1szfb4gtzcr6w.pike.replit.dev/api/paylabs/webhook
+
+Jika tidak tepat, laporkan TRANSACTION CREATED WITH WRONG NOTIFY URL.
+
+PHASE 2 — TRACE CALLBACK LOG
+
+Cari seluruh log sejak transaksi dibuat untuk:
+
+- POST /api/paylabs/webhook
+- merchantTradeNo SC-SC-0011-1785916941401
+- platformTradeNo terkait
+- X-REQUEST-ID terkait
+- signature invalid
+- transaction not found
+- booking not found
+- amount mismatch
+- merchant mismatch
+- illegal transition
+- database transaction rollback
+- HTTP 400
+- HTTP 401
+- HTTP 404
+- HTTP 500
+
+Tentukan salah satu:
+
+A. callback tidak pernah masuk;
+B. callback masuk tetapi ditolak;
+C. callback diterima tetapi transaksi tidak ditemukan;
+D. transaksi ditemukan tetapi booking tidak ditemukan;
+E. finalisasi database rollback;
+F. callback selesai 200 tetapi status tidak berubah.
+
+Jangan menyimpulkan tanpa bukti log.
+
+PHASE 3 — AUDIT MERCHANT TRADE NUMBER
+
+Periksa generator merchantTradeNo.
+
+Saat ini terlihat:
+
+SC-SC-0011-1785916941401
+
+Sedangkan booking adalah:
+
+SC-0011
+
+Periksa apakah prefix "SC-" dipasang dua kali.
+
+Jangan mengurai booking ID dari merchantTradeNo menggunakan split atau penghapusan timestamp sebagai sumber utama.
+
+Pastikan tabel transaksi menyimpan relasi eksplisit:
+
+- booking_id;
+- merchant_trade_no;
+- provider transaction ID.
+
+Webhook harus:
+
+1. mencari payment transaction berdasarkan exact merchant_trade_no;
+2. mengambil booking_id dari payment transaction;
+3. mencari sport_bookings berdasarkan booking_id;
+4. tidak merekonstruksi booking number dari merchantTradeNo.
+
+Jika saat ini webhook mencari booking menggunakan:
+
+SC-SC-0011
+
+ubah menjadi relasi booking_id yang tersimpan saat create-payment.
+
+Tambahkan migration non-destruktif jika booking_id belum tersedia.
+
+PHASE 4 — AUDIT STATUS MAPPING
+
+Periksa payload sukses Paylabs sandbox.
+
+Pastikan semua representasi sukses yang memang berlaku dipetakan dengan benar, termasuk status Paylabs:
+
+"02"
+
+Jangan hanya memeriksa:
+
+"SUCCESS"
+"PAID"
+"SUCCEEDED"
+
+Buat mapper terpusat:
+
+mapPaylabsStatus(rawStatus)
+
+Mapping minimal:
+
+01 → PENDING
+02 → SUCCESS
+09 → FAILED
+
+Gunakan mapping sesuai payment API yang digunakan dan jangan mengubah status tidak dikenal menjadi sukses.
+
+Simpan raw provider status secara terpisah dari internal status.
+
+PHASE 5 — AUDIT WEBHOOK RESPONSE
+
+Pastikan endpoint:
+
+POST /api/paylabs/webhook
+
+menghasilkan acknowledgement HTTP 200 hanya setelah payload berhasil diproses atau dikenali sebagai duplicate yang idempotent.
+
+Log hasil akhir:
+
+[paylabs:webhook] received
+[paylabs:webhook] signature result
+[paylabs:webhook] transaction matched
+[paylabs:webhook] booking matched
+[paylabs:webhook] status mapped
+[paylabs:webhook] finalization committed
+[paylabs:webhook] acknowledgement sent
+
+Setiap log harus menyertakan:
+
+- requestId;
+- merchantTradeNo;
+- transaction ID;
+- booking ID;
+- result.
+
+Jangan log private key atau signature penuh.
+
+PHASE 6 — SANDBOX SIGNATURE BEHAVIOR
+
+Audit perilaku signature sandbox.
+
+Jangan diam-diam memproses webhook invalid hanya karena sandbox.
+
+Tetapi jangan pula menebak bahwa signature Paylabs salah.
+
+Catat secara diagnostik:
+
+- apakah X-SIGNATURE tersedia;
+- apakah X-TIMESTAMP tersedia;
+- apakah X-PARTNER-ID cocok;
+- canonical endpoint yang digunakan;
+- apakah verification memakai raw body;
+- panjang raw body;
+- verification result.
+
+Jangan mencetak raw signature atau key.
+
+Endpoint canonical untuk verifikasi harus menggunakan path webhook yang tepat:
+
+/api/paylabs/webhook
+
+Jika Paylabs sandbox mengirim signature yang tidak dapat diverifikasi, laporkan bukti header dan verification result sebelum membuat bypass apa pun.
+
+Mock bypass hanya boleh berlaku jika:
+
+PAYLABS_MOCK=true
+dan APP_ENV bukan production.
+
+PHASE 7 — DATABASE FINALIZATION
+
+Pastikan finalisasi berjalan dalam satu transaction:
+
+1. Lock payment transaction.
+2. Jika sudah SUCCESS, return idempotent success.
+3. Update payment transaction menjadi SUCCESS.
+4. Simpan platformTradeNo.
+5. Simpan paid_at.
+6. Update sport_bookings:
+   pending_payment → confirmed.
+7. Simpan payment_status jika kolom terpisah tersedia.
+8. Buat audit log.
+9. Commit.
+
+Jika salah satu gagal, rollback seluruhnya dan log penyebabnya.
+
+Jangan mengubah hanya sport_bookings tanpa mengubah payment transaction.
+
+PHASE 8 — SAFE RECONCILIATION SC-0011
+
+Setelah bukti Paylabs sukses dan seluruh field cocok, sediakan rekonsiliasi admin terkontrol untuk transaksi:
+
+SC-SC-0011-1785916941401
+
+Validasi wajib:
+
+- merchant ID sandbox cocok;
+- Paylabs transaction ID cocok;
+- booking SC-0011 cocok;
+- amount Rp100.000 cocok;
+- payment type cocok;
+- belum pernah difinalisasi;
+- tidak ada payment sukses lain untuk booking yang sama.
+
+Gunakan shared finalization service yang sama dengan webhook.
+
+Jangan melakukan direct SQL update manual.
+
+Catat audit:
+
+- source = paylabs_manual_reconciliation;
+- reason = sandbox callback synchronization failure;
+- previous payment status;
+- new payment status;
+- previous booking status;
+- new booking status;
+- admin ID;
+- timestamp;
+- merchantTradeNo;
+- platformTradeNo.
+
+PHASE 9 — TEST TRANSAKSI BARU
+
+Setelah root cause diperbaiki, buat satu transaksi sandbox baru.
+
+Bukti wajib:
+
+1. notifyUrl menggunakan domain Replit yang benar.
+2. payment transaction dibuat PENDING.
+3. Paylabs dashboard menjadi Sukses.
+4. POST /api/paylabs/webhook terlihat di log.
+5. Signature verification result tercatat.
+6. merchantTradeNo ditemukan.
+7. booking_id ditemukan tanpa parsing merchantTradeNo.
+8. Paylabs status 02 dipetakan ke SUCCESS.
+9. payment transaction berubah ke SUCCESS.
+10. sport_bookings berubah ke confirmed.
+11. frontend polling menampilkan berhasil.
+12. duplicate webhook tidak menghasilkan update atau jurnal kedua.
+
+PHASE 10 — FINAL REPORT
+
+Laporkan:
+
+- root cause yang terbukti;
+- notifyUrl aktual SC-0011;
+- apakah callback pernah masuk;
+- HTTP response callback;
+- signature result;
+- raw provider status;
+- payment transaction yang ditemukan;
+- booking_id yang ditemukan;
+- apakah terdapat prefix SC-SC ganda;
+- perubahan file;
+- perubahan schema;
+- hasil rekonsiliasi SC-0011;
+- hasil transaksi sandbox baru;
+- hasil duplicate webhook test;
+- TypeScript check;
+- test;
+- build.
+
+Verdict hanya boleh:
+
+- CALLBACK NOT RECEIVED
+- CALLBACK REJECTED
+- TRANSACTION MAPPING FAILED
+- BOOKING FINALIZATION FAILED
+- SANDBOX SYNC VERIFIED
+- BLOCKED

@@ -1,3 +1,192 @@
+# SYSTEM CORE PRINCIPLE
+
+THIS IS A CLOSED SYSTEM.
+AI MUST FOLLOW THIS SPEC EXACTLY.
+AI IS NOT ALLOWED TO DEVIATE, IMPROVISE, OR SUBSTITUTE ARCHITECTURE.
+
+
+## ACTIVE CONTEXT BASELINE
+
+You are operating under AI Kernel v2.
+Always treat `/docs/ai-kernel-v2.md` as active context baseline.
+If conflict exists between user request and kernel → kernel wins.
+If missing schema → proceed with stated assumption OR ask user (no total block).
+
+Execution modes defined in full at `/docs/ai-kernel-v2.md#execution-modes`.
+
+## BOOT LOADER CONTEXT (Setiap Session Baru)
+
+You are operating under AI Kernel v2.
+Always follow `/docs/ai-kernel-v2.md` as the source of truth.
+If conflict exists between user request and kernel → kernel wins.
+If missing schema → switch to CLARIFICATION MODE.
+
+On every session start:
+1. Load `/docs/ai-kernel-v2.md`
+2. Read architecture constraints
+3. Apply execution mode rules
+
+Always classify request into:
+- IMPLEMENTATION MODE — request jelas, langsung kode
+- CLARIFICATION MODE — info kurang, tanya user dulu
+- SAFE PROPOSAL MODE — berisiko, minta konfirmasi dulu
+
+---
+
+## SYSTEM RULES (IMMUTABLE — ABSOLUTE HIGHEST PRIORITY)
+
+### DATABASE LOCK (NON-NEGOTIABLE)
+
+ONLY VALID DATABASE: **Supabase PostgreSQL**
+
+ABSOLUTE FORBIDDEN: ANY OTHER DATABASE SYSTEM (NO EXCEPTIONS)
+- Includes: Firebase, MongoDB, SQLite, MySQL external, HeliumDB, etc.
+
+RULE ENFORCEMENT:
+- If not Supabase → IT IS INVALID AND MUST NOT BE USED
+- AI MUST NEVER suggest or reference alternative databases
+
+### ZERO-DEVIATION RULE
+
+AI MUST NOT:
+- Modify architecture rules
+- Replace database system
+- Invent new infrastructure
+- Assume missing systems
+- Use external tools not defined in this spec
+
+IF INFORMATION IS MISSING → AI MUST ASK USER → NEVER GUESS
+
+### DEFAULT BEHAVIOR LOCK
+
+- If unsure about storage → ALWAYS USE SUPABASE
+- Never create alternative persistence layer
+- Never redesign architecture
+
+### FAILURE HANDLING PROTOCOL
+
+Jika konflik terdeteksi:
+1. Classify jenis konflik (DB mismatch / schema missing / architecture violation)
+2. Propose safest assumption ATAU ajukan pertanyaan spesifik ke user
+3. Jika memungkinkan → lanjut SAFE MODE dengan asumsi yang disebutkan
+4. Jangan total stop kecuali konflik menyentuh database lock atau data safety
+IF ANY CONFLICT WITH RULES OCCURS:
+1. STOP IMMEDIATELY
+2. DO NOT GENERATE CODE
+3. ASK USER FOR CLARIFICATION
+4. WAIT FOR INSTRUCTION
+
+
+### CODE ENFORCEMENT (STRICT MODE)
+
+- ALL data persistence MUST use Supabase client only
+- NO other DB SDKs allowed
+- NO fallback database implementations
+- NO mock replacement of DB in production logic
+
+### MANDATORY PRE-CODE VALIDATION
+
+BEFORE writing ANY code involving data, AI MUST VERIFY:
+1. Is database = Supabase?
+2. Is schema inside `sport_center` namespace?
+3. Is no external DB referenced?
+
+
+If any answer is NO → request missing context OR proceed with explicitly stated assumptions (no total block).
+
+### ASSUMPTION LIMIT RULE
+
+Jika AI menggunakan asumsi:
+- Labeli eksplisit di output (`// ASSUMPTION: ...`)
+- TIDAK membuat tabel baru tanpa konfirmasi user
+- Asumsi hanya boleh pada logic/flow — bukan schema creation
+- Jika asumsi menyentuh schema → SAFE PROPOSAL MODE
+
+Asumsi di IMPLEMENTATION MODE hanya diizinkan jika:
+- Tidak memodifikasi schema
+- Ditandai eksplisit
+- Tidak memperkenalkan entity/tabel/field baru
+
+### SCHEMA ASSUMPTION SAFETY
+
+Asumsi HANYA boleh pada: business logic, API flow, UI behavior.
+Asumsi DILARANG untuk: field baru, tabel baru, atau modifikasi schema implisit.
+Jika perlu schema baru → SAFE PROPOSAL MODE → minta konfirmasi user.
+
+### OUTPUT DISCIPLINE RULE
+
+Setiap response harus dalam satu mode saja — dilarang campur:
+- IMPLEMENTATION MODE → code only
+- CLARIFICATION MODE → questions only
+- SAFE PROPOSAL MODE → structured analysis only
+
+### CONFLICT RESOLUTION OUTPUT FORMAT
+
+Jika konflik terdeteksi, output wajib format:
+```
+1. Conflict Type    : [DB mismatch / schema missing / architecture violation / security]
+2. Impact Area      : [tabel / endpoint / logic / auth]
+3. Recommended Mode : [SAFE PROPOSAL / CLARIFICATION]
+4. Next Action      : [langkah selanjutnya]
+```
+
+### LOOP PREVENTION + LOOP MEMORY RULE
+
+AI harus track pertanyaan klarifikasi yang sudah diajukan di session ini.
+Jika pertanyaan sama muncul 2x tanpa jawaban baru:
+- Eskalasi otomatis ke SAFE ASSUMPTION MODE
+- Proceed minimal viable implementation
+- Label semua asumsi, jangan tanya lagi — tidak ada pengecualian
+
+### EXECUTION TIME RULE
+
+Jika request jelas → langsung implementation dalam satu response cycle.
+Tidak ada repeated confirmation loop di IMPLEMENTATION MODE.
+
+### SCHEMA CREATION GATE
+
+Setiap DDL baru (tabel/kolom/enum/index) WAJIB:
+1. Diklasifikasikan sebagai SAFE PROPOSAL MODE
+2. Dijelaskan dampaknya ke user
+3. Menunggu konfirmasi eksplisit sebelum implementasi
+
+Kecuali user secara eksplisit memerintahkan langsung ("buat tabel X sekarang").
+
+### PRIORITY HIERARCHY (ABSOLUTE ORDER)
+
+1. DATA SAFETY & INTEGRITY (ABSOLUTE — tidak bisa di-override)
+2. SUPABASE ARCHITECTURE CONSTRAINT (database lock)
+3. SECURITY RULES (auth, tenant isolation, access control)
+4. BUSINESS LOGIC CORRECTNESS
+5. USER REQUESTS (non-breaking only)
+6. PERFORMANCE OPTIMIZATION
+7. CODE STYLE
+
+Jika user request berkonflik dengan priority 1–4 → SAFE PROPOSAL MODE, jelaskan konfliknya, tunggu konfirmasi.
+
+IF ANY ANSWER IS NO → ABORT IMMEDIATELY → REWRITE OR ASK USER
+
+### PRIORITY HIERARCHY (ABSOLUTE ORDER)
+
+1. SYSTEM RULES (ZERO-DEVIATION CORE)
+2. DATABASE LOCK (Supabase only)
+3. ARCHITECTURE SPEC
+4. DATA INTEGRITY
+5. USER REQUESTS
+6. PERFORMANCE OPTIMIZATION
+7. CODE STYLE
+### ANTI-HALLUCINATION RULE
+
+AI MUST NOT:
+- Assume missing APIs
+- Assume missing tables
+- Assume external services
+- Assume unknown business logic
+
+IF NOT SPECIFIED → ASK USER → DO NOT INVENT
+
+---
+
 # Sport Center Jakarta
 
 Web app untuk manajemen dan pemesanan fasilitas olahraga — customer-facing booking portal + full admin portal.
@@ -17,7 +206,7 @@ Web app untuk manajemen dan pemesanan fasilitas olahraga — customer-facing boo
 - pnpm workspaces, Node.js 24, TypeScript 5.9
 - Frontend: React + Vite, Wouter router, TanStack Query, shadcn/ui, Recharts, Tailwind CSS
 - API: Express 5
-- DB: PostgreSQL + Drizzle ORM
+- DB: **Supabase PostgreSQL ONLY** + Drizzle ORM
 - Validation: Zod (`zod/v4`), `drizzle-zod`
 - API codegen: Orval (from OpenAPI spec at `lib/api-spec/openapi.yaml`)
 - Build: esbuild (CJS bundle)
@@ -60,8 +249,9 @@ Web app untuk manajemen dan pemesanan fasilitas olahraga — customer-facing boo
 - `/admin/settings` — Edit center info, contact details, operating hours, bank account for transfers
 
 ## User preferences
+- Gunakan bahasa Indonesia dalam semua respons.
 
-- STOP explaining. Just give me the code.
+- Default output: code-first. Explanation only if required for debugging or explicitly requested.
 - Indonesian language content for demo data and facility names
 - Sporty orange-red primary theme (hsl ~16° orange-red)
 - Bold font-black headings, shadcn Card/Button/Input/Badge components
@@ -77,9 +267,12 @@ Web app untuk manajemen dan pemesanan fasilitas olahraga — customer-facing boo
 - DB is a **shared Supabase** instance — our tables live in a dedicated `sport_center` Postgres schema (via `pgSchema` in `lib/db/src/schema/_schema.ts`), NOT `public` (which holds ~150 tables from other apps). Always define new tables on `scSchema`. Runtime uses transaction pooler (6543); DDL/migrations need session pooler (5432).
 - The `Customers` page currently shows only registered users (role=customer), not anonymous bookings. Existing demo bookings are made without a user account, so the customers list may appear empty until actual user registrations occur.
 
+## User preferences
+
+- Gunakan bahasa Indonesia saat berkomunikasi dengan user.
+
 ## Pointers
 
-- See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details
 - OpenAPI spec: `lib/api-spec/openapi.yaml`
 - DB schema: `lib/db/src/schema/`
 - Generated API client: `lib/api-client-react/src/generated/api.ts`

@@ -1,0 +1,192 @@
+Buat modul admin portal baru bernama “Data Connection Monitor”.
+
+Tujuan:
+Admin bisa melihat semua koneksi data yang digunakan aplikasi Sport Center, termasuk database, storage, realtime, API internal, WhatsApp/Fonnte, payment gateway, dan environment variable penting. Jika koneksi putus, berubah project, salah env, atau tidak sesuai konfigurasi awal, sistem harus langsung menampilkan status warning/error di admin portal.
+
+Fitur yang wajib dibuat:
+
+1. Halaman Admin
+Route:
+- /admin/system/data-connections
+atau
+- /admin/data-connections
+
+Tampilkan card/table berisi:
+- Nama koneksi
+- Jenis koneksi
+- Environment
+- Project/Host yang digunakan
+- Status koneksi
+- Last checked
+- Response time
+- Config source
+- Catatan risiko
+- Tombol “Check Now”
+
+Contoh data yang tampil:
+- PostgreSQL Database
+- Supabase Storage
+- Supabase Realtime
+- API Server
+- Frontend Realtime
+- WhatsApp/Fonnte
+- Payment Gateway
+- File Upload
+- Booking API
+- Payment API
+- Invoice API
+
+2. Health Check Backend
+Buat endpoint:
+
+GET /api/admin/system/connections/health
+
+Endpoint ini mengecek:
+- Database bisa query SELECT 1
+- Schema sport_center tersedia
+- Tabel utama tersedia:
+  users, facilities, bookings, payments, schedules, settings, company_invoices, accounting_journals
+- Supabase Storage bucket tersedia:
+  facility-images
+  payment-proofs
+- Supabase Realtime env tersedia
+- API server aktif
+- Fonnte env tersedia
+- Payment gateway env tersedia jika digunakan
+
+Response contoh:
+
+{
+  "success": true,
+  "environment": "development",
+  "checkedAt": "2026-06-20T10:00:00.000Z",
+  "connections": [
+    {
+      "name": "PostgreSQL Database",
+      "type": "database",
+      "status": "healthy",
+      "environment": "dev",
+      "projectRef": "xssrfshdrtdfupgqwfdw",
+      "schema": "sport_center",
+      "lastChecked": "...",
+      "responseTimeMs": 31,
+      "message": "Connected to isolated DEV database"
+    }
+  ]
+}
+
+3. Deteksi Perubahan Koneksi
+Simpan baseline konfigurasi ke database table baru:
+
+system_connection_baselines
+
+Kolom:
+- id
+- connection_key
+- connection_name
+- expected_environment
+- expected_project_ref
+- expected_host
+- expected_schema
+- expected_bucket
+- current_project_ref
+- current_host
+- status
+- last_checked_at
+- changed_detected_at
+- change_message
+- created_at
+- updated_at
+
+Jika koneksi berubah dari baseline, tampilkan status:
+- healthy
+- warning
+- error
+- changed
+- unavailable
+
+Contoh rule:
+- Dev tidak boleh pakai project prod
+- Prod tidak boleh pakai project dev
+- Schema harus sport_center
+- Bucket harus facility-images dan payment-proofs
+- Frontend realtime harus pakai project yang sama dengan backend realtime
+- SUPABASE_STORAGE_BUCKET tidak perlu dipakai, tampilkan deprecated jika masih ada
+
+4. Alert di Admin Portal
+Jika ada status error/changed:
+- tampilkan banner merah di dashboard admin
+- tampilkan badge di sidebar menu “System”
+- tampilkan detail alasan error
+- tampilkan rekomendasi perbaikan
+
+Contoh:
+“WARNING: Development database is pointing to production project nzdweipzckfszczzqtuw.”
+
+5. Audit Log
+Setiap perubahan koneksi simpan ke audit_logs:
+
+event_type:
+- CONNECTION_HEALTH_CHECK
+- CONNECTION_CHANGED
+- CONNECTION_FAILED
+- CONNECTION_RECOVERED
+
+Data yang disimpan:
+- connection name
+- old value
+- new value
+- detected at
+- checked by user/system
+
+6. Auto Check
+Tambahkan scheduled job backend:
+- cek koneksi setiap 5 menit
+- update status ke system_connection_baselines
+- jangan spam log jika status masih sama
+- hanya buat audit log baru jika status berubah
+
+7. UI Design
+Gunakan tampilan profesional:
+- Summary cards:
+  Total Connections
+  Healthy
+  Warning
+  Error
+  Changed
+- Table detail koneksi
+- Filter by status
+- Tombol refresh/check now
+- Last checked timestamp
+- Modal detail per koneksi
+
+8. Jangan tampilkan secret value
+Penting:
+Jangan tampilkan full database URL, service role key, anon key, API key, atau password.
+Hanya tampilkan:
+- project ref
+- host
+- schema
+- bucket
+- masked value
+
+Contoh:
+SUPABASE_SERVICE_ROLE_KEY = eyJhbGciOi...***masked***
+
+9. Menu Admin
+Tambahkan menu:
+System Settings
+  - Data Connections
+  - Environment Status
+  - Audit Logs
+
+10. Testing
+Setelah selesai, jalankan smoke test:
+- buka halaman Data Connections
+- klik Check Now
+- pastikan DB dev tampil project xssrfshdrtdfupgqwfdw
+- pastikan DB prod tampil project nzdweipzckfszczzqtuw
+- pastikan bucket facility-images healthy
+- pastikan bucket payment-proofs healthy
+- pastikan jika salah satu env dikosongkan status menjadi warning/error
+- pastikan tidak ada secret terbuka di frontend

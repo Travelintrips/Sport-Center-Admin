@@ -1,3 +1,4 @@
+import SEOHead from "@/components/SEOHead";
 import { Card, CardContent } from "@/components/ui/card";
 import { Link } from "wouter";
 import { useLang } from "@/lib/i18n";
@@ -6,6 +7,11 @@ export default function Terms() {
   const { t } = useLang();
   return (
     <div className="container mx-auto px-4 py-12 max-w-4xl">
+      <SEOHead
+        title="Syarat & Ketentuan | Sport Center Soekarno-Hatta"
+        description="Syarat dan ketentuan penggunaan layanan Sport Center Soekarno-Hatta. Harap baca dengan seksama sebelum menggunakan layanan pemesanan lapangan kami."
+        path="/terms"
+      />
       <div className="mb-8">
         <h1 className="text-3xl md:text-5xl font-black tracking-tight mb-4">{t("Ketentuan Layanan", "Terms of Service")}</h1>
         <p className="text-muted-foreground text-lg">{t("Terakhir diperbarui:", "Last updated:")} {new Date().toLocaleDateString()}</p>

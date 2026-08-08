@@ -1,0 +1,211 @@
+# PHASE GAE-2B — DEPLOYMENT SIMULATION, VALIDATION, AND GO/NO-GO
+
+Gunakan hasil PHASE GAE-2A sebagai baseline.
+
+Target:
+
+- GCP Project ID: sc-sport-center
+- App Engine Region: asia-southeast2
+- Environment: App Engine Standard
+- Service: default
+- Production Domain: https://sc.travelintrips.co.id
+
+IMPORTANT:
+
+Jangan deploy.
+Jangan mengubah DNS.
+Jangan membuat Cloud Build Trigger.
+Jangan memasukkan secret ke repository atau command line.
+
+## PHASE 1 — SCALING AND COST REVIEW
+
+Review konfigurasi:
+
+automatic_scaling:
+  min_instances: 1
+  max_instances: 10
+  target_cpu_utilization: 0.65
+
+Untuk deployment pertama, gunakan konfigurasi hemat biaya jika aman:
+
+automatic_scaling:
+  min_instances: 0
+  max_instances: 3
+  target_cpu_utilization: 0.65
+
+Jelaskan dampaknya terhadap:
+
+- cold start;
+- biaya;
+- database connection;
+- concurrency;
+- background job;
+- scheduler;
+- queue consumer.
+
+Audit apakah aplikasi menjalankan background loop atau cron di dalam web process.
+
+Jika ada, laporkan risikonya.
+
+## PHASE 2 — HEALTH CHECK
+
+Pastikan tersedia endpoint:
+
+GET /health
+
+Syarat:
+
+- tanpa autentikasi;
+- tidak mengungkap secret;
+- ringan;
+- tidak menjalankan query berat;
+- mengembalikan status server.
+
+Jika perlu, buat readiness endpoint terpisah untuk database.
+
+Tambahkan test endpoint health.
+
+## PHASE 3 — STATIC ROUTING VERIFICATION
+
+Pastikan server production bundle melayani file prerender yang benar untuk:
+
+- /
+- /facilities
+- /promos
+- /membership
+- /contact
+- /privacy
+- /terms
+
+Jangan hanya membaca file output.
+
+Jalankan assembled production server dan uji dengan curl.
+
+Pastikan setiap route:
+
+- HTTP 200;
+- MD5 berbeda;
+- title unik;
+- description unik;
+- canonical benar;
+- og:url benar;
+- og:image benar;
+- tidak fallback ke homepage.
+
+## PHASE 4 — BUILD ARTIFACT REPRODUCIBILITY
+
+Simulasikan package deployment yang sama dengan Cloud Build:
+
+1. Clean install.
+2. Build API.
+3. Build frontend.
+4. Prerender.
+5. Assemble gae-deploy.
+6. npm install --omit=dev di gae-deploy.
+7. Start dari gae-deploy.
+8. Test seluruh route.
+9. Test /health.
+10. Test startup tanpa Replit environment.
+
+Pastikan gae-deploy tidak bergantung pada:
+
+- workspace symlink;
+- source TypeScript;
+- uncommitted file;
+- dependency dev;
+- Replit environment;
+- file di luar deployment package.
+
+## PHASE 5 — TEST MATRIX
+
+Jalankan dan laporkan:
+
+- typecheck;
+- lint;
+- unit tests;
+- API build;
+- frontend build;
+- prerender;
+- assembled deployment smoke test;
+- health endpoint test;
+- static routing test;
+- storage provider test;
+- PDF isolated test.
+
+Gunakan status:
+
+- PASS
+- FAIL
+- SKIPPED
+- BLOCKED
+
+Jangan menyebut PASS bila test dilewati.
+
+## PHASE 6 — REVIEW FINAL DEPLOYMENT FILES
+
+Tampilkan isi final:
+
+1. gae-deploy/app.yaml
+2. gae-deploy/package.json
+3. gae-deploy/.gcloudignore
+4. cloudbuild.yaml
+
+Pastikan:
+
+- tidak ada secret;
+- build path benar;
+- start command benar;
+- service default;
+- runtime cocok;
+- scaling sudah direview;
+- frontend prerender ikut tersalin;
+- deployment tidak memakai --set-env-vars untuk secret.
+
+## PHASE 7 — DEPLOYMENT PLAN
+
+Berikan:
+
+1. Exact manual deployment command tanpa secret.
+2. Exact command untuk melihat versions.
+3. Exact command untuk rollback.
+4. Exact post-deployment verification commands.
+5. Required runtime service account.
+6. Required Cloud Build service account.
+7. Required IAM roles minimum.
+8. Risiko deployment pertama.
+9. Cara memastikan URL appspot lulus sebelum DNS dipindahkan.
+
+## PHASE 8 — FINAL GO/NO-GO REPORT
+
+Laporkan:
+
+1. Semua file yang berubah.
+2. Commit baru.
+3. Typecheck result.
+4. Test result.
+5. Build result.
+6. Prerender result.
+7. Assembled deployment result.
+8. Health check result.
+9. Static route result.
+10. Storage compatibility result.
+11. PDF compatibility result.
+12. Secret Manager readiness.
+13. Scaling configuration.
+14. Estimated risks.
+15. Exact deployment command.
+16. Rollback command.
+17. Verdict:
+    - GO
+    - CONDITIONAL GO
+    - NO-GO
+
+Rules:
+
+- Jangan deploy.
+- Jangan mengubah DNS.
+- Jangan membuat trigger.
+- Jangan menutupi failure.
+- Jangan memberi verdict GO jika typecheck gagal,
+  Replit storage masih aktif di production,
+  atau assembled deployment belum lulus smoke test.

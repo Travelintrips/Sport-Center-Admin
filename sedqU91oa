@@ -1,0 +1,146 @@
+modules = ["nodejs-20", "web", "bash", "postgresql-16"]
+
+
+[deployment]
+router = "application"
+deploymentTarget = "autoscale"
+run = ["bash", "-c", "PORT=8080 NODE_ENV=production node --enable-source-maps ./artifacts/api-server/dist/index.mjs"]
+build = ["bash", "-c", "pnpm -r --if-present run build"]
+
+[deployment.postBuild]
+args = ["pnpm", "store", "prune"]
+env = { "CI" = "true" }
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Start application"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Start API Server"
+
+[[workflows.workflow]]
+name = "Start application"
+author = "agent"
+
+[workflows.workflow.metadata]
+outputType = "webview"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "PORT=5000 BASE_PATH=/ pnpm --filter @workspace/sport-center run dev"
+waitForPort = 5000
+
+[[workflows.workflow]]
+name = "Start API Server"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "PORT=8080 pnpm --filter @workspace/api-server run dev"
+waitForPort = 8080
+
+[workflows.workflow.metadata]
+outputType = "console"
+
+[agent]
+stack = "BEST_EFFORT_FALLBACK"
+expertMode = true
+
+[postMerge]
+path = "scripts/post-merge.sh"
+timeoutMs = 20000
+
+[[ports]]
+localPort = 5000
+externalPort = 80
+
+[[ports]]
+localPort = 8080
+externalPort = 8080
+
+[[ports]]
+localPort = 8081
+externalPort = 8081
+
+[[ports]]
+localPort = 8082
+externalPort = 3002
+
+[[ports]]
+localPort = 8083
+externalPort = 3003
+
+[[ports]]
+localPort = 19876
+externalPort = 3001
+
+[[ports]]
+localPort = 21089
+externalPort = 3000
+
+[userenv]
+
+[userenv.shared]
+ADMIN_EMAIL = "admcst001@gmail.com"
+ADMIN_EMAIL_DOMAINS = "example.com"
+ADMIN_EMAILS = "divatranssoetta@gmail.com,admcst001@gmail.com,almanosetiawan@gmail.com,divarestorxr@gmail.com,wangsamasindo@gmail.com"
+ADMIN_WA_PHONES = "085121073537,087882639826"
+APP_URL = "https://sport-center-admin-111569.replit.app"
+CASHIER_TOKEN_SECRET = "239a1a73ea517bf5430a357fb7a39aa0deef38cecaf4d8135310a7cf3f2e11a19466d603c1dfd5bc0c735e92d58b135d"
+DEFAULT_OBJECT_STORAGE_BUCKET_ID = "replit-objstore-e357cc66-19c3-4d73-9ca9-3069d78355d1"
+FONNTE_ADMIN_WA = "085121073537"
+FONNTE_TOKEN = "jEz4NKMr17NBTFv7PZgr"
+GOOGLE_CLIENT_ID = "751551151000-fqrgt8si0pgnchqkn3pfo6nmqienv38f.apps.googleusercontent.com"
+PORTAL_ADMIN_EMAILS = "admcst001@gmail.com,wangsamasindo@gmail.com"
+PRIVATE_OBJECT_DIR = "/replit-objstore-e357cc66-19c3-4d73-9ca9-3069d78355d1/private"
+PUBLIC_OBJECT_SEARCH_PATHS = "/replit-objstore-e357cc66-19c3-4d73-9ca9-3069d78355d1/public"
+SESSION_SECRET = "OgZyysezieWkipmN0MD4Y37AR4QHIkMqWg4oQ4yN1CXE86wRI0bYI/cFBPS/K+4DffPWvNSIXCJIuR5wXYPebQ=="
+BIZPORTAL_SYNC_API_KEY = "98bad1c799cb429ab9f07d98ba5969189545420747a3fc05da7ddd454c2e00e2"
+GOOGLE_SERVICE_ACCOUNT_JSON = '{   "type": "service_account",   "project_id": "sheet-498707",   "private_key_id": "88357f13ad3a952faef471b812154c42e4d8333e",   "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDY1Drh/BjpvYCJ\nvQz+WMi6bSuA/hXkt1ppJyRqV1hI/A4+mxAKbRdPW2Z82Z0AWHKV20kKizf3hgeI\np+PgkLtJuGUQb3IJM0rGarD3md19xKlVvfwQZZk4gaH2rg1RIRK73lrS8so4GwKc\nviyPiDWedjdYZMYz5hM/rIyZ5Pf91ktrq8OxOMyy+G81/BKLrQsostXAgbSc6LmQ\n7y12P2mEp+JxmXn6B1uo7S4P9XqZ/T8vwTLcVaELJRtgkmvbF2+LYOmEFdtsthle\nQcMgSjVtyHXdT0nDmxiL+l/mCI8gmF2V90RphH1n8U3iKlD5rCyfeUts/qFC6dy/\nxjFOAoVLAgMBAAECggEAHAcnC2IyeDhqPqPE47XnUI3fE0AE5Xk8Ax6vqt1aiKio\nULhrlOVwH25xq47XqB1Gxo8/fFDtrZ3SKHyHTNZ4lzlyOvMk+wJ51nchJAhsJJ9A\nwlgaFqaDbVX4cTIjf4q2aLl/5QfEUwdOyaMdkHorcC3YzqDMLBZAA7mSvSvnUJTf\nZani/69FnxwMtM/xvDw6EN2Fv/9fs1vWyREyX6XRDGBEtra55zLgSxE1J4KzSJ41\nv9mDLd2r55OLrpcxkS3LnsMvAVOekM1yipa5fqZYwPVDLQnF0Sc2KQp4chlQaf+2\nZ1bq6xeWI1zM990hcL9xlooohNUOsZZvR16CGv5xkQKBgQDups6U5aEJWIUn8zkG\ngZdVG5YByTiE2bGKfELF1drukYf3O/EMJoXgx7+5Tm2UIG67FKwbONhaVde8xlny\nmyxSlrbNbkSlwZTxIqApTIvK1ZFxffKAr2VMb2X/hX9OPs8AbMkoKKwwOItwAGPY\n3AGytHnlg7kxaUCYt5ZR9demMQKBgQDol1DAFf+1BJuvytk2EYzPYxU5dKz+bE36\n0ePbv2QzzvVG8JgjMAcfpnZKzjJuocNjXJq0Y1qm9peBBIjhrNjKl5iTGjH5WpC6\n9cWmS9a6/4C7ce79PTdnkMSAJnZpWc//+qX3U07+oeogCpkdz2b8tMcB+jToBtWt\nMy4PYJy4OwKBgQDL3GQVnz57zEkawlMRMrxCMGlopyoHmipmIRWtB6yYJGsgD+0u\nMu4kAJ3PPqauZTIRz2vhaSKvsCq1ED8f1dv7xNDtFWfArGd9wNVN0hyMLPmsGCmC\nMdH3hCV+K9x+y3pqY4NGMdA89OBv0XV5dx5gOHj0TRxyj/VlP1ZCNx560QKBgDB2\nLq4HJ2M5FZM4Ka/ZUkR3uZliFRVhzZGgH+DObPtaeMKSKLDUNffDQExv0BQ7AjH2\nvoktVlsJcCHCpx6WXAlCMtkbkSQKWbOKt+bhUFlgGRt1Lr12/s9GW5rz6KIkw3Dr\ncZ8prYDijZyleKe8ahHnPLvNvS5HFkhjLIqpr523AoGBAIzNQC/pYW6THnRC5Hr1\nacm0iP0J5VPdI1XyPHvyqm33PMxtkw6lTva2kOIil7MbxZ/H8AVV+TP5jvKMPzCA\nsJiIIcjNUzSkDxx74GJrYXs6QUIdsf8zFFfqyJqX7hGR2XNv8C1R2F2tsnhcNKLO\nb4WpyDC4q/htJh6qEcv2lQxd\n-----END PRIVATE KEY-----\n",   "client_email": "dheet-286@sheet-498707.iam.gserviceaccount.com",   "client_id": "112370525621324127888",   "auth_uri": "https://accounts.google.com/o/oauth2/auth",   "token_uri": "https://oauth2.googleapis.com/token",   "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",   "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/dheet-286%40sheet-498707.iam.gserviceaccount.com",   "universe_domain": "googleapis.com" }'
+PORTAL_ADMIN_KEY = "f8ae2218d7f082b61d6ed8d41ff399ff08407251fbeeb5abab1fcfaac6e206cf"
+SMTP_FROM = " info@cstlogistic.co.id"
+SMTP_PASS = " info@cstlogistic.co.id"
+VAPID_PRIVATE_KEY = "Cu-0cxYEgT24fD8lVirlkz0qpFHj_kJNcGIj347kIJ4"
+VAPID_PUBLIC_KEY = "BEAKgZOdT9HxFJLxVNxgtY-Dh2XzGptrjQwQibP2obUjPlLkfk0WR1TyzqbJvnhLlWrNGjiexhndtXZj9klZUPE"
+WATI_API_TOKEN = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1bmlxdWVfbmFtZSI6ImRpdmF0cmFuc3NvZXR0YUBnbWFpbC5jb20iLCJuYW1laWQiOiJkaXZhdHJhbnNzb2V0dGFAZ21haWwuY29tIiwiZW1haWwiOiJkaXZhdHJhbnNzb2V0dGFAZ21haWwuY29tIiwiYXV0aF90aW1lIjoiMDYvMDYvMjAyNiAxMDoyNzowOCIsInRlbmFudF9pZCI6IjEwMTc2NTAzIiwiZGJfbmFtZSI6Im10LXByb2QtVGVuYW50cyIsImh0dHA6Ly9zY2hlbWFzLm1pY3Jvc29mdC5jb20vd3MvMjAwOC8wNi9pZGVudGl0eS9jbGFpbXMvcm9sZSI6IkFETUlOSVNUUkFUT1IiLCJleHAiOjI1MzQwMjMwMDgwMCwiaXNzIjoiQ2xhcmVfQUkiLCJhdWQiOiJDbGFyZV9BSSJ9.kQ6FR4UjFDE0hs-ne0yPzN88Oz-c0eyh4XdLIVQh1ng"
+WATI_BASE_URL = "https://live-mt-server.wati.io/10176503"
+VITE_GOOGLE_CLIENT_ID = "751551151000-fqrgt8si0pgnchqkn3pfo6nmqienv38f.apps.googleusercontent.com"
+OPENAI_MODEL = "gpt-4o"
+AI_SPORTCENTER_ENABLED = "true"
+AI_SPORTCENTER_MAX_REPLY_LENGTH = "900"
+OPENAI_API_KEY = "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"
+OPENAI_BASE_URL = "https://api.openai.com/v1"
+
+[userenv.development]
+SUPABASE_SERVICE_ROLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhzc3Jmc2hkcnRkZnVwZ3F3ZmR3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3ODg5NjcyOCwiZXhwIjoyMDk0NDcyNzI4fQ.VFPcBxsVJkYwNo3ojy3uOHglqUA9zILhjw4_0JAhZYI"
+SUPABASE_URL = "https://xssrfshdrtdfupgqwfdw.supabase.co"
+VITE_SUPABASE_URL = "https://xssrfshdrtdfupgqwfdw.supabase.co"
+SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhzc3Jmc2hkcnRkZnVwZ3F3ZmR3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg4OTY3MjgsImV4cCI6MjA5NDQ3MjcyOH0.czKzR9GjEL6UK8AhPAX6OYyF74fz1YtImYQSXiiG69U"
+VITE_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhzc3Jmc2hkcnRkZnVwZ3F3ZmR3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg4OTY3MjgsImV4cCI6MjA5NDQ3MjcyOH0.czKzR9GjEL6UK8AhPAX6OYyF74fz1YtImYQSXiiG69U"
+SUPABASE_STORAGE_BUCKET = "https://xssrfshdrtdfupgqwfdw.storage.supabase.co/storage/v1/s3"
+SUPABASE_DATABASE_URL_DEV = "postgresql://postgres.nzdweipzckfszczzqtuw:ZRM0IiRaXvHrY7dP@aws-1-ap-southeast-2.pooler.supabase.com:6543/postgres"
+SUPABASE_URL_DEV = "https://xssrfshdrtdfupgqwfdw.supabase.co"
+SUPABASE_ANON_KEY_DEV = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhzc3Jmc2hkcnRkZnVwZ3F3ZmR3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg4OTY3MjgsImV4cCI6MjA5NDQ3MjcyOH0.czKzR9GjEL6UK8AhPAX6OYyF74fz1YtImYQSXiiG69U"
+SUPABASE_SERVICE_ROLE_KEY_DEV = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhzc3Jmc2hkcnRkZnVwZ3F3ZmR3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3ODg5NjcyOCwiZXhwIjoyMDk0NDcyNzI4fQ.VFPcBxsVJkYwNo3ojy3uOHglqUA9zILhjw4_0JAhZYI"
+
+[userenv.production]
+SUPABASE_DATABASE_URL = "postgresql://postgres.nzdweipzckfszczzqtuw:ZRM0IiRaXvHrY7dP@aws-1-ap-southeast-2.pooler.supabase.com:6543/postgres"
+SUPABASE_SERVICE_ROLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im56ZHdlaXB6Y2tmc3pjenpxdHV3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3ODQwMjg0NCwiZXhwIjoyMDkzOTc4ODQ0fQ.W0uM_UzGfF8Zy4PFQKhz6dKpEVDHS6_k9FtqoM9iGms"
+SUPABASE_URL = "https://nzdweipzckfszczzqtuw.supabase.co"
+VITE_SUPABASE_URL = "https://nzdweipzckfszczzqtuw.supabase.co"
+SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im56ZHdlaXB6Y2tmc3pjenpxdHV3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg0MDI4NDQsImV4cCI6MjA5Mzk3ODg0NH0.p9k3-qyRjPuXsHLizUrSRMyS-0yJAatUyjQU9NIIu1U"
+VITE_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im56ZHdlaXB6Y2tmc3pjenpxdHV3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg0MDI4NDQsImV4cCI6MjA5Mzk3ODg0NH0.p9k3-qyRjPuXsHLizUrSRMyS-0yJAatUyjQU9NIIu1U"
+SUPABASE_STORAGE_BUCKET = "https://nzdweipzckfszczzqtuw.storage.supabase.co/storage/v1/s3"
+SUPABASE_PG_URL = "postgresql://postgres.nzdweipzckfszczzqtuw:ZRM0IiRaXvHrY7dP@aws-1-ap-southeast-2.pooler.supabase.com:6543/postgres"
+
+[nix]
+channel = "stable-25_05"
