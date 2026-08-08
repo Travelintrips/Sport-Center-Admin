@@ -1,11 +1,15 @@
-modules = ["web", "bash", "nodejs-24", "postgresql-16", "python-3.11"]
-
+modules = ["nodejs-20", "web", "python-base-3.13"]
 
 [deployment]
 router = "application"
 deploymentTarget = "autoscale"
-run = ["bash", "-c", "PORT=8080 NODE_ENV=production node --enable-source-maps ./artifacts/api-server/dist/index.mjs"]
-build = ["bash", "-c", "pnpm -r --if-present run build"]
+run = [
+  "bash",
+  "-c",
+  "PORT=8080 NODE_ENV=production node --enable-source-maps ./artifacts/api-server/dist/index.mjs",
+]
+# Perbaikan: Tambahkan pnpm install SEBELUM build
+build = ["bash", "-c", "pnpm install && pnpm -r --if-present run build"]
 
 [deployment.postBuild]
 args = ["pnpm", "store", "prune"]
@@ -23,10 +27,6 @@ author = "agent"
 task = "workflow.run"
 args = "Start application"
 
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "Start API server"
-
 [[workflows.workflow]]
 name = "Start application"
 author = "agent"
@@ -36,20 +36,8 @@ outputType = "webview"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "PORT=5000 BASE_PATH=/ pnpm --filter @workspace/sport-center run dev"
+args = "bash scripts/start-dev.sh"
 waitForPort = 5000
-
-[[workflows.workflow]]
-name = "Start API server"
-author = "agent"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "PORT=8080 pnpm --filter @workspace/api-server run dev"
-waitForPort = 8080
-
-[workflows.workflow.metadata]
-outputType = "console"
 
 [agent]
 stack = "BEST_EFFORT_FALLBACK"
@@ -61,29 +49,28 @@ timeoutMs = 20000
 
 [[ports]]
 localPort = 5000
-externalPort = 5000
+externalPort = 80
 
 [[ports]]
 localPort = 8080
 externalPort = 8080
 
 [[ports]]
-
-localPort = 21089
-externalPort = 3000
-
-
 localPort = 8081
 externalPort = 8081
 
 [[ports]]
-localPort = 8082
+localPort = 21089
 externalPort = 3000
 
-[[ports]]
-localPort = 21089
-externalPort = 80
+# Konfigurasi nix (HANYA SATU KALI)
+[nix]
+channel = "stable-25_05"
 
+[nix.env]
+# Force pnpm untuk hoist dependencies agar tersedia di semua workspace packages
+PNPM_SHAMEFULLY_HOIST = "true"
+CI = "true"
 
 [userenv]
 
@@ -91,13 +78,11 @@ externalPort = 80
 ADMIN_EMAIL = "admcst001@gmail.com"
 ADMIN_EMAIL_DOMAINS = "example.com"
 ADMIN_EMAILS = "divatranssoetta@gmail.com,admcst001@gmail.com,almanosetiawan@gmail.com,divarestorxr@gmail.com,wangsamasindo@gmail.com"
-ADMIN_WA_PHONES = "081382702074,087882639826"
-AI_INTEGRATIONS_OPENAI_API_KEY = "_DUMMY_API_KEY_"
-AI_INTEGRATIONS_OPENAI_BASE_URL = "http://localhost:1106/modelfarm/openai"
-APP_URL = "https://sportcenter.travelintrips.co.id"
+ADMIN_WA_PHONES = "085121073537,087882639826"
+APP_URL = "https://sport-center-admin-111569.replit.app"
 CASHIER_TOKEN_SECRET = "239a1a73ea517bf5430a357fb7a39aa0deef38cecaf4d8135310a7cf3f2e11a19466d603c1dfd5bc0c735e92d58b135d"
 DEFAULT_OBJECT_STORAGE_BUCKET_ID = "replit-objstore-e357cc66-19c3-4d73-9ca9-3069d78355d1"
-FONNTE_ADMIN_WA = " 081216104734"
+FONNTE_ADMIN_WA = "085121073537"
 FONNTE_TOKEN = "jEz4NKMr17NBTFv7PZgr"
 GOOGLE_CLIENT_ID = "751551151000-fqrgt8si0pgnchqkn3pfo6nmqienv38f.apps.googleusercontent.com"
 PORTAL_ADMIN_EMAILS = "admcst001@gmail.com,wangsamasindo@gmail.com"
@@ -106,7 +91,7 @@ PUBLIC_OBJECT_SEARCH_PATHS = "/replit-objstore-e357cc66-19c3-4d73-9ca9-3069d7835
 SESSION_SECRET = "OgZyysezieWkipmN0MD4Y37AR4QHIkMqWg4oQ4yN1CXE86wRI0bYI/cFBPS/K+4DffPWvNSIXCJIuR5wXYPebQ=="
 BIZPORTAL_SYNC_API_KEY = "98bad1c799cb429ab9f07d98ba5969189545420747a3fc05da7ddd454c2e00e2"
 GOOGLE_SERVICE_ACCOUNT_JSON = '{   "type": "service_account",   "project_id": "sheet-498707",   "private_key_id": "88357f13ad3a952faef471b812154c42e4d8333e",   "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDY1Drh/BjpvYCJ\nvQz+WMi6bSuA/hXkt1ppJyRqV1hI/A4+mxAKbRdPW2Z82Z0AWHKV20kKizf3hgeI\np+PgkLtJuGUQb3IJM0rGarD3md19xKlVvfwQZZk4gaH2rg1RIRK73lrS8so4GwKc\nviyPiDWedjdYZMYz5hM/rIyZ5Pf91ktrq8OxOMyy+G81/BKLrQsostXAgbSc6LmQ\n7y12P2mEp+JxmXn6B1uo7S4P9XqZ/T8vwTLcVaELJRtgkmvbF2+LYOmEFdtsthle\nQcMgSjVtyHXdT0nDmxiL+l/mCI8gmF2V90RphH1n8U3iKlD5rCyfeUts/qFC6dy/\nxjFOAoVLAgMBAAECggEAHAcnC2IyeDhqPqPE47XnUI3fE0AE5Xk8Ax6vqt1aiKio\nULhrlOVwH25xq47XqB1Gxo8/fFDtrZ3SKHyHTNZ4lzlyOvMk+wJ51nchJAhsJJ9A\nwlgaFqaDbVX4cTIjf4q2aLl/5QfEUwdOyaMdkHorcC3YzqDMLBZAA7mSvSvnUJTf\nZani/69FnxwMtM/xvDw6EN2Fv/9fs1vWyREyX6XRDGBEtra55zLgSxE1J4KzSJ41\nv9mDLd2r55OLrpcxkS3LnsMvAVOekM1yipa5fqZYwPVDLQnF0Sc2KQp4chlQaf+2\nZ1bq6xeWI1zM990hcL9xlooohNUOsZZvR16CGv5xkQKBgQDups6U5aEJWIUn8zkG\ngZdVG5YByTiE2bGKfELF1drukYf3O/EMJoXgx7+5Tm2UIG67FKwbONhaVde8xlny\nmyxSlrbNbkSlwZTxIqApTIvK1ZFxffKAr2VMb2X/hX9OPs8AbMkoKKwwOItwAGPY\n3AGytHnlg7kxaUCYt5ZR9demMQKBgQDol1DAFf+1BJuvytk2EYzPYxU5dKz+bE36\n0ePbv2QzzvVG8JgjMAcfpnZKzjJuocNjXJq0Y1qm9peBBIjhrNjKl5iTGjH5WpC6\n9cWmS9a6/4C7ce79PTdnkMSAJnZpWc//+qX3U07+oeogCpkdz2b8tMcB+jToBtWt\nMy4PYJy4OwKBgQDL3GQVnz57zEkawlMRMrxCMGlopyoHmipmIRWtB6yYJGsgD+0u\nMu4kAJ3PPqauZTIRz2vhaSKvsCq1ED8f1dv7xNDtFWfArGd9wNVN0hyMLPmsGCmC\nMdH3hCV+K9x+y3pqY4NGMdA89OBv0XV5dx5gOHj0TRxyj/VlP1ZCNx560QKBgDB2\nLq4HJ2M5FZM4Ka/ZUkR3uZliFRVhzZGgH+DObPtaeMKSKLDUNffDQExv0BQ7AjH2\nvoktVlsJcCHCpx6WXAlCMtkbkSQKWbOKt+bhUFlgGRt1Lr12/s9GW5rz6KIkw3Dr\ncZ8prYDijZyleKe8ahHnPLvNvS5HFkhjLIqpr523AoGBAIzNQC/pYW6THnRC5Hr1\nacm0iP0J5VPdI1XyPHvyqm33PMxtkw6lTva2kOIil7MbxZ/H8AVV+TP5jvKMPzCA\nsJiIIcjNUzSkDxx74GJrYXs6QUIdsf8zFFfqyJqX7hGR2XNv8C1R2F2tsnhcNKLO\nb4WpyDC4q/htJh6qEcv2lQxd\n-----END PRIVATE KEY-----\n",   "client_email": "dheet-286@sheet-498707.iam.gserviceaccount.com",   "client_id": "112370525621324127888",   "auth_uri": "https://accounts.google.com/o/oauth2/auth",   "token_uri": "https://oauth2.googleapis.com/token",   "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",   "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/dheet-286%40sheet-498707.iam.gserviceaccount.com",   "universe_domain": "googleapis.com" }'
-PORTAL_ADMIN_KEY = "admin123"
+PORTAL_ADMIN_KEY = "f8ae2218d7f082b61d6ed8d41ff399ff08407251fbeeb5abab1fcfaac6e206cf"
 SMTP_FROM = " info@cstlogistic.co.id"
 SMTP_PASS = " info@cstlogistic.co.id"
 VAPID_PRIVATE_KEY = "Cu-0cxYEgT24fD8lVirlkz0qpFHj_kJNcGIj347kIJ4"
@@ -114,26 +99,41 @@ VAPID_PUBLIC_KEY = "BEAKgZOdT9HxFJLxVNxgtY-Dh2XzGptrjQwQibP2obUjPlLkfk0WR1TyzqbJ
 WATI_API_TOKEN = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1bmlxdWVfbmFtZSI6ImRpdmF0cmFuc3NvZXR0YUBnbWFpbC5jb20iLCJuYW1laWQiOiJkaXZhdHJhbnNzb2V0dGFAZ21haWwuY29tIiwiZW1haWwiOiJkaXZhdHJhbnNzb2V0dGFAZ21haWwuY29tIiwiYXV0aF90aW1lIjoiMDYvMDYvMjAyNiAxMDoyNzowOCIsInRlbmFudF9pZCI6IjEwMTc2NTAzIiwiZGJfbmFtZSI6Im10LXByb2QtVGVuYW50cyIsImh0dHA6Ly9zY2hlbWFzLm1pY3Jvc29mdC5jb20vd3MvMjAwOC8wNi9pZGVudGl0eS9jbGFpbXMvcm9sZSI6IkFETUlOSVNUUkFUT1IiLCJleHAiOjI1MzQwMjMwMDgwMCwiaXNzIjoiQ2xhcmVfQUkiLCJhdWQiOiJDbGFyZV9BSSJ9.kQ6FR4UjFDE0hs-ne0yPzN88Oz-c0eyh4XdLIVQh1ng"
 WATI_BASE_URL = "https://live-mt-server.wati.io/10176503"
 VITE_GOOGLE_CLIENT_ID = "751551151000-fqrgt8si0pgnchqkn3pfo6nmqienv38f.apps.googleusercontent.com"
+OPENAI_MODEL = "gpt-4o"
+AI_SPORTCENTER_ENABLED = "true"
+AI_SPORTCENTER_MAX_REPLY_LENGTH = "900"
+OPENAI_API_KEY = "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"
+OPENAI_BASE_URL = "https://api.openai.com/v1"
+FONNTE_CUSTOMER_TOKEN = ""
+VITE_PUBLIC_URL = "https://sc.travelintrips.co.id"
+PORT = "8080"
+PAYLABS_PROD_MERCHANT_ID = "010613"
+PAYLABS_PROD_PRIVATE_KEY = "-----BEGIN RSA PRIVATE KEY----- MIIEogIBAAKCAQB8vE45P4Q4fkfJPFny8m/fZ83NDibHo/LBmAaIxTiWN0XytxI5 CChxkBQf1LdDPciDgSlxUrK0UDNn8zyyLofPiDYRLp5DMe+Knr6sZCBDsruqMBBc Tzt3hdn0LXqV7B0OAnuK2EhY2EDdtcbmQdt8qP1pLnj/Iz/GipI5lTE2LzoMugiD 96UjhaacumVX7GKJRzZsqX8y3smPW+cXKeEYhtqXmtGj2z26v8TB8fE/vAkI2zwe RrxKC9gzojmf4uzGGIi9iv5xhbrRFTseX/toAYw3U+I8N5tV0JTFP61TligHrXwk YLr/hKG+Hnx5bmhq9wihRvn7dxt6HczqweZFAgMBAAECggEAMgoMy3SKo2stezJF 12ugq5vl+LQLpJ1FvpoxTN7pk4F7AyKkIdL+/ofROu/H0SbQ8Mh5CqglXqap6LKw j76Q5xV6syvje4tl0FNcpKXKN75VALIlbhKvBYTh6c3w1oIRKdSfIRUg+NtQMmFA +JBE796PQonNKnVGmWxvur/6LQT3t13p3Qf53NZ9cjO0UHsjZZmXuwdBERpU12/9 8eeQ3+05yTM3Y0PLdn89CfMu1GUNTu1oKbJukZsmRlvZa6QPV1Pd5ljJSFXWQ5rP sS9aa5OxCdUfA/mVYQmMFbWyRwRUSWCw5EXCeko4Zo7y6IGtAI6ISBxTEH/cLtZE DkcTJQKBgQC3AVv2r9mDb0pU1tF6LNhR9s2N/EM7B937PauzSJ7YCiKpPrJ1Hfjb Fp655E4omCTAnzFE0u9kp5uxt5gPNpRZEQFB6zcTn8iL8QGMdQqC9DEvQ3fDwzT/ Lhd3zJWByD40fUec+taUdzDVqo2TQhdqC0UWFwB+zA4tlGtnY8VXLwKBgQCufQh3 yXx8Y1xuyvjBh8MZ8R7ig+c2+HuaGdPnpMaAn7e7E1Dp1/eHAbJL3osNtH5tP6kZ N7SLQDtRTbz9sYhZCYKbdvoJev/FER9OOXuG+KC7i0pxU0rTv5WyqIylqTYXnCYm KAYn5S8XTteyGW5oFojWsf9Ah7oNgc7+5uV8ywKBgCerNcINcDrbXuNxBUtUeTeb JgeHDRO4qteREKz2KuhtmgHRw2E7s/vZtWJaKM8H27+dQlLG3nmVE1y8jUuO6y07 UGh3kiLA2fnrrghCPpsQT7ENEOLwZ4aA+TlQsX/GZiV+mo1emjDofT9zjujCxMyJ 0Nnu9n6FwPUEXRu2NsqlAoGAIn9L1kr6lqkaVDlC1xhdRVq7jXMgmmikH0Jt98VH DZUGQTE/dQwivwlh08gq28nMmRLV/stZoZJQZ/GjpNCdsWTE8rGiG4+6055f/xo0 RuoO9SVD0YXzLEwbb5gNPo9mx2Iy1KZjGS4hkk0fLfIDNwcFhNTqLzrmWNdKMnE5 ++MCgYEAqeaU9YDO5yZfiO0TJJhlyXKDPKvtIOqE/edOVY0fZzr1MOhJ1rmbsYog 40CWxXJJZCdnHvfwF8iSf9SBkEqzWi3cn0VkS2xnNuw7VW8FDiijyfUE3Pvwqeae TXlTn2h7h8FKr4r5sMhsQCMfKJ1cZ1oAUkrMGdHgND4t3z1Drx4= -----END RSA PRIVATE KEY-----"
+PAYLABS_PROD_PUBLIC_KEY = "-----BEGIN PUBLIC KEY----- MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0HDowwUAniBqAxUziB2+RL7bKwMBY31V3yZav0y8mJwriSjYgFlXIkaSspybEPPnPHfaTT40jBEGIGlzWq5K+wV7abhkVNRJN1U/2P9WXuZrv+mGDKqwzpqqwoMYJM46eXVw8D8twt5bH64hXuZC0FzkmZA+mjPpKMEbpSj63+Xnx2ZNAzB/GeoDBFSV05XaIlYC+vvVxfO4i2/jFLSc6R0SpRcva8NHurEh3m5urFmhVL01yBvr7iJV1TVFDuyO5AnsNQ2VmOFPeTPkL4butMGHT6ng8OIvHaUpR5ynqHexqkPeB6DQCsgj+Lal9CjjdmYSY31SuXSa/sRJAzBLmwIDAQAB -----END PUBLIC KEY-----"
+PAYLABS_SANDBOX_MERCHANT_ID = "010728"
+PAYLABS_SANDBOX_PRIVATE_KEY = "-----BEGIN RSA PRIVATE KEY----- MIIEowIBAAKCAQEAkIbGoeDb+PSeISrr8gn+qMJmS3euQef35bH3+cDdykV6IJSM iXRCQ4tpxKxS9fFuXDFbdkSXau4EAhztqwD4WwYxHRdguWKXKlRu9q1asLszJ1uq wWpK7+eB1X94csmfU4I4VjvSxMiIq945Lv6J9Hw/qfh7O56Q3jNA4BJqH+therGh GA2a77xqEWIGYYdDQ9SW5hXZJ3t1i5C4XeHTiC40zm9Yz88OjPMpF406fDHtUkPJ WFnqhqWZqmAVqZdVZMBDDByyZzWt2qIJYY/i7F/5NGwgAXPVnO3o+2H49sGEzDqL mRtXrA7XFU1szgJILuLmEXMHRFJMilp4jK5utwIDAQABAoIBAForPBIS8CrKsz2O QdaoVbGEV74N1TJZP1iXSFcR9U4VOrTI+UVou07Y1AxYVwoKrwfl42JOOQoFpYqL 8dwWptxjaJD13OrMj/Ng6joMveA1axzLHCW/4zD6Bw7kkIlNMZIwVGW4vS74zgws gRDIzdkzC6VH2drAezGmWHt0AbIXgG8NNGD1ABrhJkYsrv+hqOickmsVD73aGP5Z tJ8RJZbe4EZoz9nyABYDKGJFqZIyVN1x8RtoWsG9j5ckQm+zsrUKeIww3h+mOAA8 YOJsnOOJ/h20jS6itPp/IZz5QJIvAjyK43/TXovuKIn+v2mIdvctNCCYkNc6PIuE iLMskwECgYEAx/9tITZKb7QTaTDQgNMQYRiKvayM6Cm/KqEwe63pPz69Oxc9pKcr bqgX0sAtTgmAHJAzYf1dW2SmxunPTcaPZ9OVG1DdhqX4FoAaafRhazEJprRlNEpR sr06dVoQm3eFFAqB44VtOyhenXO8sYW8FvVYRY5cOHjn4vipbw6ZmHECgYEAuP72 vc1eL0p6duOOIiehJ4bdfTcVeILbp60ATMLEm9md6Ocr9Fq3MkBMGHLVzovdTDn7 edrAg9mQ6/eWlMWw6PRPe/AUrogQHQxdcQ1tyIXZpIvUw7mjcODgmvlBJu37v8X/ LiVEotrcubSNngd2BfNxNjBdRc4Z5bOLWC7CTacCgYA8emcbxfkYclH0W0iRzEGF uxApb0Zk5krirz+kBuEjuOssNUj0w4CEw9wAZRDOKl1NReXj2eQjQPqV6BpCIKs4 8GiEjB2RHBs7Yp2aMMZMzdVnTeHUwCyYalSFLCkdejUJ7Gt+y9hOLVT/NAJ5hEFu h96bmgMVKKqmnh9OcBHOYQKBgQCAm7f7gZ9dryBuMIpqUjSl3wtx9m51xjtgWVQh CTJXyrUN6lBTYxGC3NJKGONs4S0qxhB+yUYXI5SthwVnTfxMJzRuzBwErdDN8P+x DY3p3qvMye1TWGY4ng1nj6rsnnvq+YIKmZwav569d7kQSM2TG4f0DTF6yuqUFvrj hjZMdwKBgHlg8qh/DuaDKecEtdizlVU2Lm6xZ+fbRALndPgMJeERD/aMhua7CPkK X3C1OmzIB/GiZODfa1wTpMobZtGdjPCVvN9kMBfcW90mzNkSYzMHAhojbbNnnplp iypogS38oMrEyfKY3s+Q4EiMejtf+dQV4r4snweVAa7ZUL01Xg2N -----END RSA PRIVATE KEY-----"
+PAYLABS_SANDBOX_PUBLIC_KEY = "-----BEGIN PUBLIC KEY----- MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAkIbGoeDb+PSeISrr8gn+ qMJmS3euQef35bH3+cDdykV6IJSMiXRCQ4tpxKxS9fFuXDFbdkSXau4EAhztqwD4 WwYxHRdguWKXKlRu9q1asLszJ1uqwWpK7+eB1X94csmfU4I4VjvSxMiIq945Lv6J 9Hw/qfh7O56Q3jNA4BJqH+therGhGA2a77xqEWIGYYdDQ9SW5hXZJ3t1i5C4XeHT iC40zm9Yz88OjPMpF406fDHtUkPJWFnqhqWZqmAVqZdVZMBDDByyZzWt2qIJYY/i 7F/5NGwgAXPVnO3o+2H49sGEzDqLmRtXrA7XFU1szgJILuLmEXMHRFJMilp4jK5u twIDAQAB -----END PUBLIC KEY-----"
 
 [userenv.development]
-SUPABASE_DATABASE_URL = "postgresql://postgres.xssrfshdrtdfupgqwfdw:admcst0012026@aws-1-ap-southeast-2.pooler.supabase.com:6543/postgres"
-SUPABASE_SERVICE_ROLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhzc3Jmc2hkcnRkZnVwZ3F3ZmR3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3ODg5NjcyOCwiZXhwIjoyMDk0NDcyNzI4fQ.VFPcBxsVJkYwNo3ojy3uOHglqUA9zILhjw4_0JAhZYI"
-SUPABASE_URL = "https://xssrfshdrtdfupgqwfdw.supabase.co"
-VITE_SUPABASE_URL = "https://xssrfshdrtdfupgqwfdw.supabase.co"
-SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhzc3Jmc2hkcnRkZnVwZ3F3ZmR3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg4OTY3MjgsImV4cCI6MjA5NDQ3MjcyOH0.czKzR9GjEL6UK8AhPAX6OYyF74fz1YtImYQSXiiG69U"
-VITE_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhzc3Jmc2hkcnRkZnVwZ3F3ZmR3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg4OTY3MjgsImV4cCI6MjA5NDQ3MjcyOH0.czKzR9GjEL6UK8AhPAX6OYyF74fz1YtImYQSXiiG69U"
-SUPABASE_STORAGE_BUCKET = "https://xssrfshdrtdfupgqwfdw.storage.supabase.co/storage/v1/s3"
-SUPABASE_PG_URL = "postgresql://postgres.xssrfshdrtdfupgqwfdw:%24%23Admin12345%40%24@aws-1-ap-southeast-2.pooler.supabase.com:6543/postgres"
+SUPABASE_URL_DEV = "https://xssrfshdrtdfupgqwfdw.supabase.co"
+SUPABASE_ANON_KEY_DEV = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhzc3Jmc2hkcnRkZnVwZ3F3ZmR3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg4OTY3MjgsImV4cCI6MjA5NDQ3MjcyOH0.czKzR9GjEL6UK8AhPAX6OYyF74fz1YtImYQSXiiG69U"
+SUPABASE_SERVICE_ROLE_KEY_DEV = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhzc3Jmc2hkcnRkZnVwZ3F3ZmR3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3ODg5NjcyOCwiZXhwIjoyMDk0NDcyNzI4fQ.VFPcBxsVJkYwNo3ojy3uOHglqUA9zILhjw4_0JAhZYI"
+VITE_SUPABASE_URL_DEV = "https://xssrfshdrtdfupgqwfdw.supabase.co"
+VITE_SUPABASE_ANON_KEY_DEV = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhzc3Jmc2hkcnRkZnVwZ3F3ZmR3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg4OTY3MjgsImV4cCI6MjA5NDQ3MjcyOH0.czKzR9GjEL6UK8AhPAX6OYyF74fz1YtImYQSXiiG69U"
+SUPABASE_STORAGE_BUCKET_DEV = "https://xssrfshdrtdfupgqwfdw.storage.supabase.co/storage/v1/s3"
+SUPABASE_DATABASE_URL_DEV = "postgresql://postgres.xssrfshdrtdfupgqwfdw:nvVEWjiHruxen4cE@aws-1-ap-southeast-2.pooler.supabase.com:6543/postgres"
+SUPABASE_PG_URL_DEV = "postgresql://postgres.xssrfshdrtdfupgqwfdw:nvVEWjiHruxen4cE@aws-1-ap-southeast-2.pooler.supabase.com:6543/postgres"
 
 [userenv.production]
-SUPABASE_DATABASE_URL = "postgresql://postgres.nzdweipzckfszczzqtuw:%24%23Admin12345%40%24@aws-1-ap-southeast-2.pooler.supabase.com:6543/postgres"
-SUPABASE_SERVICE_ROLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im56ZHdlaXB6Y2tmc3pjenpxdHV3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3ODQwMjg0NCwiZXhwIjoyMDkzOTc4ODQ0fQ.W0uM_UzGfF8Zy4PFQKhz6dKpEVDHS6_k9FtqoM9iGms"
-SUPABASE_URL = "https://nzdweipzckfszczzqtuw.supabase.co"
+SUPABASE_PG_URL = "postgresql://postgres.nzdweipzckfszczzqtuw:AnTXXOl0t1ArQOEU@aws-1-ap-southeast-2.pooler.supabase.com:6543/postgres"
 VITE_SUPABASE_URL = "https://nzdweipzckfszczzqtuw.supabase.co"
-SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im56ZHdlaXB6Y2tmc3pjenpxdHV3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg0MDI4NDQsImV4cCI6MjA5Mzk3ODg0NH0.p9k3-qyRjPuXsHLizUrSRMyS-0yJAatUyjQU9NIIu1U"
 VITE_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im56ZHdlaXB6Y2tmc3pjenpxdHV3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg0MDI4NDQsImV4cCI6MjA5Mzk3ODg0NH0.p9k3-qyRjPuXsHLizUrSRMyS-0yJAatUyjQU9NIIu1U"
+SUPABASE_URL = "https://nzdweipzckfszczzqtuw.supabase.co"
 SUPABASE_STORAGE_BUCKET = "https://nzdweipzckfszczzqtuw.storage.supabase.co/storage/v1/s3"
-SUPABASE_PG_URL = "postgresql://postgres.nzdweipzckfszczzqtuw:%24%23Admin12345%40%24@aws-1-ap-southeast-2.pooler.supabase.com:6543/postgres"
-
-[nix]
-channel = "stable-25_05"
+SUPABASE_SERVICE_ROLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im56ZHdlaXB6Y2tmc3pjenpxdHV3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3ODQwMjg0NCwiZXhwIjoyMDkzOTc4ODQ0fQ.W0uM_UzGfF8Zy4PFQKhz6dKpEVDHS6_k9FtqoM9iGms"
+SUPABASE_DATABASE_URL = "postgresql://postgres.nzdweipzckfszczzqtuw:AnTXXOl0t1ArQOEU@aws-1-ap-southeast-2.pooler.supabase.com:6543/postgres"
+SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im56ZHdlaXB6Y2tmc3pjenpxdHV3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg0MDI4NDQsImV4cCI6MjA5Mzk3ODg0NH0.p9k3-qyRjPuXsHLizUrSRMyS-0yJAatUyjQU9NIIu1U"
+# Tambahkan GA4 tracking
+GA4_PROPERTY_ID = "547502054"
+# WhatsApp Group ID untuk notifikasi (isi dengan ID group Anda)
+WHATSAPP_GROUP_ID = ""
