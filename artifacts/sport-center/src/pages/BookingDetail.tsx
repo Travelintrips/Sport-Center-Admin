@@ -316,7 +316,6 @@ export default function BookingDetail() {
   const hasBankInfo = settings?.bankAccount && settings?.bankName;
 
   const qrisImageUrl = (settings as any)?.qrisImageUrl || DEFAULT_QRIS_IMAGE;
-  const hasQris = Boolean(qrisImageUrl);
 
   // Manual QRIS follows the same production toggle as the admin payment-method
   // list, while still requiring the QR image configured in Settings.
