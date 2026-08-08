@@ -222,10 +222,21 @@ router.post("/payments", async (req, res) => {
     const rawPaymentProvider = req.body.paymentProvider;
     let paymentMethod: "QRIS" | "Transfer Bank" = "Transfer Bank";
     let paymentProvider: "mandiri_direct" | "paylabs" | "unknown" | null = null;
+    const requestedProvider = req.body.paymentProvider;
+    let paymentMethod: "QRIS" | "Transfer Bank" = "Transfer Bank";
+    let paymentProvider: "mandiri_direct" | "unknown" | null = null;
     if (rawPaymentMethod !== undefined) {
       const method = String(rawPaymentMethod).trim().toLowerCase();
       if (method === "qris") {
         paymentMethod = "QRIS";
+        const normalizedProvider = normalizePaymentProvider(requestedProvider);
+        if (!normalizedProvider || normalizedProvider === "paylabs") {
+          res.status(400).json({
+            error: "Pembayaran QRIS manual wajib menyertakan paymentProvider mandiri_direct atau unknown.",
+          });
+          return;
+        }
+        paymentProvider = normalizedProvider;
       } else if (method === "transfer" || method === "bank_transfer" || method === "transfer bank") {
         paymentMethod = "Transfer Bank";
       } else {
@@ -471,6 +482,7 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
   try {
     const id = parseInt(String(req.params.id));
     const { status, paymentMethod, paymentProvider: rawPaymentProvider, notes } = req.body;
+    const { status, paymentMethod, paymentProvider: requestedProvider, notes } = req.body;
     const [before] = await db.select().from(paymentsTable).where(eq(paymentsTable.id, id)).limit(1);
     if (!before) { res.status(404).json({ error: "Not found" }); return; }
     // A repeated confirmation callback must be a no-op. Besides avoiding
@@ -487,6 +499,9 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
       const paidAt = before.paidAt ?? new Date();
       updateData.confirmedAt = before.confirmedAt ?? paidAt;
       updateData.paidAt = paidAt;
+      const canonicalPaidAt = before.paidAt ?? new Date();
+      updateData.confirmedAt = before.confirmedAt ?? canonicalPaidAt;
+      updateData.paidAt = canonicalPaidAt;
     }
     if (paymentMethod !== undefined) {
       if (typeof paymentMethod !== "string" || !paymentMethod.trim()) {
@@ -498,6 +513,23 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
         return;
       }
       updateData.paymentMethod = paymentMethod.trim();
+      if (paymentMethod.trim().toUpperCase() === "QRIS") {
+        const provider = normalizePaymentProvider(requestedProvider ?? before.paymentProvider);
+        if (!provider || provider === "paylabs") {
+          res.status(400).json({
+            error: "Pembayaran QRIS wajib memiliki paymentProvider mandiri_direct atau unknown.",
+          });
+          return;
+        }
+        updateData.paymentProvider = provider;
+      } else if (requestedProvider !== undefined) {
+        const provider = normalizePaymentProvider(requestedProvider);
+        if (!provider) {
+          res.status(400).json({ error: "paymentProvider tidak valid." });
+          return;
+        }
+        updateData.paymentProvider = provider;
+      }
     }
     if (rawPaymentProvider !== undefined) {
       const normalizedProvider = normalizePaymentProvider(rawPaymentProvider);
@@ -575,7 +607,12 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
         });
         // Update juga sibling payment records ke status yang sama
         await db.update(paymentsTable)
-          .set({ status: status as any, ...(status === "confirmed" ? { confirmedAt: new Date() } : {}) })
+         .set({
+           status: status as any,
+           ...(status === "confirmed"
+             ? { confirmedAt: payment.paidAt ?? payment.confirmedAt ?? new Date(), paidAt: payment.paidAt ?? payment.confirmedAt ?? new Date() }
+             : {}),
+         })
           .where(and(eq(paymentsTable.bookingId, sib.id), eq(paymentsTable.status, "pending")));
         // Sync sibling ke BizPortal dengan total_price = 0:
         // Nilai finansial sudah tercatat di booking utama (primary) sehingga

@@ -250,6 +250,16 @@ async function runStartupMigrations() {
        ADD COLUMN IF NOT EXISTS ocr_raw text`,
     `ALTER TABLE sport_center.sport_payments
        ADD COLUMN IF NOT EXISTS ocr_data jsonb`,
+    // Canonical payment provider metadata — nullable for backward compatibility.
+    `DO $$ BEGIN
+       CREATE TYPE sport_center.payment_provider AS ENUM ('mandiri_direct','paylabs','unknown');
+     EXCEPTION WHEN duplicate_object THEN null; END $$`,
+    `ALTER TABLE sport_center.sport_payments
+       ADD COLUMN IF NOT EXISTS payment_provider sport_center.payment_provider,
+       ADD COLUMN IF NOT EXISTS provider_reference text,
+       ADD COLUMN IF NOT EXISTS merchant_trade_no text,
+       ADD COLUMN IF NOT EXISTS provider_trade_no text,
+       ADD COLUMN IF NOT EXISTS paid_at timestamptz`,
     // Enum billing_status untuk bookings
     `DO $$ BEGIN
        CREATE TYPE sport_center.billing_status AS ENUM ('unbilled','billed','paid');

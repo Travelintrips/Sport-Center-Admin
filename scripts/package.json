@@ -15,6 +15,7 @@
     "fix-admin:dev": "tsx ./src/fix-admin-hash.ts",
     "test-ppn": "tsx ./src/test-ppn.ts",
     "fix-ppn-journals": "tsx ./src/fix-ppn-journals.ts",
+    "backfill-payment-providers": "tsx ./src/backfill-payment-providers.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

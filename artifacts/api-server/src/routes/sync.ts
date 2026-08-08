@@ -197,8 +197,12 @@ router.get("/sync/bookings", apiKeyMiddleware, async (req, res) => {
               method: payment.paymentMethod,
               status: payment.status,
               proofUrl: payment.proofUrl,
-              paidAt: payment.confirmedAt,
+              paidAt: payment.paidAt ?? payment.confirmedAt,
               confirmedAt: payment.confirmedAt,
+              paymentProvider: payment.paymentProvider,
+              providerReference: payment.providerReference,
+              merchantTradeNo: payment.merchantTradeNo,
+              providerTradeNo: payment.providerTradeNo,
             }
           : null,
       };
@@ -796,6 +800,11 @@ router.get("/sync/payment-groups", apiKeyMiddleware, async (req, res) => {
           status: payment.status,
           proofUrl: payment.proofUrl,
           confirmedAt: payment.confirmedAt,
+           paidAt: payment.paidAt ?? payment.confirmedAt,
+           paymentProvider: payment.paymentProvider,
+           providerReference: payment.providerReference,
+           merchantTradeNo: payment.merchantTradeNo,
+           providerTradeNo: payment.providerTradeNo,
         } : null,
       };
     });
@@ -827,6 +836,11 @@ router.get("/sync/payment-groups", apiKeyMiddleware, async (req, res) => {
           status: payment.status,
           proofUrl: payment.proofUrl,
           confirmedAt: payment.confirmedAt,
+           paidAt: payment.paidAt ?? payment.confirmedAt,
+           paymentProvider: payment.paymentProvider,
+           providerReference: payment.providerReference,
+           merchantTradeNo: payment.merchantTradeNo,
+           providerTradeNo: payment.providerTradeNo,
         } : null,
       };
     });

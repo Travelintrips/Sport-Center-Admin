@@ -18,7 +18,7 @@
 - [DP multi-payment flow](dp-multi-payment.md) — payments table has payment_type (dp/pelunasan/full_payment); no unique constraint on booking_id; confirm DP → booking stays pending_payment; confirm pelunasan → booking confirmed.
 - [Expenses feature](expenses-feature.md) — sport_expenses table + expense_no_seq + expense_status/category enums; accounting_journals.booking_id made nullable for expense journal entries; /admin/expenses routes.
 
-- [Payment provider audit](payment-provider-audit.md) — Booking payment currently supports manual transfer/QRIS; Paylabs has no active source, route, config, or repository history.
+- [Payment provider audit](payment-provider-audit.md) — QRIS payments now carry canonical provider/reference/timestamp metadata; preserve safe Paylabs callback and terminal-booking guards.
 - [QRIS settlement account](qris-bank-mandiri-mapping.md) — QRIS Sport Center settles to Bank Mandiri CST; never map it to cash or a separate QRIS COA.
 - [Incremental payment accounting](incremental-payment-accounting.md) — Idempotency must be keyed by payment mirror, not booking, because DP and pelunasan are separate payments.
 - [Data Connection Monitor](data-connection-monitor.md) — connectionHealth.ts lib; Drizzle sql.raw() needed for IN queries on information_schema; blocked_schedules (not "schedules") is the table name; system_connection_baselines table in sport_center schema.
