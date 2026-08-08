@@ -502,6 +502,17 @@ async function runStartupMigrations() {
     `CREATE SEQUENCE IF NOT EXISTS sport_center.expense_no_seq`,
     // accounting_journals.booking_id nullable untuk expense journal entries
     `ALTER TABLE sport_center.accounting_journals ALTER COLUMN booking_id DROP NOT NULL`,
+    // A confirmed payment may have only one internal payment journal. Keep this
+    // nullable for historical journals and enforce uniqueness for new payment
+    // journals only.
+    `ALTER TABLE sport_center.accounting_journals
+       ADD COLUMN IF NOT EXISTS payment_id int
+       REFERENCES sport_center.sport_payments(id) ON DELETE SET NULL`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS accounting_journals_payment_confirmed_unique
+       ON sport_center.accounting_journals (payment_id)
+       WHERE payment_id IS NOT NULL
+         AND journal_type = 'payment_confirmed'
+         AND is_reversal = false`,
     // accounting_journal_lines — double-entry lines per jurnal (debit/kredit)
     `CREATE TABLE IF NOT EXISTS sport_center.accounting_journal_lines (
        id          serial PRIMARY KEY,

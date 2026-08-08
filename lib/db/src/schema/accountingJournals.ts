@@ -7,6 +7,7 @@ import { bookingsTable } from "./bookings";
 export const accountingJournalsTable = scSchema.table("accounting_journals", {
   id: serial("id").primaryKey(),
   bookingId: integer("booking_id").references(() => bookingsTable.id, { onDelete: "cascade" }),
+  paymentId: integer("payment_id"),
   orderNumber: text("order_number").notNull(),
   journalType: text("journal_type").notNull(),
   debitAccount: text("debit_account").notNull().default("Kas/Bank"),

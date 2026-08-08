@@ -483,10 +483,32 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
       res.status(400).json({ error: "Tidak ada perubahan pembayaran" });
       return;
     }
-    await db.update(paymentsTable).set(updateData).where(eq(paymentsTable.id, id));
+    let payment: typeof before | undefined;
+    if (status === "confirmed") {
+      // Claim the pending payment in the database. Two concurrent callbacks
+      // can both read "pending", but only one can transition it and continue
+      // to accounting.
+      [payment] = await db
+        .update(paymentsTable)
+        .set(updateData)
+        .where(and(eq(paymentsTable.id, id), eq(paymentsTable.status, "pending")))
+        .returning();
 
-    const [payment] = await db.select().from(paymentsTable).where(eq(paymentsTable.id, id)).limit(1);
-    if (!payment) { res.status(404).json({ error: "Not found" }); return; }
+      if (!payment) {
+        const [current] = await db.select().from(paymentsTable).where(eq(paymentsTable.id, id)).limit(1);
+        if (!current) { res.status(404).json({ error: "Not found" }); return; }
+        if (current.status === "confirmed") {
+          res.json({ ...current, amount: Number(current.amount) });
+          return;
+        }
+        res.status(409).json({ error: "Pembayaran tidak lagi menunggu konfirmasi" });
+        return;
+      }
+    } else {
+      await db.update(paymentsTable).set(updateData).where(eq(paymentsTable.id, id));
+      [payment] = await db.select().from(paymentsTable).where(eq(paymentsTable.id, id)).limit(1);
+      if (!payment) { res.status(404).json({ error: "Not found" }); return; }
+    }
 
     const [booking] = await db.select().from(bookingsTable)
       .where(eq(bookingsTable.id, payment.bookingId)).limit(1);
@@ -893,13 +915,16 @@ router.post("/payments/backfill-group-accounting", adminMiddleware, async (req, 
           ? new Date(confirmedBooking.updatedAt).toISOString().slice(0, 10)
           : new Date().toISOString().slice(0, 10);
 
-        const groupEntries = bookingsInGroup.map(b => ({
+        const groupEntries = bookingsInGroup.map(b => {
+          const extracted = extractBookingDpp(b);
+          return {
           id: b.id,
           orderNumber: b.orderNumber,
-          subtotal: Number(b.totalPrice),
-          ppnAmount: b.ppnAmount != null ? Number(b.ppnAmount) : 0,
+          subtotal: extracted.dpp,
+          ppnAmount: extracted.ppnAmount,
           facilityId: b.facilityId,
-        }));
+          };
+        });
 
         await createPublicAccountingEntryForGroup(groupRef, groupEntries, journalDate);
         processed++;

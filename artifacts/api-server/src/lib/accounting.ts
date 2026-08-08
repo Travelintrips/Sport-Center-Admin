@@ -1,5 +1,5 @@
 import { db, accountingJournalsTable, accountingJournalLinesTable, taxTransactionsTable } from "@workspace/db";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import pg from "pg";
 import { extractBookingDpp } from "./accountingMath";
 
@@ -966,19 +966,17 @@ export async function createJournalEntry(
   const methodLabel = paymentMethod ? ` via ${paymentMethod}` : "";
   const paymentMarker = paymentId != null ? ` [paymentId=${paymentId}]` : "";
 
-  // Internal journals do not have a payment_id column. Keep the payment
-  // identity in the existing notes field so retries are idempotent without a
-  // schema migration, while still allowing DP and pelunasan to have separate
-  // journals for the same booking.
+  // The payment id is the accounting idempotency key. This still allows DP
+  // and pelunasan to have separate journals for the same booking.
   if (paymentId != null) {
     const existing = await db
       .select({ id: accountingJournalsTable.id })
       .from(accountingJournalsTable)
       .where(
         and(
-          eq(accountingJournalsTable.bookingId, bookingId),
+          eq(accountingJournalsTable.paymentId, paymentId),
           eq(accountingJournalsTable.journalType, "payment_confirmed"),
-          sql`${accountingJournalsTable.notes} LIKE ${`%[paymentId=${paymentId}]%`}`,
+          eq(accountingJournalsTable.isReversal, false),
         ),
       )
       .limit(1);
@@ -994,6 +992,7 @@ export async function createJournalEntry(
     .insert(accountingJournalsTable)
     .values({
       bookingId,
+      paymentId: paymentId ?? null,
       orderNumber,
       journalType: "payment_confirmed",
       debitAccount,
