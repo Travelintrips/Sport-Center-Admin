@@ -166,7 +166,6 @@ async function computeStrictQrisCandidate(mutation: BankMutation): Promise<Match
       effective_from AS "effectiveFrom",
       effective_until AS "effectiveUntil"
     FROM sport_center.uat_qris_mdr_configs
-    WHERE active IS NOT FALSE
   `).catch(() => ({ rows: [] as Array<Record<string, unknown>> }));
   const rules = (ruleRows.rows as Array<Record<string, unknown>>)
     .filter((row) => isCanonicalQrisProvider(row.provider) && row.provider !== "unknown")
