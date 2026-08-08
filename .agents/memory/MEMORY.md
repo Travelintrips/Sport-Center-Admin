@@ -42,4 +42,5 @@
 - [Merge recovery validation](merge-recovery.md) — after external merges, sync workspace dependencies and regenerate API clients before validating typecheck/build.
 - [Sport Center payment accounting audit](sport-center-payment-accounting-audit.md) — `posting_status=posted` is insufficient; verify linked public entry, GL lines, and both PPN ledgers by payment ID.
 - [Legacy payment reconciliation](legacy-payment-reconciliation.md) — legacy accounting payments may retain valid entries without sport mirrors; link only unique ref+amount pairs, never delete audit rows.
+- [Payment-accounting integration contract](payment-accounting-integration-contract.md) — cross-project financial events require explicit ownership, immutable IDs, and database-enforced idempotency.
 
