@@ -40,4 +40,5 @@
 - [Paylabs private key persistence](paylabs-private-key-persistence.md) — GET must never return private keys; PATCH only accepts them when explicitly provided + valid; badge+editor UI pattern is the correct fix.
 - [Booking payment method options](booking-payment-method-options.md) — active admin methods drive labels; manual customer payments use canonical QRIS/Transfer Bank values.
 - [Merge recovery validation](merge-recovery.md) — after external merges, sync workspace dependencies and regenerate API clients before validating typecheck/build.
+- [Sport Center payment accounting audit](sport-center-payment-accounting-audit.md) — `posting_status=posted` is insufficient; verify linked public entry, GL lines, and both PPN ledgers by payment ID.
 
