@@ -87,6 +87,260 @@ export async function initBizportalTables(): Promise<void> {
   }
 }
 
+export type LegacyPaymentLinkClassification =
+  | "linked"
+  | "safe_candidate"
+  | "ambiguous"
+  | "unresolved";
+
+export type LegacySportCenterPaymentAuditRow = {
+  accountingPaymentId: number;
+  paymentNumber: string | null;
+  ref: string | null;
+  amount: number;
+  entryId: number | null;
+  entryExists: boolean;
+  entryStatus: string | null;
+  entrySource: string | null;
+  linkedSportPaymentId: number | null;
+  candidateSportPaymentIds: number[];
+  refMatchCount: number;
+  exactMatchCount: number;
+  availableExactMatchCount: number;
+  classification: LegacyPaymentLinkClassification;
+};
+
+export type LegacySportCenterPaymentAudit = {
+  configured: boolean;
+  scannedAt: string;
+  totalRows: number;
+  totalAmount: number;
+  byClassification: Record<LegacyPaymentLinkClassification, { rows: number; amount: number }>;
+  safeCandidateCount: number;
+  safeCandidateAmount: number;
+  exceptions: LegacySportCenterPaymentAuditRow[];
+};
+
+function classifyLegacyPaymentLink(row: {
+  linkedSportPaymentId: number | null;
+  refMatchCount: number;
+  exactMatchCount: number;
+  availableExactMatchCount: number;
+}): LegacyPaymentLinkClassification {
+  if (row.linkedSportPaymentId !== null) return "linked";
+  if (row.availableExactMatchCount === 1 && row.exactMatchCount === 1) return "safe_candidate";
+  if (row.exactMatchCount > 0 || row.refMatchCount > 0) return "ambiguous";
+  return "unresolved";
+}
+
+/**
+ * Audit the old public.accounting_payments stream without deleting or voiding
+ * anything. The old table has no reliable reverse FK to public.sport_payments,
+ * so only one-to-one ref+amount matches are eligible for linking.
+ */
+export async function auditLegacySportCenterPayments(): Promise<LegacySportCenterPaymentAudit> {
+  const pool = getProdPool();
+  const emptyByClassification = (): Record<LegacyPaymentLinkClassification, { rows: number; amount: number }> => ({
+    linked: { rows: 0, amount: 0 },
+    safe_candidate: { rows: 0, amount: 0 },
+    ambiguous: { rows: 0, amount: 0 },
+    unresolved: { rows: 0, amount: 0 },
+  });
+  const empty: LegacySportCenterPaymentAudit = {
+    configured: Boolean(pool),
+    scannedAt: new Date().toISOString(),
+    totalRows: 0,
+    totalAmount: 0,
+    byClassification: emptyByClassification(),
+    safeCandidateCount: 0,
+    safeCandidateAmount: 0,
+    exceptions: [],
+  };
+  if (!pool) return empty;
+
+  const { rows } = await pool.query(`
+    SELECT
+      ap.id AS accounting_payment_id,
+      ap.payment_number,
+      ap.ref,
+      ap.amount,
+      ap.entry_id,
+      ae.id AS entry_exists_id,
+      ae.status::text AS entry_status,
+      ae.source::text AS entry_source,
+      linked.id AS linked_sport_payment_id,
+      COALESCE(ref_matches.ref_match_count, 0)::int AS ref_match_count,
+      COALESCE(exact_matches.exact_match_count, 0)::int AS exact_match_count,
+      COALESCE(available_exact_matches.available_exact_match_count, 0)::int
+        AS available_exact_match_count,
+      COALESCE(exact_matches.candidate_ids, ARRAY[]::int[]) AS candidate_sport_payment_ids
+    FROM public.accounting_payments ap
+    LEFT JOIN public.accounting_entries ae ON ae.id = ap.entry_id
+    LEFT JOIN LATERAL (
+      SELECT sp.id
+      FROM public.sport_payments sp
+      WHERE sp.accounting_payment_id = ap.id
+      ORDER BY sp.id
+      LIMIT 1
+    ) linked ON true
+    LEFT JOIN LATERAL (
+      SELECT
+        COUNT(*)::int AS ref_match_count
+      FROM public.sport_payments sp
+      WHERE ap.ref IS NOT NULL
+        AND sp.payment_number = ap.ref
+    ) ref_matches ON true
+    LEFT JOIN LATERAL (
+      SELECT
+        COUNT(*)::int AS exact_match_count,
+        ARRAY_AGG(sp.id ORDER BY sp.id)::int[] AS candidate_ids
+      FROM public.sport_payments sp
+      WHERE ap.ref IS NOT NULL
+        AND sp.payment_number = ap.ref
+        AND sp.amount = ap.amount
+    ) exact_matches ON true
+    LEFT JOIN LATERAL (
+      SELECT COUNT(*)::int AS available_exact_match_count
+      FROM public.sport_payments sp
+      WHERE ap.ref IS NOT NULL
+        AND sp.payment_number = ap.ref
+        AND sp.amount = ap.amount
+        AND sp.accounting_payment_id IS NULL
+    ) available_exact_matches ON true
+    WHERE ap.source_type = 'sport_center'
+    ORDER BY ap.id
+  `);
+
+  const auditRows: LegacySportCenterPaymentAuditRow[] = rows.map((row: any) => {
+    const normalized = {
+      linkedSportPaymentId: row.linked_sport_payment_id == null ? null : Number(row.linked_sport_payment_id),
+      refMatchCount: Number(row.ref_match_count ?? 0),
+      exactMatchCount: Number(row.exact_match_count ?? 0),
+      availableExactMatchCount: Number(row.available_exact_match_count ?? 0),
+    };
+    return {
+      accountingPaymentId: Number(row.accounting_payment_id),
+      paymentNumber: row.payment_number == null ? null : String(row.payment_number),
+      ref: row.ref == null ? null : String(row.ref),
+      amount: Number(row.amount ?? 0),
+      entryId: row.entry_id == null ? null : Number(row.entry_id),
+      entryExists: row.entry_exists_id != null,
+      entryStatus: row.entry_status == null ? null : String(row.entry_status),
+      entrySource: row.entry_source == null ? null : String(row.entry_source),
+      linkedSportPaymentId: normalized.linkedSportPaymentId,
+      candidateSportPaymentIds: Array.isArray(row.candidate_sport_payment_ids)
+        ? row.candidate_sport_payment_ids.map(Number)
+        : [],
+      refMatchCount: normalized.refMatchCount,
+      exactMatchCount: normalized.exactMatchCount,
+      availableExactMatchCount: normalized.availableExactMatchCount,
+      classification: classifyLegacyPaymentLink(normalized),
+    };
+  });
+
+  const byClassification = emptyByClassification();
+  for (const row of auditRows) {
+    const bucket = byClassification[row.classification];
+    bucket.rows++;
+    bucket.amount += row.amount;
+  }
+
+  return {
+    configured: true,
+    scannedAt: new Date().toISOString(),
+    totalRows: auditRows.length,
+    totalAmount: auditRows.reduce((sum, row) => sum + row.amount, 0),
+    byClassification,
+    safeCandidateCount: byClassification.safe_candidate.rows,
+    safeCandidateAmount: byClassification.safe_candidate.amount,
+    // Keep the endpoint useful without exposing the entire historical table.
+    exceptions: auditRows
+      .filter((row) => row.classification !== "linked")
+      .slice(0, 100),
+  };
+}
+
+/**
+ * Link only deterministic legacy rows. This is intentionally an UPDATE of a
+ * nullable reference, never a DELETE/void/reversal of either audit stream.
+ * Callers must opt in with apply=true; dry-run is the default.
+ */
+export async function reconcileLegacySportCenterPaymentLinks(options?: {
+  apply?: boolean;
+}): Promise<
+  LegacySportCenterPaymentAudit & {
+    applied: boolean;
+    linkedRows: number;
+    appliedCandidateCount: number;
+    appliedCandidateAmount: number;
+  }
+> {
+  const audit = await auditLegacySportCenterPayments();
+  const apply = options?.apply === true;
+  const pool = getProdPool();
+  if (!apply || !pool || audit.safeCandidateCount === 0) {
+    return {
+      ...audit,
+      applied: false,
+      linkedRows: 0,
+      appliedCandidateCount: 0,
+      appliedCandidateAmount: 0,
+    };
+  }
+
+  const appliedCandidateCount = audit.safeCandidateCount;
+  const appliedCandidateAmount = audit.safeCandidateAmount;
+  const client = await pool.connect();
+  let linkedRows = 0;
+  try {
+    await client.query("BEGIN");
+    const updateResult = await client.query(`
+      UPDATE public.sport_payments sp
+         SET accounting_payment_id = ap.id,
+             updated_at = NOW()
+        FROM public.accounting_payments ap
+       WHERE ap.source_type = 'sport_center'
+         AND ap.ref IS NOT NULL
+         AND sp.accounting_payment_id IS NULL
+         AND sp.payment_number = ap.ref
+         AND sp.amount = ap.amount
+         AND NOT EXISTS (
+           SELECT 1
+           FROM public.sport_payments already_linked
+           WHERE already_linked.accounting_payment_id = ap.id
+         )
+         AND (
+           SELECT COUNT(*)
+           FROM public.sport_payments same_ref
+           WHERE same_ref.payment_number = ap.ref
+         ) = 1
+         AND (
+           SELECT COUNT(*)
+           FROM public.sport_payments same_exact
+           WHERE same_exact.payment_number = ap.ref
+             AND same_exact.amount = ap.amount
+             AND same_exact.accounting_payment_id IS NULL
+         ) = 1
+    `);
+    linkedRows = updateResult.rowCount ?? 0;
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+
+  const after = await auditLegacySportCenterPayments();
+  return {
+    ...after,
+    applied: true,
+    linkedRows,
+    appliedCandidateCount,
+    appliedCandidateAmount,
+  };
+}
+
 // In-memory last sync tracking for diagnostic endpoint
 export const lastSyncState = {
   booking:    { at: null as string | null, success: null as boolean | null, error: null as string | null },

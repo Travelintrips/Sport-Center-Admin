@@ -293,6 +293,18 @@ export async function postSportCenterBookingPayment(
     }
 
     if (mirroredPayment.posting_status === "posted" && mirroredPayment.entry_id) {
+      const postedEntry = await client.query(
+        `SELECT id
+           FROM public.accounting_entries
+          WHERE id = $1
+            AND status = 'posted'`,
+        [mirroredPayment.entry_id],
+      );
+      if (postedEntry.rows.length !== 1) {
+        throw new Error(
+          `[accounting] Payment ${input.paymentNumber} memiliki entry_id ${mirroredPayment.entry_id}, tetapi entry tidak ditemukan atau belum posted.`,
+        );
+      }
       await client.query("COMMIT");
       return {
         entryId: Number(mirroredPayment.entry_id),
@@ -453,6 +465,24 @@ export async function postSportCenterBookingPayment(
         WHERE id = $1`,
       [mirroredPayment.id, entryId],
     );
+    const invariantCheck = await client.query(
+      `SELECT sp.entry_id, sp.posting_status, ae.status::text AS entry_status
+         FROM public.sport_payments sp
+         LEFT JOIN public.accounting_entries ae ON ae.id = sp.entry_id
+        WHERE sp.id = $1`,
+      [mirroredPayment.id],
+    );
+    const persisted = invariantCheck.rows[0];
+    if (
+      !persisted ||
+      Number(persisted.entry_id) !== entryId ||
+      persisted.posting_status !== "posted" ||
+      persisted.entry_status !== "posted"
+    ) {
+      throw new Error(
+        `[accounting] Invariant payment mirror gagal untuk ${input.paymentNumber}: entry_id/posting_status tidak konsisten.`,
+      );
+    }
     await client.query("COMMIT");
 
     console.info(`[accounting] ✓ Sport Center payment posted: ${input.paymentNumber} → entry ${entryId}`);

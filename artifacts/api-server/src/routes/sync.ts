@@ -3,8 +3,17 @@ import { db, bookingsTable, facilitiesTable, paymentsTable, usersTable, gymMembe
 
 import { desc, gte, and, lte, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { extractBookingDpp } from "../lib/accounting";
-import { adminMiddleware } from "../lib/auth";
-import { syncBookingToBizportal, syncMembershipToBizportal, bizportalSyncConfigured, bulkPushPaymentsToBizportal, type BulkPaymentPushResult } from "../lib/bizportalSync";
+import { adminMiddleware, financeMiddleware } from "../lib/auth";
+import { logAudit } from "../lib/auditLog";
+import {
+  syncBookingToBizportal,
+  syncMembershipToBizportal,
+  bizportalSyncConfigured,
+  bulkPushPaymentsToBizportal,
+  auditLegacySportCenterPayments,
+  reconcileLegacySportCenterPaymentLinks,
+  type BulkPaymentPushResult,
+} from "../lib/bizportalSync";
 
 const router = Router();
 
@@ -643,6 +652,58 @@ router.get("/admin/sync-bizportal-payments/pending", adminMiddleware, async (_re
     res.json({ pending: parseInt(rows[0]?.pending ?? "0", 10), configured: true });
   } catch (err: any) {
     res.json({ pending: 0, configured: true, error: err.message });
+  }
+});
+
+/**
+ * GET /api/admin/audit-bizportal-payment-links
+ * Audit non-destruktif untuk stream legacy public.accounting_payments.
+ * Tidak menghapus accounting_payments, accounting_entries, atau sport_payments.
+ */
+router.get("/admin/audit-bizportal-payment-links", financeMiddleware, async (_req, res) => {
+  try {
+    const audit = await auditLegacySportCenterPayments();
+    res.json({
+      success: true,
+      mode: "dry_run",
+      policy: "Only unique ref+amount links are eligible; no rows are deleted or voided.",
+      ...audit,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message ?? "Legacy payment audit failed" });
+  }
+});
+
+/**
+ * POST /api/admin/reconcile-bizportal-payment-links
+ * Dry-run secara default. Kirim { "apply": true } untuk mengisi hanya
+ * public.sport_payments.accounting_payment_id pada pasangan deterministik.
+ */
+router.post("/admin/reconcile-bizportal-payment-links", financeMiddleware, async (req, res) => {
+  const apply = req.body?.apply === true;
+  try {
+    const result = await reconcileLegacySportCenterPaymentLinks({ apply });
+    if (apply && result.linkedRows > 0) {
+      await logAudit({
+        action: "RECONCILE_LEGACY_SPORT_CENTER_PAYMENT_LINKS",
+        entity: "sport_payments",
+        after: {
+          linkedRows: result.linkedRows,
+          appliedCandidateCount: result.appliedCandidateCount,
+          appliedCandidateAmount: result.appliedCandidateAmount,
+          appliedAt: new Date().toISOString(),
+          policy: "No payment, accounting entry, or audit row deleted/voided.",
+        },
+      });
+    }
+    res.json({
+      success: true,
+      mode: result.applied ? "apply_safe_links" : "dry_run",
+      policy: "Only unique ref+amount links are eligible; no rows are deleted or voided.",
+      ...result,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message ?? "Legacy payment reconciliation failed" });
   }
 });
 
