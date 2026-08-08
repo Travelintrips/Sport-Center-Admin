@@ -25,6 +25,11 @@ description: How DP + pelunasan settlement works — multiple payments per booki
 - 409 if pending dp payment already exists for same booking
 - 409 if pending pelunasan payment already exists
 
+## Audit guardrails
+- Never trust client-supplied `amount` or `paymentType`; derive the expected stage and amount on the server.
+- DP/payment submission and DP amount mutation must prove booking ownership or use an authenticated admin route.
+- Payment confirmation and journal posting must be state-checked and idempotent; one booking must not receive multiple original journals.
+
 ## Status transitions on rejection
 - Reject dp or pelunasan: booking → `pending_payment` (customer re-uploads)
 
