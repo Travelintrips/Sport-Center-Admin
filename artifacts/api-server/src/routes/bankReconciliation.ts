@@ -133,7 +133,7 @@ async function propagateApproval(
     if (repBooking?.groupRef) {
       // Ambil semua booking dalam grup yang masih bisa dikonfirmasi
       const { rows: groupRows } = await db.execute(sql`
-        SELECT id FROM sport_center.bookings
+        SELECT id FROM sport_center.sport_bookings
         WHERE group_ref = ${repBooking.groupRef}
           AND status = ANY(ARRAY['pending_payment','waiting_confirmation','waiting_admin_approval','paid'])
       `);
@@ -730,20 +730,20 @@ router.get("/bank-reconciliation/matches/:mutationId", adminMiddleware, async (r
         bgp.customer_phone   AS "groupCustomerPhone"
       FROM sport_center.bank_reconciliation_matches m
       -- Payment join
-      LEFT JOIN sport_center.payments p
+      LEFT JOIN sport_center.sport_payments p
         ON p.id = m.candidate_id AND m.candidate_type = 'payment'
       -- Booking via payment
-      LEFT JOIN sport_center.bookings bp
+      LEFT JOIN sport_center.sport_bookings bp
         ON bp.id = p.booking_id AND m.candidate_type = 'payment'
-      LEFT JOIN sport_center.facilities fp
+      LEFT JOIN sport_center.sport_facilities fp
         ON fp.id = bp.facility_id AND m.candidate_type = 'payment'
       -- Direct order/booking join
-      LEFT JOIN sport_center.bookings bo
+      LEFT JOIN sport_center.sport_bookings bo
         ON bo.id = m.candidate_id AND m.candidate_type = 'order'
-      LEFT JOIN sport_center.facilities fo
+      LEFT JOIN sport_center.sport_facilities fo
         ON fo.id = bo.facility_id AND m.candidate_type = 'order'
       -- Group payment representative booking join
-      LEFT JOIN sport_center.bookings bgp
+      LEFT JOIN sport_center.sport_bookings bgp
         ON bgp.id = m.candidate_id AND m.candidate_type = 'group_payment'
       WHERE m.mutation_id = ${mutationId}
       ORDER BY m.match_score DESC
@@ -791,8 +791,8 @@ router.get("/bank-reconciliation/matches/:mutationId", adminMiddleware, async (r
           b.status,
           COALESCE(b.grand_total, b.total_price)::bigint AS "amount",
           f.name         AS "facilityName"
-        FROM sport_center.bookings b
-        LEFT JOIN sport_center.facilities f ON f.id = b.facility_id
+        FROM sport_center.sport_bookings b
+        LEFT JOIN sport_center.sport_facilities f ON f.id = b.facility_id
         WHERE b.group_ref = ANY(ARRAY[${sql.raw(refLiteral)}]::text[])
         ORDER BY b.booking_date, b.start_time
       `);
@@ -1273,7 +1273,7 @@ router.post("/bank-reconciliation/scan-ocr", adminMiddleware, async (req, res) =
 
     if (paymentId) {
       await db.execute(sql`
-        UPDATE sport_center.payments
+        UPDATE sport_center.sport_payments
         SET ocr_name = ${ocrName}, ocr_amount = ${ocrAmount}, ocr_date = ${ocrDate}, ocr_raw = ${rawText.slice(0, 2000)}
         WHERE id = ${paymentId}
       `);

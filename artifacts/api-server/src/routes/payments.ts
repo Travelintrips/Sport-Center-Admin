@@ -211,7 +211,6 @@ router.get("/payments/grouped", adminMiddleware, async (req, res) => {
 
 router.post("/payments", async (req, res) => {
   try {
-    const { bookingId, amount, proofUrl, paymentMethod, notes } = req.body;
     const { bookingId, amount, proofUrl, notes } = req.body;
     const rawPaymentMethod = req.body.paymentMethod;
     let paymentMethod: "QRIS" | "Transfer Bank" = "Transfer Bank";
@@ -335,8 +334,6 @@ router.post("/payments", async (req, res) => {
         bookingId: Number(bookingId),
         amount: String(amount),
         proofUrl,
-
-        paymentMethod: paymentMethod || "Transfer Bank",
 
         paymentMethod,
 

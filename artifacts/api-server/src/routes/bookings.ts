@@ -146,10 +146,7 @@ async function getBookingWithPayment(id: number) {
     payment: payment ? { ...payment, amount: Number(payment.amount) } : null,
     payments: allPayments.map((p) => ({ ...p, amount: Number(p.amount) })),
     remainingAmount: (() => {
-
-      const total =
-        groupInfo?.groupTotalPayment ??
-        (booking.grandTotal != null ? Number(booking.grandTotal) : Number(booking.totalPrice));
+      const total = payableTotal;
 
       const confirmedDp = allPayments
         .filter((p) => p.paymentType === "dp" && p.status === "confirmed")

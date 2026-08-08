@@ -223,7 +223,7 @@ export async function computeMatchesForMutation(mutation: BankMutation): Promise
       p.ocr_amount AS "ocrAmount",
       p.ocr_date AS "ocrDate",
       p.ocr_raw AS "ocrRaw"
-    FROM sport_center.payments p
+    FROM sport_center.sport_payments p
   `);
 
   type PaymentRow = {
