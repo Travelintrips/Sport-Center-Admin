@@ -4,6 +4,13 @@ description: Dev workflow uses Helium DATABASE_URL (not Supabase); SUPABASE_DATA
 ---
 
 ## The Rule
+
+The development API now uses the development-scoped `SUPABASE_DATABASE_URL` secret when it is present; otherwise it falls back to `DATABASE_URL` (Replit's local heliumdb). Shell/bash commands may not expose the secret even when the workflow does.
+
+**Why:** Replit environment scopes and workflow secret injection can differ from shell subprocess environments. The runtime selection is defined in `lib/db/src/index.ts`, so verify the running API rather than assuming the shell's variables reflect the workflow.
+
+**How to apply:** Keep Supabase runtime traffic on the pooler connection, and apply schema changes with a direct `pg` client using the session pooler (port 5432). If development intentionally uses local PG, apply local migrations manually — do NOT rely on `drizzle-kit push`.
+
 The API server workflow should use `DATABASE_URL` (Replit Helium DB) in development. If `SUPABASE_DATABASE_URL` is set as a Replit **env var** (development scope), it takes priority in `lib/db/src/index.ts` and will fail if credentials are wrong → pg-pool circuit-breaker trips → ALL DB queries fail → WA bot breaks.
 
 **Why:** `lib/db/src/index.ts` priority: `SUPABASE_DATABASE_URL || PROD_DATABASE_URL || DATABASE_URL || SUPABASE_DATABASE_URL_DEV`. If SUPABASE_DATABASE_URL is set in Replit development env vars with expired/wrong credentials, circuit-breaker message is: `(ECIRCUITBREAKER) too many authentication failures, new connections are temporarily blocked`.
@@ -12,6 +19,7 @@ The API server workflow should use `DATABASE_URL` (Replit Helium DB) in developm
 1. Check Replit dev env vars with `viewEnvVars({ type: "env", environment: "development" })`
 2. If `SUPABASE_DATABASE_URL` is present in dev env: `deleteEnvVars({ keys: ["SUPABASE_DATABASE_URL"], environment: "development" })`
 3. Restart API server — it will now use `DATABASE_URL` (Helium)
+
 
 ## When Helium DB is empty (no sport_center schema)
 

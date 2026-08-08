@@ -334,6 +334,9 @@ router.post("/payments", async (req, res) => {
         bookingId: Number(bookingId),
         amount: String(amount),
         proofUrl,
+
+
+
         paymentMethod,
         notes,
         paymentType: paymentType as "dp" | "pelunasan" | "full_payment",
