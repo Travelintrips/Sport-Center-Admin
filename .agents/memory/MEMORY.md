@@ -20,6 +20,7 @@
 
 - [Payment provider audit](payment-provider-audit.md) — Booking payment currently supports manual transfer/QRIS; Paylabs has no active source, route, config, or repository history.
 - [QRIS settlement account](qris-bank-mandiri-mapping.md) — QRIS Sport Center settles to Bank Mandiri CST; never map it to cash or a separate QRIS COA.
+- [Incremental payment accounting](incremental-payment-accounting.md) — Idempotency must be keyed by payment mirror, not booking, because DP and pelunasan are separate payments.
 - [Data Connection Monitor](data-connection-monitor.md) — connectionHealth.ts lib; Drizzle sql.raw() needed for IN queries on information_schema; blocked_schedules (not "schedules") is the table name; system_connection_baselines table in sport_center schema.
 - [Prod schema sync approach](prod-schema-sync.md) — drizzle-kit push hangs on shared Supabase (150+ tables); use targeted ALTER TABLE script via scripts/src/ instead.
 

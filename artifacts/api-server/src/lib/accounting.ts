@@ -35,7 +35,7 @@ function normalizePublicPaymentMethod(paymentMethod?: string): PublicPaymentMeth
 }
 
 async function getPublicPaymentAccount(
-  pool: pg.Pool,
+  pool: pg.Pool | pg.PoolClient,
   paymentMethod?: string,
 ): Promise<{ id: number; code: string; name: string; label: PublicPaymentMethod }> {
   const label = normalizePublicPaymentMethod(paymentMethod);
@@ -128,7 +128,7 @@ async function getPublicIds() {
   return _publicIds;
 }
 
-async function nextPublicEntryNumber(pool: pg.Pool, year: number): Promise<string> {
+async function nextPublicEntryNumber(pool: pg.Pool | pg.PoolClient, year: number): Promise<string> {
   const result = await pool.query(
     `SELECT COALESCE(MAX(
       NULLIF(REGEXP_REPLACE(entry_number, '^SC-BNK/[0-9]+/', ''), '')::integer
@@ -241,6 +241,254 @@ export async function createPublicAccountingEntry(
   }
 
   console.info(`[accounting] ✓ Public accounting entry created: ${entryNumber} (${orderNumber})`);
+}
+
+export type SportCenterBookingPaymentPosting = {
+  paymentNumber: string;
+  bookingId: number;
+  orderNumber: string;
+  amount: number;
+  paymentMethod?: string | null;
+  paymentType?: string | null;
+  paidAt?: Date | string | null;
+  ppnRate?: number | null;
+};
+
+export type SportCenterBookingPaymentPostingResult = {
+  entryId: number;
+  postingStatus: "posted";
+  alreadyPosted: boolean;
+};
+
+/**
+ * Post one mirrored Sport Center payment to public accounting.
+ *
+ * This is deliberately keyed by the mirrored payment number, not only by
+ * booking/order number. A booking may have DP and pelunasan payments, and
+ * each payment must produce at most one accounting entry.
+ */
+export async function postSportCenterBookingPayment(
+  input: SportCenterBookingPaymentPosting,
+): Promise<SportCenterBookingPaymentPostingResult> {
+  const pool = getPublicPool();
+  if (!pool) {
+    throw new Error("[accounting] Supabase URL tidak tersedia; payment belum diposting.");
+  }
+
+  const correlationId = `sc_payment_${input.paymentNumber}`;
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+    const paymentResult = await client.query(
+      `SELECT id, entry_id, posting_status
+         FROM public.sport_payments
+        WHERE payment_number = $1
+        FOR UPDATE`,
+      [input.paymentNumber],
+    );
+    const mirroredPayment = paymentResult.rows[0];
+    if (!mirroredPayment) {
+      throw new Error(`[accounting] Mirrored payment ${input.paymentNumber} tidak ditemukan.`);
+    }
+
+    if (mirroredPayment.posting_status === "posted" && mirroredPayment.entry_id) {
+      await client.query("COMMIT");
+      return {
+        entryId: Number(mirroredPayment.entry_id),
+        postingStatus: "posted",
+        alreadyPosted: true,
+      };
+    }
+
+    const existingEntry = await client.query(
+      `SELECT id, status
+         FROM public.accounting_entries
+        WHERE correlation_id = $1
+        LIMIT 1`,
+      [correlationId],
+    );
+    if (existingEntry.rows.length > 0) {
+      const existing = existingEntry.rows[0];
+      if (existing.status !== "posted") {
+        throw new Error(
+          `[accounting] Entry ${existing.id} untuk ${input.paymentNumber} belum posted (status=${existing.status}).`,
+        );
+      }
+
+      await client.query(
+        `UPDATE public.sport_payments
+            SET entry_id = $2, posting_status = 'posted', posting_error = NULL, updated_at = NOW()
+          WHERE id = $1`,
+        [mirroredPayment.id, Number(existing.id)],
+      );
+      await client.query("COMMIT");
+      return {
+        entryId: Number(existing.id),
+        postingStatus: "posted",
+        alreadyPosted: true,
+      };
+    }
+
+    const grossAmount = Math.round(Number(input.amount));
+    if (!Number.isFinite(grossAmount) || grossAmount <= 0) {
+      throw new Error(`[accounting] Nominal payment ${input.paymentNumber} tidak valid.`);
+    }
+
+    const rate = Math.max(0, Number(input.ppnRate ?? 0));
+    const ppnAmount = rate > 0
+      ? Math.round((grossAmount * rate) / (100 + rate))
+      : 0;
+    const dpp = grossAmount - ppnAmount;
+    const journalDate = input.paidAt
+      ? new Date(input.paidAt).toISOString().slice(0, 10)
+      : new Date().toISOString().slice(0, 10);
+    const year = new Date(journalDate).getFullYear();
+    const entryNumber = await nextPublicEntryNumber(client, year);
+    const ids = await getPublicIdsForQuery(client);
+    const paymentAccount = await getPublicPaymentAccount(client, input.paymentMethod ?? undefined);
+    const methodLabel = normalizePublicPaymentMethod(input.paymentMethod ?? undefined);
+    const hasPpn = ppnAmount > 0;
+
+    const entryResult = await client.query(
+      `INSERT INTO public.accounting_entries
+        (entry_number, journal_id, date, ref, description, status, source, source_id,
+         total_debit, total_credit, company_id, correlation_id, governance_flags)
+       VALUES ($1,$2,$3::date,$4,$5,'draft','sport_center_booking',$6,$7,$7,$8,$9,'{}')
+       RETURNING id`,
+      [
+        entryNumber,
+        ids.journalId,
+        journalDate,
+        input.orderNumber,
+        `Pembayaran Sport Center ${input.orderNumber} (${input.paymentNumber}, ${input.paymentType ?? "booking"}) via ${methodLabel}`,
+        input.bookingId,
+        grossAmount,
+        COMPANY_ID,
+        correlationId,
+      ],
+    );
+    const entryId = Number(entryResult.rows[0]?.id);
+    if (!entryId) throw new Error(`[accounting] Entry gagal dibuat untuk ${input.paymentNumber}.`);
+
+    if (hasPpn) {
+      await client.query(
+        `INSERT INTO public.accounting_entry_lines
+          (entry_id, account_id, description, debit, credit) VALUES
+          ($1,$2,$3,$4,0),
+          ($1,$5,$6,0,$7),
+          ($1,$8,$9,0,$10)`,
+        [
+          entryId,
+          paymentAccount.id,
+          `Penerimaan ${input.paymentNumber} via ${methodLabel}`,
+          grossAmount,
+          ids.coaPendapatan,
+          `Pendapatan booking ${input.orderNumber}`,
+          dpp,
+          ids.coaPpnKeluaran,
+          `PPN Keluaran booking ${input.orderNumber}`,
+          ppnAmount,
+        ],
+      );
+    } else {
+      await client.query(
+        `INSERT INTO public.accounting_entry_lines
+          (entry_id, account_id, description, debit, credit) VALUES
+          ($1,$2,$3,$4,0),
+          ($1,$5,$6,0,$4)`,
+        [
+          entryId,
+          paymentAccount.id,
+          `Penerimaan ${input.paymentNumber} via ${methodLabel}`,
+          grossAmount,
+          ids.coaPendapatan,
+          `Pendapatan booking ${input.orderNumber}`,
+        ],
+      );
+    }
+
+    await client.query(
+      `UPDATE public.accounting_entries SET status = 'posted' WHERE id = $1`,
+      [entryId],
+    );
+    if (hasPpn) {
+      await client.query(
+        `INSERT INTO sport_center.tax_transactions
+          (reference_type, reference_id, reference_number, tax_code, tax_rate,
+           dpp, dpp_nilai_lain, grand_total, tax_amount, transaction_date,
+           status, transaction_type, created_at)
+         SELECT 'sport_center_payment', $1, $2, 'PPN_OUT_11', $3,
+                $4, $5, $6, $7, $8, 'posted', 'original', NOW()
+          WHERE NOT EXISTS (
+            SELECT 1
+              FROM sport_center.tax_transactions
+             WHERE reference_type = 'sport_center_payment'
+               AND reference_id = $1
+               AND transaction_type = 'original'
+          )`,
+        [
+          mirroredPayment.id,
+          input.paymentNumber,
+          String(rate),
+          String(dpp),
+          String(Math.round((dpp * 11) / 12 * 100) / 100),
+          String(grossAmount),
+          String(ppnAmount),
+          journalDate,
+        ],
+      );
+      await client.query(
+        `INSERT INTO public.gl_tax_lines
+          (company_id, accounting_entry_id, tax_type, rate,
+           base_amount, tax_amount, direction, period, entity_type, entity_id,
+           is_reported, created_at)
+         VALUES ($1,$2,'PPN_OUT',$3,$4,$5,'out',$6,'booking',$7,false,NOW())`,
+        [COMPANY_ID, entryId, rate, dpp, ppnAmount, journalDate.slice(0, 7), input.orderNumber],
+      );
+    }
+    await client.query(
+      `UPDATE public.sport_payments
+          SET entry_id = $2, posting_status = 'posted', posting_error = NULL, updated_at = NOW()
+        WHERE id = $1`,
+      [mirroredPayment.id, entryId],
+    );
+    await client.query("COMMIT");
+
+    console.info(`[accounting] ✓ Sport Center payment posted: ${input.paymentNumber} → entry ${entryId}`);
+    return { entryId, postingStatus: "posted", alreadyPosted: false };
+  } catch (err: any) {
+    await client.query("ROLLBACK").catch(() => {});
+    const message = String(err?.message ?? err).slice(0, 1000);
+    await pool.query(
+      `UPDATE public.sport_payments
+          SET posting_status = 'failed', posting_error = $2, updated_at = NOW()
+        WHERE payment_number = $1`,
+      [input.paymentNumber, message],
+    ).catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+async function getPublicIdsForQuery(pool: pg.Pool | pg.PoolClient) {
+  const [journal, kas, pendapatan, ppn] = await Promise.all([
+    pool.query(`SELECT id FROM public.accounting_journals WHERE code = 'BNK-CST' LIMIT 1`),
+    pool.query(`SELECT id FROM public.chart_of_accounts WHERE code = '1-1020-CST' AND is_active = true LIMIT 1`),
+    pool.query(`SELECT id FROM public.chart_of_accounts WHERE code = '4-1017-CST' AND is_active = true LIMIT 1`),
+    pool.query(`SELECT id FROM public.chart_of_accounts WHERE code = '2-1020-CST' AND is_active = true LIMIT 1`),
+  ]);
+  const journalId = Number(journal.rows[0]?.id);
+  const coaKas = Number(kas.rows[0]?.id);
+  const coaPendapatan = Number(pendapatan.rows[0]?.id);
+  const coaPpnKeluaran = Number(ppn.rows[0]?.id);
+  if (!journalId || !coaKas || !coaPendapatan || !coaPpnKeluaran) {
+    throw new Error(
+      `[accounting] Public COA/journal lookup gagal untuk payment posting: journalId=${journalId} coaKas=${coaKas} coaPendapatan=${coaPendapatan} coaPpnKeluaran=${coaPpnKeluaran}.`,
+    );
+  }
+  return { journalId, coaKas, coaPendapatan, coaPpnKeluaran };
 }
 
 

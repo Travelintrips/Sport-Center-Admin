@@ -1,5 +1,6 @@
 import pg from "pg";
 import type { Booking, GymMembership, CompanyInvoice } from "@workspace/db";
+import { postSportCenterBookingPayment } from "./accounting";
 
 const { Pool } = pg;
 
@@ -74,6 +75,11 @@ export async function initBizportalTables(): Promise<void> {
         created_at        TIMESTAMPTZ DEFAULT NOW(),
         updated_at        TIMESTAMPTZ DEFAULT NOW()
       );
+      ALTER TABLE public.sport_payments
+        ADD COLUMN IF NOT EXISTS entry_id BIGINT,
+        ADD COLUMN IF NOT EXISTS posting_error TEXT;
+      ALTER TABLE public.sport_payments
+        ALTER COLUMN posting_status SET DEFAULT 'unposted';
     `);
     console.info("[bizportalSync] ✓ BizPortal tables ensured (schema: sport_center)");
   } catch (err: any) {
@@ -608,10 +614,39 @@ export async function bulkPushPaymentsToBizportal(): Promise<BulkPaymentPushResu
           ]
         );
 
-        if ((rowCount ?? 0) === 0) {
-          // Sudah ada sebelumnya (ON CONFLICT DO NOTHING)
+        const mirroredPaymentResult = await pool.query(
+          `SELECT id, entry_id, posting_status
+             FROM public.sport_payments
+            WHERE payment_number = $1
+            LIMIT 1`,
+          [paymentNumber],
+        );
+        const mirroredPayment = mirroredPaymentResult.rows[0];
+        if (!mirroredPayment) {
+          throw new Error(`Payment mirror ${paymentNumber} tidak ditemukan setelah upsert.`);
+        }
+
+        const wasAlreadyPresent = (rowCount ?? 0) === 0;
+        if (wasAlreadyPresent && mirroredPayment.posting_status === "posted" && mirroredPayment.entry_id) {
+          // Mirror dan accounting sudah selesai dari sync sebelumnya.
           result.skipped++;
-          continue;
+        } else {
+          await postSportCenterBookingPayment({
+            paymentNumber,
+            bookingId: Number(p.biz_booking_id),
+            orderNumber: String(p.order_number),
+            amount,
+            paymentMethod: p.payment_method,
+            paymentType: p.payment_type,
+            paidAt: p.confirmed_at || p.payment_created_at,
+            ppnRate: taxRate,
+          });
+
+          if (wasAlreadyPresent) {
+            result.skipped++;
+          } else {
+            result.pushed++;
+          }
         }
 
         // Update payment_status di public.sport_bookings hanya jika semua payment booking ini sudah confirmed
@@ -630,7 +665,6 @@ export async function bulkPushPaymentsToBizportal(): Promise<BulkPaymentPushResu
           [p.biz_booking_id]
         );
 
-        result.pushed++;
         console.info(`[bizportalSync] ✓ Payment pushed: ${p.order_number} (${paymentNumber}) → Rp ${amount.toLocaleString('id-ID')}`);
       } catch (err: any) {
         result.failed++;
