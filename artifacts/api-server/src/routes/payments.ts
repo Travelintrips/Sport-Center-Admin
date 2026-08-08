@@ -646,11 +646,11 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
               facilityId: b.facilityId,
             }));
 
-            createPublicAccountingEntryForGroup(booking.groupRef, groupEntries, today).catch((err) =>
+            createPublicAccountingEntryForGroup(booking.groupRef, groupEntries, today, paymentMethodLabel).catch((err) =>
               logAccountingError({ operation: "createPublicAccountingEntry", orderNumber: booking.groupRef!, bookingId: booking.id, error: err }),
             );
           } else {
-            createPublicAccountingEntry(booking.id, booking.orderNumber, subtotal, ppnAmount, booking.facilityId, today).catch((err) =>
+            createPublicAccountingEntry(booking.id, booking.orderNumber, subtotal, ppnAmount, booking.facilityId, today, paymentMethodLabel).catch((err) =>
               logAccountingError({ operation: "createPublicAccountingEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
             );
           }
@@ -689,7 +689,7 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
           createJournalEntry(booking.id, booking.orderNumber, journalDpp, journalPpn, today, paymentMethodLabel).catch((err) =>
             logAccountingError({ operation: "createJournalEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
           );
-          createPublicAccountingEntry(booking.id, booking.orderNumber, journalDpp, journalPpn, booking.facilityId, today).catch((err) =>
+          createPublicAccountingEntry(booking.id, booking.orderNumber, journalDpp, journalPpn, booking.facilityId, today, paymentMethodLabel).catch((err) =>
             logAccountingError({ operation: "createPublicAccountingEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
           );
 

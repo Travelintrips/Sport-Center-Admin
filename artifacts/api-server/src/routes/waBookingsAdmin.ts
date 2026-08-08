@@ -361,10 +361,11 @@ router.post("/admin/wa-bookings/:orderNumber/paid", adminMiddleware, async (req,
 
   const today = new Date().toISOString().split("T")[0];
   const { dpp, ppnAmount } = extractBookingDpp(booking);
-  createJournalEntry(booking.id, booking.orderNumber, dpp, ppnAmount, today).catch((err) =>
+  const paymentMethod = existingPay?.paymentMethod ?? "Transfer Bank";
+  createJournalEntry(booking.id, booking.orderNumber, dpp, ppnAmount, today, paymentMethod).catch((err) =>
     logAccountingError({ operation: "createJournalEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
   );
-  createPublicAccountingEntry(booking.id, booking.orderNumber, dpp, ppnAmount, booking.facilityId, today).catch((err) =>
+  createPublicAccountingEntry(booking.id, booking.orderNumber, dpp, ppnAmount, booking.facilityId, today, paymentMethod).catch((err) =>
     logAccountingError({ operation: "createPublicAccountingEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
   );
 

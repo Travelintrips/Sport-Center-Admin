@@ -39,28 +39,19 @@ async function getPublicPaymentAccount(
   paymentMethod?: string,
 ): Promise<{ id: number; code: string; name: string; label: PublicPaymentMethod }> {
   const label = normalizePublicPaymentMethod(paymentMethod);
-  const result = label === "QRIS"
-    ? await pool.query(
-        `SELECT id, code, name
-           FROM public.chart_of_accounts
-          WHERE is_active = true
-            AND (LOWER(name) LIKE '%qris%' OR LOWER(code) LIKE '%qris%')
-          ORDER BY id
-          LIMIT 2`,
-      )
-    : await pool.query(
-        `SELECT id, code, name
-           FROM public.chart_of_accounts
-          WHERE code = '1-1020-CST'
-            AND is_active = true
-          LIMIT 1`,
-      );
+  // QRIS settles into Bank Mandiri CST, so it uses the same public COA
+  // as transfer bank. Never look up a separate "QRIS" cash account.
+  const result = await pool.query(
+    `SELECT id, code, name
+       FROM public.chart_of_accounts
+      WHERE code = '1-1020-CST'
+        AND is_active = true
+      LIMIT 1`,
+  );
 
   if (result.rows.length !== 1) {
     throw new Error(
-      label === "QRIS"
-        ? "[accounting] COA QRIS public tidak ditemukan atau tidak unik; jurnal tidak diubah."
-        : "[accounting] COA Bank Mandiri CST (1-1020-CST) tidak ditemukan; jurnal tidak diubah.",
+      "[accounting] COA Bank Mandiri CST (1-1020-CST) tidak ditemukan; jurnal tidak diubah.",
     );
   }
 
@@ -294,9 +285,10 @@ export async function createPublicAccountingEntryForGroup(
   const year         = new Date(journalDate).getFullYear();
   const entryNumber  = await nextPublicEntryNumber(pool, year);
   const ids          = await getPublicIds();
+  const paymentAccount = await getPublicPaymentAccount(pool, paymentMethod);
 
   const orderList   = groupBookings.map(b => b.orderNumber).join(", ");
-  const description = `Pembayaran Grup Booking Sport Center (${groupRef} — ${groupBookings.length} sesi: ${orderList})`;
+  const description = `Pembayaran Grup Booking Sport Center (${groupRef} — ${groupBookings.length} sesi: ${orderList}) via ${paymentAccount.label}`;
 
 
   // Gunakan facilityId dari booking pertama (representatif)
@@ -327,7 +319,7 @@ export async function createPublicAccountingEntryForGroup(
         ($1,$8,$9,0,$10)`,
       [
         entryId,
-        ids.coaKas,         `Penerimaan grup booking ${groupRef}`, totalGross,
+        paymentAccount.id,  `Penerimaan grup booking ${groupRef} via ${paymentAccount.label}`, totalGross,
         ids.coaPendapatan,  `Pendapatan grup booking ${groupRef}`, totalRevenue,
         ids.coaPpnKeluaran, `PPN Keluaran grup booking ${groupRef}`, totalPpn,
       ]
@@ -337,7 +329,7 @@ export async function createPublicAccountingEntryForGroup(
       `INSERT INTO public.accounting_entry_lines (entry_id, account_id, description, debit, credit) VALUES
         ($1,$2,$3,$4,0),
         ($1,$5,$6,0,$4)`,
-      [entryId, ids.coaKas, `Penerimaan grup booking ${groupRef}`, totalGross, ids.coaPendapatan, `Pendapatan grup booking ${groupRef}`]
+      [entryId, paymentAccount.id, `Penerimaan grup booking ${groupRef} via ${paymentAccount.label}`, totalGross, ids.coaPendapatan, `Pendapatan grup booking ${groupRef}`]
     );
   }
 
@@ -644,7 +636,8 @@ async function postJournalLines(
  */
 function resolvePaymentAccount(paymentMethod?: string): { debitAccount: string; accountCode: string } {
   const m = (paymentMethod ?? "").toLowerCase().trim();
-  if (m.includes("qris"))                                                   return { debitAccount: "Kas - QRIS",              accountCode: "1102" };
+  // QRIS settles to Bank Mandiri CST, not a separate cash account.
+  if (m.includes("qris"))                                                   return { debitAccount: "Bank Mandiri",             accountCode: "1104" };
   if (m.includes("tunai") || m.includes("cash"))                            return { debitAccount: "Kas Tunai",               accountCode: "1101" };
   if (m.includes("ewallet") || m.includes("e-wallet") || m.includes("ovo")
     || m.includes("dana") || m.includes("gopay") || m.includes("shopeepay")) return { debitAccount: "Kas - E-Wallet",         accountCode: "1103" };

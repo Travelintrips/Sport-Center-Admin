@@ -687,7 +687,7 @@ router.post("/paylabs/webhook", async (req, res) => {
         const { dpp, ppnAmount } = extractBookingDpp(bk);
         createJournalEntry(bk.id, bk.orderNumber ?? "", dpp, ppnAmount, today, confirmedPaymentMethod)
           .catch((err) => logAccountingError({ operation: "createJournalEntry", orderNumber: bk.orderNumber ?? "", bookingId: bk.id, error: err }));
-        createPublicAccountingEntry(bk.id, bk.orderNumber ?? "", dpp, ppnAmount, bk.facilityId, today)
+        createPublicAccountingEntry(bk.id, bk.orderNumber ?? "", dpp, ppnAmount, bk.facilityId, today, confirmedPaymentMethod)
           .catch((err) => logAccountingError({ operation: "createPublicAccountingEntry", orderNumber: bk.orderNumber ?? "", bookingId: bk.id, error: err }));
       })
       .catch(() => {});
@@ -791,7 +791,7 @@ router.post("/paylabs/reconcile", authMiddleware, adminMiddleware, async (req, r
         const { dpp, ppnAmount } = extractBookingDpp(bk);
         createJournalEntry(bk.id, bk.orderNumber ?? "", dpp, ppnAmount, today, reconPaymentMethod)
           .catch((err) => logAccountingError({ operation: "createJournalEntry", orderNumber: bk.orderNumber ?? "", bookingId: bk.id, error: err }));
-        createPublicAccountingEntry(bk.id, bk.orderNumber ?? "", dpp, ppnAmount, bk.facilityId, today)
+        createPublicAccountingEntry(bk.id, bk.orderNumber ?? "", dpp, ppnAmount, bk.facilityId, today, reconPaymentMethod)
           .catch((err) => logAccountingError({ operation: "createPublicAccountingEntry", orderNumber: bk.orderNumber ?? "", bookingId: bk.id, error: err }));
       })
       .catch(() => {});

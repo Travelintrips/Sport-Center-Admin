@@ -934,7 +934,7 @@ router.post("/wa/action/:token", async (req, res) => {
         createJournalEntry(booking.id, booking.orderNumber, _dpp, _ppnAmount, _today, _paymentMethod).catch((err) =>
           logAccountingError({ operation: "createJournalEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
         );
-        createPublicAccountingEntry(booking.id, booking.orderNumber, _dpp, _ppnAmount, booking.facilityId, _today).catch((err) =>
+        createPublicAccountingEntry(booking.id, booking.orderNumber, _dpp, _ppnAmount, booking.facilityId, _today, _paymentMethod).catch((err) =>
           logAccountingError({ operation: "createPublicAccountingEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
         );
 
@@ -1280,7 +1280,7 @@ router.post("/wa/review/:token", async (req, res) => {
       createJournalEntry(booking.id, booking.orderNumber, _dpp, _ppnAmount, _today, _paymentMethod).catch((err) =>
         logAccountingError({ operation: "createJournalEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
       );
-      createPublicAccountingEntry(booking.id, booking.orderNumber, _dpp, _ppnAmount, booking.facilityId, _today).catch((err) =>
+      createPublicAccountingEntry(booking.id, booking.orderNumber, _dpp, _ppnAmount, booking.facilityId, _today, _paymentMethod).catch((err) =>
         logAccountingError({ operation: "createPublicAccountingEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
       );
 
@@ -1865,10 +1865,11 @@ async function execAdminPaid(adminPhone: string, orderNumber: string) {
 
   const _paidToday = new Date().toISOString().split("T")[0];
   const { dpp: _paidDpp, ppnAmount: _paidPpnAmount } = extractBookingDpp(booking);
-  createJournalEntry(booking.id, booking.orderNumber, _paidDpp, _paidPpnAmount, _paidToday).catch((err) =>
+  const _paidPaymentMethod = existingPay?.paymentMethod ?? "Transfer Bank";
+  createJournalEntry(booking.id, booking.orderNumber, _paidDpp, _paidPpnAmount, _paidToday, _paidPaymentMethod).catch((err) =>
     logAccountingError({ operation: "createJournalEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
   );
-  createPublicAccountingEntry(booking.id, booking.orderNumber, _paidDpp, _paidPpnAmount, booking.facilityId, _paidToday).catch((err) =>
+  createPublicAccountingEntry(booking.id, booking.orderNumber, _paidDpp, _paidPpnAmount, booking.facilityId, _paidToday, _paidPaymentMethod).catch((err) =>
     logAccountingError({ operation: "createPublicAccountingEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
   );
 
