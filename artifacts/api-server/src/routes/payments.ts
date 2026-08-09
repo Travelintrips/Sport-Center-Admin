@@ -22,7 +22,8 @@ import { logger } from "../lib/logger";
 import { getBaseUrl } from "../lib/appUrl";
 import { sendRekapPemakaianToAdmin } from "../lib/rekapPemakaian";
 import { sendInvoiceToCustomer, sendGroupInvoiceToCustomer } from "../lib/invoiceDelivery";
-import { normalizePaymentProvider } from "../lib/paymentProvider";
+import { normalizePaymentProvider, parseProviderPaidAt } from "../lib/paymentProvider";
+import { enrichPayment } from "../lib/paymentEnrichment";
 
 // Helper: kirim rekap ke admin WA hanya jika tanggal booking = hari ini (WIB)
 function todayWIB(): string {
@@ -357,6 +358,13 @@ router.post("/payments", async (req, res) => {
       }
     }
 
+    const manualPaidAt = paymentMethod === "QRIS"
+      ? parseProviderPaidAt(req.body as Record<string, unknown>) ?? new Date()
+      : null;
+    const paymentEnrichment = paymentMethod === "QRIS"
+      ? await enrichPayment(booking, paymentProvider ?? "unknown", manualPaidAt)
+      : null;
+
     // Insert payment record baru (no upsert)
     const [payment] = await db.insert(paymentsTable)
       .values({
@@ -365,6 +373,10 @@ router.post("/payments", async (req, res) => {
         proofUrl,
         paymentMethod,
           paymentProvider,
+        companyId: paymentEnrichment?.companyId ?? null,
+        bankAccountId: paymentEnrichment?.bankAccountId ?? null,
+        expectedSettlementDate: paymentEnrichment?.expectedSettlementDate ?? null,
+        paidAt: paymentEnrichment?.paidAt ?? null,
         notes,
         paymentType: paymentType as "dp" | "pelunasan" | "full_payment",
       })
@@ -413,6 +425,10 @@ router.post("/payments", async (req, res) => {
             proofUrl,
             paymentMethod,
             paymentProvider,
+            companyId: paymentEnrichment?.companyId ?? null,
+            bankAccountId: paymentEnrichment?.bankAccountId ?? null,
+            expectedSettlementDate: paymentEnrichment?.expectedSettlementDate ?? null,
+            paidAt: paymentEnrichment?.paidAt ?? null,
             notes: `[Grup ${booking.groupRef}] ${notes || ""}`.trim(),
             paymentType: paymentType as "dp" | "pelunasan" | "full_payment",
           });
@@ -565,6 +581,25 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
 
     const [booking] = await db.select().from(bookingsTable)
       .where(eq(bookingsTable.id, payment.bookingId)).limit(1);
+    if (status === "confirmed" && booking && payment.paymentMethod?.toUpperCase() === "QRIS") {
+      const enrichment = await enrichPayment(
+        booking,
+        payment.paymentProvider ?? "unknown",
+        payment.paidAt ?? payment.confirmedAt ?? new Date(),
+      );
+      const [enrichedPayment] = await db
+        .update(paymentsTable)
+        .set({
+          companyId: enrichment.companyId,
+          bankAccountId: enrichment.bankAccountId,
+          expectedSettlementDate: enrichment.expectedSettlementDate,
+          paidAt: payment.paidAt ?? payment.confirmedAt ?? new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(paymentsTable.id, payment.id))
+        .returning();
+      if (enrichedPayment) payment = enrichedPayment;
+    }
     const userInfo = getUserFromReq(req);
     const clientInfo = getClientInfo(req);
 

@@ -259,7 +259,46 @@ async function runStartupMigrations() {
        ADD COLUMN IF NOT EXISTS provider_reference text,
        ADD COLUMN IF NOT EXISTS merchant_trade_no text,
        ADD COLUMN IF NOT EXISTS provider_trade_no text,
-       ADD COLUMN IF NOT EXISTS paid_at timestamptz`,
+       ADD COLUMN IF NOT EXISTS paid_at timestamptz,
+       ADD COLUMN IF NOT EXISTS company_id integer,
+       ADD COLUMN IF NOT EXISTS bank_account_id text,
+       ADD COLUMN IF NOT EXISTS expected_settlement_date text`,
+    `ALTER TABLE sport_center.bank_mutations
+       ADD COLUMN IF NOT EXISTS provider_detection_source text`,
+    `CREATE TABLE IF NOT EXISTS sport_center.payment_settlement_configs (
+       id serial PRIMARY KEY,
+       company_id integer NOT NULL,
+       provider_code text NOT NULL,
+       bank_account_id text NOT NULL,
+       settlement_delay_business_days integer NOT NULL DEFAULT 1,
+       effective_from date NOT NULL,
+       effective_until date,
+       is_active boolean NOT NULL DEFAULT true,
+       source text NOT NULL DEFAULT 'admin_config',
+       created_at timestamptz NOT NULL DEFAULT NOW(),
+       updated_at timestamptz NOT NULL DEFAULT NOW(),
+       UNIQUE (company_id, provider_code, bank_account_id, effective_from)
+     )`,
+    `CREATE TABLE IF NOT EXISTS sport_center.payment_business_calendar (
+       calendar_date date PRIMARY KEY,
+       is_business_day boolean NOT NULL DEFAULT true,
+       label text,
+       source text NOT NULL DEFAULT 'admin_config',
+       updated_at timestamptz NOT NULL DEFAULT NOW()
+     )`,
+    `CREATE TABLE IF NOT EXISTS sport_center.bank_import_source_mappings (
+       id serial PRIMARY KEY,
+       source_type text NOT NULL DEFAULT 'google_sheet',
+       source_id text NOT NULL,
+       worksheet_name text,
+       company_id integer NOT NULL,
+       bank_account_id text NOT NULL,
+       provider_name text,
+       is_active boolean NOT NULL DEFAULT true,
+       created_at timestamptz NOT NULL DEFAULT NOW(),
+       updated_at timestamptz NOT NULL DEFAULT NOW(),
+       UNIQUE (source_type, source_id, worksheet_name)
+     )`,
     // Enum billing_status untuk bookings
     `DO $$ BEGIN
        CREATE TYPE sport_center.billing_status AS ENUM ('unbilled','billed','paid');

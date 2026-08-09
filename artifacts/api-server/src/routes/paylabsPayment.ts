@@ -36,6 +36,7 @@ import {
   resolvePaylabsPaidAt,
   resolvePaylabsProviderReference,
 } from "../lib/paymentProvider";
+import { enrichPayment } from "../lib/paymentEnrichment";
 
 const router = Router();
 
@@ -289,6 +290,8 @@ async function finalizePayment(opts: FinalizePaymentOptions): Promise<FinalizePa
       );
 
       const amountPaid = Number(txRow.amount ?? booking.grandTotal ?? booking.totalPrice);
+      const canonicalPaidAt = opts.paidAt ?? new Date();
+      const paymentEnrichment = await enrichPayment(booking, "paylabs", canonicalPaidAt);
       const [insertedPayment] = await tx.insert(paymentsTable).values({
         bookingId,
         amount     : String(amountPaid),
@@ -299,10 +302,13 @@ async function finalizePayment(opts: FinalizePaymentOptions): Promise<FinalizePa
         providerReference: (opts.providerReference ?? paylabsTradeNo) || null,
         merchantTradeNo,
         providerTradeNo: paylabsTradeNo || null,
+        companyId: paymentEnrichment.companyId,
+        bankAccountId: paymentEnrichment.bankAccountId,
+        expectedSettlementDate: paymentEnrichment.expectedSettlementDate,
         status     : "confirmed",
         paymentType: "full_payment",
-        confirmedAt: opts.paidAt,
-        paidAt: opts.paidAt,
+        confirmedAt: canonicalPaidAt,
+        paidAt: canonicalPaidAt,
       } as any).returning({ id: paymentsTable.id });
 
       const auditNote = [
