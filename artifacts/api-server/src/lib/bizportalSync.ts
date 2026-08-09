@@ -133,10 +133,10 @@ export async function auditSportCenterPayment(sourcePaymentId: number): Promise<
      LEFT JOIN LATERAL (
        SELECT id, tax_amount
          FROM public.gl_tax_lines
-        WHERE accounting_entry_id = ae.id
+         WHERE accounting_entry_id = ae.id
           AND tax_type = 'PPN_OUT'
           AND entity_type = 'sport_center_payment'
-          AND entity_id = sp.id
+           AND entity_id = sp.id::text
         ORDER BY id DESC
         LIMIT 1
      ) gtl ON true
@@ -268,7 +268,7 @@ export async function dryRunConfirmedPaymentAccounting(): Promise<{
               ))::int AS provider_missing,
              COUNT(*) FILTER (WHERE company_id IS NOT NULL AND (mirror_company_id IS DISTINCT FROM company_id OR entry_company_id IS DISTINCT FROM company_id))::int AS company_mismatch,
              COUNT(*) FILTER (WHERE entry_id IS NOT NULL AND (line_count < 2 OR ABS(debit - credit) > 0.005))::int AS gl_unbalanced,
-             COUNT(*) FILTER (WHERE booking_tax > 0 AND (NOT EXISTS (SELECT 1 FROM sport_center.tax_transactions tt WHERE tt.reference_type = 'sport_center_payment' AND tt.reference_id = linked.id AND tt.transaction_type = 'original' AND tt.status = 'posted') OR NOT EXISTS (SELECT 1 FROM public.gl_tax_lines gtl WHERE gtl.accounting_entry_id = linked.entry_id AND gtl.tax_type = 'PPN_OUT' AND gtl.entity_type = 'sport_center_payment' AND gtl.entity_id = linked.id)))::int AS tax_missing
+              COUNT(*) FILTER (WHERE booking_tax > 0 AND (NOT EXISTS (SELECT 1 FROM sport_center.tax_transactions tt WHERE tt.reference_type = 'sport_center_payment' AND tt.reference_id = linked.id AND tt.transaction_type = 'original' AND tt.status = 'posted') OR NOT EXISTS (SELECT 1 FROM public.gl_tax_lines gtl WHERE gtl.accounting_entry_id = linked.entry_id AND gtl.tax_type = 'PPN_OUT' AND gtl.entity_type = 'sport_center_payment' AND gtl.entity_id = linked.id::text)))::int AS tax_missing
         FROM linked
         LEFT JOIN gl ON gl.id = linked.id
     )

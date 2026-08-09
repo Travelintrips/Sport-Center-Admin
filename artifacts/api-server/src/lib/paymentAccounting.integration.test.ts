@@ -142,6 +142,57 @@ async function fakeQuery(text: string, values: unknown[] = []): Promise<{ rows: 
     };
   }
 
+  if (sql.includes("SELECT sp.id, sp.booking_id, sp.amount, sp.payment_method, sp.payment_type")) {
+    const sourcePaymentId = scalar(values[0]);
+    const sourceAmount = sourcePaymentId === 43 ? 50_000 : sourcePaymentId === 44 ? 150_000 : 100_000;
+    return {
+      rows: [{
+        id: sourcePaymentId,
+        booking_id: sourcePaymentId,
+        amount: sourceAmount,
+        payment_method: sourcePaymentId === 42 || sourcePaymentId === 43 ? "QRIS" : "Transfer Bank",
+        payment_type: sourcePaymentId === 43 ? "dp" : sourcePaymentId === 44 ? "pelunasan" : "full_payment",
+        payment_provider: sourcePaymentId === 42 || sourcePaymentId === 43 ? "mandiri_direct" : "unknown",
+        provider_reference: null,
+        provider_order_id: null,
+        merchant_trade_no: null,
+        provider_trade_no: null,
+        company_id: 1,
+        bank_account_id: "mandiri",
+        expected_settlement_date: null,
+        paid_at: "2026-08-09T12:00:00.000Z",
+        order_number: `SC-${sourcePaymentId}`,
+        ppn_rate: sourcePaymentId === 42 || sourcePaymentId === 43 ? 11 : 0,
+      }],
+      rowCount: 1,
+    };
+  }
+
+  if (sql.includes("SELECT id FROM public.sport_bookings WHERE sc_booking_id = $1 LIMIT 1")) {
+    return { rows: [{ id: scalar(values[0]) + 10_000 }], rowCount: 1 };
+  }
+
+  if (sql.startsWith("INSERT INTO public.sport_payments")) {
+    const paymentNumber = String(values[1]);
+    const sourcePaymentId = scalar(values[7]);
+    const existing = state.mirrors.find((row) => row.paymentNumber === paymentNumber);
+    if (existing) {
+      existing.sourcePaymentId = sourcePaymentId;
+      existing.amount = scalar(values[2]);
+    } else {
+      state.mirrors.push({
+        id: state.nextMirrorId++,
+        paymentNumber,
+        amount: scalar(values[2]),
+        postingStatus: "unposted",
+        entryId: null,
+        sourcePaymentId,
+        postingError: null,
+      });
+    }
+    return { rows: [], rowCount: 1 };
+  }
+
   if (sql === "SELECT id, status FROM public.accounting_entries WHERE correlation_id = $1 LIMIT 1") {
     const entry = state.entries.find((row) => row.correlationId === values[0]);
     return { rows: entry ? [{ id: entry.id, status: entry.status }] : [], rowCount: entry ? 1 : 0 };
@@ -150,13 +201,20 @@ async function fakeQuery(text: string, values: unknown[] = []): Promise<{ rows: 
   if (sql.includes("SELECT id, status, company_id, payment_method, payment_provider") &&
       sql.includes("FROM public.accounting_entries")) {
     const entry = state.entries.find((row) => row.correlationId === values[0]);
+    const isQris = entry?.correlationId === "sc_payment_42" ||
+      entry?.correlationId === "sc_payment_43" ||
+      entry?.correlationId === "sc_payment_45";
     return {
       rows: entry ? [{
         id: entry.id,
         status: entry.status,
         company_id: 1,
-        payment_method: entry.correlationId === "sc_payment_42" || entry.correlationId === "sc_payment_43" ? "QRIS" : "Transfer Bank",
-        payment_provider: entry.correlationId === "sc_payment_42" || entry.correlationId === "sc_payment_43" ? "mandiri_direct" : "unknown",
+        payment_method: isQris ? "QRIS" : "Transfer Bank",
+        payment_provider: isQris ? "mandiri_direct" : "unknown",
+        payment_type: entry.correlationId === "sc_payment_43" ? "dp" : "full_payment",
+        source_payment_id: Number(entry.correlationId.replace("sc_payment_", "")),
+        total_debit: entry.totalDebit,
+        total_credit: entry.totalCredit,
       }] : [],
       rowCount: entry ? 1 : 0,
     };
@@ -172,6 +230,8 @@ async function fakeQuery(text: string, values: unknown[] = []): Promise<{ rows: 
         company_id: 1,
         payment_method: entry.correlationId === "sc_payment_42" || entry.correlationId === "sc_payment_43" ? "QRIS" : "Transfer Bank",
         payment_provider: entry.correlationId === "sc_payment_42" || entry.correlationId === "sc_payment_43" ? "mandiri_direct" : "unknown",
+        payment_type: entry.correlationId === "sc_payment_43" ? "dp" : "full_payment",
+        source_payment_id: Number(entry.correlationId.replace("sc_payment_", "")),
         total_debit: entry.totalDebit,
         total_credit: entry.totalCredit,
       }] : [],
@@ -237,6 +297,10 @@ async function fakeQuery(text: string, values: unknown[] = []): Promise<{ rows: 
     return { rows: [], rowCount: entry ? 1 : 0 };
   }
 
+  if (sql.startsWith("UPDATE public.accounting_entries")) {
+    return { rows: [], rowCount: 1 };
+  }
+
   if (sql.includes("SELECT COUNT(*)::int AS line_count") &&
       sql.includes("FROM public.accounting_entry_lines")) {
     const entryId = scalar(values[0]);
@@ -248,6 +312,20 @@ async function fakeQuery(text: string, values: unknown[] = []): Promise<{ rows: 
         credit: lines.reduce((sum, line) => sum + line.credit, 0),
       }],
       rowCount: 1,
+    };
+  }
+
+  if (sql.includes("SELECT sp.entry_id, sp.posting_status") &&
+      sql.includes("FROM public.sport_payments sp")) {
+    const mirror = state.mirrors.find((row) => row.id === scalar(values[0]));
+    const entry = mirror?.entryId ? state.entries.find((row) => row.id === mirror.entryId) : undefined;
+    return {
+      rows: mirror ? [{
+        entry_id: mirror.entryId,
+        posting_status: mirror.postingStatus,
+        entry_status: entry?.status ?? null,
+      }] : [],
+      rowCount: mirror ? 1 : 0,
     };
   }
 

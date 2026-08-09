@@ -319,19 +319,80 @@ export function getSportCenterPaymentCorrelationId(
   return `sc_payment_${mirrorMatch?.[1] ?? paymentNumber}`;
 }
 
+async function ensureSportCenterPaymentTaxLedgers(
+  client: pg.PoolClient,
+  input: {
+    sourcePaymentId: number;
+    entryId: number;
+    companyId: number;
+    paymentNumber: string;
+    ppnRate: number;
+    dpp: number;
+    grossAmount: number;
+    ppnAmount: number;
+    journalDate: string;
+  },
+): Promise<void> {
+  if (input.ppnAmount <= 0) return;
+
+  await client.query(
+    `INSERT INTO sport_center.tax_transactions
+      (reference_type, reference_id, reference_number, tax_code, tax_rate,
+       dpp, dpp_nilai_lain, grand_total, tax_amount, transaction_date,
+       status, transaction_type, created_at)
+     SELECT 'sport_center_payment', $1, $2, 'PPN_OUT_11', $3,
+            $4, $5, $6, $7, $8, 'posted', 'original', NOW()
+     WHERE NOT EXISTS (
+       SELECT 1
+         FROM sport_center.tax_transactions
+        WHERE reference_type = 'sport_center_payment'
+          AND reference_id = $1
+          AND transaction_type = 'original'
+     )`,
+    [
+      input.sourcePaymentId,
+      input.paymentNumber,
+      String(input.ppnRate),
+      String(input.dpp),
+      String(Math.round((input.dpp * 11) / 12 * 100) / 100),
+      String(input.grossAmount),
+      String(input.ppnAmount),
+      input.journalDate,
+    ],
+  );
+
+  await client.query(
+    `INSERT INTO public.gl_tax_lines
+      (company_id, accounting_entry_id, tax_type, rate,
+       base_amount, tax_amount, direction, period, entity_type, entity_id,
+       is_reported, created_at)
+     SELECT $1, $2, 'PPN_OUT', $3, $4, $5, 'out', $6,
+            'sport_center_payment', $7::text, false, NOW()
+      WHERE NOT EXISTS (
+        SELECT 1
+          FROM public.gl_tax_lines
+         WHERE accounting_entry_id = $2
+           AND tax_type = 'PPN_OUT'
+           AND entity_type = 'sport_center_payment'
+           AND entity_id = $7::text
+      )`,
+    [
+      input.companyId,
+      input.entryId,
+      input.ppnRate,
+      input.dpp,
+      input.ppnAmount,
+      input.journalDate.slice(0, 7),
+      String(input.sourcePaymentId),
+    ],
+  );
+}
+
 async function ensureSportCenterPaymentMirror(
   client: pg.PoolClient,
   input: SportCenterBookingPaymentPosting,
 ): Promise<void> {
   if (input.sourcePaymentId == null) return;
-  const existing = await client.query(
-    `SELECT 1
-       FROM public.sport_payments
-      WHERE payment_number = $1 OR source_payment_id = $2
-      LIMIT 1`,
-    [input.paymentNumber, input.sourcePaymentId],
-  );
-  if (existing.rows.length > 0) return;
 
   const source = await client.query(
     `SELECT sp.id, sp.booking_id, sp.amount, sp.payment_method, sp.payment_type,
@@ -529,7 +590,8 @@ export async function postSportCenterBookingPayment(
 
     if (mirroredPayment.posting_status === "posted" && mirroredPayment.entry_id) {
       const postedEntry = await client.query(
-        `SELECT id, company_id, payment_method, payment_provider, total_debit, total_credit
+        `SELECT id, company_id, payment_method, payment_provider, payment_type,
+                source_payment_id, total_debit, total_credit
            FROM public.accounting_entries
           WHERE id = $1
             AND status = 'posted'`,
@@ -541,21 +603,24 @@ export async function postSportCenterBookingPayment(
         );
       }
       const posted = postedEntry.rows[0];
-      if (Number(posted.company_id) !== companyId ||
-          String(posted.payment_method ?? "").trim() !== canonicalMethod ||
-          (canonicalMethod.toUpperCase() === "QRIS" && String(posted.payment_provider ?? "").trim().toLowerCase() !== canonicalProvider)) {
-        throw new Error(`[accounting] Existing entry metadata mismatch for ${input.paymentNumber}.`);
+      if (Number(posted.company_id) === companyId &&
+          String(posted.payment_method ?? "").trim() === canonicalMethod &&
+          String(posted.payment_type ?? "").trim() === paymentType &&
+          Number(posted.source_payment_id) === sourcePaymentId &&
+          (canonicalMethod.toUpperCase() !== "QRIS" ||
+            String(posted.payment_provider ?? "").trim().toLowerCase() === canonicalProvider)) {
+        await client.query("COMMIT");
+        return {
+          entryId: Number(mirroredPayment.entry_id),
+          postingStatus: "posted",
+          alreadyPosted: true,
+        };
       }
-      await client.query("COMMIT");
-      return {
-        entryId: Number(mirroredPayment.entry_id),
-        postingStatus: "posted",
-        alreadyPosted: true,
-      };
     }
 
     const existingEntry = await client.query(
-      `SELECT id, status, company_id, payment_method, payment_provider
+      `SELECT id, status, company_id, payment_method, payment_provider,
+              payment_type, source_payment_id, total_debit, total_credit
          FROM public.accounting_entries
          WHERE correlation_id = $1
         LIMIT 1`,
@@ -569,6 +634,48 @@ export async function postSportCenterBookingPayment(
         );
       }
 
+      await client.query(
+        `UPDATE public.accounting_entries
+            SET source = 'sport_center_payment',
+                source_id = $2,
+                source_payment_id = $2,
+                company_id = $3,
+                payment_method = $4,
+                payment_provider = $5,
+                payment_type = $6,
+                bank_account_id = $7,
+                provider_reference = $8,
+                provider_order_id = $9,
+                merchant_trade_no = $10,
+                provider_trade_no = $11
+          WHERE id = $1`,
+        [
+          Number(existing.id),
+          sourcePaymentId,
+          companyId,
+          canonicalMethod,
+          canonicalProvider,
+          paymentType,
+          bankAccountId,
+          providerReference,
+          providerOrderId,
+          merchantTradeNo,
+          providerTradeNo,
+        ],
+      );
+      await ensureSportCenterPaymentTaxLedgers(client, {
+        sourcePaymentId: Number(sourcePaymentId),
+        entryId: Number(existing.id),
+        companyId,
+        paymentNumber: input.paymentNumber,
+        ppnRate: Number(input.ppnRate ?? 0),
+        dpp: Math.max(0, requestedAmount - Math.round((requestedAmount * Number(input.ppnRate ?? 0)) / (100 + Number(input.ppnRate ?? 0)))),
+        grossAmount: requestedAmount,
+        ppnAmount: Number(input.ppnRate ?? 0) > 0
+          ? Math.round((requestedAmount * Number(input.ppnRate ?? 0)) / (100 + Number(input.ppnRate ?? 0)))
+          : 0,
+        journalDate: input.paidAt ? new Date(input.paidAt).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
+      });
       await client.query(
         `UPDATE public.sport_payments
           SET entry_id = $2,
@@ -1310,6 +1417,7 @@ type ConfirmedPaymentAccountingInput = {
   orderNumber: string;
   dpp: number;
   ppnAmount: number;
+  ppnRate?: number | null;
   facilityId: number | null;
   journalDate: string;
   paymentMethod?: string;
@@ -1342,6 +1450,7 @@ export function postConfirmedPaymentAccounting(
     const [payment] = input.paymentId != null
       ? await db
           .select({
+            amount: paymentsTable.amount,
             paymentMethod: paymentsTable.paymentMethod,
             paymentProvider: paymentsTable.paymentProvider,
             paymentType: paymentsTable.paymentType,
@@ -1351,43 +1460,75 @@ export function postConfirmedPaymentAccounting(
             providerOrderId: paymentsTable.providerOrderId,
             merchantTradeNo: paymentsTable.merchantTradeNo,
             providerTradeNo: paymentsTable.providerTradeNo,
+            paidAt: paymentsTable.paidAt,
+            confirmedAt: paymentsTable.confirmedAt,
           })
           .from(paymentsTable)
           .where(eq(paymentsTable.id, input.paymentId))
           .limit(1)
       : [];
+    const paymentId = input.paymentId;
+    if (paymentId == null) {
+      throw new Error("[accounting] Confirmed payment harus memiliki paymentId.");
+    }
+
+    const grossAmount = Math.round(Number(payment?.amount ?? input.dpp + input.ppnAmount));
+    const paymentMethod = payment?.paymentMethod ?? input.paymentMethod ?? null;
+    const paymentProvider = payment?.paymentProvider ?? input.paymentProvider ?? "unknown";
+    const paymentType = payment?.paymentType ?? input.paymentType ?? "full_payment";
+    const companyId = payment?.companyId ?? input.companyId ?? null;
+    const paidAt = payment?.paidAt ?? payment?.confirmedAt ?? input.journalDate;
+
+    // Public accounting must use the same canonical payment-level pipeline as
+    // the mirror/outbox worker. The old createPublicAccountingEntry() path
+    // created entries with source=sport_center_booking and omitted payment
+    // metadata, which made a confirmed payment look posted but unauditable.
+    await postSportCenterBookingPayment({
+      paymentNumber: `SCPAY-SC-${paymentId}`,
+      sourcePaymentId: paymentId,
+      bookingId: input.bookingId,
+      orderNumber: input.orderNumber,
+      amount: grossAmount,
+      paymentMethod,
+      paymentType,
+      paidAt,
+      ppnRate: input.ppnRate,
+      paymentProvider,
+      companyId,
+      bankAccountId: payment?.bankAccountId ?? input.bankAccountId,
+      providerReference: payment?.providerReference ?? input.providerReference,
+      providerOrderId: payment?.providerOrderId ?? input.providerOrderId,
+      merchantTradeNo: payment?.merchantTradeNo ?? input.merchantTradeNo,
+      providerTradeNo: payment?.providerTradeNo ?? input.providerTradeNo,
+    });
+
+    // Keep the internal Sport Center journal, but make it a projection of the
+    // same payment-level amount/context. Public posting above is canonical and
+    // idempotent; this journal remains for the existing Sport Center reports.
+    const effectivePpnAmount = input.ppnRate != null
+      ? Math.round((grossAmount * Number(input.ppnRate)) / (100 + Number(input.ppnRate)))
+      : Math.round(Number(input.ppnAmount));
     await createJournalEntry(
       input.bookingId,
       input.orderNumber,
-      input.dpp,
-      input.ppnAmount,
+      grossAmount - effectivePpnAmount,
+      effectivePpnAmount,
       input.journalDate,
-      input.paymentMethod,
-      input.paymentId,
+      paymentMethod ?? undefined,
+      paymentId,
       {
-        paymentType: payment?.paymentType ?? input.paymentType,
-        companyId: payment?.companyId ?? input.companyId ?? null,
-        paymentProvider: payment?.paymentProvider ?? input.paymentProvider,
+        paymentType,
+        companyId,
+        paymentProvider,
         bankAccountId: payment?.bankAccountId ?? input.bankAccountId,
-        grossAmount: input.dpp + input.ppnAmount,
-        dppAmount: input.dpp,
-        taxAmount: input.ppnAmount,
+        grossAmount,
+        dppAmount: grossAmount - effectivePpnAmount,
+        taxAmount: effectivePpnAmount,
         providerReference: payment?.providerReference ?? input.providerReference,
         providerOrderId: payment?.providerOrderId ?? input.providerOrderId,
         merchantTradeNo: payment?.merchantTradeNo ?? input.merchantTradeNo,
         providerTradeNo: payment?.providerTradeNo ?? input.providerTradeNo,
       },
-    );
-    await createPublicAccountingEntry(
-      input.bookingId,
-      input.orderNumber,
-      input.dpp,
-      input.ppnAmount,
-      input.facilityId,
-      input.journalDate,
-      input.paymentMethod,
-      input.paymentId,
-      payment?.companyId ?? input.companyId ?? null,
     );
   })();
 
