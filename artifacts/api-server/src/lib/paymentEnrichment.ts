@@ -8,7 +8,7 @@ import {
 } from "@workspace/db";
 import { and, desc, eq, lte, gte, isNull, or, sql } from "drizzle-orm";
 import type { Booking, Payment } from "@workspace/db";
-import { createPaymentProviderId, normalizeProviderName } from "./paymentMetadata";
+import { createPaymentProviderId, createPaymentProviderOrderId, normalizeProviderName } from "./paymentMetadata";
 import type { PaymentProvider } from "./paymentProvider";
 
 export type SettlementProvider = "mandiri_direct" | "paylabs" | "unknown";
@@ -288,10 +288,14 @@ export async function resolveRequiredPaymentEnrichment(
   provider: SettlementProvider,
   paidAt: Date | null,
   options?: PaymentEnrichmentOptions,
-): Promise<PaymentEnrichment> {
+): Promise<PaymentEnrichment & { bankAccountId: string }> {
   const enrichment = await enrichPayment(booking, provider, paidAt, options);
-  if (enrichment.bankAccountId?.trim()) {
-    return enrichment;
+  const configuredBankAccountId = enrichment.bankAccountId?.trim();
+  if (configuredBankAccountId) {
+    return {
+      ...enrichment,
+      bankAccountId: configuredBankAccountId,
+    };
   }
 
   const [settings] = await db
@@ -319,8 +323,18 @@ export async function ensurePaymentBankAccount(
   const normalizedProvider = provider;
   const providerId = payment.providerId?.trim()
     || createPaymentProviderId(normalizedProvider, payment.providerTradeNo ?? payment.providerReference ?? payment.merchantTradeNo);
+  const providerOrderId = payment.providerOrderId?.trim()
+    || createPaymentProviderOrderId(
+      normalizedProvider,
+      payment.merchantTradeNo ?? payment.providerTradeNo ?? payment.providerReference,
+    );
   const providerName = payment.providerName?.trim() || normalizeProviderName(normalizedProvider);
-  if (payment.bankAccountId?.trim() && payment.providerId?.trim() && payment.providerName?.trim()) return payment;
+  if (
+    payment.bankAccountId?.trim() &&
+    payment.providerId?.trim() &&
+    payment.providerName?.trim() &&
+    payment.providerOrderId?.trim()
+  ) return payment;
 
   const enrichment = await resolveRequiredPaymentEnrichment(booking, provider, paidAt, {
     explicitCompanyId: payment.companyId,
@@ -334,6 +348,7 @@ export async function ensurePaymentBankAccount(
       paymentProvider: normalizedProvider,
       providerName,
       providerId,
+      providerOrderId,
       expectedSettlementDate: payment.expectedSettlementDate ?? enrichment.expectedSettlementDate,
       paidAt: payment.paidAt ?? enrichment.paidAt,
       updatedAt: new Date(),

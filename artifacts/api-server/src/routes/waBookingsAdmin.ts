@@ -25,7 +25,7 @@ import {
 import { sendRekapPemakaianToAdmin } from "../lib/rekapPemakaian";
 import { getBaseUrl } from "../lib/appUrl";
 import { ensurePaymentBankAccount, resolveRequiredPaymentEnrichment } from "../lib/paymentEnrichment";
-import { createPaymentProviderId, normalizeProviderName } from "../lib/paymentMetadata";
+import { createPaymentProviderId, createPaymentProviderOrderId, normalizeProviderName } from "../lib/paymentMetadata";
 
 const router = Router();
 
@@ -313,6 +313,7 @@ router.post("/admin/wa-bookings/:orderNumber/paid", adminMiddleware, async (req,
       paymentProvider: "unknown",
       providerName: normalizeProviderName("unknown"),
       providerId: createPaymentProviderId("unknown", `bizportal-admin-${booking.id}`),
+      providerOrderId: createPaymentProviderOrderId("unknown", `bizportal-admin-order-${booking.id}`),
       companyId: paymentEnrichment.companyId,
       bankAccountId: paymentEnrichment.bankAccountId,
       expectedSettlementDate: paymentEnrichment.expectedSettlementDate,

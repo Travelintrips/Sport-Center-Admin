@@ -25,6 +25,20 @@ export function requirePaymentProviderId(
   return value;
 }
 
+/**
+ * Every payment also needs the provider's order identifier. Manual payments
+ * do not receive one from an external gateway, so they get an internal,
+ * traceable order identifier instead of a nullable value.
+ */
+export function createPaymentProviderOrderId(
+  provider: PaymentProvider,
+  supplied?: unknown,
+): string {
+  const value = supplied == null ? "" : String(supplied).trim();
+  if (value) return value;
+  return `internal-order-${provider}-${randomUUID()}`;
+}
+
 export function normalizeProviderName(provider: PaymentProvider): string {
   return provider.trim().toLowerCase();
 }

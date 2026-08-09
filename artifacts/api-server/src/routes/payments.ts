@@ -23,7 +23,7 @@ import { getBaseUrl } from "../lib/appUrl";
 import { sendRekapPemakaianToAdmin } from "../lib/rekapPemakaian";
 import { sendInvoiceToCustomer, sendGroupInvoiceToCustomer } from "../lib/invoiceDelivery";
 import { normalizePaymentProvider, parseProviderPaidAt } from "../lib/paymentProvider";
-import { createPaymentProviderId, normalizeProviderName } from "../lib/paymentMetadata";
+import { createPaymentProviderId, createPaymentProviderOrderId, normalizeProviderName } from "../lib/paymentMetadata";
 import { ensurePaymentBankAccount, resolveRequiredPaymentEnrichment, paymentEffectiveDate } from "../lib/paymentEnrichment";
 
 // Helper: kirim rekap ke admin WA hanya jika tanggal booking = hari ini (WIB)
@@ -378,6 +378,10 @@ router.post("/payments", async (req, res) => {
       paymentProvider ?? "unknown",
       req.body.providerId ?? req.body.providerReference ?? req.body.providerTradeNo ?? req.body.merchantTradeNo,
     );
+    const providerOrderId = createPaymentProviderOrderId(
+      paymentProvider ?? "unknown",
+      req.body.providerOrderId ?? req.body.merchantTradeNo ?? req.body.providerReference ?? req.body.providerTradeNo,
+    );
 
     // Insert payment record baru (no upsert)
     const [payment] = await db.insert(paymentsTable)
@@ -389,6 +393,7 @@ router.post("/payments", async (req, res) => {
         paymentProvider: paymentProvider ?? "unknown",
         providerName,
         providerId,
+        providerOrderId,
         companyId: paymentEnrichment.companyId ?? null,
         bankAccountId: paymentEnrichment.bankAccountId,
         expectedSettlementDate: paymentEnrichment.expectedSettlementDate ?? null,
@@ -443,6 +448,7 @@ router.post("/payments", async (req, res) => {
             paymentProvider: paymentProvider ?? "unknown",
             providerName,
             providerId,
+            providerOrderId,
             companyId: paymentEnrichment.companyId ?? null,
             bankAccountId: paymentEnrichment.bankAccountId,
             expectedSettlementDate: paymentEnrichment.expectedSettlementDate ?? null,

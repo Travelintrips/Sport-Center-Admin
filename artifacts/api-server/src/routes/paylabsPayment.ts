@@ -37,7 +37,7 @@ import {
   resolvePaylabsProviderReference,
 } from "../lib/paymentProvider";
 import { resolveRequiredPaymentEnrichment, paymentEffectiveDate } from "../lib/paymentEnrichment";
-import { requirePaymentProviderId, normalizeProviderName } from "../lib/paymentMetadata";
+import { requirePaymentProviderId, createPaymentProviderOrderId, normalizeProviderName } from "../lib/paymentMetadata";
 
 const router = Router();
 
@@ -309,6 +309,7 @@ async function finalizePayment(opts: FinalizePaymentOptions): Promise<FinalizePa
         providerName: normalizeProviderName("paylabs"),
         providerReference: (opts.providerReference ?? paylabsTradeNo) || null,
         providerId: requirePaymentProviderId("paylabs", paylabsTradeNo || opts.providerReference || merchantTradeNo),
+         providerOrderId: createPaymentProviderOrderId("paylabs", merchantTradeNo),
         merchantTradeNo,
         providerTradeNo: paylabsTradeNo || null,
         companyId: paymentEnrichment.companyId,

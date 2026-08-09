@@ -218,6 +218,10 @@ export interface Payment {
   paymentMethod?: string | null;
   /** @nullable */
   paymentProvider?: PaymentPaymentProvider;
+  providerName: string;
+  providerId: string;
+  providerOrderId: string;
+  bankAccountId: string;
   /** @nullable */
   providerReference?: string | null;
   /** @nullable */
@@ -467,6 +471,7 @@ export interface PaymentInput {
   proofUrl?: string;
   paymentMethod?: PaymentInputPaymentMethod;
   paymentProvider?: PaymentInputPaymentProvider;
+  providerOrderId?: string;
   paymentType?: PaymentInputPaymentType;
   notes?: string;
 }

@@ -19,6 +19,7 @@
 - [Expenses feature](expenses-feature.md) — sport_expenses table + expense_no_seq + expense_status/category enums; accounting_journals.booking_id made nullable for expense journal entries; /admin/expenses routes.
 
 - [Payment provider audit](payment-provider-audit.md) — QRIS payments now carry canonical provider/reference/timestamp metadata; preserve safe Paylabs callback and terminal-booking guards.
+- [Required payment provider metadata](payment-provider-order-metadata.md) — booking payments require receiving account, provider name/id, and provider order id; manual flows use traceable internal identifiers.
 - [QRIS settlement account](qris-bank-mandiri-mapping.md) — QRIS Sport Center settles to Bank Mandiri CST; never map it to cash or a separate QRIS COA.
 - [Incremental payment accounting](incremental-payment-accounting.md) — Idempotency must be keyed by payment mirror, not booking, because DP and pelunasan are separate payments.
 - [Data Connection Monitor](data-connection-monitor.md) — connectionHealth.ts lib; Drizzle sql.raw() needed for IN queries on information_schema; blocked_schedules (not "schedules") is the table name; system_connection_baselines table in sport_center schema.

@@ -19,6 +19,7 @@ export const paymentsTable = scSchema.table("sport_payments", {
   providerName: text("provider_name").notNull().default("unknown"),
   providerReference: text("provider_reference"),
   providerId: text("provider_id").notNull(),
+  providerOrderId: text("provider_order_id").notNull(),
   merchantTradeNo: text("merchant_trade_no"),
   providerTradeNo: text("provider_trade_no"),
   companyId: integer("company_id"),

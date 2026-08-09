@@ -10,9 +10,9 @@ import {
   usersTable,
 } from "@workspace/db";
 import { adminMiddleware } from "../lib/auth";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { resolveRequiredPaymentEnrichment } from "../lib/paymentEnrichment";
-import { createPaymentProviderId, normalizeProviderName } from "../lib/paymentMetadata";
+import { createPaymentProviderId, createPaymentProviderOrderId, normalizeProviderName } from "../lib/paymentMetadata";
 
 const router = Router();
 
@@ -177,6 +177,7 @@ router.post("/admin/seed-demo", adminMiddleware, async (_req, res) => {
           paymentProvider: "unknown",
           providerName: normalizeProviderName("unknown"),
           providerId: createPaymentProviderId("unknown", `demo-${b.id}`),
+          providerOrderId: createPaymentProviderOrderId("unknown", `demo-order-${b.id}`),
           companyId: paymentEnrichment.companyId,
           bankAccountId: paymentEnrichment.bankAccountId,
           expectedSettlementDate: paymentEnrichment.expectedSettlementDate,

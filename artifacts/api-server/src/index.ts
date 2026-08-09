@@ -259,6 +259,7 @@ async function runStartupMigrations() {
        ADD COLUMN IF NOT EXISTS provider_name text,
        ADD COLUMN IF NOT EXISTS provider_reference text,
        ADD COLUMN IF NOT EXISTS provider_id text,
+       ADD COLUMN IF NOT EXISTS provider_order_id text,
        ADD COLUMN IF NOT EXISTS merchant_trade_no text,
        ADD COLUMN IF NOT EXISTS provider_trade_no text,
        ADD COLUMN IF NOT EXISTS paid_at timestamptz,
@@ -274,16 +275,26 @@ async function runStartupMigrations() {
               NULLIF(btrim(provider_reference), ''),
               NULLIF(btrim(merchant_trade_no), ''),
               'legacy-' || id::text
-            )
+             ),
+             provider_order_id = COALESCE(
+               NULLIF(btrim(provider_order_id), ''),
+               NULLIF(btrim(merchant_trade_no), ''),
+               NULLIF(btrim(provider_trade_no), ''),
+               NULLIF(btrim(provider_reference), ''),
+               'legacy-order-' || id::text
+             )
       WHERE payment_provider IS NULL
          OR provider_name IS NULL
          OR btrim(provider_name) = ''
          OR provider_id IS NULL
-         OR btrim(provider_id) = ''`,
+          OR btrim(provider_id) = ''
+          OR provider_order_id IS NULL
+          OR btrim(provider_order_id) = ''`,
     `ALTER TABLE sport_center.sport_payments
        ALTER COLUMN payment_provider SET NOT NULL,
        ALTER COLUMN provider_name SET NOT NULL,
-       ALTER COLUMN provider_id SET NOT NULL`,
+       ALTER COLUMN provider_id SET NOT NULL,
+       ALTER COLUMN provider_order_id SET NOT NULL`,
      `UPDATE sport_center.sport_payments p
          SET bank_account_id = s.bank_account
         FROM sport_center.settings s

@@ -15,6 +15,7 @@ export interface PaymentInput {
   proofUrl?: string;
   paymentMethod?: PaymentInputPaymentMethod;
   paymentProvider?: PaymentInputPaymentProvider;
+  providerOrderId?: string;
   paymentType?: PaymentInputPaymentType;
   notes?: string;
 }
