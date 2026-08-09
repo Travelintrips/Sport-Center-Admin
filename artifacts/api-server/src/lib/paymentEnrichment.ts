@@ -24,7 +24,32 @@ export type PaymentEnrichment = {
   expectedSettlementDate: string | null;
 };
 
-function isoDateInJakarta(value: Date): string {
+export type PaymentEnrichmentOptions = {
+  /**
+   * Explicit company context is deliberately lower priority than the booking
+   * relation. It is used for confirmation/replay when the payment already has
+   * a trusted company snapshot but the booking relation is no longer
+   * available.
+   */
+  facilityCompanyId?: number | null;
+  merchantCompanyId?: number | null;
+  explicitCompanyId?: number | null;
+  /**
+   * Keep the effective-date decision stable across the company, account and
+   * expected-date resolver calls. Normally this is derived from paidAt.
+   */
+  effectiveDate?: string | null;
+  settlementConfig?: {
+    companyId: number;
+    providerCode: SettlementProvider;
+    bankAccountId: string;
+    effectiveFrom: string;
+    effectiveUntil?: string | null;
+    settlementDelayBusinessDays: number;
+  } | null;
+};
+
+export function paymentEffectiveDate(value: Date): string {
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Jakarta",
     year: "numeric",
@@ -95,11 +120,7 @@ export async function validateSettlementBankAccount(
 
 export async function resolvePaymentCompany(
   booking: Pick<Booking, "payerType" | "companyCustomerId" | "companyInvoiceId">,
-  options?: {
-    facilityCompanyId?: number | null;
-    merchantCompanyId?: number | null;
-    explicitCompanyId?: number | null;
-  },
+  options?: Pick<PaymentEnrichmentOptions, "facilityCompanyId" | "merchantCompanyId" | "explicitCompanyId">,
 ): Promise<PaymentCompanyResolution> {
   if (booking.payerType === "company" && booking.companyCustomerId != null) {
     if (await validateCompanyId(booking.companyCustomerId)) {
@@ -142,9 +163,21 @@ export async function resolveSettlementBankAccount(
   companyId: number | null,
   provider: SettlementProvider,
   paidAt: Date | null,
+  options?: Pick<PaymentEnrichmentOptions, "effectiveDate" | "settlementConfig">,
 ): Promise<{ bankAccountId: string | null; evidenceSource: "effective_settlement_config" | "none" }> {
   if (companyId == null || !paidAt) return { bankAccountId: null, evidenceSource: "none" };
-  const effectiveDate = isoDateInJakarta(paidAt);
+  const effectiveDate = options?.effectiveDate ?? paymentEffectiveDate(paidAt);
+  const configured = options?.settlementConfig;
+  if (
+    configured &&
+    configured.companyId === companyId &&
+    configured.providerCode === provider &&
+    configured.effectiveFrom <= effectiveDate &&
+    (!configured.effectiveUntil || configured.effectiveUntil >= effectiveDate) &&
+    configured.bankAccountId.trim()
+  ) {
+    return { bankAccountId: configured.bankAccountId.trim(), evidenceSource: "effective_settlement_config" };
+  }
   const rows = await db
     .select({
       bankAccountId: paymentSettlementConfigsTable.bankAccountId,
@@ -173,9 +206,21 @@ export async function resolveExpectedSettlementDate(
   paidAt: Date | null,
   companyId: number | null,
   bankAccountId: string | null,
+  options?: Pick<PaymentEnrichmentOptions, "effectiveDate" | "settlementConfig">,
 ): Promise<string | null> {
   if (!paidAt || companyId == null || !bankAccountId) return null;
-  const paidDate = isoDateInJakarta(paidAt);
+  const paidDate = options?.effectiveDate ?? paymentEffectiveDate(paidAt);
+  const configured = options?.settlementConfig;
+  if (
+    configured &&
+    configured.companyId === companyId &&
+    configured.providerCode === provider &&
+    configured.bankAccountId === bankAccountId &&
+    configured.effectiveFrom <= paidDate &&
+    (!configured.effectiveUntil || configured.effectiveUntil >= paidDate)
+  ) {
+    return addBusinessDays(paidDate, configured.settlementDelayBusinessDays);
+  }
   const rows = await db
     .select({ delay: paymentSettlementConfigsTable.settlementDelayBusinessDays })
     .from(paymentSettlementConfigsTable)
@@ -201,15 +246,16 @@ export async function enrichPayment(
   booking: Pick<Booking, "payerType" | "companyCustomerId" | "companyInvoiceId">,
   provider: SettlementProvider,
   paidAt: Date | null,
-  options?: { explicitCompanyId?: number | null },
+  options?: PaymentEnrichmentOptions,
 ): Promise<PaymentEnrichment> {
   const company = await resolvePaymentCompany(booking, options);
-  const account = await resolveSettlementBankAccount(company.companyId, provider, paidAt);
+  const account = await resolveSettlementBankAccount(company.companyId, provider, paidAt, options);
   const expectedSettlementDate = await resolveExpectedSettlementDate(
     provider,
     paidAt,
     company.companyId,
     account.bankAccountId,
+    options,
   );
   return {
     companyId: company.companyId,

@@ -1,6 +1,7 @@
 import pg from "pg";
 import { createHash } from "node:crypto";
 import { classifyHistoricalPayment, type HistoricalPaymentEvidence } from "./payment-enrichment-classifier.js";
+import { activeEnvironmentLookupResult } from "./payment-enrichment-diagnostic-logic.js";
 
 const { Client } = pg;
 const marker = process.argv.find((arg) => arg.startsWith("--marker="))?.slice(9) ?? null;
@@ -40,13 +41,13 @@ try {
     const payment = await client.query(
       `SELECT id, payment_method AS "paymentMethod", payment_provider AS "paymentProvider",
               provider_reference AS "providerReference", merchant_trade_no AS "merchantTradeNo",
-              provider_trade_no AS "providerTradeNo", company_id AS "companyId",
+              provider_trade_no AS "providerTradeNo", paid_at AS "paidAt", company_id AS "companyId",
               bank_account_id AS "bankAccountId", expected_settlement_date AS "expectedSettlementDate"
          FROM sport_center.sport_payments WHERE id = $1 LIMIT 1`,
       [paymentId],
     );
     if (!payment.rowCount) {
-      console.log(JSON.stringify({ ...identity, error: "RECORD_NOT_FOUND_IN_ACTIVE_ENVIRONMENT", requestedPaymentId: paymentId }, null, 2));
+      console.log(JSON.stringify({ ...identity, ...activeEnvironmentLookupResult(0, paymentId) }, null, 2));
       process.exitCode = 0;
     } else {
       const row = payment.rows[0] as HistoricalPaymentEvidence;

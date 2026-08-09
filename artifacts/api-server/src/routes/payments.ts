@@ -23,7 +23,7 @@ import { getBaseUrl } from "../lib/appUrl";
 import { sendRekapPemakaianToAdmin } from "../lib/rekapPemakaian";
 import { sendInvoiceToCustomer, sendGroupInvoiceToCustomer } from "../lib/invoiceDelivery";
 import { normalizePaymentProvider, parseProviderPaidAt } from "../lib/paymentProvider";
-import { enrichPayment } from "../lib/paymentEnrichment";
+import { enrichPayment, paymentEffectiveDate } from "../lib/paymentEnrichment";
 
 // Helper: kirim rekap ke admin WA hanya jika tanggal booking = hari ini (WIB)
 function todayWIB(): string {
@@ -362,7 +362,12 @@ router.post("/payments", async (req, res) => {
       ? parseProviderPaidAt(req.body as Record<string, unknown>) ?? new Date()
       : null;
     const paymentEnrichment = paymentMethod === "QRIS"
-      ? await enrichPayment(booking, paymentProvider ?? "unknown", manualPaidAt)
+      ? await enrichPayment(booking, paymentProvider ?? "unknown", manualPaidAt, {
+          // The booking relation is the primary company evidence. The
+          // effective date is passed explicitly so both settlement resolvers
+          // use the same provider timestamp.
+          effectiveDate: manualPaidAt ? paymentEffectiveDate(manualPaidAt) : null,
+        })
       : null;
 
     // Insert payment record baru (no upsert)
@@ -586,6 +591,17 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
         booking,
         payment.paymentProvider ?? "unknown",
         payment.paidAt ?? payment.confirmedAt ?? new Date(),
+        {
+          // Preserve the existing payment snapshot as resolver context during
+          // confirmation/replay. Resolver results are still applied with
+          // COALESCE below, so a missing source can never erase dimensions.
+          explicitCompanyId: payment.companyId,
+          effectiveDate: payment.paidAt
+            ? paymentEffectiveDate(payment.paidAt)
+            : payment.confirmedAt
+              ? paymentEffectiveDate(payment.confirmedAt)
+              : null,
+        },
       );
       const [enrichedPayment] = await db
         .update(paymentsTable)

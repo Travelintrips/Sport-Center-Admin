@@ -44,4 +44,5 @@
 - [Legacy payment reconciliation](legacy-payment-reconciliation.md) — legacy accounting payments may retain valid entries without sport mirrors; link only unique ref+amount pairs, never delete audit rows.
 - [Payment-accounting integration contract](payment-accounting-integration-contract.md) — cross-project financial events require explicit ownership, immutable IDs, and database-enforced idempotency.
 - [UAT QRIS fixture integrity](uat-qris-fixture-integrity.md) — marker columns and expected settlement dates must agree with staged import rows before running reconciliation UAT.
+- [Payment enrichment propagation](payment-enrichment-propagation.md) — all payment creation/finalization callers must pass canonical paidAt/effective-date context; replay enrichment must COALESCE snapshots.
 
