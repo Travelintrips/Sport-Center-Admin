@@ -32,12 +32,12 @@ name = "Start application"
 author = "agent"
 
 [workflows.workflow.metadata]
-outputType = "webview"
+outputType = "console"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "bash scripts/start-dev.sh"
-waitForPort = 5000
+waitForPort = 8080
 
 [agent]
 stack = "BEST_EFFORT_FALLBACK"
