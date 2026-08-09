@@ -1,0 +1,653 @@
+# PHASE B — CONTROLLED REPAIR PAYMENT 13/14
+
+## CST Ownership Resolved + Mirror + Accounting Metadata + Public Tax
+
+Lanjutkan dari Phase A yang sudah berstatus:
+
+`READY_FOR_CONTROLLED_REPAIR`
+
+Canonical ownership sudah valid:
+
+* Facility 1 → `public.companies.id = 1` / CST
+* Facility 7 → `public.companies.id = 1` / CST
+
+Mappings:
+
+* Facility 1 mapping ID 1
+* Facility 7 mapping ID 2
+* effective_from = `2026-08-09`
+* source = `manual_business_approval`
+
+Resolver:
+
+Payment 13 → company 1 / CST / deterministic
+
+Payment 14 → company 1 / CST / deterministic
+
+Task sekarang adalah melakukan **controlled repair hanya untuk payment 13 dan 14**.
+
+---
+
+# 1. HARD SCOPE
+
+Allowed records only:
+
+### Source payments
+
+* `sport_center.sport_payments.id = 13`
+* `sport_center.sport_payments.id = 14`
+
+### Public mirror
+
+* mirror ID 8 / `SCPAY-SC-13`
+* mirror ID 9 / `SCPAY-SC-14`
+
+### Accounting
+
+* entry 9 / `sc_payment_13`
+* entry 10 / `sc_payment_14`
+
+### Public tax
+
+Hanya missing payment-specific tax lines untuk payment 13/14.
+
+Do NOT modify any other payment, booking, mirror, accounting entry, tax line, journal, settlement, or mutation.
+
+---
+
+# 2. ENVIRONMENT SAFETY
+
+Development only.
+
+Before writes verify:
+
+* DB source = development
+* `isDevUsingProdDb = false`
+* `ALLOW_DEV_ON_PROD_DB = false`
+* company 1 = CST
+* ownership mappings 1/7 active
+
+If any mismatch:
+STOP.
+
+Do not production deploy.
+
+---
+
+# 3. PRE-REPAIR SNAPSHOT
+
+Before UPDATE/INSERT capture read-only snapshot for payment 13/14:
+
+## Source
+
+* company_id
+* method
+* provider
+* bank account
+* paid_at
+
+## Mirror
+
+* source_payment_id
+* company_id
+* method
+* provider
+* provider_code
+* bank_account_id
+* entry_id
+* posting_status
+
+## Accounting
+
+* entry id
+* correlation
+* source
+* source_id
+* source_payment_id if present
+* company
+* payment method
+* provider
+* bank account
+* status
+
+## GL
+
+* debit
+* credit
+* line count
+
+## Tax
+
+* internal tax
+* existing public tax rows
+
+Store/report snapshot for audit.
+
+---
+
+# 4. APPLY SOURCE PAYMENT REPAIR
+
+Payment 13:
+
+If:
+
+`company_id IS NULL`
+
+set:
+
+`company_id = 1`
+
+Payment 14:
+
+same.
+
+Do not overwrite non-null conflicting company.
+
+If conflict:
+ROLLBACK transaction and return:
+
+`SOURCE_COMPANY_CONFLICT`
+
+---
+
+# 5. REPAIR MIRROR 13
+
+Use existing mirror row:
+
+`id = 8`
+
+`payment_number = SCPAY-SC-13`
+
+Set/update idempotently:
+
+* `source_payment_id = 13`
+* `company_id = 1`
+* `bank_account_id = source payment bank_account_id`
+* `method = QRIS`
+* `payment_type = full_payment`
+* `payment_provider = mandiri_direct`
+* `provider_code = mandiri_direct`
+* `provider_reference = source value if available`
+* `provider_order_id = source value if available`
+* `merchant_trade_no = source value if available`
+* `provider_trade_no = source value if available`
+* `paid_at = source paid_at`
+* `expected_settlement_date = resolved snapshot if deterministically available`
+* `entry_id = 9`
+
+Use null-preserving semantics.
+
+Do not replace valid non-null metadata with NULL.
+
+---
+
+# 6. REPAIR MIRROR 14
+
+Existing:
+
+`id = 9`
+
+`payment_number = SCPAY-SC-14`
+
+Repair:
+
+* `source_payment_id = 14`
+* `company_id = 1`
+* source bank account
+* QRIS
+* full_payment
+* mandiri_direct
+* provider metadata
+* paid_at
+* expected settlement if deterministic
+* `entry_id = 10`
+
+No new mirror.
+
+---
+
+# 7. ACCOUNTING ENTRY 9 RECOVERY
+
+Reuse:
+
+`entry_id = 9`
+
+`correlation_id = sc_payment_13`
+
+Do NOT create new accounting entry.
+
+Canonical metadata:
+
+* source = `sport_center_payment`
+* source payment ID = 13
+* company_id = 1
+* payment_method = QRIS
+* payment_provider = mandiri_direct
+* payment_type = full_payment
+* bank_account_id = source account
+
+Preserve:
+
+* entry number
+* GL lines
+* debit/credit amounts
+* correlation ID
+
+If source ID column has different existing semantics, use existing canonical payment linkage field rather than corrupting booking reference.
+
+Do not lose booking traceability.
+
+---
+
+# 8. ACCOUNTING ENTRY 10 RECOVERY
+
+Reuse:
+
+`entry_id = 10`
+
+`correlation_id = sc_payment_14`
+
+Apply same canonical metadata with:
+
+`source payment ID = 14`
+
+Do not create duplicate entry.
+
+---
+
+# 9. GL MUST REMAIN UNCHANGED
+
+Before and after:
+
+Payment 13:
+
+`Debit  = Rp100.000`
+
+`Credit = Rp100.000`
+
+Payment 14:
+
+`Debit  = Rp50.000`
+
+`Credit = Rp50.000`
+
+No GL amount update.
+
+No GL line recreation.
+
+No debit-account redesign.
+
+If GL changes unexpectedly:
+ROLLBACK.
+
+---
+
+# 10. PUBLIC TAX REPAIR — PAYMENT 13
+
+Internal source tax:
+
+`Rp9.910`
+
+Existing entry:
+
+`9`
+
+If payment-specific public tax line is absent, insert exactly one canonical line.
+
+Use source values for:
+
+* company_id = 1
+* accounting_entry_id = 9
+* tax_type = PPN_OUT
+* rate = source tax rate
+* base_amount = source DPP
+* tax_amount = 9.910
+* direction = out
+* period
+* entity/reference fields using canonical payment identity where schema supports it
+
+Use unique/NOT EXISTS guard.
+
+Do not delete or rewrite existing booking tax row in this task.
+
+---
+
+# 11. PUBLIC TAX REPAIR — PAYMENT 14
+
+Internal tax:
+
+`Rp4.955`
+
+Entry:
+
+`10`
+
+Insert missing payment-specific tax line only if absent.
+
+Same idempotency requirements.
+
+---
+
+# 12. TAX DUPLICATE SAFETY
+
+Before insert search existing tax rows by:
+
+* accounting_entry_id
+* tax_type
+* amount/rate
+* payment/entity reference
+
+If equivalent canonical row already exists:
+
+do not insert.
+
+Classify:
+
+`ALREADY_COMPLETE`.
+
+---
+
+# 13. POSTING STATUS
+
+After source/mirror/accounting/tax repair, validate all invariants.
+
+Only set mirror `posting_status = posted` if:
+
+* source linkage valid
+* company = 1
+* entry_id valid
+* accounting entry posted
+* GL lines exist
+* debit = credit
+* payment method/provider metadata canonical
+* required tax linkage complete
+
+Otherwise leave:
+
+`failed`
+
+or appropriate review state with exact error.
+
+Do not mark complete merely because entry exists.
+
+---
+
+# 14. TRANSACTION BOUNDARY
+
+Perform repair in controlled transaction(s).
+
+Preferred:
+
+one transaction per payment.
+
+Payment 13 repair failure must not corrupt payment 14.
+
+Within each payment transaction:
+
+source
+→ mirror
+→ accounting metadata
+→ tax
+→ invariant validation
+
+Commit only when all scoped validations pass.
+
+---
+
+# 15. POST-REPAIR AUDIT PAYMENT 13
+
+Expected:
+
+## Source
+
+`company_id = 1`
+
+## Mirror
+
+* source_payment_id = 13
+* company = 1
+* QRIS
+* mandiri_direct
+* bank account present
+* entry_id = 9
+* canonical metadata present
+
+## Accounting
+
+* entry 9 reused
+* correlation `sc_payment_13`
+* company 1
+* canonical payment metadata
+* status posted
+
+## GL
+
+balanced 100.000
+
+## Tax
+
+internal PPN 9.910
+public payment tax line present exactly once.
+
+---
+
+# 16. POST-REPAIR AUDIT PAYMENT 14
+
+Expected equivalent:
+
+* source company 1
+* mirror source_payment_id 14
+* entry 10
+* GL balanced 50.000
+* tax 4.955 public line exactly once.
+
+---
+
+# 17. IDEMPOTENCY RERUN
+
+Immediately rerun repair logic in DRY-RUN mode.
+
+Expected:
+
+Payment 13:
+`ALREADY_COMPLETE`
+
+Payment 14:
+`ALREADY_COMPLETE`
+
+Expected new rows on second run:
+
+* ownership mapping: 0
+* mirror: 0
+* accounting entry: 0
+* GL lines: 0
+* tax lines: 0
+
+No UPDATE should be required except harmless timestamp fields if project convention explicitly does so; preferably none.
+
+---
+
+# 18. VERIFY ACCOUNTING IDENTITY
+
+Confirm canonical chain:
+
+Payment 13:
+
+`sport_center.sport_payments.id = 13`
+
+→ `public.sport_payments.source_payment_id = 13`
+
+→ `entry_id = 9`
+
+→ `accounting_entries.id = 9`
+
+→ GL lines
+
+→ tax line
+
+Payment 14 same chain with 14 / 10.
+
+---
+
+# 19. PAYMENT METHOD / PROVIDER
+
+Verify end-to-end:
+
+Payment 13:
+
+* payment_method = QRIS
+* payment_provider = mandiri_direct
+
+Payment 14:
+same.
+
+Source → mirror → accounting audit metadata must agree.
+
+---
+
+# 20. COMPANY CONSISTENCY
+
+Verify:
+
+# source payment company
+
+# mirror company
+
+# accounting company
+
+`public.companies.id = 1`
+
+Expected:
+
+`PT Cahaya Sejati Teknologi / CST`
+
+---
+
+# 21. CURRENT QRIS ACCOUNTING ACCOUNT
+
+Do not change existing:
+
+`Bank Mandiri CST`
+`1-1020-CST`
+
+Continue flag:
+
+`ACCOUNTING_DESIGN_REVIEW_REQUIRED`
+
+The clearing-account redesign remains separate.
+
+---
+
+# 22. INTERNAL JOURNAL
+
+Do not modify existing internal journal amounts.
+
+Read-only verify:
+
+Payment 13:
+journal payment_id = 13
+
+Payment 14:
+journal payment_id = 14
+
+No duplicates.
+
+---
+
+# 23. VALIDATION
+
+Run after repair:
+
+* `pnpm run typecheck:libs`
+* API typecheck
+* API build
+* relevant accounting/payment/tax tests
+* `git diff --check`
+
+Runtime:
+
+* `/health` 200
+* `/readiness` 200
+* `/api/health` 200
+
+---
+
+# 24. FINAL AUDIT ENDPOINT
+
+Run:
+
+`GET /api/admin/audit-sport-center-payment/13`
+
+and:
+
+`GET /api/admin/audit-sport-center-payment/14`
+
+with authorized finance/admin context if available.
+
+If direct auth is not available, use equivalent read-only service/query.
+
+Expected validation:
+
+* COMPLETE source/mirror/accounting chain
+* GL balanced
+* tax complete
+* method/provider complete.
+
+---
+
+# 25. FINAL REPORT
+
+Return:
+
+## A. Environment
+
+## B. Payment 13 before/after
+
+## C. Payment 14 before/after
+
+## D. Mirror 8 before/after
+
+## E. Mirror 9 before/after
+
+## F. Accounting entry 9 recovery
+
+## G. Accounting entry 10 recovery
+
+## H. Tax repair 13
+
+## I. Tax repair 14
+
+## J. GL invariant
+
+## K. Idempotency rerun
+
+## L. Canonical identity chain
+
+## M. Tests/build/runtime
+
+## N. Remaining risks
+
+## O. Final status
+
+Use one:
+
+`CONTROLLED_REPAIR_COMPLETE`
+
+`CONTROLLED_REPAIR_PARTIAL`
+
+`MANUAL_REVIEW_REQUIRED`
+
+# HARD SAFETY
+
+Do not:
+
+* touch any payment other than 13/14
+* create new accounting entry for 13/14
+* alter balanced GL amounts
+* mass backfill
+* modify Admin user
+* modify facility mapping beyond existing approved 1/7 → CST
+* final QRIS reconciliation
+* settlement posting
+* MDR posting
+* production deploy
