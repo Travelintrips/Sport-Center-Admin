@@ -112,6 +112,7 @@ export * from './listCustomersParams';
 export * from './listDocumentTemplatesParams';
 export * from './listExpensesParams';
 export * from './listFacilitiesParams';
+export * from './listFacilityCompanyMappingsParams';
 export * from './listMembershipsParams';
 export * from './listMembershipsStatus';
 export * from './listPaymentsParams';

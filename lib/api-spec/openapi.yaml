@@ -46,6 +46,82 @@ tags:
   - name: document-templates
     description: Company document template management (invoice, SPP, faktur, kwitansi, etc.)
 paths:
+  /admin/facility-company-mappings:
+    get:
+      operationId: listFacilityCompanyMappings
+      tags: [facilities]
+      summary: List effective-dated facility ownership mappings
+      parameters:
+        - name: facilityId
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Ownership mappings
+    post:
+      operationId: createFacilityCompanyMapping
+      tags: [facilities]
+      summary: Create an effective-dated facility ownership mapping
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [facilityId, companyId, effectiveFrom]
+              properties:
+                facilityId: { type: integer }
+                companyId: { type: integer }
+                effectiveFrom: { type: string, format: date }
+                effectiveUntil: { type: string, format: date, nullable: true }
+                isActive: { type: boolean }
+                source: { type: string }
+                notes: { type: string, nullable: true }
+      responses:
+        "201":
+          description: Mapping created
+  /admin/facility-company-mappings/{id}:
+    patch:
+      operationId: updateFacilityCompanyMapping
+      tags: [facilities]
+      summary: Deactivate or supersede an ownership mapping
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                isActive: { type: boolean }
+                effectiveUntil: { type: string, format: date, nullable: true }
+                notes: { type: string, nullable: true }
+      responses:
+        "200":
+          description: Mapping updated
+  /admin/audit-sport-center-payments/13-14-dry-run:
+    get:
+      operationId: auditSportCenterPayments1314DryRun
+      tags: [payments]
+      summary: Dry-run repair readiness for payments 13 and 14
+      responses:
+        "200":
+          description: Read-only repair report
+  /admin/audit-sport-center-ownership/dry-run:
+    get:
+      operationId: auditSportCenterOwnershipDryRun
+      tags: [payments]
+      summary: Dry-run historical ownership classifier
+      responses:
+        "200":
+          description: Read-only ownership classification
+
   /healthz:
     get:
       operationId: healthCheck

@@ -47,6 +47,7 @@ import type {
   CompanyInvoiceUpdate,
   CompanyVerification,
   CompanyVerificationRequest,
+  CreateFacilityCompanyMappingBody,
   CreateReviewInput,
   CreateTenantInput,
   Customer,
@@ -92,6 +93,7 @@ import type {
   ListDocumentTemplatesParams,
   ListExpensesParams,
   ListFacilitiesParams,
+  ListFacilityCompanyMappingsParams,
   ListMembershipsParams,
   ListPaymentsParams,
   ListPromosParams,
@@ -142,6 +144,7 @@ import type {
   TenantStatusUpdateBody,
   TimeSlot,
   ToggleBillingInput,
+  UpdateFacilityCompanyMappingBody,
   UpdateProfileInput,
   User,
   VendorSimple,
@@ -162,6 +165,387 @@ type AwaitedInput<T> = PromiseLike<T> | T;
 
 
 type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
+
+
+
+export const getListFacilityCompanyMappingsUrl = (params?: ListFacilityCompanyMappingsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/admin/facility-company-mappings?${stringifiedParams}` : `/api/admin/facility-company-mappings`
+}
+
+/**
+ * @summary List effective-dated facility ownership mappings
+ */
+export const listFacilityCompanyMappings = async (params?: ListFacilityCompanyMappingsParams, options?: RequestInit): Promise<void> => {
+
+  return customFetch<void>(getListFacilityCompanyMappingsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListFacilityCompanyMappingsQueryKey = (params?: ListFacilityCompanyMappingsParams,) => {
+    return [
+    `/api/admin/facility-company-mappings`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListFacilityCompanyMappingsQueryOptions = <TData = Awaited<ReturnType<typeof listFacilityCompanyMappings>>, TError = ErrorType<unknown>>(params?: ListFacilityCompanyMappingsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listFacilityCompanyMappings>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListFacilityCompanyMappingsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listFacilityCompanyMappings>>> = ({ signal }) => listFacilityCompanyMappings(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listFacilityCompanyMappings>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListFacilityCompanyMappingsQueryResult = NonNullable<Awaited<ReturnType<typeof listFacilityCompanyMappings>>>
+export type ListFacilityCompanyMappingsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List effective-dated facility ownership mappings
+ */
+
+export function useListFacilityCompanyMappings<TData = Awaited<ReturnType<typeof listFacilityCompanyMappings>>, TError = ErrorType<unknown>>(
+ params?: ListFacilityCompanyMappingsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listFacilityCompanyMappings>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListFacilityCompanyMappingsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getCreateFacilityCompanyMappingUrl = () => {
+
+
+
+
+  return `/api/admin/facility-company-mappings`
+}
+
+/**
+ * @summary Create an effective-dated facility ownership mapping
+ */
+export const createFacilityCompanyMapping = async (createFacilityCompanyMappingBody: CreateFacilityCompanyMappingBody, options?: RequestInit): Promise<void> => {
+
+  return customFetch<void>(getCreateFacilityCompanyMappingUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      createFacilityCompanyMappingBody,)
+  }
+);}
+
+
+
+
+export const getCreateFacilityCompanyMappingMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createFacilityCompanyMapping>>, TError,{data: BodyType<CreateFacilityCompanyMappingBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createFacilityCompanyMapping>>, TError,{data: BodyType<CreateFacilityCompanyMappingBody>}, TContext> => {
+
+const mutationKey = ['createFacilityCompanyMapping'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createFacilityCompanyMapping>>, {data: BodyType<CreateFacilityCompanyMappingBody>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createFacilityCompanyMapping(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateFacilityCompanyMappingMutationResult = NonNullable<Awaited<ReturnType<typeof createFacilityCompanyMapping>>>
+    export type CreateFacilityCompanyMappingMutationBody = BodyType<CreateFacilityCompanyMappingBody>
+    export type CreateFacilityCompanyMappingMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Create an effective-dated facility ownership mapping
+ */
+export const useCreateFacilityCompanyMapping = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createFacilityCompanyMapping>>, TError,{data: BodyType<CreateFacilityCompanyMappingBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createFacilityCompanyMapping>>,
+        TError,
+        {data: BodyType<CreateFacilityCompanyMappingBody>},
+        TContext
+      > => {
+      return useMutation(getCreateFacilityCompanyMappingMutationOptions(options));
+    }
+
+export const getUpdateFacilityCompanyMappingUrl = (id: number,) => {
+
+
+
+
+  return `/api/admin/facility-company-mappings/${id}`
+}
+
+/**
+ * @summary Deactivate or supersede an ownership mapping
+ */
+export const updateFacilityCompanyMapping = async (id: number,
+    updateFacilityCompanyMappingBody: UpdateFacilityCompanyMappingBody, options?: RequestInit): Promise<void> => {
+
+  return customFetch<void>(getUpdateFacilityCompanyMappingUrl(id),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      updateFacilityCompanyMappingBody,)
+  }
+);}
+
+
+
+
+export const getUpdateFacilityCompanyMappingMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateFacilityCompanyMapping>>, TError,{id: number;data: BodyType<UpdateFacilityCompanyMappingBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateFacilityCompanyMapping>>, TError,{id: number;data: BodyType<UpdateFacilityCompanyMappingBody>}, TContext> => {
+
+const mutationKey = ['updateFacilityCompanyMapping'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateFacilityCompanyMapping>>, {id: number;data: BodyType<UpdateFacilityCompanyMappingBody>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  updateFacilityCompanyMapping(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateFacilityCompanyMappingMutationResult = NonNullable<Awaited<ReturnType<typeof updateFacilityCompanyMapping>>>
+    export type UpdateFacilityCompanyMappingMutationBody = BodyType<UpdateFacilityCompanyMappingBody>
+    export type UpdateFacilityCompanyMappingMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Deactivate or supersede an ownership mapping
+ */
+export const useUpdateFacilityCompanyMapping = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateFacilityCompanyMapping>>, TError,{id: number;data: BodyType<UpdateFacilityCompanyMappingBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateFacilityCompanyMapping>>,
+        TError,
+        {id: number;data: BodyType<UpdateFacilityCompanyMappingBody>},
+        TContext
+      > => {
+      return useMutation(getUpdateFacilityCompanyMappingMutationOptions(options));
+    }
+
+export const getAuditSportCenterPayments1314DryRunUrl = () => {
+
+
+
+
+  return `/api/admin/audit-sport-center-payments/13-14-dry-run`
+}
+
+/**
+ * @summary Dry-run repair readiness for payments 13 and 14
+ */
+export const auditSportCenterPayments1314DryRun = async ( options?: RequestInit): Promise<void> => {
+
+  return customFetch<void>(getAuditSportCenterPayments1314DryRunUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getAuditSportCenterPayments1314DryRunQueryKey = () => {
+    return [
+    `/api/admin/audit-sport-center-payments/13-14-dry-run`
+    ] as const;
+    }
+
+
+export const getAuditSportCenterPayments1314DryRunQueryOptions = <TData = Awaited<ReturnType<typeof auditSportCenterPayments1314DryRun>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof auditSportCenterPayments1314DryRun>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getAuditSportCenterPayments1314DryRunQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof auditSportCenterPayments1314DryRun>>> = ({ signal }) => auditSportCenterPayments1314DryRun({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof auditSportCenterPayments1314DryRun>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type AuditSportCenterPayments1314DryRunQueryResult = NonNullable<Awaited<ReturnType<typeof auditSportCenterPayments1314DryRun>>>
+export type AuditSportCenterPayments1314DryRunQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Dry-run repair readiness for payments 13 and 14
+ */
+
+export function useAuditSportCenterPayments1314DryRun<TData = Awaited<ReturnType<typeof auditSportCenterPayments1314DryRun>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof auditSportCenterPayments1314DryRun>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getAuditSportCenterPayments1314DryRunQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getAuditSportCenterOwnershipDryRunUrl = () => {
+
+
+
+
+  return `/api/admin/audit-sport-center-ownership/dry-run`
+}
+
+/**
+ * @summary Dry-run historical ownership classifier
+ */
+export const auditSportCenterOwnershipDryRun = async ( options?: RequestInit): Promise<void> => {
+
+  return customFetch<void>(getAuditSportCenterOwnershipDryRunUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getAuditSportCenterOwnershipDryRunQueryKey = () => {
+    return [
+    `/api/admin/audit-sport-center-ownership/dry-run`
+    ] as const;
+    }
+
+
+export const getAuditSportCenterOwnershipDryRunQueryOptions = <TData = Awaited<ReturnType<typeof auditSportCenterOwnershipDryRun>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof auditSportCenterOwnershipDryRun>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getAuditSportCenterOwnershipDryRunQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof auditSportCenterOwnershipDryRun>>> = ({ signal }) => auditSportCenterOwnershipDryRun({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof auditSportCenterOwnershipDryRun>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type AuditSportCenterOwnershipDryRunQueryResult = NonNullable<Awaited<ReturnType<typeof auditSportCenterOwnershipDryRun>>>
+export type AuditSportCenterOwnershipDryRunQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Dry-run historical ownership classifier
+ */
+
+export function useAuditSportCenterOwnershipDryRun<TData = Awaited<ReturnType<typeof auditSportCenterOwnershipDryRun>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof auditSportCenterOwnershipDryRun>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getAuditSportCenterOwnershipDryRunQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
 
 
 

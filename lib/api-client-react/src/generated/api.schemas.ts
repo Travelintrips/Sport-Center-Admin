@@ -1769,6 +1769,26 @@ export interface WaNotifLog {
   sentAt: string;
 }
 
+export type ListFacilityCompanyMappingsParams = {
+facilityId?: number;
+};
+
+export type CreateFacilityCompanyMappingBody = {
+  facilityId: number;
+  companyId: number;
+  effectiveFrom: string;
+  effectiveUntil?: string | null;
+  isActive?: boolean;
+  source?: string;
+  notes?: string | null;
+};
+
+export type UpdateFacilityCompanyMappingBody = {
+  isActive?: boolean;
+  effectiveUntil?: string | null;
+  notes?: string | null;
+};
+
 export type SendOtp200 = {
   success?: boolean;
   message?: string;

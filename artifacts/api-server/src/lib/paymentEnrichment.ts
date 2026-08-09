@@ -12,6 +12,7 @@ import { createPaymentProviderId, createPaymentProviderOrderId, normalizeProvide
 import type { PaymentProvider } from "./paymentProvider";
 import {
   resolvePaymentCompanyEvidence,
+  resolveEffectiveFacilityCompanyMapping,
   type PaymentCompanyEvidence,
   type PaymentCompanyResolution,
 } from "./paymentCompanyResolution";
@@ -39,6 +40,7 @@ export type PaymentEnrichmentOptions = {
    */
   facilityCompanyId?: number | null;
   merchantCompanyId?: number | null;
+  sourcePaymentCompanyId?: number | null;
   explicitCompanyId?: number | null;
   /**
    * Keep the effective-date decision stable across the company, account and
@@ -125,10 +127,22 @@ export async function validateSettlementBankAccount(
 }
 
 export async function resolvePaymentCompany(
-  booking: Pick<Booking, "payerType" | "companyCustomerId" | "companyInvoiceId">,
-  options?: Pick<PaymentEnrichmentOptions, "facilityCompanyId" | "merchantCompanyId" | "explicitCompanyId">,
+  booking: Pick<Booking, "payerType" | "companyCustomerId" | "companyInvoiceId"> & { facilityId?: number | null },
+  options?: Pick<
+    PaymentEnrichmentOptions,
+    "facilityCompanyId" | "merchantCompanyId" | "sourcePaymentCompanyId" | "explicitCompanyId" | "effectiveDate"
+  >,
 ): Promise<PaymentCompanyResolution> {
   const candidates: PaymentCompanyEvidence[] = [];
+
+  if (options?.sourcePaymentCompanyId != null && await validateCompanyId(options.sourcePaymentCompanyId)) {
+    candidates.push({
+      companyId: options.sourcePaymentCompanyId,
+      evidenceSource: "source_payment_company",
+      evidenceReference: `source_payment.company_id:${options.sourcePaymentCompanyId}`,
+      effectiveDate: options.effectiveDate,
+    });
+  }
 
   if (booking.payerType === "company" && booking.companyCustomerId != null) {
     if (await validateCompanyId(booking.companyCustomerId)) {
@@ -136,6 +150,7 @@ export async function resolvePaymentCompany(
         companyId: booking.companyCustomerId,
         evidenceSource: "booking_company_relation",
         evidenceReference: `company_customer_id:${booking.companyCustomerId}`,
+        effectiveDate: options?.effectiveDate,
       });
     }
   }
@@ -153,6 +168,7 @@ export async function resolvePaymentCompany(
         companyId: Number(companyId),
         evidenceSource: "booking_company_invoice",
         evidenceReference: `company_invoice_id:${booking.companyInvoiceId}`,
+        effectiveDate: options?.effectiveDate,
       });
     }
   }
@@ -162,7 +178,39 @@ export async function resolvePaymentCompany(
       companyId: options.facilityCompanyId,
       evidenceSource: "facility_ownership",
       evidenceReference: "validated_facility_context",
+      effectiveDate: options.effectiveDate,
     });
+  }
+
+  if (booking.facilityId != null && options?.effectiveDate) {
+    const mappingRows = await db.execute(sql`
+      SELECT id, facility_id, company_id, effective_from::text, effective_until::text, is_active
+        FROM sport_center.facility_company_mappings
+       WHERE facility_id = ${booking.facilityId}
+         AND is_active = true
+         AND effective_from <= ${options.effectiveDate}::date
+         AND (effective_until IS NULL OR effective_until >= ${options.effectiveDate}::date)
+       ORDER BY effective_from DESC, id DESC
+    `).catch(() => ({ rows: [] }));
+    const mapping = resolveEffectiveFacilityCompanyMapping(
+      ((mappingRows as any).rows ?? []).map((row: any) => ({
+        id: Number(row.id),
+        facilityId: Number(row.facility_id),
+        companyId: Number(row.company_id),
+        effectiveFrom: String(row.effective_from),
+        effectiveUntil: row.effective_until == null ? null : String(row.effective_until),
+        isActive: Boolean(row.is_active),
+      })),
+      options.effectiveDate,
+    );
+    if (mapping && await validateCompanyId(mapping.companyId)) {
+      candidates.push({
+        companyId: mapping.companyId,
+        evidenceSource: "facility_company_mapping",
+        evidenceReference: `facility_company_mapping:${mapping.id}:facility:${mapping.facilityId}`,
+        effectiveDate: options.effectiveDate,
+      });
+    }
   }
 
   if (options?.merchantCompanyId != null && await validateCompanyId(options.merchantCompanyId)) {
@@ -170,6 +218,7 @@ export async function resolvePaymentCompany(
       companyId: options.merchantCompanyId,
       evidenceSource: "validated_explicit_configuration",
       evidenceReference: "validated_merchant_context",
+      effectiveDate: options.effectiveDate,
     });
   }
 
@@ -178,6 +227,7 @@ export async function resolvePaymentCompany(
       companyId: options.explicitCompanyId,
       evidenceSource: "validated_explicit_configuration",
       evidenceReference: "validated_explicit_context",
+      effectiveDate: options.effectiveDate,
     });
   }
 
@@ -268,12 +318,15 @@ export async function resolveExpectedSettlementDate(
 }
 
 export async function enrichPayment(
-  booking: Pick<Booking, "payerType" | "companyCustomerId" | "companyInvoiceId">,
+  booking: Pick<Booking, "payerType" | "companyCustomerId" | "companyInvoiceId"> & { facilityId?: number | null },
   provider: SettlementProvider,
   paidAt: Date | null,
   options?: PaymentEnrichmentOptions,
 ): Promise<PaymentEnrichment> {
-  const company = await resolvePaymentCompany(booking, options);
+  const company = await resolvePaymentCompany(booking, {
+    ...options,
+    effectiveDate: options?.effectiveDate ?? (paidAt ? paymentEffectiveDate(paidAt) : null),
+  });
   const account = await resolveSettlementBankAccount(company.companyId, provider, paidAt, options);
   const expectedSettlementDate = await resolveExpectedSettlementDate(
     provider,
@@ -303,7 +356,7 @@ export async function enrichPayment(
  * payment write.
  */
 export async function resolveRequiredPaymentEnrichment(
-  booking: Pick<Booking, "payerType" | "companyCustomerId" | "companyInvoiceId">,
+  booking: Pick<Booking, "payerType" | "companyCustomerId" | "companyInvoiceId"> & { facilityId?: number | null },
   provider: SettlementProvider,
   paidAt: Date | null,
   options?: PaymentEnrichmentOptions,
@@ -335,7 +388,7 @@ export async function resolveRequiredPaymentEnrichment(
 
 export async function ensurePaymentBankAccount(
   payment: Payment,
-  booking: Pick<Booking, "payerType" | "companyCustomerId" | "companyInvoiceId">,
+  booking: Pick<Booking, "payerType" | "companyCustomerId" | "companyInvoiceId"> & { facilityId?: number | null },
   provider: SettlementProvider = payment.paymentProvider ?? "unknown",
   paidAt: Date | null = payment.paidAt ?? payment.confirmedAt ?? null,
 ): Promise<Payment> {
@@ -356,6 +409,7 @@ export async function ensurePaymentBankAccount(
   ) return payment;
 
   const enrichment = await resolveRequiredPaymentEnrichment(booking, provider, paidAt, {
+    sourcePaymentCompanyId: payment.companyId,
     explicitCompanyId: payment.companyId,
     effectiveDate: paidAt ? paymentEffectiveDate(paidAt) : null,
   });

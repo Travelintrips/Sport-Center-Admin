@@ -9,6 +9,42 @@ import * as zod from 'zod';
 
 
 /**
+ * @summary List effective-dated facility ownership mappings
+ */
+export const ListFacilityCompanyMappingsQueryParams = zod.object({
+  "facilityId": zod.coerce.number().optional()
+})
+
+
+/**
+ * @summary Create an effective-dated facility ownership mapping
+ */
+export const CreateFacilityCompanyMappingBody = zod.object({
+  "facilityId": zod.number(),
+  "companyId": zod.number(),
+  "effectiveFrom": zod.coerce.date(),
+  "effectiveUntil": zod.coerce.date().nullish(),
+  "isActive": zod.boolean().optional(),
+  "source": zod.string().optional(),
+  "notes": zod.string().nullish()
+})
+
+
+/**
+ * @summary Deactivate or supersede an ownership mapping
+ */
+export const UpdateFacilityCompanyMappingParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const UpdateFacilityCompanyMappingBody = zod.object({
+  "isActive": zod.boolean().optional(),
+  "effectiveUntil": zod.coerce.date().nullish(),
+  "notes": zod.string().nullish()
+})
+
+
+/**
  * @summary Health check
  */
 export const HealthCheckResponse = zod.object({

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "@jest/globals";
-import { resolvePaymentCompanyEvidence } from "./paymentCompanyResolution.js";
+import {
+  resolveEffectiveFacilityCompanyMapping,
+  resolvePaymentCompanyEvidence,
+} from "./paymentCompanyResolution.js";
 
 describe("deterministic payment company evidence", () => {
   it("resolves one company from validated evidence", () => {
@@ -13,7 +16,9 @@ describe("deterministic payment company evidence", () => {
       companyId: 24,
       evidenceSource: "facility_ownership",
       evidenceReference: "facility_ownership:facility_id:17",
+      effectiveDate: null,
       deterministic: true,
+      reason: "RESOLVED",
     });
   });
 
@@ -59,7 +64,30 @@ describe("deterministic payment company evidence", () => {
       companyId: null,
       evidenceSource: "none",
       evidenceReference: null,
+      effectiveDate: null,
       deterministic: false,
+      reason: "NO_OWNERSHIP_EVIDENCE",
     });
+  });
+
+  it("resolves the mapping effective on the payment date", () => {
+    expect(resolveEffectiveFacilityCompanyMapping([
+      { id: 1, facilityId: 1, companyId: 24, effectiveFrom: "2026-01-01", effectiveUntil: "2026-12-31", isActive: true },
+      { id: 2, facilityId: 1, companyId: 31, effectiveFrom: "2027-01-01", effectiveUntil: null, isActive: true },
+    ], "2026-08-09")?.companyId).toBe(24);
+    expect(resolveEffectiveFacilityCompanyMapping([
+      { id: 1, facilityId: 1, companyId: 24, effectiveFrom: "2026-01-01", effectiveUntil: "2026-12-31", isActive: true },
+      { id: 2, facilityId: 1, companyId: 31, effectiveFrom: "2027-01-01", effectiveUntil: null, isActive: true },
+    ], "2027-08-09")?.companyId).toBe(31);
+  });
+
+  it("does not resolve overlapping mappings or inactive mappings", () => {
+    expect(resolveEffectiveFacilityCompanyMapping([
+      { id: 1, facilityId: 1, companyId: 24, effectiveFrom: "2026-01-01", effectiveUntil: null, isActive: true },
+      { id: 2, facilityId: 1, companyId: 31, effectiveFrom: "2026-06-01", effectiveUntil: null, isActive: true },
+    ], "2026-08-09")).toBeNull();
+    expect(resolveEffectiveFacilityCompanyMapping([
+      { id: 1, facilityId: 1, companyId: 24, effectiveFrom: "2026-01-01", effectiveUntil: null, isActive: false },
+    ], "2026-08-09")).toBeNull();
   });
 });

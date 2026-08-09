@@ -34,18 +34,21 @@ export type SportCenterPaymentAuditStatus =
   | "COMPANY_MISMATCH"
   | "AMOUNT_MISMATCH"
   | "PAYMENT_METHOD_MISSING"
-  | "PROVIDER_MISSING";
+  | "PROVIDER_MISSING"
+  | "AMBIGUOUS_COMPANY_OWNERSHIP"
+   | "LEGACY_COMPANY_MISMATCH"
+   | "OWNERSHIP_CONFIGURATION_REQUIRED";
 
 function paymentAuditStatus(row: any): SportCenterPaymentAuditStatus {
-  if (!row.mirror_id) return "MIRROR_MISSING";
+   if (!row.mirror_id) return "MIRROR_MISSING";
   if (!row.entry_id || row.entry_status !== "posted" || row.entry_source_payment_id == null) {
     return "ACCOUNTING_ENTRY_MISSING";
   }
   if (Number(row.gl_line_count ?? 0) < 2 || Math.abs(Number(row.gl_debit ?? 0) - Number(row.gl_credit ?? 0)) > 0.005) {
     return "GL_UNBALANCED";
   }
-  if (row.source_company_id != null &&
-      (row.mirror_company_id !== row.source_company_id || row.entry_company_id !== row.source_company_id)) {
+   if (row.source_valid_company_id != null &&
+       (row.mirror_company_id !== row.source_valid_company_id || row.entry_company_id !== row.source_valid_company_id)) {
     return "COMPANY_MISMATCH";
   }
   if (Number(row.source_amount) !== Number(row.mirror_amount)) return "AMOUNT_MISMATCH";
@@ -74,6 +77,7 @@ export async function auditSportCenterPayment(sourcePaymentId: number): Promise<
   accounting: Record<string, unknown> | null;
   tax: { sportCenter: Record<string, unknown> | null; publicGl: Record<string, unknown> | null };
   validation: Record<string, boolean>;
+  repairPlan: Record<string, unknown>;
 }> {
   const pool = getProdPool();
   if (!pool) throw new Error("BIZPORTAL_DATABASE_NOT_CONFIGURED");
@@ -81,9 +85,11 @@ export async function auditSportCenterPayment(sourcePaymentId: number): Promise<
   const { rows } = await pool.query(
     `SELECT
        sp.id AS source_id, sp.booking_id AS source_booking_id, sp.company_id AS source_company_id,
+       source_company.id AS source_valid_company_id,
        sp.amount AS source_amount, sp.payment_type AS source_payment_type,
        sp.payment_method AS source_payment_method, sp.payment_provider::text AS source_provider,
        COALESCE(sp.paid_at, sp.confirmed_at) AS source_paid_at,
+       COALESCE(sp.paid_at, sp.confirmed_at, sp.created_at)::date::text AS source_effective_date,
        sp.provider_reference AS source_provider_reference,
        sp.provider_order_id AS source_provider_order_id,
        sp.merchant_trade_no AS source_merchant_trade_no,
@@ -94,6 +100,10 @@ export async function auditSportCenterPayment(sourcePaymentId: number): Promise<
        f.name AS facility_name,
        booking_company.id AS booking_company_id,
        invoice_company.id AS invoice_company_id,
+       facility_mapping.mapping_count,
+       facility_mapping.mapping_id,
+       facility_mapping.mapping_company_id,
+       facility_mapping.mapping_effective_from,
        CASE
          WHEN booking_company.id IS NOT NULL
           AND invoice_company.id IS NOT NULL
@@ -124,11 +134,30 @@ export async function auditSportCenterPayment(sourcePaymentId: number): Promise<
         ON booking_company.id = sb.company_customer_id
        AND booking_company.account_type = 'company'
        AND COALESCE(booking_company.account_status, 'active') NOT IN ('rejected', 'inactive')
+       LEFT JOIN sport_center.users source_company
+         ON source_company.id = sp.company_id
+        AND source_company.account_type = 'company'
+        AND COALESCE(source_company.account_status, 'active') NOT IN ('rejected', 'inactive')
       LEFT JOIN sport_center.company_invoices ci ON ci.id = sb.company_invoice_id
       LEFT JOIN sport_center.users invoice_company
         ON invoice_company.id = ci.company_customer_id
        AND invoice_company.account_type = 'company'
        AND COALESCE(invoice_company.account_status, 'active') NOT IN ('rejected', 'inactive')
+      LEFT JOIN LATERAL (
+        SELECT COUNT(*)::int AS mapping_count,
+               MIN(fcm.id) AS mapping_id,
+               MIN(fcm.company_id) AS mapping_company_id,
+               MIN(fcm.effective_from)::text AS mapping_effective_from
+          FROM sport_center.facility_company_mappings fcm
+          JOIN sport_center.users mapping_company
+            ON mapping_company.id = fcm.company_id
+           AND mapping_company.account_type = 'company'
+           AND COALESCE(mapping_company.account_status, 'active') NOT IN ('rejected', 'inactive')
+         WHERE fcm.facility_id = sb.facility_id
+           AND fcm.is_active = true
+           AND fcm.effective_from <= COALESCE(sp.paid_at, sp.confirmed_at, sp.created_at)::date
+           AND (fcm.effective_until IS NULL OR fcm.effective_until >= COALESCE(sp.paid_at, sp.confirmed_at, sp.created_at)::date)
+      ) facility_mapping ON true
      LEFT JOIN public.sport_payments m
        ON m.source_payment_id = sp.id
        OR m.payment_number = 'SCPAY-SC-' || sp.id::text
@@ -179,13 +208,20 @@ export async function auditSportCenterPayment(sourcePaymentId: number): Promise<
       accounting: null,
       tax: { sportCenter: null, publicGl: null },
       validation: { amountMatch: false, companyMatch: false, paymentMethodMatch: false, providerMatch: false, glBalanced: false, taxComplete: false },
+      repairPlan: {
+        mode: "dry_run",
+        status: "SOURCE_PAYMENT_NOT_FOUND",
+        operations: [],
+        publicTax: null,
+      },
     };
   }
-  const status = paymentAuditStatus(row);
+  const baseStatus = paymentAuditStatus(row);
   const ownershipCompanyIds = [
-    row.source_company_id,
+    row.source_valid_company_id,
     row.booking_company_id,
     row.invoice_company_id,
+    Number(row.mapping_count ?? 0) === 1 ? row.mapping_company_id : null,
   ].filter((value) => value != null).map(Number);
   const uniqueOwnershipCompanyIds = [...new Set(ownershipCompanyIds)];
   const ownershipAmbiguous =
@@ -194,6 +230,55 @@ export async function auditSportCenterPayment(sourcePaymentId: number): Promise<
     uniqueOwnershipCompanyIds.length === 1 && !ownershipAmbiguous
       ? uniqueOwnershipCompanyIds[0]
       : null;
+  const mappingDeterministic = Number(row.mapping_count ?? 0) === 1;
+  const effectiveDate = row.source_effective_date ?? null;
+  const legacyCompanyMismatch =
+    ownershipCompany != null &&
+    row.entry_company_id != null &&
+    Number(row.entry_company_id) !== ownershipCompany;
+  const status: SportCenterPaymentAuditStatus =
+    ownershipAmbiguous
+      ? "AMBIGUOUS_COMPANY_OWNERSHIP"
+      : legacyCompanyMismatch
+        ? "LEGACY_COMPANY_MISMATCH"
+        : ownershipCompany == null
+          ? "OWNERSHIP_CONFIGURATION_REQUIRED"
+          : baseStatus;
+  const repairPlan = ownershipCompany != null && !ownershipAmbiguous
+    ? {
+        mode: "dry_run",
+        status: legacyCompanyMismatch ? "LEGACY_COMPANY_MISMATCH" : "REPAIR_PLAN_READY",
+        operations: [
+          ...(row.source_company_id == null ? ["UPDATE source payment company_id"] : []),
+          "COALESCE-update mirror source_payment_id/company_id/provider metadata/bank_account_id/expected_settlement_date/entry_id",
+          "COALESCE-update accounting entry ownership and payment metadata",
+          "preserve correlation_id sc_payment_" + sourcePaymentId,
+          "preserve balanced GL lines",
+          ...(Number(row.expected_tax_amount ?? 0) > 0 && !row.gl_tax_line_id
+            ? ["INSERT public.gl_tax_lines only when NOT EXISTS"]
+            : []),
+        ],
+        publicTax: Number(row.expected_tax_amount ?? 0) > 0
+          ? {
+              accountingEntryId: row.entry_id == null ? null : Number(row.entry_id),
+              companyId: ownershipCompany,
+              taxType: "PPN_OUT",
+              baseAmount: Number(row.source_amount) - Number(row.expected_tax_amount ?? 0),
+              taxAmount: Number(row.expected_tax_amount ?? 0),
+              direction: "out",
+              period: effectiveDate?.slice(0, 7) ?? null,
+              entityType: "sport_center_payment",
+              entityId: String(sourcePaymentId),
+              duplicate: Boolean(row.gl_tax_line_id),
+            }
+          : null,
+      }
+    : {
+        mode: "dry_run",
+        status: ownershipAmbiguous ? "AMBIGUOUS_COMPANY_OWNERSHIP" : "OWNERSHIP_CONFIGURATION_REQUIRED",
+        operations: [],
+        publicTax: null,
+      };
   return {
     readOnly: true,
     sourcePaymentId,
@@ -211,8 +296,38 @@ export async function auditSportCenterPayment(sourcePaymentId: number): Promise<
     ownership: {
       resolvedCompany: ownershipCompany,
       deterministic: ownershipCompany != null,
+        evidenceSource: ownershipAmbiguous
+          ? "ambiguous"
+          : row.source_valid_company_id != null
+            ? "source_payment_company"
+            : row.booking_company_id != null
+              ? "booking_company_relation"
+              : row.invoice_company_id != null
+                ? "booking_company_invoice"
+                : mappingDeterministic
+                  ? "facility_company_mapping"
+                  : "none",
+        evidenceReference: [
+          row.source_valid_company_id != null ? `source_payment.company_id:${row.source_valid_company_id}` : null,
+          row.booking_company_id != null ? `booking.company_customer_id:${row.booking_company_id}` : null,
+          row.invoice_company_id != null ? `booking.company_invoice_id:${row.source_booking_id}` : null,
+          mappingDeterministic && row.mapping_id != null
+            ? `facility_company_mapping:${row.mapping_id}:facility:${row.facility_id}`
+            : null,
+        ].filter(Boolean),
+        effectiveDate,
+        reason: ownershipAmbiguous
+          ? "AMBIGUOUS_COMPANY_OWNERSHIP"
+          : ownershipCompany != null
+            ? "RESOLVED"
+            : "OWNERSHIP_CONFIGURATION_REQUIRED",
+        mappingId: mappingDeterministic && row.mapping_id != null ? Number(row.mapping_id) : null,
+        mappingCompanyId: mappingDeterministic && row.mapping_company_id != null ? Number(row.mapping_company_id) : null,
+        mappingEffectiveFrom: row.mapping_effective_from ?? null,
+        mappingCandidateCount: Number(row.mapping_count ?? 0),
+        legacyCompanyMismatch,
       evidence: [
-        row.source_company_id != null
+          row.source_valid_company_id != null
           ? `source_payment.company_id:${row.source_company_id}`
           : null,
         row.booking_company_id != null
@@ -256,12 +371,15 @@ export async function auditSportCenterPayment(sourcePaymentId: number): Promise<
     },
     validation: {
       amountMatch: Number(row.source_amount) === Number(row.mirror_amount),
-      companyMatch: row.source_company_id == null || Number(row.source_company_id) === Number(row.mirror_company_id) && Number(row.source_company_id) === Number(row.entry_company_id),
+       companyMatch: row.source_valid_company_id == null ||
+         Number(row.source_valid_company_id) === Number(row.mirror_company_id) &&
+         Number(row.source_valid_company_id) === Number(row.entry_company_id),
       paymentMethodMatch: String(row.source_payment_method ?? "").trim() === String(row.entry_payment_method ?? "").trim(),
       providerMatch: String(row.source_provider ?? "unknown").trim().toLowerCase() === String(row.entry_payment_provider ?? "unknown").trim().toLowerCase(),
       glBalanced: Number(row.gl_line_count ?? 0) >= 2 && Math.abs(Number(row.gl_debit ?? 0) - Number(row.gl_credit ?? 0)) <= 0.005,
       taxComplete: Number(row.expected_tax_amount ?? 0) <= 0 || Boolean(row.tax_transaction_id && row.gl_tax_line_id),
     },
+    repairPlan,
   };
 }
 
@@ -276,6 +394,7 @@ export async function dryRunConfirmedPaymentAccounting(): Promise<{
   glUnbalanced: number;
   taxLedgerMissing: number;
   duplicateCorrelationId: number;
+  ownership: HistoricalOwnershipDryRun;
 }> {
   const pool = getProdPool();
   if (!pool) throw new Error("BIZPORTAL_DATABASE_NOT_CONFIGURED");
@@ -340,6 +459,7 @@ export async function dryRunConfirmedPaymentAccounting(): Promise<{
       ) duplicates
   `);
   const row = rows[0] ?? {};
+  const ownership = await dryRunHistoricalOwnership();
   return {
     readOnly: true,
     scanned: Number(row.scanned ?? 0),
@@ -351,6 +471,91 @@ export async function dryRunConfirmedPaymentAccounting(): Promise<{
     glUnbalanced: Number(row.gl_unbalanced ?? 0),
     taxLedgerMissing: Number(row.tax_missing ?? 0),
     duplicateCorrelationId: Number(duplicate.rows[0]?.count ?? 0),
+    ownership,
+  };
+}
+
+export type HistoricalOwnershipClassification =
+  | "SAFE_FACILITY_COMPANY_BACKFILL"
+  | "SAFE_VENUE_COMPANY_BACKFILL"
+  | "AMBIGUOUS_OWNERSHIP"
+  | "NO_OWNERSHIP_EVIDENCE";
+
+export type HistoricalOwnershipDryRun = {
+  readOnly: true;
+  scanned: number;
+  counts: Record<HistoricalOwnershipClassification, number>;
+  rows: Array<{
+    paymentId: number;
+    facilityId: number;
+    paidAt: string | null;
+    classification: HistoricalOwnershipClassification;
+    mappingIds: number[];
+  }>;
+};
+
+/**
+ * Classify confirmed historical payments that still have no source company.
+ * This function deliberately returns a plan/report only; it never writes a
+ * source payment, mirror, accounting entry, or tax row.
+ */
+export async function dryRunHistoricalOwnership(): Promise<HistoricalOwnershipDryRun> {
+  const pool = getProdPool();
+  if (!pool) throw new Error("BIZPORTAL_DATABASE_NOT_CONFIGURED");
+  const { rows } = await pool.query(`
+    SELECT sp.id AS payment_id,
+           sb.facility_id,
+           COALESCE(sp.paid_at, sp.confirmed_at, sp.created_at) AS paid_at,
+           COUNT(fcm.id)::int AS mapping_count,
+           ARRAY_REMOVE(ARRAY_AGG(fcm.id ORDER BY fcm.id), NULL)::int[] AS mapping_ids
+      FROM sport_center.sport_payments sp
+      JOIN sport_center.sport_bookings sb ON sb.id = sp.booking_id
+      LEFT JOIN sport_center.facility_company_mappings fcm
+        ON fcm.facility_id = sb.facility_id
+       AND fcm.is_active = true
+       AND fcm.effective_from <= COALESCE(sp.paid_at, sp.confirmed_at, sp.created_at)::date
+       AND (fcm.effective_until IS NULL OR fcm.effective_until >= COALESCE(sp.paid_at, sp.confirmed_at, sp.created_at)::date)
+      WHERE sp.status = 'confirmed'
+        AND sp.company_id IS NULL
+      GROUP BY sp.id, sb.facility_id, COALESCE(sp.paid_at, sp.confirmed_at, sp.created_at)
+      ORDER BY sp.id
+  `);
+  const counts: Record<HistoricalOwnershipClassification, number> = {
+    SAFE_FACILITY_COMPANY_BACKFILL: 0,
+    SAFE_VENUE_COMPANY_BACKFILL: 0,
+    AMBIGUOUS_OWNERSHIP: 0,
+    NO_OWNERSHIP_EVIDENCE: 0,
+  };
+  const reportRows = rows.map((row) => {
+    const mappingCount = Number(row.mapping_count ?? 0);
+    const classification: HistoricalOwnershipClassification =
+      mappingCount === 1
+        ? "SAFE_FACILITY_COMPANY_BACKFILL"
+        : mappingCount > 1
+          ? "AMBIGUOUS_OWNERSHIP"
+          : "NO_OWNERSHIP_EVIDENCE";
+    counts[classification]++;
+    return {
+      paymentId: Number(row.payment_id),
+      facilityId: Number(row.facility_id),
+      paidAt: row.paid_at == null ? null : new Date(row.paid_at).toISOString(),
+      classification,
+      mappingIds: Array.isArray(row.mapping_ids) ? row.mapping_ids.map(Number) : [],
+    };
+  });
+  return { readOnly: true, scanned: reportRows.length, counts, rows: reportRows };
+}
+
+export async function dryRunSpecificSportCenterPayments(paymentIds: number[]): Promise<{
+  readOnly: true;
+  paymentIds: number[];
+  reports: Array<Awaited<ReturnType<typeof auditSportCenterPayment>>>;
+}> {
+  const uniqueIds = [...new Set(paymentIds.filter((id) => Number.isSafeInteger(id) && id > 0))];
+  return {
+    readOnly: true,
+    paymentIds: uniqueIds,
+    reports: await Promise.all(uniqueIds.map((id) => auditSportCenterPayment(id))),
   };
 }
 

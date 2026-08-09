@@ -4,6 +4,74 @@ const { Client } = pg;
 
 export const CUSTOM_MIGRATION_SQL = `
 -- ============================================================
+-- Facility → company ownership mapping (effective-dated)
+-- ============================================================
+CREATE EXTENSION IF NOT EXISTS btree_gist;
+
+CREATE TABLE IF NOT EXISTS sport_center.facility_company_mappings (
+  id serial PRIMARY KEY,
+  facility_id integer NOT NULL REFERENCES sport_center.sport_facilities(id) ON DELETE CASCADE,
+  company_id integer NOT NULL REFERENCES sport_center.users(id) ON DELETE RESTRICT,
+  effective_from date NOT NULL,
+  effective_until date,
+  is_active boolean NOT NULL DEFAULT true,
+  source text NOT NULL DEFAULT 'admin_config',
+  notes text,
+  created_by integer REFERENCES sport_center.users(id) ON DELETE SET NULL,
+  updated_by integer REFERENCES sport_center.users(id) ON DELETE SET NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT facility_company_mappings_date_range_valid
+    CHECK (effective_until IS NULL OR effective_until >= effective_from)
+);
+
+CREATE INDEX IF NOT EXISTS facility_company_mappings_lookup_idx
+  ON sport_center.facility_company_mappings (facility_id, effective_from, effective_until)
+  WHERE is_active = true;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+      FROM pg_constraint
+     WHERE conname = 'facility_company_mappings_no_active_overlap'
+       AND conrelid = 'sport_center.facility_company_mappings'::regclass
+  ) THEN
+    ALTER TABLE sport_center.facility_company_mappings
+      ADD CONSTRAINT facility_company_mappings_no_active_overlap
+      EXCLUDE USING gist (
+        facility_id WITH =,
+        daterange(effective_from, COALESCE(effective_until, 'infinity'::date), '[]') WITH &&
+      )
+      WHERE (is_active = true);
+  END IF;
+END $$;
+
+CREATE OR REPLACE FUNCTION sport_center.validate_facility_company_mapping_company()
+RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+      FROM sport_center.users
+     WHERE id = NEW.company_id
+       AND account_type = 'company'
+       AND COALESCE(account_status, 'active') NOT IN ('rejected', 'inactive')
+  ) THEN
+    RAISE EXCEPTION 'FACILITY_COMPANY_MAPPING_COMPANY_INVALID:%', NEW.company_id;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_validate_facility_company_mapping_company
+  ON sport_center.facility_company_mappings;
+CREATE TRIGGER trg_validate_facility_company_mapping_company
+  BEFORE INSERT OR UPDATE OF company_id
+  ON sport_center.facility_company_mappings
+  FOR EACH ROW
+  EXECUTE FUNCTION sport_center.validate_facility_company_mapping_company();
+
+-- ============================================================
 -- 0. sport_vendors table (idempotent)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS sport_center.sport_vendors (
