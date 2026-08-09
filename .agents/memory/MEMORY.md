@@ -47,4 +47,5 @@
 - [UAT QRIS fixture integrity](uat-qris-fixture-integrity.md) — marker columns and expected settlement dates must agree with staged import rows before running reconciliation UAT.
 - [Payment enrichment propagation](payment-enrichment-propagation.md) — all payment creation/finalization callers must pass canonical paidAt/effective-date context; replay enrichment must COALESCE snapshots.
 - [Tracked configuration secrets](tracked-config-secrets.md) — inspect `.replit` and legacy tracked config files for plaintext credentials before treating environment secrets as isolated.
+- [Payment accounting verification](payment-accounting-verification.md) — assess mirror completion from linkage, GL, tax, replay, and recovery evidence, not function presence or `posted` alone.
 
