@@ -8,6 +8,8 @@ import {
 } from "@workspace/db";
 import { and, desc, eq, lte, gte, isNull, or, sql } from "drizzle-orm";
 import type { Booking, Payment } from "@workspace/db";
+import { createPaymentProviderId, normalizeProviderName } from "./paymentMetadata";
+import type { PaymentProvider } from "./paymentProvider";
 
 export type SettlementProvider = "mandiri_direct" | "paylabs" | "unknown";
 
@@ -314,7 +316,11 @@ export async function ensurePaymentBankAccount(
   provider: SettlementProvider = payment.paymentProvider ?? "unknown",
   paidAt: Date | null = payment.paidAt ?? payment.confirmedAt ?? null,
 ): Promise<Payment> {
-  if (payment.bankAccountId?.trim()) return payment;
+  const normalizedProvider = provider;
+  const providerId = payment.providerId?.trim()
+    || createPaymentProviderId(normalizedProvider, payment.providerTradeNo ?? payment.providerReference ?? payment.merchantTradeNo);
+  const providerName = payment.providerName?.trim() || normalizeProviderName(normalizedProvider);
+  if (payment.bankAccountId?.trim() && payment.providerId?.trim() && payment.providerName?.trim()) return payment;
 
   const enrichment = await resolveRequiredPaymentEnrichment(booking, provider, paidAt, {
     explicitCompanyId: payment.companyId,
@@ -325,6 +331,9 @@ export async function ensurePaymentBankAccount(
     .set({
       companyId: payment.companyId ?? enrichment.companyId,
       bankAccountId: enrichment.bankAccountId,
+      paymentProvider: normalizedProvider,
+      providerName,
+      providerId,
       expectedSettlementDate: payment.expectedSettlementDate ?? enrichment.expectedSettlementDate,
       paidAt: payment.paidAt ?? enrichment.paidAt,
       updatedAt: new Date(),

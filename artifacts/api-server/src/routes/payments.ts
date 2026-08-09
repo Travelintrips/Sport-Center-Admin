@@ -23,6 +23,7 @@ import { getBaseUrl } from "../lib/appUrl";
 import { sendRekapPemakaianToAdmin } from "../lib/rekapPemakaian";
 import { sendInvoiceToCustomer, sendGroupInvoiceToCustomer } from "../lib/invoiceDelivery";
 import { normalizePaymentProvider, parseProviderPaidAt } from "../lib/paymentProvider";
+import { createPaymentProviderId, normalizeProviderName } from "../lib/paymentMetadata";
 import { ensurePaymentBankAccount, resolveRequiredPaymentEnrichment, paymentEffectiveDate } from "../lib/paymentEnrichment";
 
 // Helper: kirim rekap ke admin WA hanya jika tanggal booking = hari ini (WIB)
@@ -372,6 +373,11 @@ router.post("/payments", async (req, res) => {
         effectiveDate: manualPaidAt ? paymentEffectiveDate(manualPaidAt) : null,
       },
     );
+    const providerName = normalizeProviderName(paymentProvider ?? "unknown");
+    const providerId = createPaymentProviderId(
+      paymentProvider ?? "unknown",
+      req.body.providerId ?? req.body.providerReference ?? req.body.providerTradeNo ?? req.body.merchantTradeNo,
+    );
 
     // Insert payment record baru (no upsert)
     const [payment] = await db.insert(paymentsTable)
@@ -380,7 +386,9 @@ router.post("/payments", async (req, res) => {
         amount: String(amount),
         proofUrl,
         paymentMethod,
-          paymentProvider,
+        paymentProvider: paymentProvider ?? "unknown",
+        providerName,
+        providerId,
         companyId: paymentEnrichment.companyId ?? null,
         bankAccountId: paymentEnrichment.bankAccountId,
         expectedSettlementDate: paymentEnrichment.expectedSettlementDate ?? null,
@@ -432,7 +440,9 @@ router.post("/payments", async (req, res) => {
             amount: String(sib.grandTotal ?? sib.totalPrice),
             proofUrl,
             paymentMethod,
-            paymentProvider,
+            paymentProvider: paymentProvider ?? "unknown",
+            providerName,
+            providerId,
             companyId: paymentEnrichment.companyId ?? null,
             bankAccountId: paymentEnrichment.bankAccountId,
             expectedSettlementDate: paymentEnrichment.expectedSettlementDate ?? null,

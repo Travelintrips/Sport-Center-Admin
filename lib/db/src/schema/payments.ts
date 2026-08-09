@@ -14,8 +14,11 @@ export const paymentsTable = scSchema.table("sport_payments", {
   amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
   proofUrl: text("proof_url"),
   paymentMethod: text("payment_method").default("Transfer Bank"),
-  paymentProvider: paymentProviderEnum("payment_provider"),
+  // Compatibility enum retained for existing reconciliation consumers.
+  paymentProvider: paymentProviderEnum("payment_provider").notNull().default("unknown"),
+  providerName: text("provider_name").notNull().default("unknown"),
   providerReference: text("provider_reference"),
+  providerId: text("provider_id").notNull(),
   merchantTradeNo: text("merchant_trade_no"),
   providerTradeNo: text("provider_trade_no"),
   companyId: integer("company_id"),

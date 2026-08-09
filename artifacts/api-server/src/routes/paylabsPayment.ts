@@ -37,6 +37,7 @@ import {
   resolvePaylabsProviderReference,
 } from "../lib/paymentProvider";
 import { resolveRequiredPaymentEnrichment, paymentEffectiveDate } from "../lib/paymentEnrichment";
+import { requirePaymentProviderId, normalizeProviderName } from "../lib/paymentMetadata";
 
 const router = Router();
 
@@ -305,7 +306,9 @@ async function finalizePayment(opts: FinalizePaymentOptions): Promise<FinalizePa
         notes      : `Auto-confirmed via Paylabs ${source} (${merchantTradeNo}) | reason: ${reason ?? "payment_notification"}`,
         paymentMethod: resolvePaylabsPaymentMethod(String(txRow.payment_method ?? "")),
         paymentProvider: "paylabs",
+        providerName: normalizeProviderName("paylabs"),
         providerReference: (opts.providerReference ?? paylabsTradeNo) || null,
+        providerId: requirePaymentProviderId("paylabs", paylabsTradeNo || opts.providerReference || merchantTradeNo),
         merchantTradeNo,
         providerTradeNo: paylabsTradeNo || null,
         companyId: paymentEnrichment.companyId,

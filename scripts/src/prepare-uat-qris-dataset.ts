@@ -595,17 +595,18 @@ async function main() {
       const providerReference = `${spec.provider.toUpperCase()}-${MARKER}-${spec.key}`;
       const payment = await client.query(
         `INSERT INTO sport_center.sport_payments
-          (booking_id, amount, payment_method, payment_provider, provider_reference,
+          (booking_id, amount, payment_method, payment_provider, provider_name, provider_id, provider_reference,
            merchant_trade_no, provider_trade_no, payment_type, status, paid_at, notes,
            company_id, bank_account_id, settlement_status, expected_settlement_date,
            settlement_rule_version, gross_tax_inclusive, uat_marker)
-         VALUES ($1, $2, 'QRIS', $3, $4, $5, $6, 'full_payment', 'pending', $7, $8,
-                 $9, $10, 'unsettled', $11, $12, true, $13)
+         VALUES ($1, $2, 'QRIS', $3, $3, $4, $5, $6, $7, 'full_payment', 'pending', $8, $9,
+                 $10, $11, 'unsettled', $12, $13, true, $14)
          RETURNING id`,
         [
           bookingId,
           gross,
           spec.provider,
+           providerReference,
           providerReference,
           `${MARKER}-${spec.key}`,
           `${MARKER}-TRADE-${String(index + 1).padStart(3, "0")}`,

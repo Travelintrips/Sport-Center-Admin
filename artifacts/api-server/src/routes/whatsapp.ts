@@ -44,6 +44,7 @@ import { hashPassword } from "../lib/auth";
 import { syncStatusToBizportal, pushConfirmedPaymentAsBankMutation } from "../lib/bizportalSync";
 import { calculateTax, recordTaxTransaction } from "../lib/tax";
 import { ensurePaymentBankAccount, resolveRequiredPaymentEnrichment } from "../lib/paymentEnrichment";
+import { createPaymentProviderId, normalizeProviderName } from "../lib/paymentMetadata";
 import { broadcastAvailabilityChange } from "../lib/supabase";
 import { logger } from "../lib/logger";
 import { uploadProofWithFallback } from "./storage";
@@ -1149,6 +1150,9 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
         amount: String(Number(booking.totalPrice)),
         proofUrl,
         paymentMethod: "Transfer Bank (WhatsApp)",
+        paymentProvider: "unknown",
+        providerName: normalizeProviderName("unknown"),
+        providerId: createPaymentProviderId("unknown", `wa-${bookingId}`),
         companyId: paymentEnrichment.companyId,
         bankAccountId: paymentEnrichment.bankAccountId,
         expectedSettlementDate: paymentEnrichment.expectedSettlementDate,
@@ -1650,6 +1654,9 @@ async function execAdminApprove(adminPhone: string, orderNumber: string) {
       bookingId: booking.id,
       amount: String(Number(booking.grandTotal ?? booking.totalPrice)),
       paymentMethod: "Manual (Admin WA)",
+      paymentProvider: "unknown",
+      providerName: normalizeProviderName("unknown"),
+      providerId: createPaymentProviderId("unknown", `wa-admin-${booking.id}`),
       companyId: paymentEnrichment.companyId,
       bankAccountId: paymentEnrichment.bankAccountId,
       expectedSettlementDate: paymentEnrichment.expectedSettlementDate,
@@ -1845,6 +1852,9 @@ async function execAdminPaid(adminPhone: string, orderNumber: string) {
       bookingId: booking.id,
       amount: String(Number(booking.grandTotal ?? booking.totalPrice)),
       paymentMethod: "Manual (Admin WA)",
+      paymentProvider: "unknown",
+      providerName: normalizeProviderName("unknown"),
+      providerId: createPaymentProviderId("unknown", `wa-admin-${booking.id}`),
       companyId: paymentEnrichment.companyId,
       bankAccountId: paymentEnrichment.bankAccountId,
       expectedSettlementDate: paymentEnrichment.expectedSettlementDate,

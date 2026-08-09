@@ -12,6 +12,7 @@ import {
 import { adminMiddleware } from "../lib/auth";
 import { sql } from "drizzle-orm";
 import { resolveRequiredPaymentEnrichment } from "../lib/paymentEnrichment";
+import { createPaymentProviderId, normalizeProviderName } from "../lib/paymentMetadata";
 
 const router = Router();
 
@@ -173,6 +174,9 @@ router.post("/admin/seed-demo", adminMiddleware, async (_req, res) => {
           bookingId: b.id,
           amount: b.totalPrice,
           paymentMethod: pick(["Transfer Bank", "Transfer Bank", "Transfer Bank", "QRIS"]),
+          paymentProvider: "unknown",
+          providerName: normalizeProviderName("unknown"),
+          providerId: createPaymentProviderId("unknown", `demo-${b.id}`),
           companyId: paymentEnrichment.companyId,
           bankAccountId: paymentEnrichment.bankAccountId,
           expectedSettlementDate: paymentEnrichment.expectedSettlementDate,
