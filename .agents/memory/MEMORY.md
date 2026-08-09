@@ -45,4 +45,5 @@
 - [Payment-accounting integration contract](payment-accounting-integration-contract.md) — cross-project financial events require explicit ownership, immutable IDs, and database-enforced idempotency.
 - [UAT QRIS fixture integrity](uat-qris-fixture-integrity.md) — marker columns and expected settlement dates must agree with staged import rows before running reconciliation UAT.
 - [Payment enrichment propagation](payment-enrichment-propagation.md) — all payment creation/finalization callers must pass canonical paidAt/effective-date context; replay enrichment must COALESCE snapshots.
+- [Tracked configuration secrets](tracked-config-secrets.md) — inspect `.replit` and legacy tracked config files for plaintext credentials before treating environment secrets as isolated.
 
