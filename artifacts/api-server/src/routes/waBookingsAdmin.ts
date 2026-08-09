@@ -24,6 +24,7 @@ import {
 } from "../lib/notifications";
 import { sendRekapPemakaianToAdmin } from "../lib/rekapPemakaian";
 import { getBaseUrl } from "../lib/appUrl";
+import { ensurePaymentBankAccount, resolveRequiredPaymentEnrichment } from "../lib/paymentEnrichment";
 
 const router = Router();
 
@@ -299,13 +300,19 @@ router.post("/admin/wa-bookings/:orderNumber/paid", adminMiddleware, async (req,
     .where(eq(paymentsTable.bookingId, booking.id)).limit(1);
   let paymentForAccounting = existingPay;
   if (existingPay) {
+    paymentForAccounting = await ensurePaymentBankAccount(existingPay, booking);
     await db.update(paymentsTable).set({ status: "confirmed", confirmedAt: new Date() })
       .where(eq(paymentsTable.bookingId, booking.id));
   } else {
+    const paymentEnrichment = await resolveRequiredPaymentEnrichment(booking, "unknown", new Date());
     const [createdPayment] = await db.insert(paymentsTable).values({
       bookingId: booking.id,
       amount: String(Number(booking.grandTotal ?? booking.totalPrice)),
       paymentMethod: "Manual (Admin BizPortal)",
+      companyId: paymentEnrichment.companyId,
+      bankAccountId: paymentEnrichment.bankAccountId,
+      expectedSettlementDate: paymentEnrichment.expectedSettlementDate,
+      paidAt: paymentEnrichment.paidAt,
       status: "confirmed",
       confirmedAt: new Date(),
     }).returning();

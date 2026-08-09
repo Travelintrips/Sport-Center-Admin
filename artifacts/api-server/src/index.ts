@@ -263,6 +263,22 @@ async function runStartupMigrations() {
        ADD COLUMN IF NOT EXISTS company_id integer,
        ADD COLUMN IF NOT EXISTS bank_account_id text,
        ADD COLUMN IF NOT EXISTS expected_settlement_date text`,
+     `UPDATE sport_center.sport_payments p
+         SET bank_account_id = s.bank_account
+        FROM sport_center.settings s
+       WHERE (p.bank_account_id IS NULL OR btrim(p.bank_account_id) = '')
+         AND s.bank_account IS NOT NULL
+         AND btrim(s.bank_account) <> ''`,
+     `DO $$ BEGIN
+        IF EXISTS (
+          SELECT 1 FROM sport_center.sport_payments
+           WHERE bank_account_id IS NULL OR btrim(bank_account_id) = ''
+        ) THEN
+          RAISE EXCEPTION 'Cannot enforce sport_payments.bank_account_id: payment rows still lack a receiving account';
+        END IF;
+        ALTER TABLE sport_center.sport_payments
+          ALTER COLUMN bank_account_id SET NOT NULL;
+      END $$`,
     `ALTER TABLE sport_center.bank_mutations
        ADD COLUMN IF NOT EXISTS provider_detection_source text`,
     `CREATE TABLE IF NOT EXISTS sport_center.payment_settlement_configs (

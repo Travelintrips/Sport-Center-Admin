@@ -27,6 +27,7 @@ import {
 import { writeApprovalToSheetRow, isGoogleSheetsConfigured } from "../lib/googleSheets";
 import * as XLSX from "xlsx";
 import multer from "multer";
+import { ensurePaymentBankAccount } from "../lib/paymentEnrichment";
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -43,10 +44,17 @@ async function propagateApproval(
   const ctx = auditCtx ?? {};
 
   if (type === "payment") {
-    const [pmt] = await db.select({
-      bookingId: paymentsTable.bookingId,
-      amount: paymentsTable.amount,
-    }).from(paymentsTable).where(eq(paymentsTable.id, id)).limit(1);
+    const [rawPayment] = await db.select().from(paymentsTable)
+      .where(eq(paymentsTable.id, id)).limit(1);
+    if (!rawPayment) throw new Error(`Payment ${id} tidak ditemukan`);
+    const [paymentBooking] = await db.select().from(bookingsTable)
+      .where(eq(bookingsTable.id, rawPayment.bookingId)).limit(1);
+    if (!paymentBooking) throw new Error(`Booking ${rawPayment.bookingId} tidak ditemukan`);
+    const pmt = await ensurePaymentBankAccount(
+      rawPayment,
+      paymentBooking,
+      rawPayment.paymentProvider ?? "unknown",
+    );
 
     await db.update(paymentsTable).set({ status: "confirmed", updatedAt: new Date() }).where(eq(paymentsTable.id, id));
     await db.insert(auditLogsTable).values({
@@ -56,7 +64,7 @@ async function propagateApproval(
       ipAddress: ctx.ipAddress, userAgent: ctx.userAgent,
     });
 
-    if (pmt?.bookingId) {
+    if (pmt.bookingId) {
       const updated = await db.update(bookingsTable).set({ status: "confirmed", updatedAt: new Date() }).where(
         and(eq(bookingsTable.id, pmt.bookingId), inArray(bookingsTable.status, CONFIRMABLE as any[]))
       ).returning({ id: bookingsTable.id });
@@ -78,6 +86,12 @@ async function propagateApproval(
           .where(and(eq(bookingsTable.groupRef, mainBooking.groupRef), ne(bookingsTable.id, pmt.bookingId)));
         for (const sib of siblings) {
           if (!CONFIRMABLE.includes(sib.status as any)) continue;
+          const [siblingPayment] = await db.select().from(paymentsTable)
+            .where(and(eq(paymentsTable.bookingId, sib.id), eq(paymentsTable.status, "pending")))
+            .limit(1);
+          if (siblingPayment) {
+            await ensurePaymentBankAccount(siblingPayment, paymentBooking);
+          }
           await db.update(bookingsTable).set({ status: "confirmed", updatedAt: new Date() })
             .where(eq(bookingsTable.id, sib.id));
           await db.update(paymentsTable)

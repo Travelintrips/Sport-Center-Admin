@@ -43,6 +43,7 @@ import { extractBookingDpp, postConfirmedPaymentAccounting } from "../lib/accoun
 import { hashPassword } from "../lib/auth";
 import { syncStatusToBizportal, pushConfirmedPaymentAsBankMutation } from "../lib/bizportalSync";
 import { calculateTax, recordTaxTransaction } from "../lib/tax";
+import { ensurePaymentBankAccount, resolveRequiredPaymentEnrichment } from "../lib/paymentEnrichment";
 import { broadcastAvailabilityChange } from "../lib/supabase";
 import { logger } from "../lib/logger";
 import { uploadProofWithFallback } from "./storage";
@@ -882,9 +883,10 @@ router.post("/wa/action/:token", async (req, res) => {
 
     switch (tokenRow.action) {
       case "approve_payment": {
-        const [payment] = await db.select().from(paymentsTable)
+        let [payment] = await db.select().from(paymentsTable)
           .where(eq(paymentsTable.bookingId, booking.id)).limit(1);
         if (!payment) { res.status(400).json({ error: "Tidak ada bukti pembayaran" }); return; }
+        payment = await ensurePaymentBankAccount(payment, booking);
 
         await consumeWaToken(req.params.token);
 
@@ -1137,14 +1139,20 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
       .where(eq(paymentsTable.bookingId, bookingId)).limit(1);
 
     if (existing) {
+      await ensurePaymentBankAccount(existing, booking);
       await db.update(paymentsTable).set({ proofUrl, status: "pending", updatedAt: new Date() })
         .where(eq(paymentsTable.bookingId, bookingId));
     } else {
+      const paymentEnrichment = await resolveRequiredPaymentEnrichment(booking, "unknown", new Date());
       await db.insert(paymentsTable).values({
         bookingId,
         amount: String(Number(booking.totalPrice)),
         proofUrl,
         paymentMethod: "Transfer Bank (WhatsApp)",
+        companyId: paymentEnrichment.companyId,
+        bankAccountId: paymentEnrichment.bankAccountId,
+        expectedSettlementDate: paymentEnrichment.expectedSettlementDate,
+        paidAt: paymentEnrichment.paidAt,
         status: "pending",
       });
     }
@@ -1235,9 +1243,10 @@ router.post("/wa/review/:token", async (req, res) => {
       .where(eq(facilitiesTable.id, booking.facilityId)).limit(1);
 
     if (action === "approve") {
-      const [payment] = await db.select().from(paymentsTable)
+      let [payment] = await db.select().from(paymentsTable)
         .where(eq(paymentsTable.bookingId, booking.id)).limit(1);
       if (!payment) { res.status(400).json({ error: "Tidak ada bukti pembayaran" }); return; }
+      payment = await ensurePaymentBankAccount(payment, booking);
 
       await consumeWaToken(req.params.token);
 
@@ -1629,17 +1638,26 @@ async function execAdminApprove(adminPhone: string, orderNumber: string) {
 
   const [existingPay] = await db.select().from(paymentsTable)
     .where(eq(paymentsTable.bookingId, booking.id)).limit(1);
-  if (existingPay) {
+  let paymentForConfirmation = existingPay
+    ? await ensurePaymentBankAccount(existingPay, booking)
+    : null;
+  if (paymentForConfirmation) {
     await db.update(paymentsTable).set({ status: "confirmed", confirmedAt: new Date() })
       .where(eq(paymentsTable.bookingId, booking.id));
   } else {
+    const paymentEnrichment = await resolveRequiredPaymentEnrichment(booking, "unknown", new Date());
     const [createdPayment] = await db.insert(paymentsTable).values({
       bookingId: booking.id,
       amount: String(Number(booking.grandTotal ?? booking.totalPrice)),
       paymentMethod: "Manual (Admin WA)",
+      companyId: paymentEnrichment.companyId,
+      bankAccountId: paymentEnrichment.bankAccountId,
+      expectedSettlementDate: paymentEnrichment.expectedSettlementDate,
+      paidAt: paymentEnrichment.paidAt,
       status: "confirmed",
       confirmedAt: new Date(),
     }).returning();
+    paymentForConfirmation = createdPayment;
   }
 
   await db.update(bookingsTable)
@@ -1815,15 +1833,22 @@ async function execAdminPaid(adminPhone: string, orderNumber: string) {
 
   const [existingPay] = await db.select().from(paymentsTable)
     .where(eq(paymentsTable.bookingId, booking.id)).limit(1);
-  let paymentForAccounting = existingPay;
-  if (existingPay) {
+  let paymentForAccounting = existingPay
+    ? await ensurePaymentBankAccount(existingPay, booking)
+    : null;
+  if (paymentForAccounting) {
     await db.update(paymentsTable).set({ status: "confirmed", confirmedAt: new Date() })
       .where(eq(paymentsTable.bookingId, booking.id));
   } else {
+    const paymentEnrichment = await resolveRequiredPaymentEnrichment(booking, "unknown", new Date());
     const [createdPayment] = await db.insert(paymentsTable).values({
       bookingId: booking.id,
       amount: String(Number(booking.grandTotal ?? booking.totalPrice)),
       paymentMethod: "Manual (Admin WA)",
+      companyId: paymentEnrichment.companyId,
+      bankAccountId: paymentEnrichment.bankAccountId,
+      expectedSettlementDate: paymentEnrichment.expectedSettlementDate,
+      paidAt: paymentEnrichment.paidAt,
       status: "confirmed",
       confirmedAt: new Date(),
     }).returning();
@@ -1879,7 +1904,7 @@ async function execAdminPaid(adminPhone: string, orderNumber: string) {
 
   const _paidToday = new Date().toISOString().split("T")[0];
   const { dpp: _paidDpp, ppnAmount: _paidPpnAmount } = extractBookingDpp(booking);
-  const _paidPaymentMethod = existingPay?.paymentMethod ?? "Transfer Bank";
+  const _paidPaymentMethod = paymentForAccounting?.paymentMethod ?? "Transfer Bank";
   postConfirmedPaymentAccounting({
     bookingId: booking.id,
     orderNumber: booking.orderNumber,

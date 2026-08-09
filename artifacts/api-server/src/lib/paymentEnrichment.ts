@@ -1,7 +1,13 @@
 import { createHash } from "node:crypto";
-import { db, paymentSettlementConfigsTable, bankImportSourceMappingsTable } from "@workspace/db";
+import {
+  db,
+  paymentSettlementConfigsTable,
+  bankImportSourceMappingsTable,
+  paymentsTable,
+  settingsTable,
+} from "@workspace/db";
 import { and, desc, eq, lte, gte, isNull, or, sql } from "drizzle-orm";
-import type { Booking } from "@workspace/db";
+import type { Booking, Payment } from "@workspace/db";
 
 export type SettlementProvider = "mandiri_direct" | "paylabs" | "unknown";
 
@@ -19,7 +25,7 @@ export type PaymentEnrichment = {
   companyId: number | null;
   companyEvidenceSource: PaymentCompanyResolution["evidenceSource"];
   bankAccountId: string | null;
-  bankAccountEvidenceSource: "effective_settlement_config" | "none";
+  bankAccountEvidenceSource: "effective_settlement_config" | "default_center_settings" | "none";
   paidAt: Date | null;
   expectedSettlementDate: string | null;
 };
@@ -265,6 +271,70 @@ export async function enrichPayment(
     paidAt,
     expectedSettlementDate,
   };
+}
+
+/**
+ * Resolve the account that must be present on every payment row.
+ *
+ * Company/provider settlement configuration remains the preferred source.
+ * Consumer/manual payments and legacy configurations fall back to the
+ * Sport Center receiving account. Returning null is never allowed for a
+ * payment write.
+ */
+export async function resolveRequiredPaymentEnrichment(
+  booking: Pick<Booking, "payerType" | "companyCustomerId" | "companyInvoiceId">,
+  provider: SettlementProvider,
+  paidAt: Date | null,
+  options?: PaymentEnrichmentOptions,
+): Promise<PaymentEnrichment> {
+  const enrichment = await enrichPayment(booking, provider, paidAt, options);
+  if (enrichment.bankAccountId?.trim()) {
+    return enrichment;
+  }
+
+  const [settings] = await db
+    .select({ bankAccount: settingsTable.bankAccount })
+    .from(settingsTable)
+    .limit(1);
+  const bankAccountId = settings?.bankAccount?.trim() || null;
+  if (!bankAccountId) {
+    throw new Error("RECEIVING_BANK_ACCOUNT_NOT_CONFIGURED");
+  }
+
+  return {
+    ...enrichment,
+    bankAccountId,
+    bankAccountEvidenceSource: "default_center_settings",
+  };
+}
+
+export async function ensurePaymentBankAccount(
+  payment: Payment,
+  booking: Pick<Booking, "payerType" | "companyCustomerId" | "companyInvoiceId">,
+  provider: SettlementProvider = payment.paymentProvider ?? "unknown",
+  paidAt: Date | null = payment.paidAt ?? payment.confirmedAt ?? null,
+): Promise<Payment> {
+  if (payment.bankAccountId?.trim()) return payment;
+
+  const enrichment = await resolveRequiredPaymentEnrichment(booking, provider, paidAt, {
+    explicitCompanyId: payment.companyId,
+    effectiveDate: paidAt ? paymentEffectiveDate(paidAt) : null,
+  });
+  const [updated] = await db
+    .update(paymentsTable)
+    .set({
+      companyId: payment.companyId ?? enrichment.companyId,
+      bankAccountId: enrichment.bankAccountId,
+      expectedSettlementDate: payment.expectedSettlementDate ?? enrichment.expectedSettlementDate,
+      paidAt: payment.paidAt ?? enrichment.paidAt,
+      updatedAt: new Date(),
+    })
+    .where(eq(paymentsTable.id, payment.id))
+    .returning();
+  if (!updated?.bankAccountId?.trim()) {
+    throw new Error(`PAYMENT_BANK_ACCOUNT_REQUIRED:${payment.id}`);
+  }
+  return updated;
 }
 
 export async function resolveBankImportSource(

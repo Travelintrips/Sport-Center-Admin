@@ -19,7 +19,7 @@ export const paymentsTable = scSchema.table("sport_payments", {
   merchantTradeNo: text("merchant_trade_no"),
   providerTradeNo: text("provider_trade_no"),
   companyId: integer("company_id"),
-  bankAccountId: text("bank_account_id"),
+  bankAccountId: text("bank_account_id").notNull(),
   expectedSettlementDate: text("expected_settlement_date"),
   paymentType: paymentTypeEnum("payment_type").notNull().default("full_payment"),
   status: paymentStatusEnum("status").notNull().default("pending"),

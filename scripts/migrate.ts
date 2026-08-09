@@ -913,5 +913,29 @@ ALTER TABLE sport_center.sport_bookings
 
 ALTER TABLE sport_center.sport_bookings
   ADD COLUMN IF NOT EXISTS event_discount_amount NUMERIC(12,2);
+
+-- ============================================================
+-- Required payment receiving account
+-- ============================================================
+-- Existing payments are backfilled from the configured Sport Center
+-- receiving account before the database constraint is tightened.
+UPDATE sport_center.sport_payments p
+   SET bank_account_id = s.bank_account
+  FROM sport_center.settings s
+ WHERE (p.bank_account_id IS NULL OR btrim(p.bank_account_id) = '')
+   AND s.bank_account IS NOT NULL
+   AND btrim(s.bank_account) <> '';
+
+DO $$ BEGIN
+  IF EXISTS (
+    SELECT 1
+      FROM sport_center.sport_payments
+     WHERE bank_account_id IS NULL OR btrim(bank_account_id) = ''
+  ) THEN
+    RAISE EXCEPTION 'Cannot enforce sport_payments.bank_account_id: payment rows still lack a receiving account';
+  END IF;
+  ALTER TABLE sport_center.sport_payments
+    ALTER COLUMN bank_account_id SET NOT NULL;
+END $$;
 `;
 

@@ -36,7 +36,7 @@ import {
   resolvePaylabsPaidAt,
   resolvePaylabsProviderReference,
 } from "../lib/paymentProvider";
-import { enrichPayment, paymentEffectiveDate } from "../lib/paymentEnrichment";
+import { resolveRequiredPaymentEnrichment, paymentEffectiveDate } from "../lib/paymentEnrichment";
 
 const router = Router();
 
@@ -291,7 +291,7 @@ async function finalizePayment(opts: FinalizePaymentOptions): Promise<FinalizePa
 
       const amountPaid = Number(txRow.amount ?? booking.grandTotal ?? booking.totalPrice);
       const canonicalPaidAt = opts.paidAt ?? new Date();
-      const paymentEnrichment = await enrichPayment(booking, "paylabs", canonicalPaidAt, {
+      const paymentEnrichment = await resolveRequiredPaymentEnrichment(booking, "paylabs", canonicalPaidAt, {
         // The booking relation is authoritative; this explicit context is
         // only a fallback for company bookings whose relation is still being
         // finalized during the provider callback.
