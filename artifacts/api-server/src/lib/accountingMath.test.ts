@@ -16,6 +16,7 @@ jest.unstable_mockModule("@workspace/db", () => ({
   },
   accountingJournalLinesTable: {},
   taxTransactionsTable: {},
+  paymentsTable: {},
 }));
 
 jest.unstable_mockModule("drizzle-orm", () => ({

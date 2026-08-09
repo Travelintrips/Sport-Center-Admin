@@ -72,6 +72,9 @@ async function fakeQuery(text: string, values: unknown[] = []): Promise<{ rows: 
   if (sql === "BEGIN" || sql === "COMMIT" || sql === "ROLLBACK") {
     return { rows: [], rowCount: 0 };
   }
+  if (sql.startsWith("SELECT pg_advisory_xact_lock")) {
+    return { rows: [], rowCount: 1 };
+  }
 
   if (sql.includes("SELECT COUNT(*) AS pending")) {
     const pending = state.confirmedSourcePaymentIds.filter((sourcePaymentId) => {
@@ -83,14 +86,78 @@ async function fakeQuery(text: string, values: unknown[] = []): Promise<{ rows: 
     return { rows: [{ pending }], rowCount: 1 };
   }
 
-  if (sql === "SELECT id, entry_id, posting_status FROM public.sport_payments WHERE payment_number = $1 FOR UPDATE") {
-    const mirror = state.mirrors.find((row) => row.paymentNumber === values[0]);
-    return { rows: mirror ? [{ id: mirror.id, entry_id: mirror.entryId, posting_status: mirror.postingStatus }] : [], rowCount: mirror ? 1 : 0 };
+  if (sql.includes("SELECT 1 FROM public.sport_payments WHERE payment_number = $1 OR source_payment_id = $2")) {
+    const mirror = state.mirrors.find((row) =>
+      row.paymentNumber === values[0] || row.sourcePaymentId === scalar(values[1]),
+    );
+    return { rows: mirror ? [{ "?column?": 1 }] : [], rowCount: mirror ? 1 : 0 };
+  }
+
+  if (sql.includes("SELECT id, entry_id, posting_status, source_payment_id, amount, method")) {
+    const mirror = state.mirrors.find((row) =>
+      row.paymentNumber === values[0] || row.sourcePaymentId === scalar(values[1]),
+    );
+    return {
+      rows: mirror ? [{
+        id: mirror.id,
+        entry_id: mirror.entryId,
+        posting_status: mirror.postingStatus,
+        source_payment_id: mirror.sourcePaymentId,
+        amount: mirror.amount,
+        method: "Transfer Bank",
+        payment_type: "full_payment",
+        payment_provider: "unknown",
+        provider_code: "unknown",
+        company_id: 1,
+        bank_account_id: "mandiri",
+      }] : [],
+      rowCount: mirror ? 1 : 0,
+    };
+  }
+
+  if (sql.includes("SELECT id, booking_id, company_id, amount, payment_method, payment_type")) {
+    const sourcePaymentId = scalar(values[0]);
+    return {
+      rows: state.confirmedSourcePaymentIds.includes(sourcePaymentId) || sourcePaymentId > 0
+        ? [{
+          id: sourcePaymentId,
+          booking_id: sourcePaymentId,
+          company_id: 1,
+          amount: 100_000,
+          payment_method: sourcePaymentId === 42 || sourcePaymentId === 43 ? "QRIS" : "Transfer Bank",
+          payment_type: sourcePaymentId === 43 ? "dp" : sourcePaymentId === 44 ? "pelunasan" : "full_payment",
+          payment_provider: sourcePaymentId === 42 || sourcePaymentId === 43 ? "mandiri_direct" : "unknown",
+          bank_account_id: "mandiri",
+          provider_reference: null,
+          provider_order_id: null,
+          merchant_trade_no: null,
+          provider_trade_no: null,
+          paid_at: "2026-08-09T12:00:00.000Z",
+          confirmed_at: "2026-08-09T12:00:00.000Z",
+        }]
+        : [],
+      rowCount: 1,
+    };
   }
 
   if (sql === "SELECT id, status FROM public.accounting_entries WHERE correlation_id = $1 LIMIT 1") {
     const entry = state.entries.find((row) => row.correlationId === values[0]);
     return { rows: entry ? [{ id: entry.id, status: entry.status }] : [], rowCount: entry ? 1 : 0 };
+  }
+
+  if (sql.includes("SELECT id, status, company_id, payment_method, payment_provider") &&
+      sql.includes("FROM public.accounting_entries")) {
+    const entry = state.entries.find((row) => row.correlationId === values[0]);
+    return {
+      rows: entry ? [{
+        id: entry.id,
+        status: entry.status,
+        company_id: 1,
+        payment_method: "Transfer Bank",
+        payment_provider: "unknown",
+      }] : [],
+      rowCount: entry ? 1 : 0,
+    };
   }
 
   if (sql === "SELECT id FROM public.accounting_entries WHERE id = $1 AND status = 'posted'") {
@@ -228,6 +295,7 @@ jest.unstable_mockModule("@workspace/db", () => ({
   accountingJournalsTable: {},
   accountingJournalLinesTable: {},
   taxTransactionsTable: {},
+  paymentsTable: {},
 }));
 
 process.env.SUPABASE_DATABASE_URL_DEV = "postgres://integration-test";
@@ -316,7 +384,7 @@ describe("Sport Center payment accounting integration", () => {
       sourcePaymentId,
       bookingId: sourcePaymentId,
       orderNumber: `SC-${sourcePaymentId}`,
-      amount: 100_000,
+          amount: sourcePaymentId === 43 ? 50_000 : sourcePaymentId === 44 ? 150_000 : 100_000,
       paymentMethod: "QRIS",
       paymentType: "full_payment",
       ppnRate: 11,

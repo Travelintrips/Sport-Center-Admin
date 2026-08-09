@@ -536,6 +536,7 @@ CREATE INDEX IF NOT EXISTS accounting_journals_journal_date_idx ON sport_center.
 ALTER TABLE sport_center.accounting_journals
   ADD COLUMN IF NOT EXISTS payment_id integer
     REFERENCES sport_center.sport_payments(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS company_id integer,
   ADD COLUMN IF NOT EXISTS payment_method text,
   ADD COLUMN IF NOT EXISTS payment_provider text,
   ADD COLUMN IF NOT EXISTS payment_type text,
@@ -553,6 +554,14 @@ CREATE UNIQUE INDEX IF NOT EXISTS accounting_journals_payment_confirmed_unique
   WHERE payment_id IS NOT NULL
     AND journal_type = 'payment_confirmed'
     AND is_reversal = false;
+
+-- Payment-level public accounting idempotency. This is intentionally scoped
+-- to Sport Center payment entries so legacy accounting streams keep their
+-- existing contract.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_public_accounting_entries_sc_payment_correlation
+  ON public.accounting_entries (correlation_id)
+  WHERE source = 'sport_center_payment'
+    AND correlation_id IS NOT NULL;
 
 -- ============================================================
 -- 21. company_invoice_items + unique constraint on company_invoices

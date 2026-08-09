@@ -142,6 +142,7 @@ export async function createPublicAccountingEntry(
   journalDate: string,
   paymentMethod?: string,
   paymentId?: number,
+  companyId?: number | null,
 ): Promise<void> {
   const pool = getPublicPool();
   if (!pool) {
@@ -150,8 +151,8 @@ export async function createPublicAccountingEntry(
   }
 
   // A booking may have more than one payment (DP + pelunasan). When the
-  // payment id is available, use it as the accounting correlation key rather
-  // than the booking/order number.
+  // payment id is available, use it as the accounting correlation key and
+  // source identity rather than the booking/order number.
   const correlationId = paymentId != null
     ? `sc_payment_${paymentId}`
     : `sc_booking_${orderNumber}`;
@@ -191,12 +192,16 @@ export async function createPublicAccountingEntry(
     `INSERT INTO public.accounting_entries
       (entry_number, journal_id, date, ref, description, status, source, source_id,
        total_debit, total_credit, company_id, facility_id, correlation_id, governance_flags)
-    VALUES ($1,$2,$3::date,$4,$5,'draft','sport_center_booking',$6,$7,$7,$8,$9,$10,'{}')
+     VALUES ($1,$2,$3::date,$4,$5,'draft',$6,$7,$8,$8,$9,$10,$11,'{}')
     RETURNING id`,
     [
       entryNumber, ids.journalId, journalDate, orderNumber,
       `Pembayaran Booking Sport Center (${orderNumber}) via ${paymentAccount.label}`,
-      bookingId, grandTotal, COMPANY_ID, facilityId ?? null,
+      paymentId != null ? "sport_center_payment" : "sport_center_booking",
+      paymentId ?? bookingId,
+      grandTotal,
+      companyId ?? COMPANY_ID,
+      facilityId ?? null,
       correlationId,
     ]
   );
@@ -425,14 +430,21 @@ export async function postSportCenterBookingPayment(
 
   try {
     await client.query("BEGIN");
+    // Serialize retries for the same payment at the database level. The
+    // unique index remains the final guard, while this prevents concurrent
+    // callbacks from both observing "no entry" before inserting.
+    await client.query(
+      `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
+      [correlationId],
+    );
     await ensureSportCenterPaymentMirror(client, input);
     const paymentResult = await client.query(
       `SELECT id, entry_id, posting_status, source_payment_id, amount, method,
               payment_type, payment_provider, provider_code, company_id, bank_account_id
          FROM public.sport_payments
-        WHERE payment_number = $1
+        WHERE payment_number = $1 OR source_payment_id = $2
         FOR UPDATE`,
-      [input.paymentNumber],
+      [input.paymentNumber, input.sourcePaymentId ?? null],
     );
     const mirroredPayment = paymentResult.rows[0];
     if (!mirroredPayment) {
@@ -487,10 +499,19 @@ export async function postSportCenterBookingPayment(
     }
     const sourceCompanyId = sourcePayment?.company_id == null ? null : Number(sourcePayment.company_id);
     const mirrorCompanyId = mirroredPayment.company_id == null ? null : Number(mirroredPayment.company_id);
+    if (sourcePaymentId != null && sourceCompanyId == null) {
+      throw new Error(`[accounting] COMPANY_MISSING:${input.paymentNumber} source payment ${sourcePaymentId} tidak memiliki company_id.`);
+    }
     if (sourceCompanyId != null && mirrorCompanyId != null && sourceCompanyId !== mirrorCompanyId) {
       throw new Error(`[accounting] COMPANY_MISMATCH:${input.paymentNumber} source=${sourceCompanyId} mirror=${mirrorCompanyId}`);
     }
-    const companyId = sourceCompanyId ?? mirrorCompanyId ?? input.companyId ?? COMPANY_ID;
+    if (sourceCompanyId != null && input.companyId != null && sourceCompanyId !== Number(input.companyId)) {
+      throw new Error(`[accounting] COMPANY_MISMATCH:${input.paymentNumber} source=${sourceCompanyId} input=${input.companyId}`);
+    }
+    const companyId = sourceCompanyId ?? mirrorCompanyId ?? input.companyId;
+    if (companyId == null) {
+      throw new Error(`[accounting] COMPANY_MISSING:${input.paymentNumber}`);
+    }
     const bankAccountId = String(
       sourcePayment?.bank_account_id ??
       mirroredPayment.bank_account_id ??
@@ -605,7 +626,7 @@ export async function postSportCenterBookingPayment(
         canonicalMethod,
         canonicalProvider,
         paymentType,
-        sourcePaymentId,
+         sourcePaymentId,
         bankAccountId,
         providerReference,
         providerOrderId,
@@ -1195,6 +1216,7 @@ export async function createJournalEntry(
   paymentMethod?: string,
   paymentId?: number,
   paymentContext?: {
+    companyId?: number | null;
     paymentType?: string | null;
     paymentProvider?: string | null;
     bankAccountId?: string | null;
@@ -1241,6 +1263,7 @@ export async function createJournalEntry(
     .values({
       bookingId,
       paymentId: paymentId ?? null,
+        companyId: paymentContext?.companyId ?? null,
       orderNumber,
       journalType: "payment_confirmed",
       paymentMethod: paymentMethod ?? null,
@@ -1288,6 +1311,7 @@ type ConfirmedPaymentAccountingInput = {
   journalDate: string;
   paymentMethod?: string;
   paymentId?: number;
+  companyId?: number | null;
   paymentType?: string | null;
   paymentProvider?: string | null;
   bankAccountId?: string | null;
@@ -1318,6 +1342,7 @@ export function postConfirmedPaymentAccounting(
             paymentMethod: paymentsTable.paymentMethod,
             paymentProvider: paymentsTable.paymentProvider,
             paymentType: paymentsTable.paymentType,
+            companyId: paymentsTable.companyId,
             bankAccountId: paymentsTable.bankAccountId,
             providerReference: paymentsTable.providerReference,
             providerOrderId: paymentsTable.providerOrderId,
@@ -1338,6 +1363,7 @@ export function postConfirmedPaymentAccounting(
       input.paymentId,
       {
         paymentType: payment?.paymentType ?? input.paymentType,
+        companyId: payment?.companyId ?? input.companyId ?? null,
         paymentProvider: payment?.paymentProvider ?? input.paymentProvider,
         bankAccountId: payment?.bankAccountId ?? input.bankAccountId,
         grossAmount: input.dpp + input.ppnAmount,
@@ -1358,6 +1384,7 @@ export function postConfirmedPaymentAccounting(
       input.journalDate,
       input.paymentMethod,
       input.paymentId,
+      payment?.companyId ?? input.companyId ?? null,
     );
   })();
 

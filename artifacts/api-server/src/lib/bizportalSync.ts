@@ -38,17 +38,29 @@ export type SportCenterPaymentAuditStatus =
 
 function paymentAuditStatus(row: any): SportCenterPaymentAuditStatus {
   if (!row.mirror_id) return "MIRROR_MISSING";
-  if (!row.entry_id || row.entry_status !== "posted") return "ACCOUNTING_ENTRY_MISSING";
+  if (!row.entry_id || row.entry_status !== "posted" || row.entry_source_payment_id == null) {
+    return "ACCOUNTING_ENTRY_MISSING";
+  }
   if (Number(row.gl_line_count ?? 0) < 2 || Math.abs(Number(row.gl_debit ?? 0) - Number(row.gl_credit ?? 0)) > 0.005) {
     return "GL_UNBALANCED";
   }
-  if (row.source_company_id != null && row.mirror_company_id !== row.source_company_id) return "COMPANY_MISMATCH";
+  if (row.source_company_id != null &&
+      (row.mirror_company_id !== row.source_company_id || row.entry_company_id !== row.source_company_id)) {
+    return "COMPANY_MISMATCH";
+  }
   if (Number(row.source_amount) !== Number(row.mirror_amount)) return "AMOUNT_MISMATCH";
   if (!String(row.entry_payment_method ?? "").trim()) return "PAYMENT_METHOD_MISSING";
-  if (String(row.source_payment_method ?? "").trim().toUpperCase() === "QRIS" && !String(row.entry_payment_provider ?? "").trim()) {
+  if (!String(row.entry_payment_provider ?? "").trim() ||
+      String(row.source_provider ?? "unknown").trim().toLowerCase() !==
+        String(row.entry_payment_provider ?? "unknown").trim().toLowerCase()) {
     return "PROVIDER_MISSING";
   }
-  if (Number(row.source_tax_amount ?? 0) > 0 && (!row.tax_transaction_id || !row.gl_tax_line_id)) return "TAX_LEDGER_MISSING";
+  if (Number(row.expected_tax_amount ?? 0) > 0 &&
+      (!row.tax_transaction_id || !row.gl_tax_line_id ||
+       Math.abs(Number(row.source_tax_amount ?? 0) - Number(row.public_tax_amount ?? 0)) > 0.005 ||
+       Math.abs(Number(row.source_tax_amount ?? 0) - Number(row.expected_tax_amount ?? 0)) > 0.005)) {
+    return "TAX_LEDGER_MISSING";
+  }
   return "COMPLETE";
 }
 
@@ -76,12 +88,17 @@ export async function auditSportCenterPayment(sourcePaymentId: number): Promise<
        sp.merchant_trade_no AS source_merchant_trade_no,
        sp.provider_trade_no AS source_provider_trade_no,
        sp.bank_account_id AS source_bank_account_id,
-       sb.order_number, sb.ppn_rate,
+        sb.order_number, sb.ppn_rate,
+        CASE WHEN COALESCE(sb.ppn_rate, 0) > 0
+          THEN ROUND((sp.amount * sb.ppn_rate) / (100 + sb.ppn_rate), 0)
+          ELSE 0
+        END AS expected_tax_amount,
        m.id AS mirror_id, m.source_payment_id AS mirror_source_payment_id,
        m.amount AS mirror_amount, m.method AS mirror_method, m.payment_provider AS mirror_provider,
        m.company_id AS mirror_company_id, m.bank_account_id AS mirror_bank_account_id,
        m.posting_status AS mirror_posting_status, m.entry_id AS mirror_entry_id,
        ae.id AS entry_id, ae.correlation_id, ae.company_id AS entry_company_id,
+        ae.source_payment_id AS entry_source_payment_id,
        ae.payment_method AS entry_payment_method, ae.payment_provider AS entry_payment_provider,
        ae.payment_type AS entry_payment_type, ae.total_debit, ae.total_credit,
        ae.status::text AS entry_status,
@@ -188,7 +205,7 @@ export async function auditSportCenterPayment(sourcePaymentId: number): Promise<
       paymentMethodMatch: String(row.source_payment_method ?? "").trim() === String(row.entry_payment_method ?? "").trim(),
       providerMatch: String(row.source_provider ?? "unknown").trim().toLowerCase() === String(row.entry_payment_provider ?? "unknown").trim().toLowerCase(),
       glBalanced: Number(row.gl_line_count ?? 0) >= 2 && Math.abs(Number(row.gl_debit ?? 0) - Number(row.gl_credit ?? 0)) <= 0.005,
-      taxComplete: Number(row.source_tax_amount ?? 0) <= 0 || Boolean(row.tax_transaction_id && row.gl_tax_line_id),
+      taxComplete: Number(row.expected_tax_amount ?? 0) <= 0 || Boolean(row.tax_transaction_id && row.gl_tax_line_id),
     },
   };
 }
@@ -209,8 +226,11 @@ export async function dryRunConfirmedPaymentAccounting(): Promise<{
   if (!pool) throw new Error("BIZPORTAL_DATABASE_NOT_CONFIGURED");
   const { rows } = await pool.query(`
     WITH confirmed AS (
-      SELECT sp.id, sp.amount, sp.company_id, sp.payment_method, sp.payment_provider::text AS provider,
-             COALESCE(sb.ppn_amount, 0) AS booking_tax
+       SELECT sp.id, sp.amount, sp.company_id, sp.payment_method, sp.payment_provider::text AS provider,
+              CASE WHEN COALESCE(sb.ppn_rate, 0) > 0
+                THEN ROUND((sp.amount * sb.ppn_rate) / (100 + sb.ppn_rate), 0)
+                ELSE 0
+              END AS booking_tax
         FROM sport_center.sport_payments sp
         JOIN sport_center.sport_bookings sb ON sb.id = sp.booking_id
        WHERE sp.status = 'confirmed'
@@ -218,7 +238,8 @@ export async function dryRunConfirmedPaymentAccounting(): Promise<{
     linked AS (
       SELECT c.*,
              m.id AS mirror_id, m.amount AS mirror_amount, m.company_id AS mirror_company_id,
-             m.entry_id, ae.status::text AS entry_status,
+              m.entry_id, ae.status::text AS entry_status,
+              ae.source_payment_id AS entry_source_payment_id,
              ae.company_id AS entry_company_id, ae.payment_method AS entry_payment_method,
              ae.payment_provider AS entry_payment_provider
         FROM confirmed c
@@ -239,9 +260,12 @@ export async function dryRunConfirmedPaymentAccounting(): Promise<{
     counts AS (
       SELECT COUNT(*)::int AS scanned,
              COUNT(*) FILTER (WHERE mirror_id IS NULL)::int AS mirror_missing,
-             COUNT(*) FILTER (WHERE mirror_id IS NOT NULL AND (entry_id IS NULL OR entry_status <> 'posted'))::int AS entry_missing,
+              COUNT(*) FILTER (WHERE mirror_id IS NOT NULL AND (entry_id IS NULL OR entry_status <> 'posted' OR entry_source_payment_id IS NULL))::int AS entry_missing,
              COUNT(*) FILTER (WHERE entry_id IS NOT NULL AND NULLIF(BTRIM(entry_payment_method), '') IS NULL)::int AS method_missing,
-             COUNT(*) FILTER (WHERE entry_id IS NOT NULL AND UPPER(payment_method) = 'QRIS' AND NULLIF(BTRIM(entry_payment_provider), '') IS NULL)::int AS provider_missing,
+              COUNT(*) FILTER (WHERE entry_id IS NOT NULL AND (
+                NULLIF(BTRIM(entry_payment_provider), '') IS NULL
+                OR LOWER(COALESCE(provider, 'unknown')) <> LOWER(COALESCE(entry_payment_provider, 'unknown'))
+              ))::int AS provider_missing,
              COUNT(*) FILTER (WHERE company_id IS NOT NULL AND (mirror_company_id IS DISTINCT FROM company_id OR entry_company_id IS DISTINCT FROM company_id))::int AS company_mismatch,
              COUNT(*) FILTER (WHERE entry_id IS NOT NULL AND (line_count < 2 OR ABS(debit - credit) > 0.005))::int AS gl_unbalanced,
              COUNT(*) FILTER (WHERE booking_tax > 0 AND (NOT EXISTS (SELECT 1 FROM sport_center.tax_transactions tt WHERE tt.reference_type = 'sport_center_payment' AND tt.reference_id = linked.id AND tt.transaction_type = 'original' AND tt.status = 'posted') OR NOT EXISTS (SELECT 1 FROM public.gl_tax_lines gtl WHERE gtl.accounting_entry_id = linked.entry_id AND gtl.tax_type = 'PPN_OUT' AND gtl.entity_type = 'sport_center_payment' AND gtl.entity_id = linked.id)))::int AS tax_missing
@@ -343,6 +367,7 @@ export async function initBizportalTables(): Promise<void> {
         ADD COLUMN IF NOT EXISTS payment_provider TEXT,
         ADD COLUMN IF NOT EXISTS payment_type TEXT,
         ADD COLUMN IF NOT EXISTS source_payment_id BIGINT,
+        ADD COLUMN IF NOT EXISTS company_id INTEGER,
         ADD COLUMN IF NOT EXISTS bank_account_id TEXT,
         ADD COLUMN IF NOT EXISTS provider_reference TEXT,
         ADD COLUMN IF NOT EXISTS provider_order_id TEXT,
@@ -356,6 +381,10 @@ export async function initBizportalTables(): Promise<void> {
       CREATE UNIQUE INDEX IF NOT EXISTS uq_public_accounting_entries_source_payment_id
         ON public.accounting_entries (source_payment_id)
         WHERE source_payment_id IS NOT NULL;
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_public_accounting_entries_sc_payment_correlation
+        ON public.accounting_entries (correlation_id)
+        WHERE source = 'sport_center_payment'
+          AND correlation_id IS NOT NULL;
       ALTER TABLE public.sport_payments
         ALTER COLUMN posting_status SET DEFAULT 'unposted';
     `);
