@@ -113,6 +113,9 @@ ALTER TABLE sport_center.sport_payments
   ALTER COLUMN provider_order_id SET NOT NULL;
 
 -- ============================================================
+-- Payment accounting/mirror audit metadata (additive)
+-- ============================================================
+-- ============================================================
 -- 3. booking_history
 -- ============================================================
 CREATE TABLE IF NOT EXISTS sport_center.booking_history (
@@ -529,6 +532,27 @@ CREATE TABLE IF NOT EXISTS sport_center.accounting_journals (
 
 CREATE INDEX IF NOT EXISTS accounting_journals_booking_id_idx ON sport_center.accounting_journals(booking_id);
 CREATE INDEX IF NOT EXISTS accounting_journals_journal_date_idx ON sport_center.accounting_journals(journal_date DESC);
+
+ALTER TABLE sport_center.accounting_journals
+  ADD COLUMN IF NOT EXISTS payment_id integer
+    REFERENCES sport_center.sport_payments(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS payment_method text,
+  ADD COLUMN IF NOT EXISTS payment_provider text,
+  ADD COLUMN IF NOT EXISTS payment_type text,
+  ADD COLUMN IF NOT EXISTS bank_account_id text,
+  ADD COLUMN IF NOT EXISTS gross_amount numeric(14,2),
+  ADD COLUMN IF NOT EXISTS dpp_amount numeric(14,2),
+  ADD COLUMN IF NOT EXISTS tax_amount numeric(14,2),
+  ADD COLUMN IF NOT EXISTS provider_reference text,
+  ADD COLUMN IF NOT EXISTS provider_order_id text,
+  ADD COLUMN IF NOT EXISTS merchant_trade_no text,
+  ADD COLUMN IF NOT EXISTS provider_trade_no text;
+
+CREATE UNIQUE INDEX IF NOT EXISTS accounting_journals_payment_confirmed_unique
+  ON sport_center.accounting_journals (payment_id)
+  WHERE payment_id IS NOT NULL
+    AND journal_type = 'payment_confirmed'
+    AND is_reversal = false;
 
 -- ============================================================
 -- 21. company_invoice_items + unique constraint on company_invoices

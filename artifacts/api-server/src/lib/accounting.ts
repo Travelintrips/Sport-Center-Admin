@@ -1,4 +1,10 @@
-import { db, accountingJournalsTable, accountingJournalLinesTable, taxTransactionsTable } from "@workspace/db";
+import {
+  db,
+  accountingJournalsTable,
+  accountingJournalLinesTable,
+  taxTransactionsTable,
+  paymentsTable,
+} from "@workspace/db";
 import { eq, and } from "drizzle-orm";
 import pg from "pg";
 import { extractBookingDpp } from "./accountingMath";
@@ -279,7 +285,10 @@ export type SportCenterBookingPaymentPosting = {
   paidAt?: Date | string | null;
   ppnRate?: number | null;
   paymentProvider?: string | null;
+  companyId?: number | null;
+  bankAccountId?: string | null;
   providerReference?: string | null;
+  providerOrderId?: string | null;
   merchantTradeNo?: string | null;
   providerTradeNo?: string | null;
 };
@@ -305,6 +314,94 @@ export function getSportCenterPaymentCorrelationId(
   return `sc_payment_${mirrorMatch?.[1] ?? paymentNumber}`;
 }
 
+async function ensureSportCenterPaymentMirror(
+  client: pg.PoolClient,
+  input: SportCenterBookingPaymentPosting,
+): Promise<void> {
+  if (input.sourcePaymentId == null) return;
+  const existing = await client.query(
+    `SELECT 1
+       FROM public.sport_payments
+      WHERE payment_number = $1 OR source_payment_id = $2
+      LIMIT 1`,
+    [input.paymentNumber, input.sourcePaymentId],
+  );
+  if (existing.rows.length > 0) return;
+
+  const source = await client.query(
+    `SELECT sp.id, sp.booking_id, sp.amount, sp.payment_method, sp.payment_type,
+            sp.payment_provider::text AS payment_provider, sp.provider_reference,
+            sp.provider_order_id, sp.merchant_trade_no, sp.provider_trade_no,
+            sp.company_id, sp.bank_account_id, sp.expected_settlement_date,
+            COALESCE(sp.paid_at, sp.confirmed_at, sp.created_at) AS paid_at,
+            sb.order_number, sb.ppn_rate
+       FROM sport_center.sport_payments sp
+       JOIN sport_center.sport_bookings sb ON sb.id = sp.booking_id
+      WHERE sp.id = $1
+        AND sp.status = 'confirmed'
+      LIMIT 1`,
+    [input.sourcePaymentId],
+  );
+  const payment = source.rows[0];
+  if (!payment) throw new Error(`[accounting] Source confirmed payment ${input.sourcePaymentId} tidak ditemukan.`);
+
+  const booking = await client.query(
+    `SELECT id
+       FROM public.sport_bookings
+      WHERE sc_booking_id = $1
+      LIMIT 1`,
+    [payment.booking_id],
+  );
+  if (booking.rows.length !== 1) {
+    throw new Error(`[accounting] Mirror booking untuk source booking ${payment.booking_id} tidak ditemukan.`);
+  }
+
+  await client.query(
+    `INSERT INTO public.sport_payments
+       (booking_id, payment_number, amount, method, status, paid_at, payment_type,
+        tax_rate, tax_amount, source, posting_status, source_payment_id,
+        payment_provider, provider_code, provider_reference, provider_order_id,
+        merchant_trade_no, provider_trade_no, company_id, bank_account_id,
+        expected_settlement_date, created_at, updated_at)
+     VALUES ($1,$2,$3,$4,'paid',$5,$6,$7,0,'SPORT_CENTER_SUPABASE','unposted',$8,
+             $9,$9,$10,$11,$12,$13,$14,$15,$16,NOW(),NOW())
+     ON CONFLICT (payment_number) DO UPDATE SET
+       source_payment_id = COALESCE(public.sport_payments.source_payment_id, EXCLUDED.source_payment_id),
+       amount = EXCLUDED.amount,
+       method = COALESCE(EXCLUDED.method, public.sport_payments.method),
+       payment_type = COALESCE(EXCLUDED.payment_type, public.sport_payments.payment_type),
+       payment_provider = COALESCE(EXCLUDED.payment_provider, public.sport_payments.payment_provider),
+       provider_code = COALESCE(EXCLUDED.provider_code, public.sport_payments.provider_code),
+       provider_reference = COALESCE(EXCLUDED.provider_reference, public.sport_payments.provider_reference),
+       provider_order_id = COALESCE(EXCLUDED.provider_order_id, public.sport_payments.provider_order_id),
+       merchant_trade_no = COALESCE(EXCLUDED.merchant_trade_no, public.sport_payments.merchant_trade_no),
+       provider_trade_no = COALESCE(EXCLUDED.provider_trade_no, public.sport_payments.provider_trade_no),
+       company_id = COALESCE(EXCLUDED.company_id, public.sport_payments.company_id),
+       bank_account_id = COALESCE(EXCLUDED.bank_account_id, public.sport_payments.bank_account_id),
+       expected_settlement_date = COALESCE(EXCLUDED.expected_settlement_date, public.sport_payments.expected_settlement_date),
+       paid_at = COALESCE(EXCLUDED.paid_at, public.sport_payments.paid_at),
+       updated_at = NOW()`,
+    [
+      booking.rows[0].id,
+      input.paymentNumber,
+      String(payment.amount),
+      payment.payment_method ?? input.paymentMethod ?? "Transfer Bank",
+      payment.paid_at,
+      payment.payment_type ?? input.paymentType ?? "full_payment",
+      payment.ppn_rate ?? input.ppnRate ?? 0,
+      input.sourcePaymentId,
+      payment.payment_provider ?? input.paymentProvider ?? "unknown",
+      payment.provider_reference ?? input.providerReference ?? null,
+      payment.provider_order_id ?? input.providerOrderId ?? null,
+      payment.merchant_trade_no ?? input.merchantTradeNo ?? null,
+      payment.provider_trade_no ?? input.providerTradeNo ?? null,
+      payment.company_id ?? input.companyId ?? null,
+      payment.bank_account_id ?? input.bankAccountId ?? null,
+      payment.expected_settlement_date ?? null,
+    ],
+  );
+}
+
 /**
  * Post one mirrored Sport Center payment to public accounting.
  *
@@ -328,8 +425,10 @@ export async function postSportCenterBookingPayment(
 
   try {
     await client.query("BEGIN");
+    await ensureSportCenterPaymentMirror(client, input);
     const paymentResult = await client.query(
-      `SELECT id, entry_id, posting_status
+      `SELECT id, entry_id, posting_status, source_payment_id, amount, method,
+              payment_type, payment_provider, provider_code, company_id, bank_account_id
          FROM public.sport_payments
         WHERE payment_number = $1
         FOR UPDATE`,
@@ -340,9 +439,73 @@ export async function postSportCenterBookingPayment(
       throw new Error(`[accounting] Mirrored payment ${input.paymentNumber} tidak ditemukan.`);
     }
 
+    const sourcePaymentResult = input.sourcePaymentId != null
+      ? await client.query(
+          `SELECT id, booking_id, company_id, amount, payment_method, payment_type,
+                  payment_provider::text AS payment_provider, bank_account_id,
+                  provider_reference, provider_order_id, merchant_trade_no, provider_trade_no,
+                  paid_at, confirmed_at
+             FROM sport_center.sport_payments
+            WHERE id = $1
+            FOR SHARE`,
+          [input.sourcePaymentId],
+        )
+      : { rows: [] as any[] };
+    const sourcePayment = sourcePaymentResult.rows[0];
+    if (input.sourcePaymentId != null && !sourcePayment) {
+      throw new Error(`[accounting] Source payment ${input.sourcePaymentId} tidak ditemukan.`);
+    }
+
+    const sourcePaymentId = sourcePayment?.id == null
+      ? (mirroredPayment.source_payment_id ?? input.sourcePaymentId ?? null)
+      : Number(sourcePayment.id);
+    const sourceAmount = sourcePayment?.amount == null ? null : Math.round(Number(sourcePayment.amount));
+    const mirrorAmount = mirroredPayment.amount == null ? null : Math.round(Number(mirroredPayment.amount));
+    const requestedAmount = Math.round(Number(input.amount));
+    if (sourceAmount != null && sourceAmount !== requestedAmount) {
+      throw new Error(`[accounting] Amount mismatch source=${sourceAmount} input=${requestedAmount} payment=${input.paymentNumber}.`);
+    }
+    if (mirrorAmount != null && mirrorAmount !== requestedAmount) {
+      throw new Error(`[accounting] Amount mismatch mirror=${mirrorAmount} input=${requestedAmount} payment=${input.paymentNumber}.`);
+    }
+
+    const canonicalMethod = String(
+      sourcePayment?.payment_method ?? mirroredPayment.method ?? input.paymentMethod ?? "",
+    ).trim();
+    if (!canonicalMethod) {
+      throw new Error(`[accounting] PAYMENT_METHOD_MISSING:${input.paymentNumber}`);
+    }
+    const canonicalProvider = String(
+      sourcePayment?.payment_provider ??
+      mirroredPayment.payment_provider ??
+      mirroredPayment.provider_code ??
+      input.paymentProvider ??
+      "unknown",
+    ).trim().toLowerCase();
+    if (canonicalMethod.toUpperCase() === "QRIS" && !canonicalProvider) {
+      throw new Error(`[accounting] PROVIDER_MISSING:${input.paymentNumber}`);
+    }
+    const sourceCompanyId = sourcePayment?.company_id == null ? null : Number(sourcePayment.company_id);
+    const mirrorCompanyId = mirroredPayment.company_id == null ? null : Number(mirroredPayment.company_id);
+    if (sourceCompanyId != null && mirrorCompanyId != null && sourceCompanyId !== mirrorCompanyId) {
+      throw new Error(`[accounting] COMPANY_MISMATCH:${input.paymentNumber} source=${sourceCompanyId} mirror=${mirrorCompanyId}`);
+    }
+    const companyId = sourceCompanyId ?? mirrorCompanyId ?? input.companyId ?? COMPANY_ID;
+    const bankAccountId = String(
+      sourcePayment?.bank_account_id ??
+      mirroredPayment.bank_account_id ??
+      input.bankAccountId ??
+      "",
+    ).trim() || null;
+    const providerReference = sourcePayment?.provider_reference ?? input.providerReference ?? null;
+    const providerOrderId = sourcePayment?.provider_order_id ?? input.providerOrderId ?? null;
+    const merchantTradeNo = sourcePayment?.merchant_trade_no ?? input.merchantTradeNo ?? null;
+    const providerTradeNo = sourcePayment?.provider_trade_no ?? input.providerTradeNo ?? null;
+    const paymentType = sourcePayment?.payment_type ?? mirroredPayment.payment_type ?? input.paymentType ?? "full_payment";
+
     if (mirroredPayment.posting_status === "posted" && mirroredPayment.entry_id) {
       const postedEntry = await client.query(
-        `SELECT id
+        `SELECT id, company_id, payment_method, payment_provider, total_debit, total_credit
            FROM public.accounting_entries
           WHERE id = $1
             AND status = 'posted'`,
@@ -353,6 +516,12 @@ export async function postSportCenterBookingPayment(
           `[accounting] Payment ${input.paymentNumber} memiliki entry_id ${mirroredPayment.entry_id}, tetapi entry tidak ditemukan atau belum posted.`,
         );
       }
+      const posted = postedEntry.rows[0];
+      if (Number(posted.company_id) !== companyId ||
+          String(posted.payment_method ?? "").trim() !== canonicalMethod ||
+          (canonicalMethod.toUpperCase() === "QRIS" && String(posted.payment_provider ?? "").trim().toLowerCase() !== canonicalProvider)) {
+        throw new Error(`[accounting] Existing entry metadata mismatch for ${input.paymentNumber}.`);
+      }
       await client.query("COMMIT");
       return {
         entryId: Number(mirroredPayment.entry_id),
@@ -362,9 +531,9 @@ export async function postSportCenterBookingPayment(
     }
 
     const existingEntry = await client.query(
-      `SELECT id, status
+      `SELECT id, status, company_id, payment_method, payment_provider
          FROM public.accounting_entries
-        WHERE correlation_id = $1
+         WHERE correlation_id = $1
         LIMIT 1`,
       [correlationId],
     );
@@ -394,7 +563,7 @@ export async function postSportCenterBookingPayment(
       };
     }
 
-    const grossAmount = Math.round(Number(input.amount));
+    const grossAmount = requestedAmount;
     if (!Number.isFinite(grossAmount) || grossAmount <= 0) {
       throw new Error(`[accounting] Nominal payment ${input.paymentNumber} tidak valid.`);
     }
@@ -410,15 +579,18 @@ export async function postSportCenterBookingPayment(
     const year = new Date(journalDate).getFullYear();
     const entryNumber = await nextPublicEntryNumber(client, year);
     const ids = await getPublicIdsForQuery(client);
-    const paymentAccount = await getPublicPaymentAccount(client, input.paymentMethod ?? undefined);
-    const methodLabel = normalizePublicPaymentMethod(input.paymentMethod ?? undefined);
+    const paymentAccount = await getPublicPaymentAccount(client, canonicalMethod);
+    const methodLabel = normalizePublicPaymentMethod(canonicalMethod);
     const hasPpn = ppnAmount > 0;
 
     const entryResult = await client.query(
       `INSERT INTO public.accounting_entries
         (entry_number, journal_id, date, ref, description, status, source, source_id,
-         total_debit, total_credit, company_id, correlation_id, governance_flags)
-       VALUES ($1,$2,$3::date,$4,$5,'draft','sport_center_booking',$6,$7,$7,$8,$9,'{}')
+         total_debit, total_credit, company_id, correlation_id, governance_flags,
+         payment_method, payment_provider, payment_type, source_payment_id,
+         bank_account_id, provider_reference, provider_order_id, merchant_trade_no, provider_trade_no)
+       VALUES ($1,$2,$3::date,$4,$5,'draft','sport_center_payment',$6,$7,$7,$8,$9,'{}',
+               $10,$11,$12,$13,$14,$15,$16,$17,$18)
        RETURNING id`,
       [
         entryNumber,
@@ -426,10 +598,19 @@ export async function postSportCenterBookingPayment(
         journalDate,
         input.orderNumber,
         `Pembayaran Sport Center ${input.orderNumber} (${input.paymentNumber}, ${input.paymentType ?? "booking"}) via ${methodLabel}`,
-        input.bookingId,
+        sourcePaymentId ?? input.bookingId,
         grossAmount,
-        COMPANY_ID,
+        companyId,
         correlationId,
+        canonicalMethod,
+        canonicalProvider,
+        paymentType,
+        sourcePaymentId,
+        bankAccountId,
+        providerReference,
+        providerOrderId,
+        merchantTradeNo,
+        providerTradeNo,
       ],
     );
     const entryId = Number(entryResult.rows[0]?.id);
@@ -472,17 +653,13 @@ export async function postSportCenterBookingPayment(
       );
     }
 
-    await client.query(
-      `UPDATE public.accounting_entries SET status = 'posted' WHERE id = $1`,
-      [entryId],
-    );
     if (hasPpn) {
       await client.query(
         `INSERT INTO sport_center.tax_transactions
           (reference_type, reference_id, reference_number, tax_code, tax_rate,
            dpp, dpp_nilai_lain, grand_total, tax_amount, transaction_date,
            status, transaction_type, created_at)
-         SELECT 'sport_center_payment', $1, $2, 'PPN_OUT_11', $3,
+          SELECT 'sport_center_payment', $1, $2, 'PPN_OUT_11', $3,
                 $4, $5, $6, $7, $8, 'posted', 'original', NOW()
           WHERE NOT EXISTS (
             SELECT 1
@@ -492,7 +669,7 @@ export async function postSportCenterBookingPayment(
                AND transaction_type = 'original'
           )`,
         [
-          mirroredPayment.id,
+          sourcePaymentId ?? mirroredPayment.id,
           input.paymentNumber,
           String(rate),
           String(dpp),
@@ -507,10 +684,38 @@ export async function postSportCenterBookingPayment(
           (company_id, accounting_entry_id, tax_type, rate,
            base_amount, tax_amount, direction, period, entity_type, entity_id,
            is_reported, created_at)
-         VALUES ($1,$2,'PPN_OUT',$3,$4,$5,'out',$6,'booking',$7,false,NOW())`,
-        [COMPANY_ID, entryId, rate, dpp, ppnAmount, journalDate.slice(0, 7), input.orderNumber],
+          SELECT $1,$2,'PPN_OUT',$3,$4,$5,'out',$6,'sport_center_payment',$7,false,NOW()
+           WHERE NOT EXISTS (
+             SELECT 1 FROM public.gl_tax_lines
+              WHERE accounting_entry_id = $2
+                AND tax_type = 'PPN_OUT'
+                AND entity_type = 'sport_center_payment'
+                AND entity_id = $7
+           )`,
+        [companyId, entryId, rate, dpp, ppnAmount, journalDate.slice(0, 7), sourcePaymentId ?? mirroredPayment.id],
       );
     }
+
+    const balance = await client.query(
+      `SELECT COUNT(*)::int AS line_count,
+              COALESCE(SUM(debit), 0)::numeric AS debit,
+              COALESCE(SUM(credit), 0)::numeric AS credit
+         FROM public.accounting_entry_lines
+        WHERE entry_id = $1`,
+      [entryId],
+    );
+    const balanceRow = balance.rows[0];
+    if (
+      Number(balanceRow?.line_count ?? 0) < 2 ||
+      Math.abs(Number(balanceRow.debit) - Number(balanceRow.credit)) > 0.005 ||
+      Math.abs(Number(balanceRow.debit) - grossAmount) > 0.005
+    ) {
+      throw new Error(`[accounting] GL_UNBALANCED:${input.paymentNumber}`);
+    }
+    await client.query(
+      `UPDATE public.accounting_entries SET status = 'posted' WHERE id = $1`,
+      [entryId],
+    );
     await client.query(
       `UPDATE public.sport_payments
           SET entry_id = $2,
@@ -519,7 +724,7 @@ export async function postSportCenterBookingPayment(
               posting_error = NULL,
               updated_at = NOW()
         WHERE id = $1`,
-      [mirroredPayment.id, entryId, input.sourcePaymentId ?? null],
+      [mirroredPayment.id, entryId, sourcePaymentId],
     );
     const invariantCheck = await client.query(
       `SELECT sp.entry_id, sp.posting_status, ae.status::text AS entry_status
@@ -989,6 +1194,18 @@ export async function createJournalEntry(
   journalDate: string,
   paymentMethod?: string,
   paymentId?: number,
+  paymentContext?: {
+    paymentType?: string | null;
+    paymentProvider?: string | null;
+    bankAccountId?: string | null;
+    grossAmount?: number | null;
+    dppAmount?: number | null;
+    taxAmount?: number | null;
+    providerReference?: string | null;
+    providerOrderId?: string | null;
+    merchantTradeNo?: string | null;
+    providerTradeNo?: string | null;
+  },
 ): Promise<void> {
   // subtotal = DPP (sebelum PPN), grandTotal = DPP + PPN = jumlah yang masuk ke bank
   const grandTotal = subtotal + ppnAmount;
@@ -1026,6 +1243,17 @@ export async function createJournalEntry(
       paymentId: paymentId ?? null,
       orderNumber,
       journalType: "payment_confirmed",
+      paymentMethod: paymentMethod ?? null,
+      paymentProvider: paymentContext?.paymentProvider ?? null,
+      paymentType: paymentContext?.paymentType ?? null,
+      bankAccountId: paymentContext?.bankAccountId ?? null,
+      grossAmount: String(paymentContext?.grossAmount ?? grandTotal),
+      dppAmount: String(paymentContext?.dppAmount ?? subtotal),
+      taxAmount: String(paymentContext?.taxAmount ?? ppnAmount),
+      providerReference: paymentContext?.providerReference ?? null,
+      providerOrderId: paymentContext?.providerOrderId ?? null,
+      merchantTradeNo: paymentContext?.merchantTradeNo ?? null,
+      providerTradeNo: paymentContext?.providerTradeNo ?? null,
       debitAccount,
       debitAmount: String(grandTotal),
       creditRevenueAccount: "Pendapatan Sport Center",
@@ -1060,9 +1288,16 @@ type ConfirmedPaymentAccountingInput = {
   journalDate: string;
   paymentMethod?: string;
   paymentId?: number;
+  paymentType?: string | null;
+  paymentProvider?: string | null;
+  bankAccountId?: string | null;
+  providerReference?: string | null;
+  providerOrderId?: string | null;
+  merchantTradeNo?: string | null;
+  providerTradeNo?: string | null;
 };
 
-const paymentAccountingInFlight = new Map<number, Promise<void>>();
+  const paymentAccountingInFlight = new Map<number, Promise<void>>();
 
 /**
  * Post the internal journal and public accounting entry as one ordered
@@ -1077,6 +1312,22 @@ export function postConfirmedPaymentAccounting(
   if (running) return running;
 
   const work = (async () => {
+    const [payment] = input.paymentId != null
+      ? await db
+          .select({
+            paymentMethod: paymentsTable.paymentMethod,
+            paymentProvider: paymentsTable.paymentProvider,
+            paymentType: paymentsTable.paymentType,
+            bankAccountId: paymentsTable.bankAccountId,
+            providerReference: paymentsTable.providerReference,
+            providerOrderId: paymentsTable.providerOrderId,
+            merchantTradeNo: paymentsTable.merchantTradeNo,
+            providerTradeNo: paymentsTable.providerTradeNo,
+          })
+          .from(paymentsTable)
+          .where(eq(paymentsTable.id, input.paymentId))
+          .limit(1)
+      : [];
     await createJournalEntry(
       input.bookingId,
       input.orderNumber,
@@ -1085,6 +1336,18 @@ export function postConfirmedPaymentAccounting(
       input.journalDate,
       input.paymentMethod,
       input.paymentId,
+      {
+        paymentType: payment?.paymentType ?? input.paymentType,
+        paymentProvider: payment?.paymentProvider ?? input.paymentProvider,
+        bankAccountId: payment?.bankAccountId ?? input.bankAccountId,
+        grossAmount: input.dpp + input.ppnAmount,
+        dppAmount: input.dpp,
+        taxAmount: input.ppnAmount,
+        providerReference: payment?.providerReference ?? input.providerReference,
+        providerOrderId: payment?.providerOrderId ?? input.providerOrderId,
+        merchantTradeNo: payment?.merchantTradeNo ?? input.merchantTradeNo,
+        providerTradeNo: payment?.providerTradeNo ?? input.providerTradeNo,
+      },
     );
     await createPublicAccountingEntry(
       input.bookingId,

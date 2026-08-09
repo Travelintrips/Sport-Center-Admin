@@ -13,6 +13,8 @@ import {
   countPendingPaymentMirrors,
   auditLegacySportCenterPayments,
   reconcileLegacySportCenterPaymentLinks,
+  auditSportCenterPayment,
+  dryRunConfirmedPaymentAccounting,
   type BulkPaymentPushResult,
 } from "../lib/bizportalSync";
 
@@ -697,6 +699,40 @@ router.post("/admin/reconcile-bizportal-payment-links", financeMiddleware, async
     });
   } catch (err: any) {
     res.status(500).json({ error: err?.message ?? "Legacy payment reconciliation failed" });
+  }
+});
+
+/**
+ * GET /api/admin/audit-sport-center-payment/:sourcePaymentId
+ * Read-only validator for source payment → mirror → accounting → GL → tax.
+ */
+router.get("/admin/audit-sport-center-payment/:sourcePaymentId", financeMiddleware, async (req, res) => {
+  const sourcePaymentId = Number(req.params.sourcePaymentId);
+  if (!Number.isSafeInteger(sourcePaymentId) || sourcePaymentId <= 0) {
+    res.status(400).json({ error: "sourcePaymentId harus berupa integer positif" });
+    return;
+  }
+  try {
+    res.json(await auditSportCenterPayment(sourcePaymentId));
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message ?? "Sport Center payment audit failed" });
+  }
+});
+
+/**
+ * GET /api/admin/audit-sport-center-payments/dry-run
+ * Read-only historical gap scan for all confirmed Sport Center payments.
+ */
+router.get("/admin/audit-sport-center-payments/dry-run", financeMiddleware, async (_req, res) => {
+  try {
+    res.json({
+      success: true,
+      mode: "dry_run",
+      policy: "No historical payment, mirror, accounting entry, GL line, or tax row is mutated.",
+      ...(await dryRunConfirmedPaymentAccounting()),
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message ?? "Sport Center payment dry-run failed" });
   }
 });
 

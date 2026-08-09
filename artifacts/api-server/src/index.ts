@@ -626,6 +626,18 @@ async function runStartupMigrations() {
     `ALTER TABLE sport_center.accounting_journals
        ADD COLUMN IF NOT EXISTS payment_id int
        REFERENCES sport_center.sport_payments(id) ON DELETE SET NULL`,
+     `ALTER TABLE sport_center.accounting_journals
+        ADD COLUMN IF NOT EXISTS payment_method text,
+        ADD COLUMN IF NOT EXISTS payment_provider text,
+        ADD COLUMN IF NOT EXISTS payment_type text,
+        ADD COLUMN IF NOT EXISTS bank_account_id text,
+        ADD COLUMN IF NOT EXISTS gross_amount numeric(14,2),
+        ADD COLUMN IF NOT EXISTS dpp_amount numeric(14,2),
+        ADD COLUMN IF NOT EXISTS tax_amount numeric(14,2),
+        ADD COLUMN IF NOT EXISTS provider_reference text,
+        ADD COLUMN IF NOT EXISTS provider_order_id text,
+        ADD COLUMN IF NOT EXISTS merchant_trade_no text,
+        ADD COLUMN IF NOT EXISTS provider_trade_no text`,
     `CREATE UNIQUE INDEX IF NOT EXISTS accounting_journals_payment_confirmed_unique
        ON sport_center.accounting_journals (payment_id)
        WHERE payment_id IS NOT NULL

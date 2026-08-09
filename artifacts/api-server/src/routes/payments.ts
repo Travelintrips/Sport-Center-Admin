@@ -819,31 +819,27 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
           syncStatusToBizportal(booking.orderNumber, "confirmed", payment.proofUrl, new Date(), bookingForFinancial).catch(() => {});
           pushConfirmedPaymentAsBankMutation(bookingForFinancial, new Date()).catch(() => {});
           if (booking.groupRef) {
-            createJournalEntry(booking.id, booking.orderNumber, journalDpp, journalPpn, today, paymentMethodLabel, payment.id).catch((err) =>
-              logAccountingError({ operation: "createJournalEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
-            );
-            const allGroupBookings = await db.select({
-              id: bookingsTable.id,
-              orderNumber: bookingsTable.orderNumber,
-              totalPrice: bookingsTable.totalPrice,
-              ppnAmount: bookingsTable.ppnAmount,
-              grandTotal: bookingsTable.grandTotal,
-              facilityId: bookingsTable.facilityId,
-            }).from(bookingsTable).where(eq(bookingsTable.groupRef, booking.groupRef));
-
-            const groupEntries = allGroupBookings.map(b => {
-              const extracted = extractBookingDpp(b);
-              return {
-                id: b.id,
-                orderNumber: b.orderNumber,
-                subtotal: extracted.dpp,
-                ppnAmount: extracted.ppnAmount,
-                facilityId: b.facilityId,
-              };
-            });
-
-            createPublicAccountingEntryForGroup(booking.groupRef, groupEntries, today, paymentMethodLabel).catch((err) =>
-              logAccountingError({ operation: "createPublicAccountingEntry", orderNumber: booking.groupRef!, bookingId: booking.id, error: err }),
+            // Group bookings still represent one payment event. Keep the
+            // accounting identity at payment level; never create sc_group_*
+            // entries that cannot be traced to the confirmed payment.
+            postConfirmedPaymentAccounting({
+              bookingId: booking.id,
+              orderNumber: booking.orderNumber,
+              dpp: journalDpp,
+              ppnAmount: journalPpn,
+              facilityId: booking.facilityId,
+              journalDate: today,
+              paymentMethod: paymentMethodLabel,
+              paymentId: payment.id,
+              paymentType: payment.paymentType,
+              paymentProvider: payment.paymentProvider,
+              bankAccountId: payment.bankAccountId,
+              providerReference: payment.providerReference,
+              providerOrderId: payment.providerOrderId,
+              merchantTradeNo: payment.merchantTradeNo,
+              providerTradeNo: payment.providerTradeNo,
+            }).catch((err) =>
+              logAccountingError({ operation: "postConfirmedPaymentAccounting", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
             );
           } else {
             postConfirmedPaymentAccounting({
@@ -855,6 +851,13 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
               journalDate: today,
               paymentMethod: paymentMethodLabel,
               paymentId: payment.id,
+              paymentType: payment.paymentType,
+              paymentProvider: payment.paymentProvider,
+              bankAccountId: payment.bankAccountId,
+              providerReference: payment.providerReference,
+              providerOrderId: payment.providerOrderId,
+              merchantTradeNo: payment.merchantTradeNo,
+              providerTradeNo: payment.providerTradeNo,
             }).catch((err) =>
               logAccountingError({ operation: "postConfirmedPaymentAccounting", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
             );
