@@ -99,13 +99,31 @@ export async function validateCompanyId(companyId: number | null | undefined): P
   if (companyId == null || !Number.isInteger(companyId)) return false;
   const result = await db.execute(sql`
     SELECT 1
-      FROM sport_center.users
+      FROM public.companies
      WHERE id = ${companyId}
-       AND account_type = 'company'
-       AND COALESCE(account_status, 'active') NOT IN ('rejected', 'inactive')
+       AND is_active = true
      LIMIT 1
   `).catch(() => ({ rows: [] }));
   return Boolean((result as any).rows?.[0]);
+}
+
+async function getPublicCompany(companyId: number | null | undefined): Promise<{
+  id: number;
+  code: string;
+  name: string;
+} | null> {
+  if (companyId == null || !Number.isInteger(companyId)) return null;
+  const result = await db.execute(sql`
+    SELECT id, code, COALESCE(name, company_name, code) AS name
+      FROM public.companies
+     WHERE id = ${companyId}
+       AND is_active = true
+     LIMIT 1
+  `).catch(() => ({ rows: [] }));
+  const row = (result as any).rows?.[0];
+  return row
+    ? { id: Number(row.id), code: String(row.code), name: String(row.name) }
+    : null;
 }
 
 export async function validateSettlementBankAccount(
@@ -135,100 +153,101 @@ export async function resolvePaymentCompany(
 ): Promise<PaymentCompanyResolution> {
   const candidates: PaymentCompanyEvidence[] = [];
 
-  if (options?.sourcePaymentCompanyId != null && await validateCompanyId(options.sourcePaymentCompanyId)) {
+  const addPublicCompanyEvidence = async (
+    companyId: number | null | undefined,
+    evidenceSource: PaymentCompanyEvidence["evidenceSource"],
+    evidenceReference: string,
+    effectiveDate?: string | null,
+  ) => {
+    const company = await getPublicCompany(companyId);
+    if (!company) return;
     candidates.push({
-      companyId: options.sourcePaymentCompanyId,
-      evidenceSource: "source_payment_company",
-      evidenceReference: `source_payment.company_id:${options.sourcePaymentCompanyId}`,
-      effectiveDate: options.effectiveDate,
+      companyId: company.id,
+      companyCode: company.code,
+      companyName: company.name,
+      evidenceSource,
+      evidenceReference,
+      effectiveDate,
     });
+  };
+
+  if (options?.sourcePaymentCompanyId != null) {
+    await addPublicCompanyEvidence(
+      options.sourcePaymentCompanyId,
+      "source_payment_company",
+      `source_payment.company_id:${options.sourcePaymentCompanyId}`,
+      options.effectiveDate,
+    );
   }
 
-  if (booking.payerType === "company" && booking.companyCustomerId != null) {
-    if (await validateCompanyId(booking.companyCustomerId)) {
-      candidates.push({
-        companyId: booking.companyCustomerId,
-        evidenceSource: "booking_company_relation",
-        evidenceReference: `company_customer_id:${booking.companyCustomerId}`,
-        effectiveDate: options?.effectiveDate,
-      });
-    }
-  }
+  // companyCustomerId/company_invoice_id currently reference the legacy
+  // Sport Center user model. They are intentionally not treated as public
+  // company IDs until an explicit validated bridge exists.
 
-  if (booking.companyInvoiceId != null) {
-    const invoice = await db.execute(sql`
-      SELECT company_customer_id
-        FROM sport_center.company_invoices
-       WHERE id = ${booking.companyInvoiceId}
-       LIMIT 1
-    `).catch(() => ({ rows: [] }));
-    const companyId = (invoice as any).rows?.[0]?.company_customer_id;
-    if (companyId != null && await validateCompanyId(Number(companyId))) {
-      candidates.push({
-        companyId: Number(companyId),
-        evidenceSource: "booking_company_invoice",
-        evidenceReference: `company_invoice_id:${booking.companyInvoiceId}`,
-        effectiveDate: options?.effectiveDate,
-      });
-    }
-  }
-
-  if (options?.facilityCompanyId != null && await validateCompanyId(options.facilityCompanyId)) {
-    candidates.push({
-      companyId: options.facilityCompanyId,
-      evidenceSource: "facility_ownership",
-      evidenceReference: "validated_facility_context",
-      effectiveDate: options.effectiveDate,
-    });
+  if (options?.facilityCompanyId != null) {
+    await addPublicCompanyEvidence(
+      options.facilityCompanyId,
+      "facility_ownership",
+      "validated_facility_context",
+      options.effectiveDate,
+    );
   }
 
   if (booking.facilityId != null && options?.effectiveDate) {
     const mappingRows = await db.execute(sql`
-      SELECT id, facility_id, company_id, effective_from::text, effective_until::text, is_active
-        FROM sport_center.facility_company_mappings
-       WHERE facility_id = ${booking.facilityId}
-         AND is_active = true
-         AND effective_from <= ${options.effectiveDate}::date
-         AND (effective_until IS NULL OR effective_until >= ${options.effectiveDate}::date)
-       ORDER BY effective_from DESC, id DESC
+      SELECT fcm.id, fcm.facility_id, fcm.company_id,
+             c.code AS company_code,
+             COALESCE(c.name, c.company_name, c.code) AS company_name,
+             fcm.effective_from::text, fcm.effective_until::text, fcm.is_active
+        FROM sport_center.facility_company_mappings fcm
+        JOIN public.companies c ON c.id = fcm.company_id AND c.is_active = true
+       WHERE fcm.facility_id = ${booking.facilityId}
+         AND fcm.is_active = true
+         AND fcm.effective_from <= ${options.effectiveDate}::date
+         AND (fcm.effective_until IS NULL OR fcm.effective_until >= ${options.effectiveDate}::date)
+       ORDER BY fcm.effective_from DESC, fcm.id DESC
     `).catch(() => ({ rows: [] }));
     const mapping = resolveEffectiveFacilityCompanyMapping(
       ((mappingRows as any).rows ?? []).map((row: any) => ({
         id: Number(row.id),
         facilityId: Number(row.facility_id),
         companyId: Number(row.company_id),
+        companyCode: String(row.company_code),
+        companyName: String(row.company_name),
         effectiveFrom: String(row.effective_from),
         effectiveUntil: row.effective_until == null ? null : String(row.effective_until),
         isActive: Boolean(row.is_active),
       })),
       options.effectiveDate,
     );
-    if (mapping && await validateCompanyId(mapping.companyId)) {
+    if (mapping) {
       candidates.push({
         companyId: mapping.companyId,
+        companyCode: mapping.companyCode,
+        companyName: mapping.companyName,
         evidenceSource: "facility_company_mapping",
-        evidenceReference: `facility_company_mapping:${mapping.id}:facility:${mapping.facilityId}`,
+        evidenceReference: `mapping:${mapping.id}:facility:${mapping.facilityId}`,
         effectiveDate: options.effectiveDate,
       });
     }
   }
 
-  if (options?.merchantCompanyId != null && await validateCompanyId(options.merchantCompanyId)) {
-    candidates.push({
-      companyId: options.merchantCompanyId,
-      evidenceSource: "validated_explicit_configuration",
-      evidenceReference: "validated_merchant_context",
-      effectiveDate: options.effectiveDate,
-    });
+  if (options?.merchantCompanyId != null) {
+    await addPublicCompanyEvidence(
+      options.merchantCompanyId,
+      "validated_explicit_configuration",
+      "validated_merchant_context",
+      options.effectiveDate,
+    );
   }
 
-  if (options?.explicitCompanyId != null && await validateCompanyId(options.explicitCompanyId)) {
-    candidates.push({
-      companyId: options.explicitCompanyId,
-      evidenceSource: "validated_explicit_configuration",
-      evidenceReference: "validated_explicit_context",
-      effectiveDate: options.effectiveDate,
-    });
+  if (options?.explicitCompanyId != null) {
+    await addPublicCompanyEvidence(
+      options.explicitCompanyId,
+      "validated_explicit_configuration",
+      "validated_explicit_context",
+      options.effectiveDate,
+    );
   }
 
   return resolvePaymentCompanyEvidence(candidates);

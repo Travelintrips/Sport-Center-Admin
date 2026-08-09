@@ -98,19 +98,13 @@ export async function auditSportCenterPayment(sourcePaymentId: number): Promise<
        sb.order_number, sb.ppn_rate,
        sb.facility_id, sb.payer_type, sb.company_customer_id, sb.company_invoice_id,
        f.name AS facility_name,
-       booking_company.id AS booking_company_id,
-       invoice_company.id AS invoice_company_id,
+        NULL::integer AS booking_company_id,
+        NULL::integer AS invoice_company_id,
        facility_mapping.mapping_count,
        facility_mapping.mapping_id,
        facility_mapping.mapping_company_id,
        facility_mapping.mapping_effective_from,
-       CASE
-         WHEN booking_company.id IS NOT NULL
-          AND invoice_company.id IS NOT NULL
-          AND booking_company.id <> invoice_company.id
-         THEN true
-         ELSE false
-       END AS ownership_ambiguous,
+        false AS ownership_ambiguous,
         CASE WHEN COALESCE(sb.ppn_rate, 0) > 0
           THEN ROUND((sp.amount * sb.ppn_rate) / (100 + sb.ppn_rate), 0)
           ELSE 0
@@ -130,29 +124,17 @@ export async function auditSportCenterPayment(sourcePaymentId: number): Promise<
      FROM sport_center.sport_payments sp
      JOIN sport_center.sport_bookings sb ON sb.id = sp.booking_id
       LEFT JOIN sport_center.sport_facilities f ON f.id = sb.facility_id
-      LEFT JOIN sport_center.users booking_company
-        ON booking_company.id = sb.company_customer_id
-       AND booking_company.account_type = 'company'
-       AND COALESCE(booking_company.account_status, 'active') NOT IN ('rejected', 'inactive')
-       LEFT JOIN sport_center.users source_company
+      LEFT JOIN public.companies source_company
          ON source_company.id = sp.company_id
-        AND source_company.account_type = 'company'
-        AND COALESCE(source_company.account_status, 'active') NOT IN ('rejected', 'inactive')
-      LEFT JOIN sport_center.company_invoices ci ON ci.id = sb.company_invoice_id
-      LEFT JOIN sport_center.users invoice_company
-        ON invoice_company.id = ci.company_customer_id
-       AND invoice_company.account_type = 'company'
-       AND COALESCE(invoice_company.account_status, 'active') NOT IN ('rejected', 'inactive')
       LEFT JOIN LATERAL (
         SELECT COUNT(*)::int AS mapping_count,
                MIN(fcm.id) AS mapping_id,
                MIN(fcm.company_id) AS mapping_company_id,
                MIN(fcm.effective_from)::text AS mapping_effective_from
           FROM sport_center.facility_company_mappings fcm
-          JOIN sport_center.users mapping_company
+          JOIN public.companies mapping_company
             ON mapping_company.id = fcm.company_id
-           AND mapping_company.account_type = 'company'
-           AND COALESCE(mapping_company.account_status, 'active') NOT IN ('rejected', 'inactive')
+           AND mapping_company.is_active = true
          WHERE fcm.facility_id = sb.facility_id
            AND fcm.is_active = true
            AND fcm.effective_from <= COALESCE(sp.paid_at, sp.confirmed_at, sp.created_at)::date

@@ -48,3 +48,4 @@ export * from "./paylabsSettings";
 export * from "./paymentSettlement";
 export * from "./facilityCompanyMappings";
 export * from "./paymentAccountingOutbox";
+export * from "./publicCompanies";

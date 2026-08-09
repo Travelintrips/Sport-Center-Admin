@@ -7,6 +7,7 @@ import {
   usersTable,
   gymMembershipsTable,
   facilityCompanyMappingsTable,
+  publicCompaniesTable,
 } from "@workspace/db";
 
 import { desc, gte, and, lte, eq, inArray, isNotNull, sql, asc } from "drizzle-orm";
@@ -742,8 +743,9 @@ router.get("/admin/facility-company-mappings", financeMiddleware, async (req, re
         facilityId: facilityCompanyMappingsTable.facilityId,
         facilityName: facilitiesTable.name,
         companyId: facilityCompanyMappingsTable.companyId,
-        companyName: usersTable.companyName,
-        companyUserName: usersTable.name,
+        companyCode: publicCompaniesTable.code,
+        companyName: publicCompaniesTable.name,
+        companyUserName: sql`NULL::text`,
         effectiveFrom: facilityCompanyMappingsTable.effectiveFrom,
         effectiveUntil: facilityCompanyMappingsTable.effectiveUntil,
         isActive: facilityCompanyMappingsTable.isActive,
@@ -756,7 +758,7 @@ router.get("/admin/facility-company-mappings", financeMiddleware, async (req, re
       })
       .from(facilityCompanyMappingsTable)
       .innerJoin(facilitiesTable, eq(facilityCompanyMappingsTable.facilityId, facilitiesTable.id))
-      .innerJoin(usersTable, eq(facilityCompanyMappingsTable.companyId, usersTable.id))
+      .innerJoin(publicCompaniesTable, eq(facilityCompanyMappingsTable.companyId, publicCompaniesTable.id))
       .where(facilityId != null ? eq(facilityCompanyMappingsTable.facilityId, facilityId) : undefined)
       .orderBy(asc(facilityCompanyMappingsTable.facilityId), desc(facilityCompanyMappingsTable.effectiveFrom));
     res.json({ readOnly: true, data: mappings });

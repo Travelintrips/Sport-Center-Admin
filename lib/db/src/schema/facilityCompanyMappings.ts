@@ -4,16 +4,17 @@ import { z } from "zod/v4";
 import { facilitiesTable } from "./facilities";
 import { scSchema } from "./_schema";
 import { usersTable } from "./users";
+import { publicCompaniesTable } from "./publicCompanies";
 
 /**
  * Canonical, effective-dated operational ownership for Sport Center
- * facilities.  A company account is still validated by the database trigger
- * during writes; the FK only guarantees that the referenced user exists.
+ * facilities. Company ownership points to the public legal/accounting company
+ * master; createdBy/updatedBy remain Sport Center login identities.
  */
 export const facilityCompanyMappingsTable = scSchema.table("facility_company_mappings", {
   id: serial("id").primaryKey(),
   facilityId: integer("facility_id").notNull().references(() => facilitiesTable.id, { onDelete: "cascade" }),
-  companyId: integer("company_id").notNull().references(() => usersTable.id, { onDelete: "restrict" }),
+  companyId: integer("company_id").notNull().references(() => publicCompaniesTable.id, { onDelete: "restrict" }),
   effectiveFrom: date("effective_from").notNull(),
   effectiveUntil: date("effective_until"),
   isActive: boolean("is_active").notNull().default(true),

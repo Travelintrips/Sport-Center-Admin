@@ -8,6 +8,8 @@ export type PaymentCompanyEvidenceSource =
 
 export type PaymentCompanyEvidence = {
   companyId: number;
+  companyCode?: string | null;
+  companyName?: string | null;
   evidenceSource: PaymentCompanyEvidenceSource;
   evidenceReference: string;
   effectiveDate?: string | null;
@@ -15,6 +17,8 @@ export type PaymentCompanyEvidence = {
 
 export type PaymentCompanyResolution = {
   companyId: number | null;
+  companyCode: string | null;
+  companyName: string | null;
   evidenceSource: PaymentCompanyEvidenceSource | "ambiguous" | "none";
   evidenceReference: string | null;
   effectiveDate: string | null;
@@ -40,6 +44,8 @@ export function resolvePaymentCompanyEvidence(
   if (companyIds.length === 0) {
     return {
       companyId: null,
+      companyCode: null,
+      companyName: null,
       evidenceSource: "none",
       evidenceReference: null,
       effectiveDate: null,
@@ -50,6 +56,8 @@ export function resolvePaymentCompanyEvidence(
   if (companyIds.length > 1) {
     return {
       companyId: null,
+      companyCode: null,
+      companyName: null,
       evidenceSource: "ambiguous",
       evidenceReference: validCandidates
         .map((candidate) => `${candidate.evidenceSource}:${candidate.evidenceReference}=${candidate.companyId}`)
@@ -63,6 +71,8 @@ export function resolvePaymentCompanyEvidence(
   const effectiveDates = [...new Set(validCandidates.map((candidate) => candidate.effectiveDate ?? null))];
   return {
     companyId: companyIds[0]!,
+    companyCode: first.companyCode ?? null,
+    companyName: first.companyName ?? null,
     evidenceSource: first.evidenceSource,
     evidenceReference: validCandidates
       .map((candidate) => `${candidate.evidenceSource}:${candidate.evidenceReference}`)
@@ -77,6 +87,8 @@ export type EffectiveFacilityCompanyMapping = {
   id: number;
   facilityId: number;
   companyId: number;
+  companyCode?: string | null;
+  companyName?: string | null;
   effectiveFrom: string;
   effectiveUntil: string | null;
   isActive: boolean;

@@ -10,6 +10,7 @@
     "migrate": "tsx ../migrate.ts",
     "migrate:dev": "tsx ./src/db-migrate.ts",
     "migrate:prod": "tsx ./src/db-migrate.ts --prod",
+    "migrate:ownership:dev": "tsx ./src/migrate-facility-company-ownership.ts",
     "backfill:payment-providers": "tsx ./src/backfill-payment-providers.ts",
     "migrate:diff": "tsx ./src/schema-diff.ts",
     "fix-admin:dev": "tsx ./src/fix-admin-hash.ts",

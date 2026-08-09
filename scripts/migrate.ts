@@ -11,7 +11,7 @@ CREATE EXTENSION IF NOT EXISTS btree_gist;
 CREATE TABLE IF NOT EXISTS sport_center.facility_company_mappings (
   id serial PRIMARY KEY,
   facility_id integer NOT NULL REFERENCES sport_center.sport_facilities(id) ON DELETE CASCADE,
-  company_id integer NOT NULL REFERENCES sport_center.users(id) ON DELETE RESTRICT,
+  company_id integer NOT NULL REFERENCES public.companies(id) ON DELETE RESTRICT,
   effective_from date NOT NULL,
   effective_until date,
   is_active boolean NOT NULL DEFAULT true,
@@ -24,6 +24,56 @@ CREATE TABLE IF NOT EXISTS sport_center.facility_company_mappings (
   CONSTRAINT facility_company_mappings_date_range_valid
     CHECK (effective_until IS NULL OR effective_until >= effective_from)
 );
+
+-- The canonical company master is public.companies. Existing rows are not
+-- silently converted: a populated legacy table must be reviewed explicitly.
+DO $$
+DECLARE
+  current_company_target text;
+  mapping_count integer;
+BEGIN
+  IF to_regclass('public.companies') IS NULL THEN
+    RAISE EXCEPTION 'COMPANY_MODEL_MIGRATION_BLOCKED: public.companies is missing';
+  END IF;
+
+  SELECT COUNT(*) INTO mapping_count
+    FROM sport_center.facility_company_mappings;
+  IF mapping_count > 0 THEN
+    SELECT n.nspname || '.' || c.relname
+      INTO current_company_target
+      FROM pg_constraint fk
+      JOIN pg_class local_table ON local_table.oid = fk.conrelid
+      JOIN pg_namespace local_schema ON local_schema.oid = local_table.relnamespace
+      JOIN pg_class c ON c.oid = fk.confrelid
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+     WHERE fk.conname = 'facility_company_mappings_company_id_fkey'
+       AND local_schema.nspname = 'sport_center'
+       AND local_table.relname = 'facility_company_mappings';
+    IF current_company_target = 'sport_center.users' THEN
+      RAISE EXCEPTION 'COMPANY_MODEL_MIGRATION_BLOCKED: existing legacy facility ownership rows require manual translation';
+    END IF;
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+      FROM pg_constraint fk
+      JOIN pg_class local_table ON local_table.oid = fk.conrelid
+      JOIN pg_namespace local_schema ON local_schema.oid = local_table.relnamespace
+      JOIN pg_class target_table ON target_table.oid = fk.confrelid
+      JOIN pg_namespace target_schema ON target_schema.oid = target_table.relnamespace
+     WHERE fk.conname = 'facility_company_mappings_company_id_fkey'
+       AND local_schema.nspname = 'sport_center'
+       AND local_table.relname = 'facility_company_mappings'
+       AND target_schema.nspname = 'sport_center'
+       AND target_table.relname = 'users'
+  ) THEN
+    ALTER TABLE sport_center.facility_company_mappings
+      DROP CONSTRAINT facility_company_mappings_company_id_fkey;
+    ALTER TABLE sport_center.facility_company_mappings
+      ADD CONSTRAINT facility_company_mappings_company_id_fkey
+      FOREIGN KEY (company_id) REFERENCES public.companies(id) ON DELETE RESTRICT;
+  END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS facility_company_mappings_lookup_idx
   ON sport_center.facility_company_mappings (facility_id, effective_from, effective_until)
@@ -52,10 +102,9 @@ RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
   IF NOT EXISTS (
     SELECT 1
-      FROM sport_center.users
+      FROM public.companies
      WHERE id = NEW.company_id
-       AND account_type = 'company'
-       AND COALESCE(account_status, 'active') NOT IN ('rejected', 'inactive')
+        AND is_active = true
   ) THEN
     RAISE EXCEPTION 'FACILITY_COMPANY_MAPPING_COMPANY_INVALID:%', NEW.company_id;
   END IF;

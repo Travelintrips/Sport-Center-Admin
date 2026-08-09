@@ -9,11 +9,15 @@ describe("deterministic payment company evidence", () => {
     expect(resolvePaymentCompanyEvidence([
       {
         companyId: 24,
+        companyCode: "DV",
+        companyName: "PT Diva Servis",
         evidenceSource: "facility_ownership",
         evidenceReference: "facility_id:17",
       },
     ])).toEqual({
       companyId: 24,
+      companyCode: "DV",
+      companyName: "PT Diva Servis",
       evidenceSource: "facility_ownership",
       evidenceReference: "facility_ownership:facility_id:17",
       effectiveDate: null,
@@ -26,11 +30,15 @@ describe("deterministic payment company evidence", () => {
     const result = resolvePaymentCompanyEvidence([
       {
         companyId: 24,
+        companyCode: "DV",
+        companyName: "PT Diva Servis",
         evidenceSource: "booking_company_relation",
         evidenceReference: "company_customer_id:24",
       },
       {
         companyId: 24,
+        companyCode: "DV",
+        companyName: "PT Diva Servis",
         evidenceSource: "booking_company_invoice",
         evidenceReference: "company_invoice_id:8",
       },
@@ -62,6 +70,8 @@ describe("deterministic payment company evidence", () => {
   it("returns null when no validated evidence exists", () => {
     expect(resolvePaymentCompanyEvidence([])).toEqual({
       companyId: null,
+      companyCode: null,
+      companyName: null,
       evidenceSource: "none",
       evidenceReference: null,
       effectiveDate: null,
