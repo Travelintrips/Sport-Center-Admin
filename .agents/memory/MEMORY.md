@@ -48,4 +48,5 @@
 - [Payment enrichment propagation](payment-enrichment-propagation.md) — all payment creation/finalization callers must pass canonical paidAt/effective-date context; replay enrichment must COALESCE snapshots.
 - [Tracked configuration secrets](tracked-config-secrets.md) — inspect `.replit` and legacy tracked config files for plaintext credentials before treating environment secrets as isolated.
 - [Payment accounting verification](payment-accounting-verification.md) — assess mirror completion from linkage, GL, tax, replay, and recovery evidence, not function presence or `posted` alone.
+- [Company ownership evidence](company-ownership-evidence.md) — historical payment company resolution must use validated relations; missing or conflicting evidence stays NULL and blocks posting.
 

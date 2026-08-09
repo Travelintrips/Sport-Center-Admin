@@ -10,22 +10,20 @@ import { and, desc, eq, lte, gte, isNull, or, sql } from "drizzle-orm";
 import type { Booking, Payment } from "@workspace/db";
 import { createPaymentProviderId, createPaymentProviderOrderId, normalizeProviderName } from "./paymentMetadata";
 import type { PaymentProvider } from "./paymentProvider";
+import {
+  resolvePaymentCompanyEvidence,
+  type PaymentCompanyEvidence,
+  type PaymentCompanyResolution,
+} from "./paymentCompanyResolution";
 
 export type SettlementProvider = "mandiri_direct" | "paylabs" | "unknown";
-
-export type PaymentCompanyResolution = {
-  companyId: number | null;
-  evidenceSource:
-    | "booking_company_relation"
-    | "booking_company_invoice"
-    | "validated_explicit_configuration"
-    | "facility_ownership"
-    | "none";
-};
+export type { PaymentCompanyEvidence, PaymentCompanyResolution } from "./paymentCompanyResolution";
 
 export type PaymentEnrichment = {
   companyId: number | null;
   companyEvidenceSource: PaymentCompanyResolution["evidenceSource"];
+  companyEvidenceReference: string | null;
+  companyDeterministic: boolean;
   bankAccountId: string | null;
   bankAccountEvidenceSource: "effective_settlement_config" | "default_center_settings" | "none";
   paidAt: Date | null;
@@ -130,41 +128,60 @@ export async function resolvePaymentCompany(
   booking: Pick<Booking, "payerType" | "companyCustomerId" | "companyInvoiceId">,
   options?: Pick<PaymentEnrichmentOptions, "facilityCompanyId" | "merchantCompanyId" | "explicitCompanyId">,
 ): Promise<PaymentCompanyResolution> {
+  const candidates: PaymentCompanyEvidence[] = [];
+
   if (booking.payerType === "company" && booking.companyCustomerId != null) {
     if (await validateCompanyId(booking.companyCustomerId)) {
-      return { companyId: booking.companyCustomerId, evidenceSource: "booking_company_relation" };
+      candidates.push({
+        companyId: booking.companyCustomerId,
+        evidenceSource: "booking_company_relation",
+        evidenceReference: `company_customer_id:${booking.companyCustomerId}`,
+      });
     }
   }
 
   if (booking.companyInvoiceId != null) {
     const invoice = await db.execute(sql`
-      SELECT company_id
+      SELECT company_customer_id
         FROM sport_center.company_invoices
        WHERE id = ${booking.companyInvoiceId}
        LIMIT 1
     `).catch(() => ({ rows: [] }));
-    const companyId = (invoice as any).rows?.[0]?.company_id;
+    const companyId = (invoice as any).rows?.[0]?.company_customer_id;
     if (companyId != null && await validateCompanyId(Number(companyId))) {
-      return { companyId: Number(companyId), evidenceSource: "booking_company_invoice" };
+      candidates.push({
+        companyId: Number(companyId),
+        evidenceSource: "booking_company_invoice",
+        evidenceReference: `company_invoice_id:${booking.companyInvoiceId}`,
+      });
     }
   }
 
   if (options?.facilityCompanyId != null && await validateCompanyId(options.facilityCompanyId)) {
-    return { companyId: options.facilityCompanyId, evidenceSource: "facility_ownership" };
+    candidates.push({
+      companyId: options.facilityCompanyId,
+      evidenceSource: "facility_ownership",
+      evidenceReference: "validated_facility_context",
+    });
   }
 
   if (options?.merchantCompanyId != null && await validateCompanyId(options.merchantCompanyId)) {
-    return { companyId: options.merchantCompanyId, evidenceSource: "validated_explicit_configuration" };
+    candidates.push({
+      companyId: options.merchantCompanyId,
+      evidenceSource: "validated_explicit_configuration",
+      evidenceReference: "validated_merchant_context",
+    });
   }
 
   if (options?.explicitCompanyId != null && await validateCompanyId(options.explicitCompanyId)) {
-    return {
+    candidates.push({
       companyId: options.explicitCompanyId,
       evidenceSource: "validated_explicit_configuration",
-    };
+      evidenceReference: "validated_explicit_context",
+    });
   }
 
-  return { companyId: null, evidenceSource: "none" };
+  return resolvePaymentCompanyEvidence(candidates);
 }
 
 export async function resolveSettlementBankAccount(
@@ -268,6 +285,8 @@ export async function enrichPayment(
   return {
     companyId: company.companyId,
     companyEvidenceSource: company.evidenceSource,
+    companyEvidenceReference: company.evidenceReference,
+    companyDeterministic: company.deterministic,
     bankAccountId: account.bankAccountId,
     bankAccountEvidenceSource: account.evidenceSource,
     paidAt,

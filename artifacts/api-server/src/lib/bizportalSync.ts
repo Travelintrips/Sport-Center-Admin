@@ -69,6 +69,7 @@ export async function auditSportCenterPayment(sourcePaymentId: number): Promise<
   sourcePaymentId: number;
   status: SportCenterPaymentAuditStatus;
   source: Record<string, unknown> | null;
+  ownership: Record<string, unknown> | null;
   mirror: Record<string, unknown> | null;
   accounting: Record<string, unknown> | null;
   tax: { sportCenter: Record<string, unknown> | null; publicGl: Record<string, unknown> | null };
@@ -88,7 +89,18 @@ export async function auditSportCenterPayment(sourcePaymentId: number): Promise<
        sp.merchant_trade_no AS source_merchant_trade_no,
        sp.provider_trade_no AS source_provider_trade_no,
        sp.bank_account_id AS source_bank_account_id,
-        sb.order_number, sb.ppn_rate,
+       sb.order_number, sb.ppn_rate,
+       sb.facility_id, sb.payer_type, sb.company_customer_id, sb.company_invoice_id,
+       f.name AS facility_name,
+       booking_company.id AS booking_company_id,
+       invoice_company.id AS invoice_company_id,
+       CASE
+         WHEN booking_company.id IS NOT NULL
+          AND invoice_company.id IS NOT NULL
+          AND booking_company.id <> invoice_company.id
+         THEN true
+         ELSE false
+       END AS ownership_ambiguous,
         CASE WHEN COALESCE(sb.ppn_rate, 0) > 0
           THEN ROUND((sp.amount * sb.ppn_rate) / (100 + sb.ppn_rate), 0)
           ELSE 0
@@ -107,6 +119,16 @@ export async function auditSportCenterPayment(sourcePaymentId: number): Promise<
        gtl.id AS gl_tax_line_id, gtl.tax_amount AS public_tax_amount
      FROM sport_center.sport_payments sp
      JOIN sport_center.sport_bookings sb ON sb.id = sp.booking_id
+      LEFT JOIN sport_center.sport_facilities f ON f.id = sb.facility_id
+      LEFT JOIN sport_center.users booking_company
+        ON booking_company.id = sb.company_customer_id
+       AND booking_company.account_type = 'company'
+       AND COALESCE(booking_company.account_status, 'active') NOT IN ('rejected', 'inactive')
+      LEFT JOIN sport_center.company_invoices ci ON ci.id = sb.company_invoice_id
+      LEFT JOIN sport_center.users invoice_company
+        ON invoice_company.id = ci.company_customer_id
+       AND invoice_company.account_type = 'company'
+       AND COALESCE(invoice_company.account_status, 'active') NOT IN ('rejected', 'inactive')
      LEFT JOIN public.sport_payments m
        ON m.source_payment_id = sp.id
        OR m.payment_number = 'SCPAY-SC-' || sp.id::text
@@ -152,6 +174,7 @@ export async function auditSportCenterPayment(sourcePaymentId: number): Promise<
       sourcePaymentId,
       status: "MIRROR_MISSING",
       source: null,
+      ownership: null,
       mirror: null,
       accounting: null,
       tax: { sportCenter: null, publicGl: null },
@@ -159,6 +182,18 @@ export async function auditSportCenterPayment(sourcePaymentId: number): Promise<
     };
   }
   const status = paymentAuditStatus(row);
+  const ownershipCompanyIds = [
+    row.source_company_id,
+    row.booking_company_id,
+    row.invoice_company_id,
+  ].filter((value) => value != null).map(Number);
+  const uniqueOwnershipCompanyIds = [...new Set(ownershipCompanyIds)];
+  const ownershipAmbiguous =
+    Boolean(row.ownership_ambiguous) || uniqueOwnershipCompanyIds.length > 1;
+  const ownershipCompany =
+    uniqueOwnershipCompanyIds.length === 1 && !ownershipAmbiguous
+      ? uniqueOwnershipCompanyIds[0]
+      : null;
   return {
     readOnly: true,
     sourcePaymentId,
@@ -172,6 +207,26 @@ export async function auditSportCenterPayment(sourcePaymentId: number): Promise<
       paymentMethod: row.source_payment_method,
       provider: row.source_provider,
       paidAt: row.source_paid_at,
+    },
+    ownership: {
+      resolvedCompany: ownershipCompany,
+      deterministic: ownershipCompany != null,
+      evidence: [
+        row.source_company_id != null
+          ? `source_payment.company_id:${row.source_company_id}`
+          : null,
+        row.booking_company_id != null
+          ? `booking.company_customer_id:${row.booking_company_id}`
+          : null,
+        row.invoice_company_id != null
+          ? `booking.company_invoice_id:${row.source_booking_id}`
+          : null,
+      ].filter(Boolean),
+      facilityId: row.facility_id == null ? null : Number(row.facility_id),
+      facilityName: row.facility_name ?? null,
+      payerType: row.payer_type ?? null,
+      companyCustomerId: row.company_customer_id == null ? null : Number(row.company_customer_id),
+      companyInvoiceId: row.company_invoice_id == null ? null : Number(row.company_invoice_id),
     },
     mirror: row.mirror_id ? {
       id: Number(row.mirror_id),
