@@ -555,6 +555,23 @@ CREATE UNIQUE INDEX IF NOT EXISTS accounting_journals_payment_confirmed_unique
     AND journal_type = 'payment_confirmed'
     AND is_reversal = false;
 
+-- The shared public accounting schema uses an enum for source. Add the
+-- Sport Center payment source before creating source-scoped constraints.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+      FROM pg_type t
+      JOIN pg_namespace n ON n.oid = t.typnamespace
+     WHERE t.typname = 'accounting_entry_source'
+       AND n.nspname = 'public'
+  ) THEN
+    ALTER TYPE public.accounting_entry_source
+      ADD VALUE IF NOT EXISTS 'sport_center_payment';
+  END IF;
+END
+$$;
+
 -- Payment-level public accounting idempotency. This is intentionally scoped
 -- to Sport Center payment entries so legacy accounting streams keep their
 -- existing contract.
@@ -562,6 +579,61 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_public_accounting_entries_sc_payment_correl
   ON public.accounting_entries (correlation_id)
   WHERE source = 'sport_center_payment'
     AND correlation_id IS NOT NULL;
+
+-- Durable payment accounting/mirror retry queue. A trigger below enqueues
+-- every newly-confirmed payment in the same transaction as the status change.
+CREATE TABLE IF NOT EXISTS sport_center.payment_accounting_outbox (
+  id serial PRIMARY KEY,
+  payment_id integer NOT NULL REFERENCES sport_center.sport_payments(id) ON DELETE CASCADE,
+  event_type text NOT NULL DEFAULT 'payment_confirmed',
+  status text NOT NULL DEFAULT 'pending',
+  attempts integer NOT NULL DEFAULT 0,
+  available_at timestamptz NOT NULL DEFAULT now(),
+  locked_at timestamptz,
+  processed_at timestamptz,
+  last_error text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT payment_accounting_outbox_payment_event_unique UNIQUE (payment_id, event_type)
+);
+CREATE INDEX IF NOT EXISTS payment_accounting_outbox_ready_idx
+  ON sport_center.payment_accounting_outbox (status, available_at, locked_at);
+
+CREATE OR REPLACE FUNCTION sport_center.enqueue_payment_accounting_outbox()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF NEW.status::text = 'confirmed' THEN
+    IF TG_OP = 'INSERT' OR OLD.status::text IS DISTINCT FROM 'confirmed' THEN
+      INSERT INTO sport_center.payment_accounting_outbox
+        (payment_id, event_type, status, available_at, created_at, updated_at)
+      VALUES (NEW.id, 'payment_confirmed', 'pending', now(), now(), now())
+      ON CONFLICT (payment_id, event_type) DO UPDATE
+        SET status = CASE
+              WHEN sport_center.payment_accounting_outbox.status = 'posted'
+                THEN sport_center.payment_accounting_outbox.status
+              ELSE 'pending'
+            END,
+            available_at = CASE
+              WHEN sport_center.payment_accounting_outbox.status = 'posted'
+                THEN sport_center.payment_accounting_outbox.available_at
+              ELSE now()
+            END,
+            locked_at = NULL,
+            updated_at = now();
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_payment_accounting_outbox
+  ON sport_center.sport_payments;
+CREATE TRIGGER trg_payment_accounting_outbox
+AFTER INSERT OR UPDATE OF status ON sport_center.sport_payments
+FOR EACH ROW
+EXECUTE FUNCTION sport_center.enqueue_payment_accounting_outbox();
 
 -- ============================================================
 -- 21. company_invoice_items + unique constraint on company_invoices

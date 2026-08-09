@@ -303,6 +303,31 @@ export async function initBizportalTables(): Promise<void> {
   const pool = getProdPool();
   if (!pool) return;
   try {
+    // PostgreSQL requires a newly-added enum value to be committed before a
+    // later statement can use it in a partial index predicate.
+    const sourceEnum = await pool.query<{ exists: boolean; has_value: boolean }>(`
+      SELECT EXISTS (
+        SELECT 1
+          FROM pg_type t
+          JOIN pg_namespace n ON n.oid = t.typnamespace
+         WHERE t.typname = 'accounting_entry_source'
+           AND n.nspname = 'public'
+      ) AS exists,
+      EXISTS (
+        SELECT 1
+          FROM pg_enum e
+          JOIN pg_type t ON t.oid = e.enumtypid
+          JOIN pg_namespace n ON n.oid = t.typnamespace
+         WHERE t.typname = 'accounting_entry_source'
+           AND n.nspname = 'public'
+           AND e.enumlabel = 'sport_center_payment'
+      ) AS has_value
+    `);
+    if (sourceEnum.rows[0]?.exists && !sourceEnum.rows[0]?.has_value) {
+      await pool.query(
+        `ALTER TYPE public.accounting_entry_source ADD VALUE 'sport_center_payment'`,
+      );
+    }
     await pool.query(`
       CREATE TABLE IF NOT EXISTS sport_center.sport_bookings_sync (
         id                SERIAL PRIMARY KEY,
@@ -381,10 +406,70 @@ export async function initBizportalTables(): Promise<void> {
       CREATE UNIQUE INDEX IF NOT EXISTS uq_public_accounting_entries_source_payment_id
         ON public.accounting_entries (source_payment_id)
         WHERE source_payment_id IS NOT NULL;
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1
+            FROM pg_type t
+            JOIN pg_namespace n ON n.oid = t.typnamespace
+           WHERE t.typname = 'accounting_entry_source'
+             AND n.nspname = 'public'
+        ) THEN
+          ALTER TYPE public.accounting_entry_source
+            ADD VALUE IF NOT EXISTS 'sport_center_payment';
+        END IF;
+      END
+      $$;
       CREATE UNIQUE INDEX IF NOT EXISTS uq_public_accounting_entries_sc_payment_correlation
         ON public.accounting_entries (correlation_id)
         WHERE source = 'sport_center_payment'
           AND correlation_id IS NOT NULL;
+      CREATE TABLE IF NOT EXISTS sport_center.payment_accounting_outbox (
+        id SERIAL PRIMARY KEY,
+        payment_id INTEGER NOT NULL REFERENCES sport_center.sport_payments(id) ON DELETE CASCADE,
+        event_type TEXT NOT NULL DEFAULT 'payment_confirmed',
+        status TEXT NOT NULL DEFAULT 'pending',
+        attempts INTEGER NOT NULL DEFAULT 0,
+        available_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        locked_at TIMESTAMPTZ,
+        processed_at TIMESTAMPTZ,
+        last_error TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        CONSTRAINT payment_accounting_outbox_payment_event_unique UNIQUE (payment_id, event_type)
+      );
+      CREATE INDEX IF NOT EXISTS payment_accounting_outbox_ready_idx
+        ON sport_center.payment_accounting_outbox (status, available_at, locked_at);
+      CREATE OR REPLACE FUNCTION sport_center.enqueue_payment_accounting_outbox()
+      RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        IF NEW.status::text = 'confirmed' THEN
+          IF TG_OP = 'INSERT' OR OLD.status::text IS DISTINCT FROM 'confirmed' THEN
+            INSERT INTO sport_center.payment_accounting_outbox
+              (payment_id, event_type, status, available_at, created_at, updated_at)
+            VALUES (NEW.id, 'payment_confirmed', 'pending', NOW(), NOW(), NOW())
+            ON CONFLICT (payment_id, event_type) DO UPDATE
+              SET status = CASE
+                    WHEN sport_center.payment_accounting_outbox.status = 'posted'
+                      THEN sport_center.payment_accounting_outbox.status
+                    ELSE 'pending'
+                  END,
+                  available_at = CASE
+                    WHEN sport_center.payment_accounting_outbox.status = 'posted'
+                      THEN sport_center.payment_accounting_outbox.available_at
+                    ELSE NOW()
+                  END,
+                  locked_at = NULL,
+                  updated_at = NOW();
+          END IF;
+        END IF;
+        RETURN NEW;
+      END;
+      $$;
+      DROP TRIGGER IF EXISTS trg_payment_accounting_outbox ON sport_center.sport_payments;
+      CREATE TRIGGER trg_payment_accounting_outbox
+      AFTER INSERT OR UPDATE OF status ON sport_center.sport_payments
+      FOR EACH ROW EXECUTE FUNCTION sport_center.enqueue_payment_accounting_outbox();
       ALTER TABLE public.sport_payments
         ALTER COLUMN posting_status SET DEFAULT 'unposted';
     `);
@@ -1128,6 +1213,128 @@ export async function countPendingPaymentMirrors(pool: pg.Pool): Promise<number>
       )
   `);
   return Number(rows[0]?.pending ?? 0);
+}
+
+/**
+ * Claim and process durable payment-confirmation events. The database trigger
+ * creates the outbox row in the same transaction as confirmation, so a
+ * process crash cannot lose the accounting/mirror work.
+ */
+export async function processPaymentAccountingOutbox(): Promise<{
+  claimed: number;
+  posted: number;
+  retried: number;
+}> {
+  const pool = getProdPool();
+  if (!pool) return { claimed: 0, posted: 0, retried: 0 };
+
+  const client = await pool.connect();
+  let claimed: Array<{ id: number; payment_id: number }> = [];
+  try {
+    await client.query("BEGIN");
+    const result = await client.query(`
+      SELECT id, payment_id
+        FROM sport_center.payment_accounting_outbox
+       WHERE status IN ('pending', 'failed')
+         AND available_at <= NOW()
+         AND (locked_at IS NULL OR locked_at < NOW() - INTERVAL '15 minutes')
+       ORDER BY id
+       FOR UPDATE SKIP LOCKED
+       LIMIT 50
+    `);
+    claimed = result.rows.map((row) => ({
+      id: Number(row.id),
+      payment_id: Number(row.payment_id),
+    }));
+    if (claimed.length > 0) {
+      await client.query(
+        `UPDATE sport_center.payment_accounting_outbox
+            SET status = 'processing',
+                attempts = attempts + 1,
+                locked_at = NOW(),
+                updated_at = NOW()
+          WHERE id = ANY($1::int[])`,
+        [claimed.map((row) => row.id)],
+      );
+    }
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    client.release();
+    throw err;
+  }
+  client.release();
+
+  if (claimed.length === 0) return { claimed: 0, posted: 0, retried: 0 };
+
+  // The bulk path is idempotent and handles both missing mirrors and failed
+  // public entries. It also preserves DP/pelunasan payment-level identity.
+  await bulkPushPaymentsToBizportal();
+
+  let posted = 0;
+  let retried = 0;
+  for (const event of claimed) {
+    try {
+      const result = await pool.query(`
+        SELECT sp.status,
+               m.posting_status,
+               m.entry_id,
+               ae.status AS entry_status
+          FROM sport_center.sport_payments sp
+          LEFT JOIN public.sport_payments m
+            ON m.source_payment_id = sp.id
+            OR m.payment_number = 'SCPAY-SC-' || sp.id::text
+          LEFT JOIN public.accounting_entries ae
+            ON ae.id = m.entry_id
+         WHERE sp.id = $1
+         ORDER BY CASE WHEN m.source_payment_id = sp.id THEN 0 ELSE 1 END
+         LIMIT 1
+      `, [event.payment_id]);
+      const row = result.rows[0];
+      const complete =
+        row?.status === "confirmed" &&
+        row?.posting_status === "posted" &&
+        row?.entry_id != null &&
+        row?.entry_status === "posted";
+
+      if (complete) {
+        await pool.query(
+          `UPDATE sport_center.payment_accounting_outbox
+              SET status = 'posted', processed_at = NOW(), locked_at = NULL,
+                  last_error = NULL, updated_at = NOW()
+            WHERE id = $1`,
+          [event.id],
+        );
+        posted++;
+      } else {
+        await pool.query(
+          `UPDATE sport_center.payment_accounting_outbox
+              SET status = 'failed',
+                  available_at = NOW() + LEAST(INTERVAL '1 hour', INTERVAL '5 minutes' * GREATEST(attempts, 1)),
+                  locked_at = NULL,
+                  last_error = $2,
+                  updated_at = NOW()
+            WHERE id = $1`,
+          [event.id, "PAYMENT_ACCOUNTING_INCOMPLETE"],
+        );
+        retried++;
+      }
+    } catch (err: any) {
+      await pool.query(
+        `UPDATE sport_center.payment_accounting_outbox
+            SET status = 'failed',
+                available_at = NOW() + LEAST(INTERVAL '1 hour', INTERVAL '5 minutes' * GREATEST(attempts, 1)),
+                locked_at = NULL,
+                last_error = $2,
+                updated_at = NOW()
+          WHERE id = $1`,
+        [event.id, String(err?.message ?? err).slice(0, 1000)],
+      ).catch(() => {});
+      retried++;
+    }
+  }
+
+  return { claimed: claimed.length, posted, retried };
 }
 
 export async function bulkPushPaymentsToBizportal(): Promise<BulkPaymentPushResult> {

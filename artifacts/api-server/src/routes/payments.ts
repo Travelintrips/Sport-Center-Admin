@@ -229,9 +229,9 @@ router.post("/payments", async (req, res) => {
       if (method === "qris") {
         paymentMethod = "QRIS";
         const normalizedProvider = normalizePaymentProvider(rawPaymentProvider);
-        if (normalizedProvider !== "mandiri_direct" && normalizedProvider !== "unknown") {
+        if (normalizedProvider !== "mandiri_direct") {
           res.status(400).json({
-            error: "Pembayaran QRIS manual wajib menyertakan paymentProvider mandiri_direct atau unknown.",
+            error: "Pembayaran QRIS manual wajib menyertakan paymentProvider mandiri_direct.",
           });
           return;
         }
@@ -245,9 +245,9 @@ router.post("/payments", async (req, res) => {
     }
     if (paymentMethod === "QRIS") {
       const normalizedProvider = normalizePaymentProvider(rawPaymentProvider);
-      if (normalizedProvider === "paylabs" || !normalizedProvider) {
+      if (normalizedProvider !== "mandiri_direct") {
         res.status(400).json({
-            error: "Provider QRIS manual wajib diisi: mandiri_direct atau unknown.",
+            error: "Provider QRIS manual wajib diisi: mandiri_direct.",
         });
         return;
       }
@@ -549,9 +549,9 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
       updateData.paymentMethod = paymentMethod.trim();
       if (paymentMethod.trim().toUpperCase() === "QRIS") {
         const provider = normalizePaymentProvider(rawPaymentProvider ?? before.paymentProvider);
-        if (!provider || provider === "paylabs") {
+        if (provider !== "mandiri_direct") {
           res.status(400).json({
-            error: "Pembayaran QRIS wajib memiliki paymentProvider mandiri_direct atau unknown.",
+            error: "Pembayaran QRIS wajib memiliki paymentProvider mandiri_direct.",
           });
           return;
         }

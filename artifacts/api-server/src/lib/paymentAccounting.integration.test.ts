@@ -97,6 +97,7 @@ async function fakeQuery(text: string, values: unknown[] = []): Promise<{ rows: 
     const mirror = state.mirrors.find((row) =>
       row.paymentNumber === values[0] || row.sourcePaymentId === scalar(values[1]),
     );
+    const sourcePaymentId = mirror?.sourcePaymentId ?? Number(String(mirror?.paymentNumber ?? "").replace("SCPAY-SC-", ""));
     return {
       rows: mirror ? [{
         id: mirror.id,
@@ -104,10 +105,10 @@ async function fakeQuery(text: string, values: unknown[] = []): Promise<{ rows: 
         posting_status: mirror.postingStatus,
         source_payment_id: mirror.sourcePaymentId,
         amount: mirror.amount,
-        method: "Transfer Bank",
-        payment_type: "full_payment",
-        payment_provider: "unknown",
-        provider_code: "unknown",
+        method: sourcePaymentId === 42 || sourcePaymentId === 43 ? "QRIS" : "Transfer Bank",
+        payment_type: sourcePaymentId === 43 ? "dp" : sourcePaymentId === 44 ? "pelunasan" : "full_payment",
+        payment_provider: sourcePaymentId === 42 || sourcePaymentId === 43 ? "mandiri_direct" : "unknown",
+        provider_code: sourcePaymentId === 42 || sourcePaymentId === 43 ? "mandiri_direct" : "unknown",
         company_id: 1,
         bank_account_id: "mandiri",
       }] : [],
@@ -117,13 +118,14 @@ async function fakeQuery(text: string, values: unknown[] = []): Promise<{ rows: 
 
   if (sql.includes("SELECT id, booking_id, company_id, amount, payment_method, payment_type")) {
     const sourcePaymentId = scalar(values[0]);
+    const sourceAmount = sourcePaymentId === 43 ? 50_000 : sourcePaymentId === 44 ? 150_000 : 100_000;
     return {
       rows: state.confirmedSourcePaymentIds.includes(sourcePaymentId) || sourcePaymentId > 0
         ? [{
           id: sourcePaymentId,
           booking_id: sourcePaymentId,
           company_id: 1,
-          amount: 100_000,
+          amount: sourceAmount,
           payment_method: sourcePaymentId === 42 || sourcePaymentId === 43 ? "QRIS" : "Transfer Bank",
           payment_type: sourcePaymentId === 43 ? "dp" : sourcePaymentId === 44 ? "pelunasan" : "full_payment",
           payment_provider: sourcePaymentId === 42 || sourcePaymentId === 43 ? "mandiri_direct" : "unknown",
@@ -153,16 +155,28 @@ async function fakeQuery(text: string, values: unknown[] = []): Promise<{ rows: 
         id: entry.id,
         status: entry.status,
         company_id: 1,
-        payment_method: "Transfer Bank",
-        payment_provider: "unknown",
+        payment_method: entry.correlationId === "sc_payment_42" || entry.correlationId === "sc_payment_43" ? "QRIS" : "Transfer Bank",
+        payment_provider: entry.correlationId === "sc_payment_42" || entry.correlationId === "sc_payment_43" ? "mandiri_direct" : "unknown",
       }] : [],
       rowCount: entry ? 1 : 0,
     };
   }
 
-  if (sql === "SELECT id FROM public.accounting_entries WHERE id = $1 AND status = 'posted'") {
+  if (sql.includes("FROM public.accounting_entries") &&
+      sql.includes("WHERE id = $1") &&
+      sql.includes("status = 'posted'")) {
     const entry = state.entries.find((row) => row.id === scalar(values[0]) && row.status === "posted");
-    return { rows: entry ? [{ id: entry.id }] : [], rowCount: entry ? 1 : 0 };
+    return {
+      rows: entry ? [{
+        id: entry.id,
+        company_id: 1,
+        payment_method: entry.correlationId === "sc_payment_42" || entry.correlationId === "sc_payment_43" ? "QRIS" : "Transfer Bank",
+        payment_provider: entry.correlationId === "sc_payment_42" || entry.correlationId === "sc_payment_43" ? "mandiri_direct" : "unknown",
+        total_debit: entry.totalDebit,
+        total_credit: entry.totalCredit,
+      }] : [],
+      rowCount: entry ? 1 : 0,
+    };
   }
 
   if (sql.includes("SELECT COALESCE(MAX(") && sql.includes("FROM public.accounting_entries")) {
@@ -221,6 +235,20 @@ async function fakeQuery(text: string, values: unknown[] = []): Promise<{ rows: 
     const entry = state.entries.find((row) => row.id === scalar(values[0]));
     if (entry) entry.status = "posted";
     return { rows: [], rowCount: entry ? 1 : 0 };
+  }
+
+  if (sql.includes("SELECT COUNT(*)::int AS line_count") &&
+      sql.includes("FROM public.accounting_entry_lines")) {
+    const entryId = scalar(values[0]);
+    const lines = state.lines.filter((line) => line.entryId === entryId);
+    return {
+      rows: [{
+        line_count: lines.length,
+        debit: lines.reduce((sum, line) => sum + line.debit, 0),
+        credit: lines.reduce((sum, line) => sum + line.credit, 0),
+      }],
+      rowCount: 1,
+    };
   }
 
   if (sql.startsWith("INSERT INTO sport_center.tax_transactions")) {

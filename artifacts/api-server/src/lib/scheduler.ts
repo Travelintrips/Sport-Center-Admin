@@ -7,7 +7,7 @@ import { reverseJournalEntry } from "./accounting";
 import { runBankAudit } from "./bankAudit";
 import { runConnectionHealthCheck } from "./connectionHealth";
 import { sendRekapPemakaianToAdmin } from "./rekapPemakaian";
-import { bulkPushPaymentsToBizportal } from "./bizportalSync";
+import { bulkPushPaymentsToBizportal, processPaymentAccountingOutbox } from "./bizportalSync";
 import { logger } from "./logger";
 
 function getAppUrl(): string {
@@ -562,6 +562,9 @@ export function startScheduler(): void {
   autoCompleteBookings();
   syncDailyUsageList();
   checkConnections();
+  processPaymentAccountingOutbox().catch((err) =>
+    logger.error({ err }, "[scheduler] Initial payment accounting outbox processing failed"),
+  );
 
   // Every 5 minutes: expire overdue bookings + memberships + auto-complete + reminders + nightly audit + connection health + daily rekap
   setInterval(async () => {
@@ -576,6 +579,14 @@ export function startScheduler(): void {
     await sendDailyRekap();
     await sendNightlyRekap();
     await checkConnections();
+    try {
+      const result = await processPaymentAccountingOutbox();
+      if (result.claimed > 0) {
+        logger.info(result, "[scheduler] Payment accounting outbox processed");
+      }
+    } catch (err) {
+      logger.error({ err }, "[scheduler] Payment accounting outbox processing failed");
+    }
   }, 5 * 60 * 1000);
 
   // Every 60 minutes: auto-sync confirmed payments to BizPortal so both sides stay balanced

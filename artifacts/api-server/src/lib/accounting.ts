@@ -494,7 +494,10 @@ export async function postSportCenterBookingPayment(
       input.paymentProvider ??
       "unknown",
     ).trim().toLowerCase();
-    if (canonicalMethod.toUpperCase() === "QRIS" && !canonicalProvider) {
+    if (
+      canonicalMethod.toUpperCase() === "QRIS" &&
+      !["mandiri_direct", "paylabs"].includes(canonicalProvider)
+    ) {
       throw new Error(`[accounting] PROVIDER_MISSING:${input.paymentNumber}`);
     }
     const sourceCompanyId = sourcePayment?.company_id == null ? null : Number(sourcePayment.company_id);
