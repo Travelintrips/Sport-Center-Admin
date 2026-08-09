@@ -813,6 +813,28 @@ export interface BulkPaymentPushResult {
   errors: string[];
 }
 
+export async function countPendingPaymentMirrors(pool: pg.Pool): Promise<number> {
+  const { rows } = await pool.query(`
+    SELECT COUNT(*) AS pending
+    FROM sport_center.sport_payments sp
+    JOIN sport_center.sport_bookings sb ON sb.id = sp.booking_id
+    LEFT JOIN public.sport_bookings pb ON pb.sc_booking_id = sb.id
+    LEFT JOIN public.sport_payments bpay
+      ON bpay.payment_number = 'SCPAY-SC-' || sp.id::text
+    LEFT JOIN public.accounting_entries bentry ON bentry.id = bpay.entry_id
+    WHERE sp.status = 'confirmed'
+      AND pb.id IS NOT NULL
+      AND (
+        bpay.id IS NULL
+        OR bpay.posting_status IS DISTINCT FROM 'posted'
+        OR bpay.entry_id IS NULL
+        OR bentry.id IS NULL
+        OR bentry.status IS DISTINCT FROM 'posted'
+      )
+  `);
+  return Number(rows[0]?.pending ?? 0);
+}
+
 export async function bulkPushPaymentsToBizportal(): Promise<BulkPaymentPushResult> {
   const pool = getProdPool();
   if (!pool) return { total: 0, pushed: 0, skipped: 0, failed: 0, errors: [] };
@@ -957,6 +979,7 @@ export async function bulkPushPaymentsToBizportal(): Promise<BulkPaymentPushResu
             paymentType: p.payment_type,
             paidAt: p.paid_at || p.payment_created_at,
             ppnRate: taxRate,
+            sourcePaymentId: Number(p.sc_payment_id),
           });
 
           if (wasAlreadyPresent) {

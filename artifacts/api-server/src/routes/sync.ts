@@ -10,6 +10,7 @@ import {
   syncMembershipToBizportal,
   bizportalSyncConfigured,
   bulkPushPaymentsToBizportal,
+  countPendingPaymentMirrors,
   auditLegacySportCenterPayments,
   reconcileLegacySportCenterPaymentLinks,
   type BulkPaymentPushResult,
@@ -640,20 +641,8 @@ router.get("/admin/sync-bizportal-payments/pending", adminMiddleware, async (_re
       return;
     }
 
-    const { rows } = await pool.query(`
-      SELECT COUNT(*) AS pending
-      FROM sport_center.sport_payments sp
-      JOIN sport_center.sport_bookings sb ON sb.id = sp.booking_id
-      LEFT JOIN public.sport_bookings pb ON pb.sc_booking_id = sb.id
-      WHERE sp.status = 'confirmed'
-        AND pb.id IS NOT NULL
-        AND NOT EXISTS (
-          SELECT 1 FROM public.sport_payments bpay
-          WHERE bpay.payment_number = 'SCPAY-SC-' || sp.id::text
-        )
-    `);
-
-    res.json({ pending: parseInt(rows[0]?.pending ?? "0", 10), configured: true });
+    const pending = await countPendingPaymentMirrors(pool);
+    res.json({ pending, configured: true });
   } catch (err: any) {
     res.json({ pending: 0, configured: true, error: err.message });
   }

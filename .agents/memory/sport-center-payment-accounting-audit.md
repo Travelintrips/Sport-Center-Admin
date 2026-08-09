@@ -14,3 +14,9 @@ Pada 2026-08-09 ditemukan bahwa konfirmasi langsung dapat membuat `public.accoun
 **Why:** Dua pipeline tersebut tidak atomik dan mirror dijalankan berkala. UI dapat menampilkan payment seolah belum dijurnal walaupun entry public sudah posted, atau sebaliknya menampilkan pending=0 karena row failed sudah ada.
 
 **How to apply:** Saat audit dan repair, cari payment confirmed yang mirror-nya ada tetapi `posting_status <> 'posted'` atau `entry_id` kosong, bukan hanya mirror yang belum ada. Jalankan repair berdasarkan `payment_number = SCPAY-SC-<source_payment_id>` dan validasi entry, GL lines, serta tax ledger sesudahnya.
+
+Posting public payment harus memakai correlation canonical `sc_payment_<source_payment_id>`, meskipun mirror memakai nomor `SCPAY-SC-<id>`.
+
+**Why:** Retry dari mirror lama harus dapat menemukan entry yang sudah dibuat oleh konfirmasi langsung dan mengisi linkage tanpa menduplikasi jurnal.
+
+**How to apply:** Selalu teruskan source payment ID ke `postSportCenterBookingPayment`; gunakan indikator pending untuk mendeteksi mirror hilang, failed/unposted, atau entry yang tidak posted.

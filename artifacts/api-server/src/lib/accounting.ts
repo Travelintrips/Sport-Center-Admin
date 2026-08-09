@@ -270,6 +270,7 @@ export async function createPublicAccountingEntry(
 
 export type SportCenterBookingPaymentPosting = {
   paymentNumber: string;
+  sourcePaymentId?: number | null;
   bookingId: number;
   orderNumber: string;
   amount: number;
@@ -290,6 +291,21 @@ export type SportCenterBookingPaymentPostingResult = {
 };
 
 /**
+ * A payment can be represented by the legacy mirror number
+ * (SCPAY-SC-123) or by the source payment id (123). Both must resolve to the
+ * same durable accounting correlation key so a retry can repair a failed
+ * mirror without creating a second public entry.
+ */
+export function getSportCenterPaymentCorrelationId(
+  paymentNumber: string,
+  sourcePaymentId?: number | null,
+): string {
+  if (sourcePaymentId != null) return `sc_payment_${sourcePaymentId}`;
+  const mirrorMatch = /^SCPAY-SC-(\d+)$/.exec(paymentNumber.trim());
+  return `sc_payment_${mirrorMatch?.[1] ?? paymentNumber}`;
+}
+
+/**
  * Post one mirrored Sport Center payment to public accounting.
  *
  * This is deliberately keyed by the mirrored payment number, not only by
@@ -304,7 +320,10 @@ export async function postSportCenterBookingPayment(
     throw new Error("[accounting] Supabase URL tidak tersedia; payment belum diposting.");
   }
 
-  const correlationId = `sc_payment_${input.paymentNumber}`;
+  const correlationId = getSportCenterPaymentCorrelationId(
+    input.paymentNumber,
+    input.sourcePaymentId,
+  );
   const client = await pool.connect();
 
   try {
@@ -359,9 +378,13 @@ export async function postSportCenterBookingPayment(
 
       await client.query(
         `UPDATE public.sport_payments
-            SET entry_id = $2, posting_status = 'posted', posting_error = NULL, updated_at = NOW()
+          SET entry_id = $2,
+              source_payment_id = COALESCE(source_payment_id, $3),
+              posting_status = 'posted',
+              posting_error = NULL,
+              updated_at = NOW()
           WHERE id = $1`,
-        [mirroredPayment.id, Number(existing.id)],
+        [mirroredPayment.id, Number(existing.id), input.sourcePaymentId ?? null],
       );
       await client.query("COMMIT");
       return {
@@ -490,9 +513,13 @@ export async function postSportCenterBookingPayment(
     }
     await client.query(
       `UPDATE public.sport_payments
-          SET entry_id = $2, posting_status = 'posted', posting_error = NULL, updated_at = NOW()
+          SET entry_id = $2,
+              source_payment_id = COALESCE(source_payment_id, $3),
+              posting_status = 'posted',
+              posting_error = NULL,
+              updated_at = NOW()
         WHERE id = $1`,
-      [mirroredPayment.id, entryId],
+      [mirroredPayment.id, entryId, input.sourcePaymentId ?? null],
     );
     const invariantCheck = await client.query(
       `SELECT sp.entry_id, sp.posting_status, ae.status::text AS entry_status
