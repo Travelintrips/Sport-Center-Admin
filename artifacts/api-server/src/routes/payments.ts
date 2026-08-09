@@ -246,7 +246,7 @@ router.post("/payments", async (req, res) => {
       const normalizedProvider = normalizePaymentProvider(rawPaymentProvider);
       if (normalizedProvider === "paylabs" || !normalizedProvider) {
         res.status(400).json({
-          error: "Provider QRIS wajib diisi: mandiri_direct, paylabs, atau unknown.",
+            error: "Provider QRIS manual wajib diisi: mandiri_direct atau unknown.",
         });
         return;
       }
@@ -590,9 +590,9 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
       const [enrichedPayment] = await db
         .update(paymentsTable)
         .set({
-          companyId: enrichment.companyId,
-          bankAccountId: enrichment.bankAccountId,
-          expectedSettlementDate: enrichment.expectedSettlementDate,
+          companyId: enrichment.companyId ?? payment.companyId,
+          bankAccountId: enrichment.bankAccountId ?? payment.bankAccountId,
+          expectedSettlementDate: enrichment.expectedSettlementDate ?? payment.expectedSettlementDate,
           paidAt: payment.paidAt ?? payment.confirmedAt ?? new Date(),
           updatedAt: new Date(),
         })

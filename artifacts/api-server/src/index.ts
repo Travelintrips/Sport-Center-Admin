@@ -299,6 +299,14 @@ async function runStartupMigrations() {
        updated_at timestamptz NOT NULL DEFAULT NOW(),
        UNIQUE (source_type, source_id, worksheet_name)
      )`,
+     `CREATE TABLE IF NOT EXISTS sport_center.payment_enrichment_provenance (
+        id serial PRIMARY KEY,
+        payment_id integer NOT NULL,
+        field_name text NOT NULL,
+        evidence_source text NOT NULL,
+        evidence text,
+        created_at timestamptz NOT NULL DEFAULT NOW()
+      )`,
     // Enum billing_status untuk bookings
     `DO $$ BEGIN
        CREATE TYPE sport_center.billing_status AS ENUM ('unbilled','billed','paid');
@@ -829,6 +837,8 @@ async function runStartupMigrations() {
 
 // env validation already ran above (step 2) — no-op placeholder kept for clarity
 
+await runStartupMigrations();
+
 app.listen(port, (err) => {
   if (err) {
     logger.error({ err }, "Error listening on port");
@@ -836,7 +846,6 @@ app.listen(port, (err) => {
   }
 
   logger.info({ port }, "Server listening");
-  runStartupMigrations().catch(() => {});
   initBizportalTables().catch(() => {});
   startScheduler();
   ensureDefaultTemplates().catch(() => {});

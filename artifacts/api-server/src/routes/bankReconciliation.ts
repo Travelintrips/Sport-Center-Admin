@@ -538,6 +538,7 @@ router.post("/bank-reconciliation/import", adminMiddleware, upload.single("file"
       const normDesc = normalizeDescription(row.description);
       const providerOrderId = extractOrderId(row.description);
       const providerName = extractProviderName(row.description);
+       const providerDetectionSource = providerName ? "proven description pattern" : null;
 
       const [existing] = await db
         .select({ id: bankMutationsTable.id })
@@ -565,6 +566,7 @@ router.post("/bank-reconciliation/import", adminMiddleware, upload.single("file"
           mutationKey,
           normalizedDescription: normDesc,
           providerName,
+           providerDetectionSource,
           providerOrderId,
           rawPayload: row,
           status: "unmatched",

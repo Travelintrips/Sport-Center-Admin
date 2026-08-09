@@ -9,4 +9,7 @@ ALTER TABLE sport_center.sport_payments
   ADD COLUMN IF NOT EXISTS provider_reference text,
   ADD COLUMN IF NOT EXISTS merchant_trade_no text,
   ADD COLUMN IF NOT EXISTS provider_trade_no text,
-  ADD COLUMN IF NOT EXISTS paid_at timestamptz;
+  ADD COLUMN IF NOT EXISTS paid_at timestamptz,
+  ADD COLUMN IF NOT EXISTS company_id integer,
+  ADD COLUMN IF NOT EXISTS bank_account_id text,
+  ADD COLUMN IF NOT EXISTS expected_settlement_date text;

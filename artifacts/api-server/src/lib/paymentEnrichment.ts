@@ -71,7 +71,7 @@ export async function validateCompanyId(companyId: number | null | undefined): P
        AND account_type = 'company'
        AND COALESCE(account_status, 'active') NOT IN ('rejected', 'inactive')
      LIMIT 1
-  `);
+  `).catch(() => ({ rows: [] }));
   return Boolean((result as any).rows?.[0]);
 }
 
@@ -88,13 +88,18 @@ export async function validateSettlementBankAccount(
       eq(paymentSettlementConfigsTable.bankAccountId, bankAccountId.trim()),
       eq(paymentSettlementConfigsTable.isActive, true),
     ))
-    .limit(1);
+    .limit(1)
+    .catch(() => []);
   return Boolean(result[0]);
 }
 
 export async function resolvePaymentCompany(
   booking: Pick<Booking, "payerType" | "companyCustomerId" | "companyInvoiceId">,
-  options?: { explicitCompanyId?: number | null },
+  options?: {
+    facilityCompanyId?: number | null;
+    merchantCompanyId?: number | null;
+    explicitCompanyId?: number | null;
+  },
 ): Promise<PaymentCompanyResolution> {
   if (booking.payerType === "company" && booking.companyCustomerId != null) {
     if (await validateCompanyId(booking.companyCustomerId)) {
@@ -115,6 +120,14 @@ export async function resolvePaymentCompany(
     }
   }
 
+  if (options?.facilityCompanyId != null && await validateCompanyId(options.facilityCompanyId)) {
+    return { companyId: options.facilityCompanyId, evidenceSource: "facility_ownership" };
+  }
+
+  if (options?.merchantCompanyId != null && await validateCompanyId(options.merchantCompanyId)) {
+    return { companyId: options.merchantCompanyId, evidenceSource: "validated_explicit_configuration" };
+  }
+
   if (options?.explicitCompanyId != null && await validateCompanyId(options.explicitCompanyId)) {
     return {
       companyId: options.explicitCompanyId,
@@ -130,8 +143,8 @@ export async function resolveSettlementBankAccount(
   provider: SettlementProvider,
   paidAt: Date | null,
 ): Promise<{ bankAccountId: string | null; evidenceSource: "effective_settlement_config" | "none" }> {
-  if (companyId == null) return { bankAccountId: null, evidenceSource: "none" };
-  const effectiveDate = isoDateInJakarta(paidAt ?? new Date());
+  if (companyId == null || !paidAt) return { bankAccountId: null, evidenceSource: "none" };
+  const effectiveDate = isoDateInJakarta(paidAt);
   const rows = await db
     .select({
       bankAccountId: paymentSettlementConfigsTable.bankAccountId,
@@ -148,7 +161,8 @@ export async function resolveSettlementBankAccount(
       ),
     ))
     .orderBy(desc(paymentSettlementConfigsTable.effectiveFrom))
-    .limit(1);
+    .limit(1)
+    .catch(() => []);
   return rows[0]?.bankAccountId
     ? { bankAccountId: rows[0].bankAccountId, evidenceSource: "effective_settlement_config" }
     : { bankAccountId: null, evidenceSource: "none" };
@@ -177,7 +191,8 @@ export async function resolveExpectedSettlementDate(
       ),
     ))
     .orderBy(desc(paymentSettlementConfigsTable.effectiveFrom))
-    .limit(1);
+    .limit(1)
+    .catch(() => []);
   if (!rows[0]) return null;
   return addBusinessDays(paidDate, rows[0].delay);
 }
@@ -231,7 +246,8 @@ export async function resolveBankImportSource(
       ),
     ))
     .orderBy(desc(bankImportSourceMappingsTable.worksheetName))
-    .limit(1);
+    .limit(1)
+    .catch(() => []);
   const mapping = rows[0];
   if (
     !mapping ||

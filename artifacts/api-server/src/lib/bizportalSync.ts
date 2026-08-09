@@ -80,9 +80,13 @@ export async function initBizportalTables(): Promise<void> {
         ADD COLUMN IF NOT EXISTS posting_error TEXT,
         ADD COLUMN IF NOT EXISTS source_payment_id BIGINT,
         ADD COLUMN IF NOT EXISTS payment_provider TEXT,
+        ADD COLUMN IF NOT EXISTS provider_code TEXT,
         ADD COLUMN IF NOT EXISTS provider_reference TEXT,
         ADD COLUMN IF NOT EXISTS merchant_trade_no TEXT,
-        ADD COLUMN IF NOT EXISTS provider_trade_no TEXT;
+        ADD COLUMN IF NOT EXISTS provider_trade_no TEXT,
+        ADD COLUMN IF NOT EXISTS company_id INTEGER,
+        ADD COLUMN IF NOT EXISTS bank_account_id TEXT,
+        ADD COLUMN IF NOT EXISTS expected_settlement_date TEXT;
       CREATE INDEX IF NOT EXISTS idx_public_sport_payments_source_payment_id
         ON public.sport_payments (source_payment_id);
       ALTER TABLE public.sport_payments
@@ -824,6 +828,9 @@ export async function bulkPushPaymentsToBizportal(): Promise<BulkPaymentPushResu
         sp.amount         AS payment_amount,
         sp.payment_method,
         sp.payment_provider,
+        sp.company_id,
+        sp.bank_account_id,
+        sp.expected_settlement_date,
         sp.provider_reference,
         sp.merchant_trade_no,
         sp.provider_trade_no,
@@ -864,14 +871,14 @@ export async function bulkPushPaymentsToBizportal(): Promise<BulkPaymentPushResu
           `INSERT INTO public.sport_payments
              (booking_id, payment_number, amount, method, status, paid_at,
               payment_type, tax_rate, tax_amount, source, posting_status, source_payment_id,
-              payment_provider, provider_reference, merchant_trade_no, provider_trade_no,
+              payment_provider, provider_code, provider_reference, merchant_trade_no, provider_trade_no,
+              company_id, bank_account_id, expected_settlement_date,
               created_at, updated_at)
            VALUES ($1,$2,$3,$4,'paid',$5,$6,$7,$8,'SPORT_CENTER_SUPABASE','unposted',$9,
-                   $10,$11,$12,$13,$14,NOW(),NOW())
+                    $10,$10,$11,$12,$13,$14,$15,$16,$17,NOW(),NOW())
            ON CONFLICT (payment_number) DO NOTHING`,
           [
             p.biz_booking_id,
-            p.sc_payment_id,
             paymentNumber,
             String(amount),
             p.payment_method || 'Transfer Bank',
@@ -884,7 +891,9 @@ export async function bulkPushPaymentsToBizportal(): Promise<BulkPaymentPushResu
             p.provider_reference || null,
             p.merchant_trade_no || null,
             p.provider_trade_no || null,
-            p.payment_created_at,
+            p.company_id || null,
+            p.bank_account_id || null,
+            p.expected_settlement_date || null,
           ]
         );
         // Replays also repair metadata on an already-existing mirror without
@@ -892,11 +901,15 @@ export async function bulkPushPaymentsToBizportal(): Promise<BulkPaymentPushResu
         await pool.query(
           `UPDATE public.sport_payments
               SET source_payment_id = COALESCE(source_payment_id, $2),
-                  payment_provider = COALESCE(payment_provider, $3),
+                  payment_provider = COALESCE(payment_provider, provider_code, $3),
+                  provider_code = COALESCE(payment_provider, provider_code, $3),
                   provider_reference = COALESCE(provider_reference, $4),
                   merchant_trade_no = COALESCE(merchant_trade_no, $5),
                   provider_trade_no = COALESCE(provider_trade_no, $6),
-                  paid_at = COALESCE(paid_at, $7),
+                  company_id = COALESCE(company_id, $7),
+                  bank_account_id = COALESCE(bank_account_id, $8),
+                  expected_settlement_date = COALESCE(expected_settlement_date, $9),
+                  paid_at = COALESCE(paid_at, $10),
                   updated_at = NOW()
             WHERE payment_number = $1`,
           [
@@ -906,6 +919,9 @@ export async function bulkPushPaymentsToBizportal(): Promise<BulkPaymentPushResu
             p.provider_reference || null,
             p.merchant_trade_no || null,
             p.provider_trade_no || null,
+            p.company_id || null,
+            p.bank_account_id || null,
+            p.expected_settlement_date || null,
             p.paid_at || p.payment_created_at,
           ],
         );
