@@ -2272,7 +2272,12 @@ export default function AdminBookings() {
           setSelectedBooking(null);
         }
       },
-      onError: () => toast({ title: "Gagal memperbarui pembayaran", variant: "destructive" }),
+      onError: (error: any) =>
+        toast({
+          title: "Gagal memperbarui pembayaran",
+          description: error?.message?.replace(/^HTTP \d+ [^:]+:\s*/, "") || "Terjadi kesalahan pada server.",
+          variant: "destructive",
+        }),
     },
   });
 

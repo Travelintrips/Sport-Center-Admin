@@ -576,6 +576,57 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
       res.status(400).json({ error: "Tidak ada perubahan pembayaran" });
       return;
     }
+    const [booking] = await db.select().from(bookingsTable)
+      .where(eq(bookingsTable.id, before.bookingId)).limit(1);
+
+    // Prepare all required accounting dimensions before claiming the payment.
+    // If QRIS settlement configuration is incomplete, the request must fail
+    // while the payment is still pending instead of returning 500 after the
+    // status has already changed to confirmed.
+    let preparedPayment: typeof before = before;
+    if (status === "confirmed" && booking) {
+      const paymentCandidate = {
+        ...before,
+        ...updateData,
+      } as typeof before;
+      preparedPayment = await ensurePaymentBankAccount(
+        paymentCandidate,
+        booking,
+        paymentCandidate.paymentProvider ?? "unknown",
+        paymentCandidate.paidAt ?? paymentCandidate.confirmedAt ?? new Date(),
+      );
+      if (paymentCandidate.paymentMethod?.toUpperCase() === "QRIS") {
+        const enrichment = await resolveRequiredPaymentEnrichment(
+          booking,
+          paymentCandidate.paymentProvider ?? "unknown",
+          preparedPayment.paidAt ?? preparedPayment.confirmedAt ?? new Date(),
+          {
+            // Preserve the existing payment snapshot as resolver context during
+            // confirmation/replay. Resolver results are still applied with
+            // COALESCE below, so a missing source can never erase dimensions.
+            explicitCompanyId: preparedPayment.companyId,
+            effectiveDate: preparedPayment.paidAt
+              ? paymentEffectiveDate(preparedPayment.paidAt)
+              : preparedPayment.confirmedAt
+                ? paymentEffectiveDate(preparedPayment.confirmedAt)
+                : null,
+          },
+        );
+        const [enrichedPayment] = await db
+          .update(paymentsTable)
+          .set({
+            companyId: enrichment.companyId ?? preparedPayment.companyId,
+            bankAccountId: enrichment.bankAccountId ?? preparedPayment.bankAccountId,
+            expectedSettlementDate: enrichment.expectedSettlementDate ?? preparedPayment.expectedSettlementDate,
+            paidAt: preparedPayment.paidAt ?? preparedPayment.confirmedAt ?? new Date(),
+            updatedAt: new Date(),
+          })
+          .where(eq(paymentsTable.id, preparedPayment.id))
+          .returning();
+        if (enrichedPayment) preparedPayment = enrichedPayment;
+      }
+    }
+
     let payment: typeof before | undefined;
     if (status === "confirmed") {
       // Claim the pending payment in the database. Two concurrent callbacks
@@ -603,46 +654,6 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
       if (!payment) { res.status(404).json({ error: "Not found" }); return; }
     }
 
-    const [booking] = await db.select().from(bookingsTable)
-      .where(eq(bookingsTable.id, payment.bookingId)).limit(1);
-    if (status === "confirmed" && booking) {
-      payment = await ensurePaymentBankAccount(
-        payment,
-        booking,
-        payment.paymentProvider ?? "unknown",
-        payment.paidAt ?? payment.confirmedAt ?? new Date(),
-      );
-    }
-    if (status === "confirmed" && booking && payment.paymentMethod?.toUpperCase() === "QRIS") {
-      const enrichment = await resolveRequiredPaymentEnrichment(
-        booking,
-        payment.paymentProvider ?? "unknown",
-        payment.paidAt ?? payment.confirmedAt ?? new Date(),
-        {
-          // Preserve the existing payment snapshot as resolver context during
-          // confirmation/replay. Resolver results are still applied with
-          // COALESCE below, so a missing source can never erase dimensions.
-          explicitCompanyId: payment.companyId,
-          effectiveDate: payment.paidAt
-            ? paymentEffectiveDate(payment.paidAt)
-            : payment.confirmedAt
-              ? paymentEffectiveDate(payment.confirmedAt)
-              : null,
-        },
-      );
-      const [enrichedPayment] = await db
-        .update(paymentsTable)
-        .set({
-          companyId: enrichment.companyId ?? payment.companyId,
-          bankAccountId: enrichment.bankAccountId ?? payment.bankAccountId,
-          expectedSettlementDate: enrichment.expectedSettlementDate ?? payment.expectedSettlementDate,
-          paidAt: payment.paidAt ?? payment.confirmedAt ?? new Date(),
-          updatedAt: new Date(),
-        })
-        .where(eq(paymentsTable.id, payment.id))
-        .returning();
-      if (enrichedPayment) payment = enrichedPayment;
-    }
     const userInfo = getUserFromReq(req);
     const clientInfo = getClientInfo(req);
 
