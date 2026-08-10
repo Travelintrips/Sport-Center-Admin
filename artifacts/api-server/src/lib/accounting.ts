@@ -514,7 +514,21 @@ export async function postSportCenterBookingPayment(
 
     const sourcePaymentResult = input.sourcePaymentId != null
       ? await client.query(
-          `SELECT id, booking_id, company_id, amount, payment_method, payment_type,
+          `SELECT id, booking_id,
+                  COALESCE(
+                    company_id,
+                    (
+                      SELECT pb.company_id
+                        FROM public.sport_bookings pb
+                        JOIN public.companies pc
+                          ON pc.id = pb.company_id
+                         AND pc.is_active = true
+                       WHERE pb.sc_booking_id = sport_payments.booking_id
+                       ORDER BY pb.id DESC
+                       LIMIT 1
+                    )
+                  ) AS company_id,
+                  amount, payment_method, payment_type,
                   payment_provider::text AS payment_provider, bank_account_id,
                   provider_reference, provider_order_id, merchant_trade_no, provider_trade_no,
                   paid_at, confirmed_at
@@ -1348,9 +1362,23 @@ export async function createJournalEntry(
 
   // The payment id is the accounting idempotency key. This still allows DP
   // and pelunasan to have separate journals for the same booking.
-  if (paymentId != null) {
+    if (paymentId != null) {
     const existing = await db
-      .select({ id: accountingJournalsTable.id })
+      .select({
+        id: accountingJournalsTable.id,
+        companyId: accountingJournalsTable.companyId,
+        paymentMethod: accountingJournalsTable.paymentMethod,
+        paymentProvider: accountingJournalsTable.paymentProvider,
+        paymentType: accountingJournalsTable.paymentType,
+        bankAccountId: accountingJournalsTable.bankAccountId,
+        grossAmount: accountingJournalsTable.grossAmount,
+        dppAmount: accountingJournalsTable.dppAmount,
+        taxAmount: accountingJournalsTable.taxAmount,
+        providerReference: accountingJournalsTable.providerReference,
+        providerOrderId: accountingJournalsTable.providerOrderId,
+        merchantTradeNo: accountingJournalsTable.merchantTradeNo,
+        providerTradeNo: accountingJournalsTable.providerTradeNo,
+      })
       .from(accountingJournalsTable)
       .where(
         and(
@@ -1361,8 +1389,27 @@ export async function createJournalEntry(
       )
       .limit(1);
     if (existing.length > 0) {
+      const current = existing[0];
+      await db
+        .update(accountingJournalsTable)
+        .set({
+          bookingId,
+          companyId: paymentContext?.companyId ?? current.companyId ?? null,
+          paymentMethod: paymentMethod ?? current.paymentMethod ?? null,
+          paymentProvider: paymentContext?.paymentProvider ?? current.paymentProvider ?? null,
+          paymentType: paymentContext?.paymentType ?? current.paymentType ?? null,
+          bankAccountId: paymentContext?.bankAccountId ?? current.bankAccountId ?? null,
+          grossAmount: String(paymentContext?.grossAmount ?? current.grossAmount ?? grandTotal),
+          dppAmount: String(paymentContext?.dppAmount ?? current.dppAmount ?? subtotal),
+          taxAmount: String(paymentContext?.taxAmount ?? current.taxAmount ?? ppnAmount),
+          providerReference: paymentContext?.providerReference ?? current.providerReference ?? null,
+          providerOrderId: paymentContext?.providerOrderId ?? current.providerOrderId ?? null,
+          merchantTradeNo: paymentContext?.merchantTradeNo ?? current.merchantTradeNo ?? null,
+          providerTradeNo: paymentContext?.providerTradeNo ?? current.providerTradeNo ?? null,
+        })
+        .where(eq(accountingJournalsTable.id, current.id));
       console.info(
-        `[accounting] Internal journal sudah ada untuk payment=${paymentId} (id=${existing[0].id}) — skip`,
+        `[accounting] Internal journal sudah ada untuk payment=${paymentId} (id=${current.id}) — metadata diperkaya`,
       );
       return;
     }

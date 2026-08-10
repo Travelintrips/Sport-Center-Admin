@@ -2,11 +2,13 @@ import { jest } from "@jest/globals";
 
 const mockSelect = jest.fn();
 const mockInsert = jest.fn();
+const mockUpdate = jest.fn();
 
 jest.unstable_mockModule("@workspace/db", () => ({
   db: {
     select: mockSelect,
     insert: mockInsert,
+    update: mockUpdate,
   },
   accountingJournalsTable: {
     id: "id",
@@ -49,6 +51,11 @@ function insertResult(returningRows: unknown[] = []) {
 describe("confirmed booking payment accounting", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockUpdate.mockReturnValue({
+      set: () => ({
+        where: jest.fn().mockResolvedValue([]),
+      }),
+    });
   });
 
   it("extracts DPP from an inclusive-PPN price", () => {

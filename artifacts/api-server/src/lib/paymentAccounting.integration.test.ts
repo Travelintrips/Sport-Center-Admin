@@ -116,7 +116,10 @@ async function fakeQuery(text: string, values: unknown[] = []): Promise<{ rows: 
     };
   }
 
-  if (sql.includes("SELECT id, booking_id, company_id, amount, payment_method, payment_type")) {
+  if (
+    sql.includes("FROM sport_center.sport_payments") &&
+    sql.includes("FOR SHARE")
+  ) {
     const sourcePaymentId = scalar(values[0]);
     const sourceAmount = sourcePaymentId === 43 ? 50_000 : sourcePaymentId === 44 ? 150_000 : 100_000;
     return {

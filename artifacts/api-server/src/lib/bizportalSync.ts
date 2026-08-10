@@ -1107,12 +1107,6 @@ export async function syncBookingToBizportal(payload: SyncBookingPayload): Promi
            group_ref         = COALESCE(EXCLUDED.group_ref,         sport_bookings_sync.group_ref),
            group_total       = COALESCE(EXCLUDED.group_total,       sport_bookings_sync.group_total),
 
-           ppn_rate          = EXCLUDED.ppn_rate,
-           dpp               = EXCLUDED.dpp,
-           dpp_nilai_lain    = EXCLUDED.dpp_nilai_lain,
-           ppn_amount        = EXCLUDED.ppn_amount,
-           grand_total       = EXCLUDED.grand_total,
-
            updated_at        = NOW()`,
         [
           booking.orderNumber,
