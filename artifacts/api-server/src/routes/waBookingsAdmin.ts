@@ -12,32 +12,25 @@ import {
 import { eq, and, desc, or, sql, ilike } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
 import { logAudit, logAccountingError } from "../lib/auditLog";
-import { createJournalEntry, createPublicAccountingEntry } from "../lib/accounting";
+import { extractBookingDpp, postConfirmedPaymentAccounting } from "../lib/accounting";
 import { createWaToken } from "../lib/waTokens";
 import {
   notifyWaBookingApproved,
   notifyWaBookingRejectedByAdmin,
   notifyWaBookingConfirmed,
   notifyWaStaffCheckin,
+  notifyPaymentConfirmed,
+  sendWAToAdmins,
 } from "../lib/notifications";
+import { sendRekapPemakaianToAdmin } from "../lib/rekapPemakaian";
+import { getBaseUrl } from "../lib/appUrl";
+import { ensurePaymentBankAccount, resolveRequiredPaymentEnrichment } from "../lib/paymentEnrichment";
+import { createPaymentProviderId, createPaymentProviderOrderId, normalizeProviderName } from "../lib/paymentMetadata";
 
 const router = Router();
-const APP_URL = process.env.APP_URL ?? "";
 
 function formatIDR(n: number): string {
   return "Rp " + n.toLocaleString("id-ID");
-}
-
-async function sendWAMsg(phone: string, message: string): Promise<void> {
-  const token = process.env.FONNTE_TOKEN || "";
-  if (!token || !phone) return;
-  try {
-    await fetch("https://api.fonnte.com/send", {
-      method: "POST",
-      headers: { Authorization: token, "Content-Type": "application/json" },
-      body: JSON.stringify({ target: phone, message }),
-    });
-  } catch {}
 }
 
 // ─── GET /api/admin/wa-bookings ───────────────────────────────────────────────
@@ -204,12 +197,22 @@ router.post("/admin/wa-bookings/:orderNumber/approve", adminMiddleware, async (r
     endTime: booking.endTime,
     totalPrice: amountToPay.toLocaleString("id-ID"),
     paymentDeadline: deadlineStr,
-    statusUrl: `${APP_URL}/wa/status/${booking.orderNumber}`,
-    uploadProofUrl: `${APP_URL}/wa/proof/${proofToken}`,
+    statusUrl: `${await getBaseUrl()}/status/${booking.orderNumber}`,
+    uploadProofUrl: `${await getBaseUrl()}/bukti/${proofToken}`,
     bankName: settings?.bankName ?? "",
     bankAccount: settings?.bankAccount ?? "",
     bankAccountName: settings?.bankAccountName ?? "",
   });
+
+  // ─── Kirim rekap pemakaian Sport Center ke grup admin setelah approve ───
+  (async () => {
+    try {
+      await sendRekapPemakaianToAdmin(booking.bookingDate);
+      console.log("[SPORT CENTER REKAP] Rekap pemakaian berhasil dikirim");
+    } catch (err) {
+      console.error("[SPORT CENTER REKAP] Gagal kirim rekap pemakaian", err);
+    }
+  })();
 
   await logAudit({
     action: "admin_approved_via_wa",
@@ -296,17 +299,29 @@ router.post("/admin/wa-bookings/:orderNumber/paid", adminMiddleware, async (req,
 
   const [existingPay] = await db.select().from(paymentsTable)
     .where(eq(paymentsTable.bookingId, booking.id)).limit(1);
+  let paymentForAccounting = existingPay;
   if (existingPay) {
+    paymentForAccounting = await ensurePaymentBankAccount(existingPay, booking);
     await db.update(paymentsTable).set({ status: "confirmed", confirmedAt: new Date() })
       .where(eq(paymentsTable.bookingId, booking.id));
   } else {
-    await db.insert(paymentsTable).values({
+    const paymentEnrichment = await resolveRequiredPaymentEnrichment(booking, "unknown", new Date());
+    const [createdPayment] = await db.insert(paymentsTable).values({
       bookingId: booking.id,
       amount: String(Number(booking.grandTotal ?? booking.totalPrice)),
       paymentMethod: "Manual (Admin BizPortal)",
+      paymentProvider: "unknown",
+      providerName: normalizeProviderName("unknown"),
+      providerId: createPaymentProviderId("unknown", `bizportal-admin-${booking.id}`),
+      providerOrderId: createPaymentProviderOrderId("unknown", `bizportal-admin-order-${booking.id}`),
+      companyId: paymentEnrichment.companyId,
+      bankAccountId: paymentEnrichment.bankAccountId,
+      expectedSettlementDate: paymentEnrichment.expectedSettlementDate,
+      paidAt: paymentEnrichment.paidAt,
       status: "confirmed",
       confirmedAt: new Date(),
-    });
+    }).returning();
+    paymentForAccounting = createdPayment;
   }
 
   await db.update(bookingsTable).set({
@@ -326,7 +341,7 @@ router.post("/admin/wa-bookings/:orderNumber/paid", adminMiddleware, async (req,
   const checkinToken = await createWaToken(booking.id, "checkin", 30);
   const finishToken = await createWaToken(booking.id, "finish", 30);
 
-  notifyWaBookingConfirmed({
+  notifyPaymentConfirmed({
     customerName: booking.customerName,
     customerPhone: booking.customerPhone,
     orderNumber: booking.orderNumber,
@@ -335,8 +350,8 @@ router.post("/admin/wa-bookings/:orderNumber/paid", adminMiddleware, async (req,
     startTime: booking.startTime,
     endTime: booking.endTime,
     totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
-    statusUrl: `${APP_URL}/wa/status/${booking.orderNumber}`,
-  });
+    bookingId: booking.id,
+  }).catch((err) => console.error("[WA] notifyPaymentConfirmed error:", err));
 
   notifyWaStaffCheckin({
     orderNumber: booking.orderNumber,
@@ -345,9 +360,9 @@ router.post("/admin/wa-bookings/:orderNumber/paid", adminMiddleware, async (req,
     bookingDate: booking.bookingDate,
     startTime: booking.startTime,
     endTime: booking.endTime,
-    checkinUrl: `${APP_URL}/wa/action/${checkinToken}`,
-    finishUrl: `${APP_URL}/wa/action/${finishToken}`,
-  });
+    checkinUrl: `${await getBaseUrl()}/wa/action/${checkinToken}`,
+    finishUrl: `${await getBaseUrl()}/wa/action/${finishToken}`,
+  }).catch((err) => console.error("[WA] notifyWaStaffCheckin error:", err));
 
   await logAudit({
     action: "admin_paid_via_wa",
@@ -359,13 +374,19 @@ router.post("/admin/wa-bookings/:orderNumber/paid", adminMiddleware, async (req,
   });
 
   const today = new Date().toISOString().split("T")[0];
-  const subtotal = Number(booking.totalPrice);
-  const ppnAmount = booking.ppnAmount != null ? Number(booking.ppnAmount) : 0;
-  createJournalEntry(booking.id, booking.orderNumber, subtotal, ppnAmount, today).catch((err) =>
-    logAccountingError({ operation: "createJournalEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
-  );
-  createPublicAccountingEntry(booking.id, booking.orderNumber, subtotal, ppnAmount, booking.facilityId, today).catch((err) =>
-    logAccountingError({ operation: "createPublicAccountingEntry", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
+  const { dpp, ppnAmount } = extractBookingDpp(booking);
+  const paymentMethod = existingPay?.paymentMethod ?? "Transfer Bank";
+  postConfirmedPaymentAccounting({
+    bookingId: booking.id,
+    orderNumber: booking.orderNumber,
+    dpp,
+    ppnAmount,
+    facilityId: booking.facilityId,
+    journalDate: today,
+    paymentMethod,
+    paymentId: paymentForAccounting?.id,
+  }).catch((err) =>
+    logAccountingError({ operation: "postConfirmedPaymentAccounting", orderNumber: booking.orderNumber, bookingId: booking.id, error: err }),
   );
 
   res.json({ success: true, status: "confirmed" });
@@ -396,7 +417,7 @@ router.post("/admin/wa-bookings/:orderNumber/resend", adminMiddleware, async (re
       `Fasilitas: *${facility?.name ?? ""}*\nTanggal: *${booking.bookingDate}* pukul *${booking.startTime}–${booking.endTime}*\n` +
       `Total: *${formatIDR(amountToPay)}*\n\n` +
       `Ketik *APPROVE ${booking.orderNumber}* untuk menyetujui\nKetik *REJECT ${booking.orderNumber} [alasan]* untuk menolak`;
-    for (const p of adminList) await sendWAMsg(p, msg);
+    await sendWAToAdmins(msg);
     sentTo = `admins (${adminList.length})`;
   } else if (booking.status === "pending_payment") {
     const proofToken = await createWaToken(booking.id, "upload_proof", 7);
@@ -413,8 +434,8 @@ router.post("/admin/wa-bookings/:orderNumber/resend", adminMiddleware, async (re
       endTime: booking.endTime,
       totalPrice: amountToPay.toLocaleString("id-ID"),
       paymentDeadline: deadline,
-      statusUrl: `${APP_URL}/wa/status/${booking.orderNumber}`,
-      uploadProofUrl: `${APP_URL}/wa/proof/${proofToken}`,
+      statusUrl: `${await getBaseUrl()}/status/${booking.orderNumber}`,
+      uploadProofUrl: `${await getBaseUrl()}/bukti/${proofToken}`,
       bankName: settings?.bankName ?? "",
       bankAccount: settings?.bankAccount ?? "",
       bankAccountName: settings?.bankAccountName ?? "",
@@ -430,7 +451,7 @@ router.post("/admin/wa-bookings/:orderNumber/resend", adminMiddleware, async (re
       startTime: booking.startTime,
       endTime: booking.endTime,
       totalPrice: Number(booking.totalPrice).toLocaleString("id-ID"),
-      statusUrl: `${APP_URL}/wa/status/${booking.orderNumber}`,
+      statusUrl: `${await getBaseUrl()}/status/${booking.orderNumber}`,
     });
     sentTo = "customer (konfirmasi booking)";
   } else {

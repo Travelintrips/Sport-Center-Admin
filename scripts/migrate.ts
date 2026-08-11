@@ -4,6 +4,123 @@ const { Client } = pg;
 
 export const CUSTOM_MIGRATION_SQL = `
 -- ============================================================
+-- Facility → company ownership mapping (effective-dated)
+-- ============================================================
+CREATE EXTENSION IF NOT EXISTS btree_gist;
+
+CREATE TABLE IF NOT EXISTS sport_center.facility_company_mappings (
+  id serial PRIMARY KEY,
+  facility_id integer NOT NULL REFERENCES sport_center.sport_facilities(id) ON DELETE CASCADE,
+  company_id integer NOT NULL REFERENCES public.companies(id) ON DELETE RESTRICT,
+  effective_from date NOT NULL,
+  effective_until date,
+  is_active boolean NOT NULL DEFAULT true,
+  source text NOT NULL DEFAULT 'admin_config',
+  notes text,
+  created_by integer REFERENCES sport_center.users(id) ON DELETE SET NULL,
+  updated_by integer REFERENCES sport_center.users(id) ON DELETE SET NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT facility_company_mappings_date_range_valid
+    CHECK (effective_until IS NULL OR effective_until >= effective_from)
+);
+
+-- The canonical company master is public.companies. Existing rows are not
+-- silently converted: a populated legacy table must be reviewed explicitly.
+DO $$
+DECLARE
+  current_company_target text;
+  mapping_count integer;
+BEGIN
+  IF to_regclass('public.companies') IS NULL THEN
+    RAISE EXCEPTION 'COMPANY_MODEL_MIGRATION_BLOCKED: public.companies is missing';
+  END IF;
+
+  SELECT COUNT(*) INTO mapping_count
+    FROM sport_center.facility_company_mappings;
+  IF mapping_count > 0 THEN
+    SELECT n.nspname || '.' || c.relname
+      INTO current_company_target
+      FROM pg_constraint fk
+      JOIN pg_class local_table ON local_table.oid = fk.conrelid
+      JOIN pg_namespace local_schema ON local_schema.oid = local_table.relnamespace
+      JOIN pg_class c ON c.oid = fk.confrelid
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+     WHERE fk.conname = 'facility_company_mappings_company_id_fkey'
+       AND local_schema.nspname = 'sport_center'
+       AND local_table.relname = 'facility_company_mappings';
+    IF current_company_target = 'sport_center.users' THEN
+      RAISE EXCEPTION 'COMPANY_MODEL_MIGRATION_BLOCKED: existing legacy facility ownership rows require manual translation';
+    END IF;
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+      FROM pg_constraint fk
+      JOIN pg_class local_table ON local_table.oid = fk.conrelid
+      JOIN pg_namespace local_schema ON local_schema.oid = local_table.relnamespace
+      JOIN pg_class target_table ON target_table.oid = fk.confrelid
+      JOIN pg_namespace target_schema ON target_schema.oid = target_table.relnamespace
+     WHERE fk.conname = 'facility_company_mappings_company_id_fkey'
+       AND local_schema.nspname = 'sport_center'
+       AND local_table.relname = 'facility_company_mappings'
+       AND target_schema.nspname = 'sport_center'
+       AND target_table.relname = 'users'
+  ) THEN
+    ALTER TABLE sport_center.facility_company_mappings
+      DROP CONSTRAINT facility_company_mappings_company_id_fkey;
+    ALTER TABLE sport_center.facility_company_mappings
+      ADD CONSTRAINT facility_company_mappings_company_id_fkey
+      FOREIGN KEY (company_id) REFERENCES public.companies(id) ON DELETE RESTRICT;
+  END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS facility_company_mappings_lookup_idx
+  ON sport_center.facility_company_mappings (facility_id, effective_from, effective_until)
+  WHERE is_active = true;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+      FROM pg_constraint
+     WHERE conname = 'facility_company_mappings_no_active_overlap'
+       AND conrelid = 'sport_center.facility_company_mappings'::regclass
+  ) THEN
+    ALTER TABLE sport_center.facility_company_mappings
+      ADD CONSTRAINT facility_company_mappings_no_active_overlap
+      EXCLUDE USING gist (
+        facility_id WITH =,
+        daterange(effective_from, COALESCE(effective_until, 'infinity'::date), '[]') WITH &&
+      )
+      WHERE (is_active = true);
+  END IF;
+END $$;
+
+CREATE OR REPLACE FUNCTION sport_center.validate_facility_company_mapping_company()
+RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+      FROM public.companies
+     WHERE id = NEW.company_id
+        AND is_active = true
+  ) THEN
+    RAISE EXCEPTION 'FACILITY_COMPANY_MAPPING_COMPANY_INVALID:%', NEW.company_id;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_validate_facility_company_mapping_company
+  ON sport_center.facility_company_mappings;
+CREATE TRIGGER trg_validate_facility_company_mapping_company
+  BEFORE INSERT OR UPDATE OF company_id
+  ON sport_center.facility_company_mappings
+  FOR EACH ROW
+  EXECUTE FUNCTION sport_center.validate_facility_company_mapping_company();
+
+-- ============================================================
 -- 0. sport_vendors table (idempotent)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS sport_center.sport_vendors (
@@ -62,6 +179,59 @@ ALTER TABLE sport_center.sport_bookings
   ADD COLUMN IF NOT EXISTS checked_in_at timestamptz,
   ADD COLUMN IF NOT EXISTS completed_at timestamptz;
 
+-- ============================================================
+-- 2b. Canonical payment provider metadata (backward-compatible)
+-- ============================================================
+DO $$ BEGIN
+  CREATE TYPE sport_center.payment_provider AS ENUM ('mandiri_direct','paylabs','unknown');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TABLE sport_center.sport_payments
+  ADD COLUMN IF NOT EXISTS payment_provider sport_center.payment_provider,
+  ADD COLUMN IF NOT EXISTS provider_name text,
+  ADD COLUMN IF NOT EXISTS provider_reference text,
+  ADD COLUMN IF NOT EXISTS provider_id text,
+  ADD COLUMN IF NOT EXISTS provider_order_id text,
+  ADD COLUMN IF NOT EXISTS merchant_trade_no text,
+  ADD COLUMN IF NOT EXISTS provider_trade_no text,
+  ADD COLUMN IF NOT EXISTS paid_at timestamptz,
+  ADD COLUMN IF NOT EXISTS company_id integer,
+  ADD COLUMN IF NOT EXISTS bank_account_id text,
+  ADD COLUMN IF NOT EXISTS expected_settlement_date text;
+
+UPDATE sport_center.sport_payments
+   SET payment_provider = COALESCE(payment_provider, 'unknown'::sport_center.payment_provider),
+       provider_name = COALESCE(NULLIF(btrim(provider_name), ''), payment_provider::text, 'unknown'),
+       provider_id = COALESCE(
+         NULLIF(btrim(provider_id), ''),
+         NULLIF(btrim(provider_trade_no), ''),
+         NULLIF(btrim(provider_reference), ''),
+         NULLIF(btrim(merchant_trade_no), ''),
+         'legacy-' || id::text
+        ),
+        provider_order_id = COALESCE(
+          NULLIF(btrim(provider_order_id), ''),
+          NULLIF(btrim(merchant_trade_no), ''),
+          NULLIF(btrim(provider_trade_no), ''),
+          NULLIF(btrim(provider_reference), ''),
+          'legacy-order-' || id::text
+        )
+ WHERE payment_provider IS NULL
+    OR provider_name IS NULL
+    OR btrim(provider_name) = ''
+    OR provider_id IS NULL
+     OR btrim(provider_id) = ''
+     OR provider_order_id IS NULL
+     OR btrim(provider_order_id) = '';
+
+ALTER TABLE sport_center.sport_payments
+  ALTER COLUMN payment_provider SET NOT NULL,
+  ALTER COLUMN provider_name SET NOT NULL,
+  ALTER COLUMN provider_id SET NOT NULL,
+  ALTER COLUMN provider_order_id SET NOT NULL;
+
+-- ============================================================
+-- Payment accounting/mirror audit metadata (additive)
+-- ============================================================
 -- ============================================================
 -- 3. booking_history
 -- ============================================================
@@ -260,9 +430,67 @@ ALTER TABLE sport_center.sport_memberships
 -- ============================================================
 -- 14. payments: payment_method + confirmed_at
 -- ============================================================
+DO $$ BEGIN
+  CREATE TYPE sport_center.payment_provider AS ENUM ('mandiri_direct','paylabs','unknown');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
 ALTER TABLE sport_center.sport_payments
   ADD COLUMN IF NOT EXISTS payment_method text DEFAULT 'Transfer Bank',
-  ADD COLUMN IF NOT EXISTS confirmed_at timestamptz;
+  ADD COLUMN IF NOT EXISTS confirmed_at timestamptz,
+  ADD COLUMN IF NOT EXISTS payment_provider sport_center.payment_provider,
+  ADD COLUMN IF NOT EXISTS provider_name text,
+  ADD COLUMN IF NOT EXISTS provider_reference text,
+  ADD COLUMN IF NOT EXISTS merchant_trade_no text,
+  ADD COLUMN IF NOT EXISTS provider_trade_no text,
+  ADD COLUMN IF NOT EXISTS paid_at timestamptz,
+  ADD COLUMN IF NOT EXISTS company_id integer,
+  ADD COLUMN IF NOT EXISTS bank_account_id text,
+  ADD COLUMN IF NOT EXISTS expected_settlement_date text;
+
+CREATE TABLE IF NOT EXISTS sport_center.payment_settlement_configs (
+  id serial PRIMARY KEY,
+  company_id integer NOT NULL,
+  provider_code text NOT NULL,
+  bank_account_id text NOT NULL,
+  settlement_delay_business_days integer NOT NULL DEFAULT 1,
+  effective_from date NOT NULL,
+  effective_until date,
+  is_active boolean NOT NULL DEFAULT true,
+  source text NOT NULL DEFAULT 'admin_config',
+  created_at timestamptz NOT NULL DEFAULT NOW(),
+  updated_at timestamptz NOT NULL DEFAULT NOW(),
+  UNIQUE (company_id, provider_code, bank_account_id, effective_from)
+);
+
+CREATE TABLE IF NOT EXISTS sport_center.payment_business_calendar (
+  calendar_date date PRIMARY KEY,
+  is_business_day boolean NOT NULL DEFAULT true,
+  label text,
+  source text NOT NULL DEFAULT 'admin_config',
+  updated_at timestamptz NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS sport_center.bank_import_source_mappings (
+  id serial PRIMARY KEY,
+  source_type text NOT NULL DEFAULT 'google_sheet',
+  source_id text NOT NULL,
+  worksheet_name text,
+  company_id integer NOT NULL,
+  bank_account_id text NOT NULL,
+  provider_name text,
+  is_active boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT NOW(),
+  updated_at timestamptz NOT NULL DEFAULT NOW(),
+  UNIQUE (source_type, source_id, worksheet_name)
+);
+
+ALTER TABLE sport_center.paylabs_transactions
+  ADD COLUMN IF NOT EXISTS paid_at timestamptz;
+
+CREATE INDEX IF NOT EXISTS idx_sport_payments_provider
+  ON sport_center.sport_payments (payment_provider);
+CREATE INDEX IF NOT EXISTS idx_sport_payments_merchant_trade_no
+  ON sport_center.sport_payments (merchant_trade_no);
 
 -- ============================================================
 -- 15. users: google_id + make email/password_hash nullable
@@ -279,6 +507,14 @@ ALTER TABLE sport_center.sport_bookings
   ADD COLUMN IF NOT EXISTS reminder_h1_sent_at timestamptz,
   ADD COLUMN IF NOT EXISTS reminder_day_sent_at timestamptz,
   ADD COLUMN IF NOT EXISTS payment_reminder_sent_at timestamptz;
+
+-- Daily admin WhatsApp usage-list delivery state
+CREATE TABLE IF NOT EXISTS sport_center.wa_daily_usage_snapshots (
+  id serial PRIMARY KEY,
+  usage_date text NOT NULL UNIQUE,
+  fingerprint text NOT NULL,
+  sent_at timestamptz NOT NULL DEFAULT NOW()
+);
 
 -- ============================================================
 -- 18. company_invoices table (idempotent) + bookings linkage
@@ -413,6 +649,108 @@ CREATE TABLE IF NOT EXISTS sport_center.accounting_journals (
 
 CREATE INDEX IF NOT EXISTS accounting_journals_booking_id_idx ON sport_center.accounting_journals(booking_id);
 CREATE INDEX IF NOT EXISTS accounting_journals_journal_date_idx ON sport_center.accounting_journals(journal_date DESC);
+
+ALTER TABLE sport_center.accounting_journals
+  ADD COLUMN IF NOT EXISTS payment_id integer
+    REFERENCES sport_center.sport_payments(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS company_id integer,
+  ADD COLUMN IF NOT EXISTS payment_method text,
+  ADD COLUMN IF NOT EXISTS payment_provider text,
+  ADD COLUMN IF NOT EXISTS payment_type text,
+  ADD COLUMN IF NOT EXISTS bank_account_id text,
+  ADD COLUMN IF NOT EXISTS gross_amount numeric(14,2),
+  ADD COLUMN IF NOT EXISTS dpp_amount numeric(14,2),
+  ADD COLUMN IF NOT EXISTS tax_amount numeric(14,2),
+  ADD COLUMN IF NOT EXISTS provider_reference text,
+  ADD COLUMN IF NOT EXISTS provider_order_id text,
+  ADD COLUMN IF NOT EXISTS merchant_trade_no text,
+  ADD COLUMN IF NOT EXISTS provider_trade_no text;
+
+CREATE UNIQUE INDEX IF NOT EXISTS accounting_journals_payment_confirmed_unique
+  ON sport_center.accounting_journals (payment_id)
+  WHERE payment_id IS NOT NULL
+    AND journal_type = 'payment_confirmed'
+    AND is_reversal = false;
+
+-- The shared public accounting schema uses an enum for source. Add the
+-- Sport Center payment source before creating source-scoped constraints.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+      FROM pg_type t
+      JOIN pg_namespace n ON n.oid = t.typnamespace
+     WHERE t.typname = 'accounting_entry_source'
+       AND n.nspname = 'public'
+  ) THEN
+    ALTER TYPE public.accounting_entry_source
+      ADD VALUE IF NOT EXISTS 'sport_center_payment';
+  END IF;
+END
+$$;
+
+-- Payment-level public accounting idempotency. This is intentionally scoped
+-- to Sport Center payment entries so legacy accounting streams keep their
+-- existing contract.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_public_accounting_entries_sc_payment_correlation
+  ON public.accounting_entries (correlation_id)
+  WHERE source = 'sport_center_payment'
+    AND correlation_id IS NOT NULL;
+
+-- Durable payment accounting/mirror retry queue. A trigger below enqueues
+-- every newly-confirmed payment in the same transaction as the status change.
+CREATE TABLE IF NOT EXISTS sport_center.payment_accounting_outbox (
+  id serial PRIMARY KEY,
+  payment_id integer NOT NULL REFERENCES sport_center.sport_payments(id) ON DELETE CASCADE,
+  event_type text NOT NULL DEFAULT 'payment_confirmed',
+  status text NOT NULL DEFAULT 'pending',
+  attempts integer NOT NULL DEFAULT 0,
+  available_at timestamptz NOT NULL DEFAULT now(),
+  locked_at timestamptz,
+  processed_at timestamptz,
+  last_error text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT payment_accounting_outbox_payment_event_unique UNIQUE (payment_id, event_type)
+);
+CREATE INDEX IF NOT EXISTS payment_accounting_outbox_ready_idx
+  ON sport_center.payment_accounting_outbox (status, available_at, locked_at);
+
+CREATE OR REPLACE FUNCTION sport_center.enqueue_payment_accounting_outbox()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF NEW.status::text = 'confirmed' THEN
+    IF TG_OP = 'INSERT' OR OLD.status::text IS DISTINCT FROM 'confirmed' THEN
+      INSERT INTO sport_center.payment_accounting_outbox
+        (payment_id, event_type, status, available_at, created_at, updated_at)
+      VALUES (NEW.id, 'payment_confirmed', 'pending', now(), now(), now())
+      ON CONFLICT (payment_id, event_type) DO UPDATE
+        SET status = CASE
+              WHEN sport_center.payment_accounting_outbox.status = 'posted'
+                THEN sport_center.payment_accounting_outbox.status
+              ELSE 'pending'
+            END,
+            available_at = CASE
+              WHEN sport_center.payment_accounting_outbox.status = 'posted'
+                THEN sport_center.payment_accounting_outbox.available_at
+              ELSE now()
+            END,
+            locked_at = NULL,
+            updated_at = now();
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_payment_accounting_outbox
+  ON sport_center.sport_payments;
+CREATE TRIGGER trg_payment_accounting_outbox
+AFTER INSERT OR UPDATE OF status ON sport_center.sport_payments
+FOR EACH ROW
+EXECUTE FUNCTION sport_center.enqueue_payment_accounting_outbox();
 
 -- ============================================================
 -- 21. company_invoice_items + unique constraint on company_invoices
@@ -794,5 +1132,67 @@ ALTER TABLE sport_center.sport_expenses
   ADD COLUMN IF NOT EXISTS vendor_id INTEGER
     REFERENCES sport_center.sport_vendors(id)
     ON DELETE SET NULL;
+
+-- ============================================================
+-- wa_notif_logs: log pengiriman notifikasi WhatsApp per booking
+-- ============================================================
+CREATE TABLE IF NOT EXISTS sport_center.wa_notif_logs (
+  id              SERIAL PRIMARY KEY,
+  booking_id      INTEGER,
+  order_number    TEXT,
+  event           TEXT,
+  recipient_phone TEXT NOT NULL,
+  message_preview TEXT,
+  status          TEXT NOT NULL DEFAULT 'sent',
+  error_message   TEXT,
+  sent_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- ============================================================
+-- gym_checkins: rekam check-in harian member gym
+-- ============================================================
+CREATE TABLE IF NOT EXISTS sport_center.gym_checkins (
+  id              SERIAL PRIMARY KEY,
+  membership_id   INTEGER NOT NULL REFERENCES sport_center.sport_memberships(id) ON DELETE CASCADE,
+  checkin_date    TEXT NOT NULL,
+  checked_in_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  notes           TEXT,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS gym_checkins_date_idx       ON sport_center.gym_checkins(checkin_date);
+CREATE INDEX IF NOT EXISTS gym_checkins_membership_idx ON sport_center.gym_checkins(membership_id);
+
+-- ============================================================
+-- Event booking: booking_type + event_discount_amount
+-- ============================================================
+ALTER TABLE sport_center.sport_bookings
+  ADD COLUMN IF NOT EXISTS booking_type TEXT NOT NULL DEFAULT 'regular';
+
+ALTER TABLE sport_center.sport_bookings
+  ADD COLUMN IF NOT EXISTS event_discount_amount NUMERIC(12,2);
+
+-- ============================================================
+-- Required payment receiving account
+-- ============================================================
+-- Existing payments are backfilled from the configured Sport Center
+-- receiving account before the database constraint is tightened.
+UPDATE sport_center.sport_payments p
+   SET bank_account_id = s.bank_account
+  FROM sport_center.settings s
+ WHERE (p.bank_account_id IS NULL OR btrim(p.bank_account_id) = '')
+   AND s.bank_account IS NOT NULL
+   AND btrim(s.bank_account) <> '';
+
+DO $$ BEGIN
+  IF EXISTS (
+    SELECT 1
+      FROM sport_center.sport_payments
+     WHERE bank_account_id IS NULL OR btrim(bank_account_id) = ''
+  ) THEN
+    RAISE EXCEPTION 'Cannot enforce sport_payments.bank_account_id: payment rows still lack a receiving account';
+  END IF;
+  ALTER TABLE sport_center.sport_payments
+    ALTER COLUMN bank_account_id SET NOT NULL;
+END $$;
 `;
 

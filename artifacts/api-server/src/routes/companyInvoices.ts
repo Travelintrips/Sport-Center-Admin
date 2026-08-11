@@ -1,8 +1,24 @@
 import { Router } from "express";
-import { db, usersTable, bookingsTable, companyInvoicesTable, companyInvoiceItemsTable, facilitiesTable, auditLogsTable } from "@workspace/db";
+import multer from "multer";
+import path from "path";
+import { randomUUID } from "crypto";
+import { db, usersTable, bookingsTable, companyInvoicesTable, companyInvoiceItemsTable, facilitiesTable, auditLogsTable, corporateBookingDocumentationTable } from "@workspace/db";
 import { eq, and, gte, lt, inArray, isNull, or } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
-import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
+import { logAudit, getClientInfo, getUserFromReq, logAccountingError } from "../lib/auditLog";
+import { pushInvoicePaymentAsBankMutation } from "../lib/bizportalSync";
+import { createInvoiceJournalEntry, createPublicInvoiceAccountingEntry } from "../lib/accounting";
+import { BUCKETS, uploadToStorage } from "../lib/supabaseStorage";
+import { uploadProofWithFallback } from "./storage";
+
+const uploadMiddleware = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const ok = file.mimetype.startsWith("image/") || file.mimetype === "application/pdf";
+    if (ok) cb(null, true); else cb(new Error("Hanya file gambar atau PDF yang diizinkan"));
+  },
+});
 
 const router = Router();
 
@@ -56,6 +72,8 @@ function mapInvoice(
     grandTotal,
     status: inv.status,
     paidAt: inv.paidAt ?? null,
+    paymentProofUrl: inv.paymentProofUrl ?? null,
+    paymentNotes: inv.paymentNotes ?? null,
     notes: inv.notes ?? null,
     createdAt: inv.createdAt,
     items: (items ?? []).map((item: any) => ({
@@ -441,7 +459,28 @@ router.get("/company-invoices/:id", adminMiddleware, async (req, res) => {
     const [company] = await db.select().from(usersTable).where(eq(usersTable.id, inv.companyCustomerId)).limit(1);
     const items = await resolveInvoiceItems(id, inv);
 
-    res.json(mapInvoice(inv, company?.companyName ?? company?.name, items, company));
+    // Ambil dokumentasi corporate untuk setiap booking dalam invoice
+    const bookingIds = items.map((i) => i.bookingId).filter(Boolean) as number[];
+    let docsByBookingId: Record<number, any[]> = {};
+    if (bookingIds.length > 0) {
+      const allDocs = await db
+        .select()
+        .from(corporateBookingDocumentationTable)
+        .where(inArray(corporateBookingDocumentationTable.bookingId, bookingIds));
+      for (const doc of allDocs) {
+        if (!docsByBookingId[doc.bookingId]) docsByBookingId[doc.bookingId] = [];
+        docsByBookingId[doc.bookingId].push(doc);
+      }
+    }
+
+    const invoiceData = mapInvoice(inv, company?.companyName ?? company?.name, items, company);
+    // Sisipkan dokumentasi ke setiap item
+    const itemsWithDocs = invoiceData.items.map((item) => ({
+      ...item,
+      documentation: docsByBookingId[item.bookingId] ?? [],
+    }));
+
+    res.json({ ...invoiceData, items: itemsWithDocs });
   } catch (err) {
     req.log.error({ err }, "Get company invoice error");
     res.status(500).json({ error: "Internal server error" });
@@ -524,9 +563,82 @@ router.patch("/company-invoices/:id", adminMiddleware, async (req, res) => {
 
     const [company] = await db.select().from(usersTable).where(eq(usersTable.id, updated.companyCustomerId)).limit(1);
     const items = await db.select().from(companyInvoiceItemsTable).where(eq(companyInvoiceItemsTable.invoiceId, id));
+
+    if (status === "paid" && inv.status !== "paid") {
+      const paidDate = updated.paidAt ?? new Date();
+      const today = paidDate.toISOString().split("T")[0]!;
+      // totalAmount = harga inklusif PPN. Fungsi journal menerima DPP (sebelum PPN).
+      // Gunakan calcTaxBreakdown (sama seperti mapInvoice) untuk ekstrak DPP & ppnAmount.
+      const { dpp: invDpp, ppnAmount: invPpn } = calcTaxBreakdown(Number(updated.totalAmount));
+      pushInvoicePaymentAsBankMutation(updated, company?.companyName ?? company?.name, paidDate).catch(() => {});
+      createInvoiceJournalEntry(updated.id, updated.invoiceNumber, invDpp, invPpn, today).catch((err) =>
+        logAccountingError({ operation: "createInvoiceJournalEntry", orderNumber: updated.invoiceNumber, bookingId: updated.id, error: err }),
+      );
+      createPublicInvoiceAccountingEntry(updated.id, updated.invoiceNumber, invDpp, invPpn, today).catch((err) =>
+        logAccountingError({ operation: "createPublicInvoiceAccountingEntry", orderNumber: updated.invoiceNumber, bookingId: updated.id, error: err }),
+      );
+    }
+
     res.json(mapInvoice(updated, company?.companyName ?? company?.name, items, company));
   } catch (err) {
     req.log.error({ err }, "Update company invoice error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Upload payment proof for company invoice
+router.post("/company-invoices/:id/upload-payment-proof", adminMiddleware, uploadMiddleware.single("file"), async (req, res) => {
+  try {
+    const id = parseInt(String(req.params.id));
+    const paymentNotes = String(req.body?.paymentNotes || "").trim() || null;
+    const markPaid = req.body?.markPaid === "true" || req.body?.markPaid === true;
+
+    const [inv] = await db.select().from(companyInvoicesTable).where(eq(companyInvoicesTable.id, id)).limit(1);
+    if (!inv) { res.status(404).json({ error: "Invoice tidak ditemukan" }); return; }
+
+    let proofUrl: string | null = inv.paymentProofUrl ?? null;
+
+    if (req.file) {
+      const ext = path.extname(req.file.originalname).toLowerCase() || ".jpg";
+      const objectPath = `invoice-proof-${randomUUID()}${ext}`;
+      proofUrl = await uploadToStorage(BUCKETS.proof, objectPath, req.file.buffer, req.file.mimetype);
+    }
+
+    const updates: Partial<typeof companyInvoicesTable.$inferInsert> = {
+      paymentProofUrl: proofUrl,
+      paymentNotes,
+    };
+
+    if (markPaid && inv.status !== "paid") {
+      updates.status = "paid";
+      updates.paidAt = new Date();
+    }
+
+    const [updated] = await db.update(companyInvoicesTable).set(updates).where(eq(companyInvoicesTable.id, id)).returning();
+
+    if (markPaid && inv.status !== "paid") {
+      await db.update(bookingsTable)
+        .set({ billingStatus: "paid", status: "completed" })
+        .where(eq(bookingsTable.companyInvoiceId, id));
+    }
+
+    const { ipAddress, userAgent } = getClientInfo(req);
+    const userInfo = getUserFromReq(req);
+    await logAudit({
+      ...userInfo,
+      action: "COMPANY_INVOICE_PROOF_UPLOADED",
+      entity: "company_invoice",
+      entityId: id,
+      after: { invoiceNumber: inv.invoiceNumber, proofUrl, markPaid },
+      ipAddress,
+      userAgent,
+    });
+
+    const [company] = await db.select().from(usersTable).where(eq(usersTable.id, updated.companyCustomerId)).limit(1);
+    const items = await db.select().from(companyInvoiceItemsTable).where(eq(companyInvoiceItemsTable.invoiceId, id));
+    res.json(mapInvoice(updated, company?.companyName ?? company?.name, items, company));
+  } catch (err) {
+    req.log.error({ err }, "Upload company invoice proof error");
     res.status(500).json({ error: "Internal server error" });
   }
 });

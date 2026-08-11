@@ -25,3 +25,8 @@ Scheduler runs every 5 min. Bookings with status `pending_payment` + `paymentDea
 Payment deadline set on booking creation: `now() + 30 minutes`.
 
 **Why:** "completed" should only mean the activity slot has passed, not just that payment was received.
+
+## Expired booking reactivation
+The customer-facing booking detail page allows an `expired` booking to reopen its payment instructions and upload a transfer proof. The existing payment submission then moves it to `waiting_confirmation` for admin verification.
+
+**Why:** Customers may still complete a valid transfer after the original deadline; reactivation must preserve the booking/order history and require admin confirmation rather than silently confirming it.

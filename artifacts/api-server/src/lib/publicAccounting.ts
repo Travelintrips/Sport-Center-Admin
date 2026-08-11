@@ -3,7 +3,7 @@ import { db } from "@workspace/db";
 
 const COMPANY_ID = 1;
 const CASH_JOURNAL_ID = 389;
-const CASH_ACCOUNT_ID = 17;
+const BANK_MANDIRI_CST_ACCOUNT_ID = 49098; // Bank Mandiri CST (1-1020-CST)
 const MEMBERSHIP_INCOME_ACCOUNT_ID = 1314;
 const BOOKING_INCOME_ACCOUNT_ID = 1315;
 
@@ -72,7 +72,7 @@ export async function postMembershipAccountingEntry(
       INSERT INTO public.accounting_entry_lines
         (entry_id, account_id, description, debit, credit, company_id, source_module, source_table, source_id)
       VALUES
-        (${entryId}, ${CASH_ACCOUNT_ID},            ${"Kas masuk: " + description}, ${totalPrice}, 0,            ${COMPANY_ID}, 'membership', 'sport_memberships', ${membershipId}),
+        (${entryId}, ${BANK_MANDIRI_CST_ACCOUNT_ID}, ${"Bank masuk: " + description}, ${totalPrice}, 0,            ${COMPANY_ID}, 'membership', 'sport_memberships', ${membershipId}),
         (${entryId}, ${MEMBERSHIP_INCOME_ACCOUNT_ID},${"Pendapatan: " + description}, 0,           ${totalPrice}, ${COMPANY_ID}, 'membership', 'sport_memberships', ${membershipId})
     `);
 
@@ -140,7 +140,7 @@ export async function reverseMembershipAccountingEntry(
         (entry_id, account_id, description, debit, credit, company_id, source_module, source_table, source_id)
       VALUES
         (${entryId}, ${MEMBERSHIP_INCOME_ACCOUNT_ID}, ${"Reversal: " + description}, ${totalPrice}, 0,            ${COMPANY_ID}, 'membership', 'sport_memberships', ${membershipId}),
-        (${entryId}, ${CASH_ACCOUNT_ID},              ${"Reversal: " + description}, 0,             ${totalPrice}, ${COMPANY_ID}, 'membership', 'sport_memberships', ${membershipId})
+        (${entryId}, ${BANK_MANDIRI_CST_ACCOUNT_ID},   ${"Reversal: " + description}, 0,             ${totalPrice}, ${COMPANY_ID}, 'membership', 'sport_memberships', ${membershipId})
     `);
 
     return entryNumber;

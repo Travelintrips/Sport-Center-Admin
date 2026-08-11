@@ -5,6 +5,19 @@ import { ensureDefaultTemplates } from "./lib/seedTemplates";
 import { initBizportalTables } from "./lib/bizportalSync";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
+import { validateEnv } from "./lib/envValidation";
+import { loadSecretsFromGSM } from "./lib/secretLoader";
+
+// ── 1. Load secrets from Google Secret Manager (production/GAE only) ──────────
+// Must run before any other import reads process.env for secrets.
+// Non-fatal: if GSM is unavailable, envValidation below catches missing vars.
+const gsmResult = await loadSecretsFromGSM();
+if (gsmResult.loaded.length > 0) {
+  logger.info({ loaded: gsmResult.loaded }, "[secretLoader] Secrets loaded from Google Secret Manager");
+}
+if (gsmResult.failed.length > 0) {
+  logger.warn({ failed: gsmResult.failed }, "[secretLoader] Some secrets could not be loaded from GSM");
+}
 
 const rawPort = process.env["PORT"];
 
@@ -20,64 +33,10 @@ if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
-/**
- * validateProductionEnv — runs BEFORE server listens.
- * Fails fast on missing critical secrets in production.
- * In development: only warns, never exits.
- */
-function validateProductionEnv(): void {
-  const isProd = process.env.NODE_ENV === "production";
-  if (!isProd) return;
-
-  const fatal: string[] = [];
-  const warn: string[] = [];
-
-  // Critical — DB
-  if (!process.env.SUPABASE_DATABASE_URL) {
-    fatal.push("SUPABASE_DATABASE_URL is not set — production DB unreachable");
-  }
-
-  // Critical — Storage
-  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    fatal.push("SUPABASE_SERVICE_ROLE_KEY is not set — file uploads will fail");
-  }
-
-  // Soft — Realtime (no-op allowed, but must be explicit)
-  if (!process.env.SUPABASE_URL) {
-    warn.push("SUPABASE_URL not set — realtime availability broadcasts are no-ops");
-  }
-  if (!process.env.SUPABASE_ANON_KEY) {
-    warn.push("SUPABASE_ANON_KEY not set — realtime availability broadcasts are no-ops");
-  }
-
-  // Warned flags in production — these bleed in from dev env in Replit deployments
-  // The db module correctly ignores ALLOW_DEV_ON_PROD_DB in production (always uses SUPABASE_DATABASE_URL)
-  if (process.env.ALLOW_DEV_ON_PROD_DB === "true") {
-    warn.push("ALLOW_DEV_ON_PROD_DB=true is set — harmless in production (db module ignores it), but remove from prod env when possible");
-  }
-  if (process.env.ALLOW_DEV_ON_PROD_STORAGE === "true") {
-    warn.push("ALLOW_DEV_ON_PROD_STORAGE=true is set — harmless in production (storage module ignores it), but remove from prod env when possible");
-  }
-  if (process.env.SUPABASE_DATABASE_URL_DEV) {
-    warn.push("SUPABASE_DATABASE_URL_DEV is set in production env — this var is for development only");
-  }
-
-  for (const w of warn) {
-    logger.warn(`[prod-env] ${w}`);
-  }
-
-  if (fatal.length > 0) {
-    logger.error(
-      { missing: fatal },
-      "[prod-env] FATAL: Production environment is missing required variables. Refusing to start."
-    );
-    for (const f of fatal) {
-      logger.error(`[prod-env] ✗ ${f}`);
-    }
-    process.exit(1);
-  }
-
-  logger.info("[prod-env] Production environment validation passed.");
+// ── 2. Validate environment variables — fails fast in production if critical vars are missing ──
+const envResult = validateEnv();
+if (!envResult.ok) {
+  process.exit(1);
 }
 
 async function runStartupMigrations() {
@@ -291,6 +250,111 @@ async function runStartupMigrations() {
        ADD COLUMN IF NOT EXISTS ocr_raw text`,
     `ALTER TABLE sport_center.sport_payments
        ADD COLUMN IF NOT EXISTS ocr_data jsonb`,
+     // Canonical payment provider metadata.
+    `DO $$ BEGIN
+       CREATE TYPE sport_center.payment_provider AS ENUM ('mandiri_direct','paylabs','unknown');
+     EXCEPTION WHEN duplicate_object THEN null; END $$`,
+    `ALTER TABLE sport_center.sport_payments
+       ADD COLUMN IF NOT EXISTS payment_provider sport_center.payment_provider,
+       ADD COLUMN IF NOT EXISTS provider_name text,
+       ADD COLUMN IF NOT EXISTS provider_reference text,
+       ADD COLUMN IF NOT EXISTS provider_id text,
+       ADD COLUMN IF NOT EXISTS provider_order_id text,
+       ADD COLUMN IF NOT EXISTS merchant_trade_no text,
+       ADD COLUMN IF NOT EXISTS provider_trade_no text,
+       ADD COLUMN IF NOT EXISTS paid_at timestamptz,
+       ADD COLUMN IF NOT EXISTS company_id integer,
+       ADD COLUMN IF NOT EXISTS bank_account_id text,
+       ADD COLUMN IF NOT EXISTS expected_settlement_date text`,
+    `UPDATE sport_center.sport_payments
+        SET payment_provider = COALESCE(payment_provider, 'unknown'::sport_center.payment_provider),
+            provider_name = COALESCE(NULLIF(btrim(provider_name), ''), payment_provider::text, 'unknown'),
+            provider_id = COALESCE(
+              NULLIF(btrim(provider_id), ''),
+              NULLIF(btrim(provider_trade_no), ''),
+              NULLIF(btrim(provider_reference), ''),
+              NULLIF(btrim(merchant_trade_no), ''),
+              'legacy-' || id::text
+             ),
+             provider_order_id = COALESCE(
+               NULLIF(btrim(provider_order_id), ''),
+               NULLIF(btrim(merchant_trade_no), ''),
+               NULLIF(btrim(provider_trade_no), ''),
+               NULLIF(btrim(provider_reference), ''),
+               'legacy-order-' || id::text
+             )
+      WHERE payment_provider IS NULL
+         OR provider_name IS NULL
+         OR btrim(provider_name) = ''
+         OR provider_id IS NULL
+          OR btrim(provider_id) = ''
+          OR provider_order_id IS NULL
+          OR btrim(provider_order_id) = ''`,
+    `ALTER TABLE sport_center.sport_payments
+       ALTER COLUMN payment_provider SET NOT NULL,
+       ALTER COLUMN provider_name SET NOT NULL,
+       ALTER COLUMN provider_id SET NOT NULL,
+       ALTER COLUMN provider_order_id SET NOT NULL`,
+     `UPDATE sport_center.sport_payments p
+         SET bank_account_id = s.bank_account
+        FROM sport_center.settings s
+       WHERE (p.bank_account_id IS NULL OR btrim(p.bank_account_id) = '')
+         AND s.bank_account IS NOT NULL
+         AND btrim(s.bank_account) <> ''`,
+     `DO $$ BEGIN
+        IF EXISTS (
+          SELECT 1 FROM sport_center.sport_payments
+           WHERE bank_account_id IS NULL OR btrim(bank_account_id) = ''
+        ) THEN
+          RAISE EXCEPTION 'Cannot enforce sport_payments.bank_account_id: payment rows still lack a receiving account';
+        END IF;
+        ALTER TABLE sport_center.sport_payments
+          ALTER COLUMN bank_account_id SET NOT NULL;
+      END $$`,
+    `ALTER TABLE sport_center.bank_mutations
+       ADD COLUMN IF NOT EXISTS provider_detection_source text`,
+    `CREATE TABLE IF NOT EXISTS sport_center.payment_settlement_configs (
+       id serial PRIMARY KEY,
+       company_id integer NOT NULL,
+       provider_code text NOT NULL,
+       bank_account_id text NOT NULL,
+       settlement_delay_business_days integer NOT NULL DEFAULT 1,
+       effective_from date NOT NULL,
+       effective_until date,
+       is_active boolean NOT NULL DEFAULT true,
+       source text NOT NULL DEFAULT 'admin_config',
+       created_at timestamptz NOT NULL DEFAULT NOW(),
+       updated_at timestamptz NOT NULL DEFAULT NOW(),
+       UNIQUE (company_id, provider_code, bank_account_id, effective_from)
+     )`,
+    `CREATE TABLE IF NOT EXISTS sport_center.payment_business_calendar (
+       calendar_date date PRIMARY KEY,
+       is_business_day boolean NOT NULL DEFAULT true,
+       label text,
+       source text NOT NULL DEFAULT 'admin_config',
+       updated_at timestamptz NOT NULL DEFAULT NOW()
+     )`,
+    `CREATE TABLE IF NOT EXISTS sport_center.bank_import_source_mappings (
+       id serial PRIMARY KEY,
+       source_type text NOT NULL DEFAULT 'google_sheet',
+       source_id text NOT NULL,
+       worksheet_name text,
+       company_id integer NOT NULL,
+       bank_account_id text NOT NULL,
+       provider_name text,
+       is_active boolean NOT NULL DEFAULT true,
+       created_at timestamptz NOT NULL DEFAULT NOW(),
+       updated_at timestamptz NOT NULL DEFAULT NOW(),
+       UNIQUE (source_type, source_id, worksheet_name)
+     )`,
+     `CREATE TABLE IF NOT EXISTS sport_center.payment_enrichment_provenance (
+        id serial PRIMARY KEY,
+        payment_id integer NOT NULL,
+        field_name text NOT NULL,
+        evidence_source text NOT NULL,
+        evidence text,
+        created_at timestamptz NOT NULL DEFAULT NOW()
+      )`,
     // Enum billing_status untuk bookings
     `DO $$ BEGIN
        CREATE TYPE sport_center.billing_status AS ENUM ('unbilled','billed','paid');
@@ -344,6 +408,10 @@ async function runStartupMigrations() {
        created_at timestamptz NOT NULL DEFAULT NOW(),
        updated_at timestamptz NOT NULL DEFAULT NOW()
      )`,
+     `ALTER TABLE sport_center.booking_groups
+        ADD COLUMN IF NOT EXISTS down_payment numeric(12,2) NOT NULL DEFAULT 0`,
+     `ALTER TABLE sport_center.booking_groups
+        ADD COLUMN IF NOT EXISTS is_dp_paid boolean NOT NULL DEFAULT false`,
     // wa_booking_sessions
     `CREATE TABLE IF NOT EXISTS sport_center.wa_booking_sessions (
        id serial PRIMARY KEY,
@@ -500,8 +568,21 @@ async function runStartupMigrations() {
     `DO $$ BEGIN
        CREATE TYPE sport_center.payment_type AS ENUM ('dp', 'pelunasan', 'full_payment');
      EXCEPTION WHEN duplicate_object THEN null; END $$`,
+    `DO $$ BEGIN
+       CREATE TYPE sport_center.payment_provider AS ENUM ('mandiri_direct', 'paylabs', 'unknown');
+      EXCEPTION WHEN duplicate_object THEN null; END $$`,
     `ALTER TABLE sport_center.sport_payments
        ADD COLUMN IF NOT EXISTS payment_type sport_center.payment_type NOT NULL DEFAULT 'full_payment'`,
+    `ALTER TABLE sport_center.sport_payments
+       ADD COLUMN IF NOT EXISTS payment_provider sport_center.payment_provider`,
+    `ALTER TABLE sport_center.sport_payments
+       ADD COLUMN IF NOT EXISTS provider_reference text`,
+    `ALTER TABLE sport_center.sport_payments
+       ADD COLUMN IF NOT EXISTS merchant_trade_no text`,
+    `ALTER TABLE sport_center.sport_payments
+       ADD COLUMN IF NOT EXISTS provider_trade_no text`,
+    `ALTER TABLE sport_center.sport_payments
+       ADD COLUMN IF NOT EXISTS paid_at timestamptz`,
     // Hapus unique constraint booking_id agar bisa ada multiple payments per booking
     `ALTER TABLE sport_center.sport_payments
        DROP CONSTRAINT IF EXISTS payments_booking_id_unique`,
@@ -543,6 +624,29 @@ async function runStartupMigrations() {
     `CREATE SEQUENCE IF NOT EXISTS sport_center.expense_no_seq`,
     // accounting_journals.booking_id nullable untuk expense journal entries
     `ALTER TABLE sport_center.accounting_journals ALTER COLUMN booking_id DROP NOT NULL`,
+    // A confirmed payment may have only one internal payment journal. Keep this
+    // nullable for historical journals and enforce uniqueness for new payment
+    // journals only.
+    `ALTER TABLE sport_center.accounting_journals
+       ADD COLUMN IF NOT EXISTS payment_id int
+       REFERENCES sport_center.sport_payments(id) ON DELETE SET NULL`,
+     `ALTER TABLE sport_center.accounting_journals
+        ADD COLUMN IF NOT EXISTS payment_method text,
+        ADD COLUMN IF NOT EXISTS payment_provider text,
+        ADD COLUMN IF NOT EXISTS payment_type text,
+        ADD COLUMN IF NOT EXISTS bank_account_id text,
+        ADD COLUMN IF NOT EXISTS gross_amount numeric(14,2),
+        ADD COLUMN IF NOT EXISTS dpp_amount numeric(14,2),
+        ADD COLUMN IF NOT EXISTS tax_amount numeric(14,2),
+        ADD COLUMN IF NOT EXISTS provider_reference text,
+        ADD COLUMN IF NOT EXISTS provider_order_id text,
+        ADD COLUMN IF NOT EXISTS merchant_trade_no text,
+        ADD COLUMN IF NOT EXISTS provider_trade_no text`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS accounting_journals_payment_confirmed_unique
+       ON sport_center.accounting_journals (payment_id)
+       WHERE payment_id IS NOT NULL
+         AND journal_type = 'payment_confirmed'
+         AND is_reversal = false`,
     // accounting_journal_lines — double-entry lines per jurnal (debit/kredit)
     `CREATE TABLE IF NOT EXISTS sport_center.accounting_journal_lines (
        id          serial PRIMARY KEY,
@@ -606,7 +710,7 @@ async function runStartupMigrations() {
     // Seed system default document templates
     `INSERT INTO sport_center.company_document_templates
        (company_id, document_type, is_default, company_display_name, finance_name, finance_title, number_format_prefix, paper_style)
-     SELECT NULL, t.dt, true, 'Sport Center Jakarta', 'Kepala Keuangan', 'Finance Manager', t.prefix, 'A4'
+     SELECT NULL, t.dt, true, 'Sport Center Bandara Soekarno Hatta', 'Kepala Keuangan', 'Finance Manager', t.prefix, 'A4'
      FROM (VALUES
        ('invoice','INV'), ('spp','SPP'), ('faktur','FAKTUR'),
        ('kwitansi','KWT'), ('lampiran','LMP'), ('berita_acara','BA')
@@ -679,6 +783,110 @@ async function runStartupMigrations() {
        ADD COLUMN IF NOT EXISTS bg_template_type text`,
     `ALTER TABLE sport_center.company_document_settings
        ADD COLUMN IF NOT EXISTS bg_template_active boolean NOT NULL DEFAULT false`,
+    // Daily admin WhatsApp usage-list delivery state
+    `CREATE TABLE IF NOT EXISTS sport_center.wa_daily_usage_snapshots (
+       id serial PRIMARY KEY,
+       usage_date text NOT NULL UNIQUE,
+       fingerprint text NOT NULL,
+       sent_at timestamptz NOT NULL DEFAULT NOW()
+     )`,
+    // ── gym_memberships (gym member bulanan) ─────────────────────────────
+    // membership_status enum (idempotent)
+    "DO $body$ BEGIN " +
+      "CREATE TYPE sport_center.membership_status AS ENUM " +
+      "('pending_payment','waiting_confirmation','active','expired','cancelled'); " +
+      "EXCEPTION WHEN duplicate_object THEN null; END $body$",
+    // enum values idempotently (required for pre-existing enums)
+    "DO $body$ BEGIN ALTER TYPE sport_center.membership_status ADD VALUE IF NOT EXISTS 'pending_payment'; EXCEPTION WHEN others THEN null; END $body$",
+    "DO $body$ BEGIN ALTER TYPE sport_center.membership_status ADD VALUE IF NOT EXISTS 'waiting_confirmation'; EXCEPTION WHEN others THEN null; END $body$",
+    "DO $body$ BEGIN ALTER TYPE sport_center.membership_status ADD VALUE IF NOT EXISTS 'active'; EXCEPTION WHEN others THEN null; END $body$",
+    "DO $body$ BEGIN ALTER TYPE sport_center.membership_status ADD VALUE IF NOT EXISTS 'expired'; EXCEPTION WHEN others THEN null; END $body$",
+    "DO $body$ BEGIN ALTER TYPE sport_center.membership_status ADD VALUE IF NOT EXISTS 'cancelled'; EXCEPTION WHEN others THEN null; END $body$",
+    `CREATE TABLE IF NOT EXISTS sport_center.sport_memberships (
+       id                serial PRIMARY KEY,
+       name              text NOT NULL,
+       email             text NOT NULL,
+       phone             text NOT NULL,
+       start_date        text NOT NULL,
+       end_date          text NOT NULL,
+       months            integer NOT NULL DEFAULT 1,
+       total_price       numeric(12,2) NOT NULL,
+       status            sport_center.membership_status NOT NULL DEFAULT 'active',
+       notes             text,
+       payment_method    text,
+       payment_proof_url text,
+       created_at        timestamptz NOT NULL DEFAULT NOW(),
+       updated_at        timestamptz NOT NULL DEFAULT NOW()
+     )`,
+    // ── ap_members (Angkasa Pura member list) ─────────────────────────────
+    `CREATE TABLE IF NOT EXISTS sport_center.ap_members (
+       id             serial PRIMARY KEY,
+       name           text NOT NULL,
+       phone          text,
+       email          text,
+       id_card_number text NOT NULL,
+       is_active      boolean NOT NULL DEFAULT true,
+       created_at     timestamptz NOT NULL DEFAULT NOW(),
+       updated_at     timestamptz NOT NULL DEFAULT NOW()
+     )`,
+    "DO $body$ BEGIN ALTER TABLE sport_center.ap_members ADD CONSTRAINT ap_members_id_card_number_unique UNIQUE (id_card_number); EXCEPTION WHEN others THEN null; END $body$",
+    // ── verification_logs ────────────────────────────────────────────────
+    `CREATE TABLE IF NOT EXISTS sport_center.verification_logs (
+       id                   serial PRIMARY KEY,
+       booking_id           integer REFERENCES sport_center.sport_bookings(id) ON DELETE CASCADE,
+       order_number         text,
+       verified_by_user_id  integer,
+       id_card_number_input text NOT NULL,
+       status               text NOT NULL,
+       notes                text,
+       ip_address           text,
+       created_at           timestamptz NOT NULL DEFAULT NOW()
+     )`,
+    // ── discount_settings ────────────────────────────────────────────────
+    `CREATE TABLE IF NOT EXISTS sport_center.discount_settings (
+       id                  serial PRIMARY KEY,
+       customer_type       text NOT NULL,
+       discount_percentage integer NOT NULL DEFAULT 0,
+       description         text,
+       is_active           boolean NOT NULL DEFAULT true,
+       updated_at          timestamptz NOT NULL DEFAULT NOW()
+     )`,
+    "DO $body$ BEGIN ALTER TABLE sport_center.discount_settings ADD CONSTRAINT discount_settings_customer_type_unique UNIQUE (customer_type); EXCEPTION WHEN others THEN null; END $body$",
+    // ── corporate_booking_documentation ──────────────────────────────────────
+    `CREATE TABLE IF NOT EXISTS sport_center.corporate_booking_documentation (
+       id          serial PRIMARY KEY,
+       booking_id  int NOT NULL REFERENCES sport_center.sport_bookings(id) ON DELETE CASCADE,
+       company_id  int REFERENCES sport_center.users(id) ON DELETE SET NULL,
+       uploaded_by text NOT NULL DEFAULT 'customer',
+       file_url    text NOT NULL,
+       file_name   text,
+       caption     text,
+       created_at  timestamptz NOT NULL DEFAULT NOW()
+     )`,
+    // ── company_invoices: payment_proof_url + waiting_verification status ────
+    `ALTER TABLE sport_center.company_invoices ADD COLUMN IF NOT EXISTS payment_proof_url text`,
+    `DO $mig$ BEGIN ALTER TYPE sport_center.invoice_status ADD VALUE IF NOT EXISTS 'waiting_verification'; EXCEPTION WHEN OTHERS THEN null; END $mig$`,
+    // ── paylabs_settings ─────────────────────────────────────────────────────
+    `CREATE TABLE IF NOT EXISTS sport_center.paylabs_settings (
+       id                     SERIAL PRIMARY KEY,
+       title                  TEXT    NOT NULL DEFAULT 'Online Payment (Bank Transfer, Virtual Account, QRIS)',
+       description            TEXT    NOT NULL DEFAULT '',
+       send_invoice           BOOLEAN NOT NULL DEFAULT TRUE,
+       charge_customer        BOOLEAN NOT NULL DEFAULT FALSE,
+       new_order_status       TEXT    NOT NULL DEFAULT 'completed',
+       debug_mode             BOOLEAN NOT NULL DEFAULT FALSE,
+       sandbox_mode           BOOLEAN NOT NULL DEFAULT TRUE,
+       store_id               TEXT    NOT NULL DEFAULT '',
+       sandbox_public_key     TEXT    NOT NULL DEFAULT '',
+       sandbox_private_key    TEXT    NOT NULL DEFAULT '',
+       sandbox_merchant_id    TEXT    NOT NULL DEFAULT '',
+       prod_public_key        TEXT    NOT NULL DEFAULT '',
+       prod_private_key       TEXT    NOT NULL DEFAULT '',
+       prod_merchant_id       TEXT    NOT NULL DEFAULT '',
+       payment_methods_config JSONB,
+       created_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+       updated_at             TIMESTAMPTZ NOT NULL DEFAULT NOW()
+     )`,
   ];
 
   for (const stmt of migrations) {
@@ -691,8 +899,9 @@ async function runStartupMigrations() {
   logger.info("Startup migrations OK");
 }
 
-// Run BEFORE listening — fails fast in production if env is incomplete
-validateProductionEnv();
+// env validation already ran above (step 2) — no-op placeholder kept for clarity
+
+await runStartupMigrations();
 
 app.listen(port, (err) => {
   if (err) {
@@ -701,7 +910,6 @@ app.listen(port, (err) => {
   }
 
   logger.info({ port }, "Server listening");
-  runStartupMigrations().catch(() => {});
   initBizportalTables().catch(() => {});
   startScheduler();
   ensureDefaultTemplates().catch(() => {});

@@ -1,0 +1,706 @@
+# EXECUTE PHASE B — CONTROLLED REPAIR PAYMENT 13 & 14
+
+Lanjutkan dari state workspace saat ini.
+
+**Jangan ulang Phase A. Jangan hanya membaca atau merangkum dokumen Phase B. Eksekusi controlled repair sekarang sesuai scope di bawah.**
+
+Phase A sudah selesai dengan status:
+
+`READY_FOR_CONTROLLED_REPAIR`
+
+Approved ownership:
+
+* Facility 1 → `public.companies.id = 1`
+* Facility 7 → `public.companies.id = 1`
+* Company code: `CST`
+* Company name: `PT Cahaya Sejati Teknologi`
+* Effective from: `2026-08-09`
+* Evidence: `manual_business_approval`
+
+Resolver payment 13 dan 14 sudah deterministic ke CST.
+
+---
+
+# 1. OBJECTIVE
+
+Lakukan controlled repair end-to-end hanya untuk:
+
+### Source payments
+
+* `sport_center.sport_payments.id = 13`
+* `sport_center.sport_payments.id = 14`
+
+### Existing public mirrors
+
+* ID 8 / `SCPAY-SC-13`
+* ID 9 / `SCPAY-SC-14`
+
+### Existing accounting entries
+
+* entry 9 / correlation `sc_payment_13`
+* entry 10 / correlation `sc_payment_14`
+
+### Public tax
+
+Hanya missing payment-specific tax line untuk payment 13 dan 14.
+
+Target akhir:
+
+`source payment`
+→ `public mirror`
+→ `existing accounting entry`
+→ `existing balanced GL`
+→ `public tax line`
+
+Semua harus terhubung secara canonical dan idempotent.
+
+---
+
+# 2. ENVIRONMENT SAFETY GATE
+
+Sebelum melakukan write, verifikasi active database.
+
+Wajib:
+
+* development environment
+* menggunakan `SUPABASE_DATABASE_URL_DEV`
+* `isDevUsingProdDb = false`
+* `ALLOW_DEV_ON_PROD_DB = false`
+* company ID 1 = `PT Cahaya Sejati Teknologi`
+* company code = `CST`
+* company active
+* Facility 1 ownership mapping → company 1 active
+* Facility 7 ownership mapping → company 1 active
+* mapping effective pada `2026-08-09`
+
+Jika salah satu gagal:
+
+STOP.
+
+Return:
+
+`ENVIRONMENT_OR_OWNERSHIP_PRECONDITION_FAILED`
+
+Jangan fallback ke environment/database/company lain.
+
+---
+
+# 3. PRE-WRITE SNAPSHOT
+
+Sebelum UPDATE/INSERT apa pun, ambil snapshot read-only untuk kedua payment.
+
+Capture:
+
+## Source payment
+
+* id
+* booking_id
+* company_id
+* amount
+* payment_type
+* payment_method
+* payment_provider
+* bank_account_id
+* provider_reference
+* provider_order_id
+* merchant_trade_no
+* provider_trade_no
+* paid_at
+* expected_settlement_date
+* status
+
+## Mirror
+
+* id
+* payment_number
+* source_payment_id
+* company_id
+* bank_account_id
+* method
+* payment_type
+* payment_provider
+* provider_code
+* provider references
+* paid_at
+* expected_settlement_date
+* entry_id
+* posting_status
+* posting_error
+
+## Accounting
+
+* id
+* correlation_id
+* source
+* source_id
+* source_payment_id jika schema menyediakan
+* company_id
+* payment_method
+* payment_provider
+* payment_type
+* bank_account_id
+* status
+
+## GL
+
+* line count
+* total debit
+* total credit
+* account IDs/codes
+
+## Tax
+
+* internal tax transaction
+* public tax lines untuk entry/payment terkait
+
+Gunakan snapshot ini untuk before/after report.
+
+---
+
+# 4. REPAIR PAYMENT 13
+
+Gunakan transaction boundary khusus payment 13.
+
+## 4.1 Source
+
+Expected current:
+
+`company_id = NULL`
+
+Set:
+
+`company_id = 1`
+
+Hanya jika existing company NULL atau sudah 1.
+
+Jika existing non-null dan bukan 1:
+
+ROLLBACK payment 13.
+
+Return:
+
+`SOURCE_COMPANY_CONFLICT`
+
+Jangan overwrite conflict.
+
+## 4.2 Mirror ID 8
+
+Reuse existing mirror.
+
+Jangan INSERT mirror baru.
+
+Canonical linkage:
+
+* `source_payment_id = 13`
+* `company_id = 1`
+* `bank_account_id = source.bank_account_id`
+* `method = QRIS`
+* `payment_type = full_payment`
+* `payment_provider = mandiri_direct`
+* `provider_code = mandiri_direct`
+* `provider_reference = source value`
+* `provider_order_id = source value`
+* `merchant_trade_no = source value`
+* `provider_trade_no = source value`
+* `paid_at = source.paid_at`
+* `expected_settlement_date = source/resolver value jika deterministic`
+* `entry_id = 9`
+
+Gunakan null-preserving semantics.
+
+Source NULL tidak boleh menghapus metadata valid existing.
+
+## 4.3 Accounting entry 9
+
+Reuse existing:
+
+`entry_id = 9`
+
+Correlation wajib tetap:
+
+`sc_payment_13`
+
+Jangan membuat accounting entry baru.
+
+Lengkapi canonical metadata yang memang tersedia pada schema:
+
+* company = 1
+* payment identity = payment 13
+* payment method = QRIS
+* provider = mandiri_direct
+* payment type = full_payment
+* bank account = source bank account
+* source classification = canonical Sport Center payment
+
+Jika `source_id` saat ini digunakan untuk booking traceability dan schema memiliki `source_payment_id` terpisah, jangan merusak booking traceability.
+
+Gunakan canonical payment linkage field yang benar.
+
+## 4.4 GL invariant
+
+Sebelum dan sesudah:
+
+`debit = Rp100.000`
+
+`credit = Rp100.000`
+
+GL line count tidak boleh berubah.
+
+Tidak boleh:
+
+* recreate GL
+* change amount
+* change revenue
+* change PPN amount
+* redesign debit account
+
+Jika GL berubah:
+
+ROLLBACK payment 13.
+
+## 4.5 Tax
+
+Internal canonical PPN:
+
+`Rp9.910`
+
+Cari public payment-specific tax line terlebih dahulu.
+
+Jika equivalent canonical tax line sudah ada:
+
+`ALREADY_COMPLETE`
+
+Jangan insert duplicate.
+
+Jika belum ada dan seluruh ownership/accounting invariant valid:
+
+insert exactly one public tax line untuk payment 13 / entry 9.
+
+Gunakan:
+
+* company 1
+* accounting entry 9
+* PPN_OUT
+* source tax rate
+* source DPP
+* tax amount Rp9.910
+* direction `out`
+* canonical payment identity/reference
+
+Gunakan `NOT EXISTS`, unique business key, atau equivalent idempotency guard.
+
+Jangan delete/rewrite legacy booking tax row.
+
+## 4.6 Validate before commit
+
+Commit hanya jika:
+
+* source company = 1
+* mirror source_payment_id = 13
+* mirror company = 1
+* mirror entry_id = 9
+* accounting entry 9 reused
+* accounting company = 1
+* method/provider metadata canonical
+* GL balanced dan unchanged
+* tax complete exactly once
+
+Jika invariant gagal:
+
+ROLLBACK payment 13.
+
+---
+
+# 5. REPAIR PAYMENT 14
+
+Gunakan transaction terpisah.
+
+Lakukan prosedur yang sama.
+
+Expected:
+
+### Source
+
+`company_id → 1`
+
+### Mirror
+
+* existing mirror ID 9
+* `source_payment_id = 14`
+* `company_id = 1`
+* `entry_id = 10`
+* QRIS
+* mandiri_direct
+* full_payment
+* source bank account
+* canonical provider metadata
+* paid_at
+* expected settlement jika deterministic
+
+### Accounting
+
+Reuse:
+
+`entry 10`
+
+Correlation:
+
+`sc_payment_14`
+
+No duplicate accounting entry.
+
+### GL invariant
+
+Before/after:
+
+`debit = Rp50.000`
+
+`credit = Rp50.000`
+
+### Tax
+
+Internal tax:
+
+`Rp4.955`
+
+Create exactly one missing canonical public payment tax line only if absent.
+
+Validate all invariants before commit.
+
+---
+
+# 6. POSTING STATUS
+
+Jangan langsung mengubah mirror menjadi `posted` hanya karena entry ditemukan.
+
+Mirror boleh menjadi:
+
+`posting_status = posted`
+
+hanya jika seluruh invariant complete:
+
+* source linkage valid
+* company 1
+* bank account populated
+* payment method populated
+* payment provider populated
+* entry linkage valid
+* accounting entry status posted
+* GL exists
+* GL balanced
+* tax complete bila payment taxable
+
+Clear `posting_error` hanya jika benar-benar complete.
+
+Jika incomplete:
+
+jangan menyembunyikan error.
+
+Pertahankan failed/review state dan laporkan exact reason.
+
+---
+
+# 7. POST-REPAIR AUDIT
+
+Setelah transaction selesai, baca ulang seluruh chain dari database.
+
+Payment 13 expected:
+
+`payment 13`
+→ `mirror 8`
+→ `entry 9`
+→ existing GL
+→ one canonical payment tax line
+
+Payment 14:
+
+`payment 14`
+→ `mirror 9`
+→ `entry 10`
+→ existing GL
+→ one canonical payment tax line
+
+Verify:
+
+# `source company`
+
+# `mirror company`
+
+# `accounting company`
+
+`public.companies.id 1`
+
+---
+
+# 8. PROVIDER/METHOD PROPAGATION
+
+Payment 13 dan 14 harus menunjukkan konsistensi:
+
+`payment_method = QRIS`
+
+`payment_provider = mandiri_direct`
+
+Pastikan nilai tersebut dapat diaudit pada:
+
+* source payment
+* public mirror
+* accounting metadata
+
+Provider jangan diturunkan dari tebakan description.
+
+Gunakan canonical source payment.
+
+---
+
+# 9. IDEMPOTENCY TEST
+
+Setelah successful apply, jalankan repair logic sekali lagi dalam:
+
+`DRY-RUN`
+
+Expected:
+
+Payment 13:
+
+`ALREADY_COMPLETE`
+
+Payment 14:
+
+`ALREADY_COMPLETE`
+
+Second run harus menghasilkan:
+
+* source payment UPDATE needed: 0
+* new mirror: 0
+* mirror repair needed: 0
+* new accounting entry: 0
+* accounting metadata repair needed: 0
+* new GL lines: 0
+* new public tax line: 0
+
+Tidak boleh ada duplicate.
+
+---
+
+# 10. DUPLICATE CHECK
+
+Explicitly verify:
+
+### Accounting
+
+Jumlah entry dengan:
+
+`correlation_id = sc_payment_13`
+
+harus tepat 1.
+
+Jumlah entry dengan:
+
+`correlation_id = sc_payment_14`
+
+harus tepat 1.
+
+### Mirror
+
+`SCPAY-SC-13` tepat satu.
+
+`SCPAY-SC-14` tepat satu.
+
+### Tax
+
+Canonical payment-specific PPN line masing-masing tepat satu.
+
+---
+
+# 11. INTERNAL SPORT CENTER JOURNAL
+
+Read-only verification only.
+
+Payment 13:
+existing internal journal tetap satu.
+
+Payment 14:
+existing internal journal tetap satu.
+
+Do not rewrite internal journal amount/GL.
+
+Report jika metadata internal journal masih legacy/incomplete, tetapi jangan memperluas scope kecuali metadata tersebut memang bagian dari existing controlled-repair implementation.
+
+---
+
+# 12. QRIS DEBIT ACCOUNT
+
+Do not redesign accounting.
+
+Existing account tetap:
+
+`Bank Mandiri CST`
+
+COA:
+
+`1-1020-CST`
+
+Report warning:
+
+`ACCOUNTING_DESIGN_REVIEW_REQUIRED`
+
+Clearing-vs-settlement redesign adalah task terpisah.
+
+---
+
+# 13. VALIDATION AFTER APPLY
+
+Run:
+
+`pnpm run typecheck:libs`
+
+`scripts typecheck`
+
+`API typecheck`
+
+`API build`
+
+Relevant:
+
+* payment tests
+* provider tests
+* ownership tests
+* accounting recovery tests
+* tax tests
+* idempotency tests
+
+Run:
+
+`git diff --check`
+
+Jangan mengubah source hanya untuk membuat historical data terlihat complete kecuali bug nyata ditemukan dan fix tersebut memang diperlukan oleh controlled repair.
+
+---
+
+# 14. RUNTIME
+
+Restart combined development workflow jika diperlukan.
+
+Verify:
+
+`/health → 200`
+
+`/readiness → 200`
+
+`/api/health → 200`
+
+Pastikan startup migrations tidak error.
+
+Jangan menjalankan duplicate standalone API workflow jika port 8080 sudah digunakan combined workflow.
+
+---
+
+# 15. AUDIT ENDPOINT
+
+Jika authorized finance/admin context tersedia, jalankan:
+
+`GET /api/admin/audit-sport-center-payment/13`
+
+`GET /api/admin/audit-sport-center-payment/14`
+
+Jika auth context tidak tersedia:
+
+gunakan equivalent direct read-only diagnostic terhadap active development database.
+
+Jangan bypass authentication.
+
+---
+
+# 16. DO NOT DO
+
+Dilarang:
+
+* repair payment selain 13/14
+* mass backfill
+* create duplicate mirror
+* create duplicate accounting entry
+* regenerate GL
+* alter GL amount
+* modify Admin user
+* change approved ownership mappings
+* change company master
+* final QRIS reconciliation
+* create settlement
+* settlement posting
+* MDR posting
+* accounting clearing redesign
+* production migration
+* production deploy
+* commit/push kecuali diminta secara eksplisit
+
+---
+
+# 17. FINAL REPORT
+
+Berikan hasil aktual, bukan target teoritis.
+
+Format:
+
+## A. Environment safety
+
+## B. Pre-repair snapshot
+
+## C. Payment 13 source repair
+
+## D. Payment 13 mirror repair
+
+## E. Payment 13 accounting recovery
+
+## F. Payment 13 tax repair
+
+## G. Payment 14 source repair
+
+## H. Payment 14 mirror repair
+
+## I. Payment 14 accounting recovery
+
+## J. Payment 14 tax repair
+
+## K. GL before/after invariant
+
+## L. Provider/payment-method consistency
+
+## M. Duplicate checks
+
+## N. Idempotency rerun
+
+## O. Canonical identity chain
+
+## P. Internal journal verification
+
+## Q. Tests/typecheck/build
+
+## R. Runtime health
+
+## S. Remaining risks
+
+## T. Final decision
+
+Gunakan tepat salah satu:
+
+`CONTROLLED_REPAIR_COMPLETE`
+
+`CONTROLLED_REPAIR_PARTIAL`
+
+`MANUAL_REVIEW_REQUIRED`
+
+Untuk `CONTROLLED_REPAIR_COMPLETE`, wajib terbukti:
+
+* payment 13/14 company = CST/1
+* mirror 8/9 canonical complete
+* entry 9/10 reused
+* no duplicate accounting entry
+* GL unchanged dan balanced
+* tax canonical complete exactly once
+* provider/method metadata complete
+* second dry-run = `ALREADY_COMPLETE`
+* tidak ada record di luar scope yang berubah
+
+Jika salah satu invariant gagal, jangan memaksakan status COMPLETE.
+
+Rollback transaction payment yang gagal dan laporkan penyebab persisnya.

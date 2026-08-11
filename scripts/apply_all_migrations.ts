@@ -60,8 +60,17 @@ const stmts = [
   `ALTER TABLE sport_center.sport_bookings ADD COLUMN IF NOT EXISTS down_payment numeric(12,2)`,
   `ALTER TABLE sport_center.sport_bookings ADD COLUMN IF NOT EXISTS is_dp_paid boolean DEFAULT false`,
   // payments
+  `DO $$ BEGIN CREATE TYPE sport_center.payment_provider AS ENUM ('mandiri_direct','paylabs','unknown'); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
   `ALTER TABLE sport_center.sport_payments ADD COLUMN IF NOT EXISTS payment_method text DEFAULT 'Transfer Bank'`,
   `ALTER TABLE sport_center.sport_payments ADD COLUMN IF NOT EXISTS confirmed_at timestamptz`,
+  `ALTER TABLE sport_center.sport_payments ADD COLUMN IF NOT EXISTS payment_provider sport_center.payment_provider`,
+  `ALTER TABLE sport_center.sport_payments ADD COLUMN IF NOT EXISTS provider_reference text`,
+  `ALTER TABLE sport_center.sport_payments ADD COLUMN IF NOT EXISTS provider_id text`,
+  `ALTER TABLE sport_center.sport_payments ADD COLUMN IF NOT EXISTS provider_name text`,
+  `ALTER TABLE sport_center.sport_payments ADD COLUMN IF NOT EXISTS provider_order_id text`,
+  `ALTER TABLE sport_center.sport_payments ADD COLUMN IF NOT EXISTS merchant_trade_no text`,
+  `ALTER TABLE sport_center.sport_payments ADD COLUMN IF NOT EXISTS provider_trade_no text`,
+  `ALTER TABLE sport_center.sport_payments ADD COLUMN IF NOT EXISTS paid_at timestamptz`,
   // tenant_bookings period
   `ALTER TABLE sport_center.tenant_bookings ADD COLUMN IF NOT EXISTS payment_period_type text NOT NULL DEFAULT 'monthly'`,
   `ALTER TABLE sport_center.tenant_bookings ADD COLUMN IF NOT EXISTS period_start_month integer`,

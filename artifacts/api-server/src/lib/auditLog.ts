@@ -38,7 +38,14 @@ export async function logAudit(entry: AuditLogEntry): Promise<void> {
  * Dipanggil dari catch block agar error accounting tidak hilang tanpa jejak.
  */
 export async function logAccountingError(opts: {
-  operation: "createJournalEntry" | "createPublicAccountingEntry";
+  operation:
+    | "createJournalEntry"
+    | "createPublicAccountingEntry"
+    | "createMembershipJournalEntry"
+    | "createPublicMembershipAccountingEntry"
+    | "createInvoiceJournalEntry"
+    | "createPublicInvoiceAccountingEntry"
+    | "postConfirmedPaymentAccounting";
   orderNumber: string;
   bookingId: number;
   error: unknown;

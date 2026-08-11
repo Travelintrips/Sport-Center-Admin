@@ -1,3 +1,4 @@
+import SEOHead from "@/components/SEOHead";
 import { useState } from "react";
 import { useListPromos, useRegisterPromo } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
@@ -79,6 +80,11 @@ export default function Promos() {
 
   return (
     <div className="min-h-screen bg-[#F8FAFC] dark:bg-slate-950 pb-20">
+      <SEOHead
+        title="Promo & Penawaran Spesial | Sport Center Soekarno-Hatta"
+        description="Dapatkan promo dan diskon terbaik untuk booking lapangan olahraga di Sport Center Soekarno-Hatta. Penawaran terbatas, segera manfaatkan!"
+        path="/promos"
+      />
       <div className="bg-primary/10 dark:bg-primary/5 pt-16 pb-24 rounded-b-[40px] md:rounded-b-[80px] mb-12 relative overflow-hidden">
         <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-primary/20 rounded-full blur-[80px] pointer-events-none" />
         
