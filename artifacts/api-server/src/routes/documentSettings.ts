@@ -5,7 +5,7 @@ import type { DocumentType } from "@workspace/db";
 import { adminMiddleware } from "../lib/auth";
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
 import multer from "multer";
-import { BUCKETS, uploadToStorage } from "../lib/supabaseStorage";
+import { uploadFile, BUCKETS } from "../lib/storage";
 import { randomUUID } from "crypto";
 
 const router = Router();
@@ -16,6 +16,16 @@ const upload = multer({
   fileFilter: (_req, file, cb) => {
     if (file.mimetype.startsWith("image/")) cb(null, true);
     else cb(new Error("Hanya file gambar yang diizinkan"));
+  },
+});
+
+const bgTemplateUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const allowed = ["image/png", "image/jpeg", "image/jpg", "image/webp", "application/pdf"];
+    if (allowed.includes(file.mimetype)) cb(null, true);
+    else cb(new Error("Hanya PNG, JPG, WebP, atau PDF yang diizinkan"));
   },
 });
 
@@ -145,7 +155,7 @@ router.post(
       if (!req.file) { res.status(400).json({ error: "File diperlukan" }); return; }
       const ext = req.file.originalname.split(".").pop() ?? "png";
       const filename = `doc-logo-${type}-${randomUUID()}.${ext}`;
-      const url = await uploadToStorage(BUCKETS.facility, filename, req.file.buffer, req.file.mimetype);
+      const url = await uploadFile(BUCKETS.facility, filename, req.file.buffer, req.file.mimetype);
 
       const existing = await getDocumentSettings(type);
       const [updated] = await db
@@ -186,7 +196,7 @@ router.post(
       if (!req.file) { res.status(400).json({ error: "File diperlukan" }); return; }
       const ext = req.file.originalname.split(".").pop() ?? "png";
       const filename = `doc-signature-${type}-${randomUUID()}.${ext}`;
-      const url = await uploadToStorage(BUCKETS.facility, filename, req.file.buffer, req.file.mimetype);
+      const url = await uploadFile(BUCKETS.facility, filename, req.file.buffer, req.file.mimetype);
 
       const existing = await getDocumentSettings(type);
       const [updated] = await db
@@ -211,6 +221,128 @@ router.post(
     } catch (err: any) {
       req.log.error({ err }, "Upload document signature error");
       res.status(500).json({ error: err?.message || "Upload gagal" });
+    }
+  },
+);
+
+// ── POST /admin/document-settings/:type/upload-bg-template ───────────────────
+router.post(
+  "/admin/document-settings/:type/upload-bg-template",
+  adminMiddleware,
+  bgTemplateUpload.single("file"),
+  async (req, res) => {
+    const { type } = req.params;
+    if (!isValidType(type)) { res.status(400).json({ error: "Invalid document type" }); return; }
+    try {
+      if (!req.file) { res.status(400).json({ error: "File diperlukan" }); return; }
+
+      const isPdf = req.file.mimetype === "application/pdf";
+      const templateType = isPdf ? "pdf" : "image";
+      const ext = isPdf ? "pdf" : (req.file.originalname.split(".").pop() ?? "png");
+      const filename = `doc-bg-template-${type}-${randomUUID()}.${ext}`;
+      const url = await uploadFile(BUCKETS.docTemplates, filename, req.file.buffer, req.file.mimetype);
+
+      const existing = await getDocumentSettings(type);
+      const [updated] = await db
+        .update(companyDocumentSettingsTable)
+        .set({ bgTemplateUrl: url, bgTemplateType: templateType, bgTemplateActive: true })
+        .where(eq(companyDocumentSettingsTable.documentType, type))
+        .returning();
+
+      const { ipAddress, userAgent } = getClientInfo(req);
+      const userInfo = getUserFromReq(req);
+      await logAudit({
+        ...userInfo,
+        action: "TEMPLATE_UPLOADED",
+        entity: "company_document_settings",
+        entityId: existing.id,
+        after: { type, field: "bgTemplateUrl", url, templateType },
+        ipAddress,
+        userAgent,
+      });
+
+      res.json({ url, templateType, settings: updated });
+    } catch (err: any) {
+      req.log.error({ err }, "Upload bg template error");
+      res.status(500).json({ error: err?.message || "Upload gagal" });
+    }
+  },
+);
+
+// ── PATCH /admin/document-settings/:type/bg-template/toggle ──────────────────
+router.patch(
+  "/admin/document-settings/:type/bg-template/toggle",
+  adminMiddleware,
+  async (req, res) => {
+    const { type } = req.params;
+    if (!isValidType(type)) { res.status(400).json({ error: "Invalid document type" }); return; }
+    try {
+      const existing = await getDocumentSettings(type);
+      if (!existing.bgTemplateUrl) {
+        res.status(400).json({ error: "Belum ada background template yang diupload" });
+        return;
+      }
+
+      const newActive = !existing.bgTemplateActive;
+      const [updated] = await db
+        .update(companyDocumentSettingsTable)
+        .set({ bgTemplateActive: newActive })
+        .where(eq(companyDocumentSettingsTable.documentType, type))
+        .returning();
+
+      const { ipAddress, userAgent } = getClientInfo(req);
+      const userInfo = getUserFromReq(req);
+      await logAudit({
+        ...userInfo,
+        action: newActive ? "TEMPLATE_CHANGED" : "TEMPLATE_DEACTIVATED",
+        entity: "company_document_settings",
+        entityId: existing.id,
+        before: { bgTemplateActive: existing.bgTemplateActive },
+        after: { bgTemplateActive: newActive, type },
+        ipAddress,
+        userAgent,
+      });
+
+      res.json({ bgTemplateActive: newActive, settings: updated });
+    } catch (err: any) {
+      req.log.error({ err }, "Toggle bg template error");
+      res.status(500).json({ error: err?.message || "Gagal toggle" });
+    }
+  },
+);
+
+// ── DELETE /admin/document-settings/:type/bg-template ────────────────────────
+router.delete(
+  "/admin/document-settings/:type/bg-template",
+  adminMiddleware,
+  async (req, res) => {
+    const { type } = req.params;
+    if (!isValidType(type)) { res.status(400).json({ error: "Invalid document type" }); return; }
+    try {
+      const existing = await getDocumentSettings(type);
+      const [updated] = await db
+        .update(companyDocumentSettingsTable)
+        .set({ bgTemplateUrl: null, bgTemplateType: null, bgTemplateActive: false })
+        .where(eq(companyDocumentSettingsTable.documentType, type))
+        .returning();
+
+      const { ipAddress, userAgent } = getClientInfo(req);
+      const userInfo = getUserFromReq(req);
+      await logAudit({
+        ...userInfo,
+        action: "TEMPLATE_DEACTIVATED",
+        entity: "company_document_settings",
+        entityId: existing.id,
+        before: { bgTemplateUrl: existing.bgTemplateUrl },
+        after: { type, removed: true },
+        ipAddress,
+        userAgent,
+      });
+
+      res.json({ success: true, settings: updated });
+    } catch (err: any) {
+      req.log.error({ err }, "Delete bg template error");
+      res.status(500).json({ error: err?.message || "Gagal menghapus" });
     }
   },
 );

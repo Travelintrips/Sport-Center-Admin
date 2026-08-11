@@ -1,0 +1,94 @@
+## TAMBAHAN PENTING — MULTIPLE QRIS PROVIDERS
+
+Terdapat **dua jalur QRIS** yang harus dibedakan:
+
+1. **QRIS langsung Bank Mandiri**
+2. **QRIS melalui Paylabs**
+
+Jangan menganggap seluruh transaksi QRIS berasal dari provider yang sama.
+
+Audit secara khusus apakah CST/Sport Center menyimpan informasi yang cukup untuk menentukan provider setiap transaksi.
+
+Cari field/config/function seperti:
+
+* payment_provider
+* payment_gateway
+* provider
+* acquirer
+* QRIS
+* Mandiri
+* Paylabs
+* merchant_trade_no
+* provider_trade_no
+* payment_reference
+* channel
+* source
+
+Tentukan bagaimana transaksi QRIS Mandiri Direct dapat dibedakan dari transaksi QRIS Paylabs.
+
+Jika saat ini tidak ada field canonical untuk membedakannya, tandai sebagai **HIGH priority gap**.
+
+### Rekonsiliasi wajib dipisahkan per provider
+
+Target desain:
+
+QRIS MANDIRI DIRECT
+→ candidate transactions Mandiri
+→ settlement rule Mandiri
+→ actual bank mutation
+→ observed deduction
+→ detected MDR Mandiri
+
+QRIS PAYLABS
+→ candidate transactions Paylabs
+→ settlement rule Paylabs
+→ actual bank mutation
+→ observed deduction / provider fee
+→ detected effective deduction Paylabs
+
+JANGAN mencampurkan gross Mandiri Direct dan Paylabs dalam satu reconciliation batch hanya karena keduanya menggunakan QRIS.
+
+Audit juga apakah kedua provider:
+
+* settle ke rekening yang sama;
+* settle ke rekening berbeda;
+* mempunyai description mutasi yang berbeda;
+* mempunyai provider/reference number berbeda;
+* mempunyai cut-off berbeda;
+* mempunyai settlement schedule berbeda.
+
+Jika rekening sama, cari atribut mutasi yang dapat digunakan untuk membedakan settlement Mandiri Direct dan Paylabs.
+
+### MDR
+
+Jangan berasumsi MDR Mandiri Direct sama dengan Paylabs.
+
+MDR/payment deduction harus memiliki dimensi:
+
+* provider;
+* merchant/account;
+* effective date;
+* transaction/batch;
+* detected rate;
+* observed deduction.
+
+Target reconciliation key secara konseptual:
+
+provider
+
+* expected settlement date
+* merchant/bank account
+* candidate transactions.
+
+### Pertanyaan tambahan wajib
+
+Jawab:
+
+1. Bagaimana CST membedakan QRIS Mandiri Direct dan QRIS Paylabs?
+2. Apakah Sport Center sudah mengirim payment provider?
+3. Apakah kedua provider settle ke rekening yang sama?
+4. Apakah description/reference mutasi dapat membedakan keduanya?
+5. Apakah settlement schedule keduanya berbeda?
+6. Apakah reconciliation batch dapat dipisahkan berdasarkan provider?
+7. Jika provider belum tersimpan, perubahan minimum apa yang diperlukan?
+8. Apakah transaksi existing dapat dibackfill provider-nya dari payment reference atau data Paylabs?

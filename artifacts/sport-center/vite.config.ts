@@ -41,7 +41,12 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(import.meta.dirname, "src"),
-      "@assets": path.resolve(import.meta.dirname, "..", "..", "attached_assets"),
+      "@assets": path.resolve(
+        import.meta.dirname,
+        "..",
+        "..",
+        "attached_assets",
+      ),
     },
     dedupe: ["react", "react-dom"],
   },
@@ -57,8 +62,29 @@ export default defineConfig({
     allowedHosts: true,
     proxy: {
       "/api": {
-        target: "http://localhost:8099",
+        target: "http://localhost:8080",
         changeOrigin: true,
+        configure: (proxy) => {
+          proxy.on("error", (err, _req, res) => {
+            // When the API server is unavailable (e.g. restarting), return a
+            // proper JSON 503 instead of falling through to Vite's static-file
+            // handler which returns an HTML 404 that the frontend can't parse.
+            if (
+              "writeHead" in res &&
+              typeof (res as any).writeHead === "function"
+            ) {
+              (res as any).writeHead(503, {
+                "Content-Type": "application/json",
+              });
+              (res as any).end(
+                JSON.stringify({
+                  error:
+                    "API server unavailable. Please try again in a moment.",
+                }),
+              );
+            }
+          });
+        },
       },
     },
     fs: {

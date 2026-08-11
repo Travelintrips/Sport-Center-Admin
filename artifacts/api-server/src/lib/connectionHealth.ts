@@ -68,8 +68,8 @@ async function checkDatabase(): Promise<ConnectionResult> {
     }
 
     const REQUIRED_TABLES = [
-      "users", "facilities", "bookings", "payments", "blocked_schedules",
-      "settings", "company_invoices", "accounting_journals",
+      "users", "sport_facilities", "sport_bookings", "sport_payments", "blocked_schedules",
+      "sport_settings", "company_invoices", "accounting_journals",
     ];
     const tableList = REQUIRED_TABLES.map((t) => `'${t}'`).join(",");
     const { rows: tableRows } = await db.execute(
@@ -123,26 +123,37 @@ async function checkDatabase(): Promise<ConnectionResult> {
 
 function checkStorageBucket(bucketName: string, key: string, displayName: string): ConnectionResult {
   const env = IS_DEV ? "development" : "production";
+  const replitAvailable = !!(process.env.REPL_ID || process.env.REPLIT_DEV_DOMAIN);
   const serviceKey = IS_DEV
     ? process.env.SUPABASE_SERVICE_ROLE_KEY_DEV
     : process.env.SUPABASE_SERVICE_ROLE_KEY;
   const projectRef = serviceKey ? getProjectRefFromJwt(serviceKey) : null;
   const bStatus = bucketStatus[bucketName];
-  const isOk = bStatus?.ok ?? false;
+  const supabaseOk = bStatus?.ok ?? false;
 
   let status: ConnectionStatus;
   let message: string;
   let riskNote: string | null = null;
 
-  if (isDevUsingProdStorage) {
+  // Replit Object Storage adalah PRIMARY — jika tersedia, storage selalu sehat
+  if (replitAvailable) {
+    status = "healthy";
+    if (supabaseOk) {
+      message = `${displayName}: Replit Object Storage (primary) + Supabase (fallback) — keduanya siap`;
+    } else {
+      const supabaseErr = bStatus?.error ?? "tidak dapat diakses";
+      message = `${displayName}: Replit Object Storage (primary) aktif. Supabase fallback error: ${supabaseErr.slice(0, 80)}`;
+      riskNote = "Supabase Storage melebihi kuota egress — Replit Object Storage digunakan sebagai primary.";
+    }
+  } else if (isDevUsingProdStorage) {
     status = "warning";
     message = "DEV menggunakan Storage PRODUCTION (ALLOW_DEV_ON_PROD_STORAGE=true)";
     riskNote = "⚠️ Upload dari dev akan masuk ke bucket produksi!";
   } else if (!serviceKey) {
     status = "unavailable";
-    message = `SUPABASE_SERVICE_ROLE_KEY${IS_DEV ? "_DEV" : ""} tidak di-set`;
+    message = `SUPABASE_SERVICE_ROLE_KEY${IS_DEV ? "_DEV" : ""} tidak di-set, Replit Object Storage juga tidak tersedia`;
     riskNote = "Upload file tidak akan berfungsi.";
-  } else if (isOk) {
+  } else if (supabaseOk) {
     status = "healthy";
     message = `Bucket ${bucketName} tersedia (${IS_DEV ? "dev" : "prod"})`;
   } else {
@@ -155,10 +166,11 @@ function checkStorageBucket(bucketName: string, key: string, displayName: string
 
   return {
     key, name: displayName, type: "storage",
-    status, environment: env, projectRef, configSource: storageProjectSource,
+    status, environment: env, projectRef,
+    configSource: replitAvailable ? "Replit Object Storage (primary) + Supabase (fallback)" : storageProjectSource,
     responseTimeMs: null,
     message, riskNote, lastChecked: bStatus?.checkedAt ?? new Date().toISOString(),
-    details: { bucketName },
+    details: { bucketName, replitPrimary: replitAvailable, supabaseOk },
   };
 }
 

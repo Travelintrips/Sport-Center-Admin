@@ -38,6 +38,11 @@ export const companyDocumentSettingsTable = scSchema.table("company_document_set
   // Pajak
   taxRate: numeric("tax_rate", { precision: 5, scale: 2 }).notNull().default("11"),
 
+  // Background template override (image/pdf uploaded as page background)
+  bgTemplateUrl: text("bg_template_url"),
+  bgTemplateType: text("bg_template_type"), // "image" | "pdf"
+  bgTemplateActive: boolean("bg_template_active").notNull().default(false),
+
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),

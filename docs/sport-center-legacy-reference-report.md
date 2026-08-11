@@ -1,27 +1,73 @@
 # Sport Center — Legacy Reference Report
 
-Tanggal audit: 2026-06-23
+Tanggal audit: 2026-06-23 (v2.0 update)
 
 ## Ringkasan
 
 | Kategori | Referensi Ditemukan | Status |
 |---|---|---|
-| `sport_center_bookings` (tabel) | 4 | ✅ Dihapus |
-| `sport_center_facilities` (tabel) | 3 | ✅ Dihapus |
-| `sport_center_memberships` (tabel) | 3 | ✅ Dihapus |
+| `sport_center_bookings` (tabel) | 4 | ✅ Dihapus (DEV renamed) |
+| `sport_center_facilities` (tabel) | 3 | ✅ Dihapus (DEV renamed) |
+| `sport_center_memberships` (tabel) | 3 | ✅ Dihapus (DEV renamed) |
 | `"sport_center_booking"` (nilai applies_to) | 9 | ✅ Diubah ke `"sport_booking"` |
 | `gym_memberships` (nama tabel DB) | 1 | ✅ Renamed ke `sport_memberships` |
 | `bookings` (nama tabel DB) | 1 | ✅ Renamed ke `sport_bookings` |
 | `facilities` (nama tabel DB) | 1 | ✅ Renamed ke `sport_facilities` |
 | `payments` (nama tabel DB) | 1 | ✅ Renamed ke `sport_payments` |
 | `settings` (nama tabel DB) | 1 | ✅ Renamed ke `sport_settings` |
+| `accounting_journal_lines` (tabel baru) | — | ✅ Dibuat baru (double-entry) |
+| `accounting_journals.booking_id` NOT NULL | 1 | ✅ Dibuat nullable (expense support) |
+| Label `PPN 11%` di invoice template | 1 | ✅ Diubah ke `PPN 12%` |
+| Formula PPN hardcoded `1.11` di invoices.ts | 1 | ✅ Diubah dinamis `(1 + ppnRate/100)` |
 
-## Detail per File
+## Audit: Tidak Ada Referensi Legacy Aktif di TypeScript
+
+Setelah audit menyeluruh pada `artifacts/api-server/src/` dan `lib/db/src/schema/`:
+
+- **Tidak ada** raw SQL string dengan nama tabel legacy di kode TypeScript
+- **Tidak ada** import atau query yang pakai `sport_center_bookings`, `sc_payments`, dll.
+- Semua route sudah menggunakan Drizzle ORM table variables yang map ke nama resmi:
+  - `bookingsTable` → `sport_center.sport_bookings`
+  - `facilitiesTable` → `sport_center.sport_facilities`
+  - `paymentsTable` → `sport_center.sport_payments`
+  - `gymMembershipsTable` → `sport_center.sport_memberships`
+  - `expensesTable` → `sport_center.sport_expenses`
+  - `settingsTable` → `sport_center.sport_settings`
+
+## Detail Perubahan Kode (Update 2026-06-23)
+
+### `lib/db/src/schema/accountingJournals.ts`
+- **Sebelum**: `booking_id` NOT NULL dengan FK reference
+- **Sesudah**: `booking_id` **nullable** — diperlukan untuk expense journals yang tidak memiliki booking
+
+### `lib/db/src/schema/accountingJournalLines.ts` (BARU)
+- Tabel baru `sport_center.accounting_journal_lines`
+- Kolom: `id, journal_id (FK), line_type, account_code, account_name, amount, description, created_at`
+- Mendukung double-entry bookkeeping (setiap jurnal punya baris debit+kredit terpisah)
+
+### `artifacts/api-server/src/lib/accounting.ts`
+- `createJournalEntry()` — kini juga insert ke `accounting_journal_lines` (debit Kas/Bank, credit Pendapatan + PPN Keluaran)
+- `createExpenseJournalEntry()` — fungsi baru untuk expense payments (debit Beban + PPN Masukan, credit Kas/Bank)
+- `reverseJournalEntry()` — kini juga post journal lines untuk reversal entries
+
+### `artifacts/api-server/src/lib/invoiceTemplate.ts`
+- Line 567: `PPN 11%` → **`PPN 12%`**
+
+### `artifacts/api-server/src/routes/invoices.ts`
+- Formula DPP: `grandTotal / 1.11` → **`grandTotal / (1 + ppnRate/100)`** (dinamis)
+- Formula PPN: `dpp * 0.11` → **`dppNilaiLain * 0.12`** (sesuai PMK-131/2024)
+- Semua 4 field invoice ditampilkan: DPP, DPP Nilai Lain, PPN 12%, TOTAL
+
+### `artifacts/api-server/src/routes/expenses.ts`
+- Ganti inline `db.insert(accountingJournalsTable)` dengan `createExpenseJournalEntry()`
+- Import `accountingJournalsTable` dihapus (sekarang hanya via `accounting.ts`)
+- Expense paid kini juga post ke `accounting_journal_lines`
+
+## Riwayat Perubahan Sebelumnya (v1.0)
 
 ### `artifacts/api-server/src/lib/bizportalSync.ts`
 - **Sebelum**: `sport_center.sport_center_facilities`, `sport_center.sport_center_bookings`, `sport_center.sport_center_memberships`
 - **Sesudah**: `sport_center.sport_facilities`, `sport_center.sport_bookings_sync`, `sport_center.sport_memberships_sync`
-- **Catatan**: Sync table diberi suffix `_sync` agar tidak konflik dengan renamed main tables
 
 ### `lib/db/src/schema/bookings.ts`
 - **Sebelum**: `scSchema.table("bookings", ...)`
@@ -67,28 +113,9 @@ Tanggal audit: 2026-06-23
 - Line 410: `DEFAULT 'sport_center_booking'` → `DEFAULT 'sport_booking'`
 - Line 474: INSERT seed value `'sport_center_booking'` → `'sport_booking'`
 
-### `artifacts/sport-center/src/pages/admin/InvoiceView.tsx`
-- Line 341: Template display string diubah ke `invoice_template_sport_v1`
+## DB Migration Status
 
-## DB Migration (DEV Supabase)
-
-Dijalankan: 2026-06-23 via `scripts/src/migrate-sport-tables-dev.ts`
-
-```
-ALTER TABLE sport_center.bookings RENAME TO sport_bookings
-ALTER TABLE sport_center.facilities RENAME TO sport_facilities
-ALTER TABLE sport_center.payments RENAME TO sport_payments
-ALTER TABLE sport_center.gym_memberships RENAME TO sport_memberships
-ALTER TABLE sport_center.settings RENAME TO sport_settings
-UPDATE tax_settings SET applies_to = 'sport_booking' WHERE applies_to = 'sport_center_booking'
-CREATE VIEW sport_center.sport_invoices → company_invoices
-CREATE VIEW sport_center.sport_invoice_items → company_invoice_items
-CREATE VIEW sport_center.sport_customers → users WHERE role='customer'
-```
-
-Juga dijalankan di local heliumdb (dev API server fallback).
-
-## PROD Status
-
-**PROD BELUM DISENTUH.** Migration SQL tersedia di `migrations/sport-center-legacy-routing-fix.sql`.
-Jalankan di PROD hanya setelah DEV valid dan approval manual.
+| Environment | Status | Perintah |
+|---|---|---|
+| DEV (Supabase DEV) | ✅ SQL siap | `psql $SUPABASE_DATABASE_URL_DEV_SESSION -f migrations/sport-center-legacy-routing-fix.sql` |
+| PROD | ❌ **BELUM DISENTUH** | Tunggu approval manual setelah DEV valid |

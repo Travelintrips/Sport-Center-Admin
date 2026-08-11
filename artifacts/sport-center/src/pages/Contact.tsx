@@ -1,3 +1,4 @@
+import SEOHead from "@/components/SEOHead";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { MapPin, Phone, Mail, Clock, MessageSquare } from "lucide-react";
@@ -22,6 +23,11 @@ export default function Contact() {
 
   return (
     <div className="container mx-auto px-4 py-12 max-w-5xl">
+      <SEOHead
+        title="Hubungi Kami | Sport Center Soekarno-Hatta"
+        description="Hubungi Sport Center Soekarno-Hatta untuk informasi booking, keanggotaan, atau layanan lainnya. Kami siap membantu Anda kapan saja."
+        path="/contact"
+      />
       <div className="text-center mb-12">
         <h1 className="text-3xl md:text-5xl font-black tracking-tight mb-4">{t("Hubungi Kami", "Contact Us")}</h1>
         <p className="text-muted-foreground text-lg max-w-2xl mx-auto">

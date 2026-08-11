@@ -1,166 +1,69 @@
 import { Router } from "express";
-import {
-  db,
-  bookingsTable,
-  facilitiesTable,
-  settingsTable,
-  taxSettingsTable,
-  companyDocumentSettingsTable,
-} from "@workspace/db";
-import { eq, and, inArray } from "drizzle-orm";
+import { db, bookingsTable, settingsTable } from "@workspace/db";
+import { eq } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
-import { buildInvoiceHtml, type InvoiceData } from "../lib/invoiceTemplate";
+import { buildInvoiceHtml } from "../lib/invoiceTemplate";
+import { resolveInvoiceData, resolveGroupInvoiceData } from "../lib/invoiceResolver";
+import { sendInvoiceToCustomer, sendGroupInvoiceToCustomer } from "../lib/invoiceDelivery";
+import { getInternalPdfToken } from "../lib/internalPdfToken";
+import { logger } from "../lib/logger";
+
+// ─── Internal PDF middleware ───────────────────────────────────────────────────
+// Digunakan oleh endpoint yang di-akses puppeteer saat generate PDF.
+// Token di-derive dari SESSION_SECRET — tidak perlu auth admin.
+
+function internalPdfMiddleware(req: any, res: any, next: any) {
+  const token = req.headers["x-internal-pdf-token"];
+  if (token && token === getInternalPdfToken()) return next();
+  res.status(401).json({ error: "Unauthorized" });
+}
 
 const router = Router();
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// ─── GET /invoices/internal/:orderNumber/html — puppeteer endpoint (no admin auth) ──
+// Di-akses puppeteer dari localhost saat generate PDF.
+// Dilindungi X-Internal-Pdf-Token header — bukan untuk akses publik.
 
-function formatInvoiceNumber(orderNumber: string, bookingDate: string): string {
-  const datePart = bookingDate.replace(/-/g, "").substring(0, 8);
-  const seq = orderNumber.replace(/[^0-9]/g, "").slice(-6).padStart(6, "0");
-  return `INV/SC/${datePart}/${seq}`;
-}
-
-async function resolveInvoiceData(orderNumber: string): Promise<InvoiceData | null> {
-  const [booking] = await db
-    .select()
-    .from(bookingsTable)
-    .where(eq(bookingsTable.orderNumber, orderNumber))
-    .limit(1);
-
-  if (!booking) return null;
-
-  const [facility] = await db
-    .select()
-    .from(facilitiesTable)
-    .where(eq(facilitiesTable.id, booking.facilityId))
-    .limit(1);
-
-  const [settings] = await db.select().from(settingsTable).limit(1);
-
-  // Load both 'invoice' and 'general' in one query; invoice takes priority
-  const docRows = await db
-    .select()
-    .from(companyDocumentSettingsTable)
-    .where(inArray(companyDocumentSettingsTable.documentType, ["invoice", "general"]));
-  const invoiceDoc = docRows.find(r => r.documentType === "invoice");
-  const generalDoc = docRows.find(r => r.documentType === "general");
-  // Merge: invoice overrides general, which overrides settings table
-  function pick<T>(invoice: T | null | undefined, general: T | null | undefined, fallback: T): T {
-    return (invoice !== null && invoice !== undefined && invoice !== "" as unknown as T)
-      ? invoice as T
-      : (general !== null && general !== undefined && general !== "" as unknown as T)
-        ? general as T
-        : fallback;
+router.get("/invoices/internal/:orderNumber/html", internalPdfMiddleware, async (req, res) => {
+  try {
+    const orderNumber = String(req.params.orderNumber);
+    const data = await resolveInvoiceData(orderNumber);
+    if (!data) { res.status(404).send("<h2>Invoice tidak ditemukan</h2>"); return; }
+    const html = buildInvoiceHtml(data, { autoPrint: false });
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.setHeader("Cache-Control", "no-store");
+    res.send(html);
+  } catch (err) {
+    logger.error({ err }, "Internal invoice HTML error");
+    res.status(500).send("<h2>Terjadi kesalahan</h2>");
   }
+});
 
-  // Get tax rate from booking or active tax settings
-  let ppnRate = booking.ppnRate ? Number(booking.ppnRate) : 0;
+// ─── GET /invoices/internal/group/:groupRef/html — grup invoice puppeteer endpoint ──
 
-  // grandTotal = harga final yang dibayar customer (inclusive PPN)
-  const bookingBasePrice = Number(booking.totalPrice ?? 0);
-  let grandTotal = booking.grandTotal ? Number(booking.grandTotal) : bookingBasePrice;
-
-  if (!ppnRate) {
-    const [taxSetting] = await db
-      .select()
-      .from(taxSettingsTable)
-      .where(
-        and(
-          eq(taxSettingsTable.appliesTo, "sport_booking"),
-          eq(taxSettingsTable.isActive, true),
-        ),
-      )
-      .limit(1);
-
-    ppnRate = taxSetting ? Number(taxSetting.taxRate) : 0;
+router.get("/invoices/internal/group/:groupRef/html", internalPdfMiddleware, async (req, res) => {
+  try {
+    const groupRef = String(req.params.groupRef);
+    const data = await resolveGroupInvoiceData(groupRef);
+    if (!data) { res.status(404).send("<h2>Grup booking tidak ditemukan</h2>"); return; }
+    const html = buildInvoiceHtml(data, { autoPrint: false });
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.setHeader("Cache-Control", "no-store");
+    res.send(html);
+  } catch (err) {
+    logger.error({ err }, "Internal group invoice HTML error");
+    res.status(500).send("<h2>Terjadi kesalahan</h2>");
   }
-
-  // ── DPP Nilai Lain formula (sesuai regulasi PPN Indonesia) ────────────────
-  // harga di DB = inclusive PPN
-  // dpp        = grandTotal / 1.11
-  // dppNilaiLain = dpp × (11/12)
-  // ppnAmount  = dppNilaiLain × 12%
-  // total      = dpp + ppnAmount  (≈ grandTotal, max rounding diff ±1)
-  let dpp: number;
-  let dppNilaiLain: number;
-  let ppnAmount: number;
-
-  if (ppnRate > 0) {
-    // Core calculation (inclusive PPN 11%):
-    //   DPP          = grandTotal / 1.11
-    //   PPN          = DPP × 11%          ← tax base is DPP
-    //   TOTAL        = DPP + PPN
-    // Display-only field (tidak mempengaruhi total):
-    //   DPP Nilai Lain = DPP × (11/12)
-    dpp = Math.round(grandTotal / 1.11);
-    dppNilaiLain = Math.round(dpp * 11 / 12);   // DISPLAY ONLY
-    ppnAmount = Math.round(dpp * 0.11);          // PPN = DPP × 11%
-    // Re-align grandTotal so DPP + PPN = TOTAL always
-    grandTotal = dpp + ppnAmount;
-  } else {
-    dpp = grandTotal;
-    dppNilaiLain = 0;
-    ppnAmount = 0;
-  }
-
-  const invoiceNumber = formatInvoiceNumber(booking.orderNumber, booking.bookingDate);
-
-  return {
-    invoiceNumber,
-    invoiceDate: new Date().toISOString().split("T")[0],
-    orderNumber: booking.orderNumber,
-    status: booking.status,
-
-    customerName: booking.customerName,
-    customerPhone: booking.customerPhone,
-    customerEmail: booking.customerEmail,
-
-    facilityName: facility?.name ?? "—",
-    bookingDate: booking.bookingDate,
-    startTime: booking.startTime,
-    endTime: booking.endTime,
-    durationHours: booking.durationHours,
-
-    pricePerHour: facility ? Number(facility.pricePerHour) : 0,
-    dpp,
-    dppNilaiLain,
-    ppnRate,
-    ppnAmount,
-    grandTotal,
-
-    promoCode: booking.promoCode ?? null,
-    discountAmount: Number(booking.discountAmount ?? 0),
-
-    centerName: settings?.centerName || "Sport Center Soekarno-Hatta",
-    centerAddress: settings?.address || "Kawasan Bandara Soekarno-Hatta, Tangerang 19110",
-    centerPhone: settings?.phone || "",
-    bankName: pick(invoiceDoc?.bankName, generalDoc?.bankName, settings?.bankName || "Bank Mandiri"),
-    bankAccount: pick(invoiceDoc?.bankAccount, generalDoc?.bankAccount, settings?.bankAccount || ""),
-    bankAccountName: pick(invoiceDoc?.bankHolder, generalDoc?.bankHolder, settings?.bankAccountName || "Sport Center Soekarno-Hatta"),
-
-    // Dynamic template fields — invoice doc > general doc > settings fallback
-    logoUrl: invoiceDoc?.logoUrl ?? generalDoc?.logoUrl ?? (settings as any)?.logoUrl ?? null,
-    kopSuratHtml: invoiceDoc?.kopSuratHtml ?? generalDoc?.kopSuratHtml ?? null,
-    financeName: pick(invoiceDoc?.financeName, generalDoc?.financeName, ""),
-    financeTitle: pick(invoiceDoc?.financeTitle, generalDoc?.financeTitle, "Finance Manager"),
-    signatureUrl: invoiceDoc?.signatureUrl ?? generalDoc?.signatureUrl ?? null,
-    footerText: invoiceDoc?.footerHtml ?? generalDoc?.footerHtml ?? null,
-    invoicePrefix: pick(invoiceDoc?.prefixNumber, generalDoc?.prefixNumber, "INV"),
-  };
-}
+});
 
 // ─── GET /invoices/booking/:orderNumber (JSON) ────────────────────────────────
 
 router.get("/invoices/booking/:orderNumber", adminMiddleware, async (req, res) => {
   try {
-    const { orderNumber } = req.params;
+    const orderNumber = String(req.params.orderNumber);
     const data = await resolveInvoiceData(orderNumber);
-    if (!data) {
-      res.status(404).json({ error: "Booking tidak ditemukan" });
-      return;
-    }
+    if (!data) { res.status(404).json({ error: "Booking tidak ditemukan" }); return; }
 
     const { ipAddress, userAgent } = getClientInfo(req);
     const userInfo = getUserFromReq(req);
@@ -168,11 +71,7 @@ router.get("/invoices/booking/:orderNumber", adminMiddleware, async (req, res) =
       ...userInfo,
       action: "INVOICE_TEMPLATE_RENDERED",
       entity: "booking",
-      after: {
-        orderNumber,
-        invoiceNumber: data.invoiceNumber,
-        template: "invoice_template_sport_center_v1",
-      },
+      after: { orderNumber, invoiceNumber: data.invoiceNumber, template: "invoice_template_sport_center_v1" },
       ipAddress,
       userAgent,
     });
@@ -185,33 +84,22 @@ router.get("/invoices/booking/:orderNumber", adminMiddleware, async (req, res) =
 });
 
 // ─── GET /invoices/booking/:orderNumber/html ──────────────────────────────────
-// Public-ish: admin auth OR token query param matching orderNumber hmac
 
 router.get("/invoices/booking/:orderNumber/html", adminMiddleware, async (req, res) => {
   try {
-    const { orderNumber } = req.params;
+    const orderNumber = String(req.params.orderNumber);
     const autoPrint = req.query.print === "1";
-
     const data = await resolveInvoiceData(orderNumber);
-    if (!data) {
-      res.status(404).send("<h2>Invoice tidak ditemukan</h2>");
-      return;
-    }
+    if (!data) { res.status(404).send("<h2>Invoice tidak ditemukan</h2>"); return; }
 
     const html = buildInvoiceHtml(data, { autoPrint });
-
     const { ipAddress, userAgent } = getClientInfo(req);
     const userInfo = getUserFromReq(req);
     await logAudit({
       ...userInfo,
       action: "INVOICE_GENERATED_FROM_TEMPLATE",
       entity: "booking",
-      after: {
-        orderNumber,
-        invoiceNumber: data.invoiceNumber,
-        template: "invoice_template_sport_center_v1",
-        autoPrint,
-      },
+      after: { orderNumber, invoiceNumber: data.invoiceNumber, template: "invoice_template_sport_center_v1", autoPrint },
       ipAddress,
       userAgent,
     });
@@ -224,32 +112,22 @@ router.get("/invoices/booking/:orderNumber/html", adminMiddleware, async (req, r
   }
 });
 
-// ─── GET /invoices/booking/:orderNumber/pdf (opens print dialog) ──────────────
-// Alias for /html?print=1 — returns same HTML with auto-print injected
+// ─── GET /invoices/booking/:orderNumber/pdf (buka print dialog) ───────────────
 
 router.get("/invoices/booking/:orderNumber/pdf", adminMiddleware, async (req, res) => {
   try {
-    const { orderNumber } = req.params;
-
+    const orderNumber = String(req.params.orderNumber);
     const data = await resolveInvoiceData(orderNumber);
-    if (!data) {
-      res.status(404).send("<h2>Invoice tidak ditemukan</h2>");
-      return;
-    }
+    if (!data) { res.status(404).send("<h2>Invoice tidak ditemukan</h2>"); return; }
 
     const html = buildInvoiceHtml(data, { autoPrint: true });
-
     const { ipAddress, userAgent } = getClientInfo(req);
     const userInfo = getUserFromReq(req);
     await logAudit({
       ...userInfo,
       action: "INVOICE_PDF_CREATED",
       entity: "booking",
-      after: {
-        orderNumber,
-        invoiceNumber: data.invoiceNumber,
-        template: "invoice_template_sport_center_v1",
-      },
+      after: { orderNumber, invoiceNumber: data.invoiceNumber, template: "invoice_template_sport_center_v1" },
       ipAddress,
       userAgent,
     });
@@ -262,67 +140,242 @@ router.get("/invoices/booking/:orderNumber/pdf", adminMiddleware, async (req, re
   }
 });
 
+// ─── POST /invoices/booking/:orderNumber/generate-pdf — generate & simpan PDF ─
+// Memicu generate PDF server-side, upload ke storage, kirim ke customer via
+// email & WA. Bisa dipanggil manual dari admin atau otomatis setelah pembayaran.
+
+router.post("/invoices/booking/:orderNumber/generate-pdf", adminMiddleware, async (req, res) => {
+  try {
+    const orderNumber = String(req.params.orderNumber);
+
+    // Validasi booking ada dan statusnya confirmed
+    const [booking] = await db
+      .select({ status: bookingsTable.status, orderNumber: bookingsTable.orderNumber, groupRef: bookingsTable.groupRef })
+      .from(bookingsTable)
+      .where(eq(bookingsTable.orderNumber, orderNumber))
+      .limit(1);
+    if (!booking) { res.status(404).json({ error: "Booking tidak ditemukan" }); return; }
+
+    const { ipAddress, userAgent } = getClientInfo(req);
+    const userInfo = getUserFromReq(req);
+    const audit = { userId: userInfo.userId, userName: userInfo.userName, ipAddress, userAgent };
+
+    // Jika booking bagian dari grup, generate & kirim invoice gabungan
+    const result = booking.groupRef
+      ? await sendGroupInvoiceToCustomer(booking.groupRef, audit)
+      : await sendInvoiceToCustomer(orderNumber, audit);
+
+    res.json({
+      success: true,
+      orderNumber,
+      groupRef: booking.groupRef ?? undefined,
+      pdfUrl: result.pdfUrl,
+      emailSent: result.emailSent,
+      waSent: result.waSent,
+      errors: result.errors,
+    });
+  } catch (err) {
+    logger.error({ err }, "Generate PDF invoice error");
+    res.status(500).json({ error: String((err as Error).message) });
+  }
+});
+
+// ─── GET /public/invoices/:orderNumber/pdf — akses publik PDF invoice ─────────
+// Tidak memerlukan auth — digunakan dari link WA / email ke customer.
+// Mengembalikan redirect ke URL PDF yang tersimpan, atau 404 jika belum ada.
+
+router.get("/public/invoices/:orderNumber/pdf", async (req, res) => {
+  try {
+    const orderNumber = String(req.params.orderNumber);
+    const [booking] = await db
+      .select({ invoicePdfUrl: bookingsTable.invoicePdfUrl, status: bookingsTable.status })
+      .from(bookingsTable)
+      .where(eq(bookingsTable.orderNumber, orderNumber))
+      .limit(1);
+
+    if (!booking) { res.status(404).json({ error: "Booking tidak ditemukan" }); return; }
+
+    if (booking.invoicePdfUrl) {
+      // Jika URL sudah ada di storage: redirect ke URL tersebut
+      if (booking.invoicePdfUrl.startsWith("http")) {
+        res.redirect(302, booking.invoicePdfUrl);
+        return;
+      }
+      // URL lokal (path relatif dari /api/uploads/...)
+      res.redirect(302, booking.invoicePdfUrl);
+      return;
+    }
+
+    // PDF belum pernah di-generate — generate on-demand (tanpa audit user)
+    if (!["confirmed", "completed"].includes(booking.status)) {
+      res.status(403).json({ error: "Invoice hanya tersedia setelah booking dikonfirmasi" });
+      return;
+    }
+
+    logger.info({ orderNumber }, "[InvoiceDelivery] PDF belum ada, generate on-demand");
+    const result = await sendInvoiceToCustomer(orderNumber, { userName: "system-on-demand" });
+
+    if (result.pdfUrl.startsWith("http")) {
+      res.redirect(302, result.pdfUrl);
+    } else {
+      res.redirect(302, result.pdfUrl);
+    }
+  } catch (err) {
+    logger.error({ err }, "Public invoice PDF error");
+    res.status(500).json({ error: "Gagal mengambil invoice PDF" });
+  }
+});
+
+// ─── GET /public/invoices/group/:groupRef/pdf — akses publik PDF invoice gabungan ─
+// Tidak memerlukan auth — digunakan dari link WA / email ke customer.
+// Mengembalikan redirect ke URL PDF yang tersimpan, atau generate on-demand.
+
+router.get("/public/invoices/group/:groupRef/pdf", async (req, res) => {
+  try {
+    const groupRef = String(req.params.groupRef);
+
+    // Ambil salah satu booking dari grup (semua booking dalam grup berbagi invoicePdfUrl yang sama)
+    const [booking] = await db
+      .select({ invoicePdfUrl: bookingsTable.invoicePdfUrl, status: bookingsTable.status })
+      .from(bookingsTable)
+      .where(eq(bookingsTable.groupRef, groupRef))
+      .limit(1);
+
+    if (!booking) { res.status(404).json({ error: "Grup booking tidak ditemukan" }); return; }
+
+    if (booking.invoicePdfUrl) {
+      res.redirect(302, booking.invoicePdfUrl);
+      return;
+    }
+
+    // PDF belum pernah di-generate — generate on-demand (tanpa audit user)
+    if (!["confirmed", "completed"].includes(booking.status)) {
+      res.status(403).json({ error: "Invoice hanya tersedia setelah booking dikonfirmasi" });
+      return;
+    }
+
+    logger.info({ groupRef }, "[InvoiceDelivery] PDF grup belum ada, generate on-demand");
+    const result = await sendGroupInvoiceToCustomer(groupRef, { userName: "system-on-demand" });
+    res.redirect(302, result.pdfUrl);
+  } catch (err) {
+    logger.error({ err }, "Public group invoice PDF error");
+    res.status(500).json({ error: "Gagal mengambil invoice PDF gabungan" });
+  }
+});
+
+// ─── GET /invoices/group/:groupRef (JSON) ────────────────────────────────────
+
+router.get("/invoices/group/:groupRef", adminMiddleware, async (req, res) => {
+  try {
+    const groupRef = String(req.params.groupRef);
+    const data = await resolveGroupInvoiceData(groupRef);
+    if (!data) { res.status(404).json({ error: "Grup booking tidak ditemukan" }); return; }
+    res.json(data);
+  } catch (err) {
+    req.log.error({ err }, "Get group invoice data error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ─── GET /invoices/group/:groupRef/html ──────────────────────────────────────
+
+router.get("/invoices/group/:groupRef/html", adminMiddleware, async (req, res) => {
+  try {
+    const groupRef = String(req.params.groupRef);
+    const autoPrint = req.query.print === "1";
+    const data = await resolveGroupInvoiceData(groupRef);
+    if (!data) { res.status(404).send("<h2>Grup booking tidak ditemukan</h2>"); return; }
+    const html = buildInvoiceHtml(data, { autoPrint });
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.send(html);
+  } catch (err) {
+    req.log.error({ err }, "Get group invoice HTML error");
+    res.status(500).send("<h2>Terjadi kesalahan</h2>");
+  }
+});
+
+// ─── GET /invoices/group/:groupRef/pdf ───────────────────────────────────────
+
+router.get("/invoices/group/:groupRef/pdf", adminMiddleware, async (req, res) => {
+  try {
+    const groupRef = String(req.params.groupRef);
+    const data = await resolveGroupInvoiceData(groupRef);
+    if (!data) { res.status(404).send("<h2>Grup booking tidak ditemukan</h2>"); return; }
+    const html = buildInvoiceHtml(data, { autoPrint: true });
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.send(html);
+  } catch (err) {
+    req.log.error({ err }, "Get group invoice PDF error");
+    res.status(500).send("<h2>Terjadi kesalahan</h2>");
+  }
+});
+
 // ─── POST /invoices/booking/:orderNumber/send-wa ──────────────────────────────
 
 router.post("/invoices/booking/:orderNumber/send-wa", adminMiddleware, async (req, res) => {
   try {
-    const { orderNumber } = req.params;
+    const orderNumber = String(req.params.orderNumber);
     const { customMessage } = req.body ?? {};
 
     const data = await resolveInvoiceData(orderNumber);
-    if (!data) {
-      res.status(404).json({ error: "Booking tidak ditemukan" });
-      return;
-    }
+    if (!data) { res.status(404).json({ error: "Booking tidak ditemukan" }); return; }
 
-    const phone = data.customerPhone.replace(/^\+/, "").replace(/^0/, "62");
+    // Jika booking bagian dari grup, ambil data grup untuk pesan yang lebih lengkap
+    const isGroup = !!data.groupRef;
+    const groupData = isGroup ? await resolveGroupInvoiceData(data.groupRef!) : null;
+    const invoiceData = groupData ?? data;
 
+    // Optional override: admin dapat kirim ke nomor WA berbeda (misal untuk test)
+    const overridePhone = (req.body?.overridePhone as string | undefined)?.trim() || undefined;
+    const rawPhone = overridePhone || invoiceData.customerPhone;
+    const phone = rawPhone.replace(/^\+/, "").replace(/^0/, "62");
     const appUrl =
       process.env.APP_URL ??
       `https://${process.env.REPLIT_DEV_DOMAIN ?? "localhost:5000"}`;
 
-    const invoiceLink = `${appUrl}/admin/invoice/${orderNumber}`;
+    // Gunakan link PDF grup jika ada groupRef, atau link booking tunggal
+    const pdfLink = isGroup
+      ? `${appUrl}/api/public/invoices/group/${data.groupRef}/pdf`
+      : `${appUrl}/api/public/invoices/${orderNumber}/pdf`;
 
     const message =
       customMessage ||
-      `Halo ${data.customerName},\n\n` +
-        `Berikut adalah invoice pemesanan Anda:\n\n` +
-        `📋 *No Invoice:* ${data.invoiceNumber}\n` +
-        `🏟️ *Fasilitas:* ${data.facilityName}\n` +
-        `📅 *Tanggal:* ${data.bookingDate}\n` +
-        `⏰ *Jam:* ${data.startTime} – ${data.endTime}\n` +
-        `⏱️ *Durasi:* ${data.durationHours} jam\n\n` +
-        `💰 *DPP:* Rp ${new Intl.NumberFormat("id-ID").format(data.dpp)}\n` +
-        `🧾 *PPN ${data.ppnRate}%:* Rp ${new Intl.NumberFormat("id-ID").format(data.ppnAmount)}\n` +
-        `✅ *Total:* Rp ${new Intl.NumberFormat("id-ID").format(data.grandTotal)}\n\n` +
-        `🏦 *Pembayaran:*\n` +
-        `Bank: ${data.bankName}\n` +
-        `No Rek: ${data.bankAccount}\n` +
-        `A/N: ${data.bankAccountName}\n\n` +
-        `Terima kasih telah memilih Sport Center Soekarno-Hatta. 🙏`;
+      (isGroup && groupData?.sessions?.length
+        ? `✅ *Pembayaran Dikonfirmasi!*\n\n` +
+          `Halo *${invoiceData.customerName}*,\n\n` +
+          `Invoice gabungan booking Anda (${groupData.sessions.length} sesi) sudah siap:\n\n` +
+          groupData.sessions.map((s, i) =>
+            `${i + 1}. 🏟️ ${s.facilityName} — ${s.bookingDate} ${s.startTime}–${s.endTime}`
+          ).join("\n") +
+          `\n\n✅ *Total Keseluruhan:* Rp ${new Intl.NumberFormat("id-ID").format(invoiceData.grandTotal)}\n\n` +
+          `📄 *Download Invoice PDF Gabungan:*\n${pdfLink}\n\n` +
+          `Terima kasih telah memilih Sport Center Soekarno-Hatta! 🙏`
+        : `✅ *Pembayaran Dikonfirmasi!*\n\n` +
+          `Halo *${invoiceData.customerName}*,\n\n` +
+          `Invoice booking Anda sudah siap:\n\n` +
+          `🏟️ *Fasilitas:* ${invoiceData.facilityName}\n` +
+          `📅 *Tanggal:* ${invoiceData.bookingDate}\n` +
+          `⏰ *Jam:* ${invoiceData.startTime} – ${invoiceData.endTime}\n` +
+          `⏱️ *Durasi:* ${invoiceData.durationHours} jam\n\n` +
+          `✅ *Total:* Rp ${new Intl.NumberFormat("id-ID").format(invoiceData.grandTotal)}\n\n` +
+          `📄 *Download Invoice PDF:*\n${pdfLink}\n\n` +
+          `Terima kasih telah memilih Sport Center Soekarno-Hatta! 🙏`
+      );
 
     const token =
       req.body?.fonnteToken ??
-      (await db.select().from(settingsTable).limit(1)
-        .then(([s]) => s?.fonnteToken ?? null)) ??
+      (await db.select().from(settingsTable).limit(1).then(([s]) => s?.fonnteToken ?? null)) ??
       process.env.FONNTE_TOKEN;
 
-    if (!token) {
-      res.status(400).json({ error: "FONNTE_TOKEN tidak dikonfigurasi" });
-      return;
-    }
+    if (!token) { res.status(400).json({ error: "FONNTE_TOKEN tidak dikonfigurasi" }); return; }
 
     const resp = await fetch("https://api.fonnte.com/send", {
       method: "POST",
-      headers: {
-        Authorization: token,
-        "Content-Type": "application/json",
-      },
+      headers: { Authorization: token, "Content-Type": "application/json" },
       body: JSON.stringify({ target: phone, message }),
     });
 
     const result = await resp.json().catch(() => ({}));
-
     const { ipAddress, userAgent } = getClientInfo(req);
     const userInfo = getUserFromReq(req);
     await logAudit({
@@ -331,9 +384,11 @@ router.post("/invoices/booking/:orderNumber/send-wa", adminMiddleware, async (re
       entity: "booking",
       after: {
         orderNumber,
-        invoiceNumber: data.invoiceNumber,
-        phone: data.customerPhone,
+        groupRef: data.groupRef ?? undefined,
+        invoiceNumber: invoiceData.invoiceNumber,
+        phone: rawPhone,
         fonnteStatus: result,
+        ...(overridePhone ? { overridePhone, originalPhone: invoiceData.customerPhone } : {}),
       },
       ipAddress,
       userAgent,
@@ -341,9 +396,11 @@ router.post("/invoices/booking/:orderNumber/send-wa", adminMiddleware, async (re
 
     res.json({
       success: true,
-      phone: data.customerPhone,
-      invoiceNumber: data.invoiceNumber,
+      phone: rawPhone,
+      invoiceNumber: invoiceData.invoiceNumber,
+      groupRef: data.groupRef ?? undefined,
       fonnteResponse: result,
+      ...(overridePhone ? { note: "Dikirim ke override phone, bukan nomor customer asli" } : {}),
     });
   } catch (err) {
     req.log.error({ err }, "Send invoice WA error");
@@ -355,26 +412,32 @@ router.post("/invoices/booking/:orderNumber/send-wa", adminMiddleware, async (re
 
 router.post("/invoices/booking/:orderNumber/send-email", adminMiddleware, async (req, res) => {
   try {
-    const { orderNumber } = req.params;
-
+    const orderNumber = String(req.params.orderNumber);
     const data = await resolveInvoiceData(orderNumber);
-    if (!data) {
-      res.status(404).json({ error: "Booking tidak ditemukan" });
-      return;
-    }
+    if (!data) { res.status(404).json({ error: "Booking tidak ditemukan" }); return; }
+
+    // Jika booking bagian dari grup, gunakan data dan HTML invoice gabungan
+    const isGroup = !!data.groupRef;
+    const groupData = isGroup ? await resolveGroupInvoiceData(data.groupRef!) : null;
+    const invoiceData = groupData ?? data;
 
     const smtpFrom = process.env.SMTP_FROM?.trim();
     const smtpPass = process.env.SMTP_PASS?.trim();
-
     if (!smtpFrom || !smtpPass) {
       res.status(400).json({ error: "SMTP belum dikonfigurasi (SMTP_FROM / SMTP_PASS)" });
       return;
     }
 
-    // Build invoice HTML for email
-    const html = buildInvoiceHtml(data, { autoPrint: false });
+    // Optional override: admin dapat kirim ke email berbeda (misal untuk test)
+    const overrideTo = (req.body?.overrideTo as string | undefined)?.trim() || undefined;
+    const recipientEmail = overrideTo || invoiceData.customerEmail;
 
-    // Use nodemailer if available, else fail gracefully
+    if (!recipientEmail) {
+      res.status(400).json({ error: "Email tujuan kosong. Gunakan field 'overrideTo' atau pastikan booking memiliki email customer." });
+      return;
+    }
+
+    const html = buildInvoiceHtml(invoiceData, { autoPrint: false });
     let nodemailer: any;
     try {
       nodemailer = await import("nodemailer");
@@ -388,10 +451,14 @@ router.post("/invoices/booking/:orderNumber/send-email", adminMiddleware, async 
       auth: { user: smtpFrom, pass: smtpPass },
     });
 
+    const subject = isGroup
+      ? `Invoice Gabungan ${invoiceData.invoiceNumber} – ${invoiceData.sessions?.length ?? ""} Sesi`
+      : `Invoice ${invoiceData.invoiceNumber} – ${invoiceData.facilityName}`;
+
     await transporter.sendMail({
       from: `"Sport Center Soekarno-Hatta" <${smtpFrom}>`,
-      to: data.customerEmail,
-      subject: `Invoice ${data.invoiceNumber} – ${data.facilityName}`,
+      to: recipientEmail,
+      subject,
       html,
     });
 
@@ -403,8 +470,10 @@ router.post("/invoices/booking/:orderNumber/send-email", adminMiddleware, async 
       entity: "booking",
       after: {
         orderNumber,
-        invoiceNumber: data.invoiceNumber,
-        to: data.customerEmail,
+        groupRef: data.groupRef ?? undefined,
+        invoiceNumber: invoiceData.invoiceNumber,
+        to: recipientEmail,
+        ...(overrideTo ? { overrideTo, originalEmail: invoiceData.customerEmail } : {}),
       },
       ipAddress,
       userAgent,
@@ -412,8 +481,10 @@ router.post("/invoices/booking/:orderNumber/send-email", adminMiddleware, async 
 
     res.json({
       success: true,
-      to: data.customerEmail,
-      invoiceNumber: data.invoiceNumber,
+      to: recipientEmail,
+      invoiceNumber: invoiceData.invoiceNumber,
+      groupRef: data.groupRef ?? undefined,
+      ...(overrideTo ? { note: "Dikirim ke override email, bukan email customer asli" } : {}),
     });
   } catch (err) {
     req.log.error({ err }, "Send invoice email error");

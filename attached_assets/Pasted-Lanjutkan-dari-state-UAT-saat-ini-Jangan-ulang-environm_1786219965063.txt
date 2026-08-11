@@ -1,0 +1,307 @@
+Lanjutkan dari state UAT saat ini. Jangan ulang environment bootstrap, dependency restore, atau pure tests yang sudah berhasil kecuali diperlukan untuk verifikasi akhir.
+
+Status saat ini:
+
+* Secret Manager bootstrap VALID.
+* Development secret bundle berhasil dimuat.
+* Pure QRIS provider-aware tests: 13/13 PASSED.
+* Read-only PostgreSQL connection ke development DB berhasil.
+* Tidak ada production write/migration/reconciliation/posting yang dilakukan.
+* UAT berhenti saat mengambil schema/count/sample data karena quota.
+
+Task sekarang adalah menyelesaikan **ACTUAL DATA UAT READ-ONLY**.
+
+# 1. SAFETY
+
+Tetap READ-ONLY.
+
+Hanya gunakan:
+`SELECT`
+
+JANGAN:
+
+* INSERT
+* UPDATE
+* DELETE
+* UPSERT
+* CREATE
+* ALTER
+* DROP
+* migration
+* route yang menjalankan migration
+* final reconciliation
+* candidate persistence jika menulis DB
+* accounting posting
+* backfill apply
+* production access
+
+Jika perlu menjalankan engine, load rows via SELECT lalu evaluasi IN-MEMORY.
+
+# 2. SCHEMA PRE-FLIGHT
+
+Ambil schema ringkas untuk tabel aktual berikut jika tersedia:
+
+* public.sport_payments
+* sport_center.sport_payments
+* bank_mutations
+* qris_settlements
+* qris_settlement_items
+* qris_business_calendar_holidays
+* qris_provider_settlement_rules
+
+Tampilkan hanya:
+
+* column name
+* type
+* nullable
+* key/index relevan jika mudah diperoleh
+
+Jangan dump seluruh DDL.
+
+# 3. ROW COUNTS
+
+Ambil count ringkas:
+
+* total sport payments
+* QRIS payments
+* QRIS `mandiri_direct`
+* QRIS `paylabs`
+* QRIS `unknown`
+* total incoming bank mutations
+* actual bank mutations
+* synthetic mutations
+* existing QRIS settlements
+* reconciled vs unreconciled payments
+
+# 4. SAMPLE DATA — SANITIZED
+
+Ambil sample development secukupnya, maksimal 10–20 rows per category.
+
+Payment sample fields:
+
+* id
+* company_id
+* bank_account_id
+* amount
+* provider_code/payment_provider
+* paid_at
+* expected_settlement_date
+* provider_reference masked
+* settlement status
+
+Mutation sample:
+
+* id
+* company_id
+* bank_account_id
+* transaction_date
+* credit amount
+* source/source_classification
+* provider_name if present
+* description sanitized/masked
+* reference masked
+* reconciliation status
+
+Jangan tampilkan:
+
+* full account number
+* customer PII
+* secret/token
+* full sensitive bank reference jika tidak perlu
+
+# 5. IDENTIFY ACTUAL UAT CASES
+
+Cari data nyata development untuk:
+
+A. Mandiri Direct normal
+B. Paylabs normal
+C. Friday/weekend settlement
+D. Holiday settlement jika tersedia
+E. Multiple settlement same provider/account/date
+F. Unknown provider
+G. Amount mismatch/anomaly
+
+Jika case tidak tersedia:
+`NO_REAL_SAMPLE`
+
+Jangan fabricate actual data.
+
+# 6. RUN ENGINE IN-MEMORY
+
+Jangan persist candidate.
+
+Gunakan rows hasil SELECT dan jalankan pure candidate engine secara in-memory.
+
+Untuk setiap mutation actual yang dipilih:
+
+* company
+* bank account
+* provider evidence
+* mutation date
+* candidate payment natural batch
+* expected settlement date
+* gross batch
+* bank credit
+* observed deduction
+* effective deduction rate
+* status
+* reason
+* confidence
+
+Pastikan:
+
+* provider unknown → REVIEW
+* ambiguous partition → REVIEW
+* negative deduction → REVIEW/UNMATCHED
+* Mandiri/Paylabs tidak tercampur
+* account berbeda tidak tercampur
+
+# 7. EXPECTED DATE CHECK
+
+Untuk payment sample, tampilkan:
+
+`paid_at`
+→ Jakarta business date
+→ settlement rule/version
+→ expected settlement date
+→ actual mutation date
+
+Tandai:
+
+* MATCH
+* EARLY
+* LATE
+* UNKNOWN
+
+Jika actual settlement berbeda dari default rule, jangan ubah config dulu.
+
+# 8. OBSERVED RATE ANALYSIS
+
+Untuk case MATCH/REVIEW dengan batch valid:
+
+Hitung:
+`observed_deduction = gross - bank_credit`
+
+`effective_rate = observed_deduction / gross`
+
+Buat summary per provider:
+
+MANDIRI DIRECT
+
+* sample count
+* min rate
+* max rate
+* average/median rate
+* observed settlement delay
+
+PAYLABS
+
+* sample count
+* min rate
+* max rate
+* average/median rate
+* observed settlement delay
+
+Jika sample terlalu sedikit:
+`INSUFFICIENT_DATA`
+
+Jangan mengubah expected MDR config.
+
+# 9. VERIFY ACTUAL BANK PROVENANCE
+
+Untuk setiap mutation sample, jelaskan kenapa dianggap actual:
+
+* import table/path
+* source classification
+* statement format
+* audit/import metadata jika tersedia
+
+Jangan hanya percaya label `google_sheet` atau `csv_excel` tanpa melihat provenance jika metadata tersedia.
+
+Jika provenance meragukan:
+`MUTATION_SOURCE_UNVERIFIED`
+dan jangan MATCH.
+
+# 10. IDEMPOTENCY IN-MEMORY
+
+Jalankan engine dua kali dengan input identik.
+
+Pastikan hasil:
+
+* candidate IDs/payment IDs sama
+* status sama
+* amounts sama
+* rate sama
+
+Laporkan PASS/FAIL.
+
+# 11. UAT TABLE
+
+Buat tabel:
+
+| Case | Provider | Bank Account | Paid Date | Expected Date | Mutation Date | Gross | Credit | Deduction | Rate | Status | Reason |
+
+Mask bank account.
+
+# 12. PROVIDER COMPARISON
+
+Buat:
+
+| Metric                | Mandiri Direct | Paylabs |
+| --------------------- | -------------: | ------: |
+| Samples               |                |         |
+| Gross                 |                |         |
+| Bank Credit           |                |         |
+| Avg Deduction Rate    |                |         |
+| Median Deduction Rate |                |         |
+| Settlement Delay      |                |         |
+| MATCHED               |                |         |
+| REVIEW                |                |         |
+| UNMATCHED             |                |         |
+
+# 13. IMPORTANT STATIC GAPS TO VERIFY
+
+Sebelumnya ditemukan:
+
+* expected MDR rate belum ada di provider rule;
+* `matchWindowBusinessDays` mungkin belum digunakan;
+* expected settlement date di engine bergantung pada snapshot upstream.
+
+Verifikasi terhadap data nyata apakah ini benar-benar menimbulkan false negative.
+
+Jangan implementasikan fix dalam UAT ini.
+
+Hanya laporkan:
+
+* observed impact
+* severity
+* recommended change
+
+# 14. FINAL DECISION
+
+Berikan salah satu:
+
+`READY_FOR_STAGING_RECONCILIATION`
+
+`NEEDS_FIX_BEFORE_STAGING`
+
+`INSUFFICIENT_REAL_DATA`
+
+`BLOCKED_BY_ENVIRONMENT`
+
+Jawab eksplisit:
+
+1. Ada berapa actual Mandiri sample?
+2. Ada berapa actual Paylabs sample?
+3. Provider separation terbukti?
+4. Bank-account separation terbukti?
+5. Expected settlement date cocok?
+6. Weekend logic cocok?
+7. Holiday logic cocok?
+8. Observed Mandiri deduction rate berapa?
+9. Observed Paylabs deduction rate berapa?
+10. Ada false-positive candidate?
+11. Ada false-negative candidate?
+12. Apa gap yang harus diperbaiki sebelum staging?
+
+Jangan melakukan perubahan apa pun.

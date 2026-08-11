@@ -1,0 +1,442 @@
+# IMPLEMENTASI — SPORT CENTER
+
+## Canonical Payment Provider, Canonical Paid Timestamp, dan Provider References
+
+Lakukan implementasi pada project **Sport Center** berdasarkan hasil audit existing.
+
+Tujuan utama:
+
+1. Menjadikan provider pembayaran QRIS sebagai data canonical.
+2. Membedakan dengan jelas:
+
+   * `mandiri_direct`
+   * `paylabs`
+3. Membuat timestamp pembayaran sukses lebih konsisten.
+4. Memastikan data yang dikirim/dimirror ke CST cukup untuk rekonsiliasi berbasis provider.
+5. Mempertahankan gross amount sebagai harga customer yang sudah termasuk PPN.
+6. JANGAN menghitung MDR di Sport Center.
+
+---
+
+# KONTEKS EXISTING
+
+Sport Center memiliki:
+
+* `sport_center.sport_bookings`
+* `sport_center.sport_payments`
+* `sport_center.paylabs_transactions`
+
+QRIS Paylabs memiliki jalur:
+
+`POST /api/paylabs/create-payment`
+
+`POST /api/paylabs/webhook`
+
+dan menyimpan:
+
+* `merchant_trade_no`
+* `paylabs_trade_no`
+* `booking_id`
+* raw provider payload.
+
+Setelah sukses, Paylabs juga membuat payment utama dengan:
+
+`payment_method = QRIS`
+
+dan:
+
+`proof_url = paylabs:<paylabs_trade_no>`
+
+QRIS manual/direct saat ini juga hanya disimpan sebagai:
+
+`payment_method = QRIS`
+
+sehingga provider belum menjadi dimensi canonical.
+
+Harga booking bersifat **tax-inclusive** dan Paylabs menerima:
+
+`booking.grandTotal ?? booking.totalPrice`
+
+sebagai gross customer amount.
+
+JANGAN mengubah prinsip tersebut.
+
+---
+
+# 1. DATABASE / SCHEMA
+
+Tambahkan field canonical ke:
+
+`sport_center.sport_payments`
+
+Minimal:
+
+`payment_provider`
+
+`provider_reference`
+
+`merchant_trade_no`
+
+`provider_trade_no`
+
+`paid_at`
+
+Gunakan naming yang paling sesuai dengan convention schema existing jika kolom serupa sudah ada.
+
+## payment_provider
+
+Gunakan semantic enum/constraint:
+
+`mandiri_direct`
+
+`paylabs`
+
+`unknown`
+
+Jangan memaksa historical data menjadi provider tertentu tanpa bukti.
+
+Untuk transaksi baru, QRIS wajib memiliki provider explicit.
+
+Non-QRIS payment boleh nullable atau memakai provider lain sesuai desain existing.
+
+Migration harus backward-compatible.
+
+Jangan merusak payment existing.
+
+---
+
+# 2. PAYLABS
+
+Update flow Paylabs sehingga ketika payment sukses/finalized:
+
+`sport_payments.payment_method = QRIS`
+
+`sport_payments.payment_provider = paylabs`
+
+Isi juga jika tersedia:
+
+`merchant_trade_no`
+
+`provider_trade_no = paylabs_trade_no`
+
+`provider_reference = identifier provider terbaik`
+
+`paid_at = timestamp canonical payment success`
+
+Jangan mengandalkan hanya:
+
+`proof_url = paylabs:<trade_no>`
+
+untuk transaksi baru.
+
+Proof URL boleh tetap dipertahankan untuk compatibility.
+
+Pastikan callback idempotent tetap bekerja.
+
+Jangan membuat duplicate payment saat webhook dikirim ulang.
+
+---
+
+# 3. QRIS MANDIRI DIRECT
+
+Pada jalur QRIS manual/direct:
+
+`payment_method = QRIS`
+
+harus disertai:
+
+`payment_provider = mandiri_direct`
+
+TETAPI hanya jika route/payment flow tersebut memang secara bisnis exclusively QRIS Bank Mandiri Direct.
+
+Jika route dapat digunakan untuk QRIS provider lain:
+
+JANGAN hardcode seluruhnya sebagai Mandiri.
+
+Dalam kondisi tersebut, ubah API contract supaya provider harus dikirim secara explicit dan divalidasi.
+
+Provider tidak boleh ditentukan dari:
+
+* nama customer;
+* amount;
+* screenshot saja;
+* asumsi bahwa semua QRIS manual adalah Mandiri.
+
+---
+
+# 4. CANONICAL PAID TIMESTAMP
+
+Audit menemukan timestamp payment belum konsisten:
+
+* manual menggunakan `confirmed_at`;
+* Paylabs tidak selalu mengisi booking/payment timestamp canonical;
+* beberapa jalur menggunakan waktu callback.
+
+Buat definisi canonical:
+
+`paid_at = waktu ketika pembayaran dinyatakan sukses secara authoritative`
+
+Aturan:
+
+### Paylabs
+
+Gunakan waktu success provider jika tersedia dan tervalidasi.
+
+Jika tidak tersedia:
+
+gunakan waktu callback success yang diproses server.
+
+### Mandiri Direct/manual
+
+Gunakan waktu konfirmasi pembayaran yang authoritative.
+
+Jangan overwrite `paid_at` jika payment yang sama diproses ulang secara idempotent.
+
+Simpan timezone sebagai `timestamptz`.
+
+Jangan membentuk tanggal settlement menggunakan:
+
+`new Date().toISOString().slice(0,10)`
+
+jika semantic yang dibutuhkan adalah tanggal WIB.
+
+---
+
+# 5. BOOKING STATUS
+
+Jangan mengubah behavior booking secara luas.
+
+Tetapi perbaiki guard Paylabs jika callback sukses saat booking sudah:
+
+* cancelled
+* expired
+* rejected
+* refunded
+
+Jangan otomatis mengubah booking terminal tersebut menjadi `confirmed` tanpa policy eksplisit.
+
+Gunakan existing business rules jika tersedia.
+
+Jika belum tersedia, buat guard yang aman dan arahkan ke manual review/logging.
+
+Pastikan duplicate successful callback tetap idempotent.
+
+---
+
+# 6. TAX / GROSS
+
+JANGAN mengubah formula tax-inclusive existing dalam task ini kecuali dibutuhkan untuk menjaga compatibility.
+
+Prinsip:
+
+`gross customer = DPP + PPN`
+
+QRIS provider harus menerima:
+
+`gross customer`
+
+Settlement/reconciliation nantinya juga menggunakan gross tersebut.
+
+JANGAN:
+
+* mengurangi PPN sebelum amount dikirim ke QRIS;
+* menambahkan PPN lagi;
+* menghitung MDR;
+* menyimpan net settlement sebagai transaction amount.
+
+Sport Center hanya bertanggung jawab atas:
+
+* gross;
+* DPP;
+* tax rate;
+* tax amount;
+* payment provider;
+* provider reference;
+* payment success timestamp.
+
+---
+
+# 7. SYNC / MIRROR KE CST
+
+Pastikan data payment yang tersedia bagi CST membawa:
+
+`source_payment_id`
+
+`booking_id`
+
+`amount`
+
+`payment_method`
+
+`payment_provider`
+
+`paid_at`
+
+`provider_reference`
+
+`merchant_trade_no`
+
+`provider_trade_no`
+
+Jika CST membaca langsung schema `sport_center`, pastikan field tersedia di schema.
+
+Jika ada mirror/sync code di Sport Center, update mapping-nya.
+
+Jangan mengubah settlement/MDR logic CST dari project ini.
+
+---
+
+# 8. HISTORICAL BACKFILL
+
+Buat backfill aman untuk Paylabs existing.
+
+Gunakan bukti:
+
+`sport_center.paylabs_transactions`
+
+relasi:
+
+`booking_id`
+
+`merchant_trade_no`
+
+`paylabs_trade_no`
+
+dan jika perlu:
+
+`proof_url = paylabs:<trade_no>`
+
+Backfill:
+
+`payment_provider = paylabs`
+
+`merchant_trade_no`
+
+`provider_trade_no`
+
+`provider_reference`
+
+hanya jika hubungan payment dapat ditentukan dengan keyakinan tinggi.
+
+### Existing manual QRIS
+
+JANGAN otomatis mengisi:
+
+`mandiri_direct`
+
+untuk semua historical:
+
+`payment_method = QRIS`
+
+Jika tidak ada bukti, gunakan:
+
+`unknown`
+
+atau biarkan nullable sesuai schema.
+
+Buat report/count:
+
+* Paylabs successfully backfilled
+* Mandiri direct confidently identified
+* QRIS unknown
+* ambiguous rows
+
+Jangan menghapus historical data.
+
+---
+
+# 9. MDR
+
+Sport Center **TIDAK BOLEH menghitung MDR**.
+
+Jangan tambahkan:
+
+`0.7%`
+
+`0.3%`
+
+atau rate provider lainnya ke business logic transaction.
+
+MDR aktual akan dihitung/dideteksi di CST berdasarkan settlement dan mutasi bank.
+
+Jika schema existing memiliki field MDR dari legacy code, jangan gunakan sebagai source of truth baru.
+
+---
+
+# 10. TESTING
+
+Tambahkan test minimal untuk:
+
+### Paylabs
+
+* create payment tetap menggunakan gross tax-inclusive;
+* success webhook menghasilkan `payment_provider = paylabs`;
+* reference provider tersimpan;
+* duplicate webhook tidak membuat payment duplicate;
+* `paid_at` tidak berubah pada replay;
+* terminal cancelled/expired booking tidak diam-diam menjadi confirmed.
+
+### Mandiri Direct
+
+* payment QRIS baru memiliki provider explicit;
+* provider invalid ditolak;
+* non-QRIS tidak terdampak.
+
+### Backfill
+
+* Paylabs dapat diidentifikasi;
+* ambiguous QRIS tidak dipaksa menjadi Mandiri.
+
+---
+
+# 11. OUTPUT SETELAH IMPLEMENTASI
+
+Laporkan:
+
+## A. Files changed
+
+## B. Migration/schema changes
+
+## C. API contract changes
+
+## D. Paylabs changes
+
+## E. Mandiri Direct changes
+
+## F. Backfill result/strategy
+
+## G. Tests added
+
+## H. Compatibility risks
+
+## I. Data yang sekarang tersedia untuk CST
+
+Tampilkan contoh final payment record:
+
+```text
+payment_method
+payment_provider
+amount
+paid_at
+provider_reference
+merchant_trade_no
+provider_trade_no
+```
+
+---
+
+# BATASAN
+
+JANGAN:
+
+* membuat MDR engine;
+* membuat settlement engine;
+* membuat bank reconciliation;
+* mengubah accounting posting secara luas;
+* memperbaiki seluruh masalah pajak dalam task ini;
+* menghapus legacy data;
+* memaksa historical QRIS menjadi Mandiri tanpa bukti.
+
+Implementasikan hanya perubahan minimum yang diperlukan agar Sport Center memberikan payment event yang canonical dan provider-aware kepada CST.
+
+Setelah selesai, jalankan test yang relevan dan laporkan hasilnya.
