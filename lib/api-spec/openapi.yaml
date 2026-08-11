@@ -3003,6 +3003,9 @@ components:
           type: integer
         notes:
           type: string
+        downPaymentAmount:
+          type: number
+          description: Total down payment for the recurring payment group. Must be less than the group grand total.
 
     RecurringBookingResult:
       type: object

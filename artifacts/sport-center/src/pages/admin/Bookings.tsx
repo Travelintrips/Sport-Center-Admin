@@ -878,7 +878,7 @@ function BookingDetailDrawer({
                   </div>
                   <div className="flex justify-between items-center text-sm">
                     <span className="text-slate-500">Sisa Pembayaran</span>
-                    <span className="font-bold text-amber-600 dark:text-amber-400">{formatCurrency(Math.max(0, Number(booking.totalPrice) - Number(booking.downPayment || 0)))}</span>
+                    <span className="font-bold text-amber-600 dark:text-amber-400">{formatCurrency(Math.max(0, Number(booking.grandTotal ?? booking.totalPrice) - Number(booking.downPayment || 0)))}</span>
                   </div>
                 </div>
               )}

@@ -450,6 +450,10 @@ export default function Booking() {
               bookedForName: bookedForName.trim() || effName,
               bookedForPhone: effPhone,
               vendorId: vendorId ? Number(vendorId) : undefined,
+              downPaymentAmount:
+                paymentType === "dp" && dpAmount
+                  ? Number(dpAmount)
+                  : undefined,
             } as any,
           });
         } else {
@@ -539,6 +543,10 @@ export default function Booking() {
           promoCode: couponResult?.code || undefined,
           discountAmountPerSession: discountPerSession || undefined,
           vendorId: vendorId ? Number(vendorId) : undefined,
+              downPaymentAmount:
+                paymentType === "dp" && dpAmount
+                  ? Number(dpAmount)
+                  : undefined,
         } as any,
       });
     } else {

@@ -55,7 +55,7 @@ router.get("/payments", async (req, res) => {
 router.post("/payments", async (req, res) => {
   try {
     const { bookingId, amount, proofUrl, notes } = req.body;
-    let paymentType: string = req.body.paymentType ?? "";
+    const requestedPaymentType: string = req.body.paymentType ?? "";
 
     const [booking] = await db.select().from(bookingsTable)
       .where(eq(bookingsTable.id, Number(bookingId))).limit(1);
@@ -64,16 +64,45 @@ router.post("/payments", async (req, res) => {
     const existingPayments = await db.select().from(paymentsTable)
       .where(eq(paymentsTable.bookingId, Number(bookingId)));
 
-    // Auto-detect payment_type jika tidak dikirim dari client
-    if (!paymentType) {
-      if (booking.isDpPaid && Number(booking.downPayment) > 0) {
-        const hasDpActive = existingPayments.some(
-          (p) => p.paymentType === "dp" && (p.status === "pending" || p.status === "confirmed"),
-        );
-        paymentType = hasDpActive ? "pelunasan" : "dp";
-      } else {
-        paymentType = "full_payment";
-      }
+    const configuredDp = booking.isDpPaid || Number(booking.downPayment) > 0;
+    const hasDpActive = existingPayments.some(
+      (p) => p.paymentType === "dp" && (p.status === "pending" || p.status === "confirmed"),
+    );
+    const paymentType = configuredDp
+      ? hasDpActive ? "pelunasan" : "dp"
+      : "full_payment";
+
+    // Payment type is derived from the booking state, never trusted from the browser.
+    // This also repairs the old recurring-booking bug where the client sent
+    // full_payment even though a DP had been configured.
+    if (
+      requestedPaymentType &&
+      !["dp", "pelunasan", "full_payment"].includes(requestedPaymentType)
+    ) {
+      res.status(400).json({ error: "Tipe pembayaran tidak valid" });
+      return;
+    }
+
+    const total = Number(booking.grandTotal ?? booking.totalPrice);
+    const confirmedDp = existingPayments
+      .filter((p) => p.paymentType === "dp" && p.status === "confirmed")
+      .reduce((sum, p) => sum + Number(p.amount), 0);
+    const expectedAmount =
+      paymentType === "dp"
+        ? Number(booking.downPayment)
+        : paymentType === "pelunasan"
+        ? Math.max(0, total - confirmedDp)
+        : total;
+    const submittedAmount = Number(amount);
+    if (
+      !Number.isFinite(submittedAmount) ||
+      submittedAmount <= 0 ||
+      Math.abs(submittedAmount - expectedAmount) > 1
+    ) {
+      res.status(400).json({
+        error: `Nominal ${paymentType} harus ${expectedAmount.toLocaleString("id-ID")}`,
+      });
+      return;
     }
 
     // Validasi: jangan buat duplicate pending payment untuk tipe yang sama

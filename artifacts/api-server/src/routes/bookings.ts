@@ -698,6 +698,7 @@ router.post("/bookings/recurring", async (req, res) => {
     const {
       customerName, customerEmail, facilityId, startDate, startTime, durationHours,
       notes, repeatType, repeatCount, specificDates, promoCode, discountAmountPerSession,
+      downPaymentAmount,
       // Company billing fields (optional)
       payerType, companyCustomerId, customerId: bodyCustomerId, bookedForName, bookedForPhone,
     } = req.body;
@@ -724,6 +725,17 @@ router.post("/bookings/recurring", async (req, res) => {
     const basePrice = Number(facility.pricePerHour) * durationHours;
     const discount = Math.min(Number(discountAmountPerSession) || 0, basePrice);
     const totalPrice = basePrice - discount;
+    const requestedDownPayment =
+      downPaymentAmount == null || downPaymentAmount === ""
+        ? null
+        : Number(downPaymentAmount);
+    if (
+      requestedDownPayment != null &&
+      (!Number.isFinite(requestedDownPayment) || requestedDownPayment <= 0)
+    ) {
+      res.status(400).json({ error: "Jumlah DP tidak valid" });
+      return;
+    }
 
     const created: any[] = [];
     const skipped: string[] = [];
@@ -737,6 +749,15 @@ router.post("/bookings/recurring", async (req, res) => {
       }
       // Per-date tax calc: respects effectiveDate backward-compat rule
       const taxCalc = await calculateTax(totalPrice, "sport_booking", bookingDate);
+      if (
+        requestedDownPayment != null &&
+        requestedDownPayment >= taxCalc.grandTotal
+      ) {
+        res.status(400).json({
+          error: `DP per sesi (${requestedDownPayment}) harus lebih kecil dari total sesi (${taxCalc.grandTotal})`,
+        });
+        return;
+      }
       const orderNumber = await generateOrderNumber();
       const [booking] = await db.insert(bookingsTable).values({
         orderNumber,
@@ -758,6 +779,12 @@ router.post("/bookings/recurring", async (req, res) => {
         dpp: taxCalc.taxAmount > 0 ? String(taxCalc.dpp) : null,
         ppnAmount: taxCalc.taxAmount > 0 ? String(taxCalc.taxAmount) : null,
         grandTotal: taxCalc.taxAmount > 0 ? String(taxCalc.grandTotal) : null,
+        ...(requestedDownPayment != null
+          ? {
+              downPayment: String(requestedDownPayment),
+              isDpPaid: true,
+            }
+          : {}),
         ...(isCompanyPayer ? {
           payerType: "company",
           companyCustomerId: Number(companyCustomerId),

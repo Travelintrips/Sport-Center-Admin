@@ -12,6 +12,8 @@ export const bookingGroupsTable = scSchema.table("booking_groups", {
   customerPhone: text("customer_phone").notNull(),
   customerName: text("customer_name").notNull(),
   totalPayment: numeric("total_payment", { precision: 12, scale: 2 }).notNull(),
+  downPayment: numeric("down_payment", { precision: 12, scale: 2 }).notNull().default("0"),
+  isDpPaid: boolean("is_dp_paid").notNull().default(false),
   status: bookingGroupStatusEnum("status").notNull().default("pending"),
   notes: text("notes"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

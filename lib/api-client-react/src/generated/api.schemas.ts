@@ -327,6 +327,7 @@ export interface RecurringBookingInput {
   repeatType: RecurringBookingInputRepeatType;
   repeatCount: number;
   notes?: string;
+  downPaymentAmount?: number;
 }
 
 export interface RecurringBookingResult {

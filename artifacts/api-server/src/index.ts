@@ -344,6 +344,10 @@ async function runStartupMigrations() {
        created_at timestamptz NOT NULL DEFAULT NOW(),
        updated_at timestamptz NOT NULL DEFAULT NOW()
      )`,
+     `ALTER TABLE sport_center.booking_groups
+        ADD COLUMN IF NOT EXISTS down_payment numeric(12,2) NOT NULL DEFAULT 0`,
+     `ALTER TABLE sport_center.booking_groups
+        ADD COLUMN IF NOT EXISTS is_dp_paid boolean NOT NULL DEFAULT false`,
     // wa_booking_sessions
     `CREATE TABLE IF NOT EXISTS sport_center.wa_booking_sessions (
        id serial PRIMARY KEY,
