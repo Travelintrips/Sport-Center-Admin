@@ -1,19 +1,11 @@
+modules = ["nodejs-20", "web", "postgresql-16"]
 
-modules = ["nodejs-20", "web", "python-base-3.13"]
-
-
-modules = ["nodejs-20", "web", "python-base-3.13", "postgresql-16"]
 
 [deployment]
 router = "application"
 deploymentTarget = "autoscale"
-run = [
-  "bash",
-  "-c",
-  "PORT=8080 NODE_ENV=production node --enable-source-maps ./artifacts/api-server/dist/index.mjs",
-]
-# Perbaikan: Tambahkan pnpm install SEBELUM build
-build = ["bash", "-c", "pnpm install && pnpm -r --if-present run build"]
+run = ["bash", "-c", "PORT=8080 NODE_ENV=production node --enable-source-maps ./artifacts/api-server/dist/index.mjs"]
+build = ["bash", "-c", "pnpm -r --if-present run build"]
 
 [deployment.postBuild]
 args = ["pnpm", "store", "prune"]
@@ -36,11 +28,12 @@ name = "Start application"
 author = "agent"
 
 [workflows.workflow.metadata]
-outputType = "console"
+outputType = "webview"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "bash scripts/start-dev.sh"
+args = "PORT=5000 BASE_PATH=/ pnpm --filter @workspace/sport-center run dev"
+waitForPort = 5000
 
 [agent]
 stack = "BEST_EFFORT_FALLBACK"
@@ -54,32 +47,6 @@ timeoutMs = 20000
 localPort = 5000
 externalPort = 80
 
-[[ports]]
-localPort = 8080
-externalPort = 8080
-
-[[ports]]
-localPort = 8081
-externalPort = 8081
-
-[[ports]]
-localPort = 21089
-externalPort = 3000
-
-<<<<<<< HEAD
-=======
-
-# Konfigurasi nix (HANYA SATU KALI)
-[nix]
-channel = "stable-25_05"
-
-[nix.env]
-# Force pnpm untuk hoist dependencies agar tersedia di semua workspace packages
-PNPM_SHAMEFULLY_HOIST = "true"
-CI = "true"
-
-
->>>>>>> ddcf33370fb1c98512b9691583a11495778fea73
 [userenv]
 
 [userenv.shared]
@@ -112,15 +79,6 @@ AI_SPORTCENTER_ENABLED = "true"
 AI_SPORTCENTER_MAX_REPLY_LENGTH = "900"
 OPENAI_API_KEY = "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"
 OPENAI_BASE_URL = "https://api.openai.com/v1"
-FONNTE_CUSTOMER_TOKEN = ""
-VITE_PUBLIC_URL = "https://sc.travelintrips.co.id"
-PORT = "8080"
-PAYLABS_PROD_MERCHANT_ID = "010613"
-PAYLABS_PROD_PRIVATE_KEY = "-----BEGIN RSA PRIVATE KEY----- MIIEogIBAAKCAQB8vE45P4Q4fkfJPFny8m/fZ83NDibHo/LBmAaIxTiWN0XytxI5 CChxkBQf1LdDPciDgSlxUrK0UDNn8zyyLofPiDYRLp5DMe+Knr6sZCBDsruqMBBc Tzt3hdn0LXqV7B0OAnuK2EhY2EDdtcbmQdt8qP1pLnj/Iz/GipI5lTE2LzoMugiD 96UjhaacumVX7GKJRzZsqX8y3smPW+cXKeEYhtqXmtGj2z26v8TB8fE/vAkI2zwe RrxKC9gzojmf4uzGGIi9iv5xhbrRFTseX/toAYw3U+I8N5tV0JTFP61TligHrXwk YLr/hKG+Hnx5bmhq9wihRvn7dxt6HczqweZFAgMBAAECggEAMgoMy3SKo2stezJF 12ugq5vl+LQLpJ1FvpoxTN7pk4F7AyKkIdL+/ofROu/H0SbQ8Mh5CqglXqap6LKw j76Q5xV6syvje4tl0FNcpKXKN75VALIlbhKvBYTh6c3w1oIRKdSfIRUg+NtQMmFA +JBE796PQonNKnVGmWxvur/6LQT3t13p3Qf53NZ9cjO0UHsjZZmXuwdBERpU12/9 8eeQ3+05yTM3Y0PLdn89CfMu1GUNTu1oKbJukZsmRlvZa6QPV1Pd5ljJSFXWQ5rP sS9aa5OxCdUfA/mVYQmMFbWyRwRUSWCw5EXCeko4Zo7y6IGtAI6ISBxTEH/cLtZE DkcTJQKBgQC3AVv2r9mDb0pU1tF6LNhR9s2N/EM7B937PauzSJ7YCiKpPrJ1Hfjb Fp655E4omCTAnzFE0u9kp5uxt5gPNpRZEQFB6zcTn8iL8QGMdQqC9DEvQ3fDwzT/ Lhd3zJWByD40fUec+taUdzDVqo2TQhdqC0UWFwB+zA4tlGtnY8VXLwKBgQCufQh3 yXx8Y1xuyvjBh8MZ8R7ig+c2+HuaGdPnpMaAn7e7E1Dp1/eHAbJL3osNtH5tP6kZ N7SLQDtRTbz9sYhZCYKbdvoJev/FER9OOXuG+KC7i0pxU0rTv5WyqIylqTYXnCYm KAYn5S8XTteyGW5oFojWsf9Ah7oNgc7+5uV8ywKBgCerNcINcDrbXuNxBUtUeTeb JgeHDRO4qteREKz2KuhtmgHRw2E7s/vZtWJaKM8H27+dQlLG3nmVE1y8jUuO6y07 UGh3kiLA2fnrrghCPpsQT7ENEOLwZ4aA+TlQsX/GZiV+mo1emjDofT9zjujCxMyJ 0Nnu9n6FwPUEXRu2NsqlAoGAIn9L1kr6lqkaVDlC1xhdRVq7jXMgmmikH0Jt98VH DZUGQTE/dQwivwlh08gq28nMmRLV/stZoZJQZ/GjpNCdsWTE8rGiG4+6055f/xo0 RuoO9SVD0YXzLEwbb5gNPo9mx2Iy1KZjGS4hkk0fLfIDNwcFhNTqLzrmWNdKMnE5 ++MCgYEAqeaU9YDO5yZfiO0TJJhlyXKDPKvtIOqE/edOVY0fZzr1MOhJ1rmbsYog 40CWxXJJZCdnHvfwF8iSf9SBkEqzWi3cn0VkS2xnNuw7VW8FDiijyfUE3Pvwqeae TXlTn2h7h8FKr4r5sMhsQCMfKJ1cZ1oAUkrMGdHgND4t3z1Drx4= -----END RSA PRIVATE KEY-----"
-PAYLABS_PROD_PUBLIC_KEY = "-----BEGIN PUBLIC KEY----- MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0HDowwUAniBqAxUziB2+RL7bKwMBY31V3yZav0y8mJwriSjYgFlXIkaSspybEPPnPHfaTT40jBEGIGlzWq5K+wV7abhkVNRJN1U/2P9WXuZrv+mGDKqwzpqqwoMYJM46eXVw8D8twt5bH64hXuZC0FzkmZA+mjPpKMEbpSj63+Xnx2ZNAzB/GeoDBFSV05XaIlYC+vvVxfO4i2/jFLSc6R0SpRcva8NHurEh3m5urFmhVL01yBvr7iJV1TVFDuyO5AnsNQ2VmOFPeTPkL4butMGHT6ng8OIvHaUpR5ynqHexqkPeB6DQCsgj+Lal9CjjdmYSY31SuXSa/sRJAzBLmwIDAQAB -----END PUBLIC KEY-----"
-PAYLABS_SANDBOX_MERCHANT_ID = "010728"
-PAYLABS_SANDBOX_PRIVATE_KEY = "-----BEGIN RSA PRIVATE KEY----- MIIEowIBAAKCAQEAkIbGoeDb+PSeISrr8gn+qMJmS3euQef35bH3+cDdykV6IJSM iXRCQ4tpxKxS9fFuXDFbdkSXau4EAhztqwD4WwYxHRdguWKXKlRu9q1asLszJ1uq wWpK7+eB1X94csmfU4I4VjvSxMiIq945Lv6J9Hw/qfh7O56Q3jNA4BJqH+therGh GA2a77xqEWIGYYdDQ9SW5hXZJ3t1i5C4XeHTiC40zm9Yz88OjPMpF406fDHtUkPJ WFnqhqWZqmAVqZdVZMBDDByyZzWt2qIJYY/i7F/5NGwgAXPVnO3o+2H49sGEzDqL mRtXrA7XFU1szgJILuLmEXMHRFJMilp4jK5utwIDAQABAoIBAForPBIS8CrKsz2O QdaoVbGEV74N1TJZP1iXSFcR9U4VOrTI+UVou07Y1AxYVwoKrwfl42JOOQoFpYqL 8dwWptxjaJD13OrMj/Ng6joMveA1axzLHCW/4zD6Bw7kkIlNMZIwVGW4vS74zgws gRDIzdkzC6VH2drAezGmWHt0AbIXgG8NNGD1ABrhJkYsrv+hqOickmsVD73aGP5Z tJ8RJZbe4EZoz9nyABYDKGJFqZIyVN1x8RtoWsG9j5ckQm+zsrUKeIww3h+mOAA8 YOJsnOOJ/h20jS6itPp/IZz5QJIvAjyK43/TXovuKIn+v2mIdvctNCCYkNc6PIuE iLMskwECgYEAx/9tITZKb7QTaTDQgNMQYRiKvayM6Cm/KqEwe63pPz69Oxc9pKcr bqgX0sAtTgmAHJAzYf1dW2SmxunPTcaPZ9OVG1DdhqX4FoAaafRhazEJprRlNEpR sr06dVoQm3eFFAqB44VtOyhenXO8sYW8FvVYRY5cOHjn4vipbw6ZmHECgYEAuP72 vc1eL0p6duOOIiehJ4bdfTcVeILbp60ATMLEm9md6Ocr9Fq3MkBMGHLVzovdTDn7 edrAg9mQ6/eWlMWw6PRPe/AUrogQHQxdcQ1tyIXZpIvUw7mjcODgmvlBJu37v8X/ LiVEotrcubSNngd2BfNxNjBdRc4Z5bOLWC7CTacCgYA8emcbxfkYclH0W0iRzEGF uxApb0Zk5krirz+kBuEjuOssNUj0w4CEw9wAZRDOKl1NReXj2eQjQPqV6BpCIKs4 8GiEjB2RHBs7Yp2aMMZMzdVnTeHUwCyYalSFLCkdejUJ7Gt+y9hOLVT/NAJ5hEFu h96bmgMVKKqmnh9OcBHOYQKBgQCAm7f7gZ9dryBuMIpqUjSl3wtx9m51xjtgWVQh CTJXyrUN6lBTYxGC3NJKGONs4S0qxhB+yUYXI5SthwVnTfxMJzRuzBwErdDN8P+x DY3p3qvMye1TWGY4ng1nj6rsnnvq+YIKmZwav569d7kQSM2TG4f0DTF6yuqUFvrj hjZMdwKBgHlg8qh/DuaDKecEtdizlVU2Lm6xZ+fbRALndPgMJeERD/aMhua7CPkK X3C1OmzIB/GiZODfa1wTpMobZtGdjPCVvN9kMBfcW90mzNkSYzMHAhojbbNnnplp iypogS38oMrEyfKY3s+Q4EiMejtf+dQV4r4snweVAa7ZUL01Xg2N -----END RSA PRIVATE KEY-----"
-PAYLABS_SANDBOX_PUBLIC_KEY = "-----BEGIN PUBLIC KEY----- MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAkIbGoeDb+PSeISrr8gn+ qMJmS3euQef35bH3+cDdykV6IJSMiXRCQ4tpxKxS9fFuXDFbdkSXau4EAhztqwD4 WwYxHRdguWKXKlRu9q1asLszJ1uqwWpK7+eB1X94csmfU4I4VjvSxMiIq945Lv6J 9Hw/qfh7O56Q3jNA4BJqH+therGhGA2a77xqEWIGYYdDQ9SW5hXZJ3t1i5C4XeHT iC40zm9Yz88OjPMpF406fDHtUkPJWFnqhqWZqmAVqZdVZMBDDByyZzWt2qIJYY/i 7F/5NGwgAXPVnO3o+2H49sGEzDqLmRtXrA7XFU1szgJILuLmEXMHRFJMilp4jK5u twIDAQAB -----END PUBLIC KEY-----"
 
 [userenv.development]
 SUPABASE_URL_DEV = "https://xssrfshdrtdfupgqwfdw.supabase.co"
@@ -141,7 +99,6 @@ SUPABASE_STORAGE_BUCKET = "https://nzdweipzckfszczzqtuw.storage.supabase.co/stor
 SUPABASE_SERVICE_ROLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im56ZHdlaXB6Y2tmc3pjenpxdHV3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3ODQwMjg0NCwiZXhwIjoyMDkzOTc4ODQ0fQ.W0uM_UzGfF8Zy4PFQKhz6dKpEVDHS6_k9FtqoM9iGms"
 SUPABASE_DATABASE_URL = "postgresql://postgres.nzdweipzckfszczzqtuw:AnTXXOl0t1ArQOEU@aws-1-ap-southeast-2.pooler.supabase.com:6543/postgres"
 SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im56ZHdlaXB6Y2tmc3pjenpxdHV3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg0MDI4NDQsImV4cCI6MjA5Mzk3ODg0NH0.p9k3-qyRjPuXsHLizUrSRMyS-0yJAatUyjQU9NIIu1U"
-# Tambahkan GA4 tracking
-GA4_PROPERTY_ID = "547502054"
-# WhatsApp Group ID untuk notifikasi (isi dengan ID group Anda)
-WHATSAPP_GROUP_ID = ""
+
+[nix]
+channel = "stable-25_05"
