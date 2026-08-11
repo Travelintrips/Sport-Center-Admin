@@ -1,0 +1,344 @@
+Lanjutkan dari dokumen migrasi yang sudah dibaca.
+
+Kerjakan **PHASE A ONLY** terlebih dahulu.
+
+Jangan menjalankan repair payment/accounting/tax actual pada tahap ini.
+
+# PHASE A — OWNERSHIP MODEL MIGRATION + DRY-RUN
+
+## 1. Environment safety
+
+Development only.
+
+Verifikasi:
+
+* NODE_ENV / APP_ENV
+* database source
+* sanitized database fingerprint
+* schema
+
+Jika production terdeteksi:
+STOP.
+
+## 2. Audit existing ownership schema
+
+Audit:
+`sport_center.facility_company_mappings`
+
+Tentukan:
+
+* current company FK target;
+* existing rows;
+* indexes;
+* overlap constraints;
+* code paths yang membaca/menulis mapping.
+
+Laporkan apakah saat ini FK benar-benar menunjuk ke:
+`sport_center.users`
+
+## 3. Migrate ownership to `public.companies`
+
+Target canonical:
+`facility_company_mappings.company_id`
+→ `public.companies.id`
+
+Pilih migration paling aman:
+
+### Preferred
+
+Jika table masih kosong atau dapat dimigrasikan aman:
+repoint FK ke `public.companies`.
+
+### Transitional
+
+Jika existing rows/consumers membuat repoint langsung berisiko:
+tambahkan canonical company column baru dan pertahankan legacy sementara.
+
+Jangan destructive drop legacy field pada Phase A.
+
+Migration harus:
+
+* additive/backward-compatible;
+* idempotent;
+* tidak menyentuh `sport_center.users.id=1`.
+
+## 4. Resolver update
+
+Update:
+`resolvePaymentCompany(...)`
+
+Resolver tidak boleh lagi bergantung pada:
+`users.account_type = company`
+
+Priority:
+
+1. source payment company
+2. booking company
+3. invoice company
+4. facility ownership mapping
+5. validated merchant/store mapping
+
+Semua company harus resolve terhadap:
+`public.companies`
+
+Return:
+
+* companyId
+* companyCode
+* companyName
+* evidenceSource
+* evidenceReference
+* deterministic
+* reason
+
+## 5. Auth separation regression
+
+Pastikan:
+`sport_center.users.id=1`
+
+tetap:
+
+* Admin
+* personal
+* login/auth identity
+
+Tidak boleh berubah.
+
+Test bahwa auth/admin semantics tetap jalan.
+
+## 6. Approved Facility mappings
+
+Business approval:
+
+Facility 1
+→ `public.companies.id = 1`
+→ CST / PT Cahaya Sejati Teknologi
+
+Facility 7
+→ `public.companies.id = 1`
+→ CST / PT Cahaya Sejati Teknologi
+
+Effective from:
+`2026-08-09`
+
+Source:
+`manual_business_approval`
+
+Sebelum insert:
+
+* check existing mapping;
+* check overlap;
+* check conflict.
+
+Jika conflict:
+STOP:
+`OWNERSHIP_CONFLICT`
+
+Jika aman:
+buat mapping development secara idempotent.
+
+## 7. Verify resolver
+
+Expected:
+
+Payment 13:
+
+* facility 1
+* company 1 / CST
+* deterministic true
+
+Payment 14:
+
+* facility 7
+* company 1 / CST
+* deterministic true
+
+Evidence:
+facility ownership mapping.
+
+## 8. Dry-run payment 13
+
+Jangan apply repair.
+
+Tampilkan proposed changes:
+
+### Source
+
+* company_id NULL → 1
+
+### Mirror
+
+* source_payment_id → 13
+* company_id → 1
+* bank_account_id
+* method = QRIS
+* payment_provider = mandiri_direct
+* provider_code = mandiri_direct
+* provider metadata
+* paid_at
+* expected settlement date
+* entry_id = 9
+
+### Accounting
+
+Reuse:
+`sc_payment_13`
+entry 9
+
+Proposed metadata only:
+
+* source = sport_center_payment
+* source_payment_id = 13
+* company_id = 1
+* payment_method = QRIS
+* payment_provider = mandiri_direct
+* bank_account_id
+* payment_type = full_payment
+
+Do not change GL amounts.
+
+### Tax
+
+Internal tax:
+Rp9.910
+
+If public GL tax missing:
+classify:
+`SAFE_PUBLIC_TAX_REPAIR`
+
+but do not insert.
+
+## 9. Dry-run payment 14
+
+Same process:
+
+Source company → 1
+
+Mirror:
+source_payment_id = 14
+entry_id = 10
+
+Accounting:
+reuse `sc_payment_14`
+entry 10
+
+Tax:
+Rp4.955
+→ classify if safe.
+
+## 10. Legacy company consistency
+
+Existing accounting entries 9/10 have:
+`company_id = 1`
+
+After ownership migration:
+classify:
+`LEGACY_COMPANY_CONSISTENT`
+
+Do not rewrite company unnecessarily.
+
+## 11. GL safety
+
+Verify:
+Payment 13:
+debit = credit = Rp100.000
+
+Payment 14:
+debit = credit = Rp50.000
+
+Do not regenerate GL.
+
+## 12. Current QRIS debit account
+
+Keep:
+`Bank Mandiri CST`
+`1-1020-CST`
+
+Do not redesign clearing in Phase A.
+
+Continue warning:
+`ACCOUNTING_DESIGN_REVIEW_REQUIRED`
+
+## 13. Tests
+
+Run:
+
+* typecheck libs
+* API typecheck
+* API build
+* ownership tests
+* auth regression tests
+* resolver tests
+* accounting recovery tests
+* payment/provider tests
+* tax tests
+* git diff --check
+
+## 14. Runtime validation
+
+Restart development combined workflow.
+
+Verify:
+
+* /health = 200
+* /readiness = 200
+* /api/health = 200
+
+## 15. Final Phase A report
+
+Return:
+
+### A. Ownership model before/after
+
+### B. Migration strategy
+
+### C. Auth separation result
+
+### D. Facility 1 mapping
+
+### E. Facility 7 mapping
+
+### F. Resolver result payment 13/14
+
+### G. Payment 13 repair dry-run
+
+### H. Payment 14 repair dry-run
+
+### I. Mirror repair dry-run
+
+### J. Accounting recovery dry-run
+
+### K. Tax repair eligibility
+
+### L. GL validation
+
+### M. Tests/build/runtime
+
+### N. Remaining risks
+
+### O. Phase A final status
+
+Use one:
+
+`READY_FOR_CONTROLLED_REPAIR`
+
+`OWNERSHIP_CONFLICT`
+
+`COMPANY_MODEL_MIGRATION_BLOCKED`
+
+`MANUAL_REVIEW_REQUIRED`
+
+# IMPORTANT
+
+Jangan menjalankan Phase B actual repair dalam task ini.
+
+Jangan:
+
+* update payment 13/14
+* update mirror 13/14
+* update entry 9/10
+* insert public tax line
+* final reconciliation
+* settlement posting
+* MDR posting
+* production deploy

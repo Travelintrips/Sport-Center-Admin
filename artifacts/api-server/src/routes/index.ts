@@ -57,6 +57,11 @@ import invoicesRouter from "./invoices";
 import invoiceSettingsRouter from "./invoiceSettings";
 import documentSettingsRouter from "./documentSettings";
 import dataConnectionsRouter from "./dataConnections";
+import rekapRouter from "./rekap";
+import corporateDocumentationRouter from "./corporateDocumentation";
+import analyticsPublicRouter from "./analyticsPublic";
+import paylabsSettingsRouter from "./paylabsSettings";
+import paylabsPaymentRouter from "./paylabsPayment";
 
 const router: IRouter = Router();
 
@@ -117,5 +122,10 @@ router.use(invoicesRouter);
 router.use(invoiceSettingsRouter);
 router.use(documentSettingsRouter);
 router.use(dataConnectionsRouter);
+router.use(rekapRouter);
+router.use(corporateDocumentationRouter);
+router.use(analyticsPublicRouter);
+router.use(paylabsSettingsRouter);
+router.use(paylabsPaymentRouter);
 
 export default router;

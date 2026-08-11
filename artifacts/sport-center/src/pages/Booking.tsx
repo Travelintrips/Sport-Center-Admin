@@ -33,7 +33,7 @@ import { id as idLocale, enUS } from "date-fns/locale";
 import {
   MapPin, Calendar, Clock, Receipt, ChevronLeft,
   RefreshCw, CheckCircle2, XCircle, AlertTriangle, Loader2, Pencil, X as IconX,
-  Plane, ShieldCheck, User, Building2, CreditCard, Banknote
+  Plane, ShieldCheck, User, Building2, CreditCard, Banknote, PartyPopper, Tag
 } from "lucide-react";
 import { getToken } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
@@ -66,13 +66,22 @@ export default function Booking() {
   const durationStr = queryParams.get("duration") || "1";
   const duration = parseInt(durationStr) || 1;
   const mode = queryParams.get("mode") || "time_slot";
-  const isWalkIn = mode === "walk_in";
   const urlActivityType = queryParams.get("activityType") || "";
   const bookingSource = queryParams.get("source") || "";
 
   const { data: facility, isLoading: isLoadingFacility } = useGetFacility(facilityId, {
     query: { enabled: !!facilityId, queryKey: getGetFacilityQueryKey(facilityId) },
   });
+
+  // Keep legacy Gym links correct even when they do not include
+  // mode=walk_in. Older facility rows may still be stored as time_slot.
+  const isGymFacility = Boolean(
+    facility && (
+      /gym|fitness/i.test(facility.name ?? "") ||
+      /gym|fitness/i.test(facility.category ?? "")
+    )
+  );
+  const isWalkIn = mode === "walk_in" || facility?.bookingMode === "walk_in" || isGymFacility;
 
   // --- Auth user ---
   const { data: currentUser, isLoading: isLoadingUser } = useGetMe({
@@ -130,9 +139,11 @@ export default function Booking() {
   const { data: vendors = [] } = useListVendors();
 
   // --- Booking mode: umum / angkasa_pura / perusahaan ---
-  const [bookingMode, setBookingMode] = useState<"umum" | "angkasa_pura" | "perusahaan">("umum");
+  const [bookingMode, setBookingMode] = useState<"umum" | "angkasa_pura" | "perusahaan" | "event">("umum");
   const isAP = bookingMode === "angkasa_pura";
   const isCompanyMode = bookingMode === "perusahaan";
+  const isEvent = bookingMode === "event";
+  const EVENT_DISCOUNT_RATE = 3 / 14; // ≈ 21.43% — 350.000 → 275.000 tepat
   const [idCardNumber, setIdCardNumber] = useState("");
 
   // --- Company mode state ---
@@ -353,7 +364,9 @@ export default function Booking() {
     setCouponError(null);
     setCouponResult(null);
     try {
-      const baseAmt = facility ? facility.pricePerHour * duration : 0;
+      const baseAmt = facility
+        ? facility.pricePerHour * (isWalkIn ? bookingPeopleCount : duration)
+        : 0;
       const purchaseAmount = isRepeat ? baseAmt * effectiveCount : baseAmt;
       const res = await fetch("/api/promos/validate-code", {
         method: "POST",
@@ -449,11 +462,15 @@ export default function Booking() {
               customerId: isAdminBooking ? prepData.customerId : undefined,
               bookedForName: bookedForName.trim() || effName,
               bookedForPhone: effPhone,
+
               vendorId: vendorId ? Number(vendorId) : undefined,
               downPaymentAmount:
                 paymentType === "dp" && dpAmount
                   ? Number(dpAmount)
                   : undefined,
+
+              vendorId: (vendorId && vendorId !== "__none__") ? Number(vendorId) : undefined,
+
             } as any,
           });
         } else {
@@ -466,7 +483,7 @@ export default function Booking() {
               bookingDate: date,
               ...(isWalkIn ? {} : { startTime, durationHours: duration }),
               activityType: urlActivityType || undefined,
-              numberOfPeople: isWalkIn ? parseInt(numberOfPeople) || 1 : undefined,
+              numberOfPeople: isWalkIn ? bookingPeopleCount : undefined,
               notes,
               customerType: "umum",
               payerType: "company",
@@ -474,7 +491,7 @@ export default function Booking() {
               customerId: isAdminBooking ? prepData.customerId : undefined,
               bookedForName: bookedForName.trim() || effName,
               bookedForPhone: effPhone,
-              vendorId: vendorId ? Number(vendorId) : undefined,
+              vendorId: (vendorId && vendorId !== "__none__") ? Number(vendorId) : undefined,
             } as any,
           });
         }
@@ -540,8 +557,13 @@ export default function Booking() {
           repeatCount,
           notes,
           specificDates: selectedDates,
-          promoCode: couponResult?.code || undefined,
-          discountAmountPerSession: discountPerSession || undefined,
+          customerType: bookingMode === "angkasa_pura" ? "angkasa_pura" : "umum",
+          idCardNumber: isAP ? idCardNumber.trim() : undefined,
+          promoCode: isAP || isEvent ? undefined : couponResult?.code || undefined,
+          discountAmountPerSession: isAP || isEvent ? undefined : discountPerSession || undefined,
+          bookingType: isEvent ? "event" : "regular",
+          payerType: isCompanyBilling ? "company" : "personal",
+          companyCustomerId: isCompanyBilling && billingStatus?.companyId ? billingStatus.companyId : undefined,
           vendorId: vendorId ? Number(vendorId) : undefined,
               downPaymentAmount:
                 paymentType === "dp" && dpAmount
@@ -560,12 +582,13 @@ export default function Booking() {
           bookingDate: date,
           ...(isWalkIn ? {} : { startTime, durationHours: duration }),
           activityType: urlActivityType || undefined,
-          numberOfPeople: isWalkIn ? parseInt(numberOfPeople) || 1 : undefined,
+          numberOfPeople: isWalkIn ? bookingPeopleCount : undefined,
           notes,
           customerType: bookingMode === "angkasa_pura" ? "angkasa_pura" : "umum",
           idCardNumber: isAP ? idCardNumber.trim() : undefined,
-          promoCode: isAP ? undefined : couponResult?.code || undefined,
-          discountAmount: isAP ? undefined : discountPerSession || undefined,
+          promoCode: isAP || isEvent ? undefined : couponResult?.code || undefined,
+          discountAmount: isAP || isEvent ? undefined : discountPerSession || undefined,
+          bookingType: isEvent ? "event" : "regular",
           payerType: isCompanyBilling ? "company" : "personal",
           companyCustomerId: isCompanyBilling && billingStatus?.companyId ? billingStatus.companyId : undefined,
           ...(existingCustomerId ? { customerId: existingCustomerId } : {}),
@@ -611,7 +634,12 @@ export default function Booking() {
   const endHours = hours + duration;
   const endTime = `${endHours.toString().padStart(2, "0")}:${(minutes || 0).toString().padStart(2, "0")}`;
 
-  const totalPrice = facility ? facility.pricePerHour * duration : 0;
+  const bookingPeopleCount = isWalkIn
+    ? Math.max(1, Math.min(20, parseInt(numberOfPeople, 10) || 1))
+    : 1;
+  const totalPrice = facility
+    ? facility.pricePerHour * (isWalkIn ? bookingPeopleCount : duration)
+    : 0;
 
   if (isLoadingFacility || isLoadingUser) {
     return (
@@ -859,7 +887,7 @@ export default function Booking() {
                         <SelectValue placeholder={t("Pilih vendor...", "Select vendor...")} />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="">{t("— Tanpa vendor —", "— No vendor —")}</SelectItem>
+                        <SelectItem value="__none__">{t("— Tanpa vendor —", "— No vendor —")}</SelectItem>
                         {vendors.map((v) => (
                           <SelectItem key={v.id} value={String(v.id)}>{v.name}</SelectItem>
                         ))}
@@ -883,7 +911,7 @@ export default function Booking() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className={`grid gap-2 ${isLoggedIn ? "grid-cols-3" : "grid-cols-2"}`}>
+              <div className="grid grid-cols-2 gap-2">
                 <button
                   type="button"
                   onClick={() => { setBookingMode("umum"); if (isLoggedIn) trackPayerSelection("personal"); }}
@@ -906,6 +934,19 @@ export default function Booking() {
                     <div className={`text-xs ${isAP ? "text-primary-foreground/80" : "text-muted-foreground"}`}>{t("Diskon khusus", "Discount")}</div>
                   </div>
                 </button>
+                {isAdminBooking && (
+                  <button
+                    type="button"
+                    onClick={() => { setBookingMode("event"); trackPayerSelection("personal"); }}
+                    className={`flex flex-col items-center gap-2 p-3 rounded-lg border text-center transition-colors ${isEvent ? "bg-purple-600 text-white border-purple-600" : "bg-background border-border hover:border-purple-400/50"}`}
+                  >
+                    <PartyPopper size={18} className="shrink-0" />
+                    <div>
+                      <div className="font-semibold text-xs">{t("Event", "Event")}</div>
+                      <div className={`text-xs ${isEvent ? "text-purple-100" : "text-muted-foreground"}`}>{t("Diskon 21,43%", "21.43% off")}</div>
+                    </div>
+                  </button>
+                )}
                 {isLoggedIn && (
                   <button
                     type="button"
@@ -926,6 +967,16 @@ export default function Booking() {
                   </button>
                 )}
               </div>
+
+              {isEvent && (
+                <div className="flex items-center gap-2 rounded-lg bg-purple-50 border border-purple-200 px-3 py-2.5 text-sm">
+                  <Tag size={14} className="shrink-0 text-purple-600" />
+                  <div>
+                    <span className="font-semibold text-purple-800">{t("Diskon Event 21,4% sudah diterapkan", "21.4% Event Discount Applied")}</span>
+                    <div className="text-xs text-purple-600 mt-0.5">{t("Diskon 21,43% otomatis diterapkan untuk booking event.", "21.43% discount automatically applied for event bookings.")}</div>
+                  </div>
+                </div>
+              )}
 
               {isAP && (
                 <div className="space-y-2">
@@ -1090,7 +1141,7 @@ export default function Booking() {
           )}
 
           {/* Corporate Billing */}
-          {isLoggedIn && billingStatus?.eligible && !isAP && !isCompanyMode && (
+          {isLoggedIn && billingStatus?.eligible && !isAP && !isCompanyMode && !isEvent && (
             <Card className={isCompanyBilling ? "border-primary/40 bg-primary/5" : ""}>
               <CardContent className="p-4">
                 <label className="flex items-start gap-3 cursor-pointer">
@@ -1118,7 +1169,7 @@ export default function Booking() {
           )}
 
           {/* Coupon Code */}
-          {!isAP && (
+          {!isAP && !isEvent && (
           <Card className={couponResult ? "border-green-300 bg-green-50/50" : ""}>
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
@@ -1177,7 +1228,6 @@ export default function Booking() {
           )}
 
           {/* Repeat Booking */}
-          {!isAP && (
           <Card className={isRepeat ? "border-primary/40 bg-primary/5" : ""}>
             <CardHeader className="pb-4">
               <div className="flex items-center gap-3">
@@ -1402,7 +1452,6 @@ export default function Booking() {
               </CardContent>
             )}
           </Card>
-          )}
 
           {/* Down Payment Option */}
           <Card className={paymentType === "dp" ? "border-violet-300 bg-violet-50/50 dark:bg-violet-900/10" : ""}>
@@ -1452,7 +1501,7 @@ export default function Booking() {
                         {facility && (
                           <div className="flex justify-between border-t border-violet-200 dark:border-violet-800 pt-1.5">
                             <span className="text-muted-foreground">{t("Sisa Pembayaran", "Remaining")}</span>
-                            <span className="font-bold text-foreground">Rp {Math.max(0, facility.pricePerHour * duration - Number(dpAmount)).toLocaleString("id-ID")}</span>
+                            <span className="font-bold text-foreground">Rp {Math.max(0, totalPrice - Number(dpAmount)).toLocaleString("id-ID")}</span>
                           </div>
                         )}
                       </div>
@@ -1554,13 +1603,22 @@ export default function Booking() {
 
               <div className="border-t pt-4 space-y-2 text-sm">
                 <div className="flex justify-between">
-                  <span className="text-muted-foreground">{t("Harga/jam", "Price/hour")}</span>
+                  <span className="text-muted-foreground">
+                    {isWalkIn ? t("Harga/orang", "Price/person") : t("Harga/jam", "Price/hour")}
+                  </span>
                   <span>{formatCurrency(facility.pricePerHour)}</span>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">{t("Durasi", "Duration")}</span>
-                  <span>× {duration} {t("jam", "hours")}</span>
-                </div>
+                {isWalkIn ? (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">{t("Jumlah orang", "People")}</span>
+                    <span>× {bookingPeopleCount} {t("orang", "people")}</span>
+                  </div>
+                ) : (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">{t("Durasi", "Duration")}</span>
+                    <span>× {duration} {t("jam", "hours")}</span>
+                  </div>
+                )}
                 {isRepeat && (
                   <>
                     <div className="flex justify-between">
@@ -1578,7 +1636,31 @@ export default function Booking() {
                     </div>
                   </>
                 )}
-                {couponResult && (
+                {isAP && (
+                  <div className="flex items-start gap-1.5 text-xs text-orange-600 bg-orange-50 border border-orange-200 rounded-md px-2.5 py-2">
+                    <AlertTriangle size={12} className="shrink-0 mt-0.5" />
+                    <span>{t("Diskon AP2 diterapkan setelah verifikasi ID Card.", "AP2 discount applied after ID Card verification.")}</span>
+                  </div>
+                )}
+                {isEvent && (() => {
+                  const eventDisc = Math.round(totalPrice * EVENT_DISCOUNT_RATE);
+                  const eventDiscRepeat = isRepeat
+                    ? Math.round((checkResult ? effectiveTotalPrice : totalPrice * repeatCount) * EVENT_DISCOUNT_RATE)
+                    : eventDisc;
+                  return (
+                    <>
+                      <div className="flex justify-between text-muted-foreground text-sm">
+                        <span>{t("Harga Normal", "Normal Price")}</span>
+                        <span className="line-through">{isRepeat ? (isChecking ? "..." : formatCurrency(checkResult ? effectiveTotalPrice : totalPrice * repeatCount)) : formatCurrency(totalPrice)}</span>
+                      </div>
+                      <div className="flex justify-between text-purple-700 font-medium">
+                        <span className="flex items-center gap-1"><Tag size={12} /> {t("Diskon Event 21,43%", "Event Discount 21.43%")}</span>
+                        <span>−{isRepeat ? (isChecking ? "..." : formatCurrency(eventDiscRepeat)) : formatCurrency(eventDisc)}</span>
+                      </div>
+                    </>
+                  );
+                })()}
+                {couponResult && !isEvent && (
                   <div className="flex justify-between text-green-700 font-medium">
                     <span className="flex items-center gap-1">
                       <Receipt size={12} /> {t("Diskon", "Discount")} ({couponResult.code})
@@ -1587,7 +1669,11 @@ export default function Booking() {
                   </div>
                 )}
                 {(() => {
-                  const disc = couponResult?.discountAmount ?? 0;
+                  const disc = isEvent
+                    ? (isRepeat
+                        ? Math.round((checkResult ? effectiveTotalPrice : totalPrice * repeatCount) * EVENT_DISCOUNT_RATE)
+                        : Math.round(totalPrice * EVENT_DISCOUNT_RATE))
+                    : (couponResult?.discountAmount ?? 0);
                   const grand = isRepeat
                     ? (isChecking ? null : Math.max(0, (checkResult ? effectiveTotalPrice : totalPrice * repeatCount) - disc))
                     : Math.max(0, totalPrice - disc);

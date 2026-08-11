@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import QRCode from "react-qr-code";
 import { useRoute } from "wouter";
 import {
@@ -29,21 +29,36 @@ import {
   Building2,
   QrCode,
   ChevronRight,
+  ArrowLeft,
   Star,
   CalendarClock,
   ShieldCheck,
   ShieldX,
   ShieldAlert,
   ExternalLink,
+  PartyPopper,
+  Tag,
 } from "lucide-react";
 import { Link } from "wouter";
 import RescheduleDialog from "@/components/RescheduleDialog";
 import ExtendBookingDialog from "@/components/ExtendBookingDialog";
 import { useLang } from "@/lib/i18n";
+import { getToken } from "@/lib/auth";
+import CorporateDocUpload from "@/components/CorporateDocUpload";
 
 const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "") || "";
+// QRIS lama masih tersimpan sebagai aset publik. Gunakan sebagai fallback ketika
+// konfigurasi qris_image_url di database lokal belum ikut tersinkron.
+const DEFAULT_QRIS_IMAGE = `${BASE}/uploads/qris-263226c1-c51d-4353-9165-cedaba32adb4.jpeg`;
 
-type PaymentMethod = "transfer" | "qris";
+type PaymentMethod = "transfer" | "qris" | "paylabs";
+
+interface PaylabsPublicConfig {
+  sandboxMode: boolean;
+  configured: boolean;
+  paymentMethodsConfig: Array<{ id: string; name: string; active: boolean; iconUrl?: string }> | null;
+  title: string;
+}
 
 export default function BookingDetail() {
   const [, params] = useRoute("/booking/:orderNumber");
@@ -75,6 +90,21 @@ export default function BookingDetail() {
   const [reviewRating, setReviewRating] = useState(0);
   const [reviewComment, setReviewComment] = useState("");
   const [hoverRating, setHoverRating] = useState(0);
+
+  // ── Paylabs config ──────────────────────────────────────────────────────────
+  const [paylabsConfig, setPaylabsConfig] = useState<PaylabsPublicConfig | null>(null);
+  useEffect(() => {
+    fetch(`${BASE}/api/paylabs/config`)
+      .then((r: Response) => r.ok ? r.json() : null)
+      .then((d: PaylabsPublicConfig | null) => d && setPaylabsConfig(d))
+      .catch(() => {});
+  }, []);
+
+  const isActiveAdminPaymentMethod = (id: string) =>
+    paylabsConfig?.paymentMethodsConfig?.some(
+      (method) => method.id.trim().toLowerCase() === id && method.active,
+    ) ?? false;
+  const hasPaylabs = isActiveAdminPaymentMethod("paylabs") && (paylabsConfig?.configured ?? false);
 
   const payDp = usePayBookingDp({
     mutation: {
@@ -157,10 +187,16 @@ export default function BookingDetail() {
 
     // Deteksi payment_type dan amount yang tepat berdasarkan state booking
     const bPayments = ((booking as any).payments as any[]) ?? [];
+    const groupTotal = Number((booking as any).groupInfo?.groupTotalPayment ?? 0);
+    const paymentTotal = groupTotal > 0
+      ? groupTotal
+      : Number((booking as any).grandTotal ?? booking.totalPrice);
     const isDpMode =
       !!(booking as any).isDpPaid && Number((booking as any).downPayment || 0) > 0;
+    const groupInfo = (booking as any).groupInfo as { groupTotalPayment: number; groupSessionCount: number; groupRef: string } | null;
     let detectedType = "full_payment";
-    let detectedAmount: number = booking.totalPrice;
+
+    let detectedAmount: number = paymentTotal;
 
     if (isDpMode) {
       const hasDpActive = bPayments.some(
@@ -176,7 +212,7 @@ export default function BookingDetail() {
           (booking as any).remainingAmount ??
           Math.max(
             0,
-            booking.totalPrice - Number((booking as any).downPayment || 0),
+            paymentTotal - Number((booking as any).downPayment || 0),
           );
       }
     }
@@ -205,6 +241,9 @@ export default function BookingDetail() {
           bookingId: booking.id,
           amount: detectedAmount,
           proofUrl: url ?? objectPath,
+          paymentMethod: paymentMethod === "qris" ? "QRIS" : "Transfer Bank",
+          paymentProvider: paymentMethod === "qris" ? "mandiri_direct" : undefined,
+          ...(paymentMethod === "qris" ? { paymentProvider: "mandiri_direct" as const } : {}),
           notes: notes || undefined,
           paymentType: detectedType as any,
         },
@@ -270,9 +309,20 @@ export default function BookingDetail() {
   const statusConfig = getStatusConfig(booking.status);
   const StatusIcon = statusConfig.icon;
   const isPending = uploadProgress === "uploading" || submitPayment.isPending;
+  const payableTotal = Number(
+    (booking as any).groupInfo?.groupTotalPayment ??
+    (booking as any).grandTotal ??
+    booking.totalPrice,
+  );
 
   const hasBankInfo = settings?.bankAccount && settings?.bankName;
-  const hasQris = !!(settings as any)?.qrisImageUrl;
+
+  const qrisImageUrl = (settings as any)?.qrisImageUrl || DEFAULT_QRIS_IMAGE;
+
+  // Manual QRIS follows the same production toggle as the admin payment-method
+  // list, while still requiring the QR image configured in Settings.
+  const hasQris =
+    !!(settings as any)?.qrisImageUrl && isActiveAdminPaymentMethod("qris");
 
   return (
     <div className="container mx-auto px-4 py-8 md:py-12 max-w-4xl">
@@ -313,7 +363,8 @@ export default function BookingDetail() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-        {/* Booking Details */}
+        {/* Left column: Booking Details + AP2 Verification */}
+        <div className="space-y-4">
         <Card className="border-border">
           <CardHeader className="bg-muted/30 pb-4 border-b">
             <CardTitle>{t("Detail Booking", "Booking Details")}</CardTitle>
@@ -465,25 +516,72 @@ export default function BookingDetail() {
             </CardContent>
           </Card>
         )}
+        {/* Event Discount Info */}
+        {(booking as any).bookingType === "event" && (
+          <Card className="border-2 border-purple-200 bg-purple-50/50 mt-4">
+            <CardContent className="p-5">
+              <div className="flex items-start gap-3">
+                <PartyPopper size={22} className="text-purple-600 mt-0.5 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <div className="font-bold text-sm text-purple-900">{t("Booking Event — Diskon 21,43% Diterapkan", "Event Booking — 21.43% Discount Applied")}</div>
+                  <div className="text-xs mt-0.5 text-purple-700">
+                    {t("Harga fasilitas mendapat diskon khusus event.", "Facility price has been discounted for this event booking.")}
+                  </div>
+                  {(booking as any).eventDiscountAmount && Number((booking as any).eventDiscountAmount) > 0 && (
+                    <div className="mt-2 inline-flex items-center gap-1.5 rounded-md bg-purple-100 border border-purple-200 px-2.5 py-1 text-xs font-semibold text-purple-800">
+                      <Tag size={11} />
+                      {t("Diskon", "Discount")}: Rp {Number((booking as any).eventDiscountAmount).toLocaleString("id-ID")}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
-        {/* Payment Section */}
+        {/* Upload Dokumentasi — hanya untuk booking corporate yang aktif */}
+        {(booking as any).payerType === "company" && (
+          <CorporateDocUpload
+            bookingId={(booking as any).id}
+            isAdmin={false}
+            canUpload={["confirmed", "completed", "paid", "waiting_confirmation"].includes(booking.status)}
+          />
+        )}
+        </div>{/* end left column */}
+
+        {/* Right column: Payment Section */}
         <div className="space-y-6">
-          {booking.status === "pending_payment" && (
+          {(booking.status === "pending_payment" || booking.status === "expired") && (
             <Card className="border-primary/30 shadow-md">
               <CardHeader className="bg-primary/5 pb-4 border-b border-primary/10">
                 <CardTitle className="flex items-center gap-2 text-primary">
                   <CreditCard size={20} />
-                  {t("Instruksi Pembayaran", "Payment Instructions")}
+                  {booking.status === "expired"
+                    ? t("Aktifkan Kembali & Bayar", "Reactivate & Pay")
+                    : t("Instruksi Pembayaran", "Payment Instructions")}
                 </CardTitle>
               </CardHeader>
               <CardContent className="p-6 space-y-5">
+                {booking.status === "expired" && (
+                  <div className="rounded-xl border border-orange-200 bg-orange-50 p-4 text-sm text-orange-800">
+                    <div className="font-semibold mb-1">
+                      {t("Booking ini bisa diaktifkan kembali", "This booking can be reactivated")}
+                    </div>
+                    <p>
+                      {t(
+                        "Silakan lakukan transfer sesuai total tagihan, lalu upload bukti transfer di bawah. Setelah dikirim, booking akan menunggu verifikasi admin.",
+                        "Make a transfer for the total amount, then upload your transfer proof below. After submission, the booking will wait for admin verification.",
+                      )}
+                    </p>
+                  </div>
+                )}
                 {/* DP Info Banner */}
                 {(booking as any).isDpPaid && (() => {
                   const bPayments = ((booking as any).payments as any[]) ?? [];
                   const dpConfirmed = bPayments.some((p: any) => p.paymentType === "dp" && p.status === "confirmed");
                   const dpPending = bPayments.some((p: any) => p.paymentType === "dp" && p.status === "pending");
                   const pelunasanPending = bPayments.some((p: any) => p.paymentType === "pelunasan" && p.status === "pending");
-                  const remaining = (booking as any).remainingAmount ?? Math.max(0, Number(booking.totalPrice) - Number((booking as any).downPayment || 0));
+                  const remaining = (booking as any).remainingAmount ?? Math.max(0, payableTotal - Number((booking as any).downPayment || 0));
 
                   if (dpConfirmed && pelunasanPending) {
                     return (
@@ -567,6 +665,14 @@ export default function BookingDetail() {
                       <div className="font-semibold text-sm text-violet-800 dark:text-violet-200">{t("Bayar Down Payment", "Pay Down Payment")}</div>
                       <button type="button" onClick={() => { setDpMode(false); setDpInputAmount(""); }} className="text-xs text-muted-foreground hover:text-foreground">✕</button>
                     </div>
+                    {(booking as any).groupInfo && (
+                      <div className="flex justify-between items-center rounded-lg bg-white/70 dark:bg-background/50 px-3 py-2 text-xs text-violet-800 dark:text-violet-200">
+                        <span>{t("Total semua sesi", "All sessions total")}</span>
+                        <span className="font-bold">
+                          Rp {Number((booking as any).groupInfo.groupTotalPayment).toLocaleString("id-ID")}
+                        </span>
+                      </div>
+                    )}
                     <div className="space-y-1.5">
                       <label className="text-xs text-muted-foreground font-medium">{t("Jumlah DP (Rp)", "DP Amount (Rp)")}</label>
                       <input
@@ -581,7 +687,11 @@ export default function BookingDetail() {
                     {dpInputAmount && Number(dpInputAmount) > 0 && (
                       <div className="text-xs space-y-1 text-muted-foreground">
                         <div className="flex justify-between"><span>{t("DP Dibayar", "DP Paid")}:</span><span className="font-bold text-violet-700 dark:text-violet-300">Rp {Number(dpInputAmount).toLocaleString("id-ID")}</span></div>
-                        <div className="flex justify-between"><span>{t("Sisa", "Remaining")}:</span><span className="font-bold">Rp {Math.max(0, Number(booking.totalPrice) - Number(dpInputAmount)).toLocaleString("id-ID")}</span></div>
+
+                        <div className="flex justify-between"><span>{t("Sisa", "Remaining")}:</span><span className="font-bold">Rp {Math.max(0, Number((booking as any).groupInfo?.groupTotalPayment ?? (booking as any).grandTotal ?? booking.totalPrice) - Number(dpInputAmount)).toLocaleString("id-ID")}</span></div>
+
+                        <div className="flex justify-between"><span>{t("Sisa", "Remaining")}:</span><span className="font-bold">Rp {Math.max(0, payableTotal - Number(dpInputAmount)).toLocaleString("id-ID")}</span></div>
+
                       </div>
                     )}
                     <Button
@@ -602,7 +712,7 @@ export default function BookingDetail() {
                 {(() => {
                   const remaining =
                     (booking as any).remainingAmount ??
-                    Math.max(0, Number(booking.totalPrice) - Number((booking as any).downPayment || 0));
+                    Math.max(0, payableTotal - Number((booking as any).downPayment || 0));
                   const isDpFullyPaid = (booking as any).isDpPaid && remaining <= 0;
 
                   if (isDpFullyPaid) {
@@ -647,7 +757,7 @@ export default function BookingDetail() {
                             </span>{" "}
                             {(booking as any).groupInfo && (
                               <span className="text-xs text-muted-foreground font-normal">
-                                ({(booking as any).groupInfo.groupSessionCount} {t("sesi", "sessions")} × Rp {booking.totalPrice.toLocaleString("id-ID")})
+                                ({(booking as any).groupInfo.groupSessionCount} {t("sesi", "sessions")} × Rp {Math.round((booking as any).groupInfo.groupTotalPayment / (booking as any).groupInfo.groupSessionCount).toLocaleString("id-ID")})
                               </span>
                             )}{" "}
                             {t("via:", "via:")}
@@ -657,25 +767,23 @@ export default function BookingDetail() {
 
                       {/* Payment Method Selector */}
                       {!paymentMethod && (
-                  <div className="grid grid-cols-2 gap-3">
-                    {hasBankInfo && (
-                      <button
-                        type="button"
-                        onClick={() => setPaymentMethod("transfer")}
-                        className="flex flex-col items-center gap-3 p-5 rounded-2xl border-2 border-border hover:border-primary hover:bg-primary/5 transition-all group"
-                      >
-                        <div className="w-12 h-12 rounded-xl bg-blue-100 flex items-center justify-center group-hover:bg-blue-200 transition-colors">
-                          <Building2 size={22} className="text-blue-600" />
+                  <div className={`grid gap-3 ${(() => { const extras = (hasQris ? 1 : 0) + (hasPaylabs ? 1 : 0); return extras >= 2 ? "grid-cols-3" : extras === 1 ? "grid-cols-2" : "grid-cols-1"; })()}`}>
+                    <button
+                      type="button"
+                      onClick={() => setPaymentMethod("transfer")}
+                      className="flex flex-col items-center gap-3 p-5 rounded-2xl border-2 border-border hover:border-primary hover:bg-primary/5 transition-all group"
+                    >
+                      <div className="w-12 h-12 rounded-xl bg-blue-100 flex items-center justify-center group-hover:bg-blue-200 transition-colors">
+                        <Building2 size={22} className="text-blue-600" />
+                      </div>
+                      <div className="text-center">
+                        <div className="font-semibold text-sm">{t("Transfer Bank", "Bank Transfer")}</div>
+                        <div className="text-xs text-muted-foreground mt-0.5">
+                          {settings?.bankName ?? t("Bank Transfer", "Bank Transfer")}
                         </div>
-                        <div className="text-center">
-                          <div className="font-semibold text-sm">{t("Transfer Bank", "Bank Transfer")}</div>
-                          <div className="text-xs text-muted-foreground mt-0.5">
-                            {settings?.bankName}
-                          </div>
-                        </div>
-                        <ChevronRight size={14} className="text-muted-foreground group-hover:text-primary transition-colors" />
-                      </button>
-                    )}
+                      </div>
+                      <ChevronRight size={14} className="text-muted-foreground group-hover:text-primary transition-colors" />
+                    </button>
                     {hasQris && (
                       <button
                         type="button"
@@ -692,10 +800,21 @@ export default function BookingDetail() {
                         <ChevronRight size={14} className="text-muted-foreground group-hover:text-primary transition-colors" />
                       </button>
                     )}
-                    {!hasBankInfo && !hasQris && (
-                      <div className="col-span-2 text-center py-4 text-sm text-muted-foreground">
-                        {t("Hubungi admin untuk info pembayaran.", "Contact admin for payment information.")}
-                      </div>
+                    {hasPaylabs && (
+                      <button
+                        type="button"
+                        onClick={() => setPaymentMethod("paylabs")}
+                        className="flex flex-col items-center gap-3 p-5 rounded-2xl border-2 border-border hover:border-primary hover:bg-primary/5 transition-all group"
+                      >
+                        <div className="w-12 h-12 rounded-xl bg-cyan-100 flex items-center justify-center group-hover:bg-cyan-200 transition-colors">
+                          <CreditCard size={22} className="text-cyan-600" />
+                        </div>
+                        <div className="text-center">
+                          <div className="font-semibold text-sm">Paylabs</div>
+                          <div className="text-xs text-muted-foreground mt-0.5">{t("VA / QRIS / E-Wallet", "VA / QRIS / E-Wallet")}</div>
+                        </div>
+                        <ChevronRight size={14} className="text-muted-foreground group-hover:text-primary transition-colors" />
+                      </button>
                     )}
                   </div>
                 )}
@@ -706,30 +825,33 @@ export default function BookingDetail() {
                     <button
                       type="button"
                       onClick={() => { setPaymentMethod(null); clearFile(); }}
-                      className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
+                      className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1.5 hover:gap-2 transition-all group"
                     >
-                      ← {t("Pilih metode lain", "Choose another method")}
+                      <ArrowLeft size={13} className="group-hover:-translate-x-0.5 transition-transform" />
+                      {t("Pilih metode lain", "Choose another method")}
                     </button>
 
-                    <div className="bg-muted rounded-xl p-4 relative group">
-                      <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">
-                        {settings?.bankName}
+                    {hasBankInfo && (
+                      <div className="bg-muted rounded-xl p-4 relative group">
+                        <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">
+                          {settings?.bankName}
+                        </div>
+                        <div className="text-2xl font-mono tracking-wider mb-1">
+                          {settings?.bankAccount}
+                        </div>
+                        <div className="text-sm font-medium">
+                          {t("a.n", "a/n")} {settings?.bankAccountName}
+                        </div>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="absolute top-2 right-2 opacity-50 group-hover:opacity-100 transition-opacity"
+                          onClick={() => copyToClipboard(settings?.bankAccount ?? "")}
+                        >
+                          <Copy size={16} />
+                        </Button>
                       </div>
-                      <div className="text-2xl font-mono tracking-wider mb-1">
-                        {settings?.bankAccount}
-                      </div>
-                      <div className="text-sm font-medium">
-                        {t("a.n", "a/n")} {settings?.bankAccountName}
-                      </div>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="absolute top-2 right-2 opacity-50 group-hover:opacity-100 transition-opacity"
-                        onClick={() => copyToClipboard(settings?.bankAccount ?? "")}
-                      >
-                        <Copy size={16} />
-                      </Button>
-                    </div>
+                    )}
 
                     <UploadProofForm
                       selectedFile={selectedFile}
@@ -755,9 +877,10 @@ export default function BookingDetail() {
                     <button
                       type="button"
                       onClick={() => { setPaymentMethod(null); clearFile(); }}
-                      className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
+                      className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1.5 hover:gap-2 transition-all group"
                     >
-                      ← {t("Pilih metode lain", "Choose another method")}
+                      <ArrowLeft size={13} className="group-hover:-translate-x-0.5 transition-transform" />
+                      {t("Pilih metode lain", "Choose another method")}
                     </button>
 
                     <div className="rounded-xl border border-border overflow-hidden">
@@ -766,7 +889,7 @@ export default function BookingDetail() {
                       </div>
                       <div className="p-4 flex justify-center">
                         <img
-                          src={(settings as any)?.qrisImageUrl}
+                          src={qrisImageUrl}
                           alt="QRIS Payment Code"
                           className="max-w-xs w-full rounded-lg border border-border"
                         />
@@ -792,6 +915,19 @@ export default function BookingDetail() {
                       uploadProgress={uploadProgress}
                     />
                   </div>
+                )}
+
+                {/* Paylabs Gateway */}
+                {paymentMethod === "paylabs" && booking && (
+                  <PaylabsPaymentSection
+                    bookingId={booking.id}
+                    orderNumber={booking.orderNumber}
+                    amount={Number((booking as any).grandTotal ?? booking.totalPrice)}
+                    paylabsConfig={paylabsConfig!}
+                    onBack={() => setPaymentMethod(null)}
+                    onSuccess={() => queryClient.invalidateQueries({ queryKey: getGetBookingByOrderQueryKey(orderNumber) })}
+                    base={BASE}
+                  />
                 )}
                     </>
                   );
@@ -839,7 +975,7 @@ export default function BookingDetail() {
                 </div>
                 <h3 className="font-bold text-lg text-gray-800 mb-1">{t("Booking Expired", "Booking Expired")}</h3>
                 <p className="text-sm text-gray-600">
-                  {t("Batas waktu pembayaran terlewat. Silakan buat booking baru.", "Payment deadline has passed. Please create a new booking.")}
+                  {t("Upload bukti transfer di bagian pembayaran untuk mengaktifkan kembali booking ini.", "Upload your transfer proof in the payment section to reactivate this booking.")}
                 </p>
               </CardContent>
             </Card>
@@ -880,6 +1016,19 @@ export default function BookingDetail() {
                     </div>
                   </div>
                   <p className="text-xs text-green-600 mt-2">{t("Tunjukkan kode ini kepada petugas saat tiba", "Show this code to staff upon arrival")}</p>
+                </div>
+
+                {/* Download Invoice PDF */}
+                <div className="border-t border-green-200 pt-4 mt-2">
+                  <a
+                    href={`/api/public/invoices/${booking.orderNumber}/pdf`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center justify-center gap-2 w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-3 px-4 rounded-xl text-sm transition-colors"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                    {t("Download Invoice PDF", "Download Invoice PDF")}
+                  </a>
                 </div>
 
                 {/* Reschedule + Tambah Waktu — only for confirmed */}
@@ -1031,6 +1180,277 @@ export default function BookingDetail() {
           endTime={booking.endTime}
           onSuccess={() => queryClient.invalidateQueries({ queryKey: getGetBookingByOrderQueryKey(orderNumber) })}
         />
+      )}
+    </div>
+  );
+}
+
+/* ─── Paylabs Payment Section ────────────────────────────────────── */
+
+const VA_BANKS = ["bri","bni","bca","mandiri","permata","cimb","bsi","btn","muamalat","danamon","sinarmas","ina","maybank"];
+const EWALLETS = ["ovo","dana","shopeepay","linkaja","gopay"];
+
+function PaylabsPaymentSection({
+  bookingId, amount, onBack, onSuccess, base,
+}: {
+  bookingId: number;
+  orderNumber: string;
+  amount: number;
+  paylabsConfig: PaylabsPublicConfig;   // kept in props signature for caller; component fetches fresh copy
+  onBack: () => void;
+  onSuccess: () => void;
+  base: string;
+}) {
+  const { t } = useLang();
+  const { toast } = useToast();
+
+  const [subMethod, setSubMethod] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [payment, setPayment] = useState<{
+    merchantTradeNo: string; qrCodeUrl: string; qrContent: string;
+    vaNumber: string; payUrl: string; paymentMethod: string;
+    sandboxMode: boolean;
+  } | null>(null);
+  const [pollStatus, setPollStatus] = useState<"waiting" | "paid" | "error" | "no_inquiry">("waiting");
+
+  // ── Fetch fresh config every time this section is opened ─────────────────
+  const [freshConfig, setFreshConfig] = useState<PaylabsPublicConfig | null>(null);
+  useEffect(() => {
+    fetch(`${base}/api/paylabs/config`)
+      .then((r: Response) => r.ok ? r.json() : null)
+      .then((d: PaylabsPublicConfig | null) => d && setFreshConfig(d))
+      .catch(() => {});
+  }, [base]);
+
+  // ── Active methods — always from the freshly fetched config ──────────────
+  const activeMethods = (freshConfig?.paymentMethodsConfig ?? []).filter((m) => m.active);
+  const sandboxMode   = freshConfig?.sandboxMode ?? false;
+
+  // Fallback while config is loading (show skeleton) or if no methods configured
+  const methods = activeMethods;
+
+  // ── Create payment ────────────────────────────────────────────────────────
+  async function handleSelectMethod(methodId: string) {
+    setSubMethod(methodId);
+    setLoading(true);
+    try {
+      const res = await fetch(`${base}/api/paylabs/create-payment`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` },
+        body: JSON.stringify({ bookingId, paymentMethod: methodId }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        const detail = data.errMsg ?? data.error ?? `HTTP ${res.status}`;
+        throw new Error(detail);
+      }
+      setPayment(data);
+      setPollStatus("waiting");
+    } catch (err: any) {
+      const rawMsg: string = err.message ?? "";
+      const isKeyError = /rsa|decoder|invalid_private_key|signing failed|pkcs/i.test(rawMsg);
+      const safeDesc = isKeyError
+        ? t(
+            "Gagal membuat pembayaran karena konfigurasi payment gateway belum valid. Hubungi administrator.",
+            "Payment failed due to invalid gateway configuration. Please contact the administrator.",
+          )
+        : rawMsg;
+      toast({ title: t("Gagal membuat pembayaran", "Failed to create payment"), description: safeDesc, variant: "destructive" });
+      setSubMethod(null);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // ── Poll for payment status ───────────────────────────────────────────────
+  useEffect(() => {
+    if (!payment || (pollStatus !== "waiting" && pollStatus !== "no_inquiry")) return;
+    if (pollStatus === "no_inquiry") return; // inquiry not supported, stop polling
+    const iv = setInterval(async () => {
+      try {
+        const res = await fetch(`${base}/api/paylabs/status/${encodeURIComponent(payment.merchantTradeNo)}`, {
+          headers: { Authorization: `Bearer ${getToken()}` },
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        const localStatus = (data.local?.status ?? "").toUpperCase();
+        const paylabsStatus = String(data.paylabs?.status ?? data.paylabs?.tradeState ?? "").toUpperCase();
+        const isPaid = localStatus === "SUCCESS" || paylabsStatus === "SUCCESS" || paylabsStatus === "02" || paylabsStatus === "PAID";
+        if (isPaid) {
+          setPollStatus("paid");
+          clearInterval(iv);
+          onSuccess();
+          toast({ title: t("Pembayaran Berhasil! 🎉", "Payment Successful! 🎉"), description: t("Booking Anda telah dikonfirmasi.", "Your booking has been confirmed.") });
+        }
+        // Inquiry endpoint not supported for this merchant — stop polling (rely on webhook + manual refresh)
+        if (data.inquiryNotSupported) {
+          clearInterval(iv);
+          setPollStatus("no_inquiry");
+        }
+      } catch { /* ignore */ }
+    }, 5000);
+    return () => clearInterval(iv);
+  }, [payment, pollStatus]);
+
+  // ── Method type helpers ───────────────────────────────────────────────────
+  const isQris    = (id: string) => id === "qris";
+  const isVa      = (id: string) => VA_BANKS.includes(id);
+  const isEwallet = (id: string) => EWALLETS.includes(id);
+
+  // ── Render ────────────────────────────────────────────────────────────────
+  return (
+    <div className="space-y-4">
+      {/* Back button */}
+      <button
+        type="button"
+        onClick={() => { if (subMethod && !payment) { setSubMethod(null); } else { onBack(); } }}
+        className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1.5 hover:gap-2 transition-all group"
+      >
+        <ArrowLeft size={13} className="group-hover:-translate-x-0.5 transition-transform" />
+        {subMethod ? t("Pilih metode lain", "Choose another method") : t("Kembali", "Back")}
+      </button>
+
+      {/* Loading skeleton while fresh config arrives */}
+      {!freshConfig && (
+        <div className="flex flex-col gap-2">
+          {[1,2,3].map(i => (
+            <div key={i} className="h-14 rounded-xl bg-muted animate-pulse" />
+          ))}
+        </div>
+      )}
+
+      {/* Sandbox warning */}
+      {sandboxMode && freshConfig && (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-700">
+          <AlertCircle size={13} className="shrink-0" />
+          {t("Mode Sandbox — gunakan kredensial test Paylabs", "Sandbox Mode — use Paylabs test credentials")}
+        </div>
+      )}
+
+      {/* Method picker */}
+      {!subMethod && freshConfig && (
+        <div className="space-y-2">
+          <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+            {t("Pilih Metode Pembayaran", "Choose Payment Method")}
+          </div>
+          <div className="rounded-xl border border-border overflow-hidden divide-y divide-border">
+            {methods.map((m) => (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => handleSelectMethod(m.id)}
+                className="w-full flex items-center gap-3 px-4 py-3 hover:bg-muted/40 transition-colors text-left"
+              >
+                <div className={`w-9 h-9 rounded-lg flex items-center justify-center text-[10px] font-black shrink-0 ${
+                  isQris(m.id)    ? "bg-red-100 text-red-700" :
+                  isVa(m.id)      ? "bg-blue-100 text-blue-700" :
+                  isEwallet(m.id) ? "bg-purple-100 text-purple-700" :
+                                    "bg-muted text-muted-foreground"
+                }`}>
+                  {m.id.toUpperCase().slice(0, 4)}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-semibold text-foreground">{m.name}</div>
+                  <div className="text-xs text-muted-foreground">
+                    {isQris(m.id) ? t("Scan QR Code", "Scan QR Code") :
+                     isVa(m.id) ? t("Virtual Account", "Virtual Account") :
+                     t("E-Wallet / Dompet Digital", "E-Wallet / Digital Wallet")}
+                  </div>
+                </div>
+                <ChevronRight size={15} className="text-muted-foreground shrink-0" />
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Loading */}
+      {subMethod && loading && (
+        <div className="flex flex-col items-center gap-3 py-8">
+          <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
+          <div className="text-sm text-muted-foreground">{t("Membuat pembayaran...", "Creating payment...")}</div>
+        </div>
+      )}
+
+      {/* Payment result */}
+      {payment && !loading && pollStatus !== "paid" && (
+        <div className="space-y-4">
+          {/* QRIS */}
+          {payment.qrContent && (
+            <div className="rounded-xl border border-border overflow-hidden">
+              <div className="bg-muted px-4 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                {t("Scan QR Code Paylabs", "Scan Paylabs QR Code")}
+              </div>
+              <div className="p-4 flex justify-center">
+                {payment.qrCodeUrl ? (
+                  <img src={payment.qrCodeUrl} alt="Paylabs QR" className="max-w-[240px] w-full rounded-lg border border-border" />
+                ) : (
+                  <div className="bg-white p-3 rounded-xl border border-border">
+                    <QRCode value={payment.qrContent} size={200} />
+                  </div>
+                )}
+              </div>
+              <div className="px-4 pb-3 text-center text-sm text-muted-foreground">
+                {t("Scan dengan aplikasi e-wallet / m-banking apapun", "Scan with any e-wallet / m-banking app")}
+              </div>
+            </div>
+          )}
+
+          {/* Virtual Account */}
+          {payment.vaNumber && (
+            <div className="rounded-xl border border-border bg-muted/20 p-4 space-y-2">
+              <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                {t("Nomor Virtual Account", "Virtual Account Number")}
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="text-2xl font-mono tracking-widest font-bold flex-1">{payment.vaNumber}</div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="shrink-0"
+                  onClick={() => { navigator.clipboard.writeText(payment.vaNumber); toast({ title: t("Disalin!", "Copied!") }); }}
+                >
+                  <Copy size={14} />
+                </Button>
+              </div>
+              <div className="text-xs text-muted-foreground">
+                {t("Transfer tepat sesuai nominal. Konfirmasi otomatis setelah transfer.", "Transfer exact amount. Auto-confirmed after transfer.")}
+              </div>
+            </div>
+          )}
+
+          {/* E-Wallet redirect */}
+          {payment.payUrl && !payment.qrContent && !payment.vaNumber && (
+            <a
+              href={payment.payUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center justify-center gap-2 w-full bg-cyan-500 hover:bg-cyan-600 text-white font-semibold py-3 px-4 rounded-xl text-sm transition-colors"
+            >
+              <ExternalLink size={16} />
+              {t("Bayar Sekarang", "Pay Now")}
+            </a>
+          )}
+
+          {/* Polling indicator */}
+          <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-blue-50 border border-blue-200">
+            <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse shrink-0" />
+            <div className="text-xs text-blue-700">
+              {t("Menunggu pembayaran... Halaman otomatis update setelah lunas.", "Waiting for payment... Page auto-updates once paid.")}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Paid state */}
+      {pollStatus === "paid" && (
+        <div className="flex flex-col items-center gap-3 py-6 text-center">
+          <div className="w-14 h-14 rounded-full bg-green-100 flex items-center justify-center">
+            <CheckCircle2 size={28} className="text-green-600" />
+          </div>
+          <div className="font-bold text-lg text-green-800">{t("Pembayaran Berhasil!", "Payment Successful!")}</div>
+          <div className="text-sm text-green-700">{t("Booking Anda sedang dikonfirmasi...", "Your booking is being confirmed...")}</div>
+        </div>
       )}
     </div>
   );
