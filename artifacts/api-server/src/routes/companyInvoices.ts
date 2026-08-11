@@ -104,7 +104,22 @@ async function buildAndInsertItems(invoiceId: number, companyId: number, booking
 router.get("/company-invoices", adminMiddleware, async (req, res) => {
   try {
     const { companyCustomerId, status } = req.query;
-    let invoices = await db.select().from(companyInvoicesTable);
+    // Keep the list query limited to the fields used by the portal. Production
+    // databases may contain legacy billing columns, and a SELECT * makes this
+    // endpoint unnecessarily sensitive to schema drift.
+    let invoices = await db.select({
+      id: companyInvoicesTable.id,
+      invoiceNumber: companyInvoicesTable.invoiceNumber,
+      companyCustomerId: companyInvoicesTable.companyCustomerId,
+      periodMonth: companyInvoicesTable.periodMonth,
+      totalAmount: companyInvoicesTable.totalAmount,
+      ppnAmount: companyInvoicesTable.ppnAmount,
+      grandTotal: companyInvoicesTable.grandTotal,
+      status: companyInvoicesTable.status,
+      paidAt: companyInvoicesTable.paidAt,
+      notes: companyInvoicesTable.notes,
+      createdAt: companyInvoicesTable.createdAt,
+    }).from(companyInvoicesTable);
 
     if (companyCustomerId) {
       invoices = invoices.filter((i) => i.companyCustomerId === parseInt(String(companyCustomerId)));
@@ -116,10 +131,10 @@ router.get("/company-invoices", adminMiddleware, async (req, res) => {
     const companies = await db.select({ id: usersTable.id, name: usersTable.name, companyName: usersTable.companyName }).from(usersTable);
     const companyMap = Object.fromEntries(companies.map((c) => [c.id, c.companyName ?? c.name]));
 
-    const result = invoices.map((inv) => mapInvoice(inv, companyMap[inv.companyCustomerId]));
+    const result = invoices.map((inv) => mapInvoice(inv as typeof companyInvoicesTable.$inferSelect, companyMap[inv.companyCustomerId]));
     res.json(result.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
   } catch (err) {
-    req.log.error({ err }, "List company invoices error");
+    req.log.error({ err, query: req.query }, "List company invoices error");
     res.status(500).json({ error: "Internal server error" });
   }
 });
