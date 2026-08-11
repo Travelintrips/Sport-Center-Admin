@@ -87,11 +87,12 @@ router.put("/company-billing-requirements/:companyId", adminMiddleware, async (r
     const userInfo = getUserFromReq(req);
     await logAudit({
       action: "COMPANY_BILLING_REQUIREMENTS_UPDATED",
-      targetType: "company",
-      targetId: String(cid),
-      details: { documentTypes: validTypes },
-      userId: userInfo?.userId,
-      userName: userInfo?.userName,
+      entity: "company",
+      entityId: cid,
+      after: { documentTypes: validTypes },
+      userId: userInfo.userId,
+      userName: userInfo.userName,
+      userRole: userInfo.userRole,
       ipAddress,
       userAgent,
     });
@@ -203,11 +204,12 @@ router.post("/company-invoices/:id/audit-billing-action", adminMiddleware, async
     const userInfo = getUserFromReq(req);
     await logAudit({
       action,
-      targetType: "company_invoice",
-      targetId: String(invoiceId),
-      details: { documents },
-      userId: userInfo?.userId,
-      userName: userInfo?.userName,
+      entity: "company_invoice",
+      entityId: invoiceId,
+      after: { documents: Array.isArray(documents) ? documents.slice(0, 30) : [] },
+      userId: userInfo.userId,
+      userName: userInfo.userName,
+      userRole: userInfo.userRole,
       ipAddress,
       userAgent,
     });

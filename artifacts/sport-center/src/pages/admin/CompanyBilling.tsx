@@ -17,7 +17,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Building2, Plus, CheckCircle, FileText, AlertCircle, RefreshCw, Eye,
   User, Phone, Mail, MapPin, Download, MessageSquare, AlertTriangle,
-  Package, Settings, CheckSquare, XSquare, Send,
+  Package, Settings, CheckSquare, XSquare, Send, History,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useQueryClient, useQuery, useMutation } from "@tanstack/react-query";
@@ -999,12 +999,28 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
     enabled: !!invoiceId,
   });
 
+  const { data: invoiceAudit } = useQuery({
+    queryKey: ["company-invoice-audit", invoiceId],
+    queryFn: async () => {
+      const token = getToken();
+      const res = await fetch(`/api/company-invoices/${invoiceId}/audit-trail`, {
+        headers: { Authorization: `Bearer ${token ?? ""}` },
+      });
+      if (!res.ok) throw new Error("Gagal memuat audit tagihan");
+      return res.json() as Promise<{ logs: any[] }>;
+    },
+    enabled: !!invoiceId,
+    staleTime: 0,
+    refetchOnMount: "always",
+  });
+
   const handleMarkPaid = async () => {
     try {
       await updateMutation.mutateAsync({ id: invoiceId, data: { status: "paid" } });
       toast({ title: "Invoice ditandai sebagai lunas" });
       qc.invalidateQueries({ queryKey: getListCompanyInvoicesQueryKey() });
       qc.invalidateQueries({ queryKey: ["company-invoice-detail", invoiceId] });
+      qc.invalidateQueries({ queryKey: ["company-invoice-audit", invoiceId] });
       onClose();
     } catch {
       toast({ title: "Gagal memperbarui invoice", variant: "destructive" });
@@ -1023,6 +1039,7 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
       if (!res.ok) throw new Error(data.error ?? "Gagal sinkronisasi");
       toast({ title: `Sinkronisasi berhasil`, description: `${data.rebuiltCount} item pemakaian ditemukan` });
       qc.invalidateQueries({ queryKey: ["company-invoice-detail", invoiceId] });
+      qc.invalidateQueries({ queryKey: ["company-invoice-audit", invoiceId] });
     } catch (e: any) {
       toast({ title: e?.message ?? "Gagal sinkronisasi item", variant: "destructive" });
     } finally {
@@ -1042,6 +1059,7 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
       if (!res.ok) throw new Error(data.error ?? "Gagal kirim WA");
       toast({ title: data.message ?? "WA berhasil dikirim" });
       await auditBillingAction(invoiceId, "COMPANY_DOCUMENT_SENT", ["invoice"]);
+      qc.invalidateQueries({ queryKey: ["company-invoice-audit", invoiceId] });
     } catch (e: any) {
       toast({ title: e?.message ?? "Gagal kirim WA", variant: "destructive" });
     } finally {
@@ -1054,6 +1072,7 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
     const ds = await loadDocTemplateSettings();
     printInvoicePdf(invoice, ds);
     await auditBillingAction(invoiceId, "COMPANY_DOCUMENT_DOWNLOADED", ["invoice"]);
+    qc.invalidateQueries({ queryKey: ["company-invoice-audit", invoiceId] });
   };
 
   const handleDownloadPackage = async () => {
@@ -1071,6 +1090,7 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
         description: `${docs.length} dokumen dibuka di tab baru untuk dicetak`,
       });
       await auditBillingAction(invoiceId, "COMPANY_BILLING_PACKAGE_GENERATED", docs);
+      qc.invalidateQueries({ queryKey: ["company-invoice-audit", invoiceId] });
     } finally {
       setGeneratingPackage(false);
     }
@@ -1355,6 +1375,55 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
             Dibayar pada {new Date(invoice.paidAt).toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" })}
           </div>
         )}
+
+        {/* Audit trail */}
+        <div className="rounded-lg border overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-3 bg-muted/30 border-b">
+            <div className="font-semibold text-sm flex items-center gap-2">
+              <History size={14} className="text-primary" />
+              Audit Tagihan
+            </div>
+            <span className="text-xs text-muted-foreground">
+              {(invoiceAudit?.logs ?? []).length} aktivitas
+            </span>
+          </div>
+          {!invoiceAudit ? (
+            <div className="p-4 text-xs text-muted-foreground">Memuat riwayat...</div>
+          ) : invoiceAudit.logs.length === 0 ? (
+            <div className="p-4 text-xs text-muted-foreground">Belum ada aktivitas tercatat.</div>
+          ) : (
+            <div className="divide-y">
+              {invoiceAudit.logs.map((log: any) => (
+                <div key={log.id} className="px-4 py-3 flex items-start gap-3">
+                  <div className="mt-0.5 h-2 w-2 rounded-full bg-primary shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-xs font-semibold">{log.action}</span>
+                      <span className="text-xs text-muted-foreground">
+                        oleh {log.userName ?? "System"}
+                      </span>
+                      {log.userRole && <Badge variant="outline" className="text-[10px]">{log.userRole}</Badge>}
+                    </div>
+                    {(log.before || log.after) && (
+                      <div className="mt-1 text-[11px] text-muted-foreground font-mono break-words">
+                        {log.before && <span className="text-red-600">before: {JSON.stringify(log.before)}</span>}
+                        {log.before && log.after && " → "}
+                        {log.after && <span className="text-green-700">after: {JSON.stringify(log.after)}</span>}
+                      </div>
+                    )}
+                  </div>
+                  <div className="text-[11px] text-muted-foreground whitespace-nowrap">
+                    {new Date(log.createdAt).toLocaleString("id-ID", {
+                      timeZone: "Asia/Jakarta",
+                      dateStyle: "short",
+                      timeStyle: "short",
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </DialogContent>
   );

@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db, usersTable, bookingsTable, companyInvoicesTable, companyInvoiceItemsTable, facilitiesTable, auditLogsTable } from "@workspace/db";
-import { eq, and, gte, lt, inArray, isNull, or } from "drizzle-orm";
+import { eq, and, gte, lt, inArray, isNull, or, desc } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
 
@@ -465,6 +465,22 @@ router.post("/company-invoices/:id/rebuild-items", adminMiddleware, async (req, 
 
     const [company] = await db.select().from(usersTable).where(eq(usersTable.id, inv.companyCustomerId)).limit(1);
     const items = await db.select().from(companyInvoiceItemsTable).where(eq(companyInvoiceItemsTable.invoiceId, id));
+    const { ipAddress, userAgent } = getClientInfo(req);
+    const userInfo = getUserFromReq(req);
+    await logAudit({
+      ...userInfo,
+      action: "COMPANY_INVOICE_ITEMS_REBUILT",
+      entity: "company_invoice",
+      entityId: id,
+      after: {
+        invoiceNumber: inv.invoiceNumber,
+        companyId: inv.companyCustomerId,
+        rebuiltCount: items.length,
+        linkedBookingCount: bookings.length,
+      },
+      ipAddress,
+      userAgent,
+    });
     res.json({ ...mapInvoice(inv, company?.companyName ?? company?.name, items, company), rebuiltCount: items.length });
   } catch (err) {
     req.log.error({ err }, "Rebuild invoice items error");
@@ -488,13 +504,14 @@ router.patch("/company-invoices/:id", adminMiddleware, async (req, res) => {
 
     const [updated] = await db.update(companyInvoicesTable).set(updates).where(eq(companyInvoicesTable.id, id)).returning();
 
-    if (status === "paid") {
+    const { ipAddress, userAgent } = getClientInfo(req);
+    const userInfo = getUserFromReq(req);
+
+    if (status === "paid" && inv.status !== "paid") {
       await db.update(bookingsTable)
         .set({ billingStatus: "paid", status: "completed" })
         .where(eq(bookingsTable.companyInvoiceId, id));
 
-      const { ipAddress, userAgent } = getClientInfo(req);
-      const userInfo = getUserFromReq(req);
       await logAudit({
         ...userInfo,
         action: "COMPANY_INVOICE_PAID",
@@ -505,6 +522,23 @@ router.patch("/company-invoices/:id", adminMiddleware, async (req, res) => {
         ipAddress,
         userAgent,
       });
+    } else if (status !== undefined || notes !== undefined) {
+      await logAudit({
+        ...userInfo,
+        action: "COMPANY_INVOICE_UPDATED",
+        entity: "company_invoice",
+        entityId: id,
+        before: {
+          status: inv.status,
+          notes: inv.notes,
+        },
+        after: {
+          status: updated.status,
+          notes: updated.notes,
+        },
+        ipAddress,
+        userAgent,
+      });
     }
 
     const [company] = await db.select().from(usersTable).where(eq(usersTable.id, updated.companyCustomerId)).limit(1);
@@ -512,6 +546,43 @@ router.patch("/company-invoices/:id", adminMiddleware, async (req, res) => {
     res.json(mapInvoice(updated, company?.companyName ?? company?.name, items, company));
   } catch (err) {
     req.log.error({ err }, "Update company invoice error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// GET /company-invoices/:id/audit-trail — invoice-specific audit history
+router.get("/company-invoices/:id/audit-trail", adminMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(String(req.params.id));
+    if (!Number.isInteger(id)) {
+      res.status(400).json({ error: "ID invoice tidak valid" });
+      return;
+    }
+
+    const [invoice] = await db
+      .select({ id: companyInvoicesTable.id, invoiceNumber: companyInvoicesTable.invoiceNumber })
+      .from(companyInvoicesTable)
+      .where(eq(companyInvoicesTable.id, id))
+      .limit(1);
+
+    if (!invoice) {
+      res.status(404).json({ error: "Invoice tidak ditemukan" });
+      return;
+    }
+
+    const logs = await db
+      .select()
+      .from(auditLogsTable)
+      .where(and(
+        eq(auditLogsTable.entity, "company_invoice"),
+        eq(auditLogsTable.entityId, id),
+      ))
+      .orderBy(desc(auditLogsTable.createdAt))
+      .limit(100);
+
+    res.json({ invoiceId: id, invoiceNumber: invoice.invoiceNumber, logs });
+  } catch (err) {
+    req.log.error({ err }, "Company invoice audit trail error");
     res.status(500).json({ error: "Internal server error" });
   }
 });
