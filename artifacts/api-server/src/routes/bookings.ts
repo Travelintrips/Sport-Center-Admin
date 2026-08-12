@@ -1162,6 +1162,18 @@ async function runApVerification(
     await recordTaxTransaction("booking", booking.id, booking.orderNumber, taxCalc, booking.bookingDate);
   }
 
+  // Propagate the verified AP price to Bizportal as well.
+  const [verifiedBooking] = await db.select().from(bookingsTable)
+    .where(eq(bookingsTable.id, bookingId))
+    .limit(1);
+  if (verifiedBooking && facility) {
+    syncBookingToBizportal({
+      booking: verifiedBooking,
+      facilityName: facility.name,
+      facilityCategory: facility.category,
+    }).catch(() => {});
+  }
+
   await db.insert(verificationLogsTable).values({
     bookingId,
     orderNumber: opts.orderNumber ?? booking.orderNumber,

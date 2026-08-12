@@ -167,6 +167,10 @@ export async function syncBookingToBizportal(payload: SyncBookingPayload): Promi
            payment_status, payment_proof_url, payment_proof_at, created_at, updated_at)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,NOW())
          ON CONFLICT (booking_code) DO UPDATE SET
+            facility_name     = EXCLUDED.facility_name,
+            total_hours       = EXCLUDED.total_hours,
+            total_price       = EXCLUDED.total_price,
+            notes             = COALESCE(EXCLUDED.notes, sport_bookings_sync.notes),
            status            = EXCLUDED.status,
            payment_status    = EXCLUDED.payment_status,
            payment_proof_url = COALESCE(EXCLUDED.payment_proof_url, sport_bookings_sync.payment_proof_url),
