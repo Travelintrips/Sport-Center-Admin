@@ -2347,7 +2347,7 @@ export default function AdminBookings() {
                               className="flex items-center gap-1 h-7 px-2.5 rounded-lg text-xs font-semibold text-primary border border-primary/30 hover:bg-primary/10 transition-colors whitespace-nowrap"
                             >
                               <ShieldCheck size={12} />
-                              Verifikasi ID
+                              {b.verificationStatus === "rejected" ? "Verifikasi Ulang" : "Verifikasi ID"}
                             </motion.button>
                           )}
                           {b.groupRef && (

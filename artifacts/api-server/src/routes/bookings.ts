@@ -1058,15 +1058,20 @@ async function runApVerification(
   idCardNumber: string,
   opts: { verifiedByUserId?: number; ipAddress?: string; orderNumber?: string },
 ) {
+  const normalizedIdCardNumber = idCardNumber.trim().toUpperCase();
   const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, bookingId)).limit(1);
   if (!booking) return { notFound: true } as const;
 
-  if (booking.customerType !== "angkasa_pura" || booking.verificationStatus !== "pending") {
+  // A rejected booking can be tried again with a corrected or newly activated
+  // AP card. A verified booking remains immutable.
+  const canVerify = booking.customerType === "angkasa_pura"
+    && (booking.verificationStatus === "pending" || booking.verificationStatus === "rejected");
+  if (!canVerify) {
     await db.insert(verificationLogsTable).values({
       bookingId,
       orderNumber: opts.orderNumber ?? booking.orderNumber,
       verifiedByUserId: opts.verifiedByUserId ?? null,
-      idCardNumberInput: idCardNumber,
+      idCardNumberInput: normalizedIdCardNumber,
       status: "failed",
       notes: `Booking status: ${booking.verificationStatus} / type: ${booking.customerType}`,
       ipAddress: opts.ipAddress ?? null,
@@ -1077,24 +1082,28 @@ async function runApVerification(
     };
   }
 
-  if (booking.idCardNumber && booking.idCardNumber !== idCardNumber) {
+  // Pending bookings keep the original-card mismatch guard. After a
+  // rejection, allow the admin to correct a typo or replace an old card.
+  const isRetryAfterRejection = booking.verificationStatus === "rejected";
+  const savedIdCardNumber = booking.idCardNumber?.trim().toUpperCase();
+  if (!isRetryAfterRejection && savedIdCardNumber && savedIdCardNumber !== normalizedIdCardNumber) {
     await db.insert(verificationLogsTable).values({
       bookingId,
       orderNumber: opts.orderNumber ?? booking.orderNumber,
       verifiedByUserId: opts.verifiedByUserId ?? null,
-      idCardNumberInput: idCardNumber,
+      idCardNumberInput: normalizedIdCardNumber,
       status: "mismatch",
-      notes: `Expected: ${booking.idCardNumber}, got: ${idCardNumber}`,
+      notes: `Expected: ${savedIdCardNumber}, got: ${normalizedIdCardNumber}`,
       ipAddress: opts.ipAddress ?? null,
     });
     return {
       success: false, result: "mismatch" as const,
-      message: `ID Card hasil scan (${idCardNumber}) tidak cocok dengan data booking (${booking.idCardNumber}).`,
+      message: `ID Card hasil scan (${normalizedIdCardNumber}) tidak cocok dengan data booking (${savedIdCardNumber}).`,
     };
   }
 
   const [member] = await db.select().from(apMembersTable)
-    .where(and(eq(apMembersTable.idCardNumber, idCardNumber), eq(apMembersTable.isActive, true)))
+    .where(and(eq(apMembersTable.idCardNumber, normalizedIdCardNumber), eq(apMembersTable.isActive, true)))
     .limit(1);
 
   if (!member) {
@@ -1103,7 +1112,7 @@ async function runApVerification(
       bookingId,
       orderNumber: opts.orderNumber ?? booking.orderNumber,
       verifiedByUserId: opts.verifiedByUserId ?? null,
-      idCardNumberInput: idCardNumber,
+      idCardNumberInput: normalizedIdCardNumber,
       status: "failed",
       notes: "ID Card tidak ditemukan di database AP2",
       ipAddress: opts.ipAddress ?? null,
@@ -1147,7 +1156,7 @@ async function runApVerification(
 
   await db.update(bookingsTable).set({
     verificationStatus: "verified",
-    idCardNumber,
+    idCardNumber: normalizedIdCardNumber,
     apDiscountAmount: String(discountAmount),
     totalPrice: String(finalPrice),
     ppnRate: taxCalc.taxRate > 0 ? String(taxCalc.taxRate) : null,
@@ -1178,7 +1187,7 @@ async function runApVerification(
     bookingId,
     orderNumber: opts.orderNumber ?? booking.orderNumber,
     verifiedByUserId: opts.verifiedByUserId ?? null,
-    idCardNumberInput: idCardNumber,
+    idCardNumberInput: normalizedIdCardNumber,
     status: "success",
     notes: discountEnabled
       ? `${isSpecialMultiguna ? "Harga khusus AP Multiguna — " : ""}Diskon ${discountPct}% (Rp ${discountAmount.toLocaleString("id-ID")})`
