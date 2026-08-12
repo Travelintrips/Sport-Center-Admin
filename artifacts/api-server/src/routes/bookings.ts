@@ -1798,9 +1798,7 @@ async function runApVerification(
     success: true, result: "verified" as const,
     message: discountEnabled
 
-      ? `Verifikasi berhasil. ${isSpecialMultiguna ? "Harga khusus AP Multiguna diterapkan. " : `Diskon ${discountPct}% diterapkan. `}Harga akhir Rp ${finalPrice.toLocaleString("id-ID")}.`
-
-      ? `Verifikasi berhasil. Diskon ${discountPct}% diterapkan${groupUpdatedCount > 0 ? ` ke ${groupUpdatedCount + 1} booking dalam grup` : ""}. Harga akhir Rp ${finalPrice.toLocaleString("id-ID")}.`
+      ? `Verifikasi berhasil. ${isSpecialMultiguna ? "Harga khusus AP Multiguna diterapkan. " : `Diskon ${discountPct}% diterapkan${groupUpdatedCount > 0 ? ` ke ${groupUpdatedCount + 1} booking dalam grup` : ""}. `}Harga akhir Rp ${finalPrice.toLocaleString("id-ID")}.`
 
       : "ID Card valid. Terverifikasi (diskon Angkasa Pura sedang nonaktif).",
     discountApplied: discountEnabled,
