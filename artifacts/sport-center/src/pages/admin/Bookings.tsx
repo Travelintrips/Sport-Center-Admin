@@ -1772,6 +1772,7 @@ export default function AdminBookings() {
   const [dateTo, setDateTo] = useState("");
   const [selectedBooking, setSelectedBooking] = useState<any>(null);
   const [verifyBooking, setVerifyBooking] = useState<any>(null);
+  const [fixDiscountId, setFixDiscountId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
   const [extendBooking, setExtendBooking] = useState<any>(null);
@@ -1823,6 +1824,47 @@ export default function AdminBookings() {
       if (next.has(id)) next.delete(id); else next.add(id);
       return next;
     });
+  };
+
+  const handleFixDiscount = async (booking: any) => {
+    if (fixDiscountId !== null) return;
+    const isMultiguna = `${booking.facilityName ?? ""} ${booking.facilityCategory ?? ""}`
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, "")
+      .includes("multiguna");
+    const priceLabel = isMultiguna ? "Rp300.000/jam" : "diskon AP 20%";
+    const confirmed = window.confirm(
+      `Terapkan Fix Diskon untuk ${booking.orderNumber}?\n\n` +
+      `Harga akan diubah menjadi ${priceLabel}. Status verifikasi ID Card tetap ${booking.verificationStatus ?? "pending"} ` +
+      `dan tindakan ini dicatat sebagai override admin.`,
+    );
+    if (!confirmed) return;
+
+    setFixDiscountId(booking.id);
+    try {
+      const res = await fetch(`/api/bookings/${booking.id}/fix-discount`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${getToken()}`,
+        },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Gagal menerapkan fix diskon");
+      await queryClient.invalidateQueries({ queryKey: getListBookingsQueryKey() });
+      toast({
+        title: "Fix Diskon berhasil",
+        description: data.message ?? "Harga AP sudah diterapkan.",
+      });
+    } catch (err: any) {
+      toast({
+        title: "Fix Diskon gagal",
+        description: err.message,
+        variant: "destructive",
+      });
+    } finally {
+      setFixDiscountId(null);
+    }
   };
 
 
@@ -2350,6 +2392,25 @@ export default function AdminBookings() {
                               {b.verificationStatus === "rejected" ? "Verifikasi Ulang" : "Verifikasi ID"}
                             </motion.button>
                           )}
+                          {b.customerType === "angkasa_pura"
+                            && b.verificationStatus !== "verified"
+                            && !["cancelled", "expired", "refunded"].includes(b.status)
+                            && (
+                              <motion.button
+                                whileHover={{ scale: 1.04 }}
+                                whileTap={{ scale: 0.96 }}
+                                onClick={() => void handleFixDiscount(b)}
+                                disabled={fixDiscountId === b.id}
+                                className="flex items-center gap-1 h-7 px-2.5 rounded-lg text-xs font-semibold text-emerald-600 border border-emerald-300 hover:bg-emerald-50 transition-colors whitespace-nowrap disabled:opacity-50"
+                              >
+                                {fixDiscountId === b.id ? (
+                                  <span className="w-3 h-3 border border-emerald-400 border-t-transparent rounded-full animate-spin" />
+                                ) : (
+                                  <CheckCircle2 size={12} />
+                                )}
+                                {fixDiscountId === b.id ? "Memproses..." : "Fix Diskon"}
+                              </motion.button>
+                            )}
                           {b.groupRef && (
                             <motion.button
                               whileHover={{ scale: 1.04 }}

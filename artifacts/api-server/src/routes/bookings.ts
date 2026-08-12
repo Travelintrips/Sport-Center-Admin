@@ -1209,6 +1209,126 @@ async function runApVerification(
   };
 }
 
+// POST /bookings/:id/fix-discount — admin menerapkan harga AP secara manual
+// tanpa mengubah status verifikasi ID Card.
+router.post("/bookings/:id/fix-discount", adminMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(String(req.params.id));
+    const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, id)).limit(1);
+    if (!booking) {
+      res.status(404).json({ error: "Booking tidak ditemukan" });
+      return;
+    }
+    if (booking.customerType !== "angkasa_pura") {
+      res.status(400).json({ error: "Fix diskon hanya tersedia untuk customer Angkasa Pura" });
+      return;
+    }
+    if (["cancelled", "expired", "refunded"].includes(booking.status)) {
+      res.status(400).json({ error: "Booking yang sudah tidak aktif tidak dapat diberi diskon" });
+      return;
+    }
+
+    const [facility] = await db.select().from(facilitiesTable)
+      .where(eq(facilitiesTable.id, booking.facilityId))
+      .limit(1);
+    if (!facility) {
+      res.status(404).json({ error: "Fasilitas tidak ditemukan" });
+      return;
+    }
+
+    const [setting] = await db.select().from(discountSettingsTable)
+      .where(eq(discountSettingsTable.customerType, "angkasa_pura"))
+      .limit(1);
+    const durationHours = Math.max(1, Number(booking.durationHours) || 1);
+    const basePrice = booking.basePrice == null
+      ? Number(facility.pricePerHour) * durationHours
+      : Number(booking.basePrice);
+    const isSpecialMultiguna = isMultigunaFacility(facility);
+    const specialMultigunaPrice = AP_MULTIGUNA_HOURLY_PRICE * durationHours;
+
+    // Override admin mengikuti kebijakan AP: Multiguna Rp300.000/jam,
+    // fasilitas lain 20% (atau angka yang tersimpan di pengaturan AP).
+    let discountPercentage = 20;
+    let discountAmount = 0;
+    let finalPrice = basePrice;
+    if (isSpecialMultiguna) {
+      finalPrice = Math.min(basePrice, specialMultigunaPrice);
+      discountAmount = Math.max(0, basePrice - finalPrice);
+      discountPercentage = basePrice > 0
+        ? Number(((discountAmount / basePrice) * 100).toFixed(2))
+        : 0;
+    } else {
+      discountPercentage = Number(setting?.discountPercentage ?? 20);
+      discountAmount = Math.round((basePrice * discountPercentage) / 100);
+      finalPrice = Math.max(0, basePrice - discountAmount);
+    }
+
+    const taxCalc = await calculateTax(finalPrice, "sport_booking", booking.bookingDate);
+    await db.update(bookingsTable).set({
+      apDiscountAmount: String(discountAmount),
+      totalPrice: String(finalPrice),
+      ppnRate: taxCalc.taxRate > 0 ? String(taxCalc.taxRate) : null,
+      ppnAmount: taxCalc.taxAmount > 0 ? String(taxCalc.taxAmount) : null,
+      grandTotal: taxCalc.taxAmount > 0 ? String(taxCalc.grandTotal) : null,
+    }).where(eq(bookingsTable.id, id));
+
+    await reverseTaxTransaction(booking.id, booking.orderNumber, booking.bookingDate);
+    if (taxCalc.taxCode) {
+      await recordTaxTransaction("booking", booking.id, booking.orderNumber, taxCalc, booking.bookingDate);
+    }
+
+    const [updatedBooking] = await db.select().from(bookingsTable)
+      .where(eq(bookingsTable.id, id))
+      .limit(1);
+    if (updatedBooking) {
+      syncBookingToBizportal({
+        booking: updatedBooking,
+        facilityName: facility.name,
+        facilityCategory: facility.category,
+      }).catch(() => {});
+    }
+
+    const { userId, userName, userRole } = getUserFromReq(req);
+    const { ipAddress, userAgent } = getClientInfo(req);
+    await logAudit({
+      userId,
+      userName,
+      userRole,
+      action: "ADMIN_FIXED_AP_DISCOUNT",
+      entity: "booking",
+      entityId: id,
+      before: {
+        totalPrice: Number(booking.totalPrice),
+        grandTotal: booking.grandTotal == null ? null : Number(booking.grandTotal),
+        verificationStatus: booking.verificationStatus,
+      },
+      after: {
+        totalPrice: finalPrice,
+        grandTotal: taxCalc.grandTotal,
+        apDiscountAmount: discountAmount,
+        verificationStatus: booking.verificationStatus,
+        discountPercentage,
+      },
+      ipAddress,
+      userAgent,
+    });
+
+    const result = await getBookingWithPayment(id);
+    res.json({
+      success: true,
+      manual: true,
+      message: `Fix diskon berhasil. Harga akhir Rp ${finalPrice.toLocaleString("id-ID")}. Status verifikasi ID tetap '${booking.verificationStatus}'.`,
+      discountPercentage,
+      discountAmount,
+      finalPrice,
+      booking: result,
+    });
+  } catch (err) {
+    req.log.error({ err }, "Fix AP discount error");
+    res.status(500).json({ error: "Gagal menerapkan fix diskon" });
+  }
+});
+
 // POST /bookings/:id/verify — verifikasi ID Card Angkasa Pura & terapkan diskon (admin)
 router.post("/bookings/:id/verify", adminMiddleware, async (req, res) => {
   try {
