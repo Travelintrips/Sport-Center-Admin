@@ -463,13 +463,11 @@ export default function Booking() {
               bookedForName: bookedForName.trim() || effName,
               bookedForPhone: effPhone,
 
-              vendorId: vendorId ? Number(vendorId) : undefined,
+              vendorId: (vendorId && vendorId !== "__none__") ? Number(vendorId) : undefined,
               downPaymentAmount:
                 paymentType === "dp" && dpAmount
                   ? Number(dpAmount)
                   : undefined,
-
-              vendorId: (vendorId && vendorId !== "__none__") ? Number(vendorId) : undefined,
 
             } as any,
           });
@@ -635,7 +633,12 @@ export default function Booking() {
   const endTime = `${endHours.toString().padStart(2, "0")}:${(minutes || 0).toString().padStart(2, "0")}`;
 
 
-  const totalPrice = facility ? facility.pricePerHour * duration : 0;
+  const bookingPeopleCount = isWalkIn
+    ? Math.max(1, Math.min(20, parseInt(numberOfPeople, 10) || 1))
+    : 1;
+  const totalPrice = facility
+    ? facility.pricePerHour * (isWalkIn ? bookingPeopleCount : duration)
+    : 0;
   const isMultiguna = facility
     ? `${facility.name} ${facility.category}`.toLowerCase().replace(/[^a-z0-9]/g, "").includes("multiguna")
     : false;
@@ -643,13 +646,6 @@ export default function Booking() {
     ? Math.max(0, totalPrice - (300000 * duration))
     : 0;
   const apMultigunaDiscountTotal = apMultigunaDiscount * (isRepeat ? (effectiveCount || repeatCount) : 1);
-
-  const bookingPeopleCount = isWalkIn
-    ? Math.max(1, Math.min(20, parseInt(numberOfPeople, 10) || 1))
-    : 1;
-  const totalPrice = facility
-    ? facility.pricePerHour * (isWalkIn ? bookingPeopleCount : duration)
-    : 0;
 
 
   if (isLoadingFacility || isLoadingUser) {
@@ -1642,6 +1638,7 @@ export default function Booking() {
                       {t("Harga setelah verifikasi: Rp300.000/jam", "Price after verification: Rp300,000/hour")}
                     </div>
                   </>
+                )}
 
                 {isWalkIn ? (
                   <div className="flex justify-between">
@@ -1706,13 +1703,11 @@ export default function Booking() {
                 )}
                 {(() => {
 
-                  const disc = (couponResult?.discountAmount ?? 0) + apMultigunaDiscountTotal;
-
                   const disc = isEvent
                     ? (isRepeat
                         ? Math.round((checkResult ? effectiveTotalPrice : totalPrice * repeatCount) * EVENT_DISCOUNT_RATE)
                         : Math.round(totalPrice * EVENT_DISCOUNT_RATE))
-                    : (couponResult?.discountAmount ?? 0);
+                    : (couponResult?.discountAmount ?? 0) + apMultigunaDiscountTotal;
 
                   const grand = isRepeat
                     ? (isChecking ? null : Math.max(0, (checkResult ? effectiveTotalPrice : totalPrice * repeatCount) - disc))
