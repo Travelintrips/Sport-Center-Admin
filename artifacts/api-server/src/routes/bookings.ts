@@ -508,7 +508,16 @@ router.post("/bookings", async (req, res) => {
           .where(and(eq(discountSettingsTable.customerType, "angkasa_pura"), eq(discountSettingsTable.isActive, true)))
           .limit(1);
         if (apSetting && apSetting.discountPercentage > 0) {
-          apAutoDiscountAmount = Math.round((basePrice * apSetting.discountPercentage) / 100);
+          // AP Multiguna memakai harga khusus Rp300.000/jam, bukan diskon
+          // persentase umum AP. Ini juga harus berlaku pada auto-verifikasi;
+          // booking yang auto-verified tidak akan melewati endpoint /verify.
+          if (isMultigunaFacility(facility)) {
+            const specialMultigunaPrice = AP_MULTIGUNA_HOURLY_PRICE * durationHours;
+            const finalPrice = Math.min(basePrice, specialMultigunaPrice);
+            apAutoDiscountAmount = Math.max(0, basePrice - finalPrice);
+          } else {
+            apAutoDiscountAmount = Math.round((basePrice * apSetting.discountPercentage) / 100);
+          }
           apAutoVerified = true;
         } else {
           // Member valid tapi diskon nonaktif → tetap auto-verified
