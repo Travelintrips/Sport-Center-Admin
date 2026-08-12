@@ -64,7 +64,7 @@ export default function WaRegister() {
           <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-br from-orange-500 to-red-600 mb-3 shadow-lg">
             <UserPlus className="text-white w-7 h-7" />
           </div>
-          <h1 className="text-xl font-black text-gray-900">Sport Center Jakarta</h1>
+          <h1 className="text-xl font-black text-gray-900">Sport Center Bandara Soekarno Hatta</h1>
           <p className="text-sm text-gray-500 mt-0.5">Formulir Pendaftaran</p>
         </div>
 
@@ -179,7 +179,7 @@ export default function WaRegister() {
         </Card>
 
         <p className="text-xs text-center text-gray-400 mt-4">
-          © Sport Center Jakarta — Pendaftaran aman & terenkripsi
+          © Sport Center Bandara Soekarno Hatta — Pendaftaran aman & terenkripsi
         </p>
       </div>
     </div>

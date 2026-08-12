@@ -35,6 +35,7 @@ import {
   Activity,
   XCircle,
   AlertTriangle,
+  CreditCard,
 } from "lucide-react";
 import { useGetMe, useLogout, getGetMeQueryKey } from "@workspace/api-client-react";
 import { useQueryClient, useQuery } from "@tanstack/react-query";
@@ -81,6 +82,7 @@ const NAV_GROUPS = [
     items: [
       { href: "/admin/reports", label: "Laporan Keuangan", icon: TrendingUp },
       { href: "/admin/expenses", label: "Pengeluaran", icon: TrendingDown },
+      { href: "/admin/vendors", label: "Daftar Vendor", icon: Building2 },
       { href: "/admin/notifications", label: "Kirim WA", icon: Send },
       { href: "/admin/notification-templates", label: "Template WA", icon: Bell },
       { href: "/admin/document-settings", label: "Template Dokumen", icon: FileText },
@@ -91,6 +93,7 @@ const NAV_GROUPS = [
       { href: "/admin/audit-log", label: "Audit Log", icon: Shield },
       { href: "/admin/data-connections", label: "Data Connections", icon: Activity },
       { href: "/admin/settings", label: "Pengaturan", icon: SettingsIcon },
+      { href: "/admin/paylabs", label: "Paylabs Payment Gateway", icon: CreditCard },
     ],
   },
 ];

@@ -50,11 +50,18 @@ import waAiAdminRouter from "./waAiAdmin";
 import seedDemoRouter from "./seedDemo";
 import systemAdminRouter from "./systemAdmin";
 import expensesRouter from "./expenses";
+import vendorsRouter from "./vendors";
 import documentTemplatesRouter from "./documentTemplates";
+import documentFileTemplatesRouter from "./documentFileTemplates";
 import invoicesRouter from "./invoices";
 import invoiceSettingsRouter from "./invoiceSettings";
 import documentSettingsRouter from "./documentSettings";
 import dataConnectionsRouter from "./dataConnections";
+import rekapRouter from "./rekap";
+import corporateDocumentationRouter from "./corporateDocumentation";
+import analyticsPublicRouter from "./analyticsPublic";
+import paylabsSettingsRouter from "./paylabsSettings";
+import paylabsPaymentRouter from "./paylabsPayment";
 
 const router: IRouter = Router();
 
@@ -108,10 +115,17 @@ router.use(waAiAdminRouter);
 router.use(seedDemoRouter);
 router.use(systemAdminRouter);
 router.use(expensesRouter);
+router.use(vendorsRouter);
 router.use(documentTemplatesRouter);
+router.use(documentFileTemplatesRouter);
 router.use(invoicesRouter);
 router.use(invoiceSettingsRouter);
 router.use(documentSettingsRouter);
 router.use(dataConnectionsRouter);
+router.use(rekapRouter);
+router.use(corporateDocumentationRouter);
+router.use(analyticsPublicRouter);
+router.use(paylabsSettingsRouter);
+router.use(paylabsPaymentRouter);
 
 export default router;
