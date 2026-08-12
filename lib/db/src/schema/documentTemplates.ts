@@ -38,3 +38,18 @@ export const insertDocumentTemplateSchema = createInsertSchema(companyDocumentTe
 export type InsertDocumentTemplate = z.infer<typeof insertDocumentTemplateSchema>;
 export type DocumentTemplate = typeof companyDocumentTemplatesTable.$inferSelect;
 export type DocumentNumberSequence = typeof documentNumberSequencesTable.$inferSelect;
+
+// ─── Document File Templates (image/PDF background override) ──────────────────
+export const documentFileTemplatesTable = scSchema.table("document_file_templates", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id"),
+  documentType: text("document_type").notNull(),
+  templateType: text("template_type").notNull().default("image"),
+  fileUrl: text("file_url").notNull(),
+  fileName: text("file_name"),
+  isActive: boolean("is_active").notNull().default(false),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
+});
+
+export type DocumentFileTemplate = typeof documentFileTemplatesTable.$inferSelect;

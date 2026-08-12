@@ -3,7 +3,13 @@ import fs from "fs";
 import crypto from "crypto";
 
 const { Client } = pg;
-const rawUrl = process.env.SUPABASE_DATABASE_URL_DEV || process.env.SUPABASE_DATABASE_URL || "";
+// Match the API runtime: development uses DATABASE_URL (local HeliumDB) when
+// it is available, and only falls back to the isolated Supabase dev database.
+const rawUrl =
+  process.env.DATABASE_URL ||
+  process.env.SUPABASE_DATABASE_URL_DEV ||
+  process.env.SUPABASE_DATABASE_URL ||
+  "";
 const url = rawUrl.replace("pooler.supabase.com:6543", "pooler.supabase.com:5432");
 const client = new Client({ connectionString: url, ssl: { rejectUnauthorized: false } });
 

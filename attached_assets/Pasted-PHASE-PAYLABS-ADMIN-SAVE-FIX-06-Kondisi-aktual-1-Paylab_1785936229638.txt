@@ -1,0 +1,265 @@
+PHASE PAYLABS-ADMIN-SAVE-FIX-06
+
+Kondisi aktual:
+
+1. Paylabs Store ID memang tidak diberikan oleh Paylabs dan harus tetap kosong.
+2. Store ID adalah opsional.
+3. Halaman /admin/paylabs sekarang gagal menyimpan:
+   HTTP 500: Internal server error
+4. UI menunjukkan:
+   Paylabs Public Key (Sandbox): Not configured
+5. Jangan mengisi Store ID buatan.
+6. Jangan mengubah flow create-payment, webhook, callback URL, atau finalisasi booking.
+
+Tujuan:
+
+Perbaiki endpoint penyimpanan admin Paylabs agar:
+
+- Store ID kosong dapat disimpan.
+- Settings non-secret dapat disimpan tanpa public key.
+- Public key lama tidak terhapus jika field key tidak diedit.
+- Public key baru hanya dinormalisasi ketika benar-benar dikirim.
+- Error backend tampil jelas dan tidak menjadi HTTP 500 generik.
+
+PHASE 1 — TRACE HTTP 500
+
+Reproduksi dengan membuka:
+
+/admin/paylabs
+
+Lalu klik:
+
+Simpan Perubahan
+
+tanpa mengisi Store ID dan tanpa mengubah public key.
+
+Cari log backend untuk request PATCH settings.
+
+Laporkan:
+
+- route yang dipanggil;
+- request body keys, tanpa nilai credential;
+- HTTP status;
+- stack trace;
+- database error code;
+- field yang menyebabkan error;
+- apakah error terjadi sebelum atau sesudah database update;
+- apakah audit log insert gagal.
+
+Jangan menampilkan private key atau public key penuh.
+
+Jangan memperbaiki sebelum root cause ditemukan.
+
+PHASE 2 — PATCH PAYLOAD CONTRACT
+
+Pisahkan field menjadi tiga kelompok:
+
+A. Non-secret settings:
+- sandboxMode
+- storeId
+- enabled payment methods
+- titles
+- icon URLs
+
+B. Secret/key updates:
+- sandbox public key
+- production public key
+- private keys jika masih dikelola dari UI
+
+C. Read-only status:
+- sandboxPublicKeyConfigured
+- productionPublicKeyConfigured
+
+Ketentuan:
+
+- Field read-only configured boolean tidak boleh diproses sebagai key.
+- Frontend jangan mengirim kembali boolean configured sebagai nilai public key.
+- Key hanya diubah jika request secara eksplisit membawa field update key.
+- Jika field key tidak ada, pertahankan nilai DB yang lama.
+- Jika field key berupa empty string karena user membatalkan edit, jangan otomatis menghapus key.
+- Penghapusan key harus memakai aksi eksplisit terpisah, misalnya:
+  clearSandboxPublicKey: true
+
+Jangan memakai pola:
+
+sandboxPublicKey =
+  body.sandboxPublicKey || ""
+
+karena ini dapat menimpa key lama dengan string kosong.
+
+Gunakan pola patch semantics:
+
+if ("sandboxPublicKey" in body) {
+  // validate and update
+}
+
+PHASE 3 — STORE ID OPTIONAL
+
+Atur Store ID:
+
+1. Trim whitespace.
+2. Jika kosong:
+   - simpan NULL atau hapus setting key;
+   - jangan validasi panjang;
+   - jangan kirim ke Paylabs payload.
+3. Jika terisi:
+   - wajib 6–32 karakter.
+4. Jangan membuat default.
+5. Jangan memaksa Store ID hanya karena sandbox aktif.
+
+Schema harus menerima:
+
+storeId: string | null | undefined
+
+Normalisasi:
+
+function normalizeOptionalStoreId(
+  value: unknown
+): string | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  const normalized = String(value).trim();
+
+  if (normalized === "") {
+    return null;
+  }
+
+  if (normalized.length < 6 || normalized.length > 32) {
+    throw new ValidationError(
+      "Paylabs Store ID harus 6–32 karakter jika diisi"
+    );
+  }
+
+  return normalized;
+}
+
+PHASE 4 — PUBLIC KEY OPTIONAL DURING NORMAL SETTINGS SAVE
+
+Public key sandbox wajib untuk memproses real webhook, tetapi tidak boleh membuat semua penyimpanan settings gagal.
+
+Aturan:
+
+- User boleh menyimpan method toggle, icon, label, sandbox mode, dan Store ID kosong meskipun public key belum configured.
+- Status tetap:
+  PUBLIC_KEY_NOT_CONFIGURED
+- Webhook real tetap fail-closed sampai key diisi.
+- Admin settings save tidak boleh HTTP 500 hanya karena public key belum ada.
+
+Hanya jalankan:
+
+normalizePaylabsPublicKey(...)
+
+jika field public key baru benar-benar dikirim dan tidak kosong.
+
+Jika public key baru invalid:
+
+return HTTP 400 atau 422 dengan pesan jelas.
+
+Jangan return HTTP 500 untuk kesalahan validasi user.
+
+PHASE 5 — DATABASE UPSERT
+
+Audit fungsi penyimpanan settings.
+
+Pastikan:
+
+- null Store ID diproses aman;
+- tidak ada NOT NULL violation;
+- tidak ada duplicate key violation;
+- upsert memakai unique key settings yang benar;
+- update dilakukan dalam transaction;
+- rollback hanya jika memang ada database failure;
+- audit log tidak menyimpan nilai credential.
+
+Jika audit log gagal, tentukan kebijakan:
+
+- idealnya seluruh transaction rollback dan return error jelas;
+- jangan menyembunyikan penyebab sebagai Internal server error generik.
+
+PHASE 6 — FRONTEND FIX
+
+Pada PaylabsGateway.tsx:
+
+1. Store ID kosong dikirim sebagai null atau tidak dikirim.
+2. Jangan kirim placeholder:
+   "Kosongkan jika Paylabs tidak memberikan Store ID"
+3. Pastikan placeholder bukan value.
+4. Jangan kirim:
+   sandboxPublicKeyConfigured
+   productionPublicKeyConfigured
+   sebagai bagian dari PATCH secret.
+5. Public key textarea hanya dikirim jika user membuka mode edit dan memasukkan nilai baru.
+6. Setelah save berhasil:
+   - tampilkan toast sukses;
+   - refetch settings;
+   - badge tetap Not configured jika key memang belum ada.
+7. Jika backend return 400/422:
+   - tampilkan pesan backend;
+   - jangan hanya tampilkan HTTP 500.
+
+PHASE 7 — TEST
+
+Tambahkan test:
+
+1. Save settings dengan Store ID undefined → sukses.
+2. Save settings dengan Store ID null → sukses.
+3. Save settings dengan Store ID empty string → sukses dan tersimpan null.
+4. Save settings dengan whitespace → sukses dan tersimpan null.
+5. Store ID 5 karakter → HTTP 422.
+6. Store ID 6 karakter → sukses.
+7. Save tanpa public key → settings non-secret tetap sukses.
+8. Existing public key tidak terhapus saat PATCH tidak membawa public key.
+9. Empty key field tidak menghapus existing key.
+10. Explicit clear key action bekerja jika memang disediakan.
+11. Invalid new public key → HTTP 422.
+12. configured boolean tidak dianggap sebagai key.
+13. Audit log tidak mengandung key value.
+14. Frontend placeholder tidak terkirim sebagai Store ID.
+
+PHASE 8 — BUILD DAN RETEST
+
+Setelah fix:
+
+1. Rebuild API server.
+2. Restart server.
+3. Buka /admin/paylabs.
+4. Biarkan Store ID kosong.
+5. Jangan isi public key terlebih dahulu.
+6. Klik Simpan Perubahan.
+7. Harus sukses tanpa HTTP 500.
+8. Pastikan Store ID tersimpan null/kosong.
+9. Pastikan badge public key tetap Not configured.
+10. Pastikan webhook real tetap fail-closed.
+11. Kemudian isi Paylabs Public Key Sandbox.
+12. Simpan lagi.
+13. Pastikan badge berubah Configured.
+14. Restart API.
+15. Jalankan transaksi sandbox baru.
+16. Pastikan signature result VALID.
+
+PHASE 9 — FINAL REPORT
+
+Laporkan:
+
+- root cause HTTP 500;
+- stack trace ringkas;
+- request field yang memicu error;
+- apakah placeholder sempat terkirim sebagai value;
+- apakah public key kosong dinormalisasi secara salah;
+- file yang diubah;
+- hasil tests;
+- hasil save dengan Store ID kosong;
+- hasil save tanpa public key;
+- hasil save dengan public key valid;
+- badge configured;
+- TypeScript;
+- build.
+
+Verdict hanya:
+
+- ADMIN SETTINGS SAVE VERIFIED
+- PUBLIC KEY CONFIGURED
+- SANDBOX SIGNATURE VERIFIED
+- BLOCKED

@@ -1,0 +1,16 @@
+# .gcloudignore — files excluded from gcloud app deploy packaging
+# Place this file next to app.yaml inside gae-deploy/
+
+# Source maps (large, not needed at runtime — kept for source-map support in Node)
+# Uncomment the line below to strip them and reduce package size
+# *.map
+
+# Playwright browser binaries (downloaded at runtime via @sparticuz/chromium-min)
+node_modules/playwright/.local-browsers/
+node_modules/playwright-core/.local-browsers/
+
+# Test / dev artifacts
+*.test.ts
+*.spec.ts
+__tests__/
+coverage/

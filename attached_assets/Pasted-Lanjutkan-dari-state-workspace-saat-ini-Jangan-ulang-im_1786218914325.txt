@@ -1,0 +1,167 @@
+Lanjutkan dari state workspace saat ini. Jangan ulang implementasi.
+
+Task sekarang hanya FINAL VALIDATION dan FINAL REPORT.
+
+Perubahan utama sudah selesai:
+
+* manual QRIS provider narrowed ke `mandiri_direct | unknown`;
+* Paylabs canonical provider/reference sudah diimplementasikan;
+* CST mirror sudah diperbarui;
+* backfill dry-run tersedia;
+* duplicate CST mirror update sudah dibersihkan;
+* skipped/already-populated count sudah ditambahkan;
+* tidak ada production migration/backfill apply.
+
+## 1. FINAL TYPECHECK / BUILD / TEST
+
+Jalankan ulang seluruh check yang relevan setelah patch terakhir:
+
+* API typecheck
+* API build
+* relevant frontend/workspace build
+* test payment/provider/backfill
+* generated client check jika relevan
+
+Laporkan command dan hasil exact.
+
+Jika masih ada error:
+
+* bedakan error dari patch ini;
+* bedakan pre-existing error.
+
+Jangan menyatakan selesai jika masih ada error baru dari patch ini.
+
+## 2. BACKFILL DRY-RUN DEV
+
+Jalankan kembali backfill hanya dalam dry-run terhadap development.
+
+Laporkan count final:
+
+* Paylabs confidently identified
+* Mandiri Direct confidently identified
+* QRIS unknown
+* ambiguous
+* skipped/already populated
+
+Pastikan tidak ada `--apply`.
+
+Expected behavior:
+historical QRIS tanpa evidence kuat tetap `unknown`.
+
+## 3. VERIFY MANUAL QRIS CONTRACT
+
+Pastikan final API behavior:
+
+### QRIS
+
+Allowed provider:
+
+* `mandiri_direct`
+* `unknown`
+
+Jika route khusus Mandiri mengirim provider explicit:
+`mandiri_direct`
+
+Jika evidence/provider tidak pasti:
+`unknown`
+
+Jangan menerima `paylabs` melalui jalur manual QRIS jika Paylabs memiliki route sendiri.
+
+### Non-QRIS
+
+Tetap backward-compatible.
+
+Pastikan TypeScript type/validation/API schema konsisten.
+
+## 4. VERIFY PAYLABS
+
+Final check:
+
+* success payment → `payment_provider = paylabs`
+* merchant trade no tersimpan
+* Paylabs/provider trade no tersimpan
+* provider reference tersimpan
+* canonical paid timestamp tersimpan
+* duplicate webhook idempotent
+* replay tidak mengubah `paid_at`
+* terminal cancelled/expired/rejected/refunded tidak otomatis confirmed
+
+## 5. VERIFY CST MIRROR
+
+Pastikan tidak ada duplicate update lagi.
+
+Field canonical yang tersedia ke CST harus final:
+
+* payment_provider
+* provider_reference
+* merchant_trade_no
+* provider_trade_no
+* paid_at
+
+Pastikan NULL source tidak secara tidak sengaja overwrite nilai existing yang valid.
+
+## 6. RESTART APPLICATION
+
+Restart workflow/application development yang relevan.
+
+Verifikasi log startup.
+
+Laporkan:
+
+* service berhasil listening;
+* tidak ada migration/schema error baru;
+* tidak ada runtime error dari patch provider;
+* error pre-existing, jika ada, disebut terpisah.
+
+## 7. MIGRATION SAFETY
+
+Review sekali lagi:
+
+* additive;
+* backward-compatible;
+* tidak ada DROP destructive;
+* tidak ada forced provider pada historical QRIS;
+* tidak ada production migration execution.
+
+## 8. FINAL REPORT ONLY
+
+Setelah validasi selesai, berikan laporan ringkas:
+
+### A. Status
+
+READY / NOT READY
+
+### B. Files changed
+
+### C. Schema final
+
+### D. Manual QRIS behavior
+
+### E. Paylabs behavior
+
+### F. CST mirror fields
+
+### G. Backfill dry-run result
+
+### H. Tests/build/typecheck
+
+### I. Runtime restart/log verification
+
+### J. Remaining risks
+
+### K. Explicit readiness answers
+
+Jawab:
+
+1. Apakah Sport Center siap merge?
+2. Apakah migration siap dijalankan di dev/staging?
+3. Apakah production migration masih harus menunggu?
+4. Apakah backfill aman untuk apply setelah review?
+5. Apakah CST sekarang dapat mulai memakai canonical provider?
+6. Apakah ada blocking issue tersisa?
+
+Jangan commit.
+Jangan push.
+Jangan deploy production.
+Jangan jalankan backfill apply.
+Jangan menambah scope baru.

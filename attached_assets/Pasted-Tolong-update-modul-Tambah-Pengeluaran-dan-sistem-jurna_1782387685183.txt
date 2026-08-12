@@ -1,0 +1,145 @@
+Tolong update modul **Tambah Pengeluaran** dan sistem jurnal agar kategori transaksi mengambil akun dari **COA (Chart of Accounts)** dan mendukung transaksi operasional, pinjaman, kasbon, serta pengembalian kasbon.
+
+## 1. Dropdown Kategori / Akun COA
+
+Pada form **Tambah Pengeluaran**, field **Kategori** diganti menjadi pilihan akun dari COA.
+
+Tampilkan akun dalam format:
+
+**Kode Akun - Nama Akun**
+
+Contoh:
+
+* 6101 - Biaya Listrik
+* 6102 - Biaya Air
+* 6103 - Biaya Internet
+* 1105 - Piutang Kasbon Karyawan
+* 2101 - Hutang Usaha
+* 2201 - Pinjaman Bank
+* 1201 - Peralatan
+
+Saat transaksi disimpan, sistem wajib menyimpan:
+
+**coa_account_id**
+
+bukan hanya nama kategori.
+
+## 2. Jenis Akun yang Ditampilkan
+
+Dropdown COA harus menampilkan akun yang relevan untuk transaksi pengeluaran, yaitu:
+
+* Beban / Expense
+* Aset / Asset
+* Kewajiban / Liability
+
+Jangan hanya tampilkan kategori “Lain-lain”.
+
+## 3. Posting Jurnal Otomatis
+
+Sistem harus membuat jurnal otomatis berdasarkan akun COA yang dipilih.
+
+### A. Pengeluaran Operasional
+
+Contoh:
+
+* Listrik
+* Air
+* Internet
+* Kebersihan
+* Keamanan
+* Maintenance
+* ATK
+* Administrasi Bank
+
+Jurnal:
+
+Debit: Akun Beban yang dipilih
+Kredit: Kas / Bank
+
+Contoh:
+Debit Biaya Listrik
+Kredit Bank BCA
+
+### B. Pembayaran Hutang / Pinjaman
+
+Jika pengeluaran digunakan untuk membayar hutang atau cicilan pinjaman.
+
+Jurnal:
+
+Debit: Akun Hutang / Pinjaman
+Kredit: Kas / Bank
+
+Contoh:
+Debit Pinjaman Bank
+Kredit Bank BCA
+
+Catatan:
+Penerimaan pinjaman tidak boleh dicatat dari menu Pengeluaran. Penerimaan pinjaman harus dicatat dari menu Penerimaan dengan jurnal:
+
+Debit: Kas / Bank
+Kredit: Akun Pinjaman
+
+### C. Kasbon Karyawan
+
+Kasbon bukan beban, tetapi piutang kepada karyawan.
+
+Saat kasbon diberikan kepada karyawan:
+
+Debit: Piutang Kasbon Karyawan
+Kredit: Kas / Bank
+
+Tambahkan pilihan akun COA:
+
+**Piutang Kasbon Karyawan**
+
+dengan tipe akun **Aset**.
+
+### D. Pengembalian Kasbon
+
+Pengembalian kasbon harus dicatat sebagai transaksi penerimaan, bukan pengeluaran.
+
+Jurnal:
+
+Debit: Kas / Bank
+Kredit: Piutang Kasbon Karyawan
+
+Sistem harus menyediakan menu/jenis transaksi **Pengembalian Kasbon** agar saldo kasbon karyawan berkurang.
+
+### E. Pertanggungjawaban Kasbon
+
+Jika kasbon dipakai untuk biaya operasional dan bukti sudah diserahkan:
+
+Debit: Akun Beban sesuai penggunaan
+Kredit: Piutang Kasbon Karyawan
+
+Contoh:
+Kasbon Rp1.000.000 digunakan untuk beli ATK.
+
+Debit: Biaya ATK Rp1.000.000
+Kredit: Piutang Kasbon Karyawan Rp1.000.000
+
+Jika penggunaan hanya sebagian, sisa kasbon tetap tercatat sebagai Piutang Kasbon Karyawan sampai dikembalikan atau dipertanggungjawabkan.
+
+## 4. Validasi Sistem
+
+Tambahkan validasi berikut:
+
+1. Transaksi pengeluaran wajib memilih akun COA.
+2. Akun Kas / Bank wajib terisi sebagai sumber pembayaran.
+3. Jika akun yang dipilih adalah akun Pinjaman/Hutang, jurnal harus mengurangi saldo kewajiban.
+4. Jika transaksi kasbon, wajib pilih karyawan/penerima kasbon.
+5. Pengembalian kasbon wajib mengurangi saldo Piutang Kasbon Karyawan.
+6. Jangan mencatat kasbon sebagai beban.
+7. Jangan mencatat pengembalian kasbon sebagai pendapatan.
+
+## 5. Laporan
+
+Pastikan transaksi masuk ke laporan yang benar:
+
+* Beban operasional masuk ke Laporan Laba Rugi.
+* Pinjaman/Hutang masuk ke Neraca sebagai Kewajiban.
+* Kasbon masuk ke Neraca sebagai Aset / Piutang.
+* Pengembalian kasbon mengurangi Piutang Kasbon.
+* Kas / Bank berkurang atau bertambah sesuai transaksi.
+
+Tujuannya agar setiap pengeluaran masuk ke pos akuntansi yang benar berdasarkan COA dan jurnal yang terbentuk tetap sesuai prinsip akuntansi.

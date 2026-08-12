@@ -39,7 +39,7 @@ router.get("/company-billing-requirements", adminMiddleware, async (req, res) =>
 // PUT /company-billing-requirements/:companyId  — replace all reqs for company
 router.put("/company-billing-requirements/:companyId", adminMiddleware, async (req, res) => {
   try {
-    const cid = parseInt(req.params.companyId);
+    const cid = parseInt(String(req.params.companyId));
     const { documentTypes } = req.body as { documentTypes: string[] };
 
     if (!Array.isArray(documentTypes)) {
@@ -87,11 +87,13 @@ router.put("/company-billing-requirements/:companyId", adminMiddleware, async (r
     const userInfo = getUserFromReq(req);
     await logAudit({
       action: "COMPANY_BILLING_REQUIREMENTS_UPDATED",
-      targetType: "company",
-      targetId: String(cid),
-      details: { documentTypes: validTypes },
-      userId: userInfo?.userId,
-      userName: userInfo?.userName,
+      entity: "company",
+      entityId: cid,
+      after: { documentTypes: validTypes },
+
+      userId: userInfo.userId,
+      userName: userInfo.userName,
+      userRole: userInfo.userRole,
       ipAddress,
       userAgent,
     });
@@ -119,7 +121,7 @@ router.put("/company-billing-requirements/:companyId", adminMiddleware, async (r
 // Returns per-invoice document availability based on company requirements
 router.get("/company-invoices/:id/billing-document-status", adminMiddleware, async (req, res) => {
   try {
-    const invoiceId = parseInt(req.params.id);
+    const invoiceId = parseInt(String(req.params.id));
     const [invoice] = await db
       .select()
       .from(companyInvoicesTable)
@@ -184,7 +186,7 @@ router.get("/company-invoices/:id/billing-document-status", adminMiddleware, asy
 // POST /company-invoices/:id/audit-billing-action — log download/send actions
 router.post("/company-invoices/:id/audit-billing-action", adminMiddleware, async (req, res) => {
   try {
-    const invoiceId = parseInt(req.params.id);
+    const invoiceId = parseInt(String(req.params.id));
     const { action, documents } = req.body as { action: string; documents?: string[] };
 
     const validActions = [
@@ -203,11 +205,13 @@ router.post("/company-invoices/:id/audit-billing-action", adminMiddleware, async
     const userInfo = getUserFromReq(req);
     await logAudit({
       action,
-      targetType: "company_invoice",
-      targetId: String(invoiceId),
-      details: { documents },
-      userId: userInfo?.userId,
-      userName: userInfo?.userName,
+      entity: "company_invoice",
+      entityId: invoiceId,
+
+      after: { documents: Array.isArray(documents) ? documents.slice(0, 30) : [] },
+      userId: userInfo.userId,
+      userName: userInfo.userName,
+      userRole: userInfo.userRole,
       ipAddress,
       userAgent,
     });
