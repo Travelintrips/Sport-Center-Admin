@@ -211,6 +211,9 @@ function DocTypePanel({ docType, meta }: {
     }
     if (file.size > 10 * 1024 * 1024) {
       toast({ title: "File terlalu besar", description: "Maksimum 10MB", variant: "destructive" }); return;
+    }
+    await uploadBgTemplate(file);
+  }
 
   async function uploadBgTemplate(file: File) {
     if (file.size > 10 * 1024 * 1024) {
@@ -230,17 +233,6 @@ function DocTypePanel({ docType, meta }: {
       if (!r.ok) { const e = await r.json(); throw new Error(e.error || "Upload gagal"); }
       toast({ title: "Template diupload", description: "Klik Aktifkan untuk mulai digunakan" });
       qc.invalidateQueries({ queryKey: ["document-file-templates", docType] });
-
-      fd.append("file", file);
-      const r = await fetch(`${API}/admin/document-settings/${docType}/upload-bg-template`, {
-        method: "POST", headers: authHeaders(), body: fd,
-      });
-      if (!r.ok) { const e = await r.json(); throw new Error(e.error || "Upload gagal"); }
-      const { url, templateType } = await r.json();
-      setForm(prev => ({ ...prev, bgTemplateUrl: url, bgTemplateType: templateType, bgTemplateActive: true }));
-      qc.invalidateQueries({ queryKey: ["doc-settings", docType] });
-      qc.invalidateQueries({ queryKey: ["doc-settings-all"] });
-      toast({ title: "Background template diupload & diaktifkan" });
 
     } catch (e: any) {
       toast({ title: "Upload gagal", description: e.message, variant: "destructive" });
@@ -286,9 +278,6 @@ function DocTypePanel({ docType, meta }: {
     } catch (e: any) {
       toast({ title: "Gagal", description: e.message, variant: "destructive" });
     } finally { setBgDeletingId(null); }
-
-      if (bgRef.current) bgRef.current.value = "";
-    }
   }
 
   async function toggleBgTemplate() {
@@ -341,13 +330,6 @@ function DocTypePanel({ docType, meta }: {
     { id: "finance",    label: "Finance & TTD" },
     { id: "template",   label: "Template HTML" },
     ...(supportsFileTemplate ? [{ id: "background", label: "Background Template" }] : []),
-
-    { id: "kop",      label: "Logo & Kop Surat" },
-    { id: "bank",     label: "Bank" },
-    { id: "finance",  label: "Finance & TTD" },
-    { id: "template", label: "Template HTML" },
-    { id: "bg",       label: "Background Template" },
-
   ] as const;
 
   return (

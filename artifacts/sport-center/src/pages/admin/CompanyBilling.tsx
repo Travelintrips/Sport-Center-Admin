@@ -158,8 +158,6 @@ async function loadDocTemplateSettings(): Promise<DocTemplateSettings> {
 // ─── PDF Print Helpers ────────────────────────────────────────────────────────
 
 
-function printInvoicePdf(invoice: any, ds: DocTemplateSettings) {
-
 function printInvoicePdf(invoice: any, signatureUrl?: string | null, financeName?: string | null, financeTitle?: string | null) {
 
   const items: any[] = invoice.items ?? [];
@@ -628,8 +626,6 @@ function printBeritaAcara(invoice: any, ds: DocTemplateSettings) {
 }
 
 
-async function downloadBillingPackage(invoice: any, requirements: any[]) {
-  const ds = await loadDocTemplateSettings();
 async function downloadBillingPackage(invoice: any, requirements: any[], signatureUrl?: string | null, financeName?: string | null, financeTitle?: string | null) {
 
   const docTypes = requirements.map((r: any) => r.documentType);
@@ -1531,6 +1527,10 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+        </div>
+
         {/* Upload Bukti Pembayaran */}
         <div className="rounded-lg border p-4 space-y-3">
           <div className="font-semibold text-sm flex items-center gap-2">
