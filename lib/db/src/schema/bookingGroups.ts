@@ -1,4 +1,4 @@
-import { text, serial, timestamp, numeric } from "drizzle-orm/pg-core";
+import { text, serial, timestamp, numeric, boolean } from "drizzle-orm/pg-core";
 import { scSchema } from "./_schema";
 
 export const bookingGroupStatusEnum = scSchema.enum("booking_group_status", [

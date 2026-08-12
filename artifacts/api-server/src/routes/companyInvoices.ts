@@ -1,11 +1,9 @@
 import { Router } from "express";
-import { db, usersTable, bookingsTable, companyInvoicesTable, companyInvoiceItemsTable, facilitiesTable, auditLogsTable } from "@workspace/db";
+import { db, usersTable, bookingsTable, companyInvoicesTable, companyInvoiceItemsTable, facilitiesTable, auditLogsTable, corporateBookingDocumentationTable } from "@workspace/db";
 import { eq, and, gte, lt, inArray, isNull, or, desc } from "drizzle-orm";
 import multer from "multer";
 import path from "path";
 import { randomUUID } from "crypto";
-import { db, usersTable, bookingsTable, companyInvoicesTable, companyInvoiceItemsTable, facilitiesTable, auditLogsTable, corporateBookingDocumentationTable } from "@workspace/db";
-import { eq, and, gte, lt, inArray, isNull, or } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
 import { logAudit, getClientInfo, getUserFromReq, logAccountingError } from "../lib/auditLog";
 import { pushInvoicePaymentAsBankMutation } from "../lib/bizportalSync";
@@ -655,6 +653,9 @@ router.get("/company-invoices/:id/audit-trail", adminMiddleware, async (req, res
     res.json({ invoiceId: id, invoiceNumber: invoice.invoiceNumber, logs });
   } catch (err) {
     req.log.error({ err }, "Company invoice audit trail error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
 
 // Upload payment proof for company invoice
 router.post("/company-invoices/:id/upload-payment-proof", adminMiddleware, uploadMiddleware.single("file"), async (req, res) => {

@@ -140,15 +140,6 @@ function buildInvoiceTableHtml(items: any[]): string {
 }
 
 
-function wrapInHtmlPage(bodyContent: string, paperStyle = "A4", printMode = false, backgroundUrl?: string | null): string {
-  const pageSize = paperStyle === "A4" ? "210mm 297mm" : "216mm 279mm";
-  const hasBackground = backgroundUrl && !backgroundUrl.toLowerCase().endsWith(".pdf");
-  const bgLayer = hasBackground ? `
-  <div style="position:fixed;top:0;left:0;width:100%;height:100%;z-index:0;pointer-events:none;">
-    <img src="${backgroundUrl}" style="width:100%;height:100%;object-fit:contain;print-color-adjust:exact;-webkit-print-color-adjust:exact;"
-      onerror="this.parentElement.style.display='none'" />
-  </div>` : "";
-
 function wrapInHtmlPage(bodyContent: string, paperStyle = "A4", printMode = false, bgTemplateUrl?: string | null, bgTemplateType?: string | null): string {
   const pageSize = paperStyle === "A4" ? "210mm 297mm" : "216mm 279mm";
 
@@ -183,13 +174,6 @@ function wrapInHtmlPage(bodyContent: string, paperStyle = "A4", printMode = fals
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: Arial, sans-serif; font-size: 13px; color: #1f2937; background: #f3f4f6; }
-
-    .page { ${hasBackground ? "background: transparent;" : "background: #fff;"} max-width: 800px; margin: 24px auto; padding: 40px; box-shadow: 0 1px 8px rgba(0,0,0,0.1); position: relative; z-index: 1; }
-    @media print {
-      body { background: #fff; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
-      .page { margin: 0; box-shadow: none; padding: 20px; }
-      @page { size: ${pageSize}; margin: 15mm; }
-
     .page { ${pageStyle} }
     .bg-layer { position:absolute; top:0; left:0; width:100%; height:100%; z-index:0; }
     .content-layer { ${contentStyle} }
@@ -197,13 +181,11 @@ function wrapInHtmlPage(bodyContent: string, paperStyle = "A4", printMode = fals
       body { background: #fff; }
       .page { margin: 0; box-shadow: none; ${hasBgImage || hasBgPdf ? "" : "padding: 20px;"} }
       @page { size: ${pageSize}; margin: 0; }
-
     }
   </style>
   ${printMode ? "<script>window.onload = () => { document.title = 'Dokumen Sport Center'; window.print(); };</script>" : ""}
 </head>
 <body>
-  ${bgLayer}
   <div class="page">
     ${pdfBgLayer}
     <div class="content-layer">
@@ -466,11 +448,6 @@ export async function renderDocument(params: {
   }
 
 
-  const fileTpl = await getActiveFileTemplate(documentType, companyId);
-  const html = wrapInHtmlPage(bodyContent, tpl?.paperStyle || "A4", printMode, fileTpl?.fileUrl ?? null);
-
-  return { html, templateId: tpl?.id ?? null, documentNumber, tplVars, fileTemplateUrl: fileTpl?.fileUrl ?? null };
-
   // Background template override (image/pdf as page background)
   let bgTemplateUrl: string | null | undefined = undefined;
   let bgTemplateType: string | null | undefined = undefined;
@@ -480,10 +457,10 @@ export async function renderDocument(params: {
     bgTemplateType = bgSettings?.bgTemplateType;
   } catch { /* fallback to no bg */ }
 
-  const html = wrapInHtmlPage(bodyContent, tpl?.paperStyle || "A4", printMode, bgTemplateUrl, bgTemplateType);
+  const fileTpl = await getActiveFileTemplate(documentType, companyId);
+  const html = wrapInHtmlPage(bodyContent, tpl?.paperStyle || "A4", printMode, bgTemplateUrl ?? fileTpl?.fileUrl ?? null, bgTemplateUrl ? bgTemplateType ?? null : fileTpl?.templateType ?? null);
 
-  return { html, templateId: tpl?.id ?? null, documentNumber };
-
+  return { html, templateId: tpl?.id ?? null, documentNumber, tplVars, fileTemplateUrl: fileTpl?.fileUrl ?? null };
 }
 
 /**

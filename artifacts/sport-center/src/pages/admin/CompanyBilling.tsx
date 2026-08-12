@@ -17,11 +17,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Building2, Plus, CheckCircle, FileText, AlertCircle, RefreshCw, Eye,
   User, Phone, Mail, MapPin, Download, MessageSquare, AlertTriangle,
-
-  Package, Settings, CheckSquare, XSquare, Send, History,
-
-  Package, Settings, CheckSquare, XSquare, Send, Upload, ImageIcon, X,
-
+  Package, Settings, CheckSquare, XSquare, Send, History, Upload, ImageIcon, X,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useQueryClient, useQuery, useMutation } from "@tanstack/react-query";
@@ -1039,6 +1035,7 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
   const { data: siteSettings } = useQuery({
     queryKey: ["settings-public"],
     queryFn: () => fetch("/api/settings").then(r => r.json()),
+  });
   const { data: invoiceSettings } = useQuery({
     queryKey: ["invoice-settings-public"],
     queryFn: async () => {

@@ -260,9 +260,6 @@ router.post("/payments", async (req, res) => {
       return;
     }
 
-    let paymentType: string = req.body.paymentType ?? "";
-
-
     const [booking] = await db.select().from(bookingsTable)
       .where(eq(bookingsTable.id, Number(bookingId))).limit(1);
     if (!booking) { res.status(404).json({ error: "Booking not found" }); return; }
@@ -330,20 +327,6 @@ router.post("/payments", async (req, res) => {
         error: `Nominal ${paymentType} harus ${expectedAmount.toLocaleString("id-ID")}`,
       });
       return;
-
-    // Auto-detect payment_type jika tidak dikirim dari client
-    // Gunakan downPayment > 0 (bukan isDpPaid) untuk cek apakah booking pakai skema DP
-    // isDpPaid baru true setelah admin konfirmasi DP — tidak bisa dipakai untuk detect di sini
-    if (!paymentType) {
-      if (Number(booking.downPayment) > 0) {
-        const hasDpConfirmed = existingPayments.some(
-          (p) => p.paymentType === "dp" && p.status === "confirmed",
-        );
-        paymentType = hasDpConfirmed ? "pelunasan" : "dp";
-      } else {
-        paymentType = "full_payment";
-      }
-
     }
 
     // Validasi: jangan buat duplicate pending payment untuk tipe yang sama

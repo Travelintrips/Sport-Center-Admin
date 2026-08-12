@@ -94,10 +94,6 @@ router.put("/company-billing-requirements/:companyId", adminMiddleware, async (r
       userId: userInfo.userId,
       userName: userInfo.userName,
       userRole: userInfo.userRole,
-
-      userId: userInfo?.userId,
-      userName: userInfo?.userName,
-
       ipAddress,
       userAgent,
     });
@@ -216,11 +212,6 @@ router.post("/company-invoices/:id/audit-billing-action", adminMiddleware, async
       userId: userInfo.userId,
       userName: userInfo.userName,
       userRole: userInfo.userRole,
-
-      after: { documents },
-      userId: userInfo?.userId,
-      userName: userInfo?.userName,
-
       ipAddress,
       userAgent,
     });

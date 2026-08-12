@@ -14,10 +14,8 @@ import {
   Save, Upload, Eye, FileText,
   Image as ImageIcon, Hash, Percent, AlignLeft,
   Building2, Receipt, FileCheck, ClipboardList, FileSignature, ScrollText,
-\\\\\\
   ChevronRight, LayoutTemplate, CheckCircle2, FileIcon, Trash2,
-
-  ChevronRight, Layers, Trash2, FileImage, AlertCircle, CheckCircle2,
+  Layers, FileImage, AlertCircle,
 } from "lucide-react";
 
 const API = import.meta.env.VITE_API_BASE_URL ?? "/api";
@@ -132,11 +130,6 @@ function DocTypePanel({ docType, meta }: {
     },
     enabled: supportsFileTemplate,
   });
-
-  const [bgUploading, setBgUploading] = useState(false);
-  const [bgToggling, setBgToggling] = useState(false);
-  const [innerTab, setInnerTab] = useState<"kop" | "bank" | "finance" | "template" | "bg">("kop");
-
 
   const { data, isLoading } = useQuery<DocSettings>({
     queryKey: ["doc-settings", docType],
