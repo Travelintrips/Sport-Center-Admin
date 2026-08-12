@@ -573,6 +573,13 @@ export default function Booking() {
   const endTime = `${endHours.toString().padStart(2, "0")}:${(minutes || 0).toString().padStart(2, "0")}`;
 
   const totalPrice = facility ? facility.pricePerHour * duration : 0;
+  const isMultiguna = facility
+    ? `${facility.name} ${facility.category}`.toLowerCase().replace(/[^a-z0-9]/g, "").includes("multiguna")
+    : false;
+  const apMultigunaDiscount = isAP && isMultiguna
+    ? Math.max(0, totalPrice - (300000 * duration))
+    : 0;
+  const apMultigunaDiscountTotal = apMultigunaDiscount * (isRepeat ? (effectiveCount || repeatCount) : 1);
 
   if (isLoadingFacility || isLoadingUser) {
     return (
@@ -848,7 +855,11 @@ export default function Booking() {
                   <Plane size={18} className="shrink-0" />
                   <div>
                     <div className="font-semibold text-xs">{t("Angkasa Pura", "Angkasa Pura")}</div>
-                    <div className={`text-xs ${isAP ? "text-primary-foreground/80" : "text-muted-foreground"}`}>{t("Diskon khusus", "Discount")}</div>
+                    <div className={`text-xs ${isAP ? "text-primary-foreground/80" : "text-muted-foreground"}`}>
+                      {isMultiguna
+                        ? t("14,29% Multiguna · 20% lainnya", "14.29% Multipurpose · 20% others")
+                        : t("Diskon 20%", "20% discount")}
+                    </div>
                   </div>
                 </button>
                 {isLoggedIn && (
@@ -884,7 +895,11 @@ export default function Booking() {
                   />
                   <div className="flex items-start gap-2 text-xs text-muted-foreground">
                     <AlertTriangle size={13} className="mt-0.5 shrink-0 text-orange-500" />
-                    <span>{t("Booking akan menunggu verifikasi ID Card oleh admin. Diskon diterapkan setelah ID Card terverifikasi.", "Booking will await ID Card verification by admin. Discount is applied once the ID Card is verified.")}</span>
+                    <span>
+                      {isMultiguna
+                        ? t("Booking menunggu verifikasi ID Card. Harga khusus Multiguna menjadi Rp 300.000/jam setelah terverifikasi.", "Booking awaits ID Card verification. The special Multipurpose price becomes Rp 300,000/hour after verification.")
+                        : t("Booking akan menunggu verifikasi ID Card oleh admin. Diskon 20% diterapkan setelah ID Card terverifikasi.", "Booking will await ID Card verification by admin. The 20% discount is applied once the ID Card is verified.")}
+                    </span>
                   </div>
                 </div>
               )}
@@ -1506,6 +1521,17 @@ export default function Booking() {
                   <span className="text-muted-foreground">{t("Durasi", "Duration")}</span>
                   <span>× {duration} {t("jam", "hours")}</span>
                 </div>
+                {isAP && isMultiguna && (
+                  <>
+                    <div className="flex justify-between text-green-700 font-medium">
+                      <span>{t("Diskon AP Multiguna", "AP Multipurpose discount")}</span>
+                      <span>−{formatCurrency(apMultigunaDiscountTotal)}</span>
+                    </div>
+                    <div className="text-xs text-muted-foreground text-right">
+                      {t("Harga setelah verifikasi: Rp300.000/jam", "Price after verification: Rp300,000/hour")}
+                    </div>
+                  </>
+                )}
                 {isRepeat && (
                   <>
                     <div className="flex justify-between">
@@ -1532,14 +1558,14 @@ export default function Booking() {
                   </div>
                 )}
                 {(() => {
-                  const disc = couponResult?.discountAmount ?? 0;
+                  const disc = (couponResult?.discountAmount ?? 0) + apMultigunaDiscountTotal;
                   const grand = isRepeat
                     ? (isChecking ? null : Math.max(0, (checkResult ? effectiveTotalPrice : totalPrice * repeatCount) - disc))
                     : Math.max(0, totalPrice - disc);
                   return (
                     <>
                       <div className="flex justify-between font-bold text-lg pt-2 border-t">
-                        <span>{t("Grand Total", "Grand Total")}</span>
+                        <span>{isAP && isMultiguna ? t("Perkiraan Total Setelah Verifikasi", "Estimated Total After Verification") : t("Grand Total", "Grand Total")}</span>
                         <span className="text-primary">{grand == null ? "..." : formatCurrency(grand)}</span>
                       </div>
                       {isRepeat && !isChecking && checkResult && effectiveCount > 0 && (

@@ -10,8 +10,16 @@ import { calculateTax, recordTaxTransaction, reverseTaxTransaction } from "../li
 import { reverseJournalEntry } from "../lib/accounting";
 
 const INACTIVE_STATUSES = ["cancelled", "expired", "rejected", "refunded"];
+const AP_MULTIGUNA_HOURLY_PRICE = 300000;
 
 const router = Router();
+
+function isMultigunaFacility(facility: { name?: string | null; category?: string | null }): boolean {
+  const normalized = `${facility.name ?? ""} ${facility.category ?? ""}`
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+  return normalized.includes("multiguna");
+}
 
 // ─── POST /bookings/track-payer-selection — log when customer toggles payer type ──
 router.post("/bookings/track-payer-selection", async (req, res) => {
@@ -1106,20 +1114,53 @@ async function runApVerification(
     };
   }
 
+  const [facility] = await db.select().from(facilitiesTable)
+    .where(eq(facilitiesTable.id, booking.facilityId))
+    .limit(1);
   const [setting] = await db.select().from(discountSettingsTable)
     .where(eq(discountSettingsTable.customerType, "angkasa_pura")).limit(1);
   const discountEnabled = !!setting && setting.isActive;
-  const discountPct = discountEnabled ? setting.discountPercentage : 0;
   const basePrice = booking.basePrice == null ? Number(booking.totalPrice) : Number(booking.basePrice);
-  const discountAmount = Math.round((basePrice * discountPct) / 100);
-  const finalPrice = basePrice - discountAmount;
+  const durationHours = Math.max(1, Number(booking.durationHours) || 1);
+  const specialMultigunaPrice = AP_MULTIGUNA_HOURLY_PRICE * durationHours;
+  const isSpecialMultiguna = isMultigunaFacility(facility ?? {});
+
+  let discountPct = 0;
+  let discountAmount = 0;
+  let finalPrice = basePrice;
+  if (discountEnabled) {
+    if (isSpecialMultiguna) {
+      // Harga khusus AP Multiguna: Rp300.000/jam (Rp350.000 → Rp300.000).
+      // Gunakan harga tetap agar hasil tidak menjadi Rp299.985 akibat pembulatan 14,29%.
+      finalPrice = Math.min(basePrice, specialMultigunaPrice);
+      discountAmount = Math.max(0, basePrice - finalPrice);
+      discountPct = basePrice > 0
+        ? Number(((discountAmount / basePrice) * 100).toFixed(2))
+        : 0;
+    } else {
+      discountPct = Number(setting.discountPercentage);
+      discountAmount = Math.round((basePrice * discountPct) / 100);
+      finalPrice = Math.max(0, basePrice - discountAmount);
+    }
+  }
+  const taxCalc = await calculateTax(finalPrice, "sport_booking", booking.bookingDate);
 
   await db.update(bookingsTable).set({
     verificationStatus: "verified",
     idCardNumber,
     apDiscountAmount: String(discountAmount),
     totalPrice: String(finalPrice),
+    ppnRate: taxCalc.taxRate > 0 ? String(taxCalc.taxRate) : null,
+    ppnAmount: taxCalc.taxAmount > 0 ? String(taxCalc.taxAmount) : null,
+    grandTotal: taxCalc.taxAmount > 0 ? String(taxCalc.grandTotal) : null,
   }).where(eq(bookingsTable.id, bookingId));
+
+  // Booking awal dibuat dengan harga normal karena masih menunggu verifikasi.
+  // Balikkan jurnal pajak awal lalu catat ulang berdasarkan harga AP final.
+  await reverseTaxTransaction(booking.id, booking.orderNumber, booking.bookingDate);
+  if (taxCalc.taxCode) {
+    await recordTaxTransaction("booking", booking.id, booking.orderNumber, taxCalc, booking.bookingDate);
+  }
 
   await db.insert(verificationLogsTable).values({
     bookingId,
@@ -1127,14 +1168,16 @@ async function runApVerification(
     verifiedByUserId: opts.verifiedByUserId ?? null,
     idCardNumberInput: idCardNumber,
     status: "success",
-    notes: discountEnabled ? `Diskon ${discountPct}% (Rp ${discountAmount.toLocaleString("id-ID")})` : "Terverifikasi (diskon nonaktif)",
+    notes: discountEnabled
+      ? `${isSpecialMultiguna ? "Harga khusus AP Multiguna — " : ""}Diskon ${discountPct}% (Rp ${discountAmount.toLocaleString("id-ID")})`
+      : "Terverifikasi (diskon nonaktif)",
     ipAddress: opts.ipAddress ?? null,
   });
 
   return {
     success: true, result: "verified" as const,
     message: discountEnabled
-      ? `Verifikasi berhasil. Diskon ${discountPct}% diterapkan. Harga akhir Rp ${finalPrice.toLocaleString("id-ID")}.`
+      ? `Verifikasi berhasil. ${isSpecialMultiguna ? "Harga khusus AP Multiguna diterapkan. " : `Diskon ${discountPct}% diterapkan. `}Harga akhir Rp ${finalPrice.toLocaleString("id-ID")}.`
       : "ID Card valid. Terverifikasi (diskon Angkasa Pura sedang nonaktif).",
     discountApplied: discountEnabled,
     discountPercentage: discountPct,
