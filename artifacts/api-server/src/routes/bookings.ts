@@ -1576,6 +1576,119 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
   }
 });
 
+// POST /bookings/:id/fix-gym-people — koreksi jumlah orang dan harga walk-in Gym (admin)
+router.post("/bookings/:id/fix-gym-people", adminMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(String(req.params.id));
+    const numberOfPeople = Number(req.body?.numberOfPeople);
+    if (!Number.isInteger(numberOfPeople) || numberOfPeople < 1 || numberOfPeople > 20) {
+      res.status(400).json({ error: "Jumlah orang harus berupa bilangan bulat antara 1 dan 20" });
+      return;
+    }
+
+    const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, id)).limit(1);
+    if (!booking) {
+      res.status(404).json({ error: "Booking tidak ditemukan" });
+      return;
+    }
+    if (INACTIVE_STATUSES.includes(booking.status ?? "")) {
+      res.status(400).json({ error: "Booking yang sudah tidak aktif tidak dapat dikoreksi" });
+      return;
+    }
+
+    const [facility] = await db.select().from(facilitiesTable)
+      .where(eq(facilitiesTable.id, booking.facilityId))
+      .limit(1);
+    if (!facility || (facility.category ?? "").toLowerCase() !== "fitness") {
+      res.status(400).json({ error: "Koreksi jumlah orang ini hanya untuk booking Gym/Fitness" });
+      return;
+    }
+
+    const unitPrice = Number(facility.pricePerHour);
+    const basePrice = unitPrice * numberOfPeople;
+    const discountAmount = 0;
+    const totalPrice = basePrice;
+    const taxCalc = await calculateTax(totalPrice, "sport_booking", booking.bookingDate);
+
+    await db.update(bookingsTable).set({
+      numberOfPeople,
+      basePrice: String(basePrice),
+      discountAmount: String(discountAmount),
+      apDiscountAmount: String(discountAmount),
+      totalPrice: String(totalPrice),
+      dpp: String(taxCalc.dpp),
+      ppnRate: taxCalc.taxRate > 0 ? String(taxCalc.taxRate) : null,
+      ppnAmount: taxCalc.taxAmount > 0 ? String(taxCalc.taxAmount) : null,
+      grandTotal: String(taxCalc.grandTotal),
+    }).where(eq(bookingsTable.id, id));
+
+    await reverseTaxTransaction(booking.id, booking.orderNumber, booking.bookingDate);
+    if (taxCalc.taxCode) {
+      await recordTaxTransaction("booking", booking.id, booking.orderNumber, taxCalc, booking.bookingDate);
+    }
+
+    if (booking.groupRef) {
+      const groupBookings = await db
+        .select({ totalPrice: bookingsTable.totalPrice, grandTotal: bookingsTable.grandTotal })
+        .from(bookingsTable)
+        .where(eq(bookingsTable.groupRef, booking.groupRef));
+      const groupTotal = groupBookings.reduce(
+        (sum, item) => sum + (item.grandTotal != null ? Number(item.grandTotal) : Number(item.totalPrice)),
+        0,
+      );
+      await db.update(bookingGroupsTable)
+        .set({ totalPayment: String(groupTotal), updatedAt: new Date() })
+        .where(eq(bookingGroupsTable.groupRef, booking.groupRef));
+    }
+
+    const [updatedBooking] = await db.select().from(bookingsTable)
+      .where(eq(bookingsTable.id, id))
+      .limit(1);
+    if (updatedBooking) {
+      syncBookingToBizportal({
+        booking: updatedBooking,
+        facilityName: facility.name,
+        facilityCategory: facility.category,
+      }).catch(() => {});
+    }
+
+    const { userId, userName, userRole } = getUserFromReq(req);
+    const { ipAddress, userAgent } = getClientInfo(req);
+    await logAudit({
+      userId,
+      userName,
+      userRole,
+      action: "ADMIN_FIXED_GYM_NUMBER_OF_PEOPLE",
+      entity: "booking",
+      entityId: id,
+      before: {
+        numberOfPeople: booking.numberOfPeople,
+        basePrice: Number(booking.basePrice ?? booking.totalPrice),
+        totalPrice: Number(booking.totalPrice),
+        grandTotal: booking.grandTotal == null ? null : Number(booking.grandTotal),
+      },
+      after: {
+        numberOfPeople,
+        basePrice,
+        totalPrice,
+        grandTotal: taxCalc.grandTotal,
+      },
+      ipAddress,
+      userAgent,
+    });
+
+    const result = await getBookingWithPayment(id);
+    res.json({
+      success: true,
+      message: `Koreksi Gym berhasil. ${numberOfPeople} orang, total Rp ${taxCalc.grandTotal.toLocaleString("id-ID")}.`,
+      booking: result,
+    });
+  } catch (err) {
+    req.log.error({ err }, "Fix Gym number of people error");
+    res.status(500).json({ error: "Gagal mengoreksi jumlah orang Gym" });
+  }
+});
+
 // POST /bookings/:id/check-in — tandai booking sudah check-in (admin)
 router.post("/bookings/:id/check-in", adminMiddleware, async (req, res) => {
   try {
