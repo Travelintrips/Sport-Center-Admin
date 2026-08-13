@@ -44,3 +44,11 @@ For bookings linked by `groupRef`, the DP ceiling, remaining balance, and paymen
 
 **Why:** A multi-session booking can show a group total larger than the selected session row, so validating against the row incorrectly rejects valid DP amounts.
 
+## DP configuration versus confirmation
+- `downPayment > 0` means a DP amount has been configured and must drive the first proof upload as `payment_type = dp`.
+- `isDpPaid = true` means an admin has confirmed a DP payment; it must not be set during booking creation.
+
+**Why:** Treating a configured DP as already paid caused recurring bookings to upload or display the first Rp100.000 transfer as `full_payment`.
+
+**How to apply:** Use group-level `downPayment` for recurring bookings, propagate it to all sessions, and set `isDpPaid` only in the admin confirmation transition.
+

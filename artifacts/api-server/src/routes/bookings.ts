@@ -1071,6 +1071,26 @@ router.post("/bookings/recurring", async (req, res) => {
       return;
     }
 
+    // DP recurring adalah DP untuk seluruh grup, bukan untuk satu sesi.
+    // Hitung total projected semua tanggal sebelum insert agar DP seperti
+    // Rp100.000 tetap valid untuk 4 sesi @ Rp80.000 (total Rp320.000).
+    const taxByDate = new Map<string, Awaited<ReturnType<typeof calculateTax>>>();
+    let projectedGrandTotal = 0;
+    for (const bookingDate of dates) {
+      const taxCalc = await calculateTax(totalPrice, "sport_booking", bookingDate);
+      taxByDate.set(bookingDate, taxCalc);
+      projectedGrandTotal += taxCalc.grandTotal;
+    }
+    if (
+      requestedDownPayment != null &&
+      requestedDownPayment >= projectedGrandTotal
+    ) {
+      res.status(400).json({
+        error: `DP grup (${requestedDownPayment}) harus lebih kecil dari total seluruh sesi (${projectedGrandTotal})`,
+      });
+      return;
+    }
+
     const created: any[] = [];
     const skipped: string[] = [];
     for (const bookingDate of dates) {
@@ -1085,16 +1105,7 @@ router.post("/bookings/recurring", async (req, res) => {
         continue;
       }
       // Per-date tax calc: respects effectiveDate backward-compat rule
-      const taxCalc = await calculateTax(totalPrice, "sport_booking", bookingDate);
-      if (
-        requestedDownPayment != null &&
-        requestedDownPayment >= taxCalc.grandTotal
-      ) {
-        res.status(400).json({
-          error: `DP per sesi (${requestedDownPayment}) harus lebih kecil dari total sesi (${taxCalc.grandTotal})`,
-        });
-        return;
-      }
+      const taxCalc = taxByDate.get(bookingDate)!;
       const orderNumber = await generateOrderNumber();
       const [booking] = await db.insert(bookingsTable).values({
         orderNumber,
@@ -1125,8 +1136,11 @@ router.post("/bookings/recurring", async (req, res) => {
         grandTotal: taxCalc.taxAmount > 0 ? String(taxCalc.grandTotal) : null,
         ...(requestedDownPayment != null
           ? {
+              // downPayment is the configured amount, not proof that the DP
+              // has already been paid. isDpPaid becomes true only after an
+              // admin confirms a payment with paymentType="dp".
               downPayment: String(requestedDownPayment),
-              isDpPaid: true,
+              isDpPaid: false,
             }
           : {}),
         ...(isCompanyPayer ? {
@@ -1438,10 +1452,20 @@ router.patch("/bookings/:id/dp", async (req, res) => {
       return;
     }
 
-    // Hanya simpan nominal DP — isDpPaid baru di-set true saat pembayaran DP dikonfirmasi admin
-    await db.update(bookingsTable)
-      .set({ downPayment: String(dp), isDpPaid: false })
-      .where(eq(bookingsTable.id, id));
+    // Hanya simpan nominal DP — isDpPaid baru di-set true saat pembayaran DP
+    // dikonfirmasi admin. Untuk recurring/group booking, DP adalah nominal
+    // grup, jadi semua sesi harus membawa konfigurasi yang sama. Sebelumnya
+    // hanya sesi yang sedang dibuka yang ter-update, sehingga sesi pertama
+    // bisa mendeteksi DP sementara sesi lain mengirim full_payment.
+    if (booking.groupRef) {
+      await db.update(bookingsTable)
+        .set({ downPayment: String(dp), isDpPaid: false, updatedAt: new Date() })
+        .where(eq(bookingsTable.groupRef, booking.groupRef));
+    } else {
+      await db.update(bookingsTable)
+        .set({ downPayment: String(dp), isDpPaid: false, updatedAt: new Date() })
+        .where(eq(bookingsTable.id, id));
+    }
 
     const [facility] = await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, booking.facilityId)).limit(1);
     const remaining = grandTotal - dp;

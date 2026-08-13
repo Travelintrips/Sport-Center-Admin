@@ -50,6 +50,7 @@ externalPort = 80
 [[ports]]
 localPort = 8080
 externalPort = 8080
+
 [[ports]]
 localPort = 8081
 externalPort = 8081
@@ -65,7 +66,6 @@ externalPort = 3003
 [[ports]]
 localPort = 19876
 externalPort = 3001
-
 
 [[ports]]
 localPort = 21089
@@ -127,15 +127,3 @@ TRAVELINTRIP_PRODUCTION_DATABASE_URL = "postgresql://postgres.nzdweipzckfszczzqt
 
 [nix]
 channel = "stable-25_05"
-
-[[ports]]
-localPort = 5000
-externalPort = 5000
-
-[[ports]]
-localPort = 8081
-externalPort = 80
-
-[[ports]]
-localPort = 21089
-externalPort = 3000
