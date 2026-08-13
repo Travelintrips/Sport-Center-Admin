@@ -44,6 +44,7 @@ export const bankMutationsTable = scSchema.table("bank_mutations", {
   mutationKey: text("mutation_key").notNull(),
   normalizedDescription: text("normalized_description"),
   providerName: text("provider_name"),
+  providerDetectionSource: text("provider_detection_source"),
   providerOrderId: text("provider_order_id"),
   rawPayload: jsonb("raw_payload"),
   status: bankMutationStatusEnum("status").notNull().default("unmatched"),

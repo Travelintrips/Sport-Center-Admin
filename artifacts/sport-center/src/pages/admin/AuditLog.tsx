@@ -72,6 +72,8 @@ export default function AdminAuditLog() {
             <SelectItem value="pricing_rule">Pricing Rule</SelectItem>
             <SelectItem value="maintenance_schedule">Maintenance</SelectItem>
             <SelectItem value="reschedule_request">Reschedule</SelectItem>
+            <SelectItem value="company_invoice">Tagihan Perusahaan</SelectItem>
+            <SelectItem value="company">Pengaturan Billing Perusahaan</SelectItem>
           </SelectContent>
         </Select>
       </div>

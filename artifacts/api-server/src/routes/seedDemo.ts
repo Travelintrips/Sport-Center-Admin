@@ -10,7 +10,9 @@ import {
   usersTable,
 } from "@workspace/db";
 import { adminMiddleware } from "../lib/auth";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
+import { resolveRequiredPaymentEnrichment } from "../lib/paymentEnrichment";
+import { createPaymentProviderId, createPaymentProviderOrderId, normalizeProviderName } from "../lib/paymentMetadata";
 
 const router = Router();
 
@@ -164,10 +166,22 @@ router.post("/admin/seed-demo", adminMiddleware, async (_req, res) => {
     let paymentCount = 0;
     for (const b of insertedBookings) {
       if (paidStatuses.includes(b.status)) {
+        const [booking] = await db.select().from(bookingsTable)
+          .where(eq(bookingsTable.id, b.id)).limit(1);
+        if (!booking) throw new Error(`Demo booking ${b.id} not found`);
+        const paymentEnrichment = await resolveRequiredPaymentEnrichment(booking, "unknown", new Date());
         await db.insert(paymentsTable).values({
           bookingId: b.id,
           amount: b.totalPrice,
           paymentMethod: pick(["Transfer Bank", "Transfer Bank", "Transfer Bank", "QRIS"]),
+          paymentProvider: "unknown",
+          providerName: normalizeProviderName("unknown"),
+          providerId: createPaymentProviderId("unknown", `demo-${b.id}`),
+          providerOrderId: createPaymentProviderOrderId("unknown", `demo-order-${b.id}`),
+          companyId: paymentEnrichment.companyId,
+          bankAccountId: paymentEnrichment.bankAccountId,
+          expectedSettlementDate: paymentEnrichment.expectedSettlementDate,
+          paidAt: paymentEnrichment.paidAt,
           status: b.status === "waiting_confirmation" ? "pending" : "confirmed",
           confirmedAt: b.status !== "waiting_confirmation" ? new Date() : null,
         });

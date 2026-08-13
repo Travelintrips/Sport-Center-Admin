@@ -46,6 +46,82 @@ tags:
   - name: document-templates
     description: Company document template management (invoice, SPP, faktur, kwitansi, etc.)
 paths:
+  /admin/facility-company-mappings:
+    get:
+      operationId: listFacilityCompanyMappings
+      tags: [facilities]
+      summary: List effective-dated facility ownership mappings
+      parameters:
+        - name: facilityId
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Ownership mappings
+    post:
+      operationId: createFacilityCompanyMapping
+      tags: [facilities]
+      summary: Create an effective-dated facility ownership mapping
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [facilityId, companyId, effectiveFrom]
+              properties:
+                facilityId: { type: integer }
+                companyId: { type: integer }
+                effectiveFrom: { type: string, format: date }
+                effectiveUntil: { type: string, format: date, nullable: true }
+                isActive: { type: boolean }
+                source: { type: string }
+                notes: { type: string, nullable: true }
+      responses:
+        "201":
+          description: Mapping created
+  /admin/facility-company-mappings/{id}:
+    patch:
+      operationId: updateFacilityCompanyMapping
+      tags: [facilities]
+      summary: Deactivate or supersede an ownership mapping
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                isActive: { type: boolean }
+                effectiveUntil: { type: string, format: date, nullable: true }
+                notes: { type: string, nullable: true }
+      responses:
+        "200":
+          description: Mapping updated
+  /admin/audit-sport-center-payments/13-14-dry-run:
+    get:
+      operationId: auditSportCenterPayments1314DryRun
+      tags: [payments]
+      summary: Dry-run repair readiness for payments 13 and 14
+      responses:
+        "200":
+          description: Read-only repair report
+  /admin/audit-sport-center-ownership/dry-run:
+    get:
+      operationId: auditSportCenterOwnershipDryRun
+      tags: [payments]
+      summary: Dry-run historical ownership classifier
+      responses:
+        "200":
+          description: Read-only ownership classification
+
   /healthz:
     get:
       operationId: healthCheck
@@ -385,6 +461,21 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/TimeSlot"
+
+  /vendors:
+    get:
+      operationId: listVendors
+      tags: [vendors]
+      summary: List active vendors (public dropdown)
+      responses:
+        "200":
+          description: List of active vendors
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/VendorSimple"
 
   /bookings:
     get:
@@ -1343,6 +1434,27 @@ paths:
               schema:
                 $ref: "#/components/schemas/GymMembership"
 
+  /memberships/lookup:
+    post:
+      operationId: lookupMembership
+      tags: [memberships]
+      summary: Look up a membership by phone number (public)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MembershipLookupInput"
+      responses:
+        "200":
+          description: Membership found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MembershipLookupResult"
+        "404":
+          description: Not found
+
   /memberships/{id}/payment-proof:
     post:
       operationId: submitMembershipPaymentProof
@@ -1661,6 +1773,62 @@ paths:
                 $ref: "#/components/schemas/Booking"
         "400":
           description: Already checked in
+        "404":
+          description: Booking not found
+
+  /bookings/{id}/wa-logs:
+    get:
+      operationId: getBookingWaLogs
+      tags: [bookings]
+      summary: Get WA notification logs for a booking (admin)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: WA notification logs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/WaNotifLog"
+        "404":
+          description: Booking not found
+
+  /bookings/{id}/resend-wa:
+    post:
+      operationId: resendBookingWa
+      tags: [bookings]
+      summary: Resend WA notification to customer based on booking status (admin)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: WA sent
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, message]
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+        "400":
+          description: Cannot resend for this status
         "404":
           description: Booking not found
 
@@ -2989,6 +3157,16 @@ components:
         notes:
           type: string
 
+        downPaymentAmount:
+          type: number
+          description: Total down payment for the recurring payment group. Must be less than the group grand total.
+
+        customerType:
+          type: string
+          enum: [umum, angkasa_pura]
+        idCardNumber:
+          type: string
+
     RecurringBookingResult:
       type: object
       required: [created, skipped, totalBookings, grandTotal]
@@ -3005,6 +3183,40 @@ components:
           type: integer
         grandTotal:
           type: number
+
+    Vendor:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        contactPerson:
+          type: ["string", "null"]
+        phone:
+          type: ["string", "null"]
+        email:
+          type: ["string", "null"]
+        address:
+          type: ["string", "null"]
+        notes:
+          type: ["string", "null"]
+        isActive:
+          type: boolean
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+
+    VendorSimple:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
 
     BookingInput:
       type: object
@@ -3035,6 +3247,9 @@ components:
           type: string
         notes:
           type: string
+        vendorId:
+          type: integer
+          nullable: true
 
     BookingUpdate:
       type: object
@@ -3047,7 +3262,7 @@ components:
 
     Payment:
       type: object
-      required: [id, bookingId, amount, status]
+      required: [id, bookingId, amount, providerName, providerId, providerOrderId, bankAccountId, status]
       properties:
         id:
           type: integer
@@ -3059,6 +3274,23 @@ components:
           type: ["string", "null"]
         paymentMethod:
           type: ["string", "null"]
+        paymentProvider:
+          type: ["string", "null"]
+          enum: [mandiri_direct, paylabs, unknown, null]
+        providerName:
+          type: string
+        providerId:
+          type: string
+        providerOrderId:
+          type: string
+        bankAccountId:
+          type: string
+        providerReference:
+          type: ["string", "null"]
+        merchantTradeNo:
+          type: ["string", "null"]
+        providerTradeNo:
+          type: ["string", "null"]
         paymentType:
           type: string
           enum: [dp, pelunasan, full_payment]
@@ -3066,6 +3298,8 @@ components:
           type: string
           enum: [pending, confirmed, rejected]
         confirmedAt:
+          type: ["string", "null"]
+        paidAt:
           type: ["string", "null"]
         notes:
           type: ["string", "null"]
@@ -3084,6 +3318,14 @@ components:
           type: number
         proofUrl:
           type: string
+        paymentMethod:
+          type: string
+          enum: [Transfer Bank, QRIS]
+        paymentProvider:
+          type: string
+          enum: [mandiri_direct, paylabs, unknown]
+        providerOrderId:
+          type: string
         paymentType:
           type: string
           enum: [dp, pelunasan, full_payment]
@@ -3096,6 +3338,11 @@ components:
         status:
           type: string
           enum: [pending, confirmed, rejected]
+        paymentMethod:
+          type: string
+        paymentProvider:
+          type: string
+          enum: [mandiri_direct, paylabs, unknown]
         notes:
           type: string
 
@@ -3651,6 +3898,12 @@ components:
         createdAt:
           type: string
           nullable: true
+        groupRef:
+          type: string
+          nullable: true
+        customerName:
+          type: string
+          nullable: true
 
     Review:
       type: object
@@ -3831,6 +4084,37 @@ components:
           enum: [pending_payment, waiting_confirmation, active, expired, cancelled]
         notes:
           type: string
+
+    MembershipLookupInput:
+      type: object
+      required: [phone]
+      properties:
+        phone:
+          type: string
+
+    MembershipLookupResult:
+      type: object
+      required: [id, name, phone, email, status, startDate, endDate, months, totalPrice]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        phone:
+          type: string
+        email:
+          type: string
+        status:
+          type: string
+          enum: [pending_payment, waiting_confirmation, active, expired, cancelled]
+        startDate:
+          type: string
+        endDate:
+          type: string
+        months:
+          type: integer
+        totalPrice:
+          type: number
 
     MembershipPaymentProofInput:
       type: object
@@ -4816,4 +5100,33 @@ components:
         numberFormatPattern:
           type: string
         paperStyle:
+          type: string
+
+    WaNotifLog:
+      type: object
+      required: [id, recipientPhone, status, sentAt]
+      properties:
+        id:
+          type: integer
+        bookingId:
+          type: integer
+          nullable: true
+        orderNumber:
+          type: string
+          nullable: true
+        event:
+          type: string
+          nullable: true
+        recipientPhone:
+          type: string
+        messagePreview:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [sent, failed]
+        errorMessage:
+          type: string
+          nullable: true
+        sentAt:
           type: string

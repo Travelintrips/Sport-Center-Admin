@@ -1,0 +1,859 @@
+# PHASE — SPORT CENTER QRIS SETTLEMENT & MDR ARCHITECTURE AUDIT
+
+## OBJECTIVE
+
+Lakukan audit READ-ONLY terhadap seluruh object, table, function, service, worker, config, dan flow yang berkaitan dengan:
+
+```text
+Sport Center Payment
+→ Payment Clearing
+→ Settlement
+→ MDR
+→ Net Settlement
+→ Bank Mutation
+→ Bank Reconciliation
+```
+
+Tujuan audit:
+
+> Menentukan apakah komponen settlement QRIS dan MDR yang sudah ada dapat digunakan kembali untuk architecture baru, tanpa membuat tabel/function baru yang tumpang tindih.
+
+Pada phase ini:
+
+> JANGAN IMPLEMENTASI.
+
+---
+
+# CURRENT ACCOUNTING STATE
+
+Foundation internal Sport Center sudah tersedia dan sudah diuji:
+
+```text
+Payment Confirmed
+      ↓
+Sport Center Journal Draft
+      ↓
+Approved
+      ↓
+Posted
+```
+
+Untuk QRIS/payment provider, journal payment menggunakan:
+
+```text
+DR PAYMENT_CLEARING      Gross
+   CR SPORT_REVENUE      DPP
+   CR PPN_OUTPUT         PPN
+```
+
+Journal `posted` sudah immutable.
+
+Target berikutnya secara konsep:
+
+```text
+Banyak QRIS Payment
+      ↓
+Settlement Batch Harian
+      ↓
+Gross Settlement
+      ↓
+MDR
+      ↓
+Net Settlement
+      ↓
+Settlement Journal
+      ↓
+Compare dengan Mutasi Bank
+```
+
+Tetapi JANGAN implementasikan sekarang.
+
+---
+
+# BUSINESS RULES
+
+Gunakan aturan berikut hanya sebagai target audit:
+
+1. Harga booking Sport Center sudah termasuk PPN.
+2. PPN dihitung pada payment/revenue journal.
+3. MDR TIDAK dihitung per booking.
+4. MDR dihitung pada settlement/gabungan beberapa payment.
+5. Satu settlement dapat berisi banyak booking/payment.
+6. Satu mutasi QRIS harian dapat mewakili gabungan banyak booking.
+7. Net settlement dibandingkan dengan mutasi harian dari Google Sheet/bank mutation.
+8. Bank reconciliation yang sekarang ada TIDAK BOLEH diubah pada phase ini.
+
+---
+
+# HARD SAFETY RULES
+
+READ ONLY.
+
+DILARANG:
+
+* CREATE TABLE
+* ALTER TABLE
+* DROP TABLE
+* CREATE TRIGGER
+* DROP TRIGGER
+* ALTER TRIGGER
+* CREATE FUNCTION
+* ALTER FUNCTION
+* DROP FUNCTION
+* migration
+* INSERT
+* UPDATE
+* DELETE
+* TRUNCATE
+* backfill
+* data repair
+* source-code refactor
+* replacement worker
+* replacement scheduler
+* replacement reconciliation logic
+
+Tidak ada perubahan database maupun source code.
+
+---
+
+# PROTECTED AREA — BANK RECONCILIATION
+
+JANGAN mengubah:
+
+* bank_mutations
+* bank_reconciliation_matches
+* bank_journal_entries
+* bank_reconciliation_account_rules
+* bank_reconciliation_closing
+* bank_account_balances
+* reconciliation matching
+* AI matching
+* rule engine
+* expected cash flow
+* Google Sheet synchronization
+* reconciliation posting
+* reconciliation void/reversal
+* reconciliation triggers
+
+Semua object tersebut:
+
+```text
+PROTECTED — DO NOT MODIFY
+```
+
+Audit boleh membaca dependency dan kontraknya.
+
+---
+
+# PHASE 1 — SETTLEMENT OBJECT INVENTORY
+
+Cari seluruh object settlement pada schema:
+
+```text
+sport_center
+public
+```
+
+Search minimal untuk nama/konsep:
+
+```text
+settlement
+payment_settlement
+settlement_batch
+settlement_item
+qris_settlement
+provider_settlement
+gateway_settlement
+payment_settlement_configs
+settlement_rule
+settlement_status
+expected_settlement_date
+```
+
+Buat inventory:
+
+| Schema | Object | Type | Rows | Purpose | Active? |
+| ------ | ------ | ---- | ---: | ------- | ------- |
+
+Bedakan:
+
+```text
+CANONICAL
+CONFIG
+UAT/TEST
+LEGACY
+PUBLIC SHARED
+RECONCILIATION SUPPORT
+UNKNOWN
+```
+
+---
+
+# PHASE 2 — EXISTING SPORT CENTER SETTLEMENT TABLES
+
+Audit struktur lengkap object Sport Center yang ditemukan, terutama jika ada:
+
+```text
+payment_settlements
+payment_settlement_configs
+settlement_items
+payment settlement metadata
+```
+
+Untuk setiap table dokumentasikan:
+
+* PK
+* FK
+* unique constraints
+* indexes
+* status
+* provider
+* company
+* bank account
+* gross amount
+* fee/MDR
+* net amount
+* settlement date
+* settlement reference
+* payment linkage
+* journal linkage
+* mutation linkage
+
+Jangan berasumsi nama kolom.
+
+---
+
+# PHASE 3 — PUBLIC QRIS SETTLEMENT
+
+Audit:
+
+```text
+public.qris_settlements
+public.qris_settlement_items
+public.qris_provider_settlement_rules
+```
+
+atau object aktual yang ekuivalen.
+
+Jawab:
+
+1. Apakah object ini masih runtime active?
+2. Siapa yang membuat row?
+3. Apakah berasal dari Sport Center?
+4. Apakah digunakan reconciliation?
+5. Apakah bisa direuse?
+6. Apakah shared dengan project lain?
+
+Klasifikasikan:
+
+```text
+REUSE CANDIDATE
+SHARED — DO NOT REPURPOSE
+LEGACY
+UNKNOWN
+```
+
+---
+
+# PHASE 4 — PAYMENT SETTLEMENT METADATA
+
+Audit field pada:
+
+```text
+sport_center.sport_payments
+```
+
+yang berkaitan dengan:
+
+* settlement_status
+* expected_settlement_date
+* settlement_rule_version
+* payment_provider
+* provider_name
+* provider_id
+* provider_order_id
+* provider_reference
+* merchant_trade_no
+* provider_trade_no
+* bank_account_id
+* mdr_rate
+* mdr_amount
+
+Jawab:
+
+> Apakah metadata payment sekarang cukup untuk memasukkan payment ke settlement batch secara deterministic?
+
+---
+
+# PHASE 5 — PAYMENT CLEARING
+
+Audit COA/config yang relevan untuk:
+
+```text
+PAYMENT_CLEARING
+```
+
+Cari:
+
+* apakah account code sudah benar-benar ada di `sport_center.coa_accounts`
+* apakah ada clearing account provider khusus
+* apakah QRIS/Mandiri Direct memiliki mapping account
+* apakah bank account mapping sudah ada
+* apakah settlement configs menentukan clearing/bank account
+
+Jangan membuat COA baru.
+
+Laporkan gap.
+
+---
+
+# PHASE 6 — MDR CONFIGURATION
+
+Audit seluruh sumber MDR:
+
+```text
+mdr_rate
+mdr_amount
+qris mdr config
+provider settlement rule
+uat_qris_mdr_configs
+```
+
+Untuk setiap sumber jelaskan:
+
+* schema/table
+* provider
+* effective date
+* percentage
+* fixed fee jika ada
+* tax atas fee jika ada
+* tolerance
+* active flag
+* production vs UAT
+
+Jawab:
+
+> Mana yang saat ini authoritative untuk MDR?
+
+Jika tidak ada single source:
+
+laporkan.
+
+---
+
+# PHASE 7 — CURRENT MDR CALCULATION FLOW
+
+Trace seluruh source code/function yang menghitung:
+
+```text
+Gross
+- MDR
+- Provider Fee
+= Net Settlement
+```
+
+Cari minimal:
+
+```text
+mdr
+effectiveMdr
+expectedMdr
+observedDeduction
+grossAmount
+netSettlement
+settlementAmount
+qris
+```
+
+Buat call-chain aktual.
+
+Pisahkan:
+
+```text
+ACCOUNTING MDR
+MATCHING MDR
+UAT MDR
+DISPLAY/REPORTING MDR
+```
+
+Jangan menyamakan matching logic dengan accounting logic.
+
+---
+
+# PHASE 8 — DAILY AGGREGATION
+
+Audit apakah saat ini ada mekanisme yang mengelompokkan payment berdasarkan kombinasi seperti:
+
+```text
+settlement_date
+provider
+merchant
+bank_account
+company
+payment_method
+```
+
+Cari:
+
+* batch job
+* SQL group
+* reconciliation grouping
+* provider settlement file
+* daily QRIS aggregation
+
+Jawab:
+
+> Apakah satu settlement sudah dapat mengandung banyak payment?
+
+---
+
+# PHASE 9 — GROUP BOOKING VS SETTLEMENT
+
+Pastikan audit membedakan:
+
+```text
+Group Booking
+```
+
+dengan:
+
+```text
+Settlement Batch
+```
+
+Group booking = hubungan bisnis antar booking.
+
+Settlement batch = gabungan payment yang disetor provider.
+
+Audit apakah sistem saat ini mencampur kedua konsep.
+
+---
+
+# PHASE 10 — BANK MUTATION COMPARISON
+
+READ ONLY.
+
+Trace bagaimana mutasi QRIS harian dari Google Sheet masuk ke:
+
+```text
+bank_mutations
+```
+
+Kemudian audit field yang tersedia untuk matching:
+
+* amount
+* date
+* description
+* reference
+* provider identifier
+* bank account
+* canonical key
+
+Jawab:
+
+> Settlement baru nantinya sebaiknya terhubung ke bank mutation melalui field apa?
+
+Jangan mengubah matching engine.
+
+---
+
+# PHASE 11 — REQUIRED SETTLEMENT EQUATION
+
+Audit apakah object existing mampu menyimpan contract:
+
+```text
+gross_amount
+- mdr_amount
+- other_provider_fee
++/- adjustment_amount
+=
+net_amount
+```
+
+Dan:
+
+```text
+net_amount
+≈ bank_mutation.amount
+```
+
+dengan tolerance jika memang existing rules memakai tolerance.
+
+Jangan membuat field baru.
+
+Laporkan missing capability.
+
+---
+
+# PHASE 12 — SETTLEMENT ITEM IDENTITY
+
+Audit apakah sudah ada identity untuk:
+
+```text
+settlement_id + payment_id
+```
+
+yang dapat mencegah:
+
+* satu payment masuk dua settlement aktif;
+* duplicate settlement item;
+* payment settled dua kali;
+* retry menciptakan duplicate.
+
+Cari unique constraint yang relevan.
+
+---
+
+# PHASE 13 — SETTLEMENT JOURNAL READINESS
+
+Audit apakah schema existing dapat mendukung journal:
+
+```text
+DR Bank Net
+DR MDR Expense
+DR Other Provider Fee (jika ada)
+   CR Payment Clearing Gross
+```
+
+Cari COA existing untuk:
+
+* bank
+* payment clearing
+* MDR expense
+* bank fee
+* gateway fee
+* adjustment
+
+Jangan membuat journal.
+
+---
+
+# PHASE 14 — JOURNAL LINKAGE
+
+Audit apakah settlement object existing dapat menyimpan:
+
+```text
+source payment journals
+settlement journal id
+posted status
+posted_at
+reversal reference
+```
+
+Jawab:
+
+> Bisakah settlement nanti dibuktikan berasal hanya dari payment journal yang sudah posted?
+
+---
+
+# PHASE 15 — ELIGIBILITY RULE
+
+Audit field yang tersedia untuk menentukan payment yang eligible masuk settlement.
+
+Target konsep:
+
+```text
+payment.status = confirmed
+AND payment journal.status = posted
+AND payment method/provider requires settlement
+AND payment not already settled
+```
+
+Jangan implementasi.
+
+Jelaskan apakah field existing cukup.
+
+---
+
+# PHASE 16 — SETTLEMENT DATE RULE
+
+Audit aturan provider tentang:
+
+```text
+T+0
+T+1
+T+n
+```
+
+Cari apakah:
+
+```text
+payment_settlement_configs
+```
+
+sudah memiliki:
+
+* settlement delay
+* effective_from
+* provider
+* company
+* bank account
+
+Jawab apakah settlement date dapat dihitung dari config existing.
+
+---
+
+# PHASE 17 — REFUND / REVERSAL INTERACTION
+
+Audit apa yang terjadi jika:
+
+```text
+Payment Posted
+→ Settlement Created
+→ kemudian Refund
+```
+
+Cari existing flow:
+
+* settlement reversal
+* payment reversal
+* bank reversal
+* refund accounting
+* negative adjustment
+
+Jangan mengubah refund flow.
+
+---
+
+# PHASE 18 — RECONCILIATION INTERFACE
+
+Audit interface paling aman antara:
+
+```text
+Settlement
+```
+
+dan:
+
+```text
+Bank Reconciliation
+```
+
+Jangan menjadikan bank reconciliation sebagai creator settlement.
+
+Target prinsip:
+
+```text
+Sport Center Accounting
+creates expected settlement
+
+Bank Reconciliation
+matches actual bank mutation
+```
+
+Bandingkan dengan implementasi aktual.
+
+---
+
+# PHASE 19 — CROSS-SCHEMA CONFLICT
+
+Audit apakah membuat settlement canonical di `sport_center` nantinya akan bentrok dengan:
+
+```text
+public.qris_settlements
+public.qris_settlement_items
+```
+
+Jawab secara eksplisit:
+
+* reuse public?
+* create canonical sport_center?
+* use public as downstream projection?
+* public shared sehingga tidak boleh dipakai?
+
+Tidak boleh membuat object baru pada audit ini.
+
+---
+
+# PHASE 20 — DATA QUALITY
+
+READ ONLY.
+
+Jika ada data settlement lama/test, cek:
+
+* duplicate settlement
+* duplicate payment item
+* gross mismatch
+* MDR mismatch
+* net mismatch
+* settlement without payments
+* settled payment without settlement
+* mutation link missing
+* provider/reference duplicate
+
+Data percobaan lama tidak perlu diremediasi.
+
+---
+
+# REQUIRED FINAL REPORT
+
+## 1. Settlement Inventory
+
+## 2. Sport Center Settlement Objects
+
+## 3. Public Settlement Objects
+
+## 4. Payment Settlement Metadata
+
+## 5. Payment Clearing Readiness
+
+## 6. MDR Configuration
+
+## 7. Current MDR Logic
+
+## 8. Daily Aggregation Capability
+
+## 9. Group Booking vs Settlement
+
+## 10. Bank Mutation Interface
+
+## 11. Gross/MDR/Net Contract
+
+## 12. Settlement Item Idempotency
+
+## 13. Settlement Journal Readiness
+
+## 14. Journal Linkage
+
+## 15. Eligibility Rule Readiness
+
+## 16. Settlement Date Rule
+
+## 17. Refund/Reversal Interaction
+
+## 18. Reconciliation Interface
+
+## 19. Cross-Schema Conflict
+
+## 20. Missing Components
+
+Klasifikasikan:
+
+```text
+CRITICAL
+HIGH
+MEDIUM
+LOW
+```
+
+## 21. REUSE MATRIX
+
+Buat:
+
+| Existing Object | Reuse? | Role in Target | Reason |
+| --------------- | ------ | -------------- | ------ |
+
+Gunakan:
+
+```text
+REUSE AS-IS
+REUSE WITH EXTENSION
+KEEP — SHARED
+LEGACY — DO NOT USE
+UAT ONLY
+NEW OBJECT NEEDED LATER
+```
+
+## 22. Recommended Target Architecture
+
+Tanpa implementasi.
+
+Target konsep:
+
+```text
+Posted Payment Journals
+        ↓
+Settlement Eligibility
+        ↓
+Daily Settlement Batch
+        ↓
+Settlement Items
+        ↓
+Gross
+        ↓
+MDR / Fees
+        ↓
+Net Settlement
+        ↓
+Settlement Journal
+        ↓
+Expected Bank Settlement
+        ↓
+Bank Reconciliation Match
+```
+
+## 23. Recommended Canonical Ownership
+
+Jawab secara tegas:
+
+```text
+Where should canonical settlement live?
+```
+
+Pilihan:
+
+```text
+sport_center
+public
+existing shared object
+```
+
+Sertakan alasan evidence-based.
+
+## 24. FINAL VERDICT
+
+Gunakan salah satu:
+
+```text
+READY — EXISTING SETTLEMENT COMPONENTS CAN BE REUSED
+```
+
+atau:
+
+```text
+READY WITH GAPS — REUSE EXISTING COMPONENTS AND ADD MINIMAL EXTENSIONS
+```
+
+atau:
+
+```text
+NOT READY — SETTLEMENT MODEL REQUIRES NEW CANONICAL STRUCTURE
+```
+
+---
+
+# REQUIRED CHANGE CONFIRMATION
+
+Wajib:
+
+```text
+Database changes: 0
+Source changes: 0
+Triggers changed: 0
+Functions changed: 0
+Migrations created: 0
+Historical records modified: 0
+Bank reconciliation changes: 0
+```
+
+---
+
+# FINAL RULE
+
+Audit saja.
+
+JANGAN membuat settlement table.
+
+JANGAN membuat settlement function.
+
+JANGAN membuat MDR calculation.
+
+JANGAN membuat trigger.
+
+JANGAN membuat journal settlement.
+
+JANGAN mengubah bank reconciliation.
+
+Setelah laporan selesai:
+
+STOP dan tunggu instruksi berikutnya.

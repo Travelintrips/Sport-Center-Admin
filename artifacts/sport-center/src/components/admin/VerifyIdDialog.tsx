@@ -19,6 +19,7 @@ type VerifyDialogBooking = {
   orderNumber: string;
   customerName: string;
   idCardNumber?: string | null;
+  verificationStatus?: string | null;
 };
 
 const READER_ID = "ap-qr-reader";
@@ -145,6 +146,11 @@ export default function VerifyIdDialog({
               </div>
             ) : (
               <>
+                {booking.verificationStatus === "rejected" && (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                    Verifikasi sebelumnya ditolak. Masukkan atau scan ID Card yang benar untuk mencoba lagi.
+                  </div>
+                )}
                 {scanning ? (
                   <div className="space-y-2">
                     <div id={READER_ID} className="rounded-lg overflow-hidden border" />

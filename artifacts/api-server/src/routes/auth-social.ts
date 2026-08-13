@@ -4,6 +4,7 @@ import { eq, or } from "drizzle-orm";
 import { OAuth2Client } from "google-auth-library";
 import { createToken, authMiddleware, hashPassword, verifyToken } from "../lib/auth";
 import crypto from "crypto";
+import { logger } from "../lib/logger";
 
 const router = Router();
 
@@ -137,7 +138,7 @@ router.post("/auth/send-otp", async (req, res) => {
         // swallow
       }
     } else {
-      console.log(`[DEV] OTP for ${cleaned}: ${otp}`);
+      logger.debug(`[DEV] OTP for ${cleaned}: ${otp}`);
     }
 
     res.json({ success: true, message: "OTP berhasil dikirim via WhatsApp" });
@@ -254,7 +255,7 @@ router.post("/auth/forgot-password", async (req, res) => {
         // swallow
       }
     } else {
-      console.log(`[DEV] Reset OTP for ${cleaned}: ${otp}`);
+      logger.debug(`[DEV] Reset OTP for ${cleaned}: ${otp}`);
     }
 
     const maskedPhone = user.phone.replace(/(\d{3})\d+(\d{3})/, "$1****$2");

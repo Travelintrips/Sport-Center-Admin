@@ -155,6 +155,33 @@ try {
 
   // ── Step 3: Custom incremental migrations (all idempotent) ──────────────────
   console.log(`[3/3] Custom schema migrations (enums, columns, tables)...`);
+  // PostgreSQL requires a newly-added enum value to be committed before it
+  // can be referenced by a later statement. Keep this outside the large
+  // custom migration batch so source-scoped indexes can use it safely.
+  const sourceEnum = await client.query<{ exists: boolean; has_value: boolean }>(`
+    SELECT EXISTS (
+      SELECT 1
+        FROM pg_type t
+        JOIN pg_namespace n ON n.oid = t.typnamespace
+       WHERE t.typname = 'accounting_entry_source'
+         AND n.nspname = 'public'
+    ) AS exists,
+    EXISTS (
+      SELECT 1
+        FROM pg_enum e
+        JOIN pg_type t ON t.oid = e.enumtypid
+        JOIN pg_namespace n ON n.oid = t.typnamespace
+       WHERE t.typname = 'accounting_entry_source'
+         AND n.nspname = 'public'
+         AND e.enumlabel = 'sport_center_payment'
+    ) AS has_value
+  `);
+  if (sourceEnum.rows[0]?.exists && !sourceEnum.rows[0]?.has_value) {
+    await client.query(
+      `ALTER TYPE public.accounting_entry_source ADD VALUE 'sport_center_payment'`,
+    );
+    console.log("      ✓ Added public.accounting_entry_source=sport_center_payment\n");
+  }
   await client.query(CUSTOM_MIGRATION_SQL);
   console.log("      ✓ Done\n");
 

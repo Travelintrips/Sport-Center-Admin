@@ -63,6 +63,7 @@ export async function recordTaxTransaction(
   reversalOfId?: number
 ): Promise<number | null> {
   if (!taxCalc.taxCode || taxCalc.taxAmount === 0) return null;
+  const dppNilaiLain = taxCalc.dpp > 0 ? Math.round(taxCalc.dpp * 11 / 12) : 0;
   const [row] = await db.insert(taxTransactionsTable).values({
     referenceType,
     referenceId,
@@ -70,6 +71,8 @@ export async function recordTaxTransaction(
     taxCode: taxCalc.taxCode,
     taxRate: String(taxCalc.taxRate),
     dpp: String(taxCalc.dpp),
+    dppNilaiLain: String(dppNilaiLain),
+    grandTotal: String(taxCalc.grandTotal),
     taxAmount: String(taxCalc.taxAmount),
     transactionDate,
     status,
