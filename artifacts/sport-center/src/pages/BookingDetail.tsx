@@ -53,6 +53,31 @@ const DEFAULT_QRIS_IMAGE = `${BASE}/uploads/qris-263226c1-c51d-4353-9165-cedaba3
 
 type PaymentMethod = "transfer" | "qris" | "paylabs";
 
+// "paylabs" is the gateway grouping row in admin settings, not a provider
+// payment method. The child methods determine whether the Paylabs option is
+// available to customers.
+const PAYLABS_CHILD_METHOD_IDS = new Set([
+  "qris",
+  "bri",
+  "bca",
+  "bni",
+  "mandiri",
+  "permata",
+  "cimb",
+  "btn",
+  "danamon",
+  "ovo",
+  "dana",
+  "shopeepay",
+  "linkaja",
+  "gopay",
+  "maybank",
+  "bsi",
+  "muamalat",
+  "sinarmas",
+  "ina",
+]);
+
 interface PaylabsPublicConfig {
   sandboxMode: boolean;
   configured: boolean;
@@ -104,7 +129,13 @@ export default function BookingDetail() {
     paylabsConfig?.paymentMethodsConfig?.some(
       (method) => method.id.trim().toLowerCase() === id && method.active,
     ) ?? false;
-  const hasPaylabs = isActiveAdminPaymentMethod("paylabs") && (paylabsConfig?.configured ?? false);
+  const hasActivePaylabsChildMethod =
+    paylabsConfig?.paymentMethodsConfig?.some((method) => {
+      const id = method.id.trim().toLowerCase();
+      return PAYLABS_CHILD_METHOD_IDS.has(id) && method.active;
+    }) ?? false;
+  const hasPaylabs =
+    hasActivePaylabsChildMethod && (paylabsConfig?.configured ?? false);
 
   const payDp = usePayBookingDp({
     mutation: {
@@ -1222,8 +1253,11 @@ function PaylabsPaymentSection({
       .catch(() => {});
   }, [base]);
 
-  // ── Active methods — always from the freshly fetched config ──────────────
-  const activeMethods = (freshConfig?.paymentMethodsConfig ?? []).filter((m) => m.active);
+  // ── Active child methods — the "paylabs" row is only a grouping label ─────
+  const activeMethods = (freshConfig?.paymentMethodsConfig ?? []).filter((m) => {
+    const id = m.id.trim().toLowerCase();
+    return m.active && PAYLABS_CHILD_METHOD_IDS.has(id);
+  });
   const sandboxMode   = freshConfig?.sandboxMode ?? false;
 
   // Fallback while config is loading (show skeleton) or if no methods configured
