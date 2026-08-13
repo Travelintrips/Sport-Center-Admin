@@ -627,14 +627,35 @@ export function createEwallet(req: CreateEwalletRequest, cfg?: PaylabsConfig) {
   }, cfg);
 }
 
-export function statusInquiry(merchantTradeNo: string, cfg?: PaylabsConfig) {
+/**
+ * Query the current order status.
+ *
+ * Paylabs v4.8.1 documents the VA inquiry endpoint as:
+ *   POST /payment/v2.3/va/query
+ * The old /payment/v2.3/va/inquiry path is not a v4.8.1 endpoint and returns
+ * "URL not found" in the sandbox.  The same request shape is used by the
+ * channel-specific query endpoints for QRIS and e-wallets.
+ */
+export function statusInquiry(
+  merchantTradeNo: string,
+  paymentType = "VA",
+  cfg?: PaylabsConfig,
+) {
   const config = cfg ?? getPaylabsConfig();
-  // v4.8.1 endpoint: POST /payment/v2.3/va/inquiry (try va inquiry; fallback in route)
-  return callPaylabs("/payment/v2.3/va/inquiry", {
+  const normalizedPaymentType = paymentType.trim().toUpperCase();
+  const endpoint =
+    normalizedPaymentType === "QRIS"
+      ? "/payment/v2.3/qris/query"
+      : ["OVO", "DANA", "SHOPEEPAY", "LINKAJA", "GOPAY"].includes(normalizedPaymentType)
+        ? "/payment/v2.3/ewallet/query"
+        : "/payment/v2.3/va/query";
+
+  return callPaylabs(endpoint, {
     requestId      : `inq-${merchantTradeNo}-${Date.now()}`,
     merchantId     : config.merchantId,
     ...(config.storeId ? { storeId: config.storeId } : {}),
     merchantTradeNo,
+    paymentType,
   }, cfg);
 }
 

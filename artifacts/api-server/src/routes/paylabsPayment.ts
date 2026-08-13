@@ -278,10 +278,11 @@ async function finalizePayment(opts: FinalizePaymentOptions): Promise<FinalizePa
           previousBookingStatus,
         };
       }
+      const canonicalPaidAt = opts.paidAt ?? new Date();
       if (previousBookingStatus !== "confirmed") {
         await tx
           .update(bookingsTable)
-          .set({ status: "confirmed", updatedAt: new Date() })
+          .set({ status: "confirmed", paidAt: canonicalPaidAt, updatedAt: new Date() })
           .where(eq(bookingsTable.id, bookingId));
       }
 
@@ -291,7 +292,6 @@ async function finalizePayment(opts: FinalizePaymentOptions): Promise<FinalizePa
       );
 
       const amountPaid = Number(txRow.amount ?? booking.grandTotal ?? booking.totalPrice);
-      const canonicalPaidAt = opts.paidAt ?? new Date();
       const paymentEnrichment = await resolveRequiredPaymentEnrichment(booking, "paylabs", canonicalPaidAt, {
         // The booking relation is authoritative; this explicit context is
         // only a fallback for company bookings whose relation is still being
@@ -952,7 +952,18 @@ router.get("/paylabs/status/:tradeNo", async (req, res) => {
       return res.json({ local: local ?? null, paylabs: null, paylabsOk: false, inquirySkipped: true });
     }
 
-    const paylabsRes = await statusInquiry(tradeNo);
+    // Use the same database-backed credentials as create-payment.  Calling
+    // statusInquiry() without cfg silently fell back to env credentials, which
+    // is usually empty when Paylabs settings are maintained in the admin UI.
+    const cfg = await loadPaylabsConfigFromDb();
+    const resolvedMethod = resolvePaymentMethod(String(local?.payment_method ?? ""));
+    const inquiryPaymentType =
+      resolvedMethod.type === "qris"
+        ? "QRIS"
+        : resolvedMethod.type === "va" || resolvedMethod.type === "ewallet"
+          ? resolvedMethod.code
+          : String(local?.payment_method ?? "VA");
+    const paylabsRes = await statusInquiry(tradeNo, inquiryPaymentType, cfg);
 
     const urlNotFound = !paylabsRes.ok && (
       String(paylabsRes.errMsg ?? "").toLowerCase().includes("url not found") ||
@@ -962,7 +973,86 @@ router.get("/paylabs/status/:tradeNo", async (req, res) => {
       return res.json({ local: local ?? null, paylabs: null, paylabsOk: false, inquirySkipped: true, inquiryNotSupported: true });
     }
 
-    return res.json({ local: local ?? null, paylabs: paylabsRes.data, paylabsOk: paylabsRes.ok });
+    const providerData = paylabsRes.data as Record<string, unknown>;
+    const rawProviderStatus = String(
+      providerData.status ??
+      providerData.tradeStatus ??
+      providerData.tradeState ??
+      providerData.paymentStatus ??
+      providerData.orderStatus ??
+      providerData.resultStatus ??
+      "",
+    );
+    const internalStatus = mapPaylabsStatus(rawProviderStatus);
+
+    // Inquiry is a recovery path for a missed/ rejected webhook.  A successful
+    // status must be committed server-side, not merely shown optimistically in
+    // the browser, otherwise the booking remains pending after a refresh.
+    let reconciliation: FinalizePaymentResult | undefined;
+    if (paylabsRes.ok && internalStatus === "SUCCESS") {
+      const paylabsTradeNo = String(
+        providerData.platformTradeNo ??
+        providerData.paylabsTradeNo ??
+        providerData.tradeNo ??
+        local?.paylabs_trade_no ??
+        "",
+      );
+      reconciliation = await finalizePayment({
+        merchantTradeNo: tradeNo,
+        paylabsTradeNo,
+        providerStatus: rawProviderStatus || "02",
+        source: "paylabs_manual_reconciliation",
+        reason: "automatic status inquiry recovery",
+        paidAt: resolvePaylabsPaidAt(providerData, new Date()),
+        providerReference: resolvePaylabsProviderReference(providerData, paylabsTradeNo),
+      });
+
+      // Keep automatic inquiry recovery aligned with webhook/manual
+      // reconciliation. The payment row is committed atomically above; the
+      // accounting journal is posted idempotently after the transaction.
+      if (
+        (reconciliation.outcome === "confirmed" || reconciliation.outcome === "already_confirmed") &&
+        reconciliation.bookingId
+      ) {
+        const recoveredBookingId = reconciliation.bookingId;
+        db.select().from(bookingsTable)
+          .where(eq(bookingsTable.id, recoveredBookingId))
+          .limit(1)
+          .then((rows) => {
+            const bk = rows[0];
+            if (!bk) return;
+            const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" });
+            const { dpp, ppnAmount } = extractBookingDpp(bk);
+            postConfirmedPaymentAccounting({
+              bookingId: bk.id,
+              orderNumber: bk.orderNumber ?? "",
+              dpp,
+              ppnAmount,
+              facilityId: bk.facilityId,
+              journalDate: today,
+              paymentMethod: reconciliation?.paymentMethod ?? "Transfer Bank",
+              paymentId: reconciliation.paymentId,
+            }).catch((accountingErr) =>
+              logAccountingError({
+                operation: "postConfirmedPaymentAccounting:autoInquiryRecovery",
+                orderNumber: bk.orderNumber ?? "",
+                bookingId: bk.id,
+                error: accountingErr,
+              }),
+            );
+          })
+          .catch(() => {});
+      }
+    }
+
+    return res.json({
+      local: local ?? null,
+      paylabs: paylabsRes.data,
+      paylabsOk: paylabsRes.ok,
+      reconciliation: reconciliation
+        ? { outcome: reconciliation.outcome, bookingId: reconciliation.bookingId }
+        : undefined,
+    });
   } catch (err) {
     logger.error({ err }, "[paylabs] status inquiry error");
     return res.status(500).json({ error: "Status inquiry failed" });
