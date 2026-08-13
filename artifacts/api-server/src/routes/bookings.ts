@@ -1877,6 +1877,7 @@ router.post("/bookings/:id/fix-discount", adminMiddleware, async (req, res) => {
     const taxCalc = await calculateTax(finalPrice, "sport_booking", booking.bookingDate);
     await db.update(bookingsTable).set({
       apDiscountAmount: String(discountAmount),
+      discountAmount: String(discountAmount),
       totalPrice: String(finalPrice),
       ppnRate: taxCalc.taxRate > 0 ? String(taxCalc.taxRate) : null,
       ppnAmount: taxCalc.taxAmount > 0 ? String(taxCalc.taxAmount) : null,
@@ -1886,6 +1887,21 @@ router.post("/bookings/:id/fix-discount", adminMiddleware, async (req, res) => {
     await reverseTaxTransaction(booking.id, booking.orderNumber, booking.bookingDate);
     if (taxCalc.taxCode) {
       await recordTaxTransaction("booking", booking.id, booking.orderNumber, taxCalc, booking.bookingDate);
+    }
+
+    // Keep a recurring/cart group total in sync when one session is corrected.
+    if (booking.groupRef) {
+      const groupBookings = await db
+        .select({ totalPrice: bookingsTable.totalPrice, grandTotal: bookingsTable.grandTotal })
+        .from(bookingsTable)
+        .where(eq(bookingsTable.groupRef, booking.groupRef));
+      const groupTotal = groupBookings.reduce(
+        (sum, item) => sum + (item.grandTotal != null ? Number(item.grandTotal) : Number(item.totalPrice)),
+        0,
+      );
+      await db.update(bookingGroupsTable)
+        .set({ totalPayment: String(groupTotal), updatedAt: new Date() })
+        .where(eq(bookingGroupsTable.groupRef, booking.groupRef));
     }
 
     const [updatedBooking] = await db.select().from(bookingsTable)
