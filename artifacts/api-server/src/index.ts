@@ -914,10 +914,16 @@ app.listen(port, (err) => {
   startScheduler();
   ensureDefaultTemplates().catch(() => {});
 
-  // Validate Supabase Storage buckets at startup
-  import("./lib/supabaseStorage").then(({ validateBuckets }) => {
-    validateBuckets().catch((err) =>
-      logger.warn({ err }, "Storage bucket validation failed (non-fatal)")
-    );
-  });
+  // Local development uses Replit PostgreSQL and the local filesystem fallback.
+  // Do not make the API startup depend on an unreachable isolated Supabase
+  // Storage project when DATABASE_URL is present.
+  if (process.env.NODE_ENV === "development" && process.env.DATABASE_URL) {
+    logger.info("Skipping Supabase Storage bucket validation for local development");
+  } else {
+    import("./lib/supabaseStorage").then(({ validateBuckets }) => {
+      validateBuckets().catch((err) =>
+        logger.warn({ err }, "Storage bucket validation failed (non-fatal)")
+      );
+    });
+  }
 });

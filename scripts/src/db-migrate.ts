@@ -14,10 +14,12 @@ const envLabel = isProd ? "PROD" : "DEV";
 
 const rawUrl = isProd
   ? process.env.SUPABASE_DATABASE_URL
-  : process.env.SUPABASE_DATABASE_URL_DEV ?? process.env.SUPABASE_DATABASE_URL;
+  : process.env.DATABASE_URL ??
+    process.env.SUPABASE_DATABASE_URL_DEV ??
+    process.env.SUPABASE_DATABASE_URL;
 
 if (!rawUrl) {
-  const missing = isProd ? "SUPABASE_DATABASE_URL" : "SUPABASE_DATABASE_URL_DEV";
+  const missing = isProd ? "SUPABASE_DATABASE_URL" : "DATABASE_URL or SUPABASE_DATABASE_URL_DEV";
   console.error(`[migrate] ERROR: ${missing} is not set.`);
   process.exit(1);
 }

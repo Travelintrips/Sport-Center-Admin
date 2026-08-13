@@ -5,9 +5,9 @@ description: Dev workflow uses Helium DATABASE_URL (not Supabase); SUPABASE_DATA
 
 ## The Rule
 
-The development API now uses the development-scoped `SUPABASE_DATABASE_URL` secret when it is present; otherwise it falls back to `DATABASE_URL` (Replit's local heliumdb). Shell/bash commands may not expose the secret even when the workflow does.
+The development API uses `DATABASE_URL` (Replit's local heliumdb) first. Cross-project Supabase/BizPortal access must be explicitly enabled with `ALLOW_DEV_ON_PROD_DB=true`; otherwise dev stays isolated from external databases.
 
-**Why:** Replit environment scopes and workflow secret injection can differ from shell subprocess environments. The runtime selection is defined in `lib/db/src/index.ts`, so verify the running API rather than assuming the shell's variables reflect the workflow.
+**Why:** Replit environment scopes can inject production Supabase URLs into development workflows, and a background pool can then crash an otherwise healthy local API when the external database times out.
 
 **How to apply:** Keep Supabase runtime traffic on the pooler connection, and apply schema changes with a direct `pg` client using the session pooler (port 5432). If development intentionally uses local PG, apply local migrations manually — do NOT rely on `drizzle-kit push`.
 

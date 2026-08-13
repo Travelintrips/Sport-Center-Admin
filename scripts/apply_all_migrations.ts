@@ -1,7 +1,11 @@
 import pg from "pg";
 const { Client } = pg;
 
-const rawUrl = process.env.SUPABASE_DATABASE_URL_DEV || process.env.SUPABASE_DATABASE_URL || "";
+const rawUrl =
+  process.env.DATABASE_URL ||
+  process.env.SUPABASE_DATABASE_URL_DEV ||
+  process.env.SUPABASE_DATABASE_URL ||
+  "";
 const url = rawUrl.replace("pooler.supabase.com:6543", "pooler.supabase.com:5432");
 const client = new Client({ connectionString: url, ssl: { rejectUnauthorized: false } });
 
@@ -15,6 +19,9 @@ const stmts = [
   `ALTER TABLE sport_center.sport_bookings ADD COLUMN IF NOT EXISTS rejected_reason text`,
   `ALTER TABLE sport_center.sport_bookings ADD COLUMN IF NOT EXISTS paid_at timestamptz`,
   `ALTER TABLE sport_center.sport_bookings ADD COLUMN IF NOT EXISTS booker_name text`,
+  `ALTER TABLE sport_center.sport_bookings ADD COLUMN IF NOT EXISTS booking_type text NOT NULL DEFAULT 'regular'`,
+  `ALTER TABLE sport_center.sport_bookings ADD COLUMN IF NOT EXISTS event_discount_amount numeric(12,2)`,
+  `ALTER TABLE sport_center.sport_bookings ADD COLUMN IF NOT EXISTS invoice_pdf_url text`,
   // user account type
   `DO $$ BEGIN CREATE TYPE sport_center.user_account_type AS ENUM ('personal','company'); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
   `DO $$ BEGIN CREATE TYPE sport_center.payer_type AS ENUM ('personal','company'); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
@@ -37,6 +44,15 @@ const stmts = [
   `ALTER TABLE sport_center.users ADD COLUMN IF NOT EXISTS registration_source text`,
   `ALTER TABLE sport_center.users ADD COLUMN IF NOT EXISTS customer_code text`,
   `ALTER TABLE sport_center.users ADD COLUMN IF NOT EXISTS tenant_id integer`,
+  `ALTER TABLE sport_center.users ADD COLUMN IF NOT EXISTS require_per_booking_approval boolean NOT NULL DEFAULT false`,
+  // settings columns used by the current Drizzle schema
+  `ALTER TABLE sport_center.sport_settings ADD COLUMN IF NOT EXISTS fonnte_token text`,
+  `ALTER TABLE sport_center.sport_settings ADD COLUMN IF NOT EXISTS fonnte_customer_token text`,
+  `ALTER TABLE sport_center.sport_settings ADD COLUMN IF NOT EXISTS fonnte_admin_wa text`,
+  `ALTER TABLE sport_center.sport_settings ADD COLUMN IF NOT EXISTS admin_wa_phones text`,
+  `ALTER TABLE sport_center.sport_settings ADD COLUMN IF NOT EXISTS app_url text`,
+  `ALTER TABLE sport_center.sport_settings ADD COLUMN IF NOT EXISTS payment_domain text`,
+  `ALTER TABLE sport_center.sport_settings ADD COLUMN IF NOT EXISTS payment_deadline_hours text DEFAULT '24'`,
   // bookings more columns
   `ALTER TABLE sport_center.sport_bookings ADD COLUMN IF NOT EXISTS payer_type sport_center.payer_type DEFAULT 'personal'`,
   `ALTER TABLE sport_center.sport_bookings ADD COLUMN IF NOT EXISTS company_customer_id integer`,
@@ -191,7 +207,11 @@ const stmts = [
   )`,
   // seed admin  
   `INSERT INTO sport_center.sport_settings (center_name, address, phone, whatsapp, email) VALUES ('Sport Center Dev','Jakarta','021-000000','08000000000','admin@sportcenter.com') ON CONFLICT DO NOTHING`,
-  `INSERT INTO sport_center.sport_facilities (name, category, description, price_per_hour, open_hour, close_hour, is_active) VALUES ('Lapangan Futsal A','futsal','Lapangan futsal indoor',150000,'06:00','22:00',true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO sport_center.sport_facilities (name, category, description, price_per_hour, open_time, close_time, is_active)
+   SELECT 'Lapangan Futsal A','futsal','Lapangan futsal indoor',150000,'06:00','22:00',true
+   WHERE NOT EXISTS (
+     SELECT 1 FROM sport_center.sport_facilities WHERE name = 'Lapangan Futsal A'
+   )`,
 ];
 
 let ok = 0, fail = 0;

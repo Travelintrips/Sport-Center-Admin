@@ -40,9 +40,7 @@ async function main() {
   }
 
   // Seed facilities
-  const existingFacilities = await db.select().from(facilitiesTable).limit(1);
-  if (existingFacilities.length === 0) {
-    await db.insert(facilitiesTable).values([
+  const facilitySeed = [
       {
         name: "Lapangan Badminton A",
         category: "Badminton",
@@ -127,8 +125,13 @@ async function main() {
         capacity: 4,
         isActive: true,
       },
-    ]);
-    console.log("Facilities seeded (7 facilities)");
+    ];
+  const existingFacilities = await db.select({ name: facilitiesTable.name }).from(facilitiesTable);
+  const existingNames = new Set(existingFacilities.map((facility) => facility.name));
+  const missingFacilities = facilitySeed.filter((facility) => !existingNames.has(facility.name));
+  if (missingFacilities.length > 0) {
+    await db.insert(facilitiesTable).values(missingFacilities);
+    console.log(`Facilities seeded (${missingFacilities.length} missing facilities added)`);
   } else {
     console.log("Facilities already exist, skipping");
   }
