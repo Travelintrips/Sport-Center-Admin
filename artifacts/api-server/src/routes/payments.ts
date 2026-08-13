@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db, paymentsTable, bookingsTable, bookingHistoryTable, facilitiesTable, bookingGroupsTable } from "@workspace/db";
-import { eq, and, ne, sql } from "drizzle-orm";
+import { eq, and, ne, inArray, sql } from "drizzle-orm";
 import { adminMiddleware, verifyToken } from "../lib/auth";
 import multer from "multer";
 import path from "path";
@@ -284,12 +284,26 @@ router.post("/payments", async (req, res) => {
       }
     }
 
+    const groupBookings = booking.groupRef
+      ? await db.select({
+          id: bookingsTable.id,
+          downPayment: bookingsTable.downPayment,
+          isDpPaid: bookingsTable.isDpPaid,
+        }).from(bookingsTable).where(eq(bookingsTable.groupRef, booking.groupRef))
+      : [{ id: booking.id, downPayment: booking.downPayment, isDpPaid: booking.isDpPaid }];
+    const groupBookingIds = groupBookings.map((b) => b.id);
     const existingPayments = await db.select().from(paymentsTable)
       .where(eq(paymentsTable.bookingId, Number(bookingId)));
+    const groupPayments = booking.groupRef && groupBookingIds.length > 1
+      ? await db.select().from(paymentsTable).where(inArray(paymentsTable.bookingId, groupBookingIds))
+      : existingPayments;
 
-
-    const configuredDp = booking.isDpPaid || Number(booking.downPayment) > 0;
-    const hasDpActive = existingPayments.some(
+    const configuredDownPayment = Math.max(
+      0,
+      ...groupBookings.map((b) => Number(b.downPayment ?? 0)),
+    );
+    const configuredDp = groupBookings.some((b) => b.isDpPaid) || configuredDownPayment > 0;
+    const hasDpActive = groupPayments.some(
       (p) => p.paymentType === "dp" && (p.status === "pending" || p.status === "confirmed"),
     );
     const paymentType = configuredDp
@@ -308,12 +322,15 @@ router.post("/payments", async (req, res) => {
     }
 
     const total = Number(booking.grandTotal ?? booking.totalPrice);
-    const confirmedDp = existingPayments
-      .filter((p) => p.paymentType === "dp" && p.status === "confirmed")
-      .reduce((sum, p) => sum + Number(p.amount), 0);
+    const confirmedDp = Math.max(
+      0,
+      ...groupPayments
+        .filter((p) => p.paymentType === "dp" && p.status === "confirmed")
+        .map((p) => Number(p.amount)),
+    );
     const expectedAmount =
       paymentType === "dp"
-        ? Number(booking.downPayment)
+        ? configuredDownPayment
         : paymentType === "pelunasan"
         ? Math.max(0, total - confirmedDp)
         : total;
@@ -331,7 +348,7 @@ router.post("/payments", async (req, res) => {
 
     // Validasi: jangan buat duplicate pending payment untuk tipe yang sama
     if (paymentType === "dp") {
-      const hasPendingDp = existingPayments.some(
+      const hasPendingDp = groupPayments.some(
         (p) => p.paymentType === "dp" && p.status === "pending",
       );
       if (hasPendingDp) {
@@ -341,7 +358,7 @@ router.post("/payments", async (req, res) => {
     }
 
     if (paymentType === "pelunasan") {
-      const hasPendingPelunasan = existingPayments.some(
+      const hasPendingPelunasan = groupPayments.some(
         (p) => p.paymentType === "pelunasan" && p.status === "pending",
       );
       if (hasPendingPelunasan) {
@@ -376,9 +393,12 @@ router.post("/payments", async (req, res) => {
     }
 
     if (paymentType === "pelunasan") {
-      const confirmedDpTotal = existingPayments
-        .filter((p) => p.paymentType === "dp" && p.status === "confirmed")
-        .reduce((sum, p) => sum + Number(p.amount), 0);
+      const confirmedDpTotal = Math.max(
+        0,
+        ...groupPayments
+          .filter((p) => p.paymentType === "dp" && p.status === "confirmed")
+          .map((p) => Number(p.amount)),
+      );
       const remainingAmount = grandTotalVal - confirmedDpTotal;
       if (amountNum > remainingAmount + PAYMENT_TOLERANCE) {
         res.status(400).json({
@@ -471,7 +491,10 @@ router.post("/payments", async (req, res) => {
         if (hasPendingPayment.length === 0) {
           await db.insert(paymentsTable).values({
             bookingId: sib.id,
-            amount: String(sib.grandTotal ?? sib.totalPrice),
+            // A group payment is one financial event. Mirror the submitted
+            // amount for UI/history consistency instead of showing each
+            // sibling's session price as another payment.
+            amount: String(amountNum),
             proofUrl,
             paymentMethod,
             paymentProvider: paymentProvider ?? "unknown",

@@ -222,8 +222,11 @@ export default function BookingDetail() {
     const paymentTotal = groupTotal > 0
       ? groupTotal
       : Number((booking as any).grandTotal ?? booking.totalPrice);
-    const isDpMode =
-      !!(booking as any).isDpPaid && Number((booking as any).downPayment || 0) > 0;
+    // downPayment means a DP has been configured; isDpPaid means the admin
+    // has already confirmed a DP proof. The former must drive the first
+    // upload so a configured DP is not misclassified as full_payment.
+    const hasConfiguredDp = Number((booking as any).downPayment || 0) > 0;
+    const isDpMode = hasConfiguredDp || !!(booking as any).isDpPaid;
     const groupInfo = (booking as any).groupInfo as { groupTotalPayment: number; groupSessionCount: number; groupRef: string } | null;
     let detectedType = "full_payment";
 
@@ -607,7 +610,7 @@ export default function BookingDetail() {
                   </div>
                 )}
                 {/* DP Info Banner */}
-                {(booking as any).isDpPaid && (() => {
+                {(Number((booking as any).downPayment || 0) > 0 || (booking as any).isDpPaid) && (() => {
                   const bPayments = ((booking as any).payments as any[]) ?? [];
                   const dpConfirmed = bPayments.some((p: any) => p.paymentType === "dp" && p.status === "confirmed");
                   const dpPending = bPayments.some((p: any) => p.paymentType === "dp" && p.status === "pending");
@@ -676,7 +679,7 @@ export default function BookingDetail() {
                 })()}
 
                 {/* DP Toggle (only if isDpPaid is false) */}
-                {!(booking as any).isDpPaid && !dpMode && !paymentMethod && (
+                {!(Number((booking as any).downPayment || 0) > 0 || (booking as any).isDpPaid) && !dpMode && !paymentMethod && (
                   <div className="flex items-center justify-between p-3 rounded-xl border border-dashed border-violet-300 dark:border-violet-700 bg-violet-50/50 dark:bg-violet-900/10">
                     <div className="text-sm text-muted-foreground">{t("Ingin bayar sebagian (DP)?", "Want to pay partially (DP)?")}</div>
                     <button
@@ -690,7 +693,7 @@ export default function BookingDetail() {
                 )}
 
                 {/* DP Input Mode */}
-                {dpMode && !(booking as any).isDpPaid && (
+                {dpMode && !(Number((booking as any).downPayment || 0) > 0 || (booking as any).isDpPaid) && (
                   <div className="space-y-3 p-4 rounded-xl border border-violet-200 dark:border-violet-700 bg-violet-50 dark:bg-violet-900/20">
                     <div className="flex items-center justify-between">
                       <div className="font-semibold text-sm text-violet-800 dark:text-violet-200">{t("Bayar Down Payment", "Pay Down Payment")}</div>
@@ -775,6 +778,17 @@ export default function BookingDetail() {
                             </span>{" "}
                             <span className="text-xs text-muted-foreground font-normal">
                               {t("(upload bukti pelunasan)", "(upload payment proof)")}
+                            </span>{" "}
+                            {t("via:", "via:")}
+                          </>
+                        ) : Number((booking as any).downPayment || 0) > 0 ? (
+                          <>
+                            {t("Bayar DP", "Pay down payment")}{" "}
+                            <span className="text-primary text-base">
+                              Rp {Number((booking as any).downPayment).toLocaleString("id-ID")}
+                            </span>{" "}
+                            <span className="text-xs text-muted-foreground font-normal">
+                              {t("(upload bukti DP)", "(upload DP proof)")}
                             </span>{" "}
                             {t("via:", "via:")}
                           </>
