@@ -1557,23 +1557,10 @@ function PaylabsPaymentSection({
               "Payment was detected by Paylabs, but the booking status is not synced yet. Do not pay again.",
             )}
           </p>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="border-amber-300 text-amber-800 hover:bg-amber-100"
-            onClick={() => {
-              setSyncAttempts(0);
-              setSyncing(true);
-              setPollStatus("waiting");
-            }}
-          >
-            {t("Coba sinkronkan lagi", "Retry synchronization")}
-          </Button>
           <p className="text-xs text-amber-700/80">
             {t(
-              "Jika tetap belum berubah, hubungi admin untuk pengecekan transaksi.",
-              "If it still does not update, contact the admin to verify the transaction.",
+              "Sistem akan memproses ulang notifikasi Paylabs secara otomatis. Hubungi admin untuk pengecekan transaksi dan jangan melakukan pembayaran kedua.",
+              "The system will retry the Paylabs notification automatically. Contact the admin to verify the transaction and do not pay a second time.",
             )}
           </p>
         </div>
