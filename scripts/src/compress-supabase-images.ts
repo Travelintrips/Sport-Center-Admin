@@ -40,15 +40,29 @@ function encodePath(path: string): string {
 }
 
 async function storageFetch(path: string, init: RequestInit = {}): Promise<Response> {
-  const response = await fetch(`${storageApi}${path}`, {
-    ...init,
-    headers: { ...headers, ...(init.headers ?? {}) },
-  });
-  if (!response.ok) {
-    const detail = (await response.text()).slice(0, 300);
-    throw new Error(`${init.method ?? "GET"} ${path} → ${response.status}: ${detail}`);
+  const maxAttempts = 4;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      const response = await fetch(`${storageApi}${path}`, {
+        ...init,
+        headers: { ...headers, ...(init.headers ?? {}) },
+      });
+      if (response.ok) return response;
+
+      const detail = (await response.text()).slice(0, 300);
+      const retryable = [502, 503, 504].includes(response.status);
+      if (!retryable || attempt === maxAttempts) {
+        throw new Error(`${init.method ?? "GET"} ${path} → ${response.status}: ${detail}`);
+      }
+    } catch (error) {
+      if (attempt === maxAttempts) throw error;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, attempt * 750));
   }
-  return response;
+
+  throw new Error(`Request failed after ${maxAttempts} attempts: ${init.method ?? "GET"} ${path}`);
 }
 
 async function listBuckets(): Promise<StorageBucket[]> {
@@ -161,44 +175,63 @@ const buckets = requestedBucket
 let scanned = 0;
 let compressedCount = 0;
 let skippedCount = 0;
+let failedCount = 0;
 let savedBytes = 0;
+
+async function processFile(bucket: StorageBucket, path: string): Promise<void> {
+  // Existing URLs are stored in the database, so the migration deliberately
+  // keeps each object's path/extension unchanged. Formats that would need a
+  // different extension (GIF/HEIC/BMP/TIFF) are left untouched rather than
+  // uploading bytes with a misleading content type.
+  if (!targetFormat(path)) return;
+  scanned += 1;
+
+  try {
+    const original = await download(bucket.name, path);
+    const result = await compress(original, path);
+    if (result.buffer.length >= original.length) {
+      skippedCount += 1;
+      console.log(`[skip] ${bucket.name}/${path} — already optimized (${original.length} bytes)`);
+      return;
+    }
+
+    const saved = original.length - result.buffer.length;
+    savedBytes += saved;
+    compressedCount += 1;
+    console.log(
+      `[${APPLY ? "apply" : "dry-run"}] ${bucket.name}/${path}: ` +
+      `${original.length} → ${result.buffer.length} bytes (−${saved} bytes)`,
+    );
+    if (APPLY) await upload(bucket.name, path, result.buffer, result.contentType);
+  } catch (error) {
+    failedCount += 1;
+    console.error(
+      `[error] Failed ${bucket.name}/${path}: ` +
+      `${error instanceof Error ? error.message : String(error)} — continuing`,
+    );
+  }
+}
 
 for (const bucket of buckets) {
   const files = await listFiles(bucket.name);
   console.log(`[storage-compress] ${bucket.name}: ${files.length} file(s)`);
 
-  for (const path of files) {
-    // Existing URLs are stored in the database, so the migration deliberately
-    // keeps each object's path/extension unchanged. Formats that would need a
-    // different extension (GIF/HEIC/BMP/TIFF) are left untouched rather than
-    // uploading bytes with a misleading content type.
-    if (!targetFormat(path)) continue;
-    scanned += 1;
-
-    try {
-      const original = await download(bucket.name, path);
-      const result = await compress(original, path);
-      if (result.buffer.length >= original.length) {
-        skippedCount += 1;
-        console.log(`[skip] ${bucket.name}/${path} — already optimized (${original.length} bytes)`);
-        continue;
+  // A small worker pool prevents a large bucket from taking hours while
+  // keeping request and libvips pressure bounded for Supabase.
+  let nextIndex = 0;
+  const workerCount = Math.min(4, files.length);
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (nextIndex < files.length) {
+        const path = files[nextIndex++];
+        await processFile(bucket, path);
       }
-
-      const saved = original.length - result.buffer.length;
-      savedBytes += saved;
-      compressedCount += 1;
-      console.log(
-        `[${APPLY ? "apply" : "dry-run"}] ${bucket.name}/${path}: ` +
-        `${original.length} → ${result.buffer.length} bytes (−${saved} bytes)`,
-      );
-      if (APPLY) await upload(bucket.name, path, result.buffer, result.contentType);
-    } catch (error) {
-      throw new Error(`Failed ${bucket.name}/${path}: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
+    }),
+  );
 }
 
 console.log(
   `[storage-compress] done: scanned=${scanned}, compressed=${compressedCount}, ` +
-  `skipped=${skippedCount}, saved=${savedBytes} bytes, apply=${APPLY}`,
+  `skipped=${skippedCount}, failed=${failedCount}, saved=${savedBytes} bytes, apply=${APPLY}`,
 );
+if (failedCount > 0) process.exitCode = 1;
