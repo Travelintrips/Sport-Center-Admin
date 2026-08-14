@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import crypto from "crypto";
+import bcrypt from "bcryptjs";
 
 /**
  * requireEnv — reads a required env var and throws a safe startup error if missing.
@@ -18,6 +19,7 @@ function requireEnv(name: string): string {
 
 const SECRET: string = requireEnv("SESSION_SECRET");
 const TOKEN_EXPIRY = 7 * 24 * 60 * 60 * 1000;
+const BCRYPT_ROUNDS = 12;
 
 export function createToken(userId: number, role: string, tenantId?: number | null): string {
   const payload = { userId, role, tenantId: tenantId ?? null, exp: Date.now() + TOKEN_EXPIRY };
@@ -41,8 +43,36 @@ export function verifyToken(token: string): { userId: number; role: string; tena
   }
 }
 
-export function hashPassword(password: string): string {
-  return crypto.createHmac("sha256", SECRET).update(password).digest("hex");
+/**
+ * Hash a password using bcrypt (secret-independent).
+ * SESSION_SECRET is NOT used here — it is only for JWT/session signing.
+ */
+export async function hashPassword(password: string): Promise<string> {
+  return bcrypt.hash(password, BCRYPT_ROUNDS);
+}
+
+/**
+ * Verify a password against a stored hash.
+ * Supports both bcrypt hashes and the legacy HMAC-SHA256 scheme.
+ * Returns: { valid: boolean, legacy: boolean }
+ *   - legacy=true means the stored hash used the old HMAC scheme and should be rehashed.
+ */
+export async function verifyPassword(
+  password: string,
+  storedHash: string
+): Promise<{ valid: boolean; legacy: boolean }> {
+  // bcrypt hashes always start with $2b$ or $2a$
+  if (storedHash.startsWith("$2b$") || storedHash.startsWith("$2a$")) {
+    const valid = await bcrypt.compare(password, storedHash);
+    return { valid, legacy: false };
+  }
+  // Legacy HMAC-SHA256 check (64-char hex)
+  const legacyHash = crypto.createHmac("sha256", SECRET).update(password).digest("hex");
+  const valid = crypto.timingSafeEqual(
+    Buffer.from(legacyHash, "hex"),
+    Buffer.from(storedHash.padEnd(64, "0").slice(0, 64), "hex")
+  );
+  return { valid: storedHash === legacyHash, legacy: true };
 }
 
 export function authMiddleware(req: Request, res: Response, next: NextFunction): void {
