@@ -79,7 +79,11 @@ export default function FacilityDetail() {
 
   const formattedDate = date ? format(date, "yyyy-MM-dd") : "";
 
-  const { data: slots, isLoading: isLoadingSlots } = useCheckAvailability(
+  const {
+    data: slots,
+    isLoading: isLoadingSlots,
+    isError: isSlotsError,
+  } = useCheckAvailability(
     { facilityId, date: formattedDate },
     {
       query: {
@@ -394,7 +398,10 @@ export default function FacilityDetail() {
                       <Calendar
                         mode="single"
                         selected={date}
-                        onSelect={setDate}
+                        onSelect={(nextDate) => {
+                          setDate(nextDate);
+                          setSelectedTime("");
+                        }}
                         disabled={isAdminOrOperator ? undefined : (d) => d < new Date(new Date().setHours(0,0,0,0))}
                         className="rounded-xl bg-transparent"
                         locale={lang === "en" ? enUS : id}
@@ -495,6 +502,7 @@ export default function FacilityDetail() {
                             date={formattedDate}
                             slots={slots as any}
                             isLoading={isLoadingSlots}
+                            isError={isSlotsError}
                             selectedTime={selectedTime}
                             duration={parseInt(duration)}
                             onSelectTime={setSelectedTime}
