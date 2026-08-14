@@ -422,15 +422,22 @@ async function ensureSportCenterPaymentMirror(
     throw new Error(`[accounting] Mirror booking untuk source booking ${payment.booking_id} tidak ditemukan.`);
   }
 
+  // NOTE: bank_account_id is intentionally omitted from this INSERT/UPDATE.
+  // sport_center.sport_payments.bank_account_id is a raw text account number
+  // (e.g. "1640006707220"), but public.sport_payments.bank_account_id is an
+  // INTEGER FK to the bank_accounts table in the production BizPortal DB.
+  // Passing the text value causes an integer-overflow error (the number exceeds
+  // INT4 max) or an FK violation (no matching bank_accounts row). The field
+  // is stored correctly in public.accounting_entries.bank_account_id (TEXT).
   await client.query(
     `INSERT INTO public.sport_payments
        (booking_id, payment_number, amount, method, status, paid_at, payment_type,
         tax_rate, tax_amount, source, posting_status, source_payment_id,
         payment_provider, provider_code, provider_reference, provider_order_id,
-        merchant_trade_no, provider_trade_no, company_id, bank_account_id,
+        merchant_trade_no, provider_trade_no, company_id,
         expected_settlement_date, created_at, updated_at)
      VALUES ($1,$2,$3,$4,'paid',$5,$6,$7,0,'SPORT_CENTER_SUPABASE','unposted',$8,
-             $9,$9,$10,$11,$12,$13,$14,$15,$16,NOW(),NOW())
+             $9,$9,$10,$11,$12,$13,$14,$15,NOW(),NOW())
      ON CONFLICT (payment_number) DO UPDATE SET
        source_payment_id = COALESCE(public.sport_payments.source_payment_id, EXCLUDED.source_payment_id),
        amount = EXCLUDED.amount,
@@ -443,7 +450,6 @@ async function ensureSportCenterPaymentMirror(
        merchant_trade_no = COALESCE(EXCLUDED.merchant_trade_no, public.sport_payments.merchant_trade_no),
        provider_trade_no = COALESCE(EXCLUDED.provider_trade_no, public.sport_payments.provider_trade_no),
        company_id = COALESCE(EXCLUDED.company_id, public.sport_payments.company_id),
-       bank_account_id = COALESCE(EXCLUDED.bank_account_id, public.sport_payments.bank_account_id),
        expected_settlement_date = COALESCE(EXCLUDED.expected_settlement_date, public.sport_payments.expected_settlement_date),
        paid_at = COALESCE(EXCLUDED.paid_at, public.sport_payments.paid_at),
        updated_at = NOW()`,
@@ -462,7 +468,6 @@ async function ensureSportCenterPaymentMirror(
       payment.merchant_trade_no ?? input.merchantTradeNo ?? null,
       payment.provider_trade_no ?? input.providerTradeNo ?? null,
       payment.company_id ?? input.companyId ?? null,
-      payment.bank_account_id ?? input.bankAccountId ?? null,
       payment.expected_settlement_date ?? null,
     ],
   );

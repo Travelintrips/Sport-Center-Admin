@@ -7,7 +7,7 @@ import { reverseJournalEntry } from "./accounting";
 import { runBankAudit } from "./bankAudit";
 import { runConnectionHealthCheck } from "./connectionHealth";
 import { sendRekapPemakaianToAdmin } from "./rekapPemakaian";
-import { bulkPushPaymentsToBizportal, processPaymentAccountingOutbox } from "./bizportalSync";
+import { bulkPushPaymentsToBizportal, processPaymentAccountingOutbox, prunePaymentSyncErrorCache } from "./bizportalSync";
 import { logger } from "./logger";
 
 function getAppUrl(): string {
@@ -589,8 +589,10 @@ export function startScheduler(): void {
     }
   }, 5 * 60 * 1000);
 
-  // Every 60 minutes: auto-sync confirmed payments to BizPortal so both sides stay balanced
+  // Every 60 minutes: auto-sync confirmed payments to BizPortal so both sides stay balanced.
+  // Also prune the error-dedup cache so stale entries don't accumulate in memory.
   setInterval(async () => {
+    prunePaymentSyncErrorCache();
     try {
       const result = await bulkPushPaymentsToBizportal();
       if (result.pushed > 0) {

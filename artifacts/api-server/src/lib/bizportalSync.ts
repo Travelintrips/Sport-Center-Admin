@@ -989,6 +989,45 @@ export const lastSyncState = {
   status:     { at: null as string | null, success: null as boolean | null, error: null as string | null },
 };
 
+// ── Error deduplication for repeated payment-sync failures ──────────────────
+// Tracks per-payment error fingerprints so the same persistent error is not
+// logged on every scheduler tick. Logs on: first occurrence, powers-of-two
+// counts, and once per hour thereafter.
+type SyncErrorEntry = {
+  fingerprint: string;
+  count: number;
+  firstSeenAt: number;
+  lastLoggedAt: number;
+};
+const _paymentSyncErrors = new Map<number | string, SyncErrorEntry>();
+
+function shouldLogSyncError(key: number | string, errorMessage: string): boolean {
+  const now = Date.now();
+  const fp = errorMessage.slice(0, 200);
+  const existing = _paymentSyncErrors.get(key);
+  if (!existing || existing.fingerprint !== fp) {
+    _paymentSyncErrors.set(key, { fingerprint: fp, count: 1, firstSeenAt: now, lastLoggedAt: now });
+    return true; // always log first occurrence
+  }
+  existing.count++;
+  existing.fingerprint = fp;
+  const isPowerOfTwo = (existing.count & (existing.count - 1)) === 0;
+  const hourElapsed = now - existing.lastLoggedAt >= 60 * 60 * 1000;
+  if (isPowerOfTwo || hourElapsed) {
+    existing.lastLoggedAt = now;
+    return true;
+  }
+  return false;
+}
+
+/** Clear stale error entries older than 24 h (called periodically). */
+export function prunePaymentSyncErrorCache(): void {
+  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+  for (const [key, entry] of _paymentSyncErrors) {
+    if (entry.firstSeenAt < cutoff) _paymentSyncErrors.delete(key);
+  }
+}
+
 async function withRetry<T>(fn: () => Promise<T>, label: string, retries = 2): Promise<T> {
   let lastErr: any;
   for (let attempt = 0; attempt <= retries; attempt++) {
@@ -1642,15 +1681,21 @@ export async function bulkPushPaymentsToBizportal(): Promise<BulkPaymentPushResu
         const taxAmount = 0;
 
         // INSERT ... ON CONFLICT DO NOTHING — atomik dan idempotent tanpa race condition
+        // NOTE: bank_account_id is intentionally omitted. The source field is a
+        // raw text account number from sport_center.sport_payments, but
+        // public.sport_payments.bank_account_id is an INTEGER FK to the
+        // bank_accounts table. Passing the text value would cause an integer
+        // overflow ("1640006707220" exceeds INT max) or an FK violation
+        // (no bank_accounts row with that synthetic ID exists in prod).
         const { rowCount } = await pool.query(
           `INSERT INTO public.sport_payments
              (booking_id, payment_number, amount, method, status, paid_at,
               payment_type, tax_rate, tax_amount, source, posting_status, source_payment_id,
                payment_provider, provider_code, provider_reference, provider_order_id, merchant_trade_no, provider_trade_no,
-              company_id, bank_account_id, expected_settlement_date,
+              company_id, expected_settlement_date,
               created_at, updated_at)
            VALUES ($1,$2,$3,$4,'paid',$5,$6,$7,$8,'SPORT_CENTER_SUPABASE','unposted',$9,
-                    $10,$10,$11,$12,$13,$14,$15,$16,$17,NOW(),NOW())
+                    $10,$10,$11,$12,$13,$14,$15,$16,NOW(),NOW())
            ON CONFLICT (payment_number) DO NOTHING`,
           [
             p.biz_booking_id,
@@ -1668,12 +1713,12 @@ export async function bulkPushPaymentsToBizportal(): Promise<BulkPaymentPushResu
             p.merchant_trade_no || null,
             p.provider_trade_no || null,
             p.company_id || null,
-            p.bank_account_id || null,
             p.expected_settlement_date || null,
           ]
         );
         // Replays also repair metadata on an already-existing mirror without
         // overwriting a non-null provider value with an older/null payload.
+        // bank_account_id is deliberately excluded — see comment above INSERT.
         await pool.query(
           `UPDATE public.sport_payments
               SET source_payment_id = COALESCE(source_payment_id, $2),
@@ -1684,9 +1729,8 @@ export async function bulkPushPaymentsToBizportal(): Promise<BulkPaymentPushResu
                    merchant_trade_no = COALESCE(merchant_trade_no, $6),
                    provider_trade_no = COALESCE(provider_trade_no, $7),
                    company_id = COALESCE(company_id, $8),
-                   bank_account_id = COALESCE(bank_account_id, $9),
-                   expected_settlement_date = COALESCE(expected_settlement_date, $10),
-                   paid_at = COALESCE(paid_at, $11),
+                   expected_settlement_date = COALESCE(expected_settlement_date, $9),
+                   paid_at = COALESCE(paid_at, $10),
                   updated_at = NOW()
             WHERE payment_number = $1`,
           [
@@ -1698,7 +1742,6 @@ export async function bulkPushPaymentsToBizportal(): Promise<BulkPaymentPushResu
             p.merchant_trade_no || null,
             p.provider_trade_no || null,
             p.company_id || null,
-            p.bank_account_id || null,
             p.expected_settlement_date || null,
             p.paid_at || p.payment_created_at,
           ],
@@ -1759,15 +1802,24 @@ export async function bulkPushPaymentsToBizportal(): Promise<BulkPaymentPushResu
         console.info(`[bizportalSync] ✓ Payment pushed: ${p.order_number} (${paymentNumber}) → Rp ${amount.toLocaleString('id-ID')}`);
       } catch (err: any) {
         result.failed++;
-        result.errors.push(`${p.order_number} (SC-PAY-${p.sc_payment_id}): ${err?.message ?? 'unknown'}`);
-        console.error(`[bizportalSync] ✗ Payment push failed: ${p.order_number} — ${err?.message}`);
+        const errMsg = err?.message ?? 'unknown';
+        result.errors.push(`${p.order_number} (SC-PAY-${p.sc_payment_id}): ${errMsg}`);
+        // Deduplicate: only log if first occurrence, power-of-two count, or hourly.
+        if (shouldLogSyncError(p.sc_payment_id, errMsg)) {
+          const entry = _paymentSyncErrors.get(p.sc_payment_id);
+          const suffix = entry && entry.count > 1 ? ` (occurrence #${entry.count})` : '';
+          console.error(`[bizportalSync] ✗ Payment push failed: ${p.order_number} — ${errMsg}${suffix}`);
+        }
       }
     }
   } catch (err: any) {
     // Fatal error (e.g. DB query gagal sebelum loop) — hitung sebagai failure
     result.failed++;
-    result.errors.push(`Fatal: ${err?.message}`);
-    console.error(`[bizportalSync] ✗ bulkPushPaymentsToBizportal fatal: ${err?.message}`);
+    const errMsg = err?.message ?? 'unknown';
+    result.errors.push(`Fatal: ${errMsg}`);
+    if (shouldLogSyncError('bulkPush:fatal', errMsg)) {
+      console.error(`[bizportalSync] ✗ bulkPushPaymentsToBizportal fatal: ${errMsg}`);
+    }
   }
 
   return result;
