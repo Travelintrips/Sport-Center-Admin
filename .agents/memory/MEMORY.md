@@ -33,6 +33,7 @@
 - [Gym walk-in detection](gym-walk-in-detection.md) — legacy Gym rows with time_slot mode still use per-visit access based on name/category fallback.
 - [Recurring booking WA notification](recurring-wa-notification.md) — recurring/group bookings need one admin WhatsApp summary after all sessions and groupRef are created; per-session booking notifications are not enough.
 - [Re-import recovery](reimport-recovery.md) — Sport Center is a mature project, not a fresh import; on re-import just pnpm install + restart workflows, secrets/replit.md already cover setup.
+- [Artifact workflow setup](artifact-workflow-setup.md) — managed artifact workflows need PORT=8080 configured; remove manual duplicates to avoid port conflict; post-merge timeout=120s; availability at /api/availability not /api/bookings/availability.
 - [GAE deploy TS fix](gae-deploy-ts-fix.md) — analyticsPublic.ts GA4 limit field must be string "5" not number 5; blocks Cloud Build typecheck without fix.
 - [GAE deploy bundle gaps](gae-deploy-bundle-gaps.md) — gae-deploy/package.json must include @google-cloud/storage; @replit/object-storage must NOT be in esbuild external (bundle inline); app.ts uses process.cwd() for frontend dist path; express.static needs redirect:false.
 - [GAE health endpoints](gae-health-endpoints.md) — health/healthz/readiness mounted at root via app.use(healthRouter) in app.ts (NOT only under /api); /readiness does SELECT 1 with DB pool; test in jest.config.mjs uses ts-jest ESM mode + supertest.
