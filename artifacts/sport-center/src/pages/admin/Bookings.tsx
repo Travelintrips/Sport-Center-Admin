@@ -935,6 +935,10 @@ function BookingDetailDrawer({
 
   const allPayments: any[] = booking.payments ?? (booking.payment ? [booking.payment] : []);
   const isCompleted = booking.status === "completed" || booking.status === "confirmed";
+  const hasConfirmedPaymentBookingMismatch =
+    !isCompleted &&
+    ["pending_payment", "waiting_confirmation", "paid"].includes(booking.status) &&
+    allPayments.some((pmt) => pmt.status === "confirmed" && pmt.proofUrl);
 
   return (
     <AnimatePresence>
@@ -1191,6 +1195,17 @@ function BookingDetailDrawer({
                 </div>
               )}
               <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                {hasConfirmedPaymentBookingMismatch && (
+                  <div className="m-4 p-3 rounded-xl border border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-200">
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle size={15} className="mt-0.5 shrink-0" />
+                      <div className="text-xs leading-relaxed">
+                        Pembayaran sudah dikonfirmasi, tetapi status booking belum sinkron.
+                        Gunakan tombol <span className="font-semibold">Sinkronkan Booking</span> di bawah.
+                      </div>
+                    </div>
+                  </div>
+                )}
                 {allPayments.map((pmt: any) => {
                   const typeLabel =
                     pmt.paymentType === "dp"
@@ -1216,8 +1231,14 @@ function BookingDetailDrawer({
                       : pmt.status === "rejected"
                       ? "Ditolak"
                       : "Menunggu";
-                  const confirmLabel =
-                    pmt.paymentType === "dp"
+                  const isRepairingBooking =
+                    pmt.status === "confirmed" &&
+                    pmt.proofUrl &&
+                    !isCompleted &&
+                    ["pending_payment", "waiting_confirmation", "paid"].includes(booking.status);
+                  const confirmLabel = isRepairingBooking
+                    ? "Sinkronkan Booking"
+                    : pmt.paymentType === "dp"
                       ? "Konfirmasi DP"
                       : "Konfirmasi → Selesai";
                   return (
@@ -1245,7 +1266,7 @@ function BookingDetailDrawer({
                         />
                       </div>
                       {pmt.proofUrl && <ProofImage proofUrl={pmt.proofUrl} />}
-                      {pmt.status === "pending" && pmt.proofUrl && (
+                      {((pmt.status === "pending" && pmt.proofUrl) || isRepairingBooking) && (
                         <div className="flex gap-2 pt-1">
                           <button
                             onClick={() => onConfirmPayment(pmt.id)}

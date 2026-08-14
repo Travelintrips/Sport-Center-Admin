@@ -583,6 +583,40 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
     // duplicate notifications, this prevents a second accounting post for the
     // same payment when an admin or provider retries the request.
     if (status === "confirmed" && before.status === "confirmed") {
+      const [bookingForRepair] = await db
+        .select()
+        .from(bookingsTable)
+        .where(eq(bookingsTable.id, before.bookingId))
+        .limit(1);
+      const repairableBookingStatuses = ["pending_payment", "waiting_confirmation", "paid"];
+
+      // A previous WhatsApp/provider confirmation can succeed on the payment
+      // row and fail before the booking row is updated. Keep confirmation
+      // idempotent, but repair that narrowly-defined split state when an admin
+      // retries the confirmation from the dashboard.
+      if (bookingForRepair && repairableBookingStatuses.includes(bookingForRepair.status)) {
+        const repairedPaidAt = before.paidAt ?? before.confirmedAt ?? new Date();
+        await db
+          .update(bookingsTable)
+          .set({ status: "confirmed", paidAt: repairedPaidAt, updatedAt: new Date() })
+          .where(eq(bookingsTable.id, before.bookingId));
+        await db.insert(bookingHistoryTable).values({
+          bookingId: before.bookingId,
+          fromStatus: bookingForRepair.status,
+          toStatus: "confirmed",
+          changedByName: getUserFromReq(req).userName || "admin",
+          note: "Status booking disinkronkan dengan pembayaran yang sudah dikonfirmasi",
+        });
+        await logAudit({
+          ...getUserFromReq(req),
+          action: "RECONCILE_CONFIRMED_PAYMENT_BOOKING",
+          entity: "payment",
+          entityId: before.id,
+          before: { bookingStatus: bookingForRepair.status, paymentStatus: before.status },
+          after: { bookingStatus: "confirmed", paymentStatus: before.status },
+          ...getClientInfo(req),
+        });
+      }
       res.json({ ...before, amount: Number(before.amount) });
       return;
     }
