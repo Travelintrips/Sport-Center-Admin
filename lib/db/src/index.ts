@@ -54,12 +54,12 @@ if (isProd) {
       "║  Any write in development WILL affect production data.          ║\n" +
       "╚══════════════════════════════════════════════════════════════════╝\n"
     );
-  } else if (REPLIT_DB_URL) {
-    connectionString = REPLIT_DB_URL;
-    dbSource = "DATABASE_URL (Replit PostgreSQL — dev)";
   } else if (SUPABASE_DEV_URL) {
     connectionString = SUPABASE_DEV_URL;
     dbSource = "SUPABASE_DATABASE_URL_DEV (dev — isolated)";
+  } else if (REPLIT_DB_URL) {
+    connectionString = REPLIT_DB_URL;
+    dbSource = "DATABASE_URL (Replit PostgreSQL — dev)";
   } else {
     throw new Error(
       "\n" +

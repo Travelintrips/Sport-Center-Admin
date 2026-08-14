@@ -66,8 +66,8 @@ const envLabel = isProd ? "PROD" : "DEV";
 
 const rawUrl = isProd
   ? process.env.SUPABASE_DATABASE_URL
-  : process.env.DATABASE_URL ??
-    process.env.SUPABASE_DATABASE_URL_DEV ??
+  : process.env.SUPABASE_DATABASE_URL_DEV ??
+    process.env.DATABASE_URL ??
     process.env.SUPABASE_DATABASE_URL;
 
 if (!rawUrl) {
