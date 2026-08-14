@@ -1394,6 +1394,7 @@ export async function createJournalEntry(
         .update(accountingJournalsTable)
         .set({
           bookingId,
+          status: "posted",
           companyId: paymentContext?.companyId ?? current.companyId ?? null,
           paymentMethod: paymentMethod ?? current.paymentMethod ?? null,
           paymentProvider: paymentContext?.paymentProvider ?? current.paymentProvider ?? null,
@@ -1423,6 +1424,7 @@ export async function createJournalEntry(
         companyId: paymentContext?.companyId ?? null,
       orderNumber,
       journalType: "payment_confirmed",
+      status: "posted",
       paymentMethod: paymentMethod ?? null,
       paymentProvider: paymentContext?.paymentProvider ?? null,
       paymentType: paymentContext?.paymentType ?? null,

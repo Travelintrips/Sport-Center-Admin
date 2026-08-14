@@ -625,6 +625,16 @@ async function runStartupMigrations() {
     `CREATE SEQUENCE IF NOT EXISTS sport_center.expense_no_seq`,
     // accounting_journals.booking_id nullable untuk expense journal entries
     `ALTER TABLE sport_center.accounting_journals ALTER COLUMN booking_id DROP NOT NULL`,
+    // Payment-confirmed journals are finalized accounting projections, not drafts.
+    `ALTER TABLE sport_center.accounting_journals
+       ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'posted'`,
+    `ALTER TABLE sport_center.accounting_journals
+       ALTER COLUMN status SET DEFAULT 'posted'`,
+    `UPDATE sport_center.accounting_journals
+       SET status = 'posted'
+       WHERE journal_type = 'payment_confirmed'
+         AND is_reversal = false
+         AND status IS DISTINCT FROM 'posted'`,
     // A confirmed payment may have only one internal payment journal. Keep this
     // nullable for historical journals and enforce uniqueness for new payment
     // journals only.

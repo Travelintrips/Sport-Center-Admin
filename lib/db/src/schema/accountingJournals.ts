@@ -11,6 +11,7 @@ export const accountingJournalsTable = scSchema.table("accounting_journals", {
   companyId: integer("company_id"),
   orderNumber: text("order_number").notNull(),
   journalType: text("journal_type").notNull(),
+  status: text("status").notNull().default("posted"),
   paymentMethod: text("payment_method"),
   paymentProvider: text("payment_provider"),
   paymentType: text("payment_type"),

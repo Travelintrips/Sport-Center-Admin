@@ -107,6 +107,7 @@ describe("confirmed booking payment accounting", () => {
     expect(journalValues).toHaveLength(1);
     expect(journalValues[0]).toMatchObject({
       paymentId: 15,
+    status: "posted",
       debitAmount: "200000",
       creditRevenueAmount: "180180",
       creditPpnAmount: "19820",
