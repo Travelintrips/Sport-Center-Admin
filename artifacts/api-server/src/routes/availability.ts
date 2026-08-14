@@ -28,7 +28,9 @@ function getCurrentMinutesWIB(): number {
   return wib.getUTCHours() * 60 + wib.getUTCMinutes();
 }
 
-router.get("/bookings/availability", async (req, res) => {
+// Keep this path aligned with the generated frontend client and OpenAPI
+// contract: GET /api/availability?facilityId=...&date=...
+router.get("/availability", async (req, res) => {
   try {
     const facilityId = parseInt(req.query.facilityId as string);
     const date = req.query.date as string;
