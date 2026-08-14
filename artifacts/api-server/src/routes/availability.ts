@@ -28,7 +28,7 @@ function getCurrentMinutesWIB(): number {
   return wib.getUTCHours() * 60 + wib.getUTCMinutes();
 }
 
-router.get("/availability", async (req, res) => {
+router.get("/bookings/availability", async (req, res) => {
   try {
     const facilityId = parseInt(req.query.facilityId as string);
     const date = req.query.date as string;

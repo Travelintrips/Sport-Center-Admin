@@ -484,6 +484,31 @@ CREATE TABLE IF NOT EXISTS sport_center.bank_import_source_mappings (
   UNIQUE (source_type, source_id, worksheet_name)
 );
 
+-- Create paylabs_transactions if it doesn't exist yet (fresh dev DB).
+-- On Supabase prod this table already exists; the ADD COLUMN below is idempotent.
+CREATE TABLE IF NOT EXISTS sport_center.paylabs_transactions (
+  id                SERIAL PRIMARY KEY,
+  booking_id        INTEGER,
+  order_number      TEXT NOT NULL,
+  merchant_trade_no TEXT NOT NULL UNIQUE,
+  paylabs_trade_no  TEXT,
+  payment_method    TEXT NOT NULL,
+  amount            NUMERIC(12,2) NOT NULL,
+  status            TEXT NOT NULL DEFAULT 'PENDING',
+  provider_status   TEXT,
+  notify_url        TEXT,
+  qr_code_url       TEXT,
+  qr_content        TEXT,
+  va_number         TEXT,
+  pay_url           TEXT,
+  raw_request       JSONB,
+  raw_response      JSONB,
+  raw_notification  JSONB,
+  paid_at           TIMESTAMPTZ,
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 ALTER TABLE sport_center.paylabs_transactions
   ADD COLUMN IF NOT EXISTS paid_at timestamptz;
 
@@ -692,10 +717,29 @@ $$;
 -- Payment-level public accounting idempotency. This is intentionally scoped
 -- to Sport Center payment entries so legacy accounting streams keep their
 -- existing contract.
-CREATE UNIQUE INDEX IF NOT EXISTS uq_public_accounting_entries_sc_payment_correlation
-  ON public.accounting_entries (correlation_id)
-  WHERE source = 'sport_center_payment'
-    AND correlation_id IS NOT NULL;
+-- Guard: public.accounting_entries only exists on the shared Supabase instance.
+-- On a fresh dev DB this table is absent; skip the index gracefully.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_name = 'accounting_entries'
+  ) THEN
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_indexes
+      WHERE schemaname = 'public'
+        AND tablename = 'accounting_entries'
+        AND indexname = 'uq_public_accounting_entries_sc_payment_correlation'
+    ) THEN
+      EXECUTE $sql$
+        CREATE UNIQUE INDEX uq_public_accounting_entries_sc_payment_correlation
+          ON public.accounting_entries (correlation_id)
+          WHERE source = 'sport_center_payment'
+            AND correlation_id IS NOT NULL
+      $sql$;
+    END IF;
+  END IF;
+END $$;
 
 -- Durable payment accounting/mirror retry queue. A trigger below enqueues
 -- every newly-confirmed payment in the same transaction as the status change.
@@ -1178,7 +1222,7 @@ ALTER TABLE sport_center.sport_bookings
 -- receiving account before the database constraint is tightened.
 UPDATE sport_center.sport_payments p
    SET bank_account_id = s.bank_account
-  FROM sport_center.settings s
+  FROM sport_center.sport_settings s
  WHERE (p.bank_account_id IS NULL OR btrim(p.bank_account_id) = '')
    AND s.bank_account IS NOT NULL
    AND btrim(s.bank_account) <> '';
