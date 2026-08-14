@@ -173,6 +173,23 @@ async function finalizePayment(opts: FinalizePaymentOptions): Promise<FinalizePa
         throw new Error(`Booking ${bookingId} not found for payment transaction ${transactionId}`);
       }
 
+      // Lock the parent row before changing the booking or inserting the
+      // payment mirror. The Paylabs transaction table intentionally keeps a
+      // nullable/unconstrained booking_id for legacy recovery, so the
+      // payment FK is the last line of defence. Locking here prevents an
+      // admin delete or another cleanup transaction from making the relation
+      // disappear between the read above and the payment insert.
+      const lockedBookingRows = await tx.execute(sql`
+        SELECT id
+        FROM sport_center.sport_bookings
+        WHERE id = ${bookingId}
+        FOR UPDATE
+      `);
+      const lockedBooking = (lockedBookingRows as any).rows?.[0] ?? (lockedBookingRows as any)[0];
+      if (!lockedBooking) {
+        throw new Error(`Booking ${bookingId} disappeared during Paylabs finalization`);
+      }
+
       logger.info(
         { merchantTradeNo, booking_id: bookingId, transaction_id: transactionId, requestId },
         "[paylabs] booking found",
@@ -314,7 +331,11 @@ async function finalizePayment(opts: FinalizePaymentOptions): Promise<FinalizePa
         providerTradeNo: paylabsTradeNo || null,
         companyId: paymentEnrichment.companyId,
         bankAccountId: paymentEnrichment.bankAccountId,
+         mdrRate: "0",
+         mdrAmount: "0",
+         settlementStatus: "unsettled",
         expectedSettlementDate: paymentEnrichment.expectedSettlementDate,
+         grossTaxInclusive: true,
         status     : "confirmed",
         paymentType: "full_payment",
         confirmedAt: canonicalPaidAt,

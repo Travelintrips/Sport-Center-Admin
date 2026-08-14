@@ -1257,6 +1257,7 @@ function PaylabsPaymentSection({
     sandboxMode: boolean;
   } | null>(null);
   const [pollStatus, setPollStatus] = useState<"waiting" | "paid" | "error" | "no_inquiry">("waiting");
+  const [syncing, setSyncing] = useState(false);
 
   // ── Fetch fresh config every time this section is opened ─────────────────
   const [freshConfig, setFreshConfig] = useState<PaylabsPublicConfig | null>(null);
