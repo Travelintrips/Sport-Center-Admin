@@ -7,6 +7,10 @@ set -e
 echo "=== post-merge: installing packages ==="
 pnpm install --frozen-lockfile
 
+echo "=== post-merge: rebuilding native modules ==="
+# sharp loses its native build after pnpm install; rebuild it so the API server starts.
+pnpm --filter @workspace/api-server rebuild sharp
+
 echo "=== post-merge: freeing port 8080 for API server workflow ==="
 # The API server artifact binds port 8080. Kill any stale process that may still
 # hold the port from a previous workflow run so the managed workflow can start cleanly.
