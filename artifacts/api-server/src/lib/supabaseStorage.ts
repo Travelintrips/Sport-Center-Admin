@@ -1,6 +1,6 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import ws from "ws";
-import { compressImage, replaceExtension } from "./imageCompression";
+import { compressImage, isCompressibleImage, replaceExtension } from "./imageCompression";
 
 // ─── Dev/Prod Storage Isolation ────────────────────────────────────────────
 // Development: SUPABASE_SERVICE_ROLE_KEY_DEV (isolated dev Supabase project)
@@ -194,7 +194,7 @@ export async function uploadToStorage(
   contentType: string,
 ): Promise<string> {
   const supabase = getClient();
-  const compressed = contentType.toLowerCase().startsWith("image/")
+  const compressed = isCompressibleImage(contentType, objectPath)
     ? await compressImage(body, contentType, objectPath)
     : { buffer: body, contentType, extension: "", wasCompressed: false };
   const uploadPath = compressed.wasCompressed

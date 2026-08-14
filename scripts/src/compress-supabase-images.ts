@@ -90,19 +90,12 @@ async function listFiles(bucket: string, prefix = ""): Promise<string[]> {
   return files;
 }
 
-function isImagePath(path: string): boolean {
-  return /\.(avif|bmp|gif|heic|heif|jpe?g|png|tiff?|webp)$/i.test(path);
-}
-
 function targetFormat(path: string): "jpeg" | "png" | "webp" | "avif" | null {
   const ext = path.toLowerCase().split(".").pop();
   if (ext === "jpg" || ext === "jpeg") return "jpeg";
   if (ext === "png") return "png";
   if (ext === "webp") return "webp";
   if (ext === "avif") return "avif";
-  if (ext === "gif") return "webp";
-  if (ext === "heic" || ext === "heif") return "jpeg";
-  if (ext === "bmp" || ext === "tif" || ext === "tiff") return "webp";
   return null;
 }
 
@@ -175,7 +168,11 @@ for (const bucket of buckets) {
   console.log(`[storage-compress] ${bucket.name}: ${files.length} file(s)`);
 
   for (const path of files) {
-    if (!isImagePath(path)) continue;
+    // Existing URLs are stored in the database, so the migration deliberately
+    // keeps each object's path/extension unchanged. Formats that would need a
+    // different extension (GIF/HEIC/BMP/TIFF) are left untouched rather than
+    // uploading bytes with a misleading content type.
+    if (!targetFormat(path)) continue;
     scanned += 1;
 
     try {
