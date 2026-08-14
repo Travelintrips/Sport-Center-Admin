@@ -31,13 +31,13 @@ args = "Start application"
 name = "Start application"
 author = "agent"
 
+[workflows.workflow.metadata]
+outputType = "console"
+
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "bash -c 'PORT=8080 NODE_ENV=development pnpm --filter @workspace/api-server run dev & api_pid=$!; PORT=5000 pnpm --filter @workspace/sport-center run dev & web_pid=$!; trap \"kill $api_pid $web_pid 2>/dev/null || true\" EXIT INT TERM; wait -n $api_pid $web_pid; exit $?'"
-waitForPort = 5000
-
-[workflows.workflow.metadata]
-outputType = "webview"
+waitForPort = 8080
 
 [agent]
 stack = "BEST_EFFORT_FALLBACK"
