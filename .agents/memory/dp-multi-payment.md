@@ -39,6 +39,10 @@ For bookings linked by `groupRef`, the DP ceiling, remaining balance, and paymen
 
 **Why:** A recurring/group booking is presented and paid as one combined invoice; validating against one session incorrectly rejects a valid group DP.
 
+All payment-type expected-amount validation must use the same group total, including `full_payment`; applying the group total only to the later ceiling check still rejects a valid combined payment.
+
+**Why:** The customer page shows the combined invoice, while each representative booking row may retain only one session's amount.
+
 ## Recurring booking groups
 - Recurring sessions are stored as separate booking rows but share a `groupRef`; DP and remaining-balance validation must use `booking_groups.total_payment`, not an individual row's `total_price`.
 

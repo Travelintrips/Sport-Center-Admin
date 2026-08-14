@@ -321,7 +321,17 @@ router.post("/payments", async (req, res) => {
       return;
     }
 
-    const total = Number(booking.grandTotal ?? booking.totalPrice);
+    // Group/recurring bookings are paid as one combined invoice. The
+    // representative booking row can contain only one session's total, while
+    // the customer-facing page correctly shows booking_groups.total_payment.
+    // Use the group total for payment-type validation as well.
+    const [bookingGroup] = booking.groupRef
+      ? await db.select({ totalPayment: bookingGroupsTable.totalPayment })
+          .from(bookingGroupsTable)
+          .where(eq(bookingGroupsTable.groupRef, booking.groupRef))
+          .limit(1)
+      : [];
+    const total = Number(bookingGroup?.totalPayment ?? booking.grandTotal ?? booking.totalPrice);
     const confirmedDp = Math.max(
       0,
       ...groupPayments
@@ -369,12 +379,7 @@ router.post("/payments", async (req, res) => {
 
     // ── Validasi nominal pembayaran ───────────────────────────────────────────
     // For group bookings, use the group's total payment as the ceiling, not the per-session price
-    let grandTotalVal = booking.grandTotal != null ? Number(booking.grandTotal) : Number(booking.totalPrice);
-    if (booking.groupRef) {
-      const [group] = await db.select().from(bookingGroupsTable)
-        .where(eq(bookingGroupsTable.groupRef, booking.groupRef)).limit(1);
-      if (group) grandTotalVal = Number(group.totalPayment);
-    }
+    const grandTotalVal = total;
     const amountNum = Number(amount);
     const PAYMENT_TOLERANCE = 1000;
 
