@@ -1321,14 +1321,34 @@ function PaylabsPaymentSection({
         });
         if (!res.ok) return;
         const data = await res.json();
-        const localStatus = (data.local?.status ?? "").toUpperCase();
-        const paylabsStatus = String(data.paylabs?.status ?? data.paylabs?.tradeState ?? "").toUpperCase();
-        const isPaid = localStatus === "SUCCESS" || paylabsStatus === "SUCCESS" || paylabsStatus === "02" || paylabsStatus === "PAID";
-        if (isPaid) {
+        const localStatus = String(data.local?.status ?? "").toUpperCase();
+        const reconciliationOutcome = String(data.reconciliation?.outcome ?? "").toLowerCase();
+        const backendConfirmed =
+          localStatus === "SUCCESS" ||
+          reconciliationOutcome === "confirmed" ||
+          reconciliationOutcome === "already_confirmed";
+
+        // Paylabs can report a successful provider transaction before our
+        // internal booking/payment transaction commits. Do not show the
+        // customer a false success state based only on the provider response.
+        const syncFailed = Boolean(data.reconciliation) && !backendConfirmed;
+        if (backendConfirmed) {
           setPollStatus("paid");
           clearInterval(iv);
           onSuccess();
           toast({ title: t("Pembayaran Berhasil! 🎉", "Payment Successful! 🎉"), description: t("Booking Anda telah dikonfirmasi.", "Your booking has been confirmed.") });
+        }
+        if (syncFailed) {
+          clearInterval(iv);
+          setPollStatus("error");
+          toast({
+            title: t("Sinkronisasi pembayaran belum selesai", "Payment sync is not complete"),
+            description: t(
+              "Paylabs sudah menerima pembayaran, tetapi booking belum berhasil dikonfirmasi oleh server. Silakan coba lagi atau hubungi admin.",
+              "Paylabs received the payment, but the server has not confirmed the booking yet. Please try again or contact the admin.",
+            ),
+            variant: "destructive",
+          });
         }
         // Inquiry endpoint not supported for this merchant — stop polling (rely on webhook + manual refresh)
         if (data.inquiryNotSupported) {
@@ -1498,6 +1518,15 @@ function PaylabsPaymentSection({
           </div>
           <div className="font-bold text-lg text-green-800">{t("Pembayaran Berhasil!", "Payment Successful!")}</div>
           <div className="text-sm text-green-700">{t("Booking Anda sedang dikonfirmasi...", "Your booking is being confirmed...")}</div>
+        </div>
+      )}
+
+      {pollStatus === "error" && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-center text-sm text-amber-800">
+          {t(
+            "Pembayaran terdeteksi di Paylabs, tetapi status booking belum tersinkron. Jangan membayar ulang; hubungi admin untuk pengecekan.",
+            "Payment was detected by Paylabs, but the booking status is not synced yet. Do not pay again; contact the admin for verification.",
+          )}
         </div>
       )}
     </div>

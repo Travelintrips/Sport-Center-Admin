@@ -366,6 +366,12 @@ async function finalizePayment(opts: FinalizePaymentOptions): Promise<FinalizePa
   }
 }
 
+function isCommittedPaymentOutcome(
+  outcome: FinalizePaymentResult["outcome"] | undefined,
+): boolean {
+  return outcome === "confirmed" || outcome === "already_confirmed";
+}
+
 // ─── GET /api/paylabs/config ──────────────────────────────────────────────────
 
 router.get("/paylabs/config", async (_req, res) => {
@@ -1010,10 +1016,7 @@ router.get("/paylabs/status/:tradeNo", async (req, res) => {
       // Keep automatic inquiry recovery aligned with webhook/manual
       // reconciliation. The payment row is committed atomically above; the
       // accounting journal is posted idempotently after the transaction.
-      if (
-        (reconciliation.outcome === "confirmed" || reconciliation.outcome === "already_confirmed") &&
-        reconciliation.bookingId
-      ) {
+      if (isCommittedPaymentOutcome(reconciliation.outcome) && reconciliation.bookingId) {
         const recoveredBookingId = reconciliation.bookingId;
         db.select().from(bookingsTable)
           .where(eq(bookingsTable.id, recoveredBookingId))
@@ -1045,12 +1048,30 @@ router.get("/paylabs/status/:tradeNo", async (req, res) => {
       }
     }
 
+    // finalizePayment runs in a separate transaction from this inquiry. Re-read
+    // the transaction after reconciliation so the browser receives the
+    // committed SUCCESS state instead of the stale PENDING row loaded above.
+    let committedLocal = local ?? null;
+    if (reconciliation && isCommittedPaymentOutcome(reconciliation.outcome)) {
+      const refreshedRows = await db.execute(sql`
+        SELECT *
+        FROM sport_center.paylabs_transactions
+        WHERE merchant_trade_no = ${tradeNo}
+        LIMIT 1
+      `);
+      committedLocal = (refreshedRows as any).rows?.[0] ?? (refreshedRows as any)[0] ?? committedLocal;
+    }
+
     return res.json({
-      local: local ?? null,
+      local: committedLocal,
       paylabs: paylabsRes.data,
       paylabsOk: paylabsRes.ok,
       reconciliation: reconciliation
-        ? { outcome: reconciliation.outcome, bookingId: reconciliation.bookingId }
+        ? {
+            outcome: reconciliation.outcome,
+            bookingId: reconciliation.bookingId,
+            error: reconciliation.error,
+          }
         : undefined,
     });
   } catch (err) {
