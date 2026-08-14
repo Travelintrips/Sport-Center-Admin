@@ -28,12 +28,12 @@ name = "Start application"
 author = "agent"
 
 [workflows.workflow.metadata]
-outputType = "webview"
+outputType = "console"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "PORT=5000 BASE_PATH=/ pnpm --filter @workspace/sport-center run dev"
-waitForPort = 5000
+args = "bash -c 'PORT=8080 NODE_ENV=development pnpm --filter @workspace/api-server run dev & api_pid=$!; PORT=5000 pnpm --filter @workspace/sport-center run dev & web_pid=$!; trap \"kill $api_pid $web_pid 2>/dev/null || true\" EXIT INT TERM; wait -n $api_pid $web_pid; exit $?'"
+waitForPort = 8080
 
 [agent]
 stack = "BEST_EFFORT_FALLBACK"
@@ -99,3 +99,15 @@ TRAVELINTRIP_PRODUCTION_DATABASE_URL = "postgresql://postgres.nzdweipzckfszczzqt
 
 [nix]
 channel = "stable-25_05"
+
+[[ports]]
+localPort = 8080
+externalPort = 8080
+
+[[ports]]
+localPort = 8081
+externalPort = 80
+
+[[ports]]
+localPort = 21089
+externalPort = 3000
