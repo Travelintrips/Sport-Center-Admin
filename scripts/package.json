@@ -10,6 +10,7 @@
     "migrate": "tsx ../migrate.ts",
     "migrate:dev": "tsx ./src/db-migrate.ts",
     "migrate:prod": "tsx ./src/db-migrate.ts --prod",
+    "storage:compress-images": "tsx ./src/compress-supabase-images.ts",
     "migrate:ownership:dev": "tsx ./src/migrate-facility-company-ownership.ts",
     "backfill:payment-providers": "tsx ./src/backfill-payment-providers.ts",
     "migrate:diff": "tsx ./src/schema-diff.ts",
@@ -26,7 +27,8 @@
   "dependencies": {
     "@workspace/db": "workspace:*",
     "drizzle-orm": "catalog:",
-    "pg": "^8.20.0"
+    "pg": "^8.20.0",
+    "sharp": "^0.34.5"
   },
   "devDependencies": {
     "@types/node": "catalog:",
