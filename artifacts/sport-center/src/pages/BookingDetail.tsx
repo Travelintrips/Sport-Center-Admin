@@ -1257,6 +1257,8 @@ function PaylabsPaymentSection({
     sandboxMode: boolean;
   } | null>(null);
   const [pollStatus, setPollStatus] = useState<"waiting" | "paid" | "error" | "no_inquiry">("waiting");
+  const [syncing, setSyncing] = useState(false);
+  const [syncAttempts, setSyncAttempts] = useState(0);
 
   // ── Fetch fresh config every time this section is opened ─────────────────
   const [freshConfig, setFreshConfig] = useState<PaylabsPublicConfig | null>(null);
@@ -1331,28 +1333,46 @@ function PaylabsPaymentSection({
         // Paylabs can report a successful provider transaction before our
         // internal booking/payment transaction commits. Do not show the
         // customer a false success state based only on the provider response.
-        const syncFailed = Boolean(data.reconciliation) && !backendConfirmed;
         if (backendConfirmed) {
+          setSyncing(false);
           setPollStatus("paid");
           clearInterval(iv);
           onSuccess();
           toast({ title: t("Pembayaran Berhasil! 🎉", "Payment Successful! 🎉"), description: t("Booking Anda telah dikonfirmasi.", "Your booking has been confirmed.") });
         }
-        if (syncFailed) {
-          clearInterval(iv);
-          setPollStatus("error");
-          toast({
-            title: t("Sinkronisasi pembayaran belum selesai", "Payment sync is not complete"),
-            description: t(
-              "Paylabs sudah menerima pembayaran, tetapi booking belum berhasil dikonfirmasi oleh server. Silakan coba lagi atau hubungi admin.",
-              "Paylabs received the payment, but the server has not confirmed the booking yet. Please try again or contact the admin.",
-            ),
-            variant: "destructive",
-          });
+        if (data.reconciliation && !backendConfirmed) {
+          const outcome = reconciliationOutcome;
+          const requiresManualReview = [
+            "transaction_not_found",
+            "booking_not_found",
+            "terminal_booking_manual_review",
+          ].includes(outcome);
+
+          // A database error can be transient (for example while the
+          // provider callback and the browser inquiry race). Keep the
+          // recovery loop alive instead of showing a destructive toast and
+          // leaving the customer with no way to retry.
+          if (!requiresManualReview) {
+            setSyncing(true);
+            setSyncAttempts((attempts) => {
+              const nextAttempts = attempts + 1;
+              if (nextAttempts >= 3) {
+                clearInterval(iv);
+                setSyncing(false);
+                setPollStatus("error");
+              }
+              return nextAttempts;
+            });
+          } else {
+            clearInterval(iv);
+            setSyncing(false);
+            setPollStatus("error");
+          }
         }
         // Inquiry endpoint not supported for this merchant — stop polling (rely on webhook + manual refresh)
         if (data.inquiryNotSupported) {
           clearInterval(iv);
+          setSyncing(false);
           setPollStatus("no_inquiry");
         }
       } catch { /* ignore */ }
@@ -1441,7 +1461,7 @@ function PaylabsPaymentSection({
       )}
 
       {/* Payment result */}
-      {payment && !loading && pollStatus !== "paid" && (
+      {payment && !loading && (pollStatus === "waiting" || pollStatus === "no_inquiry") && (
         <div className="space-y-4">
           {/* QRIS */}
           {payment.qrContent && (
@@ -1504,7 +1524,15 @@ function PaylabsPaymentSection({
           <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-blue-50 border border-blue-200">
             <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse shrink-0" />
             <div className="text-xs text-blue-700">
-              {t("Menunggu pembayaran... Halaman otomatis update setelah lunas.", "Waiting for payment... Page auto-updates once paid.")}
+              {syncing
+                ? t(
+                    "Pembayaran sudah terdeteksi, sedang menyinkronkan booking...",
+                    "Payment detected, synchronizing your booking...",
+                  )
+                : t(
+                    "Menunggu pembayaran... Halaman otomatis update setelah lunas.",
+                    "Waiting for payment... Page auto-updates once paid.",
+                  )}
             </div>
           </div>
         </div>
@@ -1522,11 +1550,19 @@ function PaylabsPaymentSection({
       )}
 
       {pollStatus === "error" && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-center text-sm text-amber-800">
-          {t(
-            "Pembayaran terdeteksi di Paylabs, tetapi status booking belum tersinkron. Jangan membayar ulang; hubungi admin untuk pengecekan.",
-            "Payment was detected by Paylabs, but the booking status is not synced yet. Do not pay again; contact the admin for verification.",
-          )}
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-center text-sm text-amber-800 space-y-3">
+          <p>
+            {t(
+              "Pembayaran terdeteksi di Paylabs, tetapi status booking belum tersinkron. Jangan membayar ulang.",
+              "Payment was detected by Paylabs, but the booking status is not synced yet. Do not pay again.",
+            )}
+          </p>
+          <p className="text-xs text-amber-700/80">
+            {t(
+              "Sistem akan memproses ulang notifikasi Paylabs secara otomatis. Hubungi admin untuk pengecekan transaksi dan jangan melakukan pembayaran kedua.",
+              "The system will retry the Paylabs notification automatically. Contact the admin to verify the transaction and do not pay a second time.",
+            )}
+          </p>
         </div>
       )}
     </div>

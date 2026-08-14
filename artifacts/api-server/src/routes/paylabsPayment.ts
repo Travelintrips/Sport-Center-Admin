@@ -173,6 +173,23 @@ async function finalizePayment(opts: FinalizePaymentOptions): Promise<FinalizePa
         throw new Error(`Booking ${bookingId} not found for payment transaction ${transactionId}`);
       }
 
+      // Lock the parent row before changing the booking or inserting the
+      // payment mirror. The Paylabs transaction table intentionally keeps a
+      // nullable/unconstrained booking_id for legacy recovery, so the
+      // payment FK is the last line of defence. Locking here prevents an
+      // admin delete or another cleanup transaction from making the relation
+      // disappear between the read above and the payment insert.
+      const lockedBookingRows = await tx.execute(sql`
+        SELECT id
+        FROM sport_center.sport_bookings
+        WHERE id = ${bookingId}
+        FOR UPDATE
+      `);
+      const lockedBooking = (lockedBookingRows as any).rows?.[0] ?? (lockedBookingRows as any)[0];
+      if (!lockedBooking) {
+        throw new Error(`Booking ${bookingId} disappeared during Paylabs finalization`);
+      }
+
       logger.info(
         { merchantTradeNo, booking_id: bookingId, transaction_id: transactionId, requestId },
         "[paylabs] booking found",
@@ -314,7 +331,11 @@ async function finalizePayment(opts: FinalizePaymentOptions): Promise<FinalizePa
         providerTradeNo: paylabsTradeNo || null,
         companyId: paymentEnrichment.companyId,
         bankAccountId: paymentEnrichment.bankAccountId,
+         mdrRate: "0",
+         mdrAmount: "0",
+         settlementStatus: "unsettled",
         expectedSettlementDate: paymentEnrichment.expectedSettlementDate,
+         grossTaxInclusive: true,
         status     : "confirmed",
         paymentType: "full_payment",
         confirmedAt: canonicalPaidAt,
@@ -685,7 +706,11 @@ router.post("/paylabs/webhook", async (req, res) => {
           WHERE merchant_trade_no = ${merchantTradeNo}
         `);
       } catch { /* best-effort — don't block the response */ }
-      res.status(200).json({ errCode: "SIGNATURE_INVALID" });
+      // Paylabs retries notifications when the merchant response is not
+      // successful. Returning 200 here would acknowledge a callback that we
+      // deliberately rejected and would prevent recovery after the key or
+      // signature configuration is corrected.
+      res.status(400).json({ errCode: "SIGNATURE_INVALID" });
       return;
     }
   } else {
@@ -709,7 +734,9 @@ router.post("/paylabs/webhook", async (req, res) => {
         WHERE merchant_trade_no = ${merchantTradeNo}
       `);
     } catch { /* best-effort */ }
-    res.status(200).json({ errCode: "CONFIGURATION_ERROR", errMsg: "signature_required" });
+    // A missing verification key is a merchant configuration failure. Use a
+    // non-2xx response so Paylabs can retry after the key is configured.
+    res.status(503).json({ errCode: "CONFIGURATION_ERROR", errMsg: "signature_required" });
     return;
   }
 
@@ -728,19 +755,23 @@ router.post("/paylabs/webhook", async (req, res) => {
     // Non-success provider states are recorded without finalizing the booking.
     try {
       await ensureTransactionsTable();
-      await db.execute(sql.raw(`
+      await db.execute(sql`
         UPDATE sport_center.paylabs_transactions
-        SET provider_status  = '${rawProviderStatus.replace(/'/g, "''")}',
-            paylabs_trade_no = '${paylabsTradeNo.replace(/'/g, "''")}',
-            raw_notification = '${JSON.stringify(body).replace(/'/g, "''")}',
-            updated_at       = NOW()
-        WHERE merchant_trade_no = '${merchantTradeNo.replace(/'/g, "''")}'
-      `));
+        SET provider_status   = ${rawProviderStatus},
+            paylabs_trade_no  = ${paylabsTradeNo},
+            raw_notification  = ${JSON.stringify(body)}::jsonb,
+            updated_at        = NOW()
+        WHERE merchant_trade_no = ${merchantTradeNo}
+      `);
     } catch (err) {
       logger.warn(
         { err, merchantTradeNo, booking_id: bookingId, transaction_id: transactionId, requestId },
         "[paylabs] non-success status persistence failed",
       );
+      // Do not acknowledge a notification that was not persisted. Paylabs'
+      // documented retry policy is the recovery mechanism for this case.
+      res.status(500).json({ errCode: "PERSISTENCE_ERROR", errMsg: "notification_not_persisted" });
+      return;
     }
     wlog("acknowledgement sent", { isPaid: false, internalStatus });
     res.status(200).json({ errCode: "0", errMsg: "received" });
@@ -772,6 +803,24 @@ router.post("/paylabs/webhook", async (req, res) => {
 
   if (result.outcome === "error") {
     logger.error({ requestId, merchantTradeNo, error: result.error }, "[paylabs:webhook] finalization error");
+  }
+
+  // A successful provider notification is not complete until the local
+  // payment and booking transaction commits. Returning 200 for these outcomes
+  // would stop Paylabs' retry policy while the booking remains unpaid locally.
+  // Terminal bookings are different: the callback was safely recorded and
+  // must be handled by an administrator rather than retried indefinitely.
+  const retryableOutcomes = new Set<FinalizePaymentResult["outcome"]>([
+    "error",
+    "transaction_not_found",
+    "booking_not_found",
+  ]);
+  if (retryableOutcomes.has(result.outcome)) {
+    res.status(500).json({
+      errCode: "FINALIZATION_ERROR",
+      errMsg: result.error ?? result.outcome,
+    });
+    return;
   }
 
   if ((result.outcome === "confirmed" || result.outcome === "already_confirmed") && result.bookingId) {

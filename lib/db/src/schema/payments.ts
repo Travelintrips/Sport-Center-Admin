@@ -1,4 +1,4 @@
-import { text, serial, timestamp, numeric, integer, jsonb } from "drizzle-orm/pg-core";
+import { text, serial, timestamp, numeric, integer, jsonb, boolean } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { bookingsTable } from "./bookings";
@@ -24,7 +24,11 @@ export const paymentsTable = scSchema.table("sport_payments", {
   providerTradeNo: text("provider_trade_no"),
   companyId: integer("company_id"),
   bankAccountId: text("bank_account_id").notNull(),
+  mdrRate: numeric("mdr_rate", { precision: 8, scale: 5 }).notNull().default("0"),
+  mdrAmount: numeric("mdr_amount", { precision: 14, scale: 2 }).notNull().default("0"),
+  settlementStatus: text("settlement_status").notNull().default("unsettled"),
   expectedSettlementDate: text("expected_settlement_date"),
+  grossTaxInclusive: boolean("gross_tax_inclusive").notNull().default(false),
   paymentType: paymentTypeEnum("payment_type").notNull().default("full_payment"),
   status: paymentStatusEnum("status").notNull().default("pending"),
   confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
