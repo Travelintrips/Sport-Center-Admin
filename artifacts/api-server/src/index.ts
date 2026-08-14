@@ -1133,9 +1133,10 @@ async function runStartupSeed() {
   }
 }
 
-await runStartupMigrations();
-await runStartupSeed();
-
+// Bind the port immediately so the deployment health check passes, then run
+// migrations and seed in the background. Previously migrations ran before
+// app.listen(), which meant a slow/paused Supabase DB would timeout and
+// the port would never open, causing the deploy to fail.
 app.listen(port, (err) => {
   if (err) {
     logger.error({ err }, "Error listening on port");
@@ -1159,4 +1160,10 @@ app.listen(port, (err) => {
       );
     });
   }
+
+  // Run DB migrations and seed after the port is bound so a slow/paused DB
+  // never blocks the deployment health check.
+  runStartupMigrations()
+    .then(() => runStartupSeed())
+    .catch((err) => logger.error({ err }, "Background startup task error"));
 });
