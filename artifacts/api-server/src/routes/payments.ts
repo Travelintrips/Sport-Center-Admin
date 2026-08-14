@@ -676,20 +676,38 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
     // status has already changed to confirmed.
     let preparedPayment: typeof before = before;
     if (status === "confirmed" && booking) {
+      // Historical/manual QRIS rows may have been created before the provider
+      // metadata was made mandatory. QRIS in this app settles through Mandiri
+      // Direct, so do not send "unknown" into the enrichment resolver when an
+      // old row is confirmed from the admin screen.
+      const effectiveMethod = String(
+        paymentMethod ?? before.paymentMethod ?? "",
+      ).trim().toUpperCase();
+      const storedProvider = String(
+        rawPaymentProvider ?? before.paymentProvider ?? "",
+      ).trim().toLowerCase();
+      const effectiveProvider =
+        effectiveMethod === "QRIS" &&
+        (!storedProvider || storedProvider === "unknown")
+          ? "mandiri_direct"
+          : storedProvider || "unknown";
       const paymentCandidate = {
         ...before,
         ...updateData,
+        ...(effectiveMethod === "QRIS"
+          ? { paymentMethod: "QRIS", paymentProvider: effectiveProvider }
+          : {}),
       } as typeof before;
       preparedPayment = await ensurePaymentBankAccount(
         paymentCandidate,
         booking,
-        paymentCandidate.paymentProvider ?? "unknown",
+        effectiveProvider,
         paymentCandidate.paidAt ?? paymentCandidate.confirmedAt ?? new Date(),
       );
       if (paymentCandidate.paymentMethod?.toUpperCase() === "QRIS") {
         const enrichment = await resolveRequiredPaymentEnrichment(
           booking,
-          paymentCandidate.paymentProvider ?? "unknown",
+          effectiveProvider,
           preparedPayment.paidAt ?? preparedPayment.confirmedAt ?? new Date(),
           {
             // Preserve the existing payment snapshot as resolver context during
@@ -1030,7 +1048,18 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
     res.json({ ...payment, amount: Number(payment.amount) });
   } catch (err) {
     req.log.error({ err }, "Update payment error");
-    res.status(500).json({ error: "Internal server error" });
+    const message = String(err instanceof Error ? err.message : err ?? "");
+    const safeError =
+      message === "RECEIVING_BANK_ACCOUNT_NOT_CONFIGURED"
+        ? "Rekening penerima pembayaran belum dikonfigurasi."
+        : message.startsWith("PAYMENT_BANK_ACCOUNT_REQUIRED:")
+          ? "Rekening penerima pembayaran belum tersedia untuk payment ini."
+          : message.startsWith("PAYMENT_PROVIDER")
+            ? "Metadata provider pembayaran belum lengkap."
+            : "Internal server error";
+    res.status(safeError === "Internal server error" ? 500 : 422).json({
+      error: safeError,
+    });
   }
 });
 
