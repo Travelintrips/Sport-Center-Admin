@@ -6,6 +6,58 @@ import fs from "fs";
 import { fileURLToPath } from "url";
 import { CUSTOM_MIGRATION_SQL } from "../migrate.js";
 
+/**
+ * Split a SQL string into individual statements while respecting $$ dollar-
+ * quoting used in PL/pgSQL DO blocks and function bodies.
+ */
+function splitSqlStatements(sql: string): string[] {
+  const results: string[] = [];
+  let current = "";
+  let inDollarQuote = false;
+  let dollarTag = "";
+  let i = 0;
+
+  while (i < sql.length) {
+    // Detect opening/closing $$ (or $tag$) delimiter
+    if (sql[i] === "$") {
+      const rest = sql.slice(i);
+      const match = rest.match(/^\$([A-Za-z_]*)?\$/);
+      if (match) {
+        const tag = match[0];
+        if (!inDollarQuote) {
+          inDollarQuote = true;
+          dollarTag = tag;
+          current += tag;
+          i += tag.length;
+          continue;
+        } else if (tag === dollarTag) {
+          inDollarQuote = false;
+          dollarTag = "";
+          current += tag;
+          i += tag.length;
+          continue;
+        }
+      }
+    }
+
+    if (!inDollarQuote && sql[i] === ";") {
+      current += ";";
+      const trimmed = current.trim();
+      if (trimmed && trimmed !== ";") results.push(trimmed);
+      current = "";
+      i++;
+      continue;
+    }
+
+    current += sql[i];
+    i++;
+  }
+
+  const trimmed = current.trim();
+  if (trimmed && trimmed !== ";") results.push(trimmed);
+  return results;
+}
+
 const { Client } = pg;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -184,8 +236,26 @@ try {
     );
     console.log("      ✓ Added public.accounting_entry_source=sport_center_payment\n");
   }
-  await client.query(CUSTOM_MIGRATION_SQL);
-  console.log("      ✓ Done\n");
+  // Apply CUSTOM_MIGRATION_SQL statement-by-statement so a single missing
+  // table or object (e.g. paylabs_transactions on a fresh dev DB) doesn't
+  // abort all remaining migrations.  We use a $$ -aware splitter to avoid
+  // splitting inside PL/pgSQL bodies.
+  const statements = splitSqlStatements(CUSTOM_MIGRATION_SQL);
+  let ok = 0, skipped = 0;
+  for (const stmt of statements) {
+    try {
+      await client.query(stmt);
+      ok++;
+    } catch (e: any) {
+      skipped++;
+      // Only log non-trivial failures (not "already exists" noise)
+      const msg: string = e?.message ?? "";
+      if (!msg.includes("already exists") && !msg.includes("duplicate_object")) {
+        console.warn(`      ⚠ Skipped statement (${msg.slice(0, 120)})`);
+      }
+    }
+  }
+  console.log(`      ✓ Done (${ok} applied, ${skipped} skipped)\n`);
 
   console.log(`╔══════════════════════════════════════════════════════╗`);
   console.log(`║  ✅  All migrations applied successfully!            ║`);
