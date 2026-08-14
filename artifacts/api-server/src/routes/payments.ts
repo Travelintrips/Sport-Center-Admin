@@ -744,7 +744,7 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
       [payment] = await db
         .update(paymentsTable)
         .set(updateData)
-        .where(and(eq(paymentsTable.id, id), eq(paymentsTable.status, "pending")))
+        .where(and(eq(paymentsTable.id, id), inArray(paymentsTable.status, ["pending", "waiting_confirmation"] as any[])))
         .returning();
 
       if (!payment) {
@@ -1046,7 +1046,7 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
     }
 
     res.json({ ...payment, amount: Number(payment.amount) });
-  } catch (err) {
+  } catch (err: any) {
     req.log.error({ err }, "Update payment error");
     const message = String(err instanceof Error ? err.message : err ?? "");
     const safeError =
@@ -1060,6 +1060,16 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
     res.status(safeError === "Internal server error" ? 500 : 422).json({
       error: safeError,
     });
+    const msg: string = err?.message ?? "";
+    if (msg === "RECEIVING_BANK_ACCOUNT_NOT_CONFIGURED") {
+      res.status(422).json({ error: "Rekening penerima belum dikonfigurasi. Buka Pengaturan → Rekening Bank dan isi rekening penerima default." });
+      return;
+    }
+    if (msg.startsWith("PAYMENT_BANK_ACCOUNT_REQUIRED")) {
+      res.status(422).json({ error: "Tidak dapat menentukan rekening penerima untuk pembayaran ini. Pastikan konfigurasi settlement sudah lengkap." });
+      return;
+    }
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 

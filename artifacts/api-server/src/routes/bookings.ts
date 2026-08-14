@@ -1855,13 +1855,10 @@ async function runApVerification(
     discountAmount: String(discountAmount),
     totalPrice: String(finalPrice),
 
-    ppnRate: taxCalc.taxRate > 0 ? String(taxCalc.taxRate) : null,
-    ppnAmount: taxCalc.taxAmount > 0 ? String(taxCalc.taxAmount) : null,
-    grandTotal: taxCalc.taxAmount > 0 ? String(taxCalc.grandTotal) : null,
-
+    ppnRate: finalTaxCalc.taxRate > 0 ? String(finalTaxCalc.taxRate) : null,
+    ppnAmount: finalTaxCalc.taxAmount > 0 ? String(finalTaxCalc.taxAmount) : null,
     grandTotal: finalTaxCalc.taxAmount > 0 ? String(finalTaxCalc.grandTotal) : null,
     dpp: finalTaxCalc.taxAmount > 0 ? String(finalTaxCalc.dpp) : null,
-    ppnAmount: finalTaxCalc.taxAmount > 0 ? String(finalTaxCalc.taxAmount) : null,
 
   }).where(eq(bookingsTable.id, bookingId));
 
