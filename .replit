@@ -165,6 +165,10 @@ TRAVELINTRIP_PRODUCTION_DATABASE_URL = "postgresql://postgres.nzdweipzckfszczzqt
 channel = "stable-25_05"
 
 [[ports]]
+localPort = 5000
+externalPort = 5000
+
+[[ports]]
 localPort = 8080
 externalPort = 8080
 
