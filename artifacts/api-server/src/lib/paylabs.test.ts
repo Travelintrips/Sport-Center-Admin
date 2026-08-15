@@ -19,7 +19,12 @@
 
 import crypto from "crypto";
 import { describe, it, expect } from "vitest";
-import { normalizePaylabsPublicKey, verifyPaylabsSignature } from "./paylabs";
+import {
+  minifyPaylabsBody,
+  normalizePaylabsPublicKey,
+  paylabsEndpointFromNotifyUrl,
+  verifyPaylabsSignature,
+} from "./paylabs";
 
 // ─── Key Fixture ──────────────────────────────────────────────────────────────
 // Generate a real RSA-2048 key pair for deterministic test signing
@@ -140,5 +145,32 @@ describe("verifyPaylabsSignature", () => {
     const normalized = normalizePaylabsPublicKey(flatPublicKey);
     const result = verifyPaylabsSignature(normalized, timestamp, rawBody, sig, endpoint);
     expect(result).toBe(true);
+  });
+
+  it("11. Null-valued object fields are excluded from the signed body", () => {
+    const bodyWithNull = JSON.stringify({
+      merchantTradeNo: "TEST-001",
+      optionalField: null,
+      nested: { anotherOptionalField: null, value: "kept" },
+    });
+    const signedBody = JSON.stringify({
+      merchantTradeNo: "TEST-001",
+      nested: { value: "kept" },
+    });
+    expect(minifyPaylabsBody(bodyWithNull)).toBe(signedBody);
+
+    const sig = signForTest(TEST_PRIVATE_PEM, signedBody, timestamp, endpoint);
+    expect(verifyPaylabsSignature(TEST_PUBLIC_PEM, timestamp, bodyWithNull, sig, endpoint)).toBe(true);
+  });
+});
+
+describe("paylabsEndpointFromNotifyUrl", () => {
+  it("uses only the callback path and drops query parameters", () => {
+    expect(paylabsEndpointFromNotifyUrl("https://example.com/api/paylabs/webhook?x=1"))
+      .toBe("/api/paylabs/webhook");
+  });
+
+  it("falls back to the canonical webhook path", () => {
+    expect(paylabsEndpointFromNotifyUrl("")).toBe("/api/paylabs/webhook");
   });
 });

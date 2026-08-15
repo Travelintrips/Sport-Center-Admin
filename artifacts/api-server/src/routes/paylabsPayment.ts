@@ -19,6 +19,7 @@ import {
   loadPaylabsConfigFromDb,
   getPaylabsConfig,
   normalizePaylabsPublicKey,
+  paylabsEndpointFromNotifyUrl,
   verifyPaylabsSignature,
   createQris,
   createVa,
@@ -630,10 +631,11 @@ router.post("/paylabs/webhook", async (req, res) => {
   const paylabsTradeNo    = String(body.paylabsTradeNo ?? body.platformTradeNo ?? body.tradeNo ?? "");
   let transactionId: number | null = null;
   let bookingId: number | null = null;
+  let signatureEndpoint = "/api/paylabs/webhook";
 
   try {
     const txRows = await db.execute(sql`
-      SELECT id, booking_id
+      SELECT id, booking_id, notify_url
       FROM sport_center.paylabs_transactions
       WHERE merchant_trade_no = ${merchantTradeNo}
       LIMIT 1
@@ -641,6 +643,7 @@ router.post("/paylabs/webhook", async (req, res) => {
     const txRow = (txRows as any).rows?.[0] ?? (txRows as any)[0];
     transactionId = txRow ? Number(txRow.id) : null;
     bookingId = txRow?.booking_id ? Number(txRow.booking_id) : null;
+    signatureEndpoint = paylabsEndpointFromNotifyUrl(txRow?.notify_url);
   } catch {
     // finalizePayment performs the authoritative lookup inside its transaction.
   }
@@ -684,13 +687,20 @@ router.post("/paylabs/webhook", async (req, res) => {
       verificationResult: "SKIPPED_MOCK_MODE",
     });
   } else if (normalizedPublicKey) {
-    const valid = verifyPaylabsSignature(normalizedPublicKey, timestamp, rawBody, signature);
+    const valid = verifyPaylabsSignature(
+      normalizedPublicKey,
+      timestamp,
+      rawBody,
+      signature,
+      signatureEndpoint,
+    );
     const verificationResult = valid ? "VALID" : "INVALID";
     wlog("signature result", {
       hasPublicKey      : true,
       hasSignature      : Boolean(signature),
       hasTimestamp      : Boolean(timestamp),
       hasPartnerId      : Boolean(partnerId),
+      signatureEndpoint,
       verificationResult,
     });
     if (!valid) {

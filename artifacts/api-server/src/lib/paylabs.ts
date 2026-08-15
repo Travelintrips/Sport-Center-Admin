@@ -2,7 +2,8 @@
  * Paylabs Payment Gateway — API v4.8.1 client
  *
  * Signing algorithm (v4.8.1):
- *   minifiedBody = JSON.stringify(body) stripped of \n\r\t
+ *   minifiedBody = JSON.stringify(body) with null-valued object fields omitted,
+ *                  then stripped of \n\r\t
  *   bodyHash     = lowercase( SHA256Hex( minifiedBody ) )
  *   stringToSign = "POST:" + endpoint + ":" + bodyHash + ":" + X-TIMESTAMP
  *   X-SIGNATURE  = Base64( SHA256withRSA( stringToSign, merchantPrivateKey ) )
@@ -284,9 +285,36 @@ function buildStringToSign(
   return `${method}:${endpoint}:${bodyHash}:${timestamp}`;
 }
 
-/** Minify JSON body — strip \n \r \t per Paylabs spec */
-function minifyBody(body: string): string {
-  return body.replace(/[\n\r\t]/g, "");
+/**
+ * Paylabs excludes JSON object fields whose value is null from the signature
+ * input. Undefined fields are already omitted by JSON.stringify, but null
+ * fields need an explicit recursive cleanup. Array values are preserved
+ * because removing an array item would change its meaning and ordering.
+ */
+function omitNullObjectFields(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(omitNullObjectFields);
+  }
+  if (value !== null && typeof value === "object") {
+    const cleaned: Record<string, unknown> = {};
+    for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+      if (child !== null) cleaned[key] = omitNullObjectFields(child);
+    }
+    return cleaned;
+  }
+  return value;
+}
+
+/** Build the exact JSON representation hashed by Paylabs. */
+export function minifyPaylabsBody(body: string): string {
+  try {
+    return JSON.stringify(omitNullObjectFields(JSON.parse(body)));
+  } catch {
+    // The request and webhook are JSON by contract. Keep a defensive fallback
+    // so malformed input still fails signature verification rather than
+    // throwing before the handler can return a controlled response.
+    return body.replace(/[\n\r\t]/g, "");
+  }
 }
 
 function sign(
@@ -296,7 +324,7 @@ function sign(
   endpoint: string,
   method = "POST",
 ): string {
-  const minified     = minifyBody(bodyStr);
+  const minified     = minifyPaylabsBody(bodyStr);
   const stringToSign = buildStringToSign(method, endpoint, minified, timestamp);
 
   const doSign = (key: crypto.KeyObject): string => {
@@ -364,7 +392,7 @@ export function verifyPaylabsSignature(
 ): boolean {
   try {
     const pem          = normaliseKey(paylabsPublicKeyPem, "PUBLIC");
-    const minified     = minifyBody(bodyStr);
+    const minified     = minifyPaylabsBody(bodyStr);
     const stringToSign = buildStringToSign(method, endpoint, minified, timestamp);
     const v = crypto.createVerify("RSA-SHA256");
     v.update(stringToSign, "utf8");
@@ -372,6 +400,25 @@ export function verifyPaylabsSignature(
   } catch (err) {
     logger.warn({ err }, "[paylabs] signature verification error");
     return false;
+  }
+}
+
+/**
+ * Return the path component used as EndpointUrl in Paylabs signatures.
+ * Paylabs signs the path from notifyUrl, not the full callback URL and not
+ * the query string. Stored notifyUrl is authoritative for webhook retries.
+ */
+export function paylabsEndpointFromNotifyUrl(notifyUrl?: string | null): string {
+  const raw = String(notifyUrl ?? "").trim();
+  if (!raw) return "/api/paylabs/webhook";
+
+  try {
+    const pathname = new URL(raw).pathname;
+    return pathname || "/";
+  } catch {
+    const pathOnly = raw.split(/[?#]/, 1)[0] ?? "";
+    if (!pathOnly) return "/api/paylabs/webhook";
+    return pathOnly.startsWith("/") ? pathOnly : `/${pathOnly}`;
   }
 }
 
@@ -407,7 +454,7 @@ export async function callPaylabs<T = Record<string, unknown>>(
   const url       = `${config.baseUrl}${endpoint}`;
 
   // Build the string-to-sign so we can log it for diagnostics
-  const minifiedForLog = minifyBody(bodyStr);
+  const minifiedForLog = minifyPaylabsBody(bodyStr);
   const bodyHashForLog = crypto.createHash("sha256").update(minifiedForLog, "utf8").digest("hex").toLowerCase();
   const stringToSignForLog = `POST:${endpoint}:${bodyHashForLog}:${timestamp}`;
 
