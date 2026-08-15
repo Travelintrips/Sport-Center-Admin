@@ -264,8 +264,12 @@ router.post("/payments", async (req, res) => {
       .where(eq(bookingsTable.id, Number(bookingId))).limit(1);
     if (!booking) { res.status(404).json({ error: "Booking not found" }); return; }
 
-    // Validasi status: hanya booking pending_payment yang boleh menerima bukti bayar
-    if (booking.status !== "pending_payment") {
+    // Booking yang expired boleh direaktivasi melalui pengiriman bukti bayar.
+    // Setelah bukti diterima, alur normal akan memindahkannya ke
+    // waiting_confirmation untuk verifikasi admin. Status terminal lain tetap
+    // ditolak agar booking yang dibatalkan/ditolak/refunded tidak bisa dipakai
+    // kembali tanpa proses admin khusus.
+    if (booking.status !== "pending_payment" && booking.status !== "expired") {
       res.status(409).json({ error: "Booking tidak dalam status menunggu pembayaran" });
       return;
     }
@@ -462,12 +466,13 @@ router.post("/payments", async (req, res) => {
       .set({ status: "waiting_confirmation", updatedAt: new Date() })
       .where(eq(bookingsTable.id, Number(bookingId)));
 
-    const historyNote =
-      paymentType === "dp"
-        ? "Bukti DP diupload"
-        : paymentType === "pelunasan"
-        ? "Bukti pelunasan diupload"
-        : "Bukti transfer diupload";
+    const historyNote = prevStatus === "expired"
+      ? "Booking expired direaktivasi; bukti transfer diupload"
+      : paymentType === "dp"
+      ? "Bukti DP diupload"
+      : paymentType === "pelunasan"
+      ? "Bukti pelunasan diupload"
+      : "Bukti transfer diupload";
 
     await db.insert(bookingHistoryTable).values({
       bookingId: Number(bookingId),

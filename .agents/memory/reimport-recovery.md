@@ -8,6 +8,7 @@ This repo (Sport Center Jakarta booking app) is a mature, previously-built proje
 - `replit.md` already documents run commands, stack, architecture, and gotchas in full — read it first instead of re-deriving from scratch.
 - Dev Supabase credentials and `SESSION_SECRET` are already present as environment secrets; no new secrets are needed to get it running.
 - Artifacts and their workflows are auto-detected/recreated from `.replit-artifact` markers, so a plain `pnpm install` + workflow restart is normally sufficient — no migrations or DB fixes needed.
+- If an artifact workflow reports a package missing even though its manifest and lockfile already contain it, use `pnpm install --filter <workspace> --frozen-lockfile`; offline install may fail when the package tarball is not cached.
 - Admin login can be smoke-tested via the demo credentials already documented in `replit.md`'s Product section — don't duplicate those credentials elsewhere.
 
 **Why:** Re-imports/rollbacks can make the task system re-run generic "imported project" onboarding on a project that already has an established identity; skipping straight to verification (instead of asking generic discovery questions) matches user expectations and avoids redundant work.
