@@ -56,3 +56,11 @@ All payment-type expected-amount validation must use the same group total, inclu
 
 **How to apply:** Use group-level `downPayment` for recurring bookings, propagate it to all sessions, and set `isDpPaid` only in the admin confirmation transition.
 
+## Group confirmation safety
+- Confirming a DP in a group must not downgrade a sibling already in `confirmed` or `completed` to `pending_payment`.
+- A WhatsApp approval path must apply the same DP transition as the admin payment endpoint; treating a DP as a final confirmation leaves `isDpPaid` and sibling booking states inconsistent.
+
+**Why:** A group can contain a reactivated/expired session alongside a previously approved session. Blind status propagation makes the group internally inconsistent and can turn a valid DP confirmation into a server error.
+
+**How to apply:** Treat terminal siblings as immutable, reconcile only eligible non-terminal siblings, and make the operation transactional with an explicit conflict response when group states cannot be reconciled.
+
