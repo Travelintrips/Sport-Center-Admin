@@ -8,7 +8,7 @@
  * GET  /api/paylabs/config              — public config (sandbox mode, active methods)
  */
 
-import { Router } from "express";
+import { Router, type Response } from "express";
 import { randomUUID } from "crypto";
 import { db, bookingsTable, paymentsTable, bookingHistoryTable, paylabsSettingsTable } from "@workspace/db";
 import { eq, sql } from "drizzle-orm";
@@ -22,6 +22,8 @@ import {
   getPaylabsKeyOwnershipTrace,
   isPrivateKeyValid,
   normalizePaylabsPublicKey,
+  createPaylabsSignature,
+  createPaylabsTimestamp,
   paylabsEndpointFromNotifyUrl,
   verifyPaylabsSignature,
   createQris,
@@ -44,6 +46,92 @@ import { resolveRequiredPaymentEnrichment, paymentEffectiveDate } from "../lib/p
 import { requirePaymentProviderId, createPaymentProviderOrderId, normalizeProviderName } from "../lib/paymentMetadata";
 
 const router = Router();
+const PAYLABS_WEBHOOK_PATH = "/api/paylabs/webhook";
+
+type PaylabsAckFinalizeResult = "success" | "already_confirmed" | "failed";
+
+/**
+ * Send the signed acknowledgement required by Paylabs v4.8.1.
+ *
+ * The response is deliberately built from the exact three fields Paylabs
+ * expects. Its signature uses the merchant private key selected by the active
+ * environment (sandbox or production); the Paylabs public key is only used
+ * for inbound webhook verification.
+ */
+function sendPaylabsAck(
+  res: Response,
+  cfg: Awaited<ReturnType<typeof loadPaylabsConfigFromDb>>,
+  requestId: string,
+  finalizeResult: PaylabsAckFinalizeResult,
+): void {
+  const timestamp = createPaylabsTimestamp();
+  const ackBody = {
+    merchantId: cfg.merchantId,
+    requestId,
+    errCode: "0",
+  };
+  const ackBodyStr = JSON.stringify(ackBody);
+
+  let signature: string;
+  try {
+    if (!cfg.merchantId || !cfg.privateKey) {
+      throw new Error("Paylabs ACK signing credentials are not configured");
+    }
+    signature = createPaylabsSignature(
+      cfg.privateKey,
+      timestamp,
+      ackBodyStr,
+      PAYLABS_WEBHOOK_PATH,
+    );
+  } catch (err) {
+    logger.error(
+      {
+        sandboxMode: cfg.sandboxMode,
+        environment: cfg.environment,
+        requestId,
+        partnerId: cfg.merchantId || "(missing)",
+        hasMerchantId: Boolean(cfg.merchantId),
+        hasPrivateKey: Boolean(cfg.privateKey),
+        inboundSignatureValid: true,
+        finalizeResult,
+        responseStatus: 503,
+        responseSigned: false,
+        error: String(err).slice(0, 500),
+      },
+      "[PAYLABS-ACK] unable to sign response",
+    );
+    res.status(503).json({
+      errCode: "CONFIGURATION_ERROR",
+      errMsg: "ack_signature_not_configured",
+    });
+    return;
+  }
+
+  res.set({
+    "Content-Type": "application/json;charset=utf-8",
+    "X-TIMESTAMP": timestamp,
+    "X-PARTNER-ID": cfg.merchantId,
+    "X-REQUEST-ID": requestId,
+    "X-SIGNATURE": signature,
+  });
+
+  logger.info(
+    {
+      inboundSignatureValid: true,
+      finalizeResult,
+      responseStatus: 200,
+      responseSigned: true,
+      requestId,
+      partnerId: cfg.merchantId,
+      sandboxMode: cfg.sandboxMode,
+      environment: cfg.environment,
+    },
+    "[PAYLABS-ACK] response sent",
+  );
+
+  // Send the exact signed JSON bytes; do not add errMsg or other fields.
+  res.status(200).send(ackBodyStr);
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -753,6 +841,17 @@ router.post("/paylabs/webhook", async (req, res) => {
       hasPartnerId: Boolean(partnerId),
       verificationResult: "ENVIRONMENT_MISMATCH",
     });
+    logger.info(
+      {
+        inboundSignatureValid: false,
+        finalizeResult: "failed",
+        responseStatus: 400,
+        responseSigned: false,
+        requestId,
+        partnerId,
+      },
+      "[PAYLABS-ACK] inbound signature rejected",
+    );
     res.status(400).json({ errCode: "ENVIRONMENT_MISMATCH" });
     return;
   }
@@ -783,6 +882,17 @@ router.post("/paylabs/webhook", async (req, res) => {
       verificationResult,
     });
     if (!valid) {
+      logger.info(
+        {
+          inboundSignatureValid: false,
+          finalizeResult: "failed",
+          responseStatus: 400,
+          responseSigned: false,
+          requestId,
+          partnerId,
+        },
+        "[PAYLABS-ACK] inbound signature rejected",
+      );
       // Persist raw_notification even on rejection so we can distinguish
       // "webhook never arrived" (raw_notification=null) from "webhook arrived
       // but rejected" (raw_notification has content, status stays PENDING).
@@ -826,6 +936,17 @@ router.post("/paylabs/webhook", async (req, res) => {
         ? "PUBLIC_KEY_INVALID"
         : "PUBLIC_KEY_NOT_CONFIGURED",
     });
+    logger.info(
+      {
+        inboundSignatureValid: false,
+        finalizeResult: "failed",
+        responseStatus: 503,
+        responseSigned: false,
+        requestId,
+        partnerId,
+      },
+      "[PAYLABS-ACK] inbound signature could not be verified",
+    );
     // Persist raw_notification so we know a webhook arrived (even if no public key)
     try {
       await ensureTransactionsTable();
@@ -875,11 +996,22 @@ router.post("/paylabs/webhook", async (req, res) => {
       );
       // Do not acknowledge a notification that was not persisted. Paylabs'
       // documented retry policy is the recovery mechanism for this case.
+      logger.info(
+        {
+          inboundSignatureValid: true,
+          finalizeResult: "failed",
+          responseStatus: 500,
+          responseSigned: false,
+          requestId,
+          partnerId,
+        },
+        "[PAYLABS-ACK] notification persistence failed",
+      );
       res.status(500).json({ errCode: "PERSISTENCE_ERROR", errMsg: "notification_not_persisted" });
       return;
     }
     wlog("acknowledgement sent", { isPaid: false, internalStatus });
-    res.status(200).json({ errCode: "0", errMsg: "received" });
+    sendPaylabsAck(res, cfg, requestId, "success");
     return;
   }
 
@@ -921,6 +1053,17 @@ router.post("/paylabs/webhook", async (req, res) => {
     "booking_not_found",
   ]);
   if (retryableOutcomes.has(result.outcome)) {
+    logger.info(
+      {
+        inboundSignatureValid: true,
+        finalizeResult: "failed",
+        responseStatus: 500,
+        responseSigned: false,
+        requestId,
+        partnerId,
+      },
+      "[PAYLABS-ACK] finalization failed; success ACK withheld",
+    );
     res.status(500).json({
       errCode: "FINALIZATION_ERROR",
       errMsg: result.error ?? result.outcome,
@@ -972,7 +1115,12 @@ router.post("/paylabs/webhook", async (req, res) => {
   }
 
   wlog("acknowledgement sent", { outcome: result.outcome });
-  res.status(200).json({ errCode: "0", errMsg: result.outcome });
+  sendPaylabsAck(
+    res,
+    cfg,
+    requestId,
+    result.outcome === "already_confirmed" ? "already_confirmed" : "success",
+  );
 });
 
 // ─── POST /api/paylabs/reconcile (admin, Phase 8) ────────────────────────────

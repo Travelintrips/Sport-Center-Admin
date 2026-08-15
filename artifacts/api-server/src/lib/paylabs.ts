@@ -149,7 +149,7 @@ export async function loadPaylabsConfigFromDb(): Promise<PaylabsConfig> {
  * ISO 8601 timestamp with milliseconds and +07:00 offset (WIB)
  * Required format per Paylabs v4.8.1 docs: 2022-09-16T16:58:47.964+07:00
  */
-function makeTimestamp(): string {
+export function createPaylabsTimestamp(): string {
   // Build a WIB (+07:00) ISO string
   const now = new Date();
   const wibOffset = 7 * 60; // minutes
@@ -376,7 +376,7 @@ export function minifyPaylabsBody(body: string): string {
   }
 }
 
-function sign(
+export function createPaylabsSignature(
   privateKeyPem: string,
   timestamp: string,
   bodyStr: string,
@@ -528,7 +528,7 @@ export async function callPaylabs<T = Record<string, unknown>>(
   }
 
   const bodyStr   = JSON.stringify(body);
-  const timestamp = makeTimestamp();
+  const timestamp = createPaylabsTimestamp();
   const url       = `${config.baseUrl}${endpoint}`;
 
   // Build the string-to-sign so we can log it for diagnostics
@@ -538,7 +538,7 @@ export async function callPaylabs<T = Record<string, unknown>>(
 
   let signature: string;
   try {
-    signature = sign(config.privateKey, timestamp, bodyStr, endpoint);
+    signature = createPaylabsSignature(config.privateKey, timestamp, bodyStr, endpoint);
   } catch (keyErr) {
     const msg = String(keyErr);
     logger.error(

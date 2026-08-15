@@ -23,6 +23,7 @@ import {
   minifyPaylabsBody,
   normalizePaylabsPublicKey,
   paylabsEndpointFromNotifyUrl,
+  createPaylabsSignature,
   verifyPaylabsSignature,
 } from "./paylabs";
 
@@ -176,6 +177,23 @@ describe("verifyPaylabsSignature", () => {
 
     const sig = signForTest(TEST_PRIVATE_PEM, signedBody, timestamp, endpoint);
     expect(verifyPaylabsSignature(TEST_PUBLIC_PEM, timestamp, bodyWithNull, sig, endpoint)).toBe(true);
+  });
+});
+
+describe("Paylabs signed acknowledgement", () => {
+  it("signs the exact merchantId/requestId/errCode response with the merchant private key", () => {
+    const endpoint = "/api/paylabs/webhook";
+    const timestamp = "2026-08-15T12:00:00.000+07:00";
+    const body = JSON.stringify({
+      merchantId: "010728",
+      requestId: "paylabs-callback-001",
+      errCode: "0",
+    });
+
+    const signature = createPaylabsSignature(TEST_PRIVATE_PEM, timestamp, body, endpoint);
+
+    expect(verifyPaylabsSignature(TEST_PUBLIC_PEM, timestamp, body, signature, endpoint)).toBe(true);
+    expect(Object.keys(JSON.parse(body))).toEqual(["merchantId", "requestId", "errCode"]);
   });
 });
 
