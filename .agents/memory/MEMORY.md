@@ -53,4 +53,5 @@
 - [Company ownership evidence](company-ownership-evidence.md) — historical payment company resolution must use validated relations; missing or conflicting evidence stays NULL and blocks posting.
 - [Live accounting schema audit](live-accounting-schema-audit.md) — active Supabase public accounting columns may be legacy-shaped; inspect information_schema before diagnostic SQL.
 - [Confirmed payment reconciliation](confirmed-payment-reconciliation.md) — payment confirmation can precede booking confirmation; retries must repair only the narrow split state without reposting accounting.
+- [Production payment-confirm trigger](payment-confirm-trigger-prod.md) — verify both function and trigger; production may have tables but neither mirroring object.
 
