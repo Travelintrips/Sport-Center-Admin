@@ -1013,7 +1013,13 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
   const [markPaidOnUpload, setMarkPaidOnUpload] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const { data: invoice, isLoading } = useQuery({
+  const {
+    data: invoice,
+    isLoading,
+    isError,
+    error,
+    refetch,
+  } = useQuery({
     queryKey: ["company-invoice-detail", invoiceId],
     queryFn: async () => {
       const token = getToken();
@@ -1205,6 +1211,25 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
         <DialogHeader><DialogTitle>Detail Invoice</DialogTitle></DialogHeader>
         <div className="space-y-3 p-2">
           {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-10" />)}
+        </div>
+      </DialogContent>
+    );
+  }
+
+  if (isError) {
+    return (
+      <DialogContent className="max-w-md">
+        <DialogHeader><DialogTitle>Detail Invoice</DialogTitle></DialogHeader>
+        <div className="rounded-lg border border-red-200 bg-red-50 p-5 text-center">
+          <AlertTriangle size={32} className="mx-auto mb-3 text-red-500" />
+          <div className="font-semibold text-red-800">Detail invoice tidak dapat dimuat</div>
+          <div className="mt-1 text-sm text-red-700">
+            {(error as Error)?.message ?? "Periksa koneksi API dan login admin Anda."}
+          </div>
+          <Button variant="outline" className="mt-4" onClick={() => refetch()}>
+            <RefreshCw size={14} className="mr-2" />
+            Coba Lagi
+          </Button>
         </div>
       </DialogContent>
     );
@@ -1885,7 +1910,18 @@ export default function AdminCompanyBilling() {
                           <td className="py-3 pr-4"><StatusBadge status={inv.status} /></td>
                           <td className="py-3">
                             <div className="flex items-center gap-1">
-                              <Button size="sm" variant="ghost" onClick={() => setSelectedInvoiceId(inv.id)} className="gap-1 h-7 text-xs">
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                aria-label={`Buka detail ${inv.invoiceNumber}`}
+                                title={`Buka detail ${inv.invoiceNumber}`}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  setSelectedInvoiceId(Number(inv.id));
+                                }}
+                                className="gap-1 h-7 text-xs"
+                              >
                                 <Eye size={12} /> Detail
                               </Button>
                             </div>
@@ -1959,7 +1995,7 @@ export default function AdminCompanyBilling() {
         )}
       </Dialog>
 
-      <Dialog open={!!selectedInvoiceId} onOpenChange={(v) => !v && setSelectedInvoiceId(null)}>
+      <Dialog open={selectedInvoiceId !== null} onOpenChange={(v) => !v && setSelectedInvoiceId(null)}>
         {selectedInvoiceId && <InvoiceDetail key={selectedInvoiceId} invoiceId={selectedInvoiceId} onClose={() => setSelectedInvoiceId(null)} />}
       </Dialog>
     </div>
