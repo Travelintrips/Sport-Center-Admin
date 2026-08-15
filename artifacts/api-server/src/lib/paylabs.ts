@@ -31,6 +31,10 @@ export interface PaylabsConfig {
   paylabsPublicKey: string;
   baseUrl: string;
   debugMode: boolean;
+  environment?: "SANDBOX" | "PROD";
+  merchantIdSource?: "ENV" | "NONE";
+  privateKeySource?: "ENV" | "NONE";
+  publicKeySource?: "ENV" | "NONE";
 }
 
 // ─── Store ID helper ──────────────────────────────────────────────────────────
@@ -57,21 +61,33 @@ export function normalizeOptionalPaylabsStoreId(value?: string | null): string |
   return normalized;
 }
 
-/** Env-var only fallback (used when DB is unavailable) */
-export function getPaylabsConfig(): PaylabsConfig {
-  const sandboxMode = process.env.PAYLABS_SANDBOX_MODE !== "false";
-
+function getPaylabsEnvironmentCredentials(sandboxMode: boolean) {
+  const environment = sandboxMode ? "SANDBOX" : "PROD";
   const merchantId = sandboxMode
-    ? (process.env.PAYLABS_SANDBOX_MERCHANT_ID || "")
-    : (process.env.PAYLABS_PROD_MERCHANT_ID    || "");
-
+    ? (process.env.MERCHANT_ID_SANDBOX || "")
+    : (process.env.MERCHANT_ID_PROD || "");
   const privateKey = sandboxMode
     ? (process.env.PAYLABS_SANDBOX_PRIVATE_KEY || "")
-    : (process.env.PAYLABS_PROD_PRIVATE_KEY    || "");
-
+    : (process.env.PAYLABS_PROD_PRIVATE_KEY || "");
   const paylabsPublicKey = sandboxMode
-    ? (process.env.PAYLABS_SANDBOX_PUBLIC_KEY  || "")
-    : (process.env.PAYLABS_PROD_PUBLIC_KEY     || "");
+    ? (process.env.PAYLABS_SANDBOX_PUBLIC_KEY || "")
+    : (process.env.PAYLABS_PROD_PUBLIC_KEY || "");
+
+  return {
+    environment,
+    merchantId,
+    privateKey,
+    paylabsPublicKey,
+    merchantIdSource: merchantId ? "ENV" as const : "NONE" as const,
+    privateKeySource: privateKey ? "ENV" as const : "NONE" as const,
+    publicKeySource: paylabsPublicKey ? "ENV" as const : "NONE" as const,
+  };
+}
+
+/** Resolve credentials only from the selected environment's exact env names. */
+export function getPaylabsConfig(): PaylabsConfig {
+  const sandboxMode = process.env.PAYLABS_SANDBOX_MODE !== "false";
+  const credentials = getPaylabsEnvironmentCredentials(sandboxMode);
 
   let storeId: string | undefined;
   try {
@@ -84,15 +100,20 @@ export function getPaylabsConfig(): PaylabsConfig {
   return {
     sandboxMode,
     storeId,
-    merchantId,
-    privateKey,
-    paylabsPublicKey,
+    ...credentials,
     baseUrl: sandboxMode ? SANDBOX_BASE : PROD_BASE,
     debugMode: false,
   };
 }
 
-/** Load Paylabs config from DB (paylabs_settings table), fall back to env vars */
+/**
+ * Load Paylabs non-credential settings from DB.
+ *
+ * Merchant IDs and both key pairs are always resolved from the selected
+ * environment's exact env names. DB-stored credentials are intentionally not
+ * used for signing or verification because they can silently select the wrong
+ * sandbox/production pair.
+ */
 export async function loadPaylabsConfigFromDb(): Promise<PaylabsConfig> {
   try {
     const { db, paylabsSettingsTable } = await import("@workspace/db");
@@ -100,20 +121,7 @@ export async function loadPaylabsConfigFromDb(): Promise<PaylabsConfig> {
     if (!row) return getPaylabsConfig();
 
     const sandboxMode = row.sandboxMode;
-    // DB takes priority over env vars — admin panel is the source of truth.
-    // Env vars serve as seed/fallback only when the DB field is null/undefined.
-    // EXCEPTION: paylabsPublicKey — if DB is explicitly "" (empty string, not null),
-    // skip env var fallback. This lets admin disable signature verification for sandbox
-    // testing without touching secrets. Use ?? (null-coalescing) instead of ||.
-    const merchantId = sandboxMode
-      ? (row.sandboxMerchantId || process.env.PAYLABS_SANDBOX_MERCHANT_ID || "")
-      : (row.prodMerchantId    || process.env.PAYLABS_PROD_MERCHANT_ID    || "");
-    const privateKey = sandboxMode
-      ? (row.sandboxPrivateKey || process.env.PAYLABS_SANDBOX_PRIVATE_KEY || "")
-      : (row.prodPrivateKey    || process.env.PAYLABS_PROD_PRIVATE_KEY    || "");
-    const paylabsPublicKey = sandboxMode
-      ? (row.sandboxPublicKey  ?? process.env.PAYLABS_SANDBOX_PUBLIC_KEY  ?? "")
-      : (row.prodPublicKey     ?? process.env.PAYLABS_PROD_PUBLIC_KEY     ?? "");
+    const credentials = getPaylabsEnvironmentCredentials(sandboxMode);
     let storeId: string | undefined;
     try {
       storeId = normalizeOptionalPaylabsStoreId(row.storeId ?? process.env.PAYLABS_STORE_ID);
@@ -125,9 +133,7 @@ export async function loadPaylabsConfigFromDb(): Promise<PaylabsConfig> {
     return {
       sandboxMode,
       storeId,
-      merchantId,
-      privateKey,
-      paylabsPublicKey,
+      ...credentials,
       baseUrl: sandboxMode ? SANDBOX_BASE : PROD_BASE,
       debugMode: row.debugMode,
     };
@@ -401,6 +407,24 @@ export function verifyPaylabsSignature(
     logger.warn({ err }, "[paylabs] signature verification error");
     return false;
   }
+}
+
+export function getPaylabsSignatureTrace(
+  timestamp: string,
+  bodyStr: string,
+  endpoint = "/api/paylabs/webhook",
+  method = "POST",
+): { bodyHash: string; stringToVerify: string } {
+  const minified = minifyPaylabsBody(bodyStr);
+  const bodyHash = crypto
+    .createHash("sha256")
+    .update(minified, "utf8")
+    .digest("hex")
+    .toLowerCase();
+  return {
+    bodyHash,
+    stringToVerify: `${method}:${endpoint}:${bodyHash}:${timestamp}`,
+  };
 }
 
 /**

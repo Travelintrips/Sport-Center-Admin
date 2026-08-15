@@ -33,18 +33,16 @@ router.get("/admin/paylabs/settings", adminMiddleware, async (req, res) => {
   try {
     const config = await getOrCreate();
 
-    // Effective values (DB takes priority, env vars are fallback for seeds)
-    const sandboxPublicKeyEffective  = config.sandboxPublicKey  || process.env.PAYLABS_SANDBOX_PUBLIC_KEY  || "";
-    const prodPublicKeyEffective     = config.prodPublicKey     || process.env.PAYLABS_PROD_PUBLIC_KEY     || "";
-
-    // For private keys: check DB first, then env var. Validate with crypto to detect corrupted/masked values.
-    const sandboxPrivateKeyRaw = config.sandboxPrivateKey || process.env.PAYLABS_SANDBOX_PRIVATE_KEY || "";
-    const prodPrivateKeyRaw    = config.prodPrivateKey    || process.env.PAYLABS_PROD_PRIVATE_KEY    || "";
+    // Credential source of truth is the selected environment's exact env names.
+    const sandboxPublicKeyEffective  = process.env.PAYLABS_SANDBOX_PUBLIC_KEY || "";
+    const prodPublicKeyEffective     = process.env.PAYLABS_PROD_PUBLIC_KEY || "";
+    const sandboxPrivateKeyRaw = process.env.PAYLABS_SANDBOX_PRIVATE_KEY || "";
+    const prodPrivateKeyRaw    = process.env.PAYLABS_PROD_PRIVATE_KEY || "";
 
     const merged = {
       ...config,
-      sandboxMerchantId: config.sandboxMerchantId || process.env.PAYLABS_SANDBOX_MERCHANT_ID || "",
-      prodMerchantId:    config.prodMerchantId    || process.env.PAYLABS_PROD_MERCHANT_ID    || "",
+      sandboxMerchantId: process.env.MERCHANT_ID_SANDBOX || "",
+      prodMerchantId:    process.env.MERCHANT_ID_PROD || "",
       storeId:           config.storeId           || process.env.PAYLABS_STORE_ID            || "",
       // NEVER return private keys to the client — write-only, validated before storing
       sandboxPrivateKey: undefined,
@@ -71,26 +69,6 @@ router.get("/admin/paylabs/settings", adminMiddleware, async (req, res) => {
 router.get("/admin/paylabs/test-config", adminMiddleware, async (req, res) => {
   try {
     const cfg = await loadPaylabsConfigFromDb();
-
-    function keyInfo(key: string) {
-      if (!key) return { present: false, length: 0, format: "empty" };
-      // Normalise literal \n
-      const normalized = key.trim().replace(/\\n/g, "\n").replace(/\\r/g, "");
-      const hasPem = normalized.includes("-----BEGIN");
-      const base64 = normalized.replace(/-----[^-]+-----/g, "").replace(/\s+/g, "");
-      return {
-        present : true,
-        rawLength: key.length,
-        base64Length: base64.length,
-        hasPemHeader: hasPem,
-        format: hasPem
-          ? (normalized.includes("RSA PRIVATE KEY") ? "PKCS#1 PEM" :
-             normalized.includes("PRIVATE KEY")     ? "PKCS#8 PEM" :
-             normalized.includes("PUBLIC KEY")      ? "PUBLIC PEM"  : "PEM (unknown)")
-          : "raw base64",
-        firstChars: base64.slice(0, 12) + "…",
-      };
-    }
 
     // Attempt a test sign with the effective private key
     let signTest: { ok: boolean; method?: string; error?: string } = { ok: false };
@@ -125,18 +103,22 @@ router.get("/admin/paylabs/test-config", adminMiddleware, async (req, res) => {
 
     res.json({
       sandboxMode        : cfg.sandboxMode,
+      runtimeEnvironment : cfg.environment,
       effectiveMerchantId: cfg.merchantId,
-      sandboxMerchantId  : cfg.merchantId,   // same as above when sandboxMode=true
-      prodMerchantId     : cfg.merchantId,   // same as above when sandboxMode=false
+      merchantIdSource   : cfg.merchantIdSource,
+      privateKeySource   : cfg.privateKeySource,
+      publicKeySource    : cfg.publicKeySource,
       storeId            : cfg.storeId || "(not set)",
-      privateKey         : keyInfo(cfg.privateKey),
-      publicKey          : keyInfo(cfg.paylabsPublicKey),
+      privateKeyValid    : isPrivateKeyValid(cfg.privateKey),
+      publicKeyValid     : Boolean(normalizePaylabsPublicKey(cfg.paylabsPublicKey)),
       signTest,
       envOverrides: {
-        PAYLABS_SANDBOX_MERCHANT_ID: !!process.env.PAYLABS_SANDBOX_MERCHANT_ID,
-        PAYLABS_PROD_MERCHANT_ID   : !!process.env.PAYLABS_PROD_MERCHANT_ID,
+        MERCHANT_ID_SANDBOX       : !!process.env.MERCHANT_ID_SANDBOX,
+        MERCHANT_ID_PROD          : !!process.env.MERCHANT_ID_PROD,
         PAYLABS_SANDBOX_PRIVATE_KEY: !!process.env.PAYLABS_SANDBOX_PRIVATE_KEY,
         PAYLABS_PROD_PRIVATE_KEY   : !!process.env.PAYLABS_PROD_PRIVATE_KEY,
+        PAYLABS_SANDBOX_PUBLIC_KEY : !!process.env.PAYLABS_SANDBOX_PUBLIC_KEY,
+        PAYLABS_PROD_PUBLIC_KEY    : !!process.env.PAYLABS_PROD_PUBLIC_KEY,
       },
     });
   } catch (err) {

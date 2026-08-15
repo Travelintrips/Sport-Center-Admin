@@ -29,3 +29,11 @@ Only log: `hasPublicKey`, `hasSignature`, `hasTimestamp`, `hasPartnerId`, `verif
 Never log: public key value, private key, full signature, raw credentials.
 
 **Why:** Spec PHASE PAYLABS-SANDBOX-PUBKEY-04 — webhook was fail-open (SKIPPED_NO_PUBLIC_KEY → continue), which allowed unverified callbacks to confirm payments. Changed to fail-closed to prevent spoofed webhook attacks.
+
+## Environment source of truth
+
+Paylabs credential resolution uses only the selected environment's exact names: `MERCHANT_ID_SANDBOX`, `PAYLABS_SANDBOX_PRIVATE_KEY`, `PAYLABS_SANDBOX_PUBLIC_KEY` for SANDBOX/SIT, and `MERCHANT_ID_PROD`, `PAYLABS_PROD_PRIVATE_KEY`, `PAYLABS_PROD_PUBLIC_KEY` for production. No sandbox↔production fallback and no legacy merchant-ID aliases.
+
+**Why:** The previous merchant-ID aliases could select an empty or wrong environment pair, making a valid Paylabs callback appear as `SIGNATURE_INVALID`.
+
+**How to apply:** Treat missing exact env credentials as a configuration error; never use DB-stored credentials, mock bypasses, or the other environment's key to complete signing or verification.

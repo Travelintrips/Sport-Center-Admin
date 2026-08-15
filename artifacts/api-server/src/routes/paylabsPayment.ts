@@ -18,6 +18,8 @@ import { authMiddleware, adminMiddleware } from "../lib/auth";
 import {
   loadPaylabsConfigFromDb,
   getPaylabsConfig,
+  getPaylabsSignatureTrace,
+  isPrivateKeyValid,
   normalizePaylabsPublicKey,
   paylabsEndpointFromNotifyUrl,
   verifyPaylabsSignature,
@@ -618,6 +620,7 @@ router.post("/paylabs/webhook", async (req, res) => {
     ? ((req as any).rawBody as Buffer).toString("utf8")
     : JSON.stringify(req.body);
   const body              = req.body as Record<string, unknown>;
+  const callbackMerchantId = String(body.merchantId ?? "");
   const merchantTradeNo   = String(body.merchantTradeNo ?? body.merchant_trade_no ?? "");
   const rawProviderStatus = String(
     body.tradeStatus ??
@@ -674,19 +677,52 @@ router.post("/paylabs/webhook", async (req, res) => {
   const normalizedPublicKey = cfg.paylabsPublicKey
     ? normalizePaylabsPublicKey(cfg.paylabsPublicKey)
     : "";
+  const publicKeyValid = Boolean(normalizedPublicKey);
+  const privateKeyValid = isPrivateKeyValid(cfg.privateKey);
+  const signatureTrace = getPaylabsSignatureTrace(
+    timestamp,
+    rawBody,
+    signatureEndpoint,
+    "POST",
+  );
+  const runtimeEnvironment = cfg.environment ?? (cfg.sandboxMode ? "SANDBOX" : "PROD");
+  const merchantEnvironmentMismatch = Boolean(
+    cfg.merchantId &&
+    ((callbackMerchantId && callbackMerchantId !== cfg.merchantId) ||
+      (partnerId && partnerId !== cfg.merchantId)),
+  );
+
+  wlog("signature trace", {
+    runtimeMode: process.env.NODE_ENV ?? "unknown",
+    merchantEnvSelected: runtimeEnvironment,
+    merchantId: cfg.merchantId || "(missing)",
+    merchantIdSource: cfg.merchantIdSource ?? "NONE",
+    privateKeySource: cfg.privateKeySource ?? "NONE",
+    publicKeySource: cfg.publicKeySource ?? "NONE",
+    privateKeyValid,
+    publicKeyValid,
+    httpMethod: "POST",
+    callbackEndpoint: signatureEndpoint,
+    timestamp,
+    bodyHash: signatureTrace.bodyHash,
+    stringToVerify: signatureTrace.stringToVerify,
+  });
 
   // ── Phase 6: signature verification ─────────────────────────────────────────
-  const isMockMode = process.env.PAYLABS_MOCK === "true" && process.env.NODE_ENV !== "production";
-
-  if (isMockMode) {
+  if (merchantEnvironmentMismatch) {
     wlog("signature result", {
-      hasPublicKey      : false,
-      hasSignature      : Boolean(signature),
-      hasTimestamp      : Boolean(timestamp),
-      hasPartnerId      : Boolean(partnerId),
-      verificationResult: "SKIPPED_MOCK_MODE",
+      hasPublicKey: publicKeyValid,
+      hasSignature: Boolean(signature),
+      hasTimestamp: Boolean(timestamp),
+      hasPartnerId: Boolean(partnerId),
+      signatureValid: false,
+      verificationResult: "ENVIRONMENT_MISMATCH",
     });
-  } else if (normalizedPublicKey) {
+    res.status(400).json({ errCode: "ENVIRONMENT_MISMATCH" });
+    return;
+  }
+
+  if (normalizedPublicKey) {
     const valid = verifyPaylabsSignature(
       normalizedPublicKey,
       timestamp,
@@ -701,6 +737,7 @@ router.post("/paylabs/webhook", async (req, res) => {
       hasTimestamp      : Boolean(timestamp),
       hasPartnerId      : Boolean(partnerId),
       signatureEndpoint,
+      signatureValid    : valid,
       verificationResult,
     });
     if (!valid) {
@@ -725,14 +762,19 @@ router.post("/paylabs/webhook", async (req, res) => {
     }
   } else {
     // FAIL CLOSED — no Paylabs public key configured, cannot verify webhook authenticity.
-    // Real Paylabs webhooks must be rejected; only PAYLABS_MOCK=true bypasses this.
+    // There is no mock bypass: real callbacks must always be authenticated.
     wlog("signature result", {
       hasPublicKey      : false,
       hasSignature      : Boolean(signature),
       hasTimestamp      : Boolean(timestamp),
       hasPartnerId      : Boolean(partnerId),
-      verificationResult: "PUBLIC_KEY_NOT_CONFIGURED",
-      result            : "PUBLIC_KEY_NOT_CONFIGURED",
+      signatureValid    : false,
+      verificationResult: cfg.paylabsPublicKey.trim()
+        ? "PUBLIC_KEY_INVALID"
+        : "PUBLIC_KEY_NOT_CONFIGURED",
+      result            : cfg.paylabsPublicKey.trim()
+        ? "PUBLIC_KEY_INVALID"
+        : "PUBLIC_KEY_NOT_CONFIGURED",
     });
     // Persist raw_notification so we know a webhook arrived (even if no public key)
     try {
@@ -746,7 +788,10 @@ router.post("/paylabs/webhook", async (req, res) => {
     } catch { /* best-effort */ }
     // A missing verification key is a merchant configuration failure. Use a
     // non-2xx response so Paylabs can retry after the key is configured.
-    res.status(503).json({ errCode: "CONFIGURATION_ERROR", errMsg: "signature_required" });
+    res.status(503).json({
+      errCode: "CONFIGURATION_ERROR",
+      errMsg: cfg.paylabsPublicKey.trim() ? "public_key_invalid" : "signature_required",
+    });
     return;
   }
 
