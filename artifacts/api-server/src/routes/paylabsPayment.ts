@@ -19,6 +19,7 @@ import {
   loadPaylabsConfigFromDb,
   getPaylabsConfig,
   getPaylabsSignatureTrace,
+  getPaylabsKeyOwnershipTrace,
   isPrivateKeyValid,
   normalizePaylabsPublicKey,
   paylabsEndpointFromNotifyUrl,
@@ -641,6 +642,7 @@ router.post("/paylabs/webhook", async (req, res) => {
   let transactionId: number | null = null;
   let bookingId: number | null = null;
   let signatureEndpoint = "/api/paylabs/webhook";
+  let notifyUrlForTrace = "";
 
   try {
     const txRows = await db.execute(sql`
@@ -652,6 +654,7 @@ router.post("/paylabs/webhook", async (req, res) => {
     const txRow = (txRows as any).rows?.[0] ?? (txRows as any)[0];
     transactionId = txRow ? Number(txRow.id) : null;
     bookingId = txRow?.booking_id ? Number(txRow.booking_id) : null;
+    notifyUrlForTrace = String(txRow?.notify_url ?? "").split(/[?#]/, 1)[0];
     signatureEndpoint = paylabsEndpointFromNotifyUrl(txRow?.notify_url);
   } catch {
     // finalizePayment performs the authoritative lookup inside its transaction.
@@ -692,6 +695,9 @@ router.post("/paylabs/webhook", async (req, res) => {
     "POST",
   );
   const runtimeEnvironment = cfg.environment ?? (cfg.sandboxMode ? "SANDBOX" : "PROD");
+  const keyOwnershipTrace = getPaylabsKeyOwnershipTrace(cfg);
+  const notifyPath = paylabsEndpointFromNotifyUrl(notifyUrlForTrace);
+  const pathMatch = notifyPath === signatureEndpoint;
   // Paylabs identifies the merchant in the header. Require the header to
   // match the credential pair selected by the active mode; if the callback
   // body also includes merchantId, it must agree too.
@@ -706,9 +712,20 @@ router.post("/paylabs/webhook", async (req, res) => {
     merchantMatch,
     method: "POST",
     endpointPath: signatureEndpoint,
+    notifyUrl: notifyUrlForTrace || "(not found)",
+    notifyPath,
+    verificationPath: signatureEndpoint,
+    pathMatch,
     timestampFromHeader: timestamp,
     bodyHash: signatureTrace.bodyHash,
+    minifiedBodyLength: signatureTrace.minifiedBodyLength,
+    canonicalString: signatureTrace.stringToVerify,
+    originalUrlPath: String(req.originalUrl ?? "").split("?", 1)[0],
+    requestPath: req.path,
+    signatureLength: signature.length,
+    rawBodyLength: rawBody.length,
     publicKeyValid,
+    ...keyOwnershipTrace,
     runtimeMode: process.env.NODE_ENV ?? "unknown",
     merchantEnvSelected: runtimeEnvironment,
     merchantId: cfg.merchantId || "(missing)",

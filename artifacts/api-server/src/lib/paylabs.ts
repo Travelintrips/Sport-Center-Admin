@@ -273,6 +273,59 @@ export function normalizePaylabsPublicKey(raw: string): string {
   return pem;
 }
 
+export interface PaylabsKeyOwnershipTrace {
+  merchantDerivedPublicKeyFingerprint: string | null;
+  configuredPaylabsPublicKeyFingerprint: string | null;
+  sameKey: boolean | null;
+}
+
+function publicKeyFingerprint(key: crypto.KeyObject): string {
+  const der = key.export({ type: "spki", format: "der" });
+  return crypto.createHash("sha256").update(der).digest("hex");
+}
+
+/**
+ * Safe ownership diagnostic for the two intentionally different key roles:
+ * - merchant private key → derived merchant public key
+ * - configured Paylabs public key → provider verification key
+ *
+ * Only SHA-256 fingerprints are returned. Raw key material never leaves this
+ * function and is not suitable for signature verification decisions.
+ */
+export function getPaylabsKeyOwnershipTrace(config: Pick<PaylabsConfig, "privateKey" | "paylabsPublicKey">): PaylabsKeyOwnershipTrace {
+  let merchantDerivedPublicKeyFingerprint: string | null = null;
+  let configuredPaylabsPublicKeyFingerprint: string | null = null;
+
+  try {
+    const privatePem = normalizePaylabsPrivateKey(config.privateKey);
+    const merchantPrivateKey = crypto.createPrivateKey({ key: privatePem, format: "pem" });
+    merchantDerivedPublicKeyFingerprint = publicKeyFingerprint(crypto.createPublicKey(merchantPrivateKey));
+  } catch {
+    // Keep the diagnostic non-throwing; the existing key-validity checks remain
+    // responsible for rejecting malformed signing/verifying keys.
+  }
+
+  try {
+    const paylabsPublicPem = normalizePaylabsPublicKey(config.paylabsPublicKey);
+    if (paylabsPublicPem) {
+      configuredPaylabsPublicKeyFingerprint = publicKeyFingerprint(
+        crypto.createPublicKey({ key: paylabsPublicPem, format: "pem" }),
+      );
+    }
+  } catch {
+    // normalizePaylabsPublicKey already rejects malformed keys.
+  }
+
+  return {
+    merchantDerivedPublicKeyFingerprint,
+    configuredPaylabsPublicKeyFingerprint,
+    sameKey:
+      merchantDerivedPublicKeyFingerprint && configuredPaylabsPublicKeyFingerprint
+        ? merchantDerivedPublicKeyFingerprint === configuredPaylabsPublicKeyFingerprint
+        : null,
+  };
+}
+
 /**
  * Build the canonical string-to-sign per Paylabs v4.8.1:
  *   POST:<endpoint>:<lowercase(sha256hex(minifiedBody))>:<timestamp>
@@ -414,7 +467,7 @@ export function getPaylabsSignatureTrace(
   bodyStr: string,
   endpoint = "/api/paylabs/webhook",
   method = "POST",
-): { bodyHash: string; stringToVerify: string } {
+): { bodyHash: string; minifiedBodyLength: number; stringToVerify: string } {
   const minified = minifyPaylabsBody(bodyStr);
   const bodyHash = crypto
     .createHash("sha256")
@@ -423,6 +476,7 @@ export function getPaylabsSignatureTrace(
     .toLowerCase();
   return {
     bodyHash,
+    minifiedBodyLength: minified.length,
     stringToVerify: `${method}:${endpoint}:${bodyHash}:${timestamp}`,
   };
 }
