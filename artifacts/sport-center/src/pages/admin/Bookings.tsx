@@ -2119,8 +2119,15 @@ export default function AdminBookings() {
   const [waAlertOpen, setWaAlertOpen] = useState(true);
   const [sendingWaId, setSendingWaId] = useState<number | null>(null);
 
-  const { data: rawBookings, isLoading } = useListBookings();
+  const {
+    data: rawBookings,
+    isLoading,
+    error: bookingsError,
+    refetch: refetchBookings,
+  } = useListBookings();
   const bookings = rawBookings ?? [];
+  const bookingErrorMessage =
+    (bookingsError as any)?.message ?? "Gagal mengambil data booking dari server.";
 
   const { data: paymentSettings } = useQuery<any>({
     queryKey: ["paylabs-settings-payment-methods"],
@@ -2745,7 +2752,7 @@ export default function AdminBookings() {
       </Dialog>
 
       {/* Stats */}
-      {!isLoading && (
+      {!isLoading && !bookingsError && (
         <SummaryStats
           bookings={bookings}
           activeFilter={statusFilter}
@@ -2758,8 +2765,29 @@ export default function AdminBookings() {
         />
       )}
 
+      {bookingsError && (
+        <div className="flex items-center gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-red-800 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200">
+          <AlertCircle size={19} className="shrink-0" />
+          <div className="min-w-0 flex-1">
+            <p className="font-semibold">Data booking gagal dimuat</p>
+            <p className="mt-0.5 truncate text-sm text-red-700/80 dark:text-red-300/80">
+              {bookingErrorMessage}
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="shrink-0 border-red-300 bg-transparent text-red-800 hover:bg-red-100 dark:border-red-800 dark:text-red-200 dark:hover:bg-red-950/60"
+            onClick={() => refetchBookings()}
+          >
+            <RefreshCw size={14} className="mr-1.5" />
+            Coba lagi
+          </Button>
+        </div>
+      )}
+
       {/* Revenue Summary */}
-      {!isLoading && filtered.length > 0 && (
+      {!isLoading && !bookingsError && filtered.length > 0 && (
         <motion.div
           initial={{ opacity: 0, y: -6 }}
           animate={{ opacity: 1, y: 0 }}
@@ -3019,7 +3047,7 @@ export default function AdminBookings() {
             )}
           </div>
           <span className="text-xs text-slate-400 ml-auto shrink-0">
-            {filtered.length} booking
+            {bookingsError ? "Data tidak tersedia" : `${filtered.length} booking`}
           </span>
         </div>
 
@@ -3029,6 +3057,10 @@ export default function AdminBookings() {
             {[...Array(6)].map((_, i) => (
               <Skeleton key={i} className="h-14 rounded-xl" />
             ))}
+          </div>
+        ) : bookingsError ? (
+          <div className="flex min-h-40 items-center justify-center px-5 text-sm text-slate-500">
+            Perbaiki koneksi server lalu tekan &quot;Coba lagi&quot;.
           </div>
         ) : (
           <div className="overflow-x-auto">

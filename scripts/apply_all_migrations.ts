@@ -87,6 +87,11 @@ const stmts = [
   `ALTER TABLE sport_center.sport_payments ADD COLUMN IF NOT EXISTS merchant_trade_no text`,
   `ALTER TABLE sport_center.sport_payments ADD COLUMN IF NOT EXISTS provider_trade_no text`,
   `ALTER TABLE sport_center.sport_payments ADD COLUMN IF NOT EXISTS paid_at timestamptz`,
+  `ALTER TABLE sport_center.sport_payments ADD COLUMN IF NOT EXISTS mdr_rate numeric(8,5) NOT NULL DEFAULT 0`,
+  `ALTER TABLE sport_center.sport_payments ADD COLUMN IF NOT EXISTS mdr_amount numeric(14,2) NOT NULL DEFAULT 0`,
+  `ALTER TABLE sport_center.sport_payments ADD COLUMN IF NOT EXISTS settlement_status text NOT NULL DEFAULT 'unsettled'`,
+  `ALTER TABLE sport_center.sport_payments ADD COLUMN IF NOT EXISTS expected_settlement_date text`,
+  `ALTER TABLE sport_center.sport_payments ADD COLUMN IF NOT EXISTS gross_tax_inclusive boolean NOT NULL DEFAULT false`,
   // confirmed payment journals are finalized, not drafts
   `ALTER TABLE sport_center.accounting_journals ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'posted'`,
   `ALTER TABLE sport_center.accounting_journals ALTER COLUMN status SET DEFAULT 'posted'`,
