@@ -4,11 +4,7 @@ modules = ["nodejs-20", "web", "postgresql-16"]
 [deployment]
 router = "application"
 deploymentTarget = "autoscale"
-run = [
-  "bash",
-  "-c",
-  "PORT=8080 NODE_ENV=production node --enable-source-maps ./artifacts/api-server/dist/index.mjs",
-]
+run = ["bash", "-c", "PORT=8080 NODE_ENV=production node --enable-source-maps ./artifacts/api-server/dist/index.mjs"]
 build = ["bash", "-c", "pnpm -r --if-present run build"]
 
 [deployment.postBuild]
@@ -32,7 +28,16 @@ name = "Start application"
 author = "agent"
 
 [workflows.workflow.metadata]
+<<<<<<< HEAD
 outputType = "webview"
+=======
+outputType = "console"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "bash -c 'PORT=8080 NODE_ENV=development pnpm --filter @workspace/api-server run dev & api_pid=$!; PORT=5000 pnpm --filter @workspace/sport-center run dev & web_pid=$!; trap \"kill $api_pid $web_pid 2>/dev/null || true\" EXIT INT TERM; wait -n $api_pid $web_pid; exit $?'"
+waitForPort = 8080
+>>>>>>> 47b8552851c5859d1f8204840a2d84f7a27beb1f
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
@@ -45,7 +50,11 @@ expertMode = true
 
 [postMerge]
 path = "scripts/post-merge.sh"
+<<<<<<< HEAD
 timeoutMs = 90000
+=======
+timeoutMs = 20000
+>>>>>>> 47b8552851c5859d1f8204840a2d84f7a27beb1f
 
 [userenv]
 
@@ -97,9 +106,27 @@ VITE_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhY
 SUPABASE_URL = "https://nzdweipzckfszczzqtuw.supabase.co"
 SUPABASE_STORAGE_BUCKET = "https://nzdweipzckfszczzqtuw.storage.supabase.co/storage/v1/s3"
 SUPABASE_SERVICE_ROLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im56ZHdlaXB6Y2tmc3pjenpxdHV3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3ODQwMjg0NCwiZXhwIjoyMDkzOTc4ODQ0fQ.W0uM_UzGfF8Zy4PFQKhz6dKpEVDHS6_k9FtqoM9iGms"
-SUPABASE_DATABASE_URL = "postgresql://postgres.nzdweipzckfszczzqtuw:AnTXXOl0t1ArQOEU@aws-1-ap-southeast-2.pooler.supabase.com:6543/postgres"
 SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im56ZHdlaXB6Y2tmc3pjenpxdHV3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg0MDI4NDQsImV4cCI6MjA5Mzk3ODg0NH0.p9k3-qyRjPuXsHLizUrSRMyS-0yJAatUyjQU9NIIu1U"
 TRAVELINTRIP_PRODUCTION_DATABASE_URL = "postgresql://postgres.nzdweipzckfszczzqtuw:AnTXXOl0t1ArQOEU@aws-1-ap-southeast-2.pooler.supabase.com:6543/postgres"
 
 [nix]
 channel = "stable-25_05"
+<<<<<<< HEAD
+=======
+
+[[ports]]
+localPort = 5000
+externalPort = 5000
+
+[[ports]]
+localPort = 8080
+externalPort = 8080
+
+[[ports]]
+localPort = 8081
+externalPort = 80
+
+[[ports]]
+localPort = 21089
+externalPort = 3000
+>>>>>>> 47b8552851c5859d1f8204840a2d84f7a27beb1f

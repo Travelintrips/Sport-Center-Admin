@@ -196,6 +196,10 @@ ALTER TABLE sport_center.sport_payments
   ADD COLUMN IF NOT EXISTS paid_at timestamptz,
   ADD COLUMN IF NOT EXISTS company_id integer,
   ADD COLUMN IF NOT EXISTS bank_account_id text,
+  ADD COLUMN IF NOT EXISTS mdr_rate numeric(8,5) NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS mdr_amount numeric(14,2) NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS settlement_status text NOT NULL DEFAULT 'unsettled',
+  ADD COLUMN IF NOT EXISTS gross_tax_inclusive boolean NOT NULL DEFAULT false,
   ADD COLUMN IF NOT EXISTS expected_settlement_date text;
 
 UPDATE sport_center.sport_payments
@@ -676,6 +680,7 @@ CREATE INDEX IF NOT EXISTS accounting_journals_booking_id_idx ON sport_center.ac
 CREATE INDEX IF NOT EXISTS accounting_journals_journal_date_idx ON sport_center.accounting_journals(journal_date DESC);
 
 ALTER TABLE sport_center.accounting_journals
+  ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'posted',
   ADD COLUMN IF NOT EXISTS payment_id integer
     REFERENCES sport_center.sport_payments(id) ON DELETE SET NULL,
   ADD COLUMN IF NOT EXISTS company_id integer,
@@ -690,6 +695,15 @@ ALTER TABLE sport_center.accounting_journals
   ADD COLUMN IF NOT EXISTS provider_order_id text,
   ADD COLUMN IF NOT EXISTS merchant_trade_no text,
   ADD COLUMN IF NOT EXISTS provider_trade_no text;
+
+ALTER TABLE sport_center.accounting_journals
+  ALTER COLUMN status SET DEFAULT 'posted';
+
+UPDATE sport_center.accounting_journals
+   SET status = 'posted'
+ WHERE journal_type = 'payment_confirmed'
+   AND is_reversal = false
+   AND status IS DISTINCT FROM 'posted';
 
 CREATE UNIQUE INDEX IF NOT EXISTS accounting_journals_payment_confirmed_unique
   ON sport_center.accounting_journals (payment_id)

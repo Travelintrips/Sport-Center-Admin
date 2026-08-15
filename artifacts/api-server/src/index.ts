@@ -266,7 +266,11 @@ async function runStartupMigrations() {
        ADD COLUMN IF NOT EXISTS paid_at timestamptz,
        ADD COLUMN IF NOT EXISTS company_id integer,
        ADD COLUMN IF NOT EXISTS bank_account_id text,
-       ADD COLUMN IF NOT EXISTS expected_settlement_date text`,
+        ADD COLUMN IF NOT EXISTS mdr_rate numeric(8,5) NOT NULL DEFAULT 0,
+        ADD COLUMN IF NOT EXISTS mdr_amount numeric(14,2) NOT NULL DEFAULT 0,
+        ADD COLUMN IF NOT EXISTS settlement_status text NOT NULL DEFAULT 'unsettled',
+        ADD COLUMN IF NOT EXISTS expected_settlement_date text,
+        ADD COLUMN IF NOT EXISTS gross_tax_inclusive boolean NOT NULL DEFAULT false`,
     `UPDATE sport_center.sport_payments
         SET payment_provider = COALESCE(payment_provider, 'unknown'::sport_center.payment_provider),
             provider_name = COALESCE(NULLIF(btrim(provider_name), ''), payment_provider::text, 'unknown'),
@@ -625,6 +629,16 @@ async function runStartupMigrations() {
     `CREATE SEQUENCE IF NOT EXISTS sport_center.expense_no_seq`,
     // accounting_journals.booking_id nullable untuk expense journal entries
     `ALTER TABLE sport_center.accounting_journals ALTER COLUMN booking_id DROP NOT NULL`,
+    // Payment-confirmed journals are finalized accounting projections, not drafts.
+    `ALTER TABLE sport_center.accounting_journals
+       ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'posted'`,
+    `ALTER TABLE sport_center.accounting_journals
+       ALTER COLUMN status SET DEFAULT 'posted'`,
+    `UPDATE sport_center.accounting_journals
+       SET status = 'posted'
+       WHERE journal_type = 'payment_confirmed'
+         AND is_reversal = false
+         AND status IS DISTINCT FROM 'posted'`,
     // A confirmed payment may have only one internal payment journal. Keep this
     // nullable for historical journals and enforce uniqueness for new payment
     // journals only.
