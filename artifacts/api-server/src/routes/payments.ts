@@ -307,11 +307,30 @@ router.post("/payments", async (req, res) => {
       ...groupBookings.map((b) => Number(b.downPayment ?? 0)),
     );
     const configuredDp = groupBookings.some((b) => b.isDpPaid) || configuredDownPayment > 0;
-    const hasDpActive = groupPayments.some(
+    const hasPendingDp = groupPayments.some(
       (p) => p.paymentType === "dp" && (p.status === "pending" || p.status === "confirmed"),
     );
+    const hasConfirmedDp = groupPayments.some(
+      (p) => p.paymentType === "dp" && p.status === "confirmed",
+    );
+    const dpAlreadyConfirmed = hasConfirmedDp || groupBookings.some((b) => b.isDpPaid);
+
+    // A second proof is only for pelunasan after the first DP proof has been
+    // confirmed. Do not let an expired booking or a stale client turn a
+    // pending DP into a pelunasan.
+    if (
+      configuredDp &&
+      hasPendingDp &&
+      !dpAlreadyConfirmed
+    ) {
+      res.status(409).json({
+        error: "Bukti DP masih menunggu konfirmasi admin. Upload pelunasan tersedia setelah DP dikonfirmasi.",
+      });
+      return;
+    }
+
     const paymentType = configuredDp
-      ? hasDpActive ? "pelunasan" : "dp"
+      ? dpAlreadyConfirmed ? "pelunasan" : "dp"
       : "full_payment";
 
     // Payment type is derived from the booking state, never trusted from the browser.

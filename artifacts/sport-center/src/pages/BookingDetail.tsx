@@ -233,11 +233,28 @@ export default function BookingDetail() {
     let detectedAmount: number = paymentTotal;
 
     if (isDpMode) {
-      const hasDpActive = bPayments.some(
+      const hasPendingDp = bPayments.some(
         (p: any) =>
-          p.paymentType === "dp" && (p.status === "pending" || p.status === "confirmed"),
+          p.paymentType === "dp" && p.status === "pending",
       );
-      if (!hasDpActive) {
+      const hasConfirmedDp = bPayments.some(
+        (p: any) => p.paymentType === "dp" && p.status === "confirmed",
+      );
+      const dpAlreadyConfirmed = hasConfirmedDp || !!(booking as any).isDpPaid;
+
+      if (hasPendingDp && !dpAlreadyConfirmed) {
+        toast({
+          title: t("Bukti DP sedang diverifikasi", "DP proof is being verified"),
+          description: t(
+            "Tunggu konfirmasi admin sebelum mengupload bukti pelunasan.",
+            "Wait for admin confirmation before uploading the final payment proof.",
+          ),
+          variant: "destructive",
+        });
+        return;
+      }
+
+      if (!dpAlreadyConfirmed) {
         detectedType = "dp";
         detectedAmount = Number((booking as any).downPayment || 0);
       } else {
@@ -668,10 +685,11 @@ export default function BookingDetail() {
                         <CreditCard size={16} className="text-violet-600 dark:text-violet-300" />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <div className="font-semibold text-sm text-violet-800 dark:text-violet-200">{t("DP Sudah Dicatat", "Down Payment Recorded")}</div>
+                        <div className="font-semibold text-sm text-violet-800 dark:text-violet-200">{t("DP Siap Dibayar", "DP Ready for Payment")}</div>
                         <div className="text-xs text-violet-600 dark:text-violet-400 mt-0.5 space-y-0.5">
                           <div>{t("DP", "DP")}: <span className="font-bold">Rp {Number((booking as any).downPayment || 0).toLocaleString("id-ID")}</span></div>
-                          <div>{t("Sisa Pembayaran", "Remaining")}: <span className="font-bold">Rp {remaining.toLocaleString("id-ID")}</span></div>
+                          <div>{t("Langkah berikutnya: upload bukti DP", "Next step: upload DP proof")}</div>
+                          <div>{t("Sisa setelah DP", "Remaining after DP")}: <span className="font-bold">Rp {remaining.toLocaleString("id-ID")}</span></div>
                         </div>
                       </div>
                     </div>
