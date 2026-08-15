@@ -147,6 +147,21 @@ describe("verifyPaylabsSignature", () => {
     expect(result).toBe(true);
   });
 
+  it("10b. Signature uses minified original body without reordering keys", () => {
+    const formattedBody = [
+      "{",
+      '  "status": "02",',
+      '  "merchantId": "010728",',
+      '  "optionalField": null',
+      "}",
+    ].join("\n");
+    const canonicalBody = minifyPaylabsBody(formattedBody);
+    expect(canonicalBody).toBe('{"status":"02","merchantId":"010728"}');
+
+    const sig = signForTest(TEST_PRIVATE_PEM, canonicalBody, timestamp, endpoint);
+    expect(verifyPaylabsSignature(TEST_PUBLIC_PEM, timestamp, formattedBody, sig, endpoint)).toBe(true);
+  });
+
   it("11. Null-valued object fields are excluded from the signed body", () => {
     const bodyWithNull = JSON.stringify({
       merchantTradeNo: "TEST-001",

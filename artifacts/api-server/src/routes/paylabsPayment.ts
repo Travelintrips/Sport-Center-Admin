@@ -616,9 +616,15 @@ router.post("/paylabs/webhook", async (req, res) => {
   const timestamp   = String(req.headers["x-timestamp"]  ?? "");
   const signature   = String(req.headers["x-signature"]  ?? "");
   const partnerId   = String(req.headers["x-partner-id"] ?? "");
-  const rawBody     = (req as any).rawBody
-    ? ((req as any).rawBody as Buffer).toString("utf8")
-    : JSON.stringify(req.body);
+  // The signature must be calculated from the original HTTP bytes captured by
+  // express.json(). Never fall back to JSON.stringify(req.body): that loses the
+  // provider's whitespace/key representation and is not the callback Paylabs
+  // signed.
+  const rawBodyBuffer = (req as any).rawBody;
+  const hasOriginalRawBody = Buffer.isBuffer(rawBodyBuffer);
+  const rawBody     = hasOriginalRawBody
+    ? (rawBodyBuffer as Buffer).toString("utf8")
+    : "";
   const body              = req.body as Record<string, unknown>;
   const callbackMerchantId = String(body.merchantId ?? "");
   const merchantTradeNo   = String(body.merchantTradeNo ?? body.merchant_trade_no ?? "");
@@ -686,13 +692,23 @@ router.post("/paylabs/webhook", async (req, res) => {
     "POST",
   );
   const runtimeEnvironment = cfg.environment ?? (cfg.sandboxMode ? "SANDBOX" : "PROD");
-  const merchantEnvironmentMismatch = Boolean(
+  // Paylabs identifies the merchant in the header. Require the header to
+  // match the credential pair selected by the active mode; if the callback
+  // body also includes merchantId, it must agree too.
+  const merchantMatch = Boolean(
     cfg.merchantId &&
-    ((callbackMerchantId && callbackMerchantId !== cfg.merchantId) ||
-      (partnerId && partnerId !== cfg.merchantId)),
+    partnerId === cfg.merchantId &&
+    (!callbackMerchantId || callbackMerchantId === cfg.merchantId),
   );
 
   wlog("signature trace", {
+    paylabsMode: runtimeEnvironment,
+    merchantMatch,
+    method: "POST",
+    endpointPath: signatureEndpoint,
+    timestampFromHeader: timestamp,
+    bodyHash: signatureTrace.bodyHash,
+    publicKeyValid,
     runtimeMode: process.env.NODE_ENV ?? "unknown",
     merchantEnvSelected: runtimeEnvironment,
     merchantId: cfg.merchantId || "(missing)",
@@ -700,22 +716,24 @@ router.post("/paylabs/webhook", async (req, res) => {
     privateKeySource: cfg.privateKeySource ?? "NONE",
     publicKeySource: cfg.publicKeySource ?? "NONE",
     privateKeyValid,
-    publicKeyValid,
-    httpMethod: "POST",
-    callbackEndpoint: signatureEndpoint,
-    timestamp,
-    bodyHash: signatureTrace.bodyHash,
-    stringToVerify: signatureTrace.stringToVerify,
+    hasOriginalRawBody,
   });
 
   // ── Phase 6: signature verification ─────────────────────────────────────────
-  if (merchantEnvironmentMismatch) {
+  if (!merchantMatch) {
     wlog("signature result", {
+      paylabsMode: runtimeEnvironment,
+      merchantMatch,
+      method: "POST",
+      endpointPath: signatureEndpoint,
+      timestampFromHeader: timestamp,
+      bodyHash: signatureTrace.bodyHash,
+      publicKeyValid,
+      signatureValid: false,
       hasPublicKey: publicKeyValid,
       hasSignature: Boolean(signature),
       hasTimestamp: Boolean(timestamp),
       hasPartnerId: Boolean(partnerId),
-      signatureValid: false,
       verificationResult: "ENVIRONMENT_MISMATCH",
     });
     res.status(400).json({ errCode: "ENVIRONMENT_MISMATCH" });
@@ -723,21 +741,28 @@ router.post("/paylabs/webhook", async (req, res) => {
   }
 
   if (normalizedPublicKey) {
-    const valid = verifyPaylabsSignature(
-      normalizedPublicKey,
-      timestamp,
-      rawBody,
-      signature,
-      signatureEndpoint,
-    );
+    const valid = hasOriginalRawBody && verifyPaylabsSignature(
+        normalizedPublicKey,
+        timestamp,
+        rawBody,
+        signature,
+        signatureEndpoint,
+      );
     const verificationResult = valid ? "VALID" : "INVALID";
     wlog("signature result", {
+      paylabsMode: runtimeEnvironment,
+      merchantMatch,
+      method: "POST",
+      endpointPath: signatureEndpoint,
+      timestampFromHeader: timestamp,
+      bodyHash: signatureTrace.bodyHash,
+      publicKeyValid,
+      signatureValid: valid,
       hasPublicKey      : true,
       hasSignature      : Boolean(signature),
       hasTimestamp      : Boolean(timestamp),
       hasPartnerId      : Boolean(partnerId),
-      signatureEndpoint,
-      signatureValid    : valid,
+      hasOriginalRawBody,
       verificationResult,
     });
     if (!valid) {
@@ -764,11 +789,19 @@ router.post("/paylabs/webhook", async (req, res) => {
     // FAIL CLOSED — no Paylabs public key configured, cannot verify webhook authenticity.
     // There is no mock bypass: real callbacks must always be authenticated.
     wlog("signature result", {
+      paylabsMode: runtimeEnvironment,
+      merchantMatch,
+      method: "POST",
+      endpointPath: signatureEndpoint,
+      timestampFromHeader: timestamp,
+      bodyHash: signatureTrace.bodyHash,
+      publicKeyValid,
+      signatureValid: false,
       hasPublicKey      : false,
       hasSignature      : Boolean(signature),
       hasTimestamp      : Boolean(timestamp),
       hasPartnerId      : Boolean(partnerId),
-      signatureValid    : false,
+      hasOriginalRawBody,
       verificationResult: cfg.paylabsPublicKey.trim()
         ? "PUBLIC_KEY_INVALID"
         : "PUBLIC_KEY_NOT_CONFIGURED",
