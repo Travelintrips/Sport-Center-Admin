@@ -152,6 +152,9 @@ DO $$ BEGIN
   ALTER TYPE sport_center.booking_status ADD VALUE IF NOT EXISTS 'waiting_confirmation';
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 DO $$ BEGIN
+  ALTER TYPE sport_center.payment_status ADD VALUE IF NOT EXISTS 'waiting_confirmation';
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN
   ALTER TYPE sport_center.booking_status ADD VALUE IF NOT EXISTS 'rejected';
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 DO $$ BEGIN

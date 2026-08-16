@@ -4,7 +4,7 @@ import { z } from "zod/v4";
 import { bookingsTable } from "./bookings";
 import { scSchema } from "./_schema";
 
-export const paymentStatusEnum = scSchema.enum("payment_status", ["pending", "confirmed", "rejected"]);
+export const paymentStatusEnum = scSchema.enum("payment_status", ["pending", "waiting_confirmation", "confirmed", "rejected"]);
 export const paymentTypeEnum = scSchema.enum("payment_type", ["dp", "pelunasan", "full_payment"]);
 export const paymentProviderEnum = scSchema.enum("payment_provider", ["mandiri_direct", "paylabs", "unknown"]);
 
