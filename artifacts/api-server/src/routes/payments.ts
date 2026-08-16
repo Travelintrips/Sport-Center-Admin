@@ -768,7 +768,8 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
       [payment] = await db
         .update(paymentsTable)
         .set(updateData)
-        .where(and(eq(paymentsTable.id, id), inArray(paymentsTable.status, ["pending", "waiting_confirmation"] as any[])))
+        .where(and(eq(paymentsTable.id, id), sql`${paymentsTable.status}::text IN ('pending', 'waiting_confirmation')`))
+
         .returning();
 
       if (!payment) {
