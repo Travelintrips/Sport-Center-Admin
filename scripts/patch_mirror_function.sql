@@ -42,13 +42,13 @@ BEGIN
        booking_date, start_time, end_time, duration_hours, status, payment_status,
        base_amount, discount_amount, total_amount, tax_rate, tax_amount,
        notes, created_at, updated_at, sc_booking_id)
-    VALUES
-      (COALESCE(v_company_id, 1),
+    SELECT
+      COALESCE(v_company_id, 1),
        v_src_booking.order_number,
        v_src_booking.customer_name,
        v_src_booking.customer_phone,
        COALESCE(v_facility_name, 'Sport Center'),
-       v_src_booking.booking_date,
+       v_src_booking.booking_date::date,
        v_src_booking.start_time::time,
        v_src_booking.end_time::time,
        COALESCE(v_src_booking.duration_hours, 1),
@@ -60,8 +60,8 @@ BEGIN
        v_ppn_amount,
        COALESCE(v_src_booking.notes, ''),
        v_src_booking.created_at, NOW(),
-       NEW.booking_id)
-    ON CONFLICT (sc_booking_id) DO NOTHING
+       NEW.booking_id
+    WHERE NOT EXISTS (SELECT 1 FROM public.sport_bookings WHERE sc_booking_id = NEW.booking_id)
     RETURNING id INTO v_public_booking_id;
 
     IF v_public_booking_id IS NULL THEN
