@@ -32,7 +32,12 @@ import { sendRekapPemakaianToAdmin } from "../lib/rekapPemakaian";
 import { sendInvoiceToCustomer, sendGroupInvoiceToCustomer } from "../lib/invoiceDelivery";
 import { normalizePaymentProvider, parseProviderPaidAt } from "../lib/paymentProvider";
 import { createPaymentProviderId, createPaymentProviderOrderId, normalizeProviderName } from "../lib/paymentMetadata";
-import { ensurePaymentBankAccount, resolveRequiredPaymentEnrichment, paymentEffectiveDate } from "../lib/paymentEnrichment";
+import {
+  ensurePaymentBankAccount,
+  resolveRequiredPaymentEnrichment,
+  paymentEffectiveDate,
+  type SettlementProvider,
+} from "../lib/paymentEnrichment";
 import {
   createProofOcrToken,
   paymentMethodMatchesOcr,
@@ -844,8 +849,13 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
       paymentMethodMatchesOcr(normalizedPaymentMethod, existingOcr) === false;
 
     if (paymentMethodChanged) {
-      const isQris = normalizedPaymentMethod.toUpperCase() === "QRIS";
-      const nextProvider = isQris ? "mandiri_direct" : "unknown";
+      const changedMethod = normalizedPaymentMethod;
+      if (!changedMethod) {
+        res.status(400).json({ error: "Metode pembayaran wajib diisi" });
+        return;
+      }
+      const isQris = changedMethod.toUpperCase() === "QRIS";
+      const nextProvider: SettlementProvider = isQris ? "mandiri_direct" : "unknown";
       const paidAt = before.paidAt ?? before.confirmedAt ?? null;
 
       updateData.paymentProvider = nextProvider;
@@ -922,13 +932,13 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
       preparedPayment = await ensurePaymentBankAccount(
         paymentCandidate,
         booking,
-        effectiveProvider,
+        effectiveProvider as SettlementProvider,
         paymentCandidate.paidAt ?? paymentCandidate.confirmedAt ?? new Date(),
       );
       if (paymentCandidate.paymentMethod?.toUpperCase() === "QRIS") {
         const enrichment = await resolveRequiredPaymentEnrichment(
           booking,
-          effectiveProvider,
+          effectiveProvider as SettlementProvider,
           preparedPayment.paidAt ?? preparedPayment.confirmedAt ?? new Date(),
           {
             // Preserve the existing payment snapshot as resolver context during
@@ -1333,7 +1343,7 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
         ppnRate: booking.ppnRate == null ? null : Number(booking.ppnRate),
         facilityId: booking.facilityId,
         journalDate: projectionPaidAt.toISOString().slice(0, 10),
-        paymentMethod: payment.paymentMethod,
+        paymentMethod: payment.paymentMethod ?? undefined,
         paymentId: payment.id,
         paymentType: payment.paymentType,
         paymentProvider: payment.paymentProvider,
@@ -1344,7 +1354,7 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
         providerTradeNo: payment.providerTradeNo,
       }).catch((err) =>
         logAccountingError({
-          operation: "refreshPaymentMethodAccounting",
+          operation: "postConfirmedPaymentAccounting",
           orderNumber: booking.orderNumber,
           bookingId: booking.id,
           error: err,
