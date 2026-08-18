@@ -17,9 +17,8 @@ DECLARE
 BEGIN
   IF NEW.status::text <> 'confirmed' THEN RETURN NEW; END IF;
   v_payment_number := 'SCPAY-SC-' || NEW.id::text;
-  SELECT * INTO v_canonical_metadata FROM sport_center.resolve_and_persist_payment_metadata(NEW.id);
 
-  -- ── Provider code extraction (needed early for unknown short-circuit) ──────
+  -- ── Provider code extraction FIRST — needed to decide if we call resolve ──
   v_provider_code := NULLIF(LOWER(BTRIM(NEW.payment_provider::text)), '');
 
   -- ── Auto-create public bridge if missing ──────────────────────────────────
