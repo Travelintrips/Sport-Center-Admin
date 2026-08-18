@@ -15,4 +15,16 @@ Never use `drizzle-kit push` against the production Supabase DB — it times out
 4. Runs the columns only for `sport_center.*` tables by name
 5. Delete the script after use
 
+Startup migration guards must use the current official `sport_*` table names.
+Legacy names such as `sport_center.payments` can fail non-fatally and leave
+production missing a column that a confirmation route writes.
+
+**Why:** The API can start successfully while swallowing a legacy-table
+migration warning; the first payment confirmation then exposes the schema gap
+as HTTP 500.
+
+**How to apply:** When a table has been renamed, update both the Drizzle schema
+and every startup/manual migration statement before publishing. Verify the
+target table with a read-only schema query before approving PROD changes.
+
 Environment variable: `PROD_DB_URL` with the full connection string (set temporarily via CLI, never committed).

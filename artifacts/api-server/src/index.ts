@@ -399,7 +399,7 @@ async function runStartupMigrations() {
        ADD COLUMN IF NOT EXISTS paid_at timestamptz`,
      // Kolom yang dipakai saat admin mengonfirmasi pembayaran.
      // Wajib idempotent karena tabel production bisa berasal dari schema lama.
-     `ALTER TABLE sport_center.payments
+      `ALTER TABLE sport_center.sport_payments
         ADD COLUMN IF NOT EXISTS confirmed_at timestamptz`,
      `ALTER TABLE sport_center.booking_history
         ADD COLUMN IF NOT EXISTS changed_by_name text`,
@@ -576,7 +576,10 @@ async function runStartupMigrations() {
     `UPDATE sport_center.tax_settings SET is_active = true
      WHERE tax_code = 'PPN_OUT_11' AND applies_to = 'sport_booking' AND is_active = false`,
     // payment_type enum untuk DP flow
-    `DO $$ BEGIN
+     `DO $$ BEGIN
+        ALTER TYPE sport_center.payment_status ADD VALUE IF NOT EXISTS 'waiting_confirmation';
+      EXCEPTION WHEN others THEN null; END $$`,
+     `DO $$ BEGIN
        CREATE TYPE sport_center.payment_type AS ENUM ('dp', 'pelunasan', 'full_payment');
      EXCEPTION WHEN duplicate_object THEN null; END $$`,
     `DO $$ BEGIN
