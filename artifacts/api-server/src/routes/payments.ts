@@ -1,6 +1,14 @@
 import { Router } from "express";
-import { db, paymentsTable, bookingsTable, bookingHistoryTable, facilitiesTable, bookingGroupsTable } from "@workspace/db";
-import { eq, and, ne, inArray, sql } from "drizzle-orm";
+import {
+  db,
+  paymentsTable,
+  bookingsTable,
+  bookingHistoryTable,
+  facilitiesTable,
+  bookingGroupsTable,
+  bankMutationsTable,
+} from "@workspace/db";
+import { eq, and, ne, inArray, or, sql } from "drizzle-orm";
 import { adminMiddleware, verifyToken } from "../lib/auth";
 import multer from "multer";
 import path from "path";
@@ -716,13 +724,19 @@ router.post("/payments", async (req, res) => {
 router.patch("/payments/:id", adminMiddleware, async (req, res) => {
   try {
     const id = parseInt(String(req.params.id));
-    const { status, paymentMethod, paymentProvider: rawPaymentProvider, notes } = req.body;
+    let { status, paymentMethod, paymentProvider: rawPaymentProvider, notes } = req.body;
     const [before] = await db.select().from(paymentsTable).where(eq(paymentsTable.id, id)).limit(1);
     if (!before) { res.status(404).json({ error: "Not found" }); return; }
     // A repeated confirmation callback must be a no-op. Besides avoiding
     // duplicate notifications, this prevents a second accounting post for the
     // same payment when an admin or provider retries the request.
-    if (status === "confirmed" && before.status === "confirmed") {
+    if (
+      status === "confirmed" &&
+      before.status === "confirmed" &&
+      paymentMethod === undefined &&
+      rawPaymentProvider === undefined &&
+      notes === undefined
+    ) {
       const [bookingForRepair] = await db
         .select()
         .from(bookingsTable)
@@ -761,16 +775,26 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
       return;
     }
 
+    // Jika admin mengirim status confirmed bersamaan dengan koreksi metadata,
+    // status yang sudah confirmed tidak perlu di-claim ulang. Proses request
+    // tetap dilanjutkan sebagai update metadata payment.
+    if (status === "confirmed" && before.status === "confirmed") {
+      status = undefined;
+    }
+
     const updateData: Record<string, unknown> = {};
     const existingOcr = storedPaymentProofOcr(before);
-    const effectiveMethodBeforeUpdate = paymentMethod ?? before.paymentMethod;
-    const effectiveMethodMatch = paymentMethodMatchesOcr(effectiveMethodBeforeUpdate, existingOcr);
-    if (effectiveMethodMatch === false) {
-      res.status(422).json({
-        error: `Metode pembayaran tidak sesuai dengan bukti. OCR mendeteksi ${existingOcr?.paymentMethod}.`,
-        code: "PAYMENT_METHOD_PROOF_MISMATCH",
-      });
-      return;
+    let normalizedPaymentMethod: string | undefined;
+    if (paymentMethod !== undefined) {
+      if (typeof paymentMethod !== "string" || !paymentMethod.trim()) {
+        res.status(400).json({ error: "Metode pembayaran wajib diisi" });
+        return;
+      }
+      normalizedPaymentMethod = paymentMethod.trim();
+      if (normalizedPaymentMethod.length > 120) {
+        res.status(400).json({ error: "Metode pembayaran terlalu panjang" });
+        return;
+      }
     }
     if (status) updateData.status = status;
     if (status === "confirmed") {
@@ -778,39 +802,27 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
       updateData.confirmedAt = before.confirmedAt ?? canonicalPaidAt;
       updateData.paidAt = canonicalPaidAt;
     }
-    if (paymentMethod !== undefined) {
-      if (typeof paymentMethod !== "string" || !paymentMethod.trim()) {
-        res.status(400).json({ error: "Metode pembayaran wajib diisi" });
-        return;
-      }
-      if (paymentMethod.trim().length > 120) {
-        res.status(400).json({ error: "Metode pembayaran terlalu panjang" });
-        return;
-      }
-      updateData.paymentMethod = paymentMethod.trim();
-      if (paymentMethod.trim().toUpperCase() === "QRIS") {
-        const provider = normalizePaymentProvider(rawPaymentProvider ?? before.paymentProvider);
-        if (provider !== "mandiri_direct") {
-          res.status(400).json({
-            error: "Pembayaran QRIS wajib memiliki paymentProvider mandiri_direct.",
-          });
-          return;
-        }
-        updateData.paymentProvider = provider;
-      }
+    if (normalizedPaymentMethod !== undefined) {
+      updateData.paymentMethod = normalizedPaymentMethod;
     }
     if (rawPaymentProvider !== undefined) {
       const normalizedProvider = normalizePaymentProvider(rawPaymentProvider);
-      const effectiveMethod = paymentMethod !== undefined ? paymentMethod.trim() : before.paymentMethod;
-      if (effectiveMethod?.toUpperCase() === "QRIS" && !normalizedProvider) {
-        res.status(400).json({ error: "Provider QRIS tidak valid atau belum diisi." });
-        return;
-      }
-      if (effectiveMethod?.toUpperCase() !== "QRIS" && rawPaymentProvider) {
+      const effectiveMethod = normalizedPaymentMethod ?? before.paymentMethod;
+      if (effectiveMethod?.toUpperCase() === "QRIS") {
+        // QRIS manual Sport Center selalu masuk ke Bank Mandiri CST,
+        // sehingga provider tidak boleh mengikuti nilai lama dari form.
+        updateData.paymentProvider = "mandiri_direct";
+      } else if (rawPaymentProvider) {
+        if (!normalizedProvider) {
+          res.status(400).json({ error: "Provider pembayaran tidak valid." });
+          return;
+        }
         res.status(400).json({ error: "Provider hanya boleh diisi untuk pembayaran QRIS." });
         return;
       }
-      updateData.paymentProvider = effectiveMethod?.toUpperCase() === "QRIS" ? normalizedProvider : null;
+      if (effectiveMethod?.toUpperCase() !== "QRIS") {
+        updateData.paymentProvider = null;
+      }
     }
     if (notes !== undefined) updateData.notes = notes;
     if (Object.keys(updateData).length === 0) {
@@ -819,6 +831,65 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
     }
     const [booking] = await db.select().from(bookingsTable)
       .where(eq(bookingsTable.id, before.bookingId)).limit(1);
+
+    const paymentMethodChanged =
+      normalizedPaymentMethod !== undefined &&
+      normalizedPaymentMethod !== String(before.paymentMethod ?? "").trim();
+
+    // Koreksi metode oleh admin adalah override yang disengaja. Validasi OCR
+    // tetap ditampilkan di UI, tetapi tidak boleh memblokir koreksi sumber
+    // pembayaran setelah admin memeriksa bukti secara manual.
+    const methodOcrMismatch =
+      normalizedPaymentMethod !== undefined &&
+      paymentMethodMatchesOcr(normalizedPaymentMethod, existingOcr) === false;
+
+    if (paymentMethodChanged) {
+      const isQris = normalizedPaymentMethod.toUpperCase() === "QRIS";
+      const nextProvider = isQris ? "mandiri_direct" : "unknown";
+      const paidAt = before.paidAt ?? before.confirmedAt ?? null;
+
+      updateData.paymentProvider = nextProvider;
+      updateData.providerName = normalizeProviderName(nextProvider);
+      updateData.providerId = createPaymentProviderId(
+        nextProvider,
+        before.providerReference ?? before.providerTradeNo ?? before.merchantTradeNo ?? `sport-payment-${id}`,
+      );
+      updateData.providerOrderId = createPaymentProviderOrderId(
+        nextProvider,
+        before.merchantTradeNo ?? before.providerTradeNo ?? before.providerReference ?? `SC-PAYMENT-${id}`,
+      );
+
+      if (isQris && booking) {
+        // QRIS Sport Center selalu settle ke rekening Bank Mandiri CST.
+        // Resolver memakai konfigurasi effective-dated bila tersedia, lalu
+        // fallback ke rekening penerimaan Sport Center.
+        const enrichment = await resolveRequiredPaymentEnrichment(
+          booking,
+          "mandiri_direct",
+          paidAt,
+          {
+            sourcePaymentCompanyId: before.companyId,
+            explicitCompanyId: before.companyId,
+            effectiveDate: paidAt ? paymentEffectiveDate(paidAt) : null,
+          },
+        );
+        updateData.companyId = before.companyId ?? enrichment.companyId;
+        updateData.bankAccountId = enrichment.bankAccountId;
+        updateData.expectedSettlementDate =
+          enrichment.expectedSettlementDate ?? before.expectedSettlementDate;
+      }
+
+      // Simpan tanda bahwa metode adalah hasil koreksi admin, tanpa menghapus
+      // hasil OCR sebagai bukti historis.
+      if (before.ocrData && typeof before.ocrData === "object") {
+        updateData.ocrData = {
+          ...(before.ocrData as Record<string, unknown>),
+          methodMatch: methodOcrMismatch ? false : true,
+          adminMethodOverride: true,
+          adminMethodOverrideAt: new Date().toISOString(),
+        };
+      }
+    }
 
     // Prepare all required accounting dimensions before claiming the payment.
     // If QRIS settlement configuration is incomplete, the request must fail
@@ -831,10 +902,10 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
       // Direct, so do not send "unknown" into the enrichment resolver when an
       // old row is confirmed from the admin screen.
       const effectiveMethod = String(
-        paymentMethod ?? before.paymentMethod ?? "",
+        normalizedPaymentMethod ?? before.paymentMethod ?? "",
       ).trim().toUpperCase();
       const storedProvider = String(
-        rawPaymentProvider ?? before.paymentProvider ?? "",
+        updateData.paymentProvider ?? rawPaymentProvider ?? before.paymentProvider ?? "",
       ).trim().toLowerCase();
       const effectiveProvider =
         effectiveMethod === "QRIS" &&
@@ -912,6 +983,28 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
       await db.update(paymentsTable).set(updateData).where(eq(paymentsTable.id, id));
       [payment] = await db.select().from(paymentsTable).where(eq(paymentsTable.id, id)).limit(1);
       if (!payment) { res.status(404).json({ error: "Not found" }); return; }
+    }
+
+    if (paymentMethodChanged && booking) {
+      const linkedMutationConditions = [
+        eq(bankMutationsTable.matchedPaymentId, payment.id),
+        eq(bankMutationsTable.matchedOrderId, booking.id),
+        eq(bankMutationsTable.mutationKey, `SC-${booking.orderNumber}`),
+      ];
+
+      // Mutasi bank memakai payment/order link yang sudah ada. Hanya metadata
+      // settlement yang diperbarui; nominal, tanggal, status, dan keputusan
+      // rekonsiliasi tidak disentuh.
+      await db
+        .update(bankMutationsTable)
+        .set({
+          companyId: payment.companyId,
+          bankAccountId: payment.bankAccountId,
+          providerName: payment.providerName,
+          providerOrderId: payment.providerOrderId,
+          updatedAt: new Date(),
+        })
+        .where(or(...linkedMutationConditions));
     }
 
     const userInfo = getUserFromReq(req);
@@ -1203,6 +1296,60 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
     // Rekap otomatis hanya jika status BENAR-BENAR berubah & booking hari ini
     if (booking && (status === "confirmed" || status === "rejected") && before.status !== status) {
       triggerRekapIfToday(booking.bookingDate);
+    }
+
+    // Koreksi metode pada payment confirmed harus memperbarui projection
+    // accounting/reconciliation yang sudah ada, bukan hanya sport_payments.
+    // Jalur konfirmasi normal di atas sudah mem-posting ulang sendiri, jadi
+    // refresh ini khusus untuk edit metode tanpa perubahan status.
+    if (paymentMethodChanged && status === undefined && payment.status === "confirmed" && booking) {
+      let dpp = extractBookingDpp(booking).dpp;
+      let ppnAmount = extractBookingDpp(booking).ppnAmount;
+      if (booking.groupRef) {
+        const groupBookings = await db
+          .select({
+            dpp: bookingsTable.dpp,
+            totalPrice: bookingsTable.totalPrice,
+            grandTotal: bookingsTable.grandTotal,
+            ppnAmount: bookingsTable.ppnAmount,
+          })
+          .from(bookingsTable)
+          .where(eq(bookingsTable.groupRef, booking.groupRef));
+        dpp = 0;
+        ppnAmount = 0;
+        for (const groupBooking of groupBookings) {
+          const extracted = extractBookingDpp(groupBooking);
+          dpp += extracted.dpp;
+          ppnAmount += extracted.ppnAmount;
+        }
+      }
+
+      const projectionPaidAt = payment.paidAt ?? payment.confirmedAt ?? new Date();
+      await postConfirmedPaymentAccounting({
+        bookingId: booking.id,
+        orderNumber: booking.orderNumber,
+        dpp,
+        ppnAmount,
+        ppnRate: booking.ppnRate == null ? null : Number(booking.ppnRate),
+        facilityId: booking.facilityId,
+        journalDate: projectionPaidAt.toISOString().slice(0, 10),
+        paymentMethod: payment.paymentMethod,
+        paymentId: payment.id,
+        paymentType: payment.paymentType,
+        paymentProvider: payment.paymentProvider,
+        bankAccountId: payment.bankAccountId,
+        providerReference: payment.providerReference,
+        providerOrderId: payment.providerOrderId,
+        merchantTradeNo: payment.merchantTradeNo,
+        providerTradeNo: payment.providerTradeNo,
+      }).catch((err) =>
+        logAccountingError({
+          operation: "refreshPaymentMethodAccounting",
+          orderNumber: booking.orderNumber,
+          bookingId: booking.id,
+          error: err,
+        }),
+      );
     }
 
     res.json({ ...payment, amount: Number(payment.amount) });
