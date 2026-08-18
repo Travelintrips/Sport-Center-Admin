@@ -14,7 +14,7 @@ import {
   companyInvoicesTable,
   companyInvoiceItemsTable,
 } from "@workspace/db";
-import { eq, desc, and, inArray, ne, sql, gte, lte, isNull } from "drizzle-orm";
+import { eq, desc, and, inArray, ne, sql, gte, lte, isNull, isNotNull, asc } from "drizzle-orm";
 import { adminMiddleware, financeMiddleware, superAdminMiddleware } from "../lib/auth";
 import { runBankAudit } from "../lib/bankAudit";
 import {
@@ -28,6 +28,8 @@ import { writeApprovalToSheetRow, isGoogleSheetsConfigured } from "../lib/google
 import * as XLSX from "xlsx";
 import multer from "multer";
 import { ensurePaymentBankAccount } from "../lib/paymentEnrichment";
+import { readPaymentProofOcr } from "../lib/paymentOcr";
+import { getClientInfo, getUserFromReq, logAudit } from "../lib/auditLog";
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -722,6 +724,8 @@ router.get("/bank-reconciliation/matches/:mutationId", adminMiddleware, async (r
         p.ocr_amount         AS "ocrAmount",
         p.ocr_date           AS "ocrDate",
         p.ocr_raw            AS "ocrRaw",
+        p.ocr_data           AS "ocrData",
+        p.payment_method     AS "paymentMethod",
         p.status             AS "paymentStatus",
         p.booking_id         AS "paymentBookingId",
         -- Booking enrichment via payment (candidateType = 'payment')
@@ -1240,71 +1244,191 @@ router.post("/bank-reconciliation/scan-ocr", adminMiddleware, async (req, res) =
       return;
     }
 
-    const imgRes = await fetch(proofUrl);
-    if (!imgRes.ok) {
-      res.status(400).json({ error: `Gagal mengunduh gambar: ${imgRes.statusText}` });
+    if (!paymentId) {
+      res.status(400).json({ error: "paymentId wajib diisi" });
       return;
     }
-    const imgBuffer = Buffer.from(await imgRes.arrayBuffer());
 
-    const { createWorker } = await import("tesseract.js");
-    const worker = await createWorker("ind+eng", 1, {
-      cachePath: "/tmp/tesseract-cache",
-      logger: () => {},
-    });
-    const { data } = await worker.recognize(imgBuffer);
-    await worker.terminate();
-
-    const rawText = data.text || "";
-    const lines = rawText.split("\n").map((l: string) => l.trim()).filter(Boolean);
-    let ocrName: string | null = null;
-    let ocrAmount: number | null = null;
-    let ocrDate: string | null = null;
-
-    const amountMatch = rawText.match(/(?:Rp\.?\s*|IDR\s*)?([\d]{1,3}(?:[.,]\d{3})+(?:[.,]\d{1,2})?)/i);
-    if (amountMatch) {
-      const cleaned = amountMatch[1]!.replace(/\./g, "").replace(",", ".");
-      ocrAmount = parseFloat(cleaned) || null;
-    }
-
-    const dateMatch = rawText.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})|(\d{4})[\/\-](\d{2})[\/\-](\d{2})/);
-    if (dateMatch) {
-      if (dateMatch[4]) {
-        ocrDate = `${dateMatch[4]}-${dateMatch[5]}-${dateMatch[6]}`;
-      } else {
-        const d = dateMatch[1]!.padStart(2, "0");
-        const m = dateMatch[2]!.padStart(2, "0");
-        const y = dateMatch[3]!.length === 2 ? `20${dateMatch[3]}` : dateMatch[3]!;
-        ocrDate = `${y}-${m}-${d}`;
-      }
-    }
-
-    const skipWords = /^(transfer|bank|rekening|tanggal|nominal|total|biaya|fee|dari|ke|kode|ref|no|rp|idr|berhasil|sukses|debet|kredit|saldo|date|amount|beneficiary|sender)/i;
-    for (const line of lines) {
-      if (line.length > 3 && /[a-zA-Z]{3,}/.test(line) && !skipWords.test(line) && !/^\d+$/.test(line)) {
-        ocrName = line.slice(0, 100);
-        break;
-      }
-    }
-
-    if (paymentId) {
-      await db.execute(sql`
-        UPDATE sport_center.sport_payments
-        SET ocr_name = ${ocrName}, ocr_amount = ${ocrAmount}, ocr_date = ${ocrDate}, ocr_raw = ${rawText.slice(0, 2000)}
-        WHERE id = ${paymentId}
-      `);
-    }
+    const result = await scanPaymentProofOcr(Number(paymentId), proofUrl, req);
 
     res.json({
       ok: true,
-      ocrName,
-      ocrAmount,
-      ocrDate,
-      ocrRaw: rawText.slice(0, 500),
+      ...result,
     });
   } catch (err: any) {
     req.log.error({ err }, "OCR scan error");
     res.status(500).json({ error: err?.message ?? "Gagal scan OCR" });
+  }
+});
+
+type PaymentOcrScanResult = {
+  ocrName: string | null;
+  ocrAmount: number | null;
+  ocrDate: string | null;
+  ocrRaw: string;
+  paymentMethod: string | null;
+  paymentMethodDetection: Awaited<ReturnType<typeof readPaymentProofOcr>>["paymentMethodDetection"];
+  paymentMethodAutoUpdated: boolean;
+  accountingReviewRequired: boolean;
+  outcome: "updated" | "unchanged" | "skipped";
+};
+
+async function scanPaymentProofOcr(
+  paymentId: number,
+  proofUrl: string,
+  req: Parameters<typeof adminMiddleware>[0],
+): Promise<PaymentOcrScanResult> {
+  const ocrResult = await readPaymentProofOcr(proofUrl);
+  const { ocrName, ocrAmount, ocrDate, ocrRaw, paymentMethodDetection } = ocrResult;
+  const [currentPayment] = await db.select().from(paymentsTable)
+    .where(eq(paymentsTable.id, paymentId)).limit(1);
+  if (!currentPayment) {
+    throw new Error("Payment tidak ditemukan");
+  }
+
+  let paymentMethod = currentPayment.paymentMethod ?? null;
+  let paymentMethodAutoUpdated = false;
+  const ocrData = {
+    ...(currentPayment.ocrData && typeof currentPayment.ocrData === "object"
+      ? currentPayment.ocrData as Record<string, unknown>
+      : {}),
+    paymentMethodDetection: {
+      ...paymentMethodDetection,
+      detectedAt: new Date().toISOString(),
+      source: "ocr",
+    },
+  };
+  let paymentProvider: string | null = null;
+
+  if (
+    paymentMethodDetection.highConfidence &&
+    paymentMethodDetection.paymentMethod &&
+    paymentMethodDetection.paymentMethod !== currentPayment.paymentMethod
+  ) {
+    paymentMethod = paymentMethodDetection.paymentMethod;
+    paymentMethodAutoUpdated = true;
+    if (paymentMethod === "QRIS" && currentPayment.paymentProvider === "unknown") {
+      paymentProvider = "mandiri_direct";
+    }
+
+    await logAudit({
+      ...getUserFromReq(req),
+      action: "payment_method_auto_detected_ocr",
+      entity: "payment",
+      entityId: paymentId,
+      before: {
+        paymentMethod: currentPayment.paymentMethod,
+        paymentStatus: currentPayment.status,
+      },
+      after: {
+        paymentMethod,
+        confidence: paymentMethodDetection.confidence,
+        signals: paymentMethodDetection.signals,
+        matchedTerms: paymentMethodDetection.matchedTerms,
+        accountingReviewRequired: currentPayment.status === "confirmed",
+        source: "ocr",
+      },
+      ...getClientInfo(req),
+    });
+  }
+
+  await db.execute(sql`
+    UPDATE sport_center.sport_payments
+    SET ocr_name = ${ocrName}, ocr_amount = ${ocrAmount}, ocr_date = ${ocrDate},
+        ocr_raw = ${ocrRaw}, ocr_data = ${JSON.stringify(ocrData)}::jsonb,
+        payment_method = COALESCE(${paymentMethodAutoUpdated ? paymentMethod : null}, payment_method),
+        payment_provider = COALESCE(${paymentProvider}::sport_center.payment_provider, payment_provider),
+        updated_at = NOW()
+    WHERE id = ${paymentId}
+  `);
+
+  return {
+    ocrName,
+    ocrAmount,
+    ocrDate,
+    ocrRaw: ocrRaw.slice(0, 500),
+    paymentMethod,
+    paymentMethodDetection,
+    paymentMethodAutoUpdated,
+    accountingReviewRequired: paymentMethodAutoUpdated && currentPayment.status === "confirmed",
+    outcome: paymentMethodAutoUpdated
+      ? "updated"
+      : paymentMethodDetection.highConfidence && paymentMethodDetection.paymentMethod
+        ? "unchanged"
+        : "skipped",
+  };
+}
+
+// POST /bank-reconciliation/scan-ocr-bulk
+// Processes a small cursor-based batch so admins can safely re-scan all
+// existing payment proofs without creating one long request.
+router.post("/bank-reconciliation/scan-ocr-bulk", adminMiddleware, async (req, res) => {
+  try {
+    const requestedBatchSize = Number(req.body?.batchSize ?? 5);
+    const cursor = Number(req.body?.cursor ?? 0);
+    const batchSize = Number.isInteger(requestedBatchSize)
+      ? Math.min(Math.max(requestedBatchSize, 1), 5)
+      : 5;
+    const safeCursor = Number.isInteger(cursor) && cursor >= 0 ? cursor : 0;
+
+    const conditions = safeCursor > 0
+      ? and(isNotNull(paymentsTable.proofUrl), gte(paymentsTable.id, safeCursor + 1))
+      : isNotNull(paymentsTable.proofUrl);
+    const payments = await db.select({
+      id: paymentsTable.id,
+      proofUrl: paymentsTable.proofUrl,
+    })
+      .from(paymentsTable)
+      .where(conditions)
+      .orderBy(asc(paymentsTable.id))
+      .limit(batchSize);
+
+    let updated = 0;
+    let unchanged = 0;
+    let skipped = 0;
+    let failed = 0;
+    let accountingReviewRequired = 0;
+    const errors: Array<{ paymentId: number; error: string }> = [];
+
+    for (const payment of payments) {
+      if (!payment.proofUrl?.trim()) {
+        skipped++;
+        continue;
+      }
+      try {
+        const result = await scanPaymentProofOcr(payment.id, payment.proofUrl, req);
+        if (result.outcome === "updated") updated++;
+        else if (result.outcome === "unchanged") unchanged++;
+        else skipped++;
+        if (result.accountingReviewRequired) accountingReviewRequired++;
+      } catch (error) {
+        failed++;
+        if (errors.length < 10) {
+          errors.push({
+            paymentId: payment.id,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+        req.log.warn({ err: error, paymentId: payment.id }, "Bulk payment proof OCR failed");
+      }
+    }
+
+    const nextCursor = payments.length > 0 ? payments[payments.length - 1]!.id : safeCursor;
+    res.json({
+      ok: true,
+      processed: payments.length,
+      updated,
+      unchanged,
+      skipped,
+      failed,
+      accountingReviewRequired,
+      errors,
+      nextCursor,
+      hasMore: payments.length === batchSize,
+    });
+  } catch (err: any) {
+    req.log.error({ err }, "Bulk OCR scan error");
+    res.status(500).json({ error: err?.message ?? "Gagal bulk scan OCR" });
   }
 });
 
