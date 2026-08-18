@@ -28,6 +28,14 @@ deployment still carried the old value (the dev URL).
 **Why this matters:** changing a production-scoped secret has NO effect on a
 running deployment until you redeploy. Always re-publish after changing prod env.
 
+## Cross-environment schema audits
+
+The development workflow only receives development-scope variables. A read-only
+DEV-versus-PROD schema audit therefore cannot connect to both databases from the
+normal DEV shell unless a separate production-scoped runner is used. Do not
+copy the production connection URL into the development scope just to run an
+audit; that weakens the isolation boundary.
+
 ## Dev Supabase project credentials are dead — both scopes point at prod DB
 The dev Supabase project (ref `xssrf...`) DB password in `SUPABASE_DATABASE_URL_DEV`
 is invalid (auth fails → Supabase PgBouncer trips `(ECIRCUITBREAKER) too many
