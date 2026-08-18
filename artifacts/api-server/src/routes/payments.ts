@@ -25,6 +25,13 @@ import { sendInvoiceToCustomer, sendGroupInvoiceToCustomer } from "../lib/invoic
 import { normalizePaymentProvider, parseProviderPaidAt } from "../lib/paymentProvider";
 import { createPaymentProviderId, createPaymentProviderOrderId, normalizeProviderName } from "../lib/paymentMetadata";
 import { ensurePaymentBankAccount, resolveRequiredPaymentEnrichment, paymentEffectiveDate } from "../lib/paymentEnrichment";
+import {
+  createProofOcrToken,
+  paymentMethodMatchesOcr,
+  scanPaymentProof,
+  storedPaymentProofOcr,
+  verifyProofOcrToken,
+} from "../lib/paymentProofOcr";
 
 // Helper: kirim rekap ke admin WA hanya jika tanggal booking = hari ini (WIB)
 function todayWIB(): string {
@@ -56,7 +63,20 @@ router.post("/payments/proof-upload", upload.single("proof"), async (req, res) =
   try {
     if (!req.file) { res.status(400).json({ error: "No file provided" }); return; }
     const url = await uploadProofWithFallback(req.file.buffer, req.file.originalname, req.file.mimetype);
-    res.json({ objectPath: url, url });
+    const ocrScan = await scanPaymentProof(req.file.buffer, req.file.mimetype);
+    res.json({
+      objectPath: url,
+      url,
+      ocrScan: {
+        paymentMethod: ocrScan.paymentMethod,
+        confidence: ocrScan.confidence,
+        signals: ocrScan.signals,
+        amount: ocrScan.amount,
+        date: ocrScan.date,
+        engine: ocrScan.engine,
+      },
+      ocrScanToken: createProofOcrToken(url, ocrScan),
+    });
   } catch (err) {
     req.log.error({ err }, "Upload proof error");
     res.status(500).json({ error: "Upload failed" });
@@ -257,6 +277,21 @@ router.post("/payments", async (req, res) => {
       paymentProvider = normalizedProvider as "mandiri_direct" | "unknown";
     } else if (rawPaymentProvider !== undefined && rawPaymentProvider !== null && rawPaymentProvider !== "") {
       res.status(400).json({ error: "Provider hanya boleh diisi untuk pembayaran QRIS." });
+      return;
+    }
+
+    const proofOcr = verifyProofOcrToken(req.body.ocrScanToken, String(proofUrl ?? ""));
+    const ocrMethodMatch = paymentMethodMatchesOcr(paymentMethod, proofOcr);
+    if (ocrMethodMatch === false) {
+      res.status(422).json({
+        error: `Metode pembayaran tidak sesuai dengan bukti. OCR mendeteksi ${proofOcr?.paymentMethod}.`,
+        code: "PAYMENT_METHOD_PROOF_MISMATCH",
+        ocrScan: {
+          paymentMethod: proofOcr?.paymentMethod,
+          confidence: proofOcr?.confidence,
+          signals: proofOcr?.signals,
+        },
+      });
       return;
     }
 
@@ -476,6 +511,18 @@ router.post("/payments", async (req, res) => {
         expectedSettlementDate: paymentEnrichment.expectedSettlementDate ?? null,
         paidAt: paymentEnrichment.paidAt ?? null,
         notes,
+        ocrName: proofOcr?.name ?? null,
+        ocrAmount: proofOcr?.amount == null ? null : String(proofOcr.amount),
+        ocrDate: proofOcr?.date ?? null,
+        ocrRaw: proofOcr?.rawText ?? null,
+        ocrData: proofOcr ? {
+          paymentMethod: proofOcr.paymentMethod,
+          confidence: proofOcr.confidence,
+          signals: proofOcr.signals,
+          engine: proofOcr.engine,
+          scannedAt: proofOcr.scannedAt,
+          methodMatch: ocrMethodMatch,
+        } : null,
         paymentType: paymentType as "dp" | "pelunasan" | "full_payment",
       })
       .returning();
@@ -535,6 +582,18 @@ router.post("/payments", async (req, res) => {
             expectedSettlementDate: paymentEnrichment.expectedSettlementDate ?? null,
             paidAt: paymentEnrichment.paidAt ?? null,
             notes: `[Grup ${booking.groupRef}] ${notes || ""}`.trim(),
+            ocrName: proofOcr?.name ?? null,
+            ocrAmount: proofOcr?.amount == null ? null : String(proofOcr.amount),
+            ocrDate: proofOcr?.date ?? null,
+            ocrRaw: proofOcr?.rawText ?? null,
+            ocrData: proofOcr ? {
+              paymentMethod: proofOcr.paymentMethod,
+              confidence: proofOcr.confidence,
+              signals: proofOcr.signals,
+              engine: proofOcr.engine,
+              scannedAt: proofOcr.scannedAt,
+              methodMatch: ocrMethodMatch,
+            } : null,
             paymentType: paymentType as "dp" | "pelunasan" | "full_payment",
           });
         }
@@ -646,6 +705,16 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
     }
 
     const updateData: Record<string, unknown> = {};
+    const existingOcr = storedPaymentProofOcr(before);
+    const effectiveMethodBeforeUpdate = paymentMethod ?? before.paymentMethod;
+    const effectiveMethodMatch = paymentMethodMatchesOcr(effectiveMethodBeforeUpdate, existingOcr);
+    if (effectiveMethodMatch === false) {
+      res.status(422).json({
+        error: `Metode pembayaran tidak sesuai dengan bukti. OCR mendeteksi ${existingOcr?.paymentMethod}.`,
+        code: "PAYMENT_METHOD_PROOF_MISMATCH",
+      });
+      return;
+    }
     if (status) updateData.status = status;
     if (status === "confirmed") {
       const canonicalPaidAt = before.paidAt ?? new Date();

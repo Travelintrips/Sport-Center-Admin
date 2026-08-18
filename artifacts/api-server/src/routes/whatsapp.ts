@@ -56,6 +56,11 @@ import {
 } from "../services/aiSportCenterService";
 import { trackSentMessage, isBotEcho } from "../lib/waSentTracker";
 import { getHistory, appendTurn, clearHistory } from "../lib/aiConversationMemory";
+import {
+  paymentMethodMatchesOcr,
+  scanPaymentProof,
+  storedPaymentProofOcr,
+} from "../lib/paymentProofOcr";
 
 const router = Router();
 
@@ -887,6 +892,14 @@ router.post("/wa/action/:token", async (req, res) => {
         let [payment] = await db.select().from(paymentsTable)
           .where(eq(paymentsTable.bookingId, booking.id)).limit(1);
         if (!payment) { res.status(400).json({ error: "Tidak ada bukti pembayaran" }); return; }
+        const ocrScan = storedPaymentProofOcr(payment);
+        if (paymentMethodMatchesOcr(payment.paymentMethod, ocrScan) === false) {
+          res.status(422).json({
+            error: `Metode pembayaran tidak sesuai dengan bukti. OCR mendeteksi ${ocrScan?.paymentMethod}.`,
+            code: "PAYMENT_METHOD_PROOF_MISMATCH",
+          });
+          return;
+        }
         payment = await ensurePaymentBankAccount(payment, booking);
 
         await consumeWaToken(req.params.token);
@@ -1122,8 +1135,10 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
     }
 
     let proofUrl: string | undefined = req.body?.proofUrl;
+    let proofOcr = null;
     if (req.file) {
       proofUrl = await uploadProofWithFallback(req.file.buffer, req.file.originalname, req.file.mimetype);
+      proofOcr = await scanPaymentProof(req.file.buffer, req.file.mimetype);
     }
     if (!proofUrl) { res.status(400).json({ error: "Tidak ada bukti yang diupload" }); return; }
 
@@ -1138,26 +1153,60 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
     // Upsert payment record
     const [existing] = await db.select().from(paymentsTable)
       .where(eq(paymentsTable.bookingId, bookingId)).limit(1);
+    const detectedQris = proofOcr?.paymentMethod === "QRIS";
+    const resolvedPaymentMethod = detectedQris ? "QRIS" : "Transfer Bank (WhatsApp)";
+    const resolvedProvider = detectedQris ? "mandiri_direct" : "unknown";
 
     if (existing) {
       await ensurePaymentBankAccount(existing, booking);
-      await db.update(paymentsTable).set({ proofUrl, status: "pending", updatedAt: new Date() })
+      const ocrMethodMatch = paymentMethodMatchesOcr(resolvedPaymentMethod, proofOcr);
+      await db.update(paymentsTable).set({
+        proofUrl,
+        paymentMethod: resolvedPaymentMethod,
+        paymentProvider: resolvedProvider,
+        ocrName: proofOcr?.name ?? null,
+        ocrAmount: proofOcr?.amount == null ? null : String(proofOcr.amount),
+        ocrDate: proofOcr?.date ?? null,
+        ocrRaw: proofOcr?.rawText ?? null,
+        ocrData: proofOcr ? {
+          paymentMethod: proofOcr.paymentMethod,
+          confidence: proofOcr.confidence,
+          signals: proofOcr.signals,
+          engine: proofOcr.engine,
+          scannedAt: proofOcr.scannedAt,
+          methodMatch: ocrMethodMatch,
+        } : null,
+        status: "pending",
+        updatedAt: new Date(),
+      })
         .where(eq(paymentsTable.bookingId, bookingId));
     } else {
-      const paymentEnrichment = await resolveRequiredPaymentEnrichment(booking, "unknown", new Date());
+      const paymentEnrichment = await resolveRequiredPaymentEnrichment(booking, resolvedProvider, new Date());
       await db.insert(paymentsTable).values({
         bookingId,
         amount: String(Number(booking.totalPrice)),
         proofUrl,
-        paymentMethod: "Transfer Bank (WhatsApp)",
-        paymentProvider: "unknown",
-        providerName: normalizeProviderName("unknown"),
-        providerId: createPaymentProviderId("unknown", `wa-${bookingId}`),
-        providerOrderId: createPaymentProviderOrderId("unknown", `wa-order-${bookingId}`),
+        paymentMethod: resolvedPaymentMethod,
+        paymentProvider: resolvedProvider,
+        providerName: normalizeProviderName(resolvedProvider),
+        providerId: createPaymentProviderId(resolvedProvider, `wa-${bookingId}`),
+        providerOrderId: createPaymentProviderOrderId(resolvedProvider, `wa-order-${bookingId}`),
         companyId: paymentEnrichment.companyId,
         bankAccountId: paymentEnrichment.bankAccountId,
         expectedSettlementDate: paymentEnrichment.expectedSettlementDate,
         paidAt: paymentEnrichment.paidAt,
+        ocrName: proofOcr?.name ?? null,
+        ocrAmount: proofOcr?.amount == null ? null : String(proofOcr.amount),
+        ocrDate: proofOcr?.date ?? null,
+        ocrRaw: proofOcr?.rawText ?? null,
+        ocrData: proofOcr ? {
+          paymentMethod: proofOcr.paymentMethod,
+          confidence: proofOcr.confidence,
+          signals: proofOcr.signals,
+          engine: proofOcr.engine,
+          scannedAt: proofOcr.scannedAt,
+          methodMatch: paymentMethodMatchesOcr(resolvedPaymentMethod, proofOcr),
+        } : null,
         status: "pending",
       });
     }
@@ -1251,6 +1300,14 @@ router.post("/wa/review/:token", async (req, res) => {
       let [payment] = await db.select().from(paymentsTable)
         .where(eq(paymentsTable.bookingId, booking.id)).limit(1);
       if (!payment) { res.status(400).json({ error: "Tidak ada bukti pembayaran" }); return; }
+      const ocrScan = storedPaymentProofOcr(payment);
+      if (paymentMethodMatchesOcr(payment.paymentMethod, ocrScan) === false) {
+        res.status(422).json({
+          error: `Metode pembayaran tidak sesuai dengan bukti. OCR mendeteksi ${ocrScan?.paymentMethod}.`,
+          code: "PAYMENT_METHOD_PROOF_MISMATCH",
+        });
+        return;
+      }
       payment = await ensurePaymentBankAccount(payment, booking);
 
       await consumeWaToken(req.params.token);

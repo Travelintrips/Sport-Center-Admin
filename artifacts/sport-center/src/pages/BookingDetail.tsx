@@ -284,7 +284,7 @@ export default function BookingDetail() {
         throw new Error(err.error || "Upload gagal");
       }
 
-      const { url, objectPath } = await uploadResp.json();
+      const { url, objectPath, ocrScanToken, ocrScan } = await uploadResp.json();
       setUploadProgress("done");
 
       submitPayment.mutate({
@@ -295,6 +295,8 @@ export default function BookingDetail() {
           paymentMethod: paymentMethod === "qris" ? "QRIS" : "Transfer Bank",
           paymentProvider: paymentMethod === "qris" ? "mandiri_direct" : undefined,
           ...(paymentMethod === "qris" ? { paymentProvider: "mandiri_direct" as const } : {}),
+          ocrScanToken,
+          ocrScan,
           notes: notes || undefined,
           paymentType: detectedType as any,
         },

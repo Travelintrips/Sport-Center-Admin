@@ -1264,6 +1264,43 @@ function BookingDetailDrawer({
                           onChange={onUpdatePaymentMethod}
                           disabled={isUpdating}
                         />
+                        {(() => {
+                          const ocr = pmt.ocrData as {
+                            paymentMethod?: string;
+                            confidence?: number;
+                            signals?: string[];
+                            methodMatch?: boolean | null;
+                            engine?: string;
+                          } | null | undefined;
+                          if (!ocr || ocr.engine !== "tesseract" || !ocr.paymentMethod || ocr.paymentMethod === "unknown") {
+                            return (
+                              <div className="text-[11px] text-slate-400">
+                                OCR metode: belum dapat dibaca
+                              </div>
+                            );
+                          }
+                          const mismatch = ocr.methodMatch === false;
+                          return (
+                            <div className={`rounded-lg border px-2.5 py-2 text-[11px] ${
+                              mismatch
+                                ? "border-red-200 bg-red-50 text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300"
+                                : "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-300"
+                            }`}>
+                              <div className="flex items-center gap-1 font-semibold">
+                                {mismatch ? <AlertTriangle size={12} /> : <CheckCircle2 size={12} />}
+                                OCR mendeteksi: {ocr.paymentMethod}
+                                {typeof ocr.confidence === "number" && ocr.confidence > 0
+                                  ? ` (${Math.round(ocr.confidence * 100)}%)`
+                                  : ""}
+                              </div>
+                              {mismatch && (
+                                <div className="mt-0.5">
+                                  Sesuaikan metode sebelum konfirmasi pembayaran.
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
                       </div>
                       {pmt.proofUrl && <ProofImage proofUrl={pmt.proofUrl} />}
                       {((pmt.status === "pending" && pmt.proofUrl) || isRepairingBooking) && (
