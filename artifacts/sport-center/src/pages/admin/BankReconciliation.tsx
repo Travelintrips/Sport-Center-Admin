@@ -2358,6 +2358,12 @@ export default function AdminBankReconciliation() {
   const [importResult, setImportResult] = useState<any>(null);
   const [showImportDialog, setShowImportDialog] = useState(false);
   const [bulkPosting, setBulkPosting] = useState(false);
+  const [bulkOcrScanning, setBulkOcrScanning] = useState(false);
+  const [bulkOcrProgress, setBulkOcrProgress] = useState<{
+    processed: number;
+    updated: number;
+    failed: number;
+  } | null>(null);
 
   const handleBulkPostJournal = async () => {
     setBulkPosting(true);
@@ -2373,6 +2379,60 @@ export default function AdminBankReconciliation() {
       toast({ title: e.message, variant: "destructive" });
     } finally {
       setBulkPosting(false);
+    }
+  };
+
+  const handleBulkOcrScan = async () => {
+    if (!window.confirm(
+      "Scan ulang semua bukti payment yang tersimpan? Hanya hasil OCR dengan confidence minimal 85% yang akan mengubah metode pembayaran."
+    )) return;
+
+    setBulkOcrScanning(true);
+    setBulkOcrProgress({ processed: 0, updated: 0, failed: 0 });
+    let cursor = 0;
+    let hasMore = true;
+    let processed = 0;
+    let updated = 0;
+    let failed = 0;
+    let accountingReviewRequired = 0;
+
+    try {
+      while (hasMore) {
+        const response = await fetch(`${API_BASE}/bank-reconciliation/scan-ocr-bulk`, {
+          method: "POST",
+          headers: authHeaders(),
+          body: JSON.stringify({ cursor, batchSize: 5 }),
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error ?? "Gagal bulk scan OCR");
+
+        processed += Number(result.processed ?? 0);
+        updated += Number(result.updated ?? 0);
+        failed += Number(result.failed ?? 0);
+        accountingReviewRequired += Number(result.accountingReviewRequired ?? 0);
+        setBulkOcrProgress({ processed, updated, failed });
+
+        hasMore = Boolean(result.hasMore);
+        const nextCursor = Number(result.nextCursor ?? cursor);
+        if (hasMore && nextCursor <= cursor) {
+          throw new Error("Bulk scan berhenti karena cursor tidak maju");
+        }
+        cursor = nextCursor;
+      }
+
+      toast({
+        title: `✅ Bulk OCR selesai: ${updated} metode diperbarui`,
+        description: `${processed} bukti diproses · ${failed} gagal · ${accountingReviewRequired} perlu review accounting`,
+      });
+    } catch (error: any) {
+      toast({
+        title: error?.message ?? "Bulk scan OCR gagal",
+        description: `${processed} bukti sudah diproses sebelum proses berhenti`,
+        variant: "destructive",
+      });
+    } finally {
+      setBulkOcrScanning(false);
+      setBulkOcrProgress(null);
     }
   };
 
@@ -2459,6 +2519,19 @@ export default function AdminBankReconciliation() {
             >
               <Zap size={14} />
               {runMatchingMutation.isPending ? "Memproses..." : "Jalankan Matching"}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2 border-amber-300 text-amber-700 hover:bg-amber-50"
+              onClick={handleBulkOcrScan}
+              disabled={bulkOcrScanning}
+              title="Scan ulang seluruh bukti payment yang tersimpan"
+            >
+              <RefreshCw size={14} className={bulkOcrScanning ? "animate-spin" : ""} />
+              {bulkOcrScanning
+                ? `OCR ${bulkOcrProgress?.processed ?? 0} diproses...`
+                : "Scan OCR Semua Payment"}
             </Button>
             <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleFileImport} />
             <Button size="sm" className="gap-2" onClick={() => fileRef.current?.click()} disabled={importing}>

@@ -8,3 +8,9 @@ Payment proof OCR may automatically update `payment_method` only for a distincti
 **Why:** OCR text is noisy and a generic bank mention must not silently overwrite a payment method. QRIS also has a canonical `mandiri_direct` provider invariant in the Sport Center accounting flow.
 
 **How to apply:** Keep the detector pure and thresholded at 0.85; run it after payment proof creation and from manual reconciliation rescans. If a confirmed payment is changed, expose that accounting review is required rather than reposting automatically.
+
+Existing proofs are reprocessed through an admin-only cursor-based bulk endpoint in batches of at most five. Each proof is isolated so one download/OCR failure does not stop the batch; low-confidence results update OCR metadata but never overwrite the payment method.
+
+**Why:** A full production backfill can be slow and resource-intensive, while a single failed or unreadable proof should not abort the entire recovery run.
+
+**How to apply:** Keep bulk runs sequential and resumable by cursor, show updated/failed/review-required counts in the admin UI, and require an explicit confirmation before starting the run.
