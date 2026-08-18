@@ -1,3 +1,4 @@
+- [Replit DB migration fix](replit-db-migration.md) — DB client had a Supabase-only lock guard; removed it so Replit's built-in PostgreSQL (DATABASE_URL) works alongside Supabase URLs.
 - [Supabase shared instance & schema isolation](supabase-shared-instance.md) — DB is shared; our tables live in dedicated `sport_center` schema; `drizzle-kit push` hangs, generate+apply via pg on port 5432.
 - [Booking PII & access control](booking-pii-access.md) — GET /bookings list is admin-only; public booking reads must redact idCardNumber; normalize ID cards to uppercase/trim.
 - [Migration runner setup](migration-runner.md) — scripts/migrate.ts needs `pg` in scripts/package.json; run via scripts/node_modules/.bin/tsx scripts/migrate.ts (not npx/pnpm tsx which can't find pg).
@@ -11,7 +12,47 @@
 - [PPN 11% Tax Engine](tax-engine.md) — Centralized tax calc in api-server/src/lib/tax.ts; bookings.ppnRate/ppnAmount/grandTotal nullable; old bookings untouched; tax_settings seeded with PPN_OUT_11 11%; tax_transactions ledger auto-records per booking.
 - [Bank Recon Accounting Journal](bank-recon-journal.md) — ACCOUNT_MAP + postAccountingJournal() in bankReconciliation.ts; idempotent (skips if accountingPosted=true); journalId format JRN-YYYYMMDD-000001; `matched` status deprecated, kept in enum for backward compat only.
 - [Bank Recon Hardening](bank-recon-hardening.md) — 6-phase hardening: partial invoice settlement, dynamic COA rules table, tax fields on mutations, monthly closing, approval matrix (financeMiddleware/superAdminMiddleware).
+- [Bank Recon Table Naming](bank-recon-table-naming.md) — raw reconciliation SQL must use actual sport_* table names; payment_method is not a matcher filter.
 - [WA Admin Commands & BizPortal](wa-admin-commands.md) — Admin phone sourced from DB settings.adminWaPhones first (not env); commands: APPROVE/REJECT/PAID/CANCEL/RESEND; unauthorized_admin_command audit; bookings has approved_by_admin_phone/approved_at/rejected_reason/paid_at columns.
 - [Dev DB full migration recipe](dev-db-migration.md) — Base SQLs (0000/0001/0002) create core tables; all ALTER TABLE extras (account_type, booker_name, fonnte_token, payer_type, etc.) live in scripts/migrate.ts + scripts/fix_settings_cols.ts; must apply both after fresh dev DB setup.
 - [DP multi-payment flow](dp-multi-payment.md) — payments table has payment_type (dp/pelunasan/full_payment); no unique constraint on booking_id; confirm DP → booking stays pending_payment; confirm pelunasan → booking confirmed.
 - [Expenses feature](expenses-feature.md) — sport_expenses table + expense_no_seq + expense_status/category enums; accounting_journals.booking_id made nullable for expense journal entries; /admin/expenses routes.
+
+- [Payment provider audit](payment-provider-audit.md) — QRIS payments now carry canonical provider/reference/timestamp metadata; preserve safe Paylabs callback and terminal-booking guards.
+- [Required payment provider metadata](payment-provider-order-metadata.md) — booking payments require receiving account, provider name/id, and provider order id; manual flows use traceable internal identifiers.
+- [QRIS settlement account](qris-bank-mandiri-mapping.md) — QRIS Sport Center settles to Bank Mandiri CST; never map it to cash or a separate QRIS COA.
+- [Incremental payment accounting](incremental-payment-accounting.md) — Idempotency must be keyed by payment mirror, not booking, because DP and pelunasan are separate payments.
+- [Data Connection Monitor](data-connection-monitor.md) — connectionHealth.ts lib; Drizzle sql.raw() needed for IN queries on information_schema; blocked_schedules (not "schedules") is the table name; system_connection_baselines table in sport_center schema.
+- [Prod schema sync approach](prod-schema-sync.md) — drizzle-kit push hangs on shared Supabase (150+ tables); use targeted ALTER TABLE script via scripts/src/ instead.
+
+- [Company invoice list behavior](company-invoice-list.md) — distinguish empty data from API/auth errors and expose companies without invoices without allowing empty Rp0 invoices.
+
+- [COA Accounts feature](coa-accounts-feature.md) — coa_accounts table in sport_center schema; expenses FK to coa_accounts; journal type auto-detected from accountType (expense→operational, asset→kasbon, liability→bayar hutang).
+- [Workflow waitForPort config](workflow-port-config.md) — restart_workflow tool fails "DIDNT_OPEN_A_PORT" if workflow not configured with waitForPort; fix via configureWorkflow({waitForPort:8080,outputType:"console"}).
+- [WhatsApp daily usage list](wa-daily-usage-list.md) — operational list includes confirmed/completed bookings and only resends after its persisted fingerprint changes.
+- [Gym walk-in detection](gym-walk-in-detection.md) — legacy Gym rows with time_slot mode still use per-visit access based on name/category fallback.
+- [Recurring booking WA notification](recurring-wa-notification.md) — recurring/group bookings need one admin WhatsApp summary after all sessions and groupRef are created; per-session booking notifications are not enough.
+- [Re-import recovery](reimport-recovery.md) — Sport Center is a mature project, not a fresh import; on re-import just pnpm install + restart workflows, secrets/replit.md already cover setup.
+- [Artifact workflow setup](artifact-workflow-setup.md) — managed artifact workflows need PORT=8080 configured; remove manual duplicates to avoid port conflict; post-merge timeout=120s; availability at /api/availability not /api/bookings/availability.
+- [GAE deploy TS fix](gae-deploy-ts-fix.md) — analyticsPublic.ts GA4 limit field must be string "5" not number 5; blocks Cloud Build typecheck without fix.
+- [GAE deploy bundle gaps](gae-deploy-bundle-gaps.md) — gae-deploy/package.json must include @google-cloud/storage; @replit/object-storage must NOT be in esbuild external (bundle inline); app.ts uses process.cwd() for frontend dist path; express.static needs redirect:false.
+- [GAE health endpoints](gae-health-endpoints.md) — health/healthz/readiness mounted at root via app.use(healthRouter) in app.ts (NOT only under /api); /readiness does SELECT 1 with DB pool; test in jest.config.mjs uses ts-jest ESM mode + supertest.
+- [Paylabs callback invariant](paylabs-callback-invariant.md) — persist merchantTradeNo→booking_id before provider calls; callback must use exact transaction lookup and raw-body signature verification.
+- [Paylabs commit status contract](paylabs-commit-status-contract.md) — customer success UI must require committed local transaction/reconciliation, not provider success alone.
+- [Paylabs public key verification](paylabs-pubkey-verification.md) — fail-closed webhook (no key = reject), admin UI redacts keys (configured bool only), normalizePaylabsPublicKey() for PEM normalization.
+- [Paylabs webhook acknowledgement](paylabs-webhook-ack.md) — valid callbacks require a signed HTTP 200 ACK with the exact Paylabs body and headers.
+- [Paylabs private key persistence](paylabs-private-key-persistence.md) — GET must never return private keys; PATCH only accepts them when explicitly provided + valid; badge+editor UI pattern is the correct fix.
+- [Booking payment method options](booking-payment-method-options.md) — active admin methods drive labels; manual customer payments use canonical QRIS/Transfer Bank values.
+- [Merge recovery validation](merge-recovery.md) — after external merges, sync workspace dependencies and regenerate API clients before validating typecheck/build.
+- [Sport Center payment accounting audit](sport-center-payment-accounting-audit.md) — `posting_status=posted` is insufficient; verify linked public entry, GL lines, and both PPN ledgers by payment ID.
+- [Legacy payment reconciliation](legacy-payment-reconciliation.md) — legacy accounting payments may retain valid entries without sport mirrors; link only unique ref+amount pairs, never delete audit rows.
+- [Payment-accounting integration contract](payment-accounting-integration-contract.md) — cross-project financial events require explicit ownership, immutable IDs, and database-enforced idempotency.
+- [UAT QRIS fixture integrity](uat-qris-fixture-integrity.md) — marker columns and expected settlement dates must agree with staged import rows before running reconciliation UAT.
+- [Payment enrichment propagation](payment-enrichment-propagation.md) — all payment creation/finalization callers must pass canonical paidAt/effective-date context; replay enrichment must COALESCE snapshots.
+- [Tracked configuration secrets](tracked-config-secrets.md) — inspect `.replit` and legacy tracked config files for plaintext credentials before treating environment secrets as isolated.
+- [Payment accounting verification](payment-accounting-verification.md) — assess mirror completion from linkage, GL, tax, replay, and recovery evidence, not function presence or `posted` alone.
+- [Company ownership evidence](company-ownership-evidence.md) — historical payment company resolution must use validated relations; missing or conflicting evidence stays NULL and blocks posting.
+- [Live accounting schema audit](live-accounting-schema-audit.md) — active Supabase public accounting columns may be legacy-shaped; inspect information_schema before diagnostic SQL.
+- [Confirmed payment reconciliation](confirmed-payment-reconciliation.md) — payment confirmation can precede booking confirmation; retries must repair only the narrow split state without reposting accounting.
+- [Production payment-confirm trigger](payment-confirm-trigger-prod.md) — verify both function and trigger; production may have tables but neither mirroring object.
+

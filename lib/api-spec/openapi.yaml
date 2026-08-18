@@ -43,7 +43,85 @@ tags:
     description: Bank mutation import and reconciliation matching
   - name: expenses
     description: Operational expense management
+  - name: document-templates
+    description: Company document template management (invoice, SPP, faktur, kwitansi, etc.)
 paths:
+  /admin/facility-company-mappings:
+    get:
+      operationId: listFacilityCompanyMappings
+      tags: [facilities]
+      summary: List effective-dated facility ownership mappings
+      parameters:
+        - name: facilityId
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Ownership mappings
+    post:
+      operationId: createFacilityCompanyMapping
+      tags: [facilities]
+      summary: Create an effective-dated facility ownership mapping
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [facilityId, companyId, effectiveFrom]
+              properties:
+                facilityId: { type: integer }
+                companyId: { type: integer }
+                effectiveFrom: { type: string, format: date }
+                effectiveUntil: { type: string, format: date, nullable: true }
+                isActive: { type: boolean }
+                source: { type: string }
+                notes: { type: string, nullable: true }
+      responses:
+        "201":
+          description: Mapping created
+  /admin/facility-company-mappings/{id}:
+    patch:
+      operationId: updateFacilityCompanyMapping
+      tags: [facilities]
+      summary: Deactivate or supersede an ownership mapping
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                isActive: { type: boolean }
+                effectiveUntil: { type: string, format: date, nullable: true }
+                notes: { type: string, nullable: true }
+      responses:
+        "200":
+          description: Mapping updated
+  /admin/audit-sport-center-payments/13-14-dry-run:
+    get:
+      operationId: auditSportCenterPayments1314DryRun
+      tags: [payments]
+      summary: Dry-run repair readiness for payments 13 and 14
+      responses:
+        "200":
+          description: Read-only repair report
+  /admin/audit-sport-center-ownership/dry-run:
+    get:
+      operationId: auditSportCenterOwnershipDryRun
+      tags: [payments]
+      summary: Dry-run historical ownership classifier
+      responses:
+        "200":
+          description: Read-only ownership classification
+
   /healthz:
     get:
       operationId: healthCheck
@@ -383,6 +461,21 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/TimeSlot"
+
+  /vendors:
+    get:
+      operationId: listVendors
+      tags: [vendors]
+      summary: List active vendors (public dropdown)
+      responses:
+        "200":
+          description: List of active vendors
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/VendorSimple"
 
   /bookings:
     get:
@@ -1341,6 +1434,27 @@ paths:
               schema:
                 $ref: "#/components/schemas/GymMembership"
 
+  /memberships/lookup:
+    post:
+      operationId: lookupMembership
+      tags: [memberships]
+      summary: Look up a membership by phone number (public)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MembershipLookupInput"
+      responses:
+        "200":
+          description: Membership found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MembershipLookupResult"
+        "404":
+          description: Not found
+
   /memberships/{id}/payment-proof:
     post:
       operationId: submitMembershipPaymentProof
@@ -1659,6 +1773,62 @@ paths:
                 $ref: "#/components/schemas/Booking"
         "400":
           description: Already checked in
+        "404":
+          description: Booking not found
+
+  /bookings/{id}/wa-logs:
+    get:
+      operationId: getBookingWaLogs
+      tags: [bookings]
+      summary: Get WA notification logs for a booking (admin)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: WA notification logs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/WaNotifLog"
+        "404":
+          description: Booking not found
+
+  /bookings/{id}/resend-wa:
+    post:
+      operationId: resendBookingWa
+      tags: [bookings]
+      summary: Resend WA notification to customer based on booking status (admin)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: WA sent
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, message]
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+        "400":
+          description: Cannot resend for this status
         "404":
           description: Booking not found
 
@@ -2416,6 +2586,195 @@ paths:
               schema:
                 $ref: "#/components/schemas/Expense"
 
+  /admin/document-templates:
+    get:
+      operationId: listDocumentTemplates
+      tags: [document-templates]
+      summary: List document templates with optional filters
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: companyId
+          schema:
+            type: string
+        - in: query
+          name: documentType
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of document templates
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DocumentTemplate"
+    post:
+      operationId: createDocumentTemplate
+      tags: [document-templates]
+      summary: Create a new document template
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DocumentTemplateInput"
+      responses:
+        "201":
+          description: Created template
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentTemplate"
+
+  /admin/document-templates/{id}:
+    get:
+      operationId: getDocumentTemplate
+      tags: [document-templates]
+      summary: Get a document template by ID
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Document template
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentTemplate"
+    put:
+      operationId: updateDocumentTemplate
+      tags: [document-templates]
+      summary: Update a document template
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DocumentTemplateInput"
+      responses:
+        "200":
+          description: Updated template
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentTemplate"
+    delete:
+      operationId: deleteDocumentTemplate
+      tags: [document-templates]
+      summary: Delete a document template (non-default only)
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+
+  /admin/documents/{documentType}/{entityId}/preview:
+    get:
+      operationId: previewDocument
+      tags: [document-templates]
+      summary: Render document as HTML preview (no number issuance)
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: documentType
+          required: true
+          schema:
+            type: string
+            enum: [invoice, spp, faktur, kwitansi, lampiran, berita_acara]
+        - in: path
+          name: entityId
+          required: true
+          schema:
+            type: integer
+        - in: query
+          name: companyId
+          schema:
+            type: integer
+        - in: query
+          name: _token
+          description: JWT token for browser window.open() flows (alternative to Authorization header)
+          schema:
+            type: string
+      responses:
+        "200":
+          description: HTML document preview
+          content:
+            text/html:
+              schema:
+                type: string
+
+  /admin/documents/{documentType}/{entityId}/pdf:
+    get:
+      operationId: generateDocumentPdf
+      tags: [document-templates]
+      summary: Generate PDF binary (Puppeteer) or print-ready HTML fallback; issues document number
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: documentType
+          required: true
+          schema:
+            type: string
+            enum: [invoice, spp, faktur, kwitansi, lampiran, berita_acara]
+        - in: path
+          name: entityId
+          required: true
+          schema:
+            type: integer
+        - in: query
+          name: companyId
+          schema:
+            type: integer
+        - in: query
+          name: _token
+          description: JWT token for browser window.open() flows (alternative to Authorization header)
+          schema:
+            type: string
+      responses:
+        "200":
+          description: PDF binary (application/pdf) or HTML fallback (text/html)
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+            text/html:
+              schema:
+                type: string
+
 components:
   schemas:
     HealthStatus:
@@ -2798,6 +3157,16 @@ components:
         notes:
           type: string
 
+        downPaymentAmount:
+          type: number
+          description: Total down payment for the recurring payment group. Must be less than the group grand total.
+
+        customerType:
+          type: string
+          enum: [umum, angkasa_pura]
+        idCardNumber:
+          type: string
+
     RecurringBookingResult:
       type: object
       required: [created, skipped, totalBookings, grandTotal]
@@ -2814,6 +3183,40 @@ components:
           type: integer
         grandTotal:
           type: number
+
+    Vendor:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        contactPerson:
+          type: ["string", "null"]
+        phone:
+          type: ["string", "null"]
+        email:
+          type: ["string", "null"]
+        address:
+          type: ["string", "null"]
+        notes:
+          type: ["string", "null"]
+        isActive:
+          type: boolean
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+
+    VendorSimple:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
 
     BookingInput:
       type: object
@@ -2844,6 +3247,9 @@ components:
           type: string
         notes:
           type: string
+        vendorId:
+          type: integer
+          nullable: true
 
     BookingUpdate:
       type: object
@@ -2856,7 +3262,7 @@ components:
 
     Payment:
       type: object
-      required: [id, bookingId, amount, status]
+      required: [id, bookingId, amount, providerName, providerId, providerOrderId, bankAccountId, status]
       properties:
         id:
           type: integer
@@ -2868,6 +3274,23 @@ components:
           type: ["string", "null"]
         paymentMethod:
           type: ["string", "null"]
+        paymentProvider:
+          type: ["string", "null"]
+          enum: [mandiri_direct, paylabs, unknown, null]
+        providerName:
+          type: string
+        providerId:
+          type: string
+        providerOrderId:
+          type: string
+        bankAccountId:
+          type: string
+        providerReference:
+          type: ["string", "null"]
+        merchantTradeNo:
+          type: ["string", "null"]
+        providerTradeNo:
+          type: ["string", "null"]
         paymentType:
           type: string
           enum: [dp, pelunasan, full_payment]
@@ -2875,6 +3298,8 @@ components:
           type: string
           enum: [pending, confirmed, rejected]
         confirmedAt:
+          type: ["string", "null"]
+        paidAt:
           type: ["string", "null"]
         notes:
           type: ["string", "null"]
@@ -2893,6 +3318,14 @@ components:
           type: number
         proofUrl:
           type: string
+        paymentMethod:
+          type: string
+          enum: [Transfer Bank, QRIS]
+        paymentProvider:
+          type: string
+          enum: [mandiri_direct, paylabs, unknown]
+        providerOrderId:
+          type: string
         paymentType:
           type: string
           enum: [dp, pelunasan, full_payment]
@@ -2905,6 +3338,11 @@ components:
         status:
           type: string
           enum: [pending, confirmed, rejected]
+        paymentMethod:
+          type: string
+        paymentProvider:
+          type: string
+          enum: [mandiri_direct, paylabs, unknown]
         notes:
           type: string
 
@@ -3460,6 +3898,12 @@ components:
         createdAt:
           type: string
           nullable: true
+        groupRef:
+          type: string
+          nullable: true
+        customerName:
+          type: string
+          nullable: true
 
     Review:
       type: object
@@ -3640,6 +4084,37 @@ components:
           enum: [pending_payment, waiting_confirmation, active, expired, cancelled]
         notes:
           type: string
+
+    MembershipLookupInput:
+      type: object
+      required: [phone]
+      properties:
+        phone:
+          type: string
+
+    MembershipLookupResult:
+      type: object
+      required: [id, name, phone, email, status, startDate, endDate, months, totalPrice]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        phone:
+          type: string
+        email:
+          type: string
+        status:
+          type: string
+          enum: [pending_payment, waiting_confirmation, active, expired, cancelled]
+        startDate:
+          type: string
+        endDate:
+          type: string
+        months:
+          type: integer
+        totalPrice:
+          type: number
 
     MembershipPaymentProofInput:
       type: object
@@ -4528,4 +5003,130 @@ components:
           type: string
           enum: [submit, approve, reject, pay, cancel]
         rejectedReason:
+          type: string
+
+    DocumentTemplate:
+      type: object
+      properties:
+        id:
+          type: integer
+        companyId:
+          type: integer
+          nullable: true
+        companyName:
+          type: string
+        documentType:
+          type: string
+          enum: [invoice, spp, faktur, kwitansi, lampiran, berita_acara]
+        isDefault:
+          type: boolean
+        headerLogoUrl:
+          type: string
+          nullable: true
+        kopSuratHtml:
+          type: string
+          nullable: true
+        footerHtml:
+          type: string
+          nullable: true
+        companyDisplayName:
+          type: string
+          nullable: true
+        financeName:
+          type: string
+          nullable: true
+        financeTitle:
+          type: string
+          nullable: true
+        financeSignature:
+          type: string
+          nullable: true
+        address:
+          type: string
+          nullable: true
+        phone:
+          type: string
+          nullable: true
+        email:
+          type: string
+          nullable: true
+        numberFormatPrefix:
+          type: string
+          nullable: true
+        numberFormatPattern:
+          type: string
+          nullable: true
+        paperStyle:
+          type: string
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+
+    DocumentTemplateInput:
+      type: object
+      required: [documentType]
+      properties:
+        companyId:
+          type: integer
+          nullable: true
+        documentType:
+          type: string
+          enum: [invoice, spp, faktur, kwitansi, lampiran, berita_acara]
+        isDefault:
+          type: boolean
+        headerLogoUrl:
+          type: string
+        kopSuratHtml:
+          type: string
+        footerHtml:
+          type: string
+        companyDisplayName:
+          type: string
+        financeName:
+          type: string
+        financeTitle:
+          type: string
+        financeSignature:
+          type: string
+        address:
+          type: string
+        phone:
+          type: string
+        email:
+          type: string
+        numberFormatPrefix:
+          type: string
+        numberFormatPattern:
+          type: string
+        paperStyle:
+          type: string
+
+    WaNotifLog:
+      type: object
+      required: [id, recipientPhone, status, sentAt]
+      properties:
+        id:
+          type: integer
+        bookingId:
+          type: integer
+          nullable: true
+        orderNumber:
+          type: string
+          nullable: true
+        event:
+          type: string
+          nullable: true
+        recipientPhone:
+          type: string
+        messagePreview:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [sent, failed]
+        errorMessage:
+          type: string
+          nullable: true
+        sentAt:
           type: string

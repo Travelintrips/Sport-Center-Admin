@@ -1,0 +1,569 @@
+# TASK — Configure Facility Ownership + Dry-Run Repair Payment 13/14
+
+Lanjutkan dari state workspace saat ini.
+
+JANGAN mengulang audit QRIS, accounting pipeline, mirror pipeline, resolver, atau diagnostic yang sudah selesai.
+
+Current status:
+
+`OWNERSHIP_CONFIGURATION_REQUIRED`
+
+Payment yang sedang diperiksa:
+
+* `sport_center.sport_payments.id = 13`
+* `sport_center.sport_payments.id = 14`
+
+Facility terkait:
+
+* Facility 1 — Lapangan Badminton A
+* Facility 7 — Meja Billiard
+
+Payment 13/14 saat ini confirmed dan memiliki accounting legacy, tetapi ownership company belum memiliki evidence deterministik.
+
+Tujuan task ini adalah:
+
+1. menyediakan mekanisme ownership facility → company yang resmi dan auditable;
+2. melakukan dry-run repair payment 13/14;
+3. memastikan source payment → public mirror → accounting entry → GL → tax dapat direpair secara idempotent;
+4. TIDAK melakukan repair aktual sampai ownership terbukti deterministik dan dry-run PASS.
+
+---
+
+# 1. SAFETY RULES
+
+WAJIB:
+
+* gunakan database development aktif saja;
+* identifikasi environment/database sebelum melakukan apa pun;
+* jangan fallback ke database/environment lain;
+* jangan menggunakan company ID dari legacy accounting entry sebagai evidence ownership;
+* jangan menebak company dari nama facility;
+* jangan menebak company dari rekening bank;
+* jangan menebak company dari provider;
+* jangan menganggap `company_id = 1` sebagai default;
+* jangan mass backfill;
+* jangan final reconciliation;
+* jangan accounting posting baru;
+* jangan settlement posting;
+* jangan production deploy.
+
+Jika ownership tidak dapat dibuktikan secara deterministik:
+
+`STOP`
+
+dan hasilkan:
+
+`OWNERSHIP_CONFIGURATION_REQUIRED`
+
+---
+
+# 2. FACILITY OWNERSHIP CONFIGURATION
+
+Gunakan atau buat additive configuration yang canonical untuk:
+
+`facility_id → company_id`
+
+Configuration minimal harus memiliki:
+
+* facility_id
+* company_id
+* effective_from
+* effective_to nullable
+* evidence_source
+* evidence_reference
+* status/active
+* created_at
+* updated_at
+
+Gunakan effective-dated configuration.
+
+Jangan overwrite historical mapping.
+
+Jangan membuat overlapping active mapping untuk facility dan periode yang sama.
+
+Tambahkan constraint/index yang aman bila diperlukan.
+
+Migration harus additive dan backward-compatible.
+
+Dilarang:
+
+* DROP TABLE
+* DROP COLUMN
+* destructive rewrite
+
+---
+
+# 3. OWNERSHIP YANG HARUS DISETUJUI
+
+JANGAN menentukan sendiri company Facility 1 dan Facility 7.
+
+Pertama audit company records yang tersedia dan tampilkan kandidat secara read-only.
+
+Untuk masing-masing facility tampilkan:
+
+Facility:
+
+* facility ID
+* facility name
+
+Candidate company:
+
+* company ID
+* company name
+* company status
+
+Tetapi jangan melakukan mapping hanya karena company tersebut tersedia.
+
+Mapping hanya boleh dibuat jika sudah terdapat approved/deterministic evidence.
+
+Jika workspace/task input belum menyediakan approval company yang benar:
+
+jangan INSERT mapping.
+
+Return:
+
+`AWAITING_OWNERSHIP_APPROVAL`
+
+---
+
+# 4. OWNERSHIP RESOLVER
+
+Pastikan resolver company menggunakan precedence yang deterministic.
+
+Allowed evidence:
+
+1. source payment company snapshot;
+2. booking company relation;
+3. invoice company relation;
+4. effective facility ownership mapping;
+5. validated merchant/company configuration.
+
+Resolver harus menghasilkan:
+
+* resolvedCompanyId
+* evidenceSource
+* evidenceReference
+* effectiveDate
+* deterministic
+* reason
+
+Jika lebih dari satu evidence valid tetapi company berbeda:
+
+`OWNERSHIP_CONFLICT`
+
+dan:
+
+`deterministic = false`
+
+Jika tidak ada evidence:
+
+`OWNERSHIP_CONFIGURATION_REQUIRED`
+
+Jangan fallback ke legacy accounting entry.
+
+---
+
+# 5. PAYMENT 13/14 DRY-RUN
+
+Setelah resolver tersedia, jalankan dry-run untuk:
+
+Payment 13
+
+dan
+
+Payment 14.
+
+JANGAN melakukan UPDATE/INSERT repair.
+
+Untuk masing-masing payment laporkan:
+
+## Source payment
+
+* payment ID
+* booking ID
+* facility ID
+* amount
+* payment type
+* payment method
+* payment provider
+* company ID
+* bank account ID
+* provider reference
+* provider order ID
+* merchant trade no
+* provider trade no
+* paid_at
+* status
+* tax rate
+
+## Ownership
+
+* resolved company ID
+* evidence source
+* evidence reference
+* effective date
+* deterministic
+* reason
+
+## Mirror
+
+`public.sport_payments`
+
+Audit:
+
+* mirror ID
+* source_payment_id
+* payment_number
+* company_id
+* bank_account_id
+* payment_method/method
+* payment_provider
+* provider_code
+* provider_reference
+* provider_order_id
+* merchant_trade_no
+* provider_trade_no
+* paid_at
+* expected_settlement_date
+* entry_id
+* posting_status
+
+## Accounting
+
+`public.accounting_entries`
+
+Cari terutama menggunakan:
+
+`correlation_id = sc_payment_{payment_id}`
+
+Audit:
+
+* entry ID
+* correlation ID
+* source
+* source_id
+* source_payment_id jika tersedia
+* company_id
+* payment_method metadata
+* payment_provider metadata
+* bank_account metadata
+* status
+
+## GL
+
+`public.accounting_entry_lines`
+
+Pastikan:
+
+`SUM(debit) = SUM(credit)`
+
+Laporkan debit/credit account yang digunakan.
+
+## Tax
+
+Bandingkan:
+
+`sport_center.tax_transactions`
+
+dengan:
+
+`public.gl_tax_lines`
+
+Laporkan:
+
+* expected PPN
+* internal tax amount
+* public tax amount
+* missing tax line
+* duplicate tax line
+* mismatch
+
+---
+
+# 6. REPAIR PLAN
+
+Jika ownership deterministic, buat repair plan tetapi default tetap:
+
+`DRY_RUN = TRUE`
+
+Repair plan untuk masing-masing payment harus mencakup:
+
+### Source payment
+
+Isi `company_id` hanya jika:
+
+* source NULL;
+* ownership deterministic;
+* tidak ada conflicting evidence.
+
+Jangan overwrite company existing yang berbeda.
+
+Conflict harus menjadi:
+
+`MANUAL_REVIEW`
+
+### Public mirror
+
+Repair secara idempotent:
+
+* source_payment_id
+* company_id
+* bank_account_id
+* payment method
+* payment_provider
+* provider_code
+* provider_reference
+* provider_order_id
+* merchant_trade_no
+* provider_trade_no
+* paid_at
+* expected_settlement_date
+* entry_id
+* posting_status
+
+Gunakan null-preserving/COALESCE semantics.
+
+Jangan menghapus metadata existing yang valid.
+
+### Existing accounting entry
+
+Jangan membuat accounting entry baru jika sudah ada:
+
+`correlation_id = sc_payment_{payment_id}`
+
+Recovery entry existing secara idempotent.
+
+Canonical metadata yang perlu direpair jika aman:
+
+* source → `sport_center_payment`
+* source/payment relation
+* company_id
+* payment_method
+* payment_provider
+* bank_account_id
+* payment correlation metadata
+
+Jangan mengubah nilai GL jika existing GL sudah benar dan balanced.
+
+Jangan duplicate journal.
+
+---
+
+# 7. TAX REPAIR PLAN
+
+Payment 13 expected:
+
+* gross: Rp100.000
+* internal PPN: Rp9.910
+
+Payment 14 expected:
+
+* gross: Rp50.000
+* internal PPN: Rp4.955
+
+Gunakan nilai source/tax ledger aktual sebagai source of truth saat runtime.
+
+Jika:
+
+* ownership deterministic;
+* accounting entry ditemukan;
+* GL balanced;
+* internal tax transaction valid;
+* public `gl_tax_lines` belum ada;
+
+maka classifier boleh menghasilkan:
+
+`SAFE_PUBLIC_TAX_REPAIR`
+
+Tetapi dalam task ini tetap dry-run.
+
+Gunakan idempotency guard seperti:
+
+`NOT EXISTS`
+
+atau unique business key yang sesuai.
+
+Jangan membuat duplicate tax line.
+
+---
+
+# 8. ACCOUNTING SAFETY
+
+Jangan redesign accounting pada task ini.
+
+QRIS confirmed saat ini diketahui menggunakan:
+
+`Bank Mandiri CST`
+
+COA:
+
+`1-1020-CST`
+
+Pertahankan behavior existing untuk task repair.
+
+Tetapi tetap laporkan:
+
+`ACCOUNTING_DESIGN_REVIEW_REQUIRED`
+
+karena QRIS saat confirmed saat ini langsung mendebit Bank Mandiri CST sebelum settlement bank final.
+
+Review clearing/settlement account dilakukan pada task terpisah.
+
+---
+
+# 9. REPAIR CLASSIFICATION
+
+Untuk setiap payment hasilkan salah satu:
+
+`SAFE_TO_REPAIR`
+
+`OWNERSHIP_CONFIGURATION_REQUIRED`
+
+`OWNERSHIP_CONFLICT`
+
+`ACCOUNTING_CONFLICT`
+
+`TAX_CONFLICT`
+
+`MANUAL_REVIEW`
+
+`ALREADY_COMPLETE`
+
+`SAFE_TO_REPAIR` hanya boleh diberikan jika seluruh prerequisite deterministic.
+
+---
+
+# 10. IDEMPOTENCY
+
+Buktikan repair plan idempotent.
+
+Dry-run dua kali dengan input sama harus menghasilkan:
+
+* company yang sama;
+* mirror changes yang sama;
+* accounting changes yang sama;
+* tax changes yang sama;
+* classification yang sama.
+
+Tidak boleh menghasilkan rencana duplicate accounting entry atau duplicate tax line.
+
+---
+
+# 11. TESTS
+
+Tambahkan/pertahankan focused tests minimal untuk:
+
+1. facility mapping deterministic;
+2. no ownership mapping;
+3. overlapping mapping conflict;
+4. source company vs facility company conflict;
+5. legacy accounting company tidak digunakan sebagai evidence;
+6. mirror repair idempotent;
+7. existing accounting entry recovery tanpa duplicate;
+8. public tax repair tanpa duplicate;
+9. DP dan pelunasan tetap terpisah berdasarkan payment ID;
+10. QRIS provider/payment metadata tetap propagated.
+
+Jalankan:
+
+`pnpm run typecheck:libs`
+
+`pnpm --filter @workspace/api-server run typecheck`
+
+`pnpm --filter @workspace/api-server run build`
+
+relevant tests
+
+`git diff --check`
+
+---
+
+# 12. RUNTIME VALIDATION
+
+Restart hanya workflow aplikasi development yang benar.
+
+Jangan menjalankan API standalone jika port 8080 sudah dipakai combined workflow.
+
+Verifikasi:
+
+* `/health`
+* `/readiness`
+* `/api/health`
+
+Semua harus 200.
+
+---
+
+# 13. FINAL REPORT
+
+Laporkan:
+
+## A. Environment identity
+
+## B. Ownership configuration status
+
+Facility 1:
+
+* company
+* evidence
+* effective date
+* deterministic status
+
+Facility 7:
+
+* company
+* evidence
+* effective date
+* deterministic status
+
+## C. Payment 13 audit
+
+## D. Payment 14 audit
+
+## E. Mirror repair plan
+
+## F. Accounting recovery plan
+
+## G. Tax repair plan
+
+## H. Idempotency
+
+## I. Tests/typecheck/build
+
+## J. Runtime health
+
+## K. Remaining risks
+
+## L. Final decision
+
+Final decision hanya boleh salah satu:
+
+`AWAITING_OWNERSHIP_APPROVAL`
+
+`OWNERSHIP_CONFIGURATION_REQUIRED`
+
+`OWNERSHIP_CONFLICT`
+
+`READY_FOR_CONTROLLED_REPAIR`
+
+---
+
+# IMPORTANT
+
+Jangan melakukan actual historical repair hanya karena dry-run PASS.
+
+Pada task ini target utama adalah:
+
+`ownership configuration + deterministic dry-run repair plan`
+
+Bukan:
+
+`apply repair`
+
+Jika company owner Facility 1 dan Facility 7 belum diberikan atau belum memiliki evidence resmi, berhenti pada:
+
+`AWAITING_OWNERSHIP_APPROVAL`
+
+dan tampilkan company candidates yang tersedia agar owner dapat dipilih/disetujui.
+
+Jangan commit, push, production deploy, final reconciliation, accounting posting, historical backfill, atau actual repair tanpa instruksi eksplisit berikutnya.

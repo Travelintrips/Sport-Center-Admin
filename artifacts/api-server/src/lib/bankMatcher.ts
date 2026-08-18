@@ -6,6 +6,12 @@ import {
   type BankMutation,
 } from "@workspace/db";
 import { eq, inArray, notInArray, sql, and, gte, lte } from "drizzle-orm";
+import {
+  evaluateQrisMutation,
+  type QrisMdrRule,
+  type QrisPaymentInput,
+  type QrisMutationInput,
+} from "./qrisCandidateEngine";
 
 const GOPAY_PATTERN = /DOMPET ANAK BANGSA|GOPAY|OVO|DANA|LINKAJA|SHOPEEPAY/i;
 const ORDER_ID_PATTERN = /\b(ID\d{15,25}[A-Z]{0,4}|TRX\d{10,}|INV-\d{8,})\b/i;
@@ -94,6 +100,129 @@ interface MatchCandidate {
   statusValidMatch: boolean;
   toleranceUsed: boolean;
   ocrMatch?: boolean;
+  // Group payment fields
+  isGroupPayment?: boolean;
+  groupRef?: string;
+  groupBookingCount?: number;
+  groupTotalAmount?: number;
+  hardReview?: boolean;
+}
+
+function isCanonicalQrisProvider(value: unknown): value is "mandiri_direct" | "paylabs" | "unknown" {
+  return value === "mandiri_direct" || value === "paylabs" || value === "unknown";
+}
+
+async function computeStrictQrisCandidate(mutation: BankMutation): Promise<MatchCandidate[] | null> {
+  const provider = isCanonicalQrisProvider(mutation.providerName)
+    ? mutation.providerName
+    : null;
+  const rawPayload = mutation.rawPayload && typeof mutation.rawPayload === "object"
+    ? mutation.rawPayload as Record<string, unknown>
+    : null;
+  const rawProvider = typeof rawPayload?.provider === "string" ? rawPayload.provider : null;
+  const isQris = provider !== null ||
+    rawProvider === "mandiri_direct" ||
+    rawProvider === "paylabs" ||
+    rawProvider === "unknown";
+  if (!isQris) return null;
+
+  const paymentRows = await db.execute(sql`
+    SELECT
+      p.id,
+      p.company_id AS "companyId",
+      p.bank_account_id AS "bankAccountId",
+      p.amount,
+      p.payment_method AS "paymentMethod",
+      p.payment_provider AS "provider",
+      p.expected_settlement_date AS "expectedSettlementDate",
+      p.provider_reference AS "providerReference",
+      p.merchant_trade_no AS "merchantTradeNo",
+      p.provider_trade_no AS "providerTradeNo",
+      p.notes
+    FROM sport_center.sport_payments p
+    WHERE p.payment_method = 'QRIS'
+       OR p.payment_provider IN ('mandiri_direct', 'paylabs', 'unknown')
+  `);
+  const payments = (paymentRows.rows as Array<Record<string, unknown>>).map((row): QrisPaymentInput => ({
+    id: Number(row.id),
+    companyId: row.companyId == null ? null : Number(row.companyId),
+    bankAccountId: typeof row.bankAccountId === "string" ? row.bankAccountId : null,
+    amount: Number(row.amount),
+    provider: isCanonicalQrisProvider(row.provider) ? row.provider : null,
+    expectedSettlementDate: typeof row.expectedSettlementDate === "string" ? row.expectedSettlementDate.slice(0, 10) : null,
+    providerReference: typeof row.providerReference === "string" ? row.providerReference : null,
+    merchantTradeNo: typeof row.merchantTradeNo === "string" ? row.merchantTradeNo : null,
+    providerTradeNo: typeof row.providerTradeNo === "string" ? row.providerTradeNo : null,
+    notes: typeof row.notes === "string" ? row.notes : null,
+  }));
+
+  const ruleRows = await db.execute(sql`
+    SELECT
+      company_id AS "companyId",
+      bank_account_id AS "bankAccountId",
+      provider_code AS provider,
+      expected_mdr_rate AS "expectedMdrRate",
+      rate_tolerance AS "rateTolerance",
+      effective_from AS "effectiveFrom",
+      effective_until AS "effectiveUntil"
+    FROM sport_center.uat_qris_mdr_configs
+  `).catch(() => ({ rows: [] as Array<Record<string, unknown>> }));
+  const rules = (ruleRows.rows as Array<Record<string, unknown>>)
+    .filter((row) => isCanonicalQrisProvider(row.provider) && row.provider !== "unknown")
+    .map((row): QrisMdrRule => ({
+      companyId: Number(row.companyId),
+      bankAccountId: String(row.bankAccountId),
+      provider: row.provider as "mandiri_direct" | "paylabs",
+      expectedMdrRate: Number(row.expectedMdrRate),
+      rateTolerance: Number(row.rateTolerance),
+      effectiveFrom: String(row.effectiveFrom).slice(0, 10),
+      effectiveUntil: row.effectiveUntil == null ? null : String(row.effectiveUntil).slice(0, 10),
+    }));
+
+  const qrisMutation: QrisMutationInput = {
+    id: mutation.id,
+    companyId: mutation.companyId == null ? null : Number(mutation.companyId),
+    bankAccountId: mutation.bankAccountId,
+    transactionDate: mutation.transactionDate.slice(0, 10),
+    creditAmount: Number(mutation.creditAmount ?? mutation.amount ?? 0),
+    amount: Number(mutation.amount),
+    provider: provider ?? (isCanonicalQrisProvider(rawProvider) ? rawProvider : null),
+    providerDetectionSource: rawPayload?.provider
+      ? "canonical provider field + sanitized raw payload"
+      : "canonical mutation provider field",
+    description: mutation.description,
+    providerOrderId: mutation.providerOrderId,
+    rawPayload,
+  };
+  const evaluation = evaluateQrisMutation(qrisMutation, payments, rules);
+  const candidateId = evaluation.paymentIds[0] ?? 0;
+
+  if (evaluation.decision === "UNMATCHED" && !evaluation.paymentIds.length) return [];
+
+  return [{
+    candidateType: "payment",
+    candidateId,
+    score: evaluation.decision === "MATCHED" ? 100 : 50,
+    reason: [
+      evaluation.reason,
+      `provider=${evaluation.provider ?? "unknown"}`,
+      `payment_ids=${evaluation.paymentIds.join(",") || "none"}`,
+      `gross=${evaluation.gross}`,
+      `credit=${evaluation.bankCredit}`,
+      `deduction=${evaluation.observedDeduction}`,
+      `effective_rate=${evaluation.effectiveRate ?? "n/a"}`,
+      `expected_mdr=${evaluation.expectedMdrRate ?? "n/a"}`,
+      `reference=${evaluation.referenceEvidence ?? "none"}`,
+    ],
+    amountMatch: evaluation.gross > 0 && evaluation.observedDeduction >= 0,
+    dateMatch: evaluation.reason !== "SETTLEMENT_DATE_MISMATCH",
+    nameMatch: false,
+    orderIdMatch: false,
+    proofMatch: false,
+    statusValidMatch: true,
+    toleranceUsed: evaluation.expectedMdrRate != null,
+    hardReview: evaluation.decision !== "MATCHED",
+  }];
 }
 
 /**
@@ -167,6 +296,9 @@ function scoreOcr(
 export async function computeMatchesForMutation(mutation: BankMutation): Promise<MatchCandidate[]> {
   if (mutation.direction !== "IN") return computeMatchesForOutMutation(mutation);
 
+  const strictQrisCandidates = await computeStrictQrisCandidate(mutation);
+  if (strictQrisCandidates) return strictQrisCandidates;
+
   const candidates: MatchCandidate[] = [];
   const mutationAmount = Number(mutation.amount);
   const normDesc = mutation.normalizedDescription ?? normalizeDescription(mutation.description);
@@ -192,6 +324,7 @@ export async function computeMatchesForMutation(mutation: BankMutation): Promise
       totalPrice: bookingsTable.totalPrice,
       grandTotal: bookingsTable.grandTotal,
       status: bookingsTable.status,
+      groupRef: bookingsTable.groupRef,
       updatedAt: sql<string>`${bookingsTable.updatedAt}`.as("updated_at"),
     })
     .from(bookingsTable)
@@ -217,7 +350,7 @@ export async function computeMatchesForMutation(mutation: BankMutation): Promise
       p.ocr_amount AS "ocrAmount",
       p.ocr_date AS "ocrDate",
       p.ocr_raw AS "ocrRaw"
-    FROM sport_center.payments p
+    FROM sport_center.sport_payments p
   `);
 
   type PaymentRow = {
@@ -389,6 +522,175 @@ export async function computeMatchesForMutation(mutation: BankMutation): Promise
 
     candidates.push(candidate);
   }
+
+
+  // ── Group Payment Scoring ──────────────────────────────────────────────────
+  // Jika beberapa booking punya groupRef yang sama, cocokkan mutasi ke total grup.
+  // Ini menangani kasus customer transfer 1x untuk multi-sesi (grup booking).
+  {
+    const groupedBookings = new Map<string, typeof bookings>();
+    for (const b of bookings) {
+      if (!b.groupRef) continue;
+      const existing = groupedBookings.get(b.groupRef) ?? [];
+      existing.push(b);
+      groupedBookings.set(b.groupRef, existing);
+    }
+
+    for (const [groupRef, groupBookings] of groupedBookings) {
+      if (groupBookings.length < 2) continue; // single = sudah di-score individual
+
+      const groupTotalNet = groupBookings.reduce((s: number, b: typeof groupBookings[0]) => s + Number(b.totalPrice), 0);
+      const groupTotalGross = groupBookings.reduce((s: number, b: typeof groupBookings[0]) => s + (b.grandTotal ? Number(b.grandTotal) : Number(b.totalPrice)), 0);
+      const useAmount = groupTotalGross > 0 ? groupTotalGross : groupTotalNet;
+
+      const amountMatch = amountMatches(useAmount, mutationAmount) || amountMatches(groupTotalNet, mutationAmount);
+      if (!amountMatch) continue;
+
+      // Cari representative payment (yang ada bukti transfer)
+      let repPayment: PaymentRow | undefined;
+      for (const b of groupBookings) {
+        const pmts = paymentsByBookingId.get(b.id);
+        if (pmts?.length) {
+          const withProof = pmts.find(p => p.proofUrl);
+          repPayment = withProof ?? pmts[0];
+          if (withProof) break;
+        }
+      }
+      const repBooking = groupBookings[0]!;
+
+      const score_parts: string[] = [`nominal grup cocok (${groupBookings.length} sesi) +40`];
+      let score = 40;
+
+      // Nama customer
+      const customerNorm = normalizeDescription(repBooking.customerName ?? "");
+      const words = customerNorm.split(" ").filter(w => w.length >= 4);
+      const nameMatch = words.some(w => normDesc.includes(w));
+      if (nameMatch) { score += 15; score_parts.push(`nama customer "${repBooking.customerName}" ditemukan +15`); }
+
+      // Bukti transfer
+      const proofMatch = !!repPayment?.proofUrl;
+      if (proofMatch) { score += 5; score_parts.push("ada bukti transfer +5"); }
+
+      // Status valid
+      const VALID_STATUSES = ["pending_payment", "waiting_confirmation", "confirmed", "completed", "paid"];
+      const statusValidMatch = groupBookings.some((b: typeof groupBookings[0]) => VALID_STATUSES.includes(b.status ?? ""));
+      if (statusValidMatch) { score += 5; score_parts.push("status booking valid +5"); }
+
+      // Group bonus
+      score += 10;
+      score_parts.push(`Group Booking ${groupBookings.length} sesi +10`);
+
+      // OCR
+      let ocrMatch = false;
+      if (repPayment) {
+        const ocrResult = scoreOcr(
+          repPayment.ocrAmount != null ? Number(repPayment.ocrAmount) : null,
+          repPayment.ocrDate ?? null,
+          repPayment.ocrName ?? null,
+          repPayment.ocrRaw ?? null,
+          mutationAmount,
+          mutation.transactionDate,
+          mutation.description,
+          providerOrderId,
+          score_parts,
+        );
+        score += ocrResult.added;
+        if (ocrResult.ocrMatch) ocrMatch = true;
+      }
+
+      const groupCandidate: MatchCandidate = {
+        candidateType: repPayment ? "payment" : "order",
+        candidateId: repPayment ? repPayment.id : repBooking.id,
+        score: Math.min(score, 100),
+        reason: score_parts,
+        amountMatch,
+        dateMatch: false,
+        nameMatch,
+        orderIdMatch: false,
+        proofMatch,
+        statusValidMatch,
+        toleranceUsed: false,
+        ocrMatch,
+        isGroupPayment: true,
+        groupRef,
+        groupBookingCount: groupBookings.length,
+        groupTotalAmount: useAmount,
+      };
+
+      candidates.push(groupCandidate);
+    }
+  }
+
+
+  // ── Group Payment Detection ────────────────────────────────────────────────
+  // Kelompokkan booking berdasarkan group_ref.
+  // Jika total nominal grup cocok dengan nominal mutasi → buat kandidat group_payment.
+  const bookingsByGroupRef = new Map<string, typeof bookings[0][]>();
+  for (const b of bookings) {
+    const gRef = b.groupRef;
+    if (!gRef) continue;
+    const arr = bookingsByGroupRef.get(gRef) ?? [];
+    arr.push(b);
+    bookingsByGroupRef.set(gRef, arr);
+  }
+
+  for (const [gRef, groupBookings] of bookingsByGroupRef.entries()) {
+    if (groupBookings.length < 2) continue; // grup harus ≥ 2 booking
+
+    const groupTotal = groupBookings.reduce((sum, b) => {
+      return sum + (b.grandTotal ? Number(b.grandTotal) : Number(b.totalPrice));
+    }, 0);
+
+    if (!amountMatches(groupTotal, mutationAmount)) continue;
+
+    // Nominal grup cocok → buat kandidat group_payment
+    const rep = groupBookings[0]!;
+    const gParts: string[] = [];
+    let gScore = 45; // slightly higher base — grup match lebih spesifik
+    gParts.push(`nominal grup ${gRef} (${groupBookings.length} booking) = Rp${Math.round(groupTotal).toLocaleString("id-ID")} cocok +45`);
+
+    const custNorm = normalizeDescription(rep.customerName ?? "");
+    const custWords = custNorm.split(" ").filter((w) => w.length >= 4);
+    if (custWords.some((w) => normDesc.includes(w))) {
+      gScore += 15;
+      gParts.push(`nama customer "${rep.customerName}" ditemukan +15`);
+    }
+
+    // Date heuristic: cek apakah tanggal mutasi dekat dengan salah satu booking
+    const anyDateMatch = groupBookings.some((b) => {
+      const diff = dayDiff(mutation.transactionDate, b.bookingDate);
+      return diff <= 7;
+    });
+    if (anyDateMatch) {
+      gScore += 15;
+      gParts.push("tanggal mutasi dekat dengan booking dalam grup +15");
+    }
+
+    const hasProof = groupBookings.some((b) => {
+      const pays = paymentsByBookingId.get(b.id);
+      return pays?.some((p) => p.proofUrl);
+    });
+    if (hasProof) {
+      gScore += 5;
+      gParts.push("ada bukti transfer +5");
+    }
+
+    candidates.push({
+      candidateType: "group_payment" as any,
+      candidateId: rep.id, // ID booking representatif (pertama dalam grup)
+      score: Math.min(gScore, 100),
+      reason: gParts,
+      amountMatch: true,
+      dateMatch: anyDateMatch,
+      nameMatch: custWords.some((w) => normDesc.includes(w)),
+      orderIdMatch: false,
+      proofMatch: hasProof,
+      statusValidMatch: true,
+      toleranceUsed: false,
+    });
+  }
+  // ── End Group Payment Detection ───────────────────────────────────────────
+
 
   return candidates.sort((a, b) => b.score - a.score);
 }
@@ -677,12 +979,21 @@ async function _runMatchingImpl(mutationIds?: number[]): Promise<{
         statusValidMatch: c.statusValidMatch,
         toleranceUsed: c.toleranceUsed,
         status: "candidate" as const,
+        // Simpan group metadata di note field sebagai JSON
+        note: c.isGroupPayment
+          ? JSON.stringify({
+              isGroupPayment: true,
+              groupRef: c.groupRef,
+              groupBookingCount: c.groupBookingCount,
+              groupTotalAmount: c.groupTotalAmount,
+            })
+          : null,
       }))
     );
 
     const best = candidates[0]!;
 
-    if (best.score >= 80) {
+    if (best.score >= 80 && !best.hardReview) {
       // Auto matched — skor tinggi, sistem yakin tapi admin belum approve
       await db
         .update(bankMutationsTable)
@@ -694,7 +1005,7 @@ async function _runMatchingImpl(mutationIds?: number[]): Promise<{
         })
         .where(eq(bankMutationsTable.id, mutation.id));
       autoMatched++;
-    } else if (best.score >= 50) {
+    } else if (best.score >= 50 || best.hardReview) {
       // Need review — ada kandidat tapi skor tidak cukup tinggi
       await db
         .update(bankMutationsTable)

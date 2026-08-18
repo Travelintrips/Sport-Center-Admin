@@ -28,7 +28,11 @@ function getCurrentMinutesWIB(): number {
   return wib.getUTCHours() * 60 + wib.getUTCMinutes();
 }
 
-router.get("/availability", async (req, res) => {
+// The generated client uses /api/availability. Keep the older
+// /api/bookings/availability path as an alias so already-open browser tabs
+// and cached bundles do not turn an available day into a misleading empty
+// state while they transition to the current contract.
+router.get(["/availability", "/bookings/availability"], async (req, res) => {
   try {
     const facilityId = parseInt(req.query.facilityId as string);
     const date = req.query.date as string;
@@ -54,8 +58,12 @@ router.get("/availability", async (req, res) => {
       return;
     }
 
-    // Gym (walk_in) has no hourly slots
-    if (facility.bookingMode === "walk_in") {
+    // Gym has no hourly slots. Keep the name/category fallback for legacy
+    // rows that were created before booking_mode was corrected to walk_in.
+    const isGymFacility =
+      /gym|fitness/i.test(facility.name ?? "") ||
+      /gym|fitness/i.test(facility.category ?? "");
+    if (facility.bookingMode === "walk_in" || isGymFacility) {
       res.json([]);
       return;
     }
@@ -63,7 +71,8 @@ router.get("/availability", async (req, res) => {
     const bookings = await db.select().from(bookingsTable).where(
       and(eq(bookingsTable.facilityId, facilityId), eq(bookingsTable.bookingDate, date))
     );
-    const activeBookings = bookings.filter((b) => b.status !== "cancelled");
+    const INACTIVE_STATUSES = ["cancelled", "expired", "rejected", "refunded"];
+    const activeBookings = bookings.filter((b) => !INACTIVE_STATUSES.includes(b.status));
 
     const blocked = await db.select().from(blockedSchedulesTable).where(
       and(eq(blockedSchedulesTable.facilityId, facilityId), eq(blockedSchedulesTable.date, date))

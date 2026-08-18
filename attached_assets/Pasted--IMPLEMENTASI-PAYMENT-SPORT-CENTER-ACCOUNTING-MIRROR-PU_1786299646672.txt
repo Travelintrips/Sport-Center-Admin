@@ -1,0 +1,965 @@
+# IMPLEMENTASI PAYMENT SPORT CENTER → ACCOUNTING + MIRROR PUBLIC
+
+## Canonical Payment, Accounting Journal, Tax, dan Cross-Schema Mirror
+
+Lakukan audit singkat terhadap implementasi existing, lalu implementasikan perubahan minimum agar setiap payment Sport Center yang sudah `confirmed` mempunyai:
+
+1. mirror canonical yang lengkap dari:
+   `sport_center.sport_payments`
+   → `public.sport_payments`
+
+2. jurnal accounting yang lengkap dan dapat diaudit;
+
+3. hubungan payment → mirror → accounting entry → GL lines → tax ledger yang deterministic dan idempotent.
+
+JANGAN mengubah strict QRIS reconciliation matcher.
+
+JANGAN mencampurkan settlement/MDR ke jurnal payment pada task ini.
+
+---
+
+# 1. ARSITEKTUR YANG HARUS DIPERTAHANKAN
+
+Database adalah PostgreSQL/Supabase yang sama.
+
+Source operasional:
+
+`sport_center.sport_payments`
+
+Projection/mirror finance:
+
+`public.sport_payments`
+
+Accounting bersama:
+
+`public.accounting_entries`
+
+`public.accounting_entry_lines`
+
+Tax:
+
+`sport_center.tax_transactions`
+
+`public.gl_tax_lines`
+
+Internal Sport Center journal jika masih digunakan:
+
+`sport_center.accounting_journals`
+
+`sport_center.accounting_journal_lines`
+
+Hubungan canonical:
+
+`sport_center.sport_payments.id`
+
+→ `public.sport_payments.source_payment_id`
+
+→ `public.sport_payments.entry_id`
+
+→ `public.accounting_entries.id`
+
+Kunci audit utama adalah **payment ID**, bukan hanya booking ID.
+
+---
+
+# 2. JANGAN GUNAKAN BOOKING SEBAGAI SATU-SATUNYA ECONOMIC EVENT
+
+Satu booking dapat memiliki:
+
+* DP;
+* pelunasan;
+* full payment;
+* retry/payment lain jika bisnis mengizinkan.
+
+Karena itu accounting payment harus mempunyai identity payment-level.
+
+Gunakan:
+
+`source_payment_id`
+
+atau:
+
+`correlation_id = sc_payment_{sport_payment_id}`
+
+untuk idempotensi.
+
+Jangan hanya menggunakan:
+
+`booking_id`
+
+sebagai unique accounting identity.
+
+---
+
+# 3. FIELD WAJIB SOURCE PAYMENT
+
+Pastikan `sport_center.sport_payments` mempunyai dan mengisi field berikut ketika payment confirmed:
+
+## Identity
+
+* `id`
+* `booking_id`
+* `company_id`
+
+## Payment
+
+* `amount`
+* `payment_type`
+* `payment_method`
+* `status`
+* `paid_at`
+* `confirmed_at`
+
+## Provider
+
+* `payment_provider`
+* `provider_reference`
+* `provider_order_id`
+* `merchant_trade_no`
+* `provider_trade_no`
+
+## Settlement dimension
+
+* `bank_account_id`
+* `expected_settlement_date`
+
+Tidak semua provider reference wajib non-null, tetapi field canonical harus tersedia.
+
+---
+
+# 4. FIELD WAJIB MIRROR `public.sport_payments`
+
+Mirror harus membawa minimal:
+
+## Identity
+
+`source_payment_id`
+
+`booking_id`
+
+`company_id`
+
+`payment_number`
+
+## Payment context
+
+`amount`
+
+`payment_type`
+
+`method`
+
+`payment_provider`
+
+`provider_code`
+
+`status`
+
+`paid_at`
+
+## Provider audit
+
+`provider_reference`
+
+`provider_order_id`
+
+`merchant_trade_no`
+
+`provider_trade_no`
+
+## Settlement context
+
+`bank_account_id`
+
+`expected_settlement_date`
+
+## Accounting linkage
+
+`entry_id`
+
+`posting_status`
+
+`posting_error`
+
+## Tax context
+
+`tax_rate`
+
+Jika `tax_amount` mirror belum authoritative, jangan menjadikannya source final pajak.
+
+Pastikan:
+
+`payment_number = SCPAY-SC-{source_payment_id}`
+
+atau contract equivalent existing.
+
+---
+
+# 5. MIRROR HARUS IDEMPOTENT
+
+Pastikan unique constraint/index untuk:
+
+`source_payment_id`
+
+atau payment number canonical.
+
+Satu payment source hanya boleh memiliki satu mirror.
+
+Replay/update harus:
+
+* memperbarui field canonical;
+* tidak membuat duplicate row;
+* tidak menghapus nilai existing dengan source NULL.
+
+Gunakan `COALESCE`/safe merge sesuai kebutuhan.
+
+Contoh:
+
+source provider reference NULL
+→ jangan overwrite existing provider reference non-null.
+
+---
+
+# 6. PAYMENT METHOD WAJIB MASUK ACCOUNTING CONTEXT
+
+Temuan existing:
+
+`payment_method`
+
+belum selalu tersedia pada jurnal/accounting context.
+
+Perbaiki.
+
+Accounting harus bisa membedakan:
+
+* Transfer Bank;
+* QRIS;
+* metode lainnya.
+
+Minimal `payment_method` harus tersedia pada:
+
+* internal journal header jika tabel masih digunakan;
+* accounting payment metadata;
+* atau accounting entry metadata/correlation context.
+
+Jika schema `public.accounting_entries` belum memiliki `payment_method`, pilih salah satu:
+
+A. tambahkan kolom additive:
+
+`payment_method`
+
+atau:
+
+B. simpan pada payment-level accounting relation yang dapat ditelusuri secara deterministic.
+
+Preferensi:
+
+jika jurnal memang perlu ditelusuri tanpa join kompleks, tambahkan field additive.
+
+---
+
+# 7. PAYMENT PROVIDER WAJIB UNTUK QRIS
+
+Untuk QRIS, accounting/audit context harus dapat mengetahui:
+
+`mandiri_direct`
+
+`paylabs`
+
+`unknown`.
+
+Tambahkan:
+
+`payment_provider`
+
+ke journal/accounting metadata jika belum tersedia.
+
+Jangan menggunakan `provider_name` sebagai satu-satunya canonical value.
+
+Canonical:
+
+`payment_provider`
+
+Provider display name boleh tetap terpisah.
+
+---
+
+# 8. COMPANY WAJIB
+
+Setiap accounting entry Sport Center harus memiliki:
+
+`company_id`
+
+yang sama dengan payment source.
+
+Tidak boleh membuat jurnal tanpa company jika source sebenarnya mempunyai company deterministic.
+
+Tambahkan validation:
+
+`source payment company`
+
+=
+
+`public mirror company`
+
+=
+
+`accounting entry company`.
+
+Jika mismatch:
+
+jangan silent-post.
+
+Set:
+
+`posting_status = failed`
+
+dengan error yang dapat diaudit.
+
+---
+
+# 9. BANK ACCOUNT / PAYMENT ACCOUNT CONTEXT
+
+Accounting perlu mengetahui payment diarahkan ke account apa.
+
+Tetapi HATI-HATI:
+
+Untuk QRIS, jangan otomatis menyamakan:
+
+`bank_account_id`
+
+dengan cash/bank GL debit jika uang belum settle.
+
+Audit existing behavior terlebih dahulu.
+
+Laporkan apakah saat QRIS confirmed sekarang jurnal melakukan:
+
+`DEBIT Bank Mandiri`
+
+langsung.
+
+Jika iya, jangan langsung redesign tanpa laporan.
+
+Tetapi tambahkan `bank_account_id` sebagai audit dimension agar settlement/reconciliation dapat ditelusuri.
+
+---
+
+# 10. GROSS / DPP / PPN WAJIB KONSISTEN
+
+Payment Sport Center menggunakan harga tax-inclusive.
+
+Accounting payment harus mempertahankan:
+
+`gross_amount = payment.amount`
+
+Jika kena PPN:
+
+`gross = DPP + PPN`
+
+Jangan:
+
+`gross - PPN`
+
+untuk menghasilkan payment amount.
+
+Journal normal:
+
+`DEBIT   account payment/clearing/bank     gross`
+
+`CREDIT  Revenue                           DPP`
+
+`CREDIT  PPN Output                        PPN`
+
+Jika tidak ada PPN:
+
+`DEBIT   account payment/clearing/bank     gross`
+
+`CREDIT  Revenue                           gross`
+
+---
+
+# 11. FIELD WAJIB INTERNAL JOURNAL
+
+Jika `sport_center.accounting_journals` tetap dipertahankan, minimal pastikan header memiliki:
+
+* `payment_id`
+* `booking_id`
+* `company_id`
+* `order_number`
+* `journal_type`
+* `journal_date`
+* `payment_method`
+* `payment_provider`
+* `bank_account_id`
+* `gross_amount`
+* `dpp_amount`
+* `tax_amount`
+* `debit_account`
+* `debit_amount`
+* `credit_revenue_account`
+* `credit_revenue_amount`
+* `credit_ppn_account`
+* `credit_ppn_amount`
+* `is_reversal`
+* `reversal_of_id`
+
+Audit fields:
+
+* `provider_reference`
+* `merchant_trade_no`
+* `provider_trade_no`
+
+boleh ditambahkan jika bermanfaat untuk traceability.
+
+Jangan copy OCR/proof fields ke jurnal.
+
+---
+
+# 12. FIELD WAJIB PUBLIC ACCOUNTING ENTRY
+
+`public.accounting_entries` harus memungkinkan audit ke payment asal.
+
+Pastikan minimal:
+
+* `id`
+* `entry_number`
+* `date`
+* `company_id`
+* `source`
+* `source_id`
+* `correlation_id`
+* `ref`
+* `description`
+* `status`
+* `total_debit`
+* `total_credit`
+
+Tambahkan/payment context jika belum tersedia:
+
+* `payment_method`
+* `payment_provider`
+* `source_payment_id`
+* `bank_account_id`
+
+Jika menambah kolom, gunakan migration additive.
+
+Jangan menghapus contract lama.
+
+---
+
+# 13. CORRELATION ID
+
+Gunakan:
+
+`correlation_id = sc_payment_{payment_id}`
+
+atau existing equivalent.
+
+Harus unique/idempotent secara semantic.
+
+Satu payment tidak boleh menghasilkan jurnal duplicate ketika:
+
+* callback Paylabs replay;
+* admin confirmation replay;
+* worker sync rerun;
+* mirror sync rerun.
+
+---
+
+# 14. ACCOUNTING ENTRY LINES
+
+Setiap accounting entry harus mempunyai GL lines.
+
+Validasi:
+
+`SUM(debit) = SUM(credit)`
+
+Tidak boleh status `posted` jika:
+
+* entry_id NULL;
+* GL lines tidak ada;
+* debit != credit.
+
+Jika validation gagal:
+
+`posting_status = failed`
+
+dan jangan tandai mirror payment sebagai accounting complete.
+
+---
+
+# 15. PAJAK
+
+Jangan gunakan:
+
+`public.sport_payments.tax_amount`
+
+sebagai final tax source jika saat ini mirror mengisinya 0.
+
+Untuk audit tax gunakan:
+
+`sport_center.tax_transactions`
+
+dan:
+
+`public.gl_tax_lines`.
+
+Saat payment kena PPN, pastikan ada:
+
+### Sport Center tax ledger
+
+`reference_type = sport_center_payment`
+
+`reference_id = sport_payment.id`
+
+### Public tax GL
+
+`accounting_entry_id = accounting_entries.id`
+
+`tax_type = PPN_OUT`
+
+`tax_amount = nilai PPN`
+
+Jika salah satu hilang:
+
+accounting/tax audit harus mendeteksi mismatch.
+
+---
+
+# 16. PAYMENT TYPE
+
+Tambahkan `payment_type` ke accounting context jika belum tersedia.
+
+Nilai:
+
+* dp
+* pelunasan
+* full_payment
+
+Ini penting karena satu booking dapat mempunyai lebih dari satu payment.
+
+Jangan menganggap satu booking selalu satu payment.
+
+---
+
+# 17. PROVIDER REFERENCES
+
+Untuk QRIS audit, pertahankan jika tersedia:
+
+* `provider_reference`
+* `provider_order_id`
+* `merchant_trade_no`
+* `provider_trade_no`
+
+Tidak harus menjadi GL dimension utama.
+
+Tetapi harus dapat ditelusuri dari payment/accounting event.
+
+Jangan menghilangkan reference saat mirror/accounting posting.
+
+---
+
+# 18. FIELD YANG TIDAK PERLU MASUK JOURNAL
+
+Jangan copy ke accounting journal:
+
+* `proof_url`
+* `ocr_name`
+* `ocr_amount`
+* `ocr_date`
+* `ocr_raw`
+* `ocr_data`
+* technical payment updated_at
+* full raw provider callback
+
+Data tersebut tetap berada di payment/evidence layer.
+
+---
+
+# 19. EXPECTED SETTLEMENT DATE
+
+`expected_settlement_date`
+
+wajib tersedia pada:
+
+`public.sport_payments`
+
+untuk reconciliation.
+
+Tetapi tidak wajib menjadi accounting GL field.
+
+Jika ditambahkan ke accounting entry, perlakukan hanya sebagai audit metadata.
+
+Jangan memengaruhi debit/credit payment journal berdasarkan expected date.
+
+---
+
+# 20. MDR DAN SETTLEMENT JANGAN MASUK PAYMENT JOURNAL
+
+Task ini hanya mencatat payment recognition.
+
+Jangan pada saat payment confirmed langsung membuat:
+
+`MDR expense`
+
+berdasarkan expected/configured MDR.
+
+Actual MDR berasal dari:
+
+`bank settlement reconciliation`.
+
+Jangan mengurangi:
+
+`payment.amount`.
+
+Contoh:
+
+Customer payment:
+`Rp100.000`
+
+Tetap:
+
+`gross = Rp100.000`
+
+Walaupun settlement nanti:
+
+`Rp99.700`.
+
+MDR Rp300 dibukukan pada settlement/reconciliation task terpisah.
+
+---
+
+# 21. AUDIT DEBIT ACCOUNT QRIS
+
+Audit existing journal mapping QRIS.
+
+Jawab secara eksplisit:
+
+Saat QRIS confirmed, apakah debit sekarang:
+
+A. Bank Mandiri langsung
+
+atau
+
+B. QRIS clearing / payment provider receivable
+
+atau account lain.
+
+JANGAN redesign account otomatis pada task ini.
+
+Laporkan current behavior dan rekomendasi.
+
+Jika existing langsung debit Bank Mandiri sebelum actual settlement:
+
+tandai sebagai:
+
+`ACCOUNTING_DESIGN_REVIEW_REQUIRED`
+
+tetapi jangan mengubah tanpa approval.
+
+---
+
+# 22. PAYMENT → MIRROR → ACCOUNTING CONSISTENCY
+
+Tambahkan validator/audit helper.
+
+Untuk setiap payment confirmed, cek:
+
+`source payment`
+
+→ `public mirror`
+
+→ `accounting entry`
+
+→ `GL lines`
+
+→ `tax ledger`
+
+Output status:
+
+`COMPLETE`
+
+`MIRROR_MISSING`
+
+`ACCOUNTING_ENTRY_MISSING`
+
+`GL_UNBALANCED`
+
+`TAX_LEDGER_MISSING`
+
+`COMPANY_MISMATCH`
+
+`AMOUNT_MISMATCH`
+
+`PAYMENT_METHOD_MISSING`
+
+`PROVIDER_MISSING`
+
+---
+
+# 23. REQUIRED AUDIT QUERY/ENDPOINT
+
+Buat read-only diagnostic berdasarkan:
+
+`source_payment_id`.
+
+Input:
+
+`sport_center.sport_payments.id`
+
+Output minimal:
+
+### Source payment
+
+* id
+* booking
+* company
+* amount
+* payment_type
+* payment_method
+* provider
+* paid_at
+
+### Mirror
+
+* mirror ID
+* source_payment_id
+* amount
+* method
+* provider
+* company
+* bank account
+* posting status
+* entry_id
+
+### Accounting
+
+* entry ID
+* correlation ID
+* company
+* payment method
+* provider
+* debit
+* credit
+* status
+
+### Tax
+
+* Sport Center tax transaction
+* GL tax line
+
+### Validation
+
+* amount match
+* company match
+* payment method match
+* provider match
+* GL balanced
+* tax complete.
+
+Diagnostic READ-ONLY.
+
+---
+
+# 24. MIGRATION
+
+Semua perubahan schema harus:
+
+* additive;
+* backward-compatible;
+* nullable first jika historical rows membutuhkan;
+* memiliki indexes yang relevan;
+* tidak destructive.
+
+Jangan historical mass update dalam migration.
+
+---
+
+# 25. HISTORICAL DRY-RUN
+
+Setelah implementation, audit historical confirmed payments.
+
+Hitung:
+
+* mirror missing;
+* accounting entry missing;
+* payment_method missing accounting;
+* payment_provider missing accounting;
+* company mismatch;
+* GL unbalanced;
+* tax ledger missing;
+* duplicate correlation ID.
+
+DRY-RUN ONLY.
+
+Jangan fix historical rows otomatis.
+
+---
+
+# 26. TEST WAJIB
+
+Tambahkan test:
+
+### Full payment
+
+Payment source → mirror → balanced accounting.
+
+### DP
+
+DP menghasilkan accounting event dengan `payment_id` DP.
+
+### Pelunasan
+
+Pelunasan menghasilkan accounting event berbeda.
+
+### Same booking, two payments
+
+Harus menghasilkan dua payment-level accounting identities.
+
+### QRIS Mandiri
+
+Accounting metadata menyimpan:
+`payment_method = QRIS`
+`payment_provider = mandiri_direct`.
+
+### QRIS Paylabs
+
+Accounting metadata menyimpan:
+`payment_provider = paylabs`.
+
+### Transfer Bank
+
+Payment method preserved.
+
+### Duplicate callback
+
+Tidak membuat duplicate accounting entry.
+
+### Mirror replay
+
+Tidak duplicate mirror/payment accounting.
+
+### PPN
+
+Gross = DPP + PPN.
+Tax ledger + GL tax tersedia.
+
+### GL balance
+
+Debit = credit.
+
+---
+
+# 27. STRICT QRIS RECONCILIATION REGRESSION
+
+Jalankan existing strict UAT.
+
+Harus tetap:
+
+* 14/14 scenario PASS;
+* 14/14 matcher parity;
+* no persistence;
+* no final reconciliation;
+* no accounting settlement posting.
+
+Task accounting payment ini tidak boleh mengubah matcher.
+
+---
+
+# 28. OUTPUT IMPLEMENTASI
+
+Laporkan:
+
+## A. Current architecture
+
+## B. Files changed
+
+## C. Schema changes
+
+## D. Source payment mandatory fields
+
+## E. Public mirror mandatory fields
+
+## F. Accounting mandatory fields
+
+## G. Internal journal mandatory fields
+
+## H. Payment method propagation
+
+## I. Payment provider propagation
+
+## J. Company propagation
+
+## K. Payment type handling
+
+## L. Idempotency/correlation
+
+## M. Tax handling
+
+## N. GL balance validation
+
+## O. Current QRIS debit account
+
+Jawab:
+
+`Bank Mandiri`
+
+atau:
+
+`Clearing`
+
+atau lainnya.
+
+## P. Read-only audit diagnostic
+
+## Q. Historical dry-run findings
+
+## R. Tests/typecheck/build
+
+## S. Strict QRIS regression
+
+## T. Remaining risks
+
+---
+
+# 29. ACCEPTANCE CRITERIA
+
+Task dianggap selesai jika:
+
+1. Confirmed payment mempunyai mirror public.
+2. Mirror mempunyai `source_payment_id`.
+3. Mirror membawa `payment_method`.
+4. Mirror membawa `payment_provider`.
+5. Mirror membawa `company_id`.
+6. Mirror membawa `bank_account_id`.
+7. Mirror membawa provider references.
+8. Accounting entry dapat ditelusuri ke payment ID.
+9. Accounting membawa payment method.
+10. Accounting membawa provider untuk QRIS.
+11. Company sama source→mirror→accounting.
+12. DP dan pelunasan tidak bentrok.
+13. Correlation id payment-level idempotent.
+14. GL lines balance.
+15. PPN mempunyai tax ledger yang dapat diaudit.
+16. Replay tidak membuat duplicate accounting.
+17. Tidak ada MDR expected yang diposting saat payment.
+18. Strict reconciliation matcher tetap unchanged.
+19. Historical correction belum dilakukan otomatis.
+
+---
+
+# SAFETY
+
+Jangan:
+
+* deploy production;
+* historical mass backfill;
+* final QRIS reconciliation;
+* MDR posting;
+* settlement accounting;
+* accounting redesign clearing-vs-bank tanpa approval;
+* mengubah strict matcher.
+
+Fokus task:
+
+**Payment source yang lengkap → mirror public yang lengkap → accounting journal yang lengkap dan dapat diaudit.**

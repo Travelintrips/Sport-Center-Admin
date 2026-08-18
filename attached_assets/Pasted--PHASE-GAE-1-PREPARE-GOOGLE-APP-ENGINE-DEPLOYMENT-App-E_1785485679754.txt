@@ -1,0 +1,165 @@
+# PHASE GAE-1 — PREPARE GOOGLE APP ENGINE DEPLOYMENT
+
+App Engine sudah berhasil dibuat.
+
+Target deployment:
+
+- GCP Project ID: sc-sport-center
+- App Engine Region: asia-southeast2
+- Service: default
+- Production Domain: https://sc.travelintrips.co.id
+- Repository: Travelintrips/Sport-Center-Admin
+- Production Branch: main
+
+IMPORTANT
+
+Jangan melakukan deployment.
+Jangan mengubah DNS.
+Jangan membuat perubahan yang merusak production.
+Audit terlebih dahulu kemudian baru lakukan perubahan yang diperlukan.
+
+## Phase 1 — Audit
+
+Audit seluruh repository dan tentukan:
+
+- production entry point
+- Express entry point
+- folder deployment yang benar
+- package.json yang digunakan production
+- build pipeline
+- start command
+- output directory
+- apakah project merupakan monorepo
+- dependency yang digunakan App Engine
+
+## Phase 2 — App Engine Compatibility
+
+Pastikan:
+
+- aplikasi berjalan menggunakan Node.js
+- server listen pada:
+
+process.env.PORT
+
+dan
+
+0.0.0.0
+
+- tidak ada hardcoded port
+- tidak ada hardcoded localhost
+- graceful shutdown tetap berjalan
+
+## Phase 3 — Deployment Files
+
+Buat atau perbaiki bila diperlukan:
+
+- app.yaml
+- cloudbuild.yaml
+- .gcloudignore
+
+Gunakan:
+
+Service:
+default
+
+Runtime:
+Node.js (sesuai versi project)
+
+Automatic scaling yang sesuai.
+
+## Phase 4 — Build
+
+Pastikan build production menjalankan seluruh pipeline termasuk:
+
+- pnpm install
+- build seluruh workspace yang diperlukan
+- Vite build
+- prerender seluruh halaman publik
+
+Pastikan hasil build menghasilkan HTML unik untuk:
+
+/
+ /facilities
+ /promos
+ /membership
+ /contact
+ /privacy
+ /terms
+
+## Phase 5 — SEO Verification
+
+Verifikasi raw HTML production build memiliki:
+
+- unique title
+- unique meta description
+- canonical
+- og:url
+- og:image
+- twitter:image
+
+Pastikan bukan metadata hasil hydration.
+
+## Phase 6 — Environment Variables
+
+Pisahkan:
+
+Required non-secret variables
+
+Contoh:
+
+NODE_ENV
+VITE_PUBLIC_URL
+
+Pisahkan juga:
+
+Required secrets
+
+Contoh:
+
+SUPABASE_URL
+SUPABASE_SERVICE_ROLE
+OPENAI_API_KEY
+EMAIL_API_KEY
+PAYMENT_API_KEY
+
+Jangan memasukkan secret ke:
+
+- GitHub
+- app.yaml
+- cloudbuild.yaml
+
+## Phase 7 — Validation
+
+Jalankan:
+
+- typecheck
+- production build
+- lint (jika ada)
+- unit test yang relevan
+
+## Phase 8 — Final Report
+
+Laporkan:
+
+1. Project structure
+2. Deployment directory
+3. app.yaml location
+4. cloudbuild.yaml location
+5. Runtime
+6. Service
+7. Install command
+8. Build command
+9. Start command
+10. Output directory
+11. Required non-secret env
+12. Required secrets
+13. Typecheck result
+14. Build result
+15. Prerender verification
+16. SEO verification
+17. Proposed deployment command
+18. Rollback procedure
+
+DO NOT DEPLOY.
+
+Berhenti setelah seluruh konfigurasi siap dan tunggu persetujuan sebelum menjalankan deployment pertama.

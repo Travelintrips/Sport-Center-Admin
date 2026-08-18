@@ -25,7 +25,17 @@ router.get("/admin/reports", adminMiddleware, async (req, res) => {
     if (startDate) paidMemberships = paidMemberships.filter((m) => m.startDate >= (startDate as string));
     if (endDate) paidMemberships = paidMemberships.filter((m) => m.startDate <= (endDate as string));
 
+    // Untuk chart per-status: semua booking non-cancelled
     const completed = bookings.filter((b) => !["cancelled", "expired", "rejected"].includes(b.status));
+    // Untuk revenue summary: hanya yang benar-benar LUNAS (konsisten dengan dashboard & BizPortal)
+    const isPaidBooking = (b: typeof bookings[number]) =>
+      b.payerType === "company"
+        ? b.billingStatus === "paid"
+        : ["confirmed", "completed"].includes(b.status);
+    const paidBookings = bookings.filter(isPaidBooking);
+    // Helper: pakai grandTotal (DPP+PPN) bila ada, fallback ke totalPrice
+    const gtOrPrice = (b: typeof bookings[number]) =>
+      b.grandTotal != null ? Number(b.grandTotal) : Number(b.totalPrice);
     const facilityMap: Record<number, { name: string; category: string }> = {};
     for (const f of facilities) facilityMap[f.id] = { name: f.name, category: f.category };
 
@@ -41,10 +51,10 @@ router.get("/admin/reports", adminMiddleware, async (req, res) => {
     }
 
     const revenueByPeriod: Record<string, { period: string; revenue: number; bookings: number; membershipRevenue: number; avgTicket: number }> = {};
-    for (const b of completed) {
+    for (const b of paidBookings) {
       const period = getPeriodKey(b.bookingDate);
       if (!revenueByPeriod[period]) revenueByPeriod[period] = { period, revenue: 0, bookings: 0, membershipRevenue: 0, avgTicket: 0 };
-      revenueByPeriod[period].revenue += Number(b.totalPrice);
+      revenueByPeriod[period].revenue += gtOrPrice(b);
       revenueByPeriod[period].bookings++;
     }
     for (const m of paidMemberships) {
@@ -58,7 +68,7 @@ router.get("/admin/reports", adminMiddleware, async (req, res) => {
       .map((d) => ({ ...d, avgTicket: d.bookings > 0 ? Math.round((d.revenue - d.membershipRevenue) / d.bookings) : 0 }));
 
     const revenueByFacility: Record<number, { facilityId: number; facilityName: string; category: string; revenue: number; bookings: number }> = {};
-    for (const b of completed) {
+    for (const b of paidBookings) {
       if (!revenueByFacility[b.facilityId]) {
         revenueByFacility[b.facilityId] = {
           facilityId: b.facilityId,
@@ -68,7 +78,7 @@ router.get("/admin/reports", adminMiddleware, async (req, res) => {
           bookings: 0,
         };
       }
-      revenueByFacility[b.facilityId].revenue += Number(b.totalPrice);
+      revenueByFacility[b.facilityId].revenue += gtOrPrice(b);
       revenueByFacility[b.facilityId].bookings++;
     }
 
@@ -76,7 +86,7 @@ router.get("/admin/reports", adminMiddleware, async (req, res) => {
     for (const b of bookings) {
       if (!revenueByStatus[b.status]) revenueByStatus[b.status] = { status: b.status, count: 0, revenue: 0 };
       revenueByStatus[b.status].count++;
-      revenueByStatus[b.status].revenue += Number(b.totalPrice);
+      revenueByStatus[b.status].revenue += gtOrPrice(b);
     }
 
     const paymentMethod = { transfer: 0, qris: 0, pending: 0 };
@@ -85,7 +95,7 @@ router.get("/admin/reports", adminMiddleware, async (req, res) => {
       else if (b.status === "pending_payment") paymentMethod.pending++;
     }
 
-    const bookingRevenue = completed.reduce((s, b) => s + Number(b.totalPrice), 0);
+    const bookingRevenue = paidBookings.reduce((s, b) => s + gtOrPrice(b), 0);
     const membershipRevenue = paidMemberships.reduce((s, m) => s + Number(m.totalPrice), 0);
     const totalRevenue = bookingRevenue + membershipRevenue;
     const totalBookings = bookings.length;

@@ -1,7 +1,11 @@
 import pg from "pg";
 const { Client } = pg;
 
-const rawUrl = process.env.SUPABASE_DATABASE_URL_DEV || process.env.SUPABASE_DATABASE_URL || "";
+const rawUrl =
+  process.env.DATABASE_URL ||
+  process.env.SUPABASE_DATABASE_URL_DEV ||
+  process.env.SUPABASE_DATABASE_URL ||
+  "";
 const url = rawUrl.replace("pooler.supabase.com:6543", "pooler.supabase.com:5432");
 const client = new Client({ connectionString: url, ssl: { rejectUnauthorized: false } });
 
@@ -10,11 +14,14 @@ console.log("Connected");
 
 const stmts = [
   // WA admin columns
-  `ALTER TABLE sport_center.bookings ADD COLUMN IF NOT EXISTS approved_by_admin_phone text`,
-  `ALTER TABLE sport_center.bookings ADD COLUMN IF NOT EXISTS approved_at timestamptz`,
-  `ALTER TABLE sport_center.bookings ADD COLUMN IF NOT EXISTS rejected_reason text`,
-  `ALTER TABLE sport_center.bookings ADD COLUMN IF NOT EXISTS paid_at timestamptz`,
-  `ALTER TABLE sport_center.bookings ADD COLUMN IF NOT EXISTS booker_name text`,
+  `ALTER TABLE sport_center.sport_bookings ADD COLUMN IF NOT EXISTS approved_by_admin_phone text`,
+  `ALTER TABLE sport_center.sport_bookings ADD COLUMN IF NOT EXISTS approved_at timestamptz`,
+  `ALTER TABLE sport_center.sport_bookings ADD COLUMN IF NOT EXISTS rejected_reason text`,
+  `ALTER TABLE sport_center.sport_bookings ADD COLUMN IF NOT EXISTS paid_at timestamptz`,
+  `ALTER TABLE sport_center.sport_bookings ADD COLUMN IF NOT EXISTS booker_name text`,
+  `ALTER TABLE sport_center.sport_bookings ADD COLUMN IF NOT EXISTS booking_type text NOT NULL DEFAULT 'regular'`,
+  `ALTER TABLE sport_center.sport_bookings ADD COLUMN IF NOT EXISTS event_discount_amount numeric(12,2)`,
+  `ALTER TABLE sport_center.sport_bookings ADD COLUMN IF NOT EXISTS invoice_pdf_url text`,
   // user account type
   `DO $$ BEGIN CREATE TYPE sport_center.user_account_type AS ENUM ('personal','company'); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
   `DO $$ BEGIN CREATE TYPE sport_center.payer_type AS ENUM ('personal','company'); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
@@ -37,31 +44,62 @@ const stmts = [
   `ALTER TABLE sport_center.users ADD COLUMN IF NOT EXISTS registration_source text`,
   `ALTER TABLE sport_center.users ADD COLUMN IF NOT EXISTS customer_code text`,
   `ALTER TABLE sport_center.users ADD COLUMN IF NOT EXISTS tenant_id integer`,
+  `ALTER TABLE sport_center.users ADD COLUMN IF NOT EXISTS require_per_booking_approval boolean NOT NULL DEFAULT false`,
+  // settings columns used by the current Drizzle schema
+  `ALTER TABLE sport_center.sport_settings ADD COLUMN IF NOT EXISTS fonnte_token text`,
+  `ALTER TABLE sport_center.sport_settings ADD COLUMN IF NOT EXISTS fonnte_customer_token text`,
+  `ALTER TABLE sport_center.sport_settings ADD COLUMN IF NOT EXISTS fonnte_admin_wa text`,
+  `ALTER TABLE sport_center.sport_settings ADD COLUMN IF NOT EXISTS admin_wa_phones text`,
+  `ALTER TABLE sport_center.sport_settings ADD COLUMN IF NOT EXISTS app_url text`,
+  `ALTER TABLE sport_center.sport_settings ADD COLUMN IF NOT EXISTS payment_domain text`,
+  `ALTER TABLE sport_center.sport_settings ADD COLUMN IF NOT EXISTS payment_deadline_hours text DEFAULT '24'`,
   // bookings more columns
-  `ALTER TABLE sport_center.bookings ADD COLUMN IF NOT EXISTS payer_type sport_center.payer_type DEFAULT 'personal'`,
-  `ALTER TABLE sport_center.bookings ADD COLUMN IF NOT EXISTS company_customer_id integer`,
-  `ALTER TABLE sport_center.bookings ADD COLUMN IF NOT EXISTS booked_for_name text`,
-  `ALTER TABLE sport_center.bookings ADD COLUMN IF NOT EXISTS booked_for_phone text`,
-  `ALTER TABLE sport_center.bookings ADD COLUMN IF NOT EXISTS payment_required_now boolean DEFAULT true`,
-  `ALTER TABLE sport_center.bookings ADD COLUMN IF NOT EXISTS billing_status sport_center.billing_status`,
-  `ALTER TABLE sport_center.bookings ADD COLUMN IF NOT EXISTS company_invoice_id integer`,
-  `ALTER TABLE sport_center.bookings ADD COLUMN IF NOT EXISTS booked_by_user_id integer`,
-  `ALTER TABLE sport_center.bookings ADD COLUMN IF NOT EXISTS resource_name text`,
-  `ALTER TABLE sport_center.bookings ADD COLUMN IF NOT EXISTS payment_deadline timestamptz`,
-  `ALTER TABLE sport_center.bookings ADD COLUMN IF NOT EXISTS checked_in_at timestamptz`,
-  `ALTER TABLE sport_center.bookings ADD COLUMN IF NOT EXISTS completed_at timestamptz`,
-  `ALTER TABLE sport_center.bookings ADD COLUMN IF NOT EXISTS reminder_h1_sent_at timestamptz`,
-  `ALTER TABLE sport_center.bookings ADD COLUMN IF NOT EXISTS reminder_day_sent_at timestamptz`,
-  `ALTER TABLE sport_center.bookings ADD COLUMN IF NOT EXISTS payment_reminder_sent_at timestamptz`,
-  `ALTER TABLE sport_center.bookings ADD COLUMN IF NOT EXISTS group_ref text`,
-  `ALTER TABLE sport_center.bookings ADD COLUMN IF NOT EXISTS ppn_rate numeric(5,2)`,
-  `ALTER TABLE sport_center.bookings ADD COLUMN IF NOT EXISTS ppn_amount numeric(14,2)`,
-  `ALTER TABLE sport_center.bookings ADD COLUMN IF NOT EXISTS grand_total numeric(14,2)`,
-  `ALTER TABLE sport_center.bookings ADD COLUMN IF NOT EXISTS down_payment numeric(12,2)`,
-  `ALTER TABLE sport_center.bookings ADD COLUMN IF NOT EXISTS is_dp_paid boolean DEFAULT false`,
+  `ALTER TABLE sport_center.sport_bookings ADD COLUMN IF NOT EXISTS payer_type sport_center.payer_type DEFAULT 'personal'`,
+  `ALTER TABLE sport_center.sport_bookings ADD COLUMN IF NOT EXISTS company_customer_id integer`,
+  `ALTER TABLE sport_center.sport_bookings ADD COLUMN IF NOT EXISTS booked_for_name text`,
+  `ALTER TABLE sport_center.sport_bookings ADD COLUMN IF NOT EXISTS booked_for_phone text`,
+  `ALTER TABLE sport_center.sport_bookings ADD COLUMN IF NOT EXISTS payment_required_now boolean DEFAULT true`,
+  `ALTER TABLE sport_center.sport_bookings ADD COLUMN IF NOT EXISTS billing_status sport_center.billing_status`,
+  `ALTER TABLE sport_center.sport_bookings ADD COLUMN IF NOT EXISTS company_invoice_id integer`,
+  `ALTER TABLE sport_center.sport_bookings ADD COLUMN IF NOT EXISTS booked_by_user_id integer`,
+  `ALTER TABLE sport_center.sport_bookings ADD COLUMN IF NOT EXISTS resource_name text`,
+  `ALTER TABLE sport_center.sport_bookings ADD COLUMN IF NOT EXISTS payment_deadline timestamptz`,
+  `ALTER TABLE sport_center.sport_bookings ADD COLUMN IF NOT EXISTS checked_in_at timestamptz`,
+  `ALTER TABLE sport_center.sport_bookings ADD COLUMN IF NOT EXISTS completed_at timestamptz`,
+  `ALTER TABLE sport_center.sport_bookings ADD COLUMN IF NOT EXISTS reminder_h1_sent_at timestamptz`,
+  `ALTER TABLE sport_center.sport_bookings ADD COLUMN IF NOT EXISTS reminder_day_sent_at timestamptz`,
+  `ALTER TABLE sport_center.sport_bookings ADD COLUMN IF NOT EXISTS payment_reminder_sent_at timestamptz`,
+  `ALTER TABLE sport_center.sport_bookings ADD COLUMN IF NOT EXISTS group_ref text`,
+  `ALTER TABLE sport_center.sport_bookings ADD COLUMN IF NOT EXISTS ppn_rate numeric(5,2)`,
+  `ALTER TABLE sport_center.sport_bookings ADD COLUMN IF NOT EXISTS ppn_amount numeric(14,2)`,
+  `ALTER TABLE sport_center.sport_bookings ADD COLUMN IF NOT EXISTS grand_total numeric(14,2)`,
+  `ALTER TABLE sport_center.sport_bookings ADD COLUMN IF NOT EXISTS down_payment numeric(12,2)`,
+  `ALTER TABLE sport_center.sport_bookings ADD COLUMN IF NOT EXISTS is_dp_paid boolean DEFAULT false`,
   // payments
-  `ALTER TABLE sport_center.payments ADD COLUMN IF NOT EXISTS payment_method text DEFAULT 'Transfer Bank'`,
-  `ALTER TABLE sport_center.payments ADD COLUMN IF NOT EXISTS confirmed_at timestamptz`,
+  `DO $$ BEGIN CREATE TYPE sport_center.payment_provider AS ENUM ('mandiri_direct','paylabs','unknown'); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+  `ALTER TABLE sport_center.sport_payments ADD COLUMN IF NOT EXISTS payment_method text DEFAULT 'Transfer Bank'`,
+  `ALTER TABLE sport_center.sport_payments ADD COLUMN IF NOT EXISTS confirmed_at timestamptz`,
+  `ALTER TABLE sport_center.sport_payments ADD COLUMN IF NOT EXISTS payment_provider sport_center.payment_provider`,
+  `ALTER TABLE sport_center.sport_payments ADD COLUMN IF NOT EXISTS provider_reference text`,
+  `ALTER TABLE sport_center.sport_payments ADD COLUMN IF NOT EXISTS provider_id text`,
+  `ALTER TABLE sport_center.sport_payments ADD COLUMN IF NOT EXISTS provider_name text`,
+  `ALTER TABLE sport_center.sport_payments ADD COLUMN IF NOT EXISTS provider_order_id text`,
+  `ALTER TABLE sport_center.sport_payments ADD COLUMN IF NOT EXISTS merchant_trade_no text`,
+  `ALTER TABLE sport_center.sport_payments ADD COLUMN IF NOT EXISTS provider_trade_no text`,
+  `ALTER TABLE sport_center.sport_payments ADD COLUMN IF NOT EXISTS paid_at timestamptz`,
+  `ALTER TABLE sport_center.sport_payments ADD COLUMN IF NOT EXISTS mdr_rate numeric(8,5) NOT NULL DEFAULT 0`,
+  `ALTER TABLE sport_center.sport_payments ADD COLUMN IF NOT EXISTS mdr_amount numeric(14,2) NOT NULL DEFAULT 0`,
+  `ALTER TABLE sport_center.sport_payments ADD COLUMN IF NOT EXISTS settlement_status text NOT NULL DEFAULT 'unsettled'`,
+  `ALTER TABLE sport_center.sport_payments ADD COLUMN IF NOT EXISTS expected_settlement_date text`,
+  `ALTER TABLE sport_center.sport_payments ADD COLUMN IF NOT EXISTS gross_tax_inclusive boolean NOT NULL DEFAULT false`,
+  // confirmed payment journals are finalized, not drafts
+  `ALTER TABLE sport_center.accounting_journals ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'posted'`,
+  `ALTER TABLE sport_center.accounting_journals ALTER COLUMN status SET DEFAULT 'posted'`,
+  `UPDATE sport_center.accounting_journals
+      SET status = 'posted'
+    WHERE journal_type = 'payment_confirmed'
+      AND is_reversal = false
+      AND status IS DISTINCT FROM 'posted'`,
   // tenant_bookings period
   `ALTER TABLE sport_center.tenant_bookings ADD COLUMN IF NOT EXISTS payment_period_type text NOT NULL DEFAULT 'monthly'`,
   `ALTER TABLE sport_center.tenant_bookings ADD COLUMN IF NOT EXISTS period_start_month integer`,
@@ -75,9 +113,9 @@ const stmts = [
   `ALTER TABLE sport_center.tenant_bookings ALTER COLUMN start_date DROP NOT NULL`,
   `ALTER TABLE sport_center.tenant_bookings ALTER COLUMN end_date DROP NOT NULL`,
   // facilities extra
-  `ALTER TABLE sport_center.facilities ADD COLUMN IF NOT EXISTS category text`,
-  `ALTER TABLE sport_center.facilities ADD COLUMN IF NOT EXISTS image_url text`,
-  `ALTER TABLE sport_center.facilities ADD COLUMN IF NOT EXISTS images jsonb`,
+  `ALTER TABLE sport_center.sport_facilities ADD COLUMN IF NOT EXISTS category text`,
+  `ALTER TABLE sport_center.sport_facilities ADD COLUMN IF NOT EXISTS image_url text`,
+  `ALTER TABLE sport_center.sport_facilities ADD COLUMN IF NOT EXISTS images jsonb`,
   // company_invoices table
   `CREATE TABLE IF NOT EXISTS sport_center.company_invoices (
     id serial PRIMARY KEY,
@@ -181,8 +219,12 @@ const stmts = [
     created_at timestamptz NOT NULL DEFAULT now()
   )`,
   // seed admin  
-  `INSERT INTO sport_center.settings (center_name, address, phone, whatsapp, email) VALUES ('Sport Center Dev','Jakarta','021-000000','08000000000','admin@sportcenter.com') ON CONFLICT DO NOTHING`,
-  `INSERT INTO sport_center.facilities (name, category, description, price_per_hour, open_hour, close_hour, is_active) VALUES ('Lapangan Futsal A','futsal','Lapangan futsal indoor',150000,'06:00','22:00',true) ON CONFLICT DO NOTHING`,
+  `INSERT INTO sport_center.sport_settings (center_name, address, phone, whatsapp, email) VALUES ('Sport Center Dev','Jakarta','021-000000','08000000000','admin@sportcenter.com') ON CONFLICT DO NOTHING`,
+  `INSERT INTO sport_center.sport_facilities (name, category, description, price_per_hour, open_time, close_time, is_active)
+   SELECT 'Lapangan Futsal A','futsal','Lapangan futsal indoor',150000,'06:00','22:00',true
+   WHERE NOT EXISTS (
+     SELECT 1 FROM sport_center.sport_facilities WHERE name = 'Lapangan Futsal A'
+   )`,
 ];
 
 let ok = 0, fail = 0;

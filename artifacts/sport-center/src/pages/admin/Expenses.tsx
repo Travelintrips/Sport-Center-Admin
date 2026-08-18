@@ -7,29 +7,20 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ChevronsUpDown, Check } from "lucide-react";
 import { getToken } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
 import {
-  Plus, Search, Filter, TrendingDown, Clock, CheckCircle2, XCircle,
+  Plus, Search, TrendingDown, Clock, CheckCircle2,
   Eye, Edit2, ThumbsUp, ThumbsDown, Banknote, X, Receipt,
-  Upload, ImageIcon, Loader2, Trash2,
+  Upload, Loader2, Trash2, BookOpen, Building2,
 } from "lucide-react";
 
 const API = import.meta.env.VITE_API_BASE_URL ?? "/api";
 const authHeaders = () => ({ Authorization: `Bearer ${getToken()}`, "Content-Type": "application/json" });
-
-const CATEGORIES = [
-  "Alat Gym",
-  "Bola & Peralatan Olahraga",
-  "Perbaikan Lapangan",
-  "Maintenance Fasilitas",
-  "Listrik & Air",
-  "Kebersihan",
-  "Gaji / Fee Staff",
-  "Sewa / Vendor",
-  "Lain-lain",
-];
 
 const PAYMENT_METHODS = ["Transfer Bank", "Tunai", "Kartu Kredit", "Virtual Account", "E-Wallet"];
 
@@ -51,23 +42,60 @@ const STATUS_COLORS: Record<string, string> = {
   cancelled: "bg-gray-100 text-gray-500",
 };
 
+const ACCOUNT_TYPE_LABELS: Record<string, string> = {
+  asset: "Aset",
+  liability: "Kewajiban",
+  equity: "Ekuitas",
+  revenue: "Pendapatan",
+  expense: "Beban",
+};
+
+const ACCOUNT_TYPE_COLORS: Record<string, string> = {
+  asset: "bg-blue-50 text-blue-700",
+  liability: "bg-purple-50 text-purple-700",
+  equity: "bg-indigo-50 text-indigo-700",
+  revenue: "bg-green-50 text-green-700",
+  expense: "bg-orange-50 text-orange-700",
+};
+
+const JOURNAL_TYPE_INFO: Record<string, { label: string; desc: string }> = {
+  expense: { label: "Beban Operasional", desc: "Debit Beban → Kredit Kas/Bank" },
+  asset: { label: "Aset / Kasbon", desc: "Debit Piutang/Aset → Kredit Kas/Bank" },
+  liability: { label: "Bayar Hutang", desc: "Debit Hutang/Kewajiban → Kredit Kas/Bank" },
+};
+
 function formatIDR(n: number) {
   return new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(n);
 }
 
 const EMPTY_FORM = {
   expenseDate: new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Jakarta" }),
-  category: "",
+  coaAccountId: "",
   description: "",
+  vendorId: "",
   vendorName: "",
   facilityId: "",
   amount: "",
   ppnAmount: "",
   paymentMethod: "",
   paymentAccount: "",
-  receiptUrl: "",
+  receiptUrls: [] as string[],
   notes: "",
 };
+
+interface Vendor {
+  id: number;
+  name: string;
+}
+
+interface CoaAccount {
+  id: number;
+  code: string;
+  name: string;
+  accountType: string;
+  isActive: boolean;
+  sortOrder: number;
+}
 
 export default function AdminExpenses() {
   const { toast } = useToast();
@@ -80,6 +108,8 @@ export default function AdminExpenses() {
   const [endDate, setEndDate] = useState("");
 
   const [formOpen, setFormOpen] = useState(false);
+  const [coaOpen, setCoaOpen] = useState(false);
+  const [vendorOpen, setVendorOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState({ ...EMPTY_FORM });
 
@@ -95,34 +125,45 @@ export default function AdminExpenses() {
   const [uploadingReceipt, setUploadingReceipt] = useState(false);
   const receiptInputRef = useRef<HTMLInputElement>(null);
 
-  async function handleReceiptUpload(file: File) {
+  async function handleReceiptUpload(files: FileList | File[]) {
     const allowed = ["image/jpeg", "image/png", "image/webp", "image/gif", "image/heic"];
-    if (!allowed.includes(file.type)) {
-      toast({ title: "Format tidak didukung", description: "Gunakan JPG, PNG, WebP, atau GIF", variant: "destructive" });
-      return;
-    }
-    if (file.size > 10 * 1024 * 1024) {
-      toast({ title: "File terlalu besar", description: "Maksimal 10 MB", variant: "destructive" });
-      return;
+    const fileArr = Array.from(files);
+    for (const file of fileArr) {
+      if (!allowed.includes(file.type)) {
+        toast({ title: "Format tidak didukung", description: `${file.name}: Gunakan JPG, PNG, WebP, atau GIF`, variant: "destructive" });
+        return;
+      }
+      if (file.size > 10 * 1024 * 1024) {
+        toast({ title: "File terlalu besar", description: `${file.name}: Maksimal 10 MB`, variant: "destructive" });
+        return;
+      }
     }
     setUploadingReceipt(true);
     try {
-      const fd = new FormData();
-      fd.append("file", file);
-      const resp = await fetch(`${API}/storage/upload-proof`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${getToken()}` },
-        body: fd,
-      });
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data.error ?? "Upload gagal");
-      setForm((prev) => ({ ...prev, receiptUrl: data.url }));
-      toast({ title: "Foto nota berhasil diupload" });
+      const uploaded: string[] = [];
+      for (const file of fileArr) {
+        const fd = new FormData();
+        fd.append("file", file);
+        const resp = await fetch(`${API}/storage/upload-proof`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${getToken()}` },
+          body: fd,
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error ?? "Upload gagal");
+        uploaded.push(data.url);
+      }
+      setForm((prev) => ({ ...prev, receiptUrls: [...prev.receiptUrls, ...uploaded] }));
+      toast({ title: `${uploaded.length} foto nota berhasil diupload` });
     } catch (err: any) {
       toast({ title: "Upload gagal", description: err.message, variant: "destructive" });
     } finally {
       setUploadingReceipt(false);
     }
+  }
+
+  function removeReceiptUrl(idx: number) {
+    setForm((prev) => ({ ...prev, receiptUrls: prev.receiptUrls.filter((_, i) => i !== idx) }));
   }
 
   const params = new URLSearchParams();
@@ -140,6 +181,22 @@ export default function AdminExpenses() {
   const { data: facilities = [] } = useQuery({
     queryKey: ["facilities"],
     queryFn: () => fetch(`${API}/facilities`).then((r) => r.json()),
+  });
+
+  const { data: coaAccounts = [] } = useQuery<CoaAccount[]>({
+    queryKey: ["coa-accounts"],
+    queryFn: () =>
+      fetch(`${API}/admin/expenses/coa-accounts`, { headers: authHeaders() })
+        .then((r) => r.json())
+        .then((d) => (Array.isArray(d) ? d : [])),
+  });
+
+  const { data: vendors = [] } = useQuery<Vendor[]>({
+    queryKey: ["vendors"],
+    queryFn: () =>
+      fetch(`${API}/admin/vendors`, { headers: authHeaders() })
+        .then((r) => r.json())
+        .then((d) => (Array.isArray(d) ? d.filter((v: any) => v.isActive) : [])),
   });
 
   const { data: detail } = useQuery({
@@ -233,6 +290,18 @@ export default function AdminExpenses() {
   const summary = data?.summary ?? { totalThisMonth: 0, pendingApproval: 0, paid: 0, unpaid: 0 };
   const allExpenses: any[] = data?.expenses ?? [];
 
+  // Group COA accounts by type for display
+  const coaByType = (coaAccounts as CoaAccount[]).reduce((acc, a) => {
+    if (!acc[a.accountType]) acc[a.accountType] = [];
+    acc[a.accountType]!.push(a);
+    return acc;
+  }, {} as Record<string, CoaAccount[]>);
+
+  // Get selected COA account info
+  const selectedCoa = form.coaAccountId
+    ? (coaAccounts as CoaAccount[]).find((a) => a.id === Number(form.coaAccountId)) ?? null
+    : null;
+
   const filtered = allExpenses.filter((e: any) => {
     if (!search) return true;
     const q = search.toLowerCase();
@@ -240,7 +309,9 @@ export default function AdminExpenses() {
       e.expenseNo?.toLowerCase().includes(q) ||
       e.description?.toLowerCase().includes(q) ||
       e.vendorName?.toLowerCase().includes(q) ||
-      e.category?.toLowerCase().includes(q)
+      e.category?.toLowerCase().includes(q) ||
+      e.coaAccount?.name?.toLowerCase().includes(q) ||
+      e.coaAccount?.code?.toLowerCase().includes(q)
     );
   });
 
@@ -254,15 +325,18 @@ export default function AdminExpenses() {
     setEditingId(expense.id);
     setForm({
       expenseDate: expense.expenseDate ?? "",
-      category: expense.category ?? "",
+      coaAccountId: expense.coaAccountId ? String(expense.coaAccountId) : "",
       description: expense.description ?? "",
+      vendorId: expense.vendorId ? String(expense.vendorId) : "",
+
+
       vendorName: expense.vendorName ?? "",
       facilityId: expense.facilityId ? String(expense.facilityId) : "",
       amount: String(expense.amount ?? ""),
       ppnAmount: String(expense.ppnAmount ?? "0"),
       paymentMethod: expense.paymentMethod ?? "",
       paymentAccount: expense.paymentAccount ?? "",
-      receiptUrl: expense.receiptUrl ?? "",
+      receiptUrls: Array.isArray(expense.receiptUrls) ? expense.receiptUrls : (expense.receiptUrl ? [expense.receiptUrl] : []),
       notes: expense.notes ?? "",
     });
     setFormOpen(true);
@@ -270,17 +344,27 @@ export default function AdminExpenses() {
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (!form.coaAccountId) {
+      toast({ title: "Akun COA wajib dipilih", variant: "destructive" });
+      return;
+    }
+    if (!form.vendorId) {
+      toast({ title: "Vendor wajib dipilih", description: "Pilih vendor dari daftar yang tersedia", variant: "destructive" });
+      return;
+    }
+    const selectedV = vendors.find((v) => v.id === Number(form.vendorId));
     const body = {
       expenseDate: form.expenseDate,
-      category: form.category,
+      coaAccountId: Number(form.coaAccountId),
       description: form.description,
-      vendorName: form.vendorName || null,
+      vendorId: form.vendorId ? Number(form.vendorId) : null,
+      vendorName: selectedV?.name ?? form.vendorName ?? null,
       facilityId: form.facilityId ? Number(form.facilityId) : null,
       amount: Number(form.amount),
       ppnAmount: Number(form.ppnAmount || 0),
       paymentMethod: form.paymentMethod || null,
       paymentAccount: form.paymentAccount || null,
-      receiptUrl: form.receiptUrl || null,
+      receiptUrls: form.receiptUrls,
       notes: form.notes || null,
     };
     if (editingId) {
@@ -351,7 +435,7 @@ export default function AdminExpenses() {
             <div className="relative flex-1 min-w-[200px]">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
               <Input
-                placeholder="Cari nomor, deskripsi, vendor..."
+                placeholder="Cari nomor, deskripsi, vendor, akun COA..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className="pl-9"
@@ -368,19 +452,8 @@ export default function AdminExpenses() {
                 ))}
               </SelectContent>
             </Select>
-            <Select value={filterCategory} onValueChange={setFilterCategory}>
-              <SelectTrigger className="w-[190px]">
-                <SelectValue placeholder="Kategori" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Semua Kategori</SelectItem>
-                {CATEGORIES.map((c) => (
-                  <SelectItem key={c} value={c}>{c}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="w-[150px]" placeholder="Dari" />
-            <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="w-[150px]" placeholder="Sampai" />
+            <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="w-[150px]" />
+            <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="w-[150px]" />
           </div>
         </CardContent>
       </Card>
@@ -404,7 +477,7 @@ export default function AdminExpenses() {
                   <tr>
                     <th className="px-4 py-3 text-left font-semibold text-gray-600">No. Pengeluaran</th>
                     <th className="px-4 py-3 text-left font-semibold text-gray-600">Tanggal</th>
-                    <th className="px-4 py-3 text-left font-semibold text-gray-600">Kategori</th>
+                    <th className="px-4 py-3 text-left font-semibold text-gray-600">Akun COA</th>
                     <th className="px-4 py-3 text-left font-semibold text-gray-600">Deskripsi</th>
                     <th className="px-4 py-3 text-left font-semibold text-gray-600">Vendor</th>
                     <th className="px-4 py-3 text-right font-semibold text-gray-600">Total</th>
@@ -418,7 +491,18 @@ export default function AdminExpenses() {
                       <td className="px-4 py-3 font-mono text-xs font-bold text-orange-600">{expense.expenseNo}</td>
                       <td className="px-4 py-3 text-gray-700">{expense.expenseDate}</td>
                       <td className="px-4 py-3">
-                        <Badge variant="outline" className="text-xs">{expense.category}</Badge>
+                        {expense.coaAccount ? (
+                          <div>
+                            <p className="font-semibold text-xs text-gray-900">
+                              {expense.coaAccount.code} — {expense.coaAccount.name}
+                            </p>
+                            <Badge className={`text-[10px] mt-0.5 ${ACCOUNT_TYPE_COLORS[expense.coaAccount.accountType] ?? "bg-gray-100 text-gray-600"}`}>
+                              {ACCOUNT_TYPE_LABELS[expense.coaAccount.accountType] ?? expense.coaAccount.accountType}
+                            </Badge>
+                          </div>
+                        ) : (
+                          <Badge variant="outline" className="text-xs">{expense.category}</Badge>
+                        )}
                       </td>
                       <td className="px-4 py-3 max-w-[200px] truncate text-gray-700">{expense.description}</td>
                       <td className="px-4 py-3 text-gray-500">{expense.vendorName ?? "-"}</td>
@@ -517,13 +601,60 @@ export default function AdminExpenses() {
                 <Input type="date" value={form.expenseDate} onChange={(e) => setForm({ ...form, expenseDate: e.target.value })} required />
               </div>
               <div className="space-y-1">
-                <Label>Kategori <span className="text-red-500">*</span></Label>
-                <Select value={form.category} onValueChange={(v) => setForm({ ...form, category: v })}>
-                  <SelectTrigger><SelectValue placeholder="Pilih kategori" /></SelectTrigger>
-                  <SelectContent>
-                    {CATEGORIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-                  </SelectContent>
-                </Select>
+                <Label className="flex items-center gap-1">
+                  <BookOpen className="w-3.5 h-3.5 text-orange-500" />
+                  Akun COA <span className="text-red-500">*</span>
+                </Label>
+                <Popover open={coaOpen} onOpenChange={setCoaOpen}>
+                  <PopoverTrigger asChild>
+                    <button
+                      type="button"
+                      className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {selectedCoa
+                        ? <span><span className="font-mono text-xs text-gray-500 mr-1">{selectedCoa.code}</span>{selectedCoa.name}</span>
+                        : <span className="text-muted-foreground">Pilih akun COA...</span>
+                      }
+                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[320px] p-0" align="start">
+                    <Command>
+                      <CommandInput placeholder="Cari akun COA..." />
+                      <CommandList className="max-h-64">
+                        <CommandEmpty>Akun tidak ditemukan.</CommandEmpty>
+                        {Object.entries(coaByType).map(([type, accounts]) => (
+                          <CommandGroup key={type} heading={ACCOUNT_TYPE_LABELS[type] ?? type}>
+                            {accounts.map((acc) => (
+                              <CommandItem
+                                key={acc.id}
+                                value={`${acc.code} ${acc.name}`}
+                                onSelect={() => {
+                                  setForm({ ...form, coaAccountId: String(acc.id) });
+                                  setCoaOpen(false);
+                                }}
+                              >
+                                <Check className={`mr-2 h-4 w-4 ${form.coaAccountId === String(acc.id) ? "opacity-100" : "opacity-0"}`} />
+                                <span className="font-mono text-xs text-gray-500 mr-1">{acc.code}</span>
+                                {acc.name}
+                              </CommandItem>
+                            ))}
+                          </CommandGroup>
+                        ))}
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
+                {selectedCoa && (
+                  <div className="text-xs mt-1 p-2 rounded-md bg-orange-50 border border-orange-100 flex items-center gap-2">
+                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${ACCOUNT_TYPE_COLORS[selectedCoa.accountType] ?? "bg-gray-100"}`}>
+                      {ACCOUNT_TYPE_LABELS[selectedCoa.accountType] ?? selectedCoa.accountType}
+                    </span>
+                    <span className="text-gray-600">
+                      {JOURNAL_TYPE_INFO[selectedCoa.accountType]?.desc ?? ""}
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -540,8 +671,57 @@ export default function AdminExpenses() {
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1">
-                <Label>Vendor / Supplier</Label>
-                <Input value={form.vendorName} onChange={(e) => setForm({ ...form, vendorName: e.target.value })} placeholder="Nama vendor" />
+                <Label className="flex items-center gap-1">
+                  <Building2 className="w-3.5 h-3.5 text-orange-500" />
+                  Vendor / Supplier
+                </Label>
+                <Popover open={vendorOpen} onOpenChange={setVendorOpen}>
+                  <PopoverTrigger asChild>
+                    <button
+                      type="button"
+                      className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {form.vendorId
+                        ? <span className="font-medium">{vendors.find((v) => v.id === Number(form.vendorId))?.name ?? "Pilih vendor..."}</span>
+                        : <span className="text-muted-foreground">Pilih vendor...</span>
+                      }
+                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[280px] p-0" align="start">
+                    <Command>
+                      <CommandInput placeholder="Cari vendor..." />
+                      <CommandList className="max-h-56">
+                        <CommandEmpty>
+                          <div className="text-center py-2">
+                            <p className="text-sm text-gray-500">Vendor tidak ditemukan.</p>
+                            <a href="/admin/vendors" className="text-xs text-orange-500 underline" target="_blank">
+                              Tambah vendor baru →
+                            </a>
+                          </div>
+                        </CommandEmpty>
+                        <CommandGroup>
+                          {vendors.map((v) => (
+                            <CommandItem
+                              key={v.id}
+                              value={v.name}
+                              onSelect={() => {
+                                setForm({ ...form, vendorId: String(v.id), vendorName: v.name });
+                                setVendorOpen(false);
+                              }}
+                            >
+                              <Check className={`mr-2 h-4 w-4 ${form.vendorId === String(v.id) ? "opacity-100" : "opacity-0"}`} />
+                              {v.name}
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
+                {vendors.length === 0 && (
+                  <p className="text-xs text-amber-600">Belum ada vendor aktif. <a href="/admin/vendors" className="underline" target="_blank">Tambah vendor</a></p>
+                )}
               </div>
               <div className="space-y-1">
                 <Label>Fasilitas Terkait</Label>
@@ -600,69 +780,59 @@ export default function AdminExpenses() {
               </div>
             </div>
 
-            <div className="space-y-1">
-              <Label>Foto Nota / Struk</Label>
+            <div className="space-y-2">
+              <Label>Foto Nota / Struk <span className="text-gray-400 font-normal text-xs">(bisa lebih dari 1)</span></Label>
               <input
                 ref={receiptInputRef}
                 type="file"
                 accept="image/jpeg,image/png,image/webp,image/gif,image/heic"
+                multiple
                 className="hidden"
-                onChange={(e) => { const f = e.target.files?.[0]; if (f) handleReceiptUpload(f); e.target.value = ""; }}
+                onChange={(e) => { if (e.target.files?.length) handleReceiptUpload(e.target.files); e.target.value = ""; }}
               />
-              {form.receiptUrl ? (
-                <div className="border rounded-lg overflow-hidden bg-gray-50">
-                  <div className="relative">
-                    <img
-                      src={form.receiptUrl}
-                      alt="Nota / Struk"
-                      className="w-full max-h-48 object-contain bg-white"
-                      onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-                    />
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="destructive"
-                      className="absolute top-2 right-2 h-7 w-7 p-0 rounded-full opacity-90"
-                      onClick={() => setForm({ ...form, receiptUrl: "" })}
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </Button>
-                  </div>
-                  <div className="px-3 py-2 flex items-center justify-between border-t bg-gray-50">
-                    <span className="text-xs text-gray-500 truncate max-w-[200px]">{form.receiptUrl.split("/").pop()}</span>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      className="h-7 text-xs text-orange-600 hover:text-orange-700"
-                      onClick={() => receiptInputRef.current?.click()}
-                      disabled={uploadingReceipt}
-                    >
-                      Ganti Foto
-                    </Button>
-                  </div>
+              {form.receiptUrls.length > 0 && (
+                <div className="grid grid-cols-3 gap-2">
+                  {form.receiptUrls.map((url, idx) => (
+                    <div key={idx} className="relative border rounded-lg overflow-hidden bg-gray-50 aspect-square">
+                      <img
+                        src={url}
+                        alt={`Nota ${idx + 1}`}
+                        className="w-full h-full object-cover bg-white"
+                        onError={(e) => { (e.target as HTMLImageElement).src = ""; }}
+                      />
+                      <button
+                        type="button"
+                        className="absolute top-1 right-1 bg-red-500 hover:bg-red-600 text-white rounded-full w-5 h-5 flex items-center justify-center shadow"
+                        onClick={() => removeReceiptUrl(idx)}
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                      <div className="absolute bottom-0 left-0 right-0 bg-black/40 text-white text-[10px] px-1 py-0.5 text-center truncate">
+                        Foto {idx + 1}
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => receiptInputRef.current?.click()}
-                  disabled={uploadingReceipt}
-                  className="w-full border-2 border-dashed border-gray-200 rounded-lg p-5 flex flex-col items-center gap-2 text-gray-400 hover:border-orange-300 hover:text-orange-500 transition-colors disabled:opacity-60 cursor-pointer"
-                >
-                  {uploadingReceipt ? (
-                    <>
-                      <Loader2 className="w-6 h-6 animate-spin text-orange-500" />
-                      <span className="text-sm font-medium text-orange-500">Mengupload...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Upload className="w-6 h-6" />
-                      <span className="text-sm font-medium">Klik untuk upload foto nota</span>
-                      <span className="text-xs">JPG, PNG, WebP — maks 10 MB</span>
-                    </>
-                  )}
-                </button>
               )}
+              <button
+                type="button"
+                onClick={() => receiptInputRef.current?.click()}
+                disabled={uploadingReceipt}
+                className="w-full border-2 border-dashed border-gray-200 rounded-lg p-4 flex flex-col items-center gap-2 text-gray-400 hover:border-orange-300 hover:text-orange-500 transition-colors disabled:opacity-60 cursor-pointer"
+              >
+                {uploadingReceipt ? (
+                  <>
+                    <Loader2 className="w-5 h-5 animate-spin text-orange-500" />
+                    <span className="text-sm font-medium text-orange-500">Mengupload...</span>
+                  </>
+                ) : (
+                  <>
+                    <Upload className="w-5 h-5" />
+                    <span className="text-sm font-medium">{form.receiptUrls.length > 0 ? "Tambah foto lagi" : "Klik untuk upload foto nota"}</span>
+                    <span className="text-xs">JPG, PNG, WebP — maks 10 MB per foto</span>
+                  </>
+                )}
+              </button>
             </div>
 
             <div className="space-y-1">
@@ -697,6 +867,24 @@ export default function AdminExpenses() {
                 <span className="font-mono text-sm font-bold text-orange-600">{detail.expenseNo}</span>
                 <Badge className={`${STATUS_COLORS[detail.paymentStatus]}`}>{STATUS_LABELS[detail.paymentStatus]}</Badge>
               </div>
+
+              {detail.coaAccount && (
+                <div className="p-3 rounded-lg bg-orange-50 border border-orange-100">
+                  <p className="text-xs text-gray-500 mb-1 font-medium">Akun COA</p>
+                  <p className="font-bold text-gray-900 text-sm">
+                    {detail.coaAccount.code} — {detail.coaAccount.name}
+                  </p>
+                  <div className="flex items-center gap-2 mt-1">
+                    <Badge className={`text-[10px] ${ACCOUNT_TYPE_COLORS[detail.coaAccount.accountType] ?? "bg-gray-100"}`}>
+                      {ACCOUNT_TYPE_LABELS[detail.coaAccount.accountType] ?? detail.coaAccount.accountType}
+                    </Badge>
+                    {JOURNAL_TYPE_INFO[detail.coaAccount.accountType] && (
+                      <span className="text-xs text-gray-500">{JOURNAL_TYPE_INFO[detail.coaAccount.accountType]?.desc}</span>
+                    )}
+                  </div>
+                </div>
+              )}
+
               <div className="grid grid-cols-2 gap-3 text-sm">
                 <div><span className="text-gray-500">Tanggal</span><p className="font-semibold">{detail.expenseDate}</p></div>
                 <div><span className="text-gray-500">Kategori</span><p className="font-semibold">{detail.category}</p></div>
@@ -708,80 +896,90 @@ export default function AdminExpenses() {
                 <div><span className="text-gray-500">Total</span><p className="font-black text-orange-600 text-base">{formatIDR(detail.totalAmount)}</p></div>
                 {detail.paymentMethod && <div><span className="text-gray-500">Metode</span><p className="font-semibold">{detail.paymentMethod}</p></div>}
                 {detail.paymentAccount && <div><span className="text-gray-500">Rekening</span><p className="font-semibold">{detail.paymentAccount}</p></div>}
+                {detail.journalId && (
+                  <div className="col-span-2">
+                    <span className="text-gray-500">Jurnal</span>
+                    <p className="font-mono text-xs font-bold text-green-700">{detail.journalId}</p>
+                  </div>
+                )}
                 {detail.createdByName && <div><span className="text-gray-500">Dibuat oleh</span><p className="font-semibold">{detail.createdByName}</p></div>}
                 {detail.approvedByName && <div><span className="text-gray-500">Disetujui oleh</span><p className="font-semibold">{detail.approvedByName}</p></div>}
                 {detail.approvedAt && <div><span className="text-gray-500">Disetujui pada</span><p className="font-semibold">{new Date(detail.approvedAt).toLocaleDateString("id-ID")}</p></div>}
                 {detail.paidAt && <div><span className="text-gray-500">Dibayar pada</span><p className="font-semibold">{new Date(detail.paidAt).toLocaleDateString("id-ID")}</p></div>}
                 {detail.rejectedReason && <div className="col-span-2"><span className="text-gray-500">Alasan ditolak</span><p className="font-semibold text-red-600">{detail.rejectedReason}</p></div>}
                 {detail.notes && <div className="col-span-2"><span className="text-gray-500">Catatan</span><p className="font-semibold">{detail.notes}</p></div>}
-                {detail.receiptUrl && (
-                  <div className="col-span-2">
-                    <span className="text-gray-500">Nota / Struk</span>
-                    <div className="mt-1 border rounded-lg overflow-hidden bg-gray-50">
-                      <img
-                        src={detail.receiptUrl}
-                        alt="Nota / Struk"
-                        className="w-full max-h-56 object-contain bg-white"
-                        onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-                      />
-                      <div className="px-3 py-2 border-t">
-                        <a href={detail.receiptUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline text-xs font-medium">
-                          Buka di tab baru ↗
-                        </a>
+                {(() => {
+                  const photos: string[] = Array.isArray(detail.receiptUrls) && detail.receiptUrls.length > 0
+                    ? detail.receiptUrls
+                    : detail.receiptUrl ? [detail.receiptUrl] : [];
+                  return photos.length > 0 ? (
+                    <div className="col-span-2">
+                      <span className="text-gray-500">Nota / Struk ({photos.length} foto)</span>
+                      <div className="mt-1 grid grid-cols-2 gap-2">
+                        {photos.map((url: string, idx: number) => (
+                          <div key={idx} className="border rounded-lg overflow-hidden bg-gray-50">
+                            <img
+                              src={url}
+                              alt={`Nota ${idx + 1}`}
+                              className="w-full max-h-40 object-contain bg-white"
+                              onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                            />
+                          </div>
+                        ))}
                       </div>
                     </div>
-                  </div>
-                )}
-                {detail.journalId && <div className="col-span-2"><span className="text-gray-500">Journal ID</span><p className="font-mono text-xs text-gray-700">{detail.journalId}</p></div>}
+                  ) : null;
+                })()}
               </div>
 
-              {/* Action buttons in detail */}
-              <div className="flex flex-wrap gap-2 pt-2 border-t">
-                {["draft", "rejected"].includes(detail.paymentStatus) && (
-                  <Button size="sm" variant="outline" onClick={() => { openEdit(detail); setDetailOpen(false); }}>
-                    <Edit2 className="w-3.5 h-3.5 mr-1" /> Edit
-                  </Button>
-                )}
+              <div className="flex gap-2 pt-2 flex-wrap">
                 {detail.paymentStatus === "draft" && (
-                  <Button size="sm" className="bg-yellow-500 hover:bg-yellow-600 text-white"
-                    onClick={() => statusMutation.mutate({ id: detail.id, action: "submit" })}>
-                    Ajukan Approval
-                  </Button>
+                  <>
+                    <Button size="sm" variant="outline" onClick={() => { setDetailOpen(false); openEdit(detail); }}>
+                      <Edit2 className="w-3.5 h-3.5 mr-1" /> Edit
+                    </Button>
+                    <Button
+                      size="sm"
+                      className="bg-yellow-500 hover:bg-yellow-600 text-white"
+                      onClick={() => statusMutation.mutate({ id: detail.id, action: "submit" })}
+                    >
+                      Ajukan Approval
+                    </Button>
+                    <Button
+                      size="sm" variant="destructive"
+                      onClick={() => { setDeleteConfirmId(detail.id); setDeleteConfirmNo(detail.expenseNo); }}
+                    >
+                      <Trash2 className="w-3.5 h-3.5 mr-1" /> Hapus
+                    </Button>
+                  </>
                 )}
                 {detail.paymentStatus === "pending_approval" && (
                   <>
-                    <Button size="sm" className="bg-green-500 hover:bg-green-600 text-white"
-                      onClick={() => statusMutation.mutate({ id: detail.id, action: "approve" })}>
+                    <Button
+                      size="sm"
+                      className="bg-green-600 hover:bg-green-700 text-white"
+                      onClick={() => statusMutation.mutate({ id: detail.id, action: "approve" })}
+                    >
                       <ThumbsUp className="w-3.5 h-3.5 mr-1" /> Setujui
                     </Button>
-                    <Button size="sm" variant="outline" className="text-red-500 border-red-300"
-                      onClick={() => { setRejectTargetId(detail.id); setDetailOpen(false); setRejectOpen(true); }}>
+                    <Button size="sm" variant="destructive" onClick={() => { setRejectTargetId(detail.id); setRejectOpen(true); }}>
                       <ThumbsDown className="w-3.5 h-3.5 mr-1" /> Tolak
                     </Button>
                   </>
                 )}
                 {detail.paymentStatus === "approved" && (
-                  <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white"
-                    onClick={() => statusMutation.mutate({ id: detail.id, action: "pay" })}>
-                    <Banknote className="w-3.5 h-3.5 mr-1" /> Tandai Sudah Dibayar
-                  </Button>
-                )}
-                {["draft", "pending_approval", "approved"].includes(detail.paymentStatus) && (
-                  <Button size="sm" variant="ghost" className="text-gray-400"
-                    onClick={() => statusMutation.mutate({ id: detail.id, action: "cancel" })}>
-                    <X className="w-3.5 h-3.5 mr-1" /> Batalkan
-                  </Button>
-                )}
-                {detail.paymentStatus === "draft" && (
-                  <Button size="sm" variant="ghost" className="text-red-500 hover:text-red-700 hover:bg-red-50"
-                    onClick={() => { setDeleteConfirmId(detail.id); setDeleteConfirmNo(detail.expenseNo); setDetailOpen(false); }}>
-                    <Trash2 className="w-3.5 h-3.5 mr-1" /> Hapus
+                  <Button
+                    size="sm"
+                    className="bg-green-600 hover:bg-green-700 text-white"
+                    onClick={() => statusMutation.mutate({ id: detail.id, action: "pay" })}
+                  >
+                    <Banknote className="w-3.5 h-3.5 mr-1" /> Tandai Dibayar
                   </Button>
                 )}
               </div>
             </div>
           ) : (
-            <div className="p-6 text-center text-gray-400">Memuat detail...</div>
+            <div className="p-4 text-center text-gray-400">Memuat detail...</div>
           )}
         </DialogContent>
       </Dialog>
@@ -792,26 +990,26 @@ export default function AdminExpenses() {
           <DialogHeader>
             <DialogTitle className="font-black text-red-600">Tolak Pengeluaran</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4">
+          <div className="space-y-3">
             <div className="space-y-1">
-              <Label>Alasan Penolakan</Label>
+              <Label>Alasan Penolakan <span className="text-red-500">*</span></Label>
               <Textarea
                 value={rejectReason}
                 onChange={(e) => setRejectReason(e.target.value)}
-                placeholder="Tuliskan alasan penolakan..."
+                placeholder="Jelaskan alasan penolakan..."
                 rows={3}
               />
             </div>
-            <div className="flex gap-2">
-              <Button variant="outline" onClick={() => { setRejectOpen(false); setRejectReason(""); }} className="flex-1">Batal</Button>
+            <div className="flex gap-2 justify-end">
+              <Button variant="outline" onClick={() => setRejectOpen(false)}>Batal</Button>
               <Button
-                className="flex-1 bg-red-500 hover:bg-red-600 text-white"
+                variant="destructive"
+                disabled={!rejectReason.trim() || statusMutation.isPending}
                 onClick={() => {
                   if (rejectTargetId) {
                     statusMutation.mutate({ id: rejectTargetId, action: "reject", rejectedReason: rejectReason });
                   }
                 }}
-                disabled={statusMutation.isPending}
               >
                 Tolak
               </Button>
@@ -824,35 +1022,20 @@ export default function AdminExpenses() {
       <Dialog open={!!deleteConfirmId} onOpenChange={(o) => { if (!o) { setDeleteConfirmId(null); setDeleteConfirmNo(""); } }}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle className="font-black text-red-600 flex items-center gap-2">
-              <Trash2 className="w-5 h-5" /> Hapus Pengeluaran
-            </DialogTitle>
+            <DialogTitle className="font-black text-red-600">Hapus Pengeluaran</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4">
-            <p className="text-sm text-gray-600">
-              Yakin ingin menghapus pengeluaran{" "}
-              <span className="font-bold font-mono text-gray-900">{deleteConfirmNo}</span>?
-              <br />
-              <span className="text-red-500 font-medium">Data akan terhapus permanen dan tidak bisa dikembalikan.</span>
-            </p>
-            <div className="flex gap-2">
-              <Button
-                variant="outline"
-                className="flex-1"
-                onClick={() => { setDeleteConfirmId(null); setDeleteConfirmNo(""); }}
-                disabled={deleteMutation.isPending}
-              >
-                Batal
-              </Button>
-              <Button
-                className="flex-1 bg-red-500 hover:bg-red-600 text-white font-bold"
-                onClick={() => { if (deleteConfirmId) deleteMutation.mutate(deleteConfirmId); }}
-                disabled={deleteMutation.isPending}
-              >
-                {deleteMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Trash2 className="w-4 h-4 mr-1" />}
-                Hapus Selamanya
-              </Button>
-            </div>
+          <p className="text-sm text-gray-600">
+            Yakin ingin menghapus <span className="font-bold text-orange-600">{deleteConfirmNo}</span>? Tindakan ini tidak bisa dibatalkan.
+          </p>
+          <div className="flex gap-2 justify-end mt-2">
+            <Button variant="outline" onClick={() => { setDeleteConfirmId(null); setDeleteConfirmNo(""); }}>Batal</Button>
+            <Button
+              variant="destructive"
+              disabled={deleteMutation.isPending}
+              onClick={() => { if (deleteConfirmId) deleteMutation.mutate(deleteConfirmId); }}
+            >
+              Hapus
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

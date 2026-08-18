@@ -6,6 +6,58 @@ import fs from "fs";
 import { fileURLToPath } from "url";
 import { CUSTOM_MIGRATION_SQL } from "../migrate.js";
 
+/**
+ * Split a SQL string into individual statements while respecting $$ dollar-
+ * quoting used in PL/pgSQL DO blocks and function bodies.
+ */
+function splitSqlStatements(sql: string): string[] {
+  const results: string[] = [];
+  let current = "";
+  let inDollarQuote = false;
+  let dollarTag = "";
+  let i = 0;
+
+  while (i < sql.length) {
+    // Detect opening/closing $$ (or $tag$) delimiter
+    if (sql[i] === "$") {
+      const rest = sql.slice(i);
+      const match = rest.match(/^\$([A-Za-z_]*)?\$/);
+      if (match) {
+        const tag = match[0];
+        if (!inDollarQuote) {
+          inDollarQuote = true;
+          dollarTag = tag;
+          current += tag;
+          i += tag.length;
+          continue;
+        } else if (tag === dollarTag) {
+          inDollarQuote = false;
+          dollarTag = "";
+          current += tag;
+          i += tag.length;
+          continue;
+        }
+      }
+    }
+
+    if (!inDollarQuote && sql[i] === ";") {
+      current += ";";
+      const trimmed = current.trim();
+      if (trimmed && trimmed !== ";") results.push(trimmed);
+      current = "";
+      i++;
+      continue;
+    }
+
+    current += sql[i];
+    i++;
+  }
+
+  const trimmed = current.trim();
+  if (trimmed && trimmed !== ";") results.push(trimmed);
+  return results;
+}
+
 const { Client } = pg;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -14,10 +66,12 @@ const envLabel = isProd ? "PROD" : "DEV";
 
 const rawUrl = isProd
   ? process.env.SUPABASE_DATABASE_URL
-  : process.env.SUPABASE_DATABASE_URL_DEV ?? process.env.SUPABASE_DATABASE_URL;
+  : process.env.SUPABASE_DATABASE_URL_DEV ??
+    process.env.DATABASE_URL ??
+    process.env.SUPABASE_DATABASE_URL;
 
 if (!rawUrl) {
-  const missing = isProd ? "SUPABASE_DATABASE_URL" : "SUPABASE_DATABASE_URL_DEV";
+  const missing = isProd ? "SUPABASE_DATABASE_URL" : "DATABASE_URL or SUPABASE_DATABASE_URL_DEV";
   console.error(`[migrate] ERROR: ${missing} is not set.`);
   process.exit(1);
 }
@@ -108,6 +162,41 @@ try {
     console.log("      ✓ Done\n");
   }
 
+  // ── Step 1b: Rename legacy tables to sport_ prefix (idempotent) ────────────
+  console.log(`[1b] Rename legacy tables to sport_ prefix if needed...`);
+  const tablesToRename: [string, string][] = [
+    ['settings',      'sport_settings'],
+    ['bookings',      'sport_bookings'],
+    ['facilities',    'sport_facilities'],
+    ['gym_memberships','sport_memberships'],
+    ['payments',      'sport_payments'],
+  ];
+  for (const [from, to] of tablesToRename) {
+    await client.query(`
+      DO $$ BEGIN
+        IF EXISTS (
+          SELECT 1 FROM information_schema.tables
+          WHERE table_schema = 'sport_center' AND table_name = '${from}'
+        ) AND NOT EXISTS (
+          SELECT 1 FROM information_schema.tables
+          WHERE table_schema = 'sport_center' AND table_name = '${to}'
+        ) THEN
+          EXECUTE 'ALTER TABLE sport_center.${from} RENAME TO ${to}';
+        END IF;
+      END $$
+    `);
+  }
+  // Add extra columns to sport_settings that were added after base migration
+  await client.query(`
+    ALTER TABLE sport_center.sport_settings
+      ADD COLUMN IF NOT EXISTS fonnte_token text,
+      ADD COLUMN IF NOT EXISTS fonnte_admin_wa text,
+      ADD COLUMN IF NOT EXISTS admin_wa_phones text,
+      ADD COLUMN IF NOT EXISTS app_url text,
+      ADD COLUMN IF NOT EXISTS payment_deadline_hours text DEFAULT '24'
+  `);
+  console.log("      ✓ Done\n");
+
   // ── Step 2: Extra SQL file (add_tax_effective_date) ─────────────────────────
   const extraSql = path.resolve(__dirname, "../../lib/db/drizzle/add_tax_effective_date.sql");
   if (fs.existsSync(extraSql)) {
@@ -120,8 +209,53 @@ try {
 
   // ── Step 3: Custom incremental migrations (all idempotent) ──────────────────
   console.log(`[3/3] Custom schema migrations (enums, columns, tables)...`);
-  await client.query(CUSTOM_MIGRATION_SQL);
-  console.log("      ✓ Done\n");
+  // PostgreSQL requires a newly-added enum value to be committed before it
+  // can be referenced by a later statement. Keep this outside the large
+  // custom migration batch so source-scoped indexes can use it safely.
+  const sourceEnum = await client.query<{ exists: boolean; has_value: boolean }>(`
+    SELECT EXISTS (
+      SELECT 1
+        FROM pg_type t
+        JOIN pg_namespace n ON n.oid = t.typnamespace
+       WHERE t.typname = 'accounting_entry_source'
+         AND n.nspname = 'public'
+    ) AS exists,
+    EXISTS (
+      SELECT 1
+        FROM pg_enum e
+        JOIN pg_type t ON t.oid = e.enumtypid
+        JOIN pg_namespace n ON n.oid = t.typnamespace
+       WHERE t.typname = 'accounting_entry_source'
+         AND n.nspname = 'public'
+         AND e.enumlabel = 'sport_center_payment'
+    ) AS has_value
+  `);
+  if (sourceEnum.rows[0]?.exists && !sourceEnum.rows[0]?.has_value) {
+    await client.query(
+      `ALTER TYPE public.accounting_entry_source ADD VALUE 'sport_center_payment'`,
+    );
+    console.log("      ✓ Added public.accounting_entry_source=sport_center_payment\n");
+  }
+  // Apply CUSTOM_MIGRATION_SQL statement-by-statement so a single missing
+  // table or object (e.g. paylabs_transactions on a fresh dev DB) doesn't
+  // abort all remaining migrations.  We use a $$ -aware splitter to avoid
+  // splitting inside PL/pgSQL bodies.
+  const statements = splitSqlStatements(CUSTOM_MIGRATION_SQL);
+  let ok = 0, skipped = 0;
+  for (const stmt of statements) {
+    try {
+      await client.query(stmt);
+      ok++;
+    } catch (e: any) {
+      skipped++;
+      // Only log non-trivial failures (not "already exists" noise)
+      const msg: string = e?.message ?? "";
+      if (!msg.includes("already exists") && !msg.includes("duplicate_object")) {
+        console.warn(`      ⚠ Skipped statement (${msg.slice(0, 120)})`);
+      }
+    }
+  }
+  console.log(`      ✓ Done (${ok} applied, ${skipped} skipped)\n`);
 
   console.log(`╔══════════════════════════════════════════════════════╗`);
   console.log(`║  ✅  All migrations applied successfully!            ║`);

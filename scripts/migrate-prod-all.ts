@@ -61,6 +61,18 @@ ALTER TABLE sport_center.tax_transactions
 -- ==========================================================
 -- WA: source column + wa_action_tokens
 -- ==========================================================
+ALTER TABLE sport_center.accounting_journals
+  ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'posted';
+
+ALTER TABLE sport_center.accounting_journals
+  ALTER COLUMN status SET DEFAULT 'posted';
+
+UPDATE sport_center.accounting_journals
+   SET status = 'posted'
+ WHERE journal_type = 'payment_confirmed'
+   AND is_reversal = false
+   AND status IS DISTINCT FROM 'posted';
+
 ALTER TABLE sport_center.bookings
   ADD COLUMN IF NOT EXISTS source TEXT DEFAULT 'web';
 

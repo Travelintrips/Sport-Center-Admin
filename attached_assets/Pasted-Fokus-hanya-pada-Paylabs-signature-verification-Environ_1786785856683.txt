@@ -1,0 +1,136 @@
+Fokus hanya pada Paylabs signature verification.
+
+Environment variable yang SUDAH tersedia dan merupakan source of truth adalah:
+
+SANDBOX:
+
+* MERCHANT_ID_SANDBOX
+* PAYLABS_SANDBOX_PRIVATE_KEY
+* PAYLABS_SANDBOX_PUBLIC_KEY
+
+PRODUCTION:
+
+* MERCHANT_ID_PROD
+* PAYLABS_PROD_PRIVATE_KEY
+* PAYLABS_PROD_PUBLIC_KEY
+
+Jangan membuat nama env baru.
+Jangan menggunakan alias lama kecuali diperlukan untuk backward compatibility.
+Jangan meminta credential baru.
+
+Audit seluruh kode Paylabs dan pastikan nama env yang dibaca PERSIS sesuai daftar di atas.
+
+## Environment resolver
+
+Sandbox/SIT wajib menggunakan:
+
+MERCHANT_ID_SANDBOX
+PAYLABS_SANDBOX_PRIVATE_KEY
+PAYLABS_SANDBOX_PUBLIC_KEY
+
+Production wajib menggunakan:
+
+MERCHANT_ID_PROD
+PAYLABS_PROD_PRIVATE_KEY
+PAYLABS_PROD_PUBLIC_KEY
+
+Tidak boleh ada fallback:
+
+SANDBOX → PROD
+PROD → SANDBOX
+
+## Key usage
+
+Merchant private key:
+digunakan untuk SIGN outbound request ke Paylabs.
+
+Paylabs public key:
+digunakan untuk VERIFY callback/response dari Paylabs.
+
+Jangan menggunakan merchant private key untuk memverifikasi callback.
+
+## Audit SIGNATURE_INVALID
+
+Untuk callback yang menghasilkan:
+
+_reason = SIGNATURE_INVALID
+_rejected = true
+
+trace:
+
+1. environment runtime
+2. merchant ID yang dipilih
+3. key source:
+   SANDBOX atau PROD
+4. callback HTTP method
+5. callback endpoint/path
+6. X-TIMESTAMP
+7. body canonicalization/minification
+8. SHA256 body
+9. stringToVerify
+10. RSA-SHA256 verification result
+
+Jangan log:
+
+* private key
+* public key lengkap
+* API credential
+* signature lengkap
+
+Boleh log:
+
+* keySource = SANDBOX/PROD
+* merchantId
+* project/environment
+* SHA256 body
+* signatureValid true/false
+
+## PEM normalization
+
+Pastikan private/public key dari Replit Secrets dinormalisasi:
+
+literal "\n"
+→ newline aktual
+
+Validasi menggunakan Node crypto:
+
+createPrivateKey()
+createPublicKey()
+
+Laporkan hanya:
+
+privateKeyValid: true/false
+publicKeyValid: true/false
+
+Jangan tampilkan isi key.
+
+## Merchant check
+
+Callback sebelumnya memiliki merchantId:
+
+010728
+
+Pastikan resolver memilih environment yang merchant ID-nya cocok dengan callback tersebut.
+
+Jika runtime sandbox tetapi merchantId cocok dengan production, atau sebaliknya:
+STOP dan laporkan ENVIRONMENT_MISMATCH.
+
+## Final output
+
+Laporkan:
+
+* runtime mode
+* merchant env selected
+* merchant ID
+* private key source
+* public key source
+* PEM valid
+* callback endpoint
+* body hash
+* signatureValid
+* root cause SIGNATURE_INVALID
+
+Jangan bypass signature verification.
+Jangan menerima status payment SUCCESS jika signature masih invalid.
+Jangan commit.
+Jangan push.

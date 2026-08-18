@@ -30,9 +30,15 @@ export default function AdminLogin() {
       let data: any = {};
       try { data = await res.json(); } catch { /* non-JSON body */ }
       if (!res.ok) {
+        const description =
+          res.status === 401
+            ? (data.error || "Email atau password salah")
+            : res.status >= 500
+              ? "Server API tidak tersedia. Pastikan workflow API Server sedang berjalan, lalu coba lagi."
+              : (data.error || "Login tidak dapat diproses");
         toast({
           title: "Login Gagal",
-          description: data.error || "Email atau password salah",
+          description,
           variant: "destructive",
         });
         return;
@@ -75,6 +81,7 @@ export default function AdminLogin() {
                 id="email"
                 type="email"
                 required
+                autoComplete="username"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="admin@sportcenter.com"
@@ -87,6 +94,7 @@ export default function AdminLogin() {
                 id="password"
                 type="password"
                 required
+                autoComplete="current-password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"

@@ -1,21 +1,38 @@
-import { text, serial, timestamp, numeric, integer, jsonb } from "drizzle-orm/pg-core";
+import { text, serial, timestamp, numeric, integer, jsonb, boolean } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { bookingsTable } from "./bookings";
 import { scSchema } from "./_schema";
 
-export const paymentStatusEnum = scSchema.enum("payment_status", ["pending", "confirmed", "rejected"]);
+export const paymentStatusEnum = scSchema.enum("payment_status", ["pending", "waiting_confirmation", "confirmed", "rejected"]);
 export const paymentTypeEnum = scSchema.enum("payment_type", ["dp", "pelunasan", "full_payment"]);
+export const paymentProviderEnum = scSchema.enum("payment_provider", ["mandiri_direct", "paylabs", "unknown"]);
 
-export const paymentsTable = scSchema.table("payments", {
+export const paymentsTable = scSchema.table("sport_payments", {
   id: serial("id").primaryKey(),
   bookingId: integer("booking_id").notNull().references(() => bookingsTable.id, { onDelete: "cascade" }),
   amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
   proofUrl: text("proof_url"),
   paymentMethod: text("payment_method").default("Transfer Bank"),
+  // Compatibility enum retained for existing reconciliation consumers.
+  paymentProvider: paymentProviderEnum("payment_provider").notNull().default("unknown"),
+  providerName: text("provider_name").notNull().default("unknown"),
+  providerReference: text("provider_reference"),
+  providerId: text("provider_id").notNull(),
+  providerOrderId: text("provider_order_id").notNull(),
+  merchantTradeNo: text("merchant_trade_no"),
+  providerTradeNo: text("provider_trade_no"),
+  companyId: integer("company_id"),
+  bankAccountId: text("bank_account_id").notNull(),
+  mdrRate: numeric("mdr_rate", { precision: 8, scale: 5 }).notNull().default("0"),
+  mdrAmount: numeric("mdr_amount", { precision: 14, scale: 2 }).notNull().default("0"),
+  settlementStatus: text("settlement_status").notNull().default("unsettled"),
+  expectedSettlementDate: text("expected_settlement_date"),
+  grossTaxInclusive: boolean("gross_tax_inclusive").notNull().default(false),
   paymentType: paymentTypeEnum("payment_type").notNull().default("full_payment"),
   status: paymentStatusEnum("status").notNull().default("pending"),
   confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
+  paidAt: timestamp("paid_at", { withTimezone: true }),
   notes: text("notes"),
   ocrName: text("ocr_name"),
   ocrAmount: numeric("ocr_amount", { precision: 14, scale: 2 }),
