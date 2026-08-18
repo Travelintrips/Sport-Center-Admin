@@ -326,6 +326,12 @@ async function runStartupMigrations() {
        ADD COLUMN IF NOT EXISTS rejected_reason text`,
     `ALTER TABLE sport_center.bookings
        ADD COLUMN IF NOT EXISTS paid_at timestamptz`,
+     // Kolom yang dipakai saat admin mengonfirmasi pembayaran.
+     // Wajib idempotent karena tabel production bisa berasal dari schema lama.
+     `ALTER TABLE sport_center.payments
+        ADD COLUMN IF NOT EXISTS confirmed_at timestamptz`,
+     `ALTER TABLE sport_center.booking_history
+        ADD COLUMN IF NOT EXISTS changed_by_name text`,
     // ── Tabel-tabel yang belum ada di prod ─────────────────────────────────────
     // booking_groups
     `DO $$ BEGIN

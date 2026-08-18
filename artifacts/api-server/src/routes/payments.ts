@@ -196,13 +196,17 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
           .where(eq(bookingsTable.id, payment.bookingId));
 
         if (booking) {
-          await db.insert(bookingHistoryTable).values({
-            bookingId: payment.bookingId,
-            fromStatus: prevStatus,
-            toStatus: "pending_payment",
-            changedByName: userInfo.userName || "admin",
-            note: "DP dikonfirmasi oleh admin, menunggu pelunasan",
-          });
+          try {
+            await db.insert(bookingHistoryTable).values({
+              bookingId: payment.bookingId,
+              fromStatus: prevStatus,
+              toStatus: "pending_payment",
+              changedByName: userInfo.userName || "admin",
+              note: "DP dikonfirmasi oleh admin, menunggu pelunasan",
+            });
+          } catch (err) {
+            req.log.error({ err, paymentId: id, bookingId: payment.bookingId }, "Payment confirmed but DP history could not be written");
+          }
         }
 
         await logAudit({
@@ -222,16 +226,20 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
           .where(eq(bookingsTable.id, payment.bookingId));
 
         if (booking) {
-          await db.insert(bookingHistoryTable).values({
-            bookingId: payment.bookingId,
-            fromStatus: prevStatus,
-            toStatus: "confirmed",
-            changedByName: userInfo.userName || "admin",
-            note:
-              payment.paymentType === "pelunasan"
-                ? "Pelunasan dikonfirmasi oleh admin"
-                : "Pembayaran dikonfirmasi oleh admin",
-          });
+          try {
+            await db.insert(bookingHistoryTable).values({
+              bookingId: payment.bookingId,
+              fromStatus: prevStatus,
+              toStatus: "confirmed",
+              changedByName: userInfo.userName || "admin",
+              note:
+                payment.paymentType === "pelunasan"
+                  ? "Pelunasan dikonfirmasi oleh admin"
+                  : "Pembayaran dikonfirmasi oleh admin",
+            });
+          } catch (err) {
+            req.log.error({ err, paymentId: id, bookingId: payment.bookingId }, "Payment confirmed but booking history could not be written");
+          }
 
           const [facility] = await db
             .select({ name: facilitiesTable.name })
