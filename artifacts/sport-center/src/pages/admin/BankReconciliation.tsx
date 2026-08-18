@@ -439,9 +439,24 @@ function MatchCandidateRow({
   isPending: boolean;
 }) {
   const [lightbox, setLightbox] = useState<string | null>(null);
-  const [ocr, setOcr] = useState<{ name?: string; amount?: number; date?: string; raw?: string } | null>(
-    match.ocrName || match.ocrAmount || match.ocrDate
-      ? { name: match.ocrName, amount: match.ocrAmount, date: match.ocrDate, raw: match.ocrRaw }
+  const [ocr, setOcr] = useState<{
+    name?: string;
+    amount?: number;
+    date?: string;
+    raw?: string;
+    paymentMethod?: string | null;
+    confidence?: number;
+    autoUpdated?: boolean;
+  } | null>(
+    match.ocrName || match.ocrAmount || match.ocrDate || match.ocrData?.paymentMethodDetection
+      ? {
+          name: match.ocrName,
+          amount: match.ocrAmount,
+          date: match.ocrDate,
+          raw: match.ocrRaw,
+          paymentMethod: match.ocrData?.paymentMethodDetection?.paymentMethod ?? match.paymentMethod,
+          confidence: match.ocrData?.paymentMethodDetection?.confidence,
+        }
       : null
   );
   const [ocrLoading, setOcrLoading] = useState(false);
@@ -462,8 +477,20 @@ function MatchCandidateRow({
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error ?? "Gagal scan OCR");
-      setOcr({ name: data.ocrName, amount: data.ocrAmount, date: data.ocrDate, raw: data.ocrRaw });
-      toast({ title: "Scan OCR selesai" });
+      setOcr({
+        name: data.ocrName,
+        amount: data.ocrAmount,
+        date: data.ocrDate,
+        raw: data.ocrRaw,
+        paymentMethod: data.paymentMethod,
+        confidence: data.paymentMethodDetection?.confidence,
+        autoUpdated: data.paymentMethodAutoUpdated,
+      });
+      toast({
+        title: data.paymentMethodAutoUpdated
+          ? `Metode otomatis diubah ke ${data.paymentMethod}`
+          : "Scan OCR selesai",
+      });
     } catch (e: any) {
       setOcrError(e.message);
     } finally {
@@ -638,6 +665,18 @@ function MatchCandidateRow({
                 <div className="flex gap-1.5 items-center">
                   <span className="text-[10px] font-medium text-amber-600 w-12 shrink-0">Tanggal:</span>
                   <span className="text-[10px] text-amber-800 font-semibold">{ocr.date}</span>
+                </div>
+              )}
+              {ocr.paymentMethod && (
+                <div className="flex gap-1.5 items-center pt-1 border-t border-amber-200">
+                  <span className="text-[10px] font-medium text-amber-600 w-24 shrink-0">Metode otomatis:</span>
+                  <span className="text-[10px] text-amber-900 font-bold">
+                    {ocr.paymentMethod}
+                    {ocr.confidence != null ? ` (${Math.round(ocr.confidence * 100)}%)` : ""}
+                  </span>
+                  {ocr.autoUpdated && (
+                    <span className="text-[9px] px-1 py-0.5 rounded bg-green-100 text-green-700">Diperbarui</span>
+                  )}
                 </div>
               )}
             </div>

@@ -25,6 +25,7 @@ import { sendInvoiceToCustomer, sendGroupInvoiceToCustomer } from "../lib/invoic
 import { normalizePaymentProvider, parseProviderPaidAt } from "../lib/paymentProvider";
 import { createPaymentProviderId, createPaymentProviderOrderId, normalizeProviderName } from "../lib/paymentMetadata";
 import { ensurePaymentBankAccount, resolveRequiredPaymentEnrichment, paymentEffectiveDate } from "../lib/paymentEnrichment";
+import { readPaymentProofOcr } from "../lib/paymentOcr";
 
 // Helper: kirim rekap ke admin WA hanya jika tanggal booking = hari ini (WIB)
 function todayWIB(): string {
@@ -589,6 +590,62 @@ router.post("/payments", async (req, res) => {
       after: { bookingId: Number(bookingId), paymentType, amount },
       ...clientInfo,
     });
+
+    // OCR dijalankan setelah payment tersimpan agar upload bukti tetap
+    // responsif. Auto-detection hanya mengubah metode bila confidence tinggi;
+    // kegagalan OCR tidak menggagalkan pembuatan payment.
+    if (proofUrl) {
+      readPaymentProofOcr(proofUrl)
+        .then(async (ocrResult) => {
+          const detection = ocrResult.paymentMethodDetection;
+          const [currentPayment] = await db.select().from(paymentsTable)
+            .where(eq(paymentsTable.id, payment.id)).limit(1);
+          if (!currentPayment) return;
+
+          const shouldUpdateMethod =
+            detection.highConfidence &&
+            Boolean(detection.paymentMethod) &&
+            detection.paymentMethod !== currentPayment.paymentMethod;
+          const nextMethod = shouldUpdateMethod
+            ? detection.paymentMethod
+            : currentPayment.paymentMethod;
+          await db.update(paymentsTable).set({
+            ocrName: ocrResult.ocrName,
+            ocrAmount: ocrResult.ocrAmount == null ? null : String(ocrResult.ocrAmount),
+            ocrDate: ocrResult.ocrDate,
+            ocrRaw: ocrResult.ocrRaw,
+            ocrData: {
+              paymentMethodDetection: {
+                ...detection,
+                detectedAt: new Date().toISOString(),
+                source: "ocr",
+              },
+            },
+            ...(shouldUpdateMethod ? { paymentMethod: nextMethod } : {}),
+            ...(shouldUpdateMethod && nextMethod === "QRIS" && currentPayment.paymentProvider === "unknown"
+              ? { paymentProvider: "mandiri_direct" as const }
+              : {}),
+            updatedAt: new Date(),
+          }).where(eq(paymentsTable.id, payment.id));
+
+          if (shouldUpdateMethod) {
+            await logAudit({
+              action: "payment_method_auto_detected_ocr",
+              entity: "payment",
+              entityId: payment.id,
+              before: { paymentMethod: currentPayment.paymentMethod, paymentStatus: currentPayment.status },
+              after: {
+                paymentMethod: nextMethod,
+                confidence: detection.confidence,
+                signals: detection.signals,
+                matchedTerms: detection.matchedTerms,
+                source: "ocr",
+              },
+            });
+          }
+        })
+        .catch((error) => logger.warn({ error, paymentId: payment.id }, "Payment proof OCR failed"));
+    }
 
     res.status(201).json({ ...payment, amount: Number(payment.amount) });
   } catch (err) {

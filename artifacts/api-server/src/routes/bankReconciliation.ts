@@ -28,6 +28,8 @@ import { writeApprovalToSheetRow, isGoogleSheetsConfigured } from "../lib/google
 import * as XLSX from "xlsx";
 import multer from "multer";
 import { ensurePaymentBankAccount } from "../lib/paymentEnrichment";
+import { readPaymentProofOcr } from "../lib/paymentOcr";
+import { getClientInfo, getUserFromReq, logAudit } from "../lib/auditLog";
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -722,6 +724,8 @@ router.get("/bank-reconciliation/matches/:mutationId", adminMiddleware, async (r
         p.ocr_amount         AS "ocrAmount",
         p.ocr_date           AS "ocrDate",
         p.ocr_raw            AS "ocrRaw",
+        p.ocr_data           AS "ocrData",
+        p.payment_method     AS "paymentMethod",
         p.status             AS "paymentStatus",
         p.booking_id         AS "paymentBookingId",
         -- Booking enrichment via payment (candidateType = 'payment')
@@ -1240,57 +1244,83 @@ router.post("/bank-reconciliation/scan-ocr", adminMiddleware, async (req, res) =
       return;
     }
 
-    const imgRes = await fetch(proofUrl);
-    if (!imgRes.ok) {
-      res.status(400).json({ error: `Gagal mengunduh gambar: ${imgRes.statusText}` });
-      return;
-    }
-    const imgBuffer = Buffer.from(await imgRes.arrayBuffer());
+    const ocrResult = await readPaymentProofOcr(proofUrl);
+    const { ocrName, ocrAmount, ocrDate, ocrRaw, paymentMethodDetection } = ocrResult;
 
-    const { createWorker } = await import("tesseract.js");
-    const worker = await createWorker("ind+eng", 1, {
-      cachePath: "/tmp/tesseract-cache",
-      logger: () => {},
-    });
-    const { data } = await worker.recognize(imgBuffer);
-    await worker.terminate();
-
-    const rawText = data.text || "";
-    const lines = rawText.split("\n").map((l: string) => l.trim()).filter(Boolean);
-    let ocrName: string | null = null;
-    let ocrAmount: number | null = null;
-    let ocrDate: string | null = null;
-
-    const amountMatch = rawText.match(/(?:Rp\.?\s*|IDR\s*)?([\d]{1,3}(?:[.,]\d{3})+(?:[.,]\d{1,2})?)/i);
-    if (amountMatch) {
-      const cleaned = amountMatch[1]!.replace(/\./g, "").replace(",", ".");
-      ocrAmount = parseFloat(cleaned) || null;
-    }
-
-    const dateMatch = rawText.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})|(\d{4})[\/\-](\d{2})[\/\-](\d{2})/);
-    if (dateMatch) {
-      if (dateMatch[4]) {
-        ocrDate = `${dateMatch[4]}-${dateMatch[5]}-${dateMatch[6]}`;
-      } else {
-        const d = dateMatch[1]!.padStart(2, "0");
-        const m = dateMatch[2]!.padStart(2, "0");
-        const y = dateMatch[3]!.length === 2 ? `20${dateMatch[3]}` : dateMatch[3]!;
-        ocrDate = `${y}-${m}-${d}`;
-      }
-    }
-
-    const skipWords = /^(transfer|bank|rekening|tanggal|nominal|total|biaya|fee|dari|ke|kode|ref|no|rp|idr|berhasil|sukses|debet|kredit|saldo|date|amount|beneficiary|sender)/i;
-    for (const line of lines) {
-      if (line.length > 3 && /[a-zA-Z]{3,}/.test(line) && !skipWords.test(line) && !/^\d+$/.test(line)) {
-        ocrName = line.slice(0, 100);
-        break;
-      }
-    }
-
+    let paymentMethod: string | null = null;
+    let paymentMethodAutoUpdated = false;
+    let accountingReviewRequired = false;
     if (paymentId) {
+      const [currentPayment] = await db.select().from(paymentsTable)
+        .where(eq(paymentsTable.id, Number(paymentId))).limit(1);
+      if (!currentPayment) {
+        res.status(404).json({ error: "Payment tidak ditemukan" });
+        return;
+      }
+
+      paymentMethod = currentPayment.paymentMethod ?? null;
+      const ocrData = {
+        ...(currentPayment.ocrData && typeof currentPayment.ocrData === "object"
+          ? currentPayment.ocrData as Record<string, unknown>
+          : {}),
+        paymentMethodDetection: {
+          ...paymentMethodDetection,
+          detectedAt: new Date().toISOString(),
+          source: "ocr",
+        },
+      };
+      const updateData: Record<string, unknown> = {
+        ocrName,
+        ocrAmount,
+        ocrDate,
+        ocrRaw,
+        ocrData,
+        updatedAt: new Date(),
+      };
+
+      if (
+        paymentMethodDetection.highConfidence &&
+        paymentMethodDetection.paymentMethod &&
+        paymentMethodDetection.paymentMethod !== currentPayment.paymentMethod
+      ) {
+        paymentMethod = paymentMethodDetection.paymentMethod;
+        updateData.paymentMethod = paymentMethod;
+        // QRIS has a canonical provider in this application. Keep the
+        // existing provider snapshot when OCR detects a bank/wallet/card.
+        if (paymentMethod === "QRIS" && currentPayment.paymentProvider === "unknown") {
+          updateData.paymentProvider = "mandiri_direct";
+        }
+        paymentMethodAutoUpdated = true;
+        accountingReviewRequired = currentPayment.status === "confirmed";
+
+        await logAudit({
+          ...getUserFromReq(req),
+          action: "payment_method_auto_detected_ocr",
+          entity: "payment",
+          entityId: Number(paymentId),
+          before: {
+            paymentMethod: currentPayment.paymentMethod,
+            paymentStatus: currentPayment.status,
+          },
+          after: {
+            paymentMethod,
+            confidence: paymentMethodDetection.confidence,
+            signals: paymentMethodDetection.signals,
+            matchedTerms: paymentMethodDetection.matchedTerms,
+            accountingReviewRequired,
+            source: "ocr",
+          },
+          ...getClientInfo(req),
+        });
+      }
+
       await db.execute(sql`
         UPDATE sport_center.sport_payments
-        SET ocr_name = ${ocrName}, ocr_amount = ${ocrAmount}, ocr_date = ${ocrDate}, ocr_raw = ${rawText.slice(0, 2000)}
+        SET ocr_name = ${ocrName}, ocr_amount = ${ocrAmount}, ocr_date = ${ocrDate},
+        ocr_raw = ${ocrRaw}, ocr_data = ${JSON.stringify(ocrData)}::jsonb,
+            payment_method = COALESCE(${(updateData.paymentMethod as string | undefined) ?? null}, payment_method),
+            payment_provider = COALESCE(${(updateData.paymentProvider as string | undefined) ?? null}::sport_center.payment_provider, payment_provider),
+            updated_at = NOW()
         WHERE id = ${paymentId}
       `);
     }
@@ -1300,7 +1330,11 @@ router.post("/bank-reconciliation/scan-ocr", adminMiddleware, async (req, res) =
       ocrName,
       ocrAmount,
       ocrDate,
-      ocrRaw: rawText.slice(0, 500),
+      ocrRaw: ocrRaw.slice(0, 500),
+      paymentMethod,
+      paymentMethodDetection,
+      paymentMethodAutoUpdated,
+      accountingReviewRequired,
     });
   } catch (err: any) {
     req.log.error({ err }, "OCR scan error");
