@@ -1,6 +1,9 @@
 import pg from "pg";
 import type { Booking, GymMembership, CompanyInvoice } from "@workspace/db";
-import { postSportCenterBookingPayment } from "./accounting";
+import {
+  postConfirmedPaymentAccounting,
+  postSportCenterBookingPayment,
+} from "./accounting";
 
 const { Pool } = pg;
 
@@ -1486,6 +1489,10 @@ export async function countPendingPaymentMirrors(pool: pg.Pool): Promise<number>
     SELECT COUNT(*) AS pending
     FROM sport_center.sport_payments sp
     JOIN sport_center.sport_bookings sb ON sb.id = sp.booking_id
+     LEFT JOIN sport_center.accounting_journals saj
+       ON saj.payment_id = sp.id
+      AND saj.journal_type = 'payment_confirmed'
+      AND saj.is_reversal = false
     LEFT JOIN public.sport_bookings pb ON pb.sc_booking_id = sb.id
     LEFT JOIN public.sport_payments bpay
       ON bpay.payment_number = 'SCPAY-SC-' || sp.id::text
@@ -1493,6 +1500,8 @@ export async function countPendingPaymentMirrors(pool: pg.Pool): Promise<number>
     WHERE sp.status = 'confirmed'
       AND pb.id IS NOT NULL
       AND (
+         saj.id IS NULL
+         OR
         bpay.id IS NULL
         OR bpay.posting_status IS DISTINCT FROM 'posted'
         OR bpay.entry_id IS NULL
@@ -1501,6 +1510,100 @@ export async function countPendingPaymentMirrors(pool: pg.Pool): Promise<number>
       )
   `);
   return Number(rows[0]?.pending ?? 0);
+}
+
+/**
+ * A confirmation can predate the durable outbox trigger, or an older worker
+ * can have marked the outbox posted before the internal Sport Center journal
+ * was written. Recreate only the missing-journal work; never reset a healthy
+ * event or an active lock.
+ */
+async function ensureMissingPaymentAccountingOutbox(pool: pg.Pool): Promise<number> {
+  const result = await pool.query(`
+    INSERT INTO sport_center.payment_accounting_outbox
+      (payment_id, event_type, status, available_at, locked_at, last_error, created_at, updated_at)
+    SELECT sp.id, 'payment_confirmed', 'pending', NOW(), NULL, NULL, NOW(), NOW()
+      FROM sport_center.sport_payments sp
+      LEFT JOIN sport_center.accounting_journals aj
+        ON aj.payment_id = sp.id
+       AND aj.journal_type = 'payment_confirmed'
+       AND aj.is_reversal = false
+     WHERE sp.status = 'confirmed'
+       AND aj.id IS NULL
+    ON CONFLICT (payment_id, event_type) DO UPDATE
+      SET status = 'pending',
+          available_at = NOW(),
+          locked_at = NULL,
+          last_error = NULL,
+          updated_at = NOW()
+    -- A posted outbox without its internal journal is the stale state this
+    -- repair targets. Failed/pending rows keep their retry backoff and active
+    -- processing rows are never stolen by the reconciliation pass.
+    WHERE sport_center.payment_accounting_outbox.status = 'posted'
+  `);
+  return result.rowCount ?? 0;
+}
+
+async function getConfirmedPaymentAccountingInput(pool: pg.Pool, paymentId: number): Promise<{
+  bookingId: number;
+  orderNumber: string;
+  amount: number;
+  paymentMethod: string | null;
+  paymentProvider: string | null;
+  paymentType: string | null;
+  companyId: number | null;
+  bankAccountId: string | null;
+  providerReference: string | null;
+  providerOrderId: string | null;
+  merchantTradeNo: string | null;
+  providerTradeNo: string | null;
+  ppnRate: number;
+  paidAt: string | null;
+  journalDate: string;
+} | null> {
+  const { rows } = await pool.query(
+    `SELECT
+       sp.id AS payment_id,
+       sp.booking_id,
+       sb.order_number,
+       sp.amount,
+       sp.payment_method,
+       sp.payment_provider::text AS payment_provider,
+       sp.payment_type,
+       sp.company_id,
+       sp.bank_account_id,
+       sp.provider_reference,
+       sp.provider_order_id,
+       sp.merchant_trade_no,
+       sp.provider_trade_no,
+       COALESCE(sb.ppn_rate, 0) AS ppn_rate,
+       COALESCE(sp.paid_at, sp.confirmed_at, sp.created_at)::date::text AS journal_date,
+       COALESCE(sp.paid_at, sp.confirmed_at, sp.created_at)::text AS paid_at
+     FROM sport_center.sport_payments sp
+     JOIN sport_center.sport_bookings sb ON sb.id = sp.booking_id
+    WHERE sp.id = $1
+      AND sp.status = 'confirmed'`,
+    [paymentId],
+  );
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    bookingId: Number(row.booking_id),
+    orderNumber: String(row.order_number),
+    amount: Math.round(Number(row.amount)),
+    paymentMethod: row.payment_method == null ? null : String(row.payment_method),
+    paymentProvider: row.payment_provider == null ? null : String(row.payment_provider),
+    paymentType: row.payment_type == null ? null : String(row.payment_type),
+    companyId: row.company_id == null ? null : Number(row.company_id),
+    bankAccountId: row.bank_account_id == null ? null : String(row.bank_account_id),
+    providerReference: row.provider_reference == null ? null : String(row.provider_reference),
+    providerOrderId: row.provider_order_id == null ? null : String(row.provider_order_id),
+    merchantTradeNo: row.merchant_trade_no == null ? null : String(row.merchant_trade_no),
+    providerTradeNo: row.provider_trade_no == null ? null : String(row.provider_trade_no),
+    ppnRate: Number(row.ppn_rate ?? 0),
+    paidAt: row.paid_at == null ? null : String(row.paid_at),
+    journalDate: String(row.journal_date),
+  };
 }
 
 /**
@@ -1515,6 +1618,10 @@ export async function processPaymentAccountingOutbox(): Promise<{
 }> {
   const pool = getProdPool();
   if (!pool) return { claimed: 0, posted: 0, retried: 0 };
+
+  // Repair historical confirmed payments as well as events created by the
+  // trigger. This is idempotent and does not disturb active processing locks.
+  await ensureMissingPaymentAccountingOutbox(pool);
 
   const client = await pool.connect();
   let claimed: Array<{ id: number; payment_id: number }> = [];
@@ -1555,20 +1662,48 @@ export async function processPaymentAccountingOutbox(): Promise<{
 
   if (claimed.length === 0) return { claimed: 0, posted: 0, retried: 0 };
 
-  // The bulk path is idempotent and handles both missing mirrors and failed
-  // public entries. It also preserves DP/pelunasan payment-level identity.
-  await bulkPushPaymentsToBizportal();
-
   let posted = 0;
   let retried = 0;
   for (const event of claimed) {
     try {
+      const input = await getConfirmedPaymentAccountingInput(pool, event.payment_id);
+      if (!input) {
+        throw new Error("PAYMENT_NOT_CONFIRMED_OR_MISSING");
+      }
+
+      // This ordered pipeline repairs both the internal journal and the public
+      // mirror/entry, keyed by payment id (DP and pelunasan stay separate).
+      await postConfirmedPaymentAccounting({
+        bookingId: input.bookingId,
+        orderNumber: input.orderNumber,
+        dpp: input.amount,
+        ppnAmount: 0,
+        ppnRate: input.ppnRate,
+        facilityId: null,
+        journalDate: input.journalDate,
+        paymentMethod: input.paymentMethod ?? undefined,
+        paymentId: event.payment_id,
+        companyId: input.companyId,
+        paymentType: input.paymentType,
+        paymentProvider: input.paymentProvider,
+        bankAccountId: input.bankAccountId,
+        providerReference: input.providerReference,
+        providerOrderId: input.providerOrderId,
+        merchantTradeNo: input.merchantTradeNo,
+        providerTradeNo: input.providerTradeNo,
+      });
+
       const result = await pool.query(`
         SELECT sp.status,
+               aj.id AS internal_journal_id,
                m.posting_status,
                m.entry_id,
                ae.status AS entry_status
           FROM sport_center.sport_payments sp
+          LEFT JOIN sport_center.accounting_journals aj
+            ON aj.payment_id = sp.id
+           AND aj.journal_type = 'payment_confirmed'
+           AND aj.is_reversal = false
           LEFT JOIN public.sport_payments m
             ON m.source_payment_id = sp.id
             OR m.payment_number = 'SCPAY-SC-' || sp.id::text
@@ -1581,6 +1716,7 @@ export async function processPaymentAccountingOutbox(): Promise<{
       const row = result.rows[0];
       const complete =
         row?.status === "confirmed" &&
+        row?.internal_journal_id != null &&
         row?.posting_status === "posted" &&
         row?.entry_id != null &&
         row?.entry_status === "posted";
