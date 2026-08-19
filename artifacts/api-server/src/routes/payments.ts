@@ -1477,6 +1477,9 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
     req.log.error({ err }, "Update payment error");
     if (res.headersSent) return;
     const message = String(err instanceof Error ? err.message : err ?? "");
+    const isAccountingConflict =
+      message.includes("POSTED_ACCOUNTING_JOURNAL") ||
+      message.includes("PAYMENT_ACCOUNTING_JOURNAL_AMBIGUOUS");
     const safeError =
       message === "RECEIVING_BANK_ACCOUNT_NOT_CONFIGURED"
         ? "Rekening penerima pembayaran belum dikonfigurasi."
@@ -1484,8 +1487,12 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
           ? "Rekening penerima pembayaran belum tersedia untuk payment ini."
           : message.startsWith("PAYMENT_PROVIDER")
             ? "Metadata provider pembayaran belum lengkap."
+            : message.includes("CANONICAL_") || message.includes("MIRROR_")
+              ? "Pembayaran belum dapat dikonfirmasi karena aturan settlement atau data penerima belum lengkap."
+              : isAccountingConflict
+                ? "Pembayaran sudah tercatat pada jurnal akuntansi dan tidak dapat diubah."
             : "Internal server error";
-    res.status(safeError === "Internal server error" ? 500 : 422).json({
+    res.status(safeError === "Internal server error" ? 500 : isAccountingConflict ? 409 : 422).json({
       error: safeError,
     });
   }
