@@ -21,6 +21,10 @@ async function buildAll() {
     format: "esm",
     outdir: distDir,
     outExtension: { ".js": ".mjs" },
+    // Database migrations stored as SQL files are bundled as strings so the
+    // deployed API can apply them at startup; runtime file paths are not
+    // reliable in the artifact deployment bundle.
+    loader: { ".sql": "text" },
     logLevel: "info",
     // Some packages may not be bundleable, so we externalize them, we can add more here as needed.
     // Some of the packages below may not be imported or installed, but we're adding them in case they are in the future.

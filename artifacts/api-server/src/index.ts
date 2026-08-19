@@ -8,6 +8,7 @@ import { db, usersTable, settingsTable, facilitiesTable } from "@workspace/db";
 import { sql, eq } from "drizzle-orm";
 import { validateEnv } from "./lib/envValidation";
 import { loadSecretsFromGSM } from "./lib/secretLoader";
+import { startPaymentMirrorMigration } from "./lib/paymentMirrorMigration";
 
 // ── 1. Load secrets from Google Secret Manager (production/GAE only) ──────────
 // Must run before any other import reads process.env for secrets.
@@ -1107,6 +1108,18 @@ async function runStartupSeed() {
   } catch (err) {
     logger.error({ err }, "Startup seed ERROR: seed transaction failed");
   }
+}
+
+// This is a financial safety migration, not a best-effort schema migration.
+// Finish it before binding the port so every confirmation entry point
+// (admin, WhatsApp, reconciliation, and gateway callbacks) sees the same
+// verified trigger from its first request.
+try {
+  await startPaymentMirrorMigration();
+  logger.info("Payment mirror migration verified");
+} catch (err) {
+  logger.error({ err }, "Payment mirror migration FAILED; refusing to accept traffic");
+  throw err;
 }
 
 // Bind the port immediately so the deployment health check passes, then run

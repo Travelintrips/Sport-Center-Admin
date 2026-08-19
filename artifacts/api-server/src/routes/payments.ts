@@ -39,6 +39,7 @@ import {
   paymentEffectiveDate,
   type SettlementProvider,
 } from "../lib/paymentEnrichment";
+import { assertPaymentMirrorMigrationReady } from "../lib/paymentMirrorMigration";
 import {
   createProofOcrToken,
   paymentMethodMatchesOcr,
@@ -1079,6 +1080,7 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
 
     let payment: typeof before | undefined;
     if (status === "confirmed") {
+      assertPaymentMirrorMigrationReady();
       // Claim the pending payment in the database. Two concurrent callbacks
       // can both read "pending", but only one can transition it and continue
       // to accounting.
@@ -1480,6 +1482,9 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
     const isAccountingConflict =
       message.includes("POSTED_ACCOUNTING_JOURNAL") ||
       message.includes("PAYMENT_ACCOUNTING_JOURNAL_AMBIGUOUS");
+    const isPaymentMigrationPending =
+      message === "PAYMENT_MIRROR_MIGRATION_PENDING" ||
+      message === "PAYMENT_MIRROR_MIGRATION_FAILED";
     const safeError =
       message === "RECEIVING_BANK_ACCOUNT_NOT_CONFIGURED"
         ? "Rekening penerima pembayaran belum dikonfigurasi."
@@ -1491,8 +1496,18 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
               ? "Pembayaran belum dapat dikonfirmasi karena aturan settlement atau data penerima belum lengkap."
               : isAccountingConflict
                 ? "Pembayaran sudah tercatat pada jurnal akuntansi dan tidak dapat diubah."
-            : "Internal server error";
-    res.status(safeError === "Internal server error" ? 500 : isAccountingConflict ? 409 : 422).json({
+                : isPaymentMigrationPending
+                  ? "Sistem konfirmasi pembayaran sedang disiapkan. Silakan coba lagi sesaat lagi."
+                  : "Internal server error";
+    res.status(
+      safeError === "Internal server error"
+        ? 500
+        : isPaymentMigrationPending
+          ? 503
+          : isAccountingConflict
+            ? 409
+            : 422,
+    ).json({
       error: safeError,
     });
   }

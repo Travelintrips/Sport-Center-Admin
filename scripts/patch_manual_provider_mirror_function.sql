@@ -430,3 +430,80 @@ BEGIN
   RETURN NEW;
 END;
 $function$;
+
+-- Existing deployments already have this trigger. Create it when recovering
+-- an older database, and replace an incorrectly wired trigger with the
+-- canonical projection function above.
+DO $trigger$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM pg_trigger t
+    JOIN pg_class r ON r.oid = t.tgrelid
+    JOIN pg_namespace n ON n.oid = r.relnamespace
+    JOIN pg_proc p ON p.oid = t.tgfoid
+    WHERE n.nspname = 'sport_center'
+      AND r.relname = 'sport_payments'
+      AND t.tgname = 'trg_mirror_confirmed_payment_to_public'
+      AND NOT t.tgisinternal
+      AND (
+        p.proname <> 'mirror_confirmed_payment_to_public'
+        OR t.tgenabled NOT IN ('O', 'A')
+        OR (t.tgtype & 1) = 0
+        OR (t.tgtype & 2) <> 0
+        OR (t.tgtype & 4) = 0
+        OR (t.tgtype & 16) = 0
+      )
+  ) THEN
+    EXECUTE 'DROP TRIGGER trg_mirror_confirmed_payment_to_public ON sport_center.sport_payments';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_trigger t
+    JOIN pg_class r ON r.oid = t.tgrelid
+    JOIN pg_namespace n ON n.oid = r.relnamespace
+    JOIN pg_proc p ON p.oid = t.tgfoid
+    WHERE n.nspname = 'sport_center'
+      AND r.relname = 'sport_payments'
+      AND t.tgname = 'trg_mirror_confirmed_payment_to_public'
+      AND NOT t.tgisinternal
+      AND p.proname = 'mirror_confirmed_payment_to_public'
+      AND t.tgenabled IN ('O', 'A')
+      AND (t.tgtype & 1) <> 0
+      AND (t.tgtype & 2) = 0
+      AND (t.tgtype & 4) <> 0
+      AND (t.tgtype & 16) <> 0
+  ) THEN
+    EXECUTE 'CREATE TRIGGER trg_mirror_confirmed_payment_to_public AFTER INSERT OR UPDATE ON sport_center.sport_payments FOR EACH ROW EXECUTE FUNCTION sport_center.mirror_confirmed_payment_to_public()';
+  END IF;
+END
+$trigger$;
+
+DO $verify$
+BEGIN
+  IF to_regprocedure('sport_center.resolve_and_persist_payment_metadata(integer)') IS NULL THEN
+    RAISE EXCEPTION 'PAYMENT_MIRROR_DEPENDENCY_MISSING: resolve_and_persist_payment_metadata(integer)';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_trigger t
+    JOIN pg_class r ON r.oid = t.tgrelid
+    JOIN pg_namespace n ON n.oid = r.relnamespace
+    JOIN pg_proc p ON p.oid = t.tgfoid
+    WHERE n.nspname = 'sport_center'
+      AND r.relname = 'sport_payments'
+      AND t.tgname = 'trg_mirror_confirmed_payment_to_public'
+      AND NOT t.tgisinternal
+      AND p.proname = 'mirror_confirmed_payment_to_public'
+      AND t.tgenabled IN ('O', 'A')
+      AND (t.tgtype & 1) <> 0
+      AND (t.tgtype & 2) = 0
+      AND (t.tgtype & 4) <> 0
+      AND (t.tgtype & 16) <> 0
+  ) THEN
+    RAISE EXCEPTION 'PAYMENT_MIRROR_TRIGGER_MISSING';
+  END IF;
+END
+$verify$;
