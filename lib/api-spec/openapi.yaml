@@ -720,6 +720,31 @@ paths:
               schema:
                 $ref: "#/components/schemas/Payment"
 
+  /payments/{id}/metadata:
+    patch:
+      operationId: updatePaymentMetadata
+      tags: [payments]
+      summary: Update payment metadata only (method/provider) without financial side effects
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PaymentMetadataUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Payment"
+
   /promos:
     get:
       operationId: listPromos
@@ -3345,6 +3370,17 @@ components:
           enum: [mandiri_direct, paylabs, unknown]
         notes:
           type: string
+
+    PaymentMetadataUpdate:
+      type: object
+      additionalProperties: false
+      properties:
+        paymentMethod:
+          type: string
+        paymentProvider:
+          type: string
+          # QRIS manual Sport Center selalu settle via Bank Mandiri CST.
+          enum: [mandiri_direct]
 
     Promo:
       type: object

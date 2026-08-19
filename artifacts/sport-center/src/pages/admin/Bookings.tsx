@@ -4,6 +4,7 @@ import {
   useListBookings,
   useUpdateBooking,
   useUpdatePayment,
+  useUpdatePaymentMetadata,
   useCheckInBooking,
   getListBookingsQueryKey,
   useGetBookingWaLogs,
@@ -2388,6 +2389,35 @@ export default function AdminBookings() {
     },
   });
 
+  // Edit metadata pembayaran (metode/provider) memakai endpoint khusus yang
+  // tidak menyentuh status, konfirmasi, settlement, atau akuntansi finansial.
+  const updatePaymentMetadataMutation = useUpdatePaymentMetadata({
+    mutation: {
+      onSuccess: (data) => {
+        queryClient.invalidateQueries({ queryKey: getListBookingsQueryKey() });
+        toast({ title: "Metadata pembayaran diperbarui" });
+        setSelectedBooking((current: any) => {
+          if (!current) return current;
+          const currentPayments = current.payments ?? (current.payment ? [current.payment] : []);
+          const updatedPayments = currentPayments.map((payment: any) =>
+            payment.id === data.id ? data : payment,
+          );
+          return {
+            ...current,
+            payments: updatedPayments,
+            payment: current.payment?.id === data.id ? data : current.payment,
+          };
+        });
+      },
+      onError: (error: any) =>
+        toast({
+          title: "Gagal memperbarui metadata pembayaran",
+          description: error?.message?.replace(/^HTTP \d+ [^:]+:\s*/, "") || "Terjadi kesalahan pada server.",
+          variant: "destructive",
+        }),
+    },
+  });
+
   const clearProofMutation = useMutation({
     mutationFn: async (paymentId: number) => {
       const res = await fetch(`${API_BASE}/payments/${paymentId}/proof`, {
@@ -2602,7 +2632,7 @@ export default function AdminBookings() {
     onError: (err: Error) => toast({ title: "Gagal", description: err.message, variant: "destructive" }),
   });
 
-  const isUpdating = updateBookingMutation.isPending || updatePaymentMutation.isPending || deletingId !== null;
+  const isUpdating = updateBookingMutation.isPending || updatePaymentMutation.isPending || updatePaymentMetadataMutation.isPending || deletingId !== null;
   const pendingVerification = bookings.filter((b: any) => b.status === "paid").length;
 
   const mergeSelectedBookings = useMemo(
@@ -3219,12 +3249,12 @@ export default function AdminBookings() {
                            payment={b.payment}
                            options={paymentMethodOptions}
                            onChange={(paymentId, paymentMethod) =>
-                             updatePaymentMutation.mutate({
+                             updatePaymentMetadataMutation.mutate({
                                id: paymentId,
                                data: { paymentMethod },
                              })
                            }
-                           disabled={updatePaymentMutation.isPending}
+                           disabled={updatePaymentMetadataMutation.isPending}
                          />
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">
@@ -3537,7 +3567,7 @@ export default function AdminBookings() {
           }
            paymentMethodOptions={paymentMethodOptions}
            onUpdatePaymentMethod={(paymentId, paymentMethod) =>
-             updatePaymentMutation.mutate({ id: paymentId, data: { paymentMethod } })
+             updatePaymentMetadataMutation.mutate({ id: paymentId, data: { paymentMethod } })
            }
           onClearProof={(paymentId) => clearProofMutation.mutate(paymentId)}
           onDelete={handleDelete}

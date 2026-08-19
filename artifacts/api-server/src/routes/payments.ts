@@ -32,6 +32,7 @@ import { sendRekapPemakaianToAdmin } from "../lib/rekapPemakaian";
 import { sendInvoiceToCustomer, sendGroupInvoiceToCustomer } from "../lib/invoiceDelivery";
 import { normalizePaymentProvider, parseProviderPaidAt } from "../lib/paymentProvider";
 import { createPaymentProviderId, createPaymentProviderOrderId, normalizeProviderName } from "../lib/paymentMetadata";
+import { validatePaymentMetadataUpdate } from "../lib/paymentMetadataUpdate";
 import {
   ensurePaymentBankAccount,
   resolveRequiredPaymentEnrichment,
@@ -726,10 +727,119 @@ router.post("/payments", async (req, res) => {
   }
 });
 
+/**
+ * Metadata-only payment edit.
+ *
+ * Hanya payment_method / payment_provider (+ provider_name turunan) yang
+ * boleh berubah. Tidak ada konfirmasi, enrichment, settlement, rekonsiliasi,
+ * posting jurnal, atau sinkronisasi BizPortal. Sinkronisasi metadata ke
+ * accounting journal terjadi lewat trigger DB sync_payment_accounting_journal
+ * yang metadata-only, dan guard_posted_accounting_journal menjaga field
+ * finansial jurnal posted tetap immutable.
+ */
+router.patch("/payments/:id/metadata", adminMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(String(req.params.id));
+    if (!Number.isFinite(id)) {
+      res.status(400).json({ error: "ID pembayaran tidak valid" });
+      return;
+    }
+    const [before] = await db.select().from(paymentsTable).where(eq(paymentsTable.id, id)).limit(1);
+    if (!before) { res.status(404).json({ error: "Not found" }); return; }
+
+    const result = validatePaymentMetadataUpdate(req.body, {
+      paymentMethod: before.paymentMethod,
+      paymentProvider: before.paymentProvider,
+    });
+    if (!result.ok) {
+      res.status(400).json({ error: result.error });
+      return;
+    }
+    const { update } = result;
+
+    const noChange =
+      (update.paymentMethod === undefined ||
+        update.paymentMethod === String(before.paymentMethod ?? "").trim()) &&
+      (update.paymentProvider === undefined ||
+        String(update.paymentProvider ?? "") === String(before.paymentProvider ?? ""));
+
+    if (noChange) {
+      // Idempotent: mengulang nilai yang sama tidak boleh error dan tidak
+      // boleh menyentuh apa pun.
+      res.json({ ...before, amount: Number(before.amount) });
+      return;
+    }
+
+    const [payment] = await db
+      .update(paymentsTable)
+      .set({
+        ...(update.paymentMethod !== undefined ? { paymentMethod: update.paymentMethod } : {}),
+        ...(update.paymentProvider !== undefined
+          ? { paymentProvider: update.paymentProvider as any }
+          : {}),
+        ...(update.providerName !== undefined ? { providerName: update.providerName } : {}),
+        updatedAt: new Date(),
+      })
+      .where(eq(paymentsTable.id, id))
+      .returning();
+    if (!payment) { res.status(404).json({ error: "Not found" }); return; }
+
+    await logAudit({
+      ...getUserFromReq(req),
+      action: "PAYMENT_METADATA_UPDATED",
+      entity: "payment",
+      entityId: payment.id,
+      before: {
+        paymentMethod: before.paymentMethod,
+        paymentProvider: before.paymentProvider,
+        providerName: before.providerName,
+      },
+      after: {
+        paymentMethod: payment.paymentMethod,
+        paymentProvider: payment.paymentProvider,
+        providerName: payment.providerName,
+      },
+      ...getClientInfo(req),
+    });
+
+    res.json({ ...payment, amount: Number(payment.amount) });
+  } catch (err: any) {
+    const message = String(err?.message ?? "") + " " + String((err as any)?.cause?.message ?? "");
+    if (message.includes("POSTED_ACCOUNTING_JOURNAL") || message.includes("PAYMENT_ACCOUNTING_JOURNAL_AMBIGUOUS")) {
+      req.log.error({ err }, "Payment metadata update blocked by accounting guard");
+      res.status(409).json({ error: "Jurnal akuntansi terkait tidak bisa disinkronkan. Hubungi finance." });
+      return;
+    }
+    if (message.includes("CANONICAL_PROVIDER_RULE_UNRESOLVED") || message.includes("CANONICAL_")) {
+      // Payment sudah confirmed dan terikat kontrak settlement owner-approved.
+      // Tidak ada aturan settlement untuk kombinasi metode/provider baru,
+      // jadi edit ditolak (fail closed) tanpa menyentuh settlement lama.
+      req.log.warn({ err }, "Payment metadata update blocked by settlement contract");
+      res.status(409).json({
+        error:
+          "Metode/provider ini tidak punya aturan settlement yang disetujui untuk pembayaran yang sudah dikonfirmasi. Perubahan dibatalkan.",
+      });
+      return;
+    }
+    req.log.error({ err }, "Update payment metadata error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 router.patch("/payments/:id", adminMiddleware, async (req, res) => {
   try {
     const id = parseInt(String(req.params.id));
     let { status, paymentMethod, paymentProvider: rawPaymentProvider, notes } = req.body;
+    // Edit metadata tanpa perubahan status harus lewat endpoint khusus
+    // PATCH /payments/:id/metadata yang metadata-only dan tervalidasi ketat.
+    // Route lebar ini hanya untuk konfirmasi/penolakan status (boleh disertai
+    // koreksi metadata dalam request konfirmasi yang sama).
+    if (status === undefined && (paymentMethod !== undefined || rawPaymentProvider !== undefined)) {
+      res.status(400).json({
+        error: "Gunakan endpoint /payments/:id/metadata untuk mengubah metode/provider pembayaran",
+      });
+      return;
+    }
     const [before] = await db.select().from(paymentsTable).where(eq(paymentsTable.id, id)).limit(1);
     if (!before) { res.status(404).json({ error: "Not found" }); return; }
     // A repeated confirmation callback must be a no-op. Besides avoiding

@@ -105,6 +105,7 @@ import type {
   OkResult,
   Payment,
   PaymentInput,
+  PaymentMetadataUpdate,
   PaymentUpdate,
   PreviewDocumentParams,
   Promo,
@@ -2702,6 +2703,78 @@ export const useUpdatePayment = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getUpdatePaymentMutationOptions(options));
+    }
+
+export const getUpdatePaymentMetadataUrl = (id: number,) => {
+
+
+
+
+  return `/api/payments/${id}/metadata`
+}
+
+/**
+ * @summary Update payment metadata only (method/provider) without financial side effects
+ */
+export const updatePaymentMetadata = async (id: number,
+    paymentMetadataUpdate: PaymentMetadataUpdate, options?: RequestInit): Promise<Payment> => {
+
+  return customFetch<Payment>(getUpdatePaymentMetadataUrl(id),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      paymentMetadataUpdate,)
+  }
+);}
+
+
+
+
+export const getUpdatePaymentMetadataMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updatePaymentMetadata>>, TError,{id: number;data: BodyType<PaymentMetadataUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updatePaymentMetadata>>, TError,{id: number;data: BodyType<PaymentMetadataUpdate>}, TContext> => {
+
+const mutationKey = ['updatePaymentMetadata'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updatePaymentMetadata>>, {id: number;data: BodyType<PaymentMetadataUpdate>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  updatePaymentMetadata(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdatePaymentMetadataMutationResult = NonNullable<Awaited<ReturnType<typeof updatePaymentMetadata>>>
+    export type UpdatePaymentMetadataMutationBody = BodyType<PaymentMetadataUpdate>
+    export type UpdatePaymentMetadataMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Update payment metadata only (method/provider) without financial side effects
+ */
+export const useUpdatePaymentMetadata = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updatePaymentMetadata>>, TError,{id: number;data: BodyType<PaymentMetadataUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updatePaymentMetadata>>,
+        TError,
+        {id: number;data: BodyType<PaymentMetadataUpdate>},
+        TContext
+      > => {
+      return useMutation(getUpdatePaymentMetadataMutationOptions(options));
     }
 
 export const getListPromosUrl = (params?: ListPromosParams,) => {

@@ -19,10 +19,8 @@ export interface RecurringBookingInput {
   repeatType: RecurringBookingInputRepeatType;
   repeatCount: number;
   notes?: string;
-
+  /** Total down payment for the recurring payment group. Must be less than the group grand total. */
   downPaymentAmount?: number;
-
   customerType?: RecurringBookingInputCustomerType;
   idCardNumber?: string;
-
 }

@@ -131,6 +131,8 @@ export * from './paymentInput';
 export * from './paymentInputPaymentMethod';
 export * from './paymentInputPaymentProvider';
 export * from './paymentInputPaymentType';
+export * from './paymentMetadataUpdate';
+export * from './paymentMetadataUpdatePaymentProvider';
 export * from './paymentPaymentProvider';
 export * from './paymentPaymentType';
 export * from './paymentStatus';

@@ -361,11 +361,10 @@ export interface RecurringBookingInput {
   repeatType: RecurringBookingInputRepeatType;
   repeatCount: number;
   notes?: string;
-
+  /** Total down payment for the recurring payment group. Must be less than the group grand total. */
   downPaymentAmount?: number;
   customerType?: RecurringBookingInputCustomerType;
   idCardNumber?: string;
-
 }
 
 export interface RecurringBookingResult {
@@ -502,6 +501,18 @@ export interface PaymentUpdate {
   paymentMethod?: string;
   paymentProvider?: PaymentUpdatePaymentProvider;
   notes?: string;
+}
+
+export type PaymentMetadataUpdatePaymentProvider = typeof PaymentMetadataUpdatePaymentProvider[keyof typeof PaymentMetadataUpdatePaymentProvider];
+
+
+export const PaymentMetadataUpdatePaymentProvider = {
+  mandiri_direct: 'mandiri_direct',
+} as const;
+
+export interface PaymentMetadataUpdate {
+  paymentMethod?: string;
+  paymentProvider?: PaymentMetadataUpdatePaymentProvider;
 }
 
 export type PromoType = typeof PromoType[keyof typeof PromoType];

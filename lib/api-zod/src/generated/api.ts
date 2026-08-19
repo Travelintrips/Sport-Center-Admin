@@ -539,6 +539,7 @@ export const CreateRecurringBookingBody = zod.object({
   "repeatType": zod.enum(['weekly', 'monthly']),
   "repeatCount": zod.number(),
   "notes": zod.string().optional(),
+  "downPaymentAmount": zod.number().optional().describe('Total down payment for the recurring payment group. Must be less than the group grand total.'),
   "customerType": zod.enum(['umum', 'angkasa_pura']).optional(),
   "idCardNumber": zod.string().optional()
 })
@@ -979,6 +980,42 @@ export const UpdatePaymentBody = zod.object({
 })
 
 export const UpdatePaymentResponse = zod.object({
+  "id": zod.number(),
+  "bookingId": zod.number(),
+  "amount": zod.number(),
+  "proofUrl": zod.string().nullish(),
+  "paymentMethod": zod.string().nullish(),
+  "paymentProvider": zod.union([zod.literal('mandiri_direct'),zod.literal('paylabs'),zod.literal('unknown'),zod.literal(null)]).nullish(),
+  "providerName": zod.string(),
+  "providerId": zod.string(),
+  "providerOrderId": zod.string(),
+  "bankAccountId": zod.string(),
+  "providerReference": zod.string().nullish(),
+  "merchantTradeNo": zod.string().nullish(),
+  "providerTradeNo": zod.string().nullish(),
+  "paymentType": zod.enum(['dp', 'pelunasan', 'full_payment']).optional(),
+  "status": zod.enum(['pending', 'confirmed', 'rejected']),
+  "confirmedAt": zod.string().nullish(),
+  "paidAt": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "createdAt": zod.string().optional(),
+  "updatedAt": zod.string().optional()
+})
+
+
+/**
+ * @summary Update payment metadata only (method/provider) without financial side effects
+ */
+export const UpdatePaymentMetadataParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const UpdatePaymentMetadataBody = zod.object({
+  "paymentMethod": zod.string().optional(),
+  "paymentProvider": zod.enum(['mandiri_direct']).optional()
+})
+
+export const UpdatePaymentMetadataResponse = zod.object({
   "id": zod.number(),
   "bookingId": zod.number(),
   "amount": zod.number(),
