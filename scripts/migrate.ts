@@ -1255,5 +1255,168 @@ DO $$ BEGIN
   ALTER TABLE sport_center.sport_payments
     ALTER COLUMN bank_account_id SET NOT NULL;
 END $$;
+
+-- ============================================================
+-- Runtime accounting contracts (captured from verified DEV)
+-- ============================================================
+-- Keep these definitions in the canonical migration runner so a fresh
+-- environment receives the same runtime behavior as DEV.  The functions
+-- are intentionally installed after the accounting tables and payment
+-- metadata columns have been created above.
+CREATE OR REPLACE FUNCTION sport_center.guard_posted_accounting_journal()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path TO 'pg_catalog', 'sport_center'
+AS $function$
+BEGIN
+
+  -- Posted / reversed tetap tidak boleh DELETE
+  IF TG_OP = 'DELETE'
+     AND OLD.status IN ('posted', 'reversed') THEN
+
+    RAISE EXCEPTION
+      'POSTED_ACCOUNTING_JOURNAL_CANNOT_BE_DELETED: %',
+      OLD.id;
+  END IF;
+
+
+  -- POSTED: hanya 2 metadata ini yang boleh berubah
+  IF TG_OP = 'UPDATE'
+     AND OLD.status = 'posted' THEN
+
+    IF
+      (
+        to_jsonb(NEW)
+        - ARRAY[
+            'payment_method',
+            'payment_provider'
+          ]::text[]
+      )
+      IS DISTINCT FROM
+      (
+        to_jsonb(OLD)
+        - ARRAY[
+            'payment_method',
+            'payment_provider'
+          ]::text[]
+      )
+    THEN
+      RAISE EXCEPTION
+        'POSTED_ACCOUNTING_JOURNAL_FINANCIAL_FIELDS_IMMUTABLE: %',
+        OLD.id;
+    END IF;
+
+    RETURN NEW;
+  END IF;
+
+
+  -- REVERSED tetap full immutable
+  IF TG_OP = 'UPDATE'
+     AND OLD.status = 'reversed' THEN
+
+    RAISE EXCEPTION
+      'REVERSED_ACCOUNTING_JOURNAL_IS_IMMUTABLE: %',
+      OLD.id;
+  END IF;
+
+
+  RETURN COALESCE(NEW, OLD);
+
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION sport_center.sync_payment_accounting_journal()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $function$
+DECLARE
+  v_journal_id integer;
+  v_journal_status text;
+  v_count integer;
+BEGIN
+
+  /*
+    Jangan LIMIT 1 diam-diam.
+    Pastikan payment memiliki maksimal satu payment_confirmed journal aktif.
+  */
+
+  SELECT
+    COUNT(*),
+    MIN(id)
+  INTO
+    v_count,
+    v_journal_id
+  FROM sport_center.accounting_journals
+  WHERE payment_id = NEW.id
+    AND journal_type = 'payment_confirmed'
+    AND is_reversal = false;
+
+
+  -- Belum ada jurnal: tidak perlu sync
+  IF v_count = 0 THEN
+    RETURN NEW;
+  END IF;
+
+
+  -- Ambiguous: fail closed
+  IF v_count > 1 THEN
+    RAISE EXCEPTION
+      'PAYMENT_ACCOUNTING_JOURNAL_AMBIGUOUS: payment_id=% journal_count=%',
+      NEW.id,
+      v_count;
+  END IF;
+
+
+  SELECT status::text
+  INTO v_journal_status
+  FROM sport_center.accounting_journals
+  WHERE id = v_journal_id;
+
+
+  -- Jurnal reversed jangan disentuh
+  IF v_journal_status = 'reversed' THEN
+    RETURN NEW;
+  END IF;
+
+
+  /*
+    METADATA ONLY.
+
+    Tidak menyentuh:
+    amount
+    DPP
+    PPN
+    debit / credit
+    COA
+    journal lines
+    journal date
+    status
+  */
+
+  UPDATE sport_center.accounting_journals
+  SET
+    payment_method = NEW.payment_method,
+    payment_provider = NEW.payment_provider::text
+  WHERE id = v_journal_id;
+
+
+  RETURN NEW;
+END;
+$function$;
+
+DROP TRIGGER IF EXISTS trg_guard_posted_accounting_journal
+  ON sport_center.accounting_journals;
+CREATE TRIGGER trg_guard_posted_accounting_journal
+BEFORE DELETE OR UPDATE ON sport_center.accounting_journals
+FOR EACH ROW
+EXECUTE FUNCTION sport_center.guard_posted_accounting_journal();
+
+DROP TRIGGER IF EXISTS trg_sync_payment_accounting_journal
+  ON sport_center.sport_payments;
+CREATE TRIGGER trg_sync_payment_accounting_journal
+AFTER INSERT OR UPDATE OF payment_method, payment_provider
+ON sport_center.sport_payments
+FOR EACH ROW
+EXECUTE FUNCTION sport_center.sync_payment_accounting_journal();
 `;
 
