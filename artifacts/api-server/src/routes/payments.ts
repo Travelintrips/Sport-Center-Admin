@@ -811,7 +811,15 @@ router.patch("/payments/:id/metadata", adminMiddleware, async (req, res) => {
       res.status(409).json({ error: "Jurnal akuntansi terkait tidak bisa disinkronkan. Hubungi finance." });
       return;
     }
-    if (message.includes("CANONICAL_PROVIDER_RULE_UNRESOLVED") || message.includes("CANONICAL_")) {
+    if (message.includes("CANONICAL_BANK_ACCOUNT_UNRESOLVED")) {
+      req.log.warn({ err }, "Payment metadata update blocked by receiving-account mapping");
+      res.status(409).json({
+        error:
+          "Rekening penerima pada pembayaran ini belum terdaftar sebagai rekening perusahaan aktif. Perubahan dibatalkan.",
+      });
+      return;
+    }
+    if (message.includes("CANONICAL_PROVIDER_RULE_UNRESOLVED")) {
       // Payment sudah confirmed dan terikat kontrak settlement owner-approved.
       // Tidak ada aturan settlement untuk kombinasi metode/provider baru,
       // jadi edit ditolak (fail closed) tanpa menyentuh settlement lama.
@@ -819,6 +827,14 @@ router.patch("/payments/:id/metadata", adminMiddleware, async (req, res) => {
       res.status(409).json({
         error:
           "Metode/provider ini tidak punya aturan settlement yang disetujui untuk pembayaran yang sudah dikonfirmasi. Perubahan dibatalkan.",
+      });
+      return;
+    }
+    if (message.includes("CANONICAL_")) {
+      req.log.warn({ err }, "Payment metadata update blocked by canonical payment configuration");
+      res.status(409).json({
+        error:
+          "Konfigurasi penerima atau settlement untuk pembayaran yang sudah dikonfirmasi belum lengkap. Perubahan dibatalkan.",
       });
       return;
     }

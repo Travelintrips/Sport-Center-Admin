@@ -1,6 +1,7 @@
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import manualProviderMirrorMigration from "../../../../scripts/patch_manual_provider_mirror_function.sql";
+import paymentMetadataResolverMigration from "../../../../scripts/patch_resolve_function.sql";
 
 type MigrationState =
   | { status: "pending" }
@@ -19,7 +20,13 @@ let startupPromise: Promise<void> | null = null;
 export function startPaymentMirrorMigration(): Promise<void> {
   if (startupPromise) return startupPromise;
 
-  startupPromise = db.execute(sql.raw(manualProviderMirrorMigration))
+  startupPromise = db.transaction(async (tx) => {
+    // The resolver may be reached by older/direct database triggers before the
+    // mirror projection runs. Install its manual-payment branch first, then
+    // install and verify the mirror trigger that depends on it.
+    await tx.execute(sql.raw(paymentMetadataResolverMigration));
+    await tx.execute(sql.raw(manualProviderMirrorMigration));
+  })
     .then(() => {
       state = { status: "ready" };
     })

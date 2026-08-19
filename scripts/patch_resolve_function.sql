@@ -61,7 +61,28 @@ AS $function$
           v_facility_id, v_company_count;
       END IF;
 
-      v_external_bank_account_id := NULLIF(BTRIM(v_payment.bank_account_id::text), '');
+       v_provider_code := NULLIF(LOWER(BTRIM(v_payment.payment_provider::text)), '');
+
+       -- Manual receipts (Transfer Bank, cash, DANA, and legacy rows) are
+       -- recorded with provider_code = unknown. They are valid confirmed
+       -- payments, but they do not settle through an owner-approved processor
+       -- rule. Do not invent a settlement rule or account for them.
+       IF v_provider_code IS NULL OR v_provider_code = 'unknown' THEN
+         UPDATE sport_center.sport_payments
+            SET company_id = v_company_id,
+                expected_settlement_date = NULL,
+                settlement_rule_version = NULL
+          WHERE id = p_payment_id
+            AND status::text = 'confirmed';
+
+         resolved_company_id := v_company_id;
+         resolved_expected_settlement_date := NULL;
+         resolved_rule_version := NULL;
+         RETURN NEXT;
+         RETURN;
+       END IF;
+
+       v_external_bank_account_id := NULLIF(BTRIM(v_payment.bank_account_id::text), '');
       IF v_external_bank_account_id IS NULL THEN
         RAISE EXCEPTION 'CANONICAL_BANK_ACCOUNT_UNRESOLVED: payment=%', p_payment_id;
       END IF;
@@ -80,7 +101,6 @@ AS $function$
 
       v_provider_id := NULLIF(BTRIM(v_payment.provider_id::text), '');
       v_provider_name := NULLIF(BTRIM(v_payment.provider_name::text), '');
-      v_provider_code := NULLIF(LOWER(BTRIM(v_payment.payment_provider::text)), '');
       IF v_provider_id IS NULL OR v_provider_name IS NULL OR v_provider_code IS NULL THEN
         RAISE EXCEPTION 'CANONICAL_PROVIDER_UNRESOLVED: payment=%', p_payment_id;
       END IF;
