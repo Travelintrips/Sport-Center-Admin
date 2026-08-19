@@ -436,6 +436,12 @@ router.post("/bookings", async (req, res) => {
         res.status(400).json({ error: "startTime and durationHours required" });
         return;
       }
+      const parsedDurationHours = Number(durationHours);
+      if (!Number.isInteger(parsedDurationHours) || parsedDurationHours < 1) {
+        res.status(400).json({ error: "durationHours harus berupa bilangan bulat minimal 1 jam" });
+        return;
+      }
+      durationHours = parsedDurationHours;
 
       // Validate slot is not in the past (dilewati untuk admin/operator)
       if (!isAdminRequest) {
