@@ -1405,8 +1405,30 @@ router.post("/wa/review/:token", async (req, res) => {
       res.json({ success: true, message: "Pembayaran ditolak. Customer diminta upload ulang." });
     }
   } catch (err) {
-    console.error("[wa/review] error:", err);
-    res.status(500).json({ error: "Internal server error" });
+    const errorCode = err instanceof Error ? err.message : String(err);
+    logger.error({ errorCode, token: req.params.token }, "[wa/review] action gagal");
+
+    // Keep configuration/data validation failures actionable for the admin.
+    // Do not expose raw database/provider errors to the public review link.
+    if (errorCode === "RECEIVING_BANK_ACCOUNT_NOT_CONFIGURED") {
+      res.status(422).json({
+        error: "Rekening penerima Sport Center belum dikonfigurasi. Isi rekening penerimaan di Pengaturan Pembayaran lalu coba lagi.",
+        code: errorCode,
+      });
+      return;
+    }
+    if (errorCode.startsWith("PAYMENT_BANK_ACCOUNT_REQUIRED:")) {
+      res.status(422).json({
+        error: "Data rekening penerima pada pembayaran belum lengkap. Lengkapi Pengaturan Pembayaran lalu upload ulang bukti.",
+        code: "PAYMENT_BANK_ACCOUNT_REQUIRED",
+      });
+      return;
+    }
+
+    res.status(500).json({
+      error: "Konfirmasi pembayaran gagal diproses. Silakan coba lagi atau hubungi administrator.",
+      code: "WA_REVIEW_FAILED",
+    });
   }
 });
 
