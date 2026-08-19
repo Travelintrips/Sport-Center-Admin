@@ -100,6 +100,12 @@ async function buildAll() {
       "xlsx",
       "googleapis",
       "openai",
+      // tesseract.js creates a Node worker by resolving sibling files at
+      // runtime. Bundling moves its worker-script path beside dist/ and makes
+      // every image proof upload crash the API with MODULE_NOT_FOUND.
+      // Keep it external so Node executes it from node_modules, where the
+      // worker assets remain available.
+      "tesseract.js",
       // "@replit/object-storage" intentionally removed from external list.
       // gae-deploy/package.json excludes this Replit-only package, so it must
       // be bundled inline. The code that calls it is guarded by IS_PRODUCTION,

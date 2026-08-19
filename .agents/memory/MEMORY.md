@@ -59,4 +59,5 @@
 - [Production payment-confirm trigger](payment-confirm-trigger-prod.md) — verify both function and trigger; production may have tables but neither mirroring object.
 - [GAE production access](gae-production-access.md) — custom domain runs on Google App Engine; Replit deployment metadata/logs/database do not represent live production.
 - [Payment metadata-only edits](payment-metadata-edit.md) — dedicated /metadata endpoint; provider NOT NULL uses 'unknown'; QRIS forces mandiri_direct; confirmed rows fail closed on missing settlement rule.
+- [Tesseract worker bundling](tesseract-worker-bundling.md) — keep OCR external to API bundle, available in App Engine runtime, and cache language files under /tmp.
 

@@ -155,7 +155,12 @@ export async function scanPaymentProof(
 
   try {
     const { createWorker } = await import("tesseract.js");
-    const worker = await createWorker("eng");
+    const worker = await createWorker("eng", 1, {
+      // App Engine's application filesystem is read-only. Keep downloaded
+      // language data in its writable temporary filesystem instead.
+      cachePath: "/tmp/tesseract-cache",
+      logger: () => {},
+    });
     try {
       const image = await preprocessImage(buffer);
       const result = await worker.recognize(image);
