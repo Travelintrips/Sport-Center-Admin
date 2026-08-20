@@ -1268,9 +1268,6 @@ function BookingDetailDrawer({
                           options={paymentMethodOptions}
                           onChange={onUpdatePaymentMethod}
                           disabled={isUpdating}
-                          lockedReason={isCompleted
-                            ? "Payment booking yang sudah selesai/terkonfirmasi dikunci karena sudah masuk jurnal akuntansi."
-                            : undefined}
                         />
                         {(() => {
                           const ocr = pmt.ocrData as {
@@ -3262,9 +3259,6 @@ export default function AdminBookings() {
                              })
                            }
                            disabled={updatePaymentMetadataMutation.isPending}
-                           lockedReason={["confirmed", "completed"].includes(String(b.status))
-                             ? "Payment booking yang sudah selesai/terkonfirmasi dikunci karena sudah masuk jurnal akuntansi."
-                             : undefined}
                          />
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">
