@@ -56,3 +56,18 @@ Compare a row-count fingerprint of each DB (connect with `pg` via
 `createRequire('/home/runner/workspace/scripts/package.json')` inside code
 execution) against what the live API returns. The cleanest signal: log in to the
 production API as admin and `GET /api/bookings` — the count matches exactly one DB.
+
+## Current enforcement
+
+Development runtime and migrations require `SUPABASE_DATABASE_URL_DEV`;
+production runtime and migrations require `SUPABASE_DATABASE_URL`. The old
+`DATABASE_URL` fallback and `ALLOW_DEV_ON_PROD_DB` override are not valid for
+the application path. Auxiliary accounting, health, payment-enrichment, and
+BizPortal pools follow the same environment selection.
+
+**Why:** A fallback in a helper can silently bypass the primary database
+boundary even when the main startup log shows the correct database.
+
+**How to apply:** Keep all new direct PostgreSQL pools environment-selected in
+the same way as the primary DB module, and re-publish after production
+configuration changes so the deployment receives production-scoped values.

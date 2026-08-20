@@ -41,8 +41,7 @@ router.get("/admin/system/supabase-status", adminMiddleware, (_req, res) => {
   const storageConfigured = isStorageConfigured();
 
   const dbWarning = isDevUsingProdDb
-    ? "DANGER: Development is connected to the PRODUCTION database. " +
-      "ALLOW_DEV_ON_PROD_DB=true is active. Remove immediately and set SUPABASE_DATABASE_URL_DEV."
+    ? "DANGER: Development is connected to the PRODUCTION database."
     : null;
 
   const storageWarning = isDevUsingProdStorage

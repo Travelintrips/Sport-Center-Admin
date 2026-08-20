@@ -7,17 +7,12 @@ import {
 
 const { Pool } = pg;
 
-// Cross-project BizPortal sync is production-only by default. Development uses
-// the local DATABASE_URL and must not open a pool to production merely because
-// production credentials happen to be present in the environment.
+// Cross-project BizPortal sync is production-only. Development must never open
+// a pool to production merely because production credentials are present.
 const PROD_URL =
   process.env.NODE_ENV === "development"
-    ? (process.env.ALLOW_DEV_ON_PROD_DB === "true"
-        ? process.env.SUPABASE_DATABASE_URL
-        : undefined)
-    : process.env.SUPABASE_DATABASE_URL ||
-      process.env.SUPABASE_DB_URL ||
-      process.env.SUPABASE_DATABASE_URL_DEV;
+    ? undefined
+    : process.env.SUPABASE_DATABASE_URL;
 
 let _prodPool: pg.Pool | null = null;
 export function getProdPool(): pg.Pool | null {

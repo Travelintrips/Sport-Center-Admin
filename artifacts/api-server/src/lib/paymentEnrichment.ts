@@ -490,7 +490,9 @@ export async function resolveBankImportSource(
 }
 
 export async function getEnvironmentIdentity(companyId?: number | null, marker?: string) {
-  const rawUrl = process.env.SUPABASE_DATABASE_URL_DEV ?? process.env.DATABASE_URL ?? "";
+  const rawUrl = process.env.NODE_ENV === "production"
+    ? process.env.SUPABASE_DATABASE_URL ?? ""
+    : process.env.SUPABASE_DATABASE_URL_DEV ?? "";
   let host = "unconfigured";
   try {
     host = new URL(rawUrl).hostname;

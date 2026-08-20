@@ -12,12 +12,12 @@ import { extractBookingDpp } from "./accountingMath";
 export { extractBookingDpp } from "./accountingMath";
 
 // ─── Public Accounting (public.accounting_entries) ───────────────────────────
-// Gunakan direct pg.Pool ke Supabase (PROD atau DEV fallback).
+// Gunakan direct pg.Pool ke database Supabase environment aktif.
 // db Drizzle hanya konek ke sport_center schema; public.accounting_entries ada di shared Supabase.
 const SHARED_DB_URL =
-  process.env.SUPABASE_DATABASE_URL ||
-  process.env.SUPABASE_DB_URL ||
-  process.env.SUPABASE_DATABASE_URL_DEV;
+  process.env.NODE_ENV === "production"
+    ? process.env.SUPABASE_DATABASE_URL
+    : process.env.SUPABASE_DATABASE_URL_DEV;
 
 let _publicPool: pg.Pool | null = null;
 function getPublicPool(): pg.Pool | null {
