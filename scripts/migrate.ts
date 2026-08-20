@@ -856,6 +856,32 @@ AFTER INSERT OR UPDATE OF status ON sport_center.sport_payments
 FOR EACH ROW
 EXECUTE FUNCTION sport_center.enqueue_payment_accounting_outbox();
 
+-- Central Finance owns processing state separately from the Sport Center
+-- legacy worker state. It is additive and safe to apply repeatedly.
+CREATE TABLE IF NOT EXISTS sport_center.central_finance_processing (
+  id serial PRIMARY KEY,
+  source_project text NOT NULL,
+  source_payment_id integer NOT NULL,
+  event_type text NOT NULL,
+  correlation_id text NOT NULL,
+  status text NOT NULL DEFAULT 'pending',
+  attempts integer NOT NULL DEFAULT 0,
+  available_at timestamptz NOT NULL DEFAULT now(),
+  locked_at timestamptz,
+  processed_at timestamptz,
+  last_error text,
+  comparison_class text,
+  comparison_evidence text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT central_finance_processing_identity
+    UNIQUE (source_project, source_payment_id, event_type),
+  CONSTRAINT central_finance_processing_correlation_unique
+    UNIQUE (correlation_id)
+);
+CREATE INDEX IF NOT EXISTS central_finance_processing_ready_idx
+  ON sport_center.central_finance_processing (status, available_at, locked_at);
+
 -- ============================================================
 -- 21. company_invoice_items + unique constraint on company_invoices
 -- ============================================================

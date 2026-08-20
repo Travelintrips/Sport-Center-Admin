@@ -8,6 +8,7 @@ import { runBankAudit } from "./bankAudit";
 import { runConnectionHealthCheck } from "./connectionHealth";
 import { sendRekapPemakaianToAdmin } from "./rekapPemakaian";
 import { bulkPushPaymentsToBizportal, processPaymentAccountingOutbox, prunePaymentSyncErrorCache } from "./bizportalSync";
+import { processCentralFinance } from "./centralFinance";
 import { logger } from "./logger";
 
 function getAppUrl(): string {
@@ -472,6 +473,9 @@ export function startScheduler(): void {
   processPaymentAccountingOutbox().catch((err) =>
     logger.error({ err }, "[scheduler] Initial payment accounting outbox processing failed"),
   );
+  processCentralFinance().catch((err) =>
+    logger.error({ err }, "[scheduler] Initial central finance processing failed"),
+  );
 
   // Every 5 minutes: expire overdue bookings + memberships + auto-complete + reminders + nightly audit + connection health + daily rekap
   setInterval(async () => {
@@ -492,6 +496,14 @@ export function startScheduler(): void {
       }
     } catch (err) {
       logger.error({ err }, "[scheduler] Payment accounting outbox processing failed");
+    }
+    try {
+      const result = await processCentralFinance();
+      if (result.claimed > 0) {
+        logger.info(result, "[scheduler] Central Finance events processed");
+      }
+    } catch (err) {
+      logger.error({ err }, "[scheduler] Central Finance processing failed");
     }
   }, 5 * 60 * 1000);
 
