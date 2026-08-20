@@ -1,0 +1,627 @@
+# SPORT CENTER — PHASE SC-FINANCE-BOUNDARY
+## Payment Confirmed → Finance Event → STOP
+
+PROJECT:
+Sport Center
+
+OBJECTIVE:
+
+Refactor Sport Center so its financial responsibility ends at:
+
+Business transaction / booking
+→ payment
+→ payment gateway / proof
+→ payment confirmed
+→ durable finance event/outbox
+→ STOP
+
+Everything AFTER the finance event will later be owned by Supabase Central Finance.
+
+IMPORTANT:
+
+This phase is ONLY for Sport Center boundary preparation.
+
+DO NOT build the final Central Finance processor yet.
+DO NOT modify BizPortal yet.
+DO NOT migrate Tenant yet.
+DO NOT republish production unless explicitly instructed.
+DO NOT perform uncontrolled production data cleanup.
+
+Existing Paylabs/payment gateway behavior MUST remain operational.
+
+============================================================
+ARCHITECTURE CONTRACT
+============================================================
+
+SPORT CENTER OWNS:
+
+- booking
+- booking groups
+- membership/payment business flow
+- payment creation
+- payment amount
+- payment type
+- payment method selected by customer/admin
+- payment proof
+- Paylabs checkout/request
+- Paylabs callback/webhook verification
+- provider transaction references
+- payment confirmation
+- refund/cancellation BUSINESS state where applicable
+- canonical sport_center.sport_payments
+- durable finance event creation
+
+SPORT CENTER STOPS AFTER:
+
+sport_center.sport_payments.status = confirmed
+→ finance event/outbox successfully recorded
+
+SPORT CENTER MUST NOT OWN AFTER CUTOVER:
+
+- public.sport_payments mirror creation/update
+- public.accounting_payments creation
+- public.accounting_entries creation
+- public.accounting_entry_lines creation
+- accounting journal posting
+- final PPN calculation/posting
+- COA selection
+- ledger posting
+- MDR accounting
+- settlement accounting
+- bank reconciliation posting
+
+These responsibilities will move to Central Finance in a later phase.
+
+============================================================
+PHASE 0 — SAFETY / BASELINE
+============================================================
+
+Before changing source:
+
+1. Confirm repository/branch/worktree state.
+
+2. Inventory the CURRENT active Sport Center payment paths identified by the
+previous audit.
+
+3. Locate all active producers touching:
+
+- sport_center.sport_payments
+- sport_center.payment_accounting_outbox
+- public.sport_payments
+- public.accounting_payments
+- public.accounting_entries
+- public.accounting_entry_lines
+- sport_center accounting journals/lines
+- fleet ledger
+- tax/PPN
+- settlement
+- reconciliation
+
+4. Classify every producer:
+
+BUSINESS_PAYMENT_OWNER
+FINANCE_EVENT_PRODUCER
+LEGACY_ACCOUNTING_PRODUCER
+MIRROR_PRODUCER
+SETTLEMENT_PRODUCER
+RECONCILIATION_PRODUCER
+REFUND/CORRECTION_PRODUCER
+
+Do not change anything until the complete write graph is known.
+
+============================================================
+PHASE 1 — FREEZE CANONICAL PAYMENT CONTRACT
+============================================================
+
+Canonical Sport Center payment owner:
+
+sport_center.sport_payments
+
+Confirm from actual schema/source the fields used for:
+
+- id
+- booking_id
+- company identity/evidence
+- amount
+- payment_type
+- payment_method
+- payment_provider
+- provider order/reference
+- payment proof
+- status
+- paid_at
+- confirmed_at
+- created_at
+- updated_at
+
+Do not invent columns.
+
+Define explicitly:
+
+PAYMENT CONFIRMED =
+the existing canonical confirmed state used by production.
+
+Do NOT change Paylabs callback semantics merely for this architecture.
+
+============================================================
+PHASE 2 — PROTECT PAYLABS
+============================================================
+
+Trace Paylabs end-to-end:
+
+booking
+→ payment request
+→ Paylabs
+→ callback/webhook
+→ verification
+→ canonical payment update
+→ confirmed
+
+FREEZE this boundary.
+
+Paylabs remains Sport Center responsibility until canonical payment is
+successfully confirmed.
+
+DO NOT move to Central Finance:
+
+- Paylabs credentials
+- checkout/order creation
+- callback verification
+- merchant trade number
+- provider trade number
+- provider transaction reference
+- signature verification
+- gateway status mapping
+- gateway idempotency
+
+Add/retain regression tests proving:
+
+Paylabs successful callback
+→ exactly one canonical payment confirmation
+→ exactly one finance event
+
+and DOES NOT require accounting posting to succeed in order for the payment
+business state to remain valid, according to the chosen outbox transaction
+contract.
+
+============================================================
+PHASE 3 — DEFINE FINANCE EVENT CONTRACT
+============================================================
+
+Audit the existing:
+
+sport_center.payment_accounting_outbox
+
+REUSE it if structurally suitable.
+
+Do NOT create a second competing outbox unless there is a proven blocker.
+
+The future Central Finance event must have enough immutable identity to resolve
+the payment safely.
+
+Required semantic contract:
+
+event_id
+event_type
+source_project = SPORT_CENTER
+source_schema = sport_center
+source_table = sport_payments
+source_payment_id
+booking_id / business reference
+company evidence
+amount
+payment_type
+payment_method
+payment_provider
+provider reference where applicable
+payment timestamp
+confirmation timestamp
+correlation/idempotency identity
+event/schema version
+created_at
+
+IMPORTANT:
+
+Do not guess physical columns.
+
+If the existing outbox does not store all required immutable facts, implement
+the smallest additive contract needed.
+
+The event must not depend on mutable payment metadata in a way that can silently
+change the financial meaning after confirmation.
+
+============================================================
+PHASE 4 — IDEMPOTENCY
+============================================================
+
+Enforce:
+
+ONE confirmed payment
+→ ONE active canonical finance event for the same event type.
+
+Retry of:
+
+- callback
+- admin confirmation
+- worker
+- application restart
+
+must NOT create duplicate finance events.
+
+Use deterministic identity / unique database protection.
+
+Do not rely only on application-level "SELECT then INSERT".
+
+Concurrency must be safe.
+
+============================================================
+PHASE 5 — REMOVE ACCOUNTING FROM PAYMENT CONFIRMATION OWNER
+============================================================
+
+Trace the active confirmed-payment path.
+
+Separate:
+
+A. PAYMENT CONFIRMATION
+from
+B. FINANCE PROCESSING
+
+After this phase, payment confirmation may:
+
+1. validate payment
+2. update canonical sport payment
+3. write durable finance event/outbox
+4. commit
+
+It must NOT directly create:
+
+- public.accounting_payments
+- public.accounting_entries
+- accounting_entry_lines
+- final journal
+- ledger
+- settlement accounting
+
+Identify and remove/disable the Sport Center ownership of those downstream
+writes from the live confirmation path.
+
+IMPORTANT:
+
+Do not simply delete shared accounting functions used by other modules.
+
+Remove only Sport Center invocation/ownership.
+
+============================================================
+PHASE 6 — LEGACY sport_center_booking PRODUCER
+============================================================
+
+Critical requirement:
+
+No NEW Sport Center booking may create:
+
+accounting_entries.source = sport_center_booking
+
+Find every remaining source path capable of creating it.
+
+For each path:
+
+- determine whether active or dead
+- remove/disable Sport Center invocation if active
+- preserve unrelated module behavior
+
+Add a regression guard proving:
+
+new booking
+→ NO accounting entry
+
+confirmed payment
+→ finance event only
+
+No new sport_center_booking accounting posting.
+
+============================================================
+PHASE 7 — MIRROR OWNERSHIP
+============================================================
+
+Audit creation/update of:
+
+public.sport_payments
+
+Target:
+
+Sport Center no longer owns the public mirror after the finance boundary.
+
+However:
+
+DO NOT disable mirror behavior yet if doing so would leave production without
+any downstream consumer before Central Finance exists.
+
+Implement a safe TRANSITION MODE.
+
+Preferred transition:
+
+SPORT_CENTER_FINANCE_MODE =
+legacy | shadow | central
+
+or reuse an equivalent existing feature/config mechanism.
+
+Required semantics:
+
+legacy:
+current production downstream finance behavior remains available.
+
+shadow:
+payment confirmation + finance event work,
+but Central Finance does not create financial writes yet.
+
+central:
+Sport Center stops downstream finance writes.
+
+Do not invent a feature flag if an existing mechanism already provides this.
+
+FAIL CLOSED.
+
+============================================================
+PHASE 8 — DO NOT CUT OVER PREMATURELY
+============================================================
+
+Because Central Finance does not exist yet:
+
+DO NOT switch production immediately to a mode where confirmed payments are
+never financially processed.
+
+This phase must make Sport Center READY for cutover, not create a finance gap.
+
+Production must remain on the safe existing mode until Central Finance passes
+shadow verification.
+
+Report exactly what single configuration/action will later perform the cutover.
+
+============================================================
+PHASE 9 — TAX / PPN BOUNDARY
+============================================================
+
+Sport Center may retain tax-related BUSINESS facts required for:
+
+- customer display
+- invoice display
+- historical transaction representation
+
+But Sport Center must cease being the final accounting tax-rule owner.
+
+Identify:
+
+- PPN rate hardcodes
+- tax calculation used only for accounting
+- tax calculation required for customer-facing pricing
+- historical tax snapshots
+
+Do NOT remove customer-facing price calculations if they are required to
+determine the amount the customer pays.
+
+Separate:
+
+COMMERCIAL PRICE/TAX DISPLAY
+
+from:
+
+FINAL ACCOUNTING TAX POSTING
+
+Final accounting tax posting will later belong to Central Finance.
+
+============================================================
+PHASE 10 — PAYMENT METHOD EDIT CONTRACT
+============================================================
+
+Prepare legacy payment edits for the future configuration architecture.
+
+Changing:
+
+Transfer Bank → QRIS
+QRIS → Transfer Bank
+
+must preserve:
+
+- payment ID
+- booking ID
+- amount
+- proof/history
+- provider history where required
+
+For payment configuration resolution, do not expand Sport Center with new
+hardcoded finance configuration.
+
+If current configuration cannot safely resolve a method, retain fail-closed
+behavior and document what Central Finance/BizPortal must later supply.
+
+Do NOT rewrite posted accounting entries as part of payment metadata edits.
+
+============================================================
+PHASE 11 — SETTLEMENT / MDR / RECONCILIATION
+============================================================
+
+Inventory all Sport Center-owned:
+
+- settlement builder
+- expected settlement
+- MDR
+- provider fee
+- reconciliation candidate
+- accounting settlement journal
+- bank mutation integration
+
+Classify each:
+
+BUSINESS_PROVIDER_FACT
+or
+CENTRAL_FINANCE_RESPONSIBILITY
+
+Do not delete them blindly.
+
+Prepare seams/interfaces so Central Finance can take ownership later.
+
+Paylabs/provider raw facts remain available.
+
+============================================================
+PHASE 12 — REFUND / CORRECTION SAFETY
+============================================================
+
+Do not accidentally break refund/cancellation flows.
+
+Audit whether refund currently:
+
+- changes business payment state
+- creates accounting correction
+- creates reversal
+- updates settlement
+
+Separate future ownership:
+
+Sport Center:
+refund/cancellation business event
+
+Central Finance:
+financial reversal/correction
+
+If Central Finance is not available yet, preserve current production behavior
+behind transition mode.
+
+============================================================
+PHASE 13 — TESTS
+============================================================
+
+Add focused regression coverage for at least:
+
+1. Booking creation creates no accounting entry.
+
+2. Confirmed manual payment creates exactly one finance event.
+
+3. Duplicate confirmation creates no duplicate event.
+
+4. Concurrent confirmation creates no duplicate event.
+
+5. Paylabs callback confirms payment and creates exactly one event.
+
+6. Paylabs callback retry is idempotent.
+
+7. Finance event failure behavior is fail-safe and does not create partial
+   accounting.
+
+8. No new source=sport_center_booking entry.
+
+9. Shadow mode does not create Central Finance writes.
+
+10. Legacy mode preserves existing production behavior until cutover.
+
+11. Payment method edit does not create another accounting entry.
+
+12. Existing historical payment/accounting records are not mass-mutated.
+
+13. Refund/correction business path remains intact.
+
+============================================================
+PHASE 14 — VERIFICATION
+============================================================
+
+Run:
+
+- focused tests
+- Sport Center/API relevant tests
+- API typecheck
+- Sport Center frontend typecheck if applicable
+- API build
+- Sport Center build
+- git diff --check
+
+Inspect startup/runtime.
+
+No real Paylabs charge.
+No real WA send.
+No production financial mutation for verification.
+
+============================================================
+PHASE 15 — ARCHITECTURE PROOF
+============================================================
+
+Produce a source-level flow proof for the resulting architecture:
+
+CURRENT LEGACY MODE:
+
+Sport Center payment
+→ finance event
+→ existing downstream processor
+→ accounting
+
+FUTURE CENTRAL MODE:
+
+Sport Center payment
+→ finance event
+→ STOP
+
+Central Finance
+→ consume event
+→ accounting
+
+Prove that switching to central mode later will require a controlled ownership
+change rather than another application rewrite.
+
+============================================================
+FINAL REPORT
+============================================================
+
+CANONICAL PAYMENT OWNER =
+
+PAYMENT CONFIRMED CONTRACT =
+
+PAYLABS OWNER =
+PAYLABS CHANGED = YES/NO
+
+FINANCE EVENT TABLE =
+FINANCE EVENT IDENTITY =
+FINANCE EVENT IMMUTABLE SNAPSHOT =
+
+OUTBOX IDEMPOTENCY =
+CONCURRENCY PROTECTION =
+
+SPORT CENTER DIRECT ACCOUNTING WRITES BEFORE =
+SPORT CENTER DIRECT ACCOUNTING WRITES AFTER =
+
+sport_center_booking PRODUCER ACTIVE AFTER =
+
+PUBLIC SPORT_PAYMENTS OWNER CURRENT =
+PUBLIC SPORT_PAYMENTS OWNER FUTURE =
+
+PPN BUSINESS LOGIC RETAINED =
+PPN ACCOUNTING OWNERSHIP PREPARED =
+
+SETTLEMENT CURRENT OWNER =
+SETTLEMENT FUTURE OWNER =
+
+REFUND BUSINESS OWNER =
+REFUND ACCOUNTING FUTURE OWNER =
+
+TRANSITION MODE =
+CURRENT PROD MODE =
+FUTURE CUTOVER ACTION =
+
+PAYLABS REGRESSION =
+PAYMENT REGRESSION =
+ACCOUNTING DUPLICATE REGRESSION =
+
+TESTS =
+TYPECHECK =
+BUILD =
+GIT DIFF CHECK =
+
+PRODUCTION WRITES =
+PRODUCTION CUTOVER PERFORMED = NO
+
+READY FOR CENTRAL FINANCE SQL PHASE = YES/NO
+
+BLOCKERS =
+
+STOP.
+
+Do not start Central Finance implementation in this task.
+Do not modify BizPortal.
+Do not migrate Tenant.
