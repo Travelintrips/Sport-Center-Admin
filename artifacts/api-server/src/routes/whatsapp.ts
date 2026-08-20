@@ -1154,7 +1154,9 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
     const [existing] = await db.select().from(paymentsTable)
       .where(eq(paymentsTable.bookingId, bookingId)).limit(1);
     const detectedQris = proofOcr?.paymentMethod === "QRIS";
-    const resolvedPaymentMethod = detectedQris ? "QRIS" : "Transfer Bank (WhatsApp)";
+    // WhatsApp is only the submission/notification channel. It is not a payment
+    // method, so keep the accounting label as the actual bank transfer method.
+    const resolvedPaymentMethod = detectedQris ? "QRIS" : "Transfer Bank";
     const resolvedProvider = detectedQris ? "mandiri_direct" : "unknown";
 
     if (existing) {

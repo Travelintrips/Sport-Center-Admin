@@ -9,71 +9,48 @@ const isProd            = NODE_ENV === "production";
 
 const SUPABASE_PROD_URL   = process.env.SUPABASE_DATABASE_URL;
 const SUPABASE_DEV_URL    = process.env.SUPABASE_DATABASE_URL_DEV;
-const REPLIT_DB_URL       = process.env.DATABASE_URL;
 const ALLOW_DEV_ON_PROD   = process.env.ALLOW_DEV_ON_PROD_DB === "true";
 
 let connectionString: string | undefined;
 let dbSource: string;
 let isDevUsingProdDb = false;
 
-if (isProd) {
-  if (SUPABASE_PROD_URL) {
-    connectionString = SUPABASE_PROD_URL;
-    dbSource = "SUPABASE_DATABASE_URL (prod)";
-  } else if (REPLIT_DB_URL) {
-    connectionString = REPLIT_DB_URL;
-    dbSource = "DATABASE_URL (Replit PostgreSQL — prod)";
-  } else {
-    console.error(
-      "\n╔══════════════════════════════════════════════════════════════════╗\n" +
-      "║  FATAL: No database URL configured in production.               ║\n" +
-      "║  Set DATABASE_URL or SUPABASE_DATABASE_URL.                     ║\n" +
-      "╚══════════════════════════════════════════════════════════════════╝\n"
-    );
-    process.exit(1);
-  }
-} else {
-  if (ALLOW_DEV_ON_PROD) {
-    const devFallback = SUPABASE_PROD_URL || REPLIT_DB_URL;
-    if (!devFallback) {
-      throw new Error(
-        "[DB] ALLOW_DEV_ON_PROD_DB=true but no database URL is set. Cannot start."
-      );
-    }
-    connectionString = devFallback;
-    isDevUsingProdDb = Boolean(SUPABASE_PROD_URL);
-    dbSource = SUPABASE_PROD_URL
-      ? "SUPABASE_DATABASE_URL (prod — ALLOW_DEV_ON_PROD_DB=true, EMERGENCY OVERRIDE)"
-      : "DATABASE_URL (ALLOW_DEV_ON_PROD_DB=true)";
+if (ALLOW_DEV_ON_PROD) {
+  throw new Error(
+    "[DB] ALLOW_DEV_ON_PROD_DB is no longer supported. " +
+    "Development and production must use separate Supabase databases."
+  );
+}
 
-    console.warn(
-      "\n" +
-      "╔══════════════════════════════════════════════════════════════════╗\n" +
-      "║  ⚠️   DANGER: DEV IS CONNECTED TO PRODUCTION DATABASE           ║\n" +
-      "║  ALLOW_DEV_ON_PROD_DB=true is set.                             ║\n" +
-      "║  Any write in development WILL affect production data.          ║\n" +
-      "╚══════════════════════════════════════════════════════════════════╝\n"
-    );
-  } else if (SUPABASE_DEV_URL) {
-    connectionString = SUPABASE_DEV_URL;
-    dbSource = "SUPABASE_DATABASE_URL_DEV (dev — isolated)";
-  } else if (REPLIT_DB_URL) {
-    connectionString = REPLIT_DB_URL;
-    dbSource = "DATABASE_URL (Replit PostgreSQL — dev)";
-  } else {
+if (isProd) {
+  if (!SUPABASE_PROD_URL) {
     throw new Error(
-      "\n" +
-      "╔══════════════════════════════════════════════════════════════════╗\n" +
-      "║  Development DB is not configured.                              ║\n" +
-      "║  Set DATABASE_URL (Replit PostgreSQL) or SUPABASE_DATABASE_URL_DEV.\n" +
-      "╚══════════════════════════════════════════════════════════════════╝\n"
+      "[DB] Production database is not configured. " +
+      "Set SUPABASE_DATABASE_URL (production Supabase PostgreSQL)."
     );
   }
+  connectionString = SUPABASE_PROD_URL;
+  dbSource = "SUPABASE_DATABASE_URL (prod)";
+} else {
+  if (!SUPABASE_DEV_URL) {
+    throw new Error(
+      "[DB] Development database is not configured. " +
+      "Set SUPABASE_DATABASE_URL_DEV (development Supabase PostgreSQL)."
+    );
+  }
+  if (SUPABASE_PROD_URL && SUPABASE_DEV_URL === SUPABASE_PROD_URL) {
+    throw new Error(
+      "[DB] Development and production point to the same Supabase database. " +
+      "Set a distinct SUPABASE_DATABASE_URL_DEV."
+    );
+  }
+  connectionString = SUPABASE_DEV_URL;
+  dbSource = "SUPABASE_DATABASE_URL_DEV (dev — isolated)";
 }
 
 if (!connectionString) {
   throw new Error(
-    "[DB] No database connection string resolved. Set DATABASE_URL or SUPABASE_DATABASE_URL."
+    "[DB] No database connection string resolved for this environment."
   );
 }
 
