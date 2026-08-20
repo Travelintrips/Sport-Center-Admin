@@ -202,9 +202,17 @@ export async function processCentralFinance(): Promise<{
   }
 
   await pool.query(
+    `UPDATE sport_center.payment_accounting_outbox
+        SET correlation_id = 'sc_payment_' || payment_id::text,
+            updated_at = NOW()
+      WHERE correlation_id IS NULL`,
+  );
+
+  await pool.query(
     `INSERT INTO sport_center.central_finance_processing
        (source_project, source_payment_id, event_type, correlation_id)
-     SELECT source_project, payment_id, event_type, correlation_id
+     SELECT source_project, payment_id, event_type,
+            COALESCE(correlation_id, 'sc_payment_' || payment_id::text)
        FROM sport_center.payment_accounting_outbox
       WHERE event_type = 'payment_confirmed'
      ON CONFLICT (source_project, source_payment_id, event_type) DO NOTHING`,

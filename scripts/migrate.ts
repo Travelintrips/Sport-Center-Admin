@@ -805,6 +805,10 @@ ALTER TABLE sport_center.payment_accounting_outbox
   ADD COLUMN IF NOT EXISTS confirmed_at timestamptz,
   ADD COLUMN IF NOT EXISTS correlation_id text,
   ADD COLUMN IF NOT EXISTS schema_version integer NOT NULL DEFAULT 1;
+UPDATE sport_center.payment_accounting_outbox
+   SET correlation_id = 'sc_payment_' || payment_id::text,
+       updated_at = now()
+ WHERE correlation_id IS NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS payment_accounting_outbox_correlation_unique
   ON sport_center.payment_accounting_outbox (correlation_id)
   WHERE correlation_id IS NOT NULL;

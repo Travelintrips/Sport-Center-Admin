@@ -717,6 +717,10 @@ export async function initBizportalTables(): Promise<void> {
         ADD COLUMN IF NOT EXISTS confirmed_at TIMESTAMPTZ,
         ADD COLUMN IF NOT EXISTS correlation_id TEXT,
         ADD COLUMN IF NOT EXISTS schema_version INTEGER NOT NULL DEFAULT 1;
+      UPDATE sport_center.payment_accounting_outbox
+         SET correlation_id = 'sc_payment_' || payment_id::text,
+             updated_at = NOW()
+       WHERE correlation_id IS NULL;
       CREATE UNIQUE INDEX IF NOT EXISTS payment_accounting_outbox_correlation_unique
         ON sport_center.payment_accounting_outbox (correlation_id)
         WHERE correlation_id IS NOT NULL;
