@@ -137,13 +137,25 @@ function buildSignature(
   // Derive merchant public key for fingerprint logging
   try {
     const privKeyObj = crypto.createPrivateKey(privateKey);
-    const pubPem = crypto.createPublicKey(privKeyObj).export({ type: "spki", format: "pem" }) as string;
+    const pubPem = crypto
+      .createPublicKey(privKeyObj)
+      .export({ type: "spki", format: "pem" }) as string;
     const pubBase64 = pubPem.replace(/-----[^-]+-----/g, "").replace(/\s/g, "");
-    const fingerprint = crypto.createHash("sha256").update(Buffer.from(pubBase64, "base64")).digest("hex").substring(0, 16);
-    console.log(`[Paylabs sign] path=${fullPath} | sha256body=${shaJson.substring(0,16)}... | pubkey_fingerprint=${fingerprint}`);
-    console.log(`[Paylabs sign] signatureBefore="${signatureBefore.substring(0, 80)}..."`);
+    const fingerprint = crypto
+      .createHash("sha256")
+      .update(Buffer.from(pubBase64, "base64"))
+      .digest("hex")
+      .substring(0, 16);
+    console.log(
+      `[Paylabs sign] path=${fullPath} | sha256body=${shaJson.substring(0, 16)}... | pubkey_fingerprint=${fingerprint}`,
+    );
+    console.log(
+      `[Paylabs sign] signatureBefore="${signatureBefore.substring(0, 80)}..."`,
+    );
   } catch {
-    console.log(`[Paylabs sign] path=${fullPath} | could not derive pubkey fingerprint`);
+    console.log(
+      `[Paylabs sign] path=${fullPath} | could not derive pubkey fingerprint`,
+    );
   }
 
   return crypto
@@ -173,7 +185,12 @@ export function verifyResponseSignature(
   }
 }
 
-function buildHeaders(requestId: string, signature: string, timestamp: string, cfg?: PaylabsConfig) {
+function buildHeaders(
+  requestId: string,
+  signature: string,
+  timestamp: string,
+  cfg?: PaylabsConfig,
+) {
   return {
     "Content-Type": "application/json;charset=utf-8",
     "X-TIMESTAMP": timestamp,
@@ -187,18 +204,21 @@ function isMockMode(cfg?: PaylabsConfig): boolean {
   if (process.env.PAYLABS_MOCK === "true") return true;
   // Auto-mock when credentials are not configured
   if (cfg) return !cfg.merchantId || !cfg.privateKey;
-  if (!process.env.PAYLABS_MERCHANT_ID || !process.env.PAYLABS_PRIVATE_KEY) return true;
+  if (!process.env.PAYLABS_MERCHANT_ID || !process.env.PAYLABS_PRIVATE_KEY)
+    return true;
   return false;
 }
 
 function getAppBaseUrl(): string {
-  if (process.env.APP_BASE_URL) return process.env.APP_BASE_URL.replace(/\/$/, "");
+  if (process.env.APP_BASE_URL)
+    return process.env.APP_BASE_URL.replace(/\/$/, "");
   // Replit deployment provides REPLIT_DOMAINS (comma-separated list)
   if (process.env.REPLIT_DOMAINS) {
     const first = process.env.REPLIT_DOMAINS.split(",")[0].trim();
     if (first) return `https://${first}`;
   }
-  if (process.env.REPLIT_DEV_DOMAIN) return `https://${process.env.REPLIT_DEV_DOMAIN}`;
+  if (process.env.REPLIT_DEV_DOMAIN)
+    return `https://${process.env.REPLIT_DEV_DOMAIN}`;
   return "https://travelintrips.replit.app";
 }
 
@@ -287,9 +307,9 @@ function isNetworkError(err: unknown): boolean {
  * Paylabs uses camelCase for some channel names (e.g. MandiriVA, DanamonVA).
  */
 const OUTBOUND_VA_CHANNEL_MAP: Record<string, string> = {
-  MANDIRIVA:  "MandiriVA",
-  DANAMONVA:  "DanamonVA",
-  DanamonVA:  "DanamonVA",
+  MANDIRIVA: "MandiriVA",
+  DANAMONVA: "DanamonVA",
+  DanamonVA: "DanamonVA",
 };
 
 function toPaylabsChannel(code: string): string {
@@ -326,9 +346,12 @@ export async function createVAPayment(
   const requestId = generateRequestId();
   const merchantId = getMerchantId(config);
   const timestamp = buildTimestamp();
-  const notifyUrl = params.notifyUrl ?? `${getAppBaseUrl()}/api/paylabs/webhook`;
+  const notifyUrl =
+    params.notifyUrl ?? `${getAppBaseUrl()}/api/paylabs/webhook`;
 
-  const paylabsChannel = params.bankCode ? toPaylabsChannel(params.bankCode) : undefined;
+  const paylabsChannel = params.bankCode
+    ? toPaylabsChannel(params.bankCode)
+    : undefined;
 
   const body = {
     merchantId,
@@ -380,7 +403,10 @@ export async function createVAPayment(
         raw: data,
       };
     }
-    console.error(`[Paylabs VA] errCode=${String(data.errCode ?? "")} merchantId=${merchantId} raw:`, JSON.stringify(data));
+    console.error(
+      `[Paylabs VA] errCode=${String(data.errCode ?? "")} merchantId=${merchantId} raw:`,
+      JSON.stringify(data),
+    );
     return {
       success: false,
       error: String(
@@ -393,7 +419,10 @@ export async function createVAPayment(
     const msg = err instanceof Error ? err.message : String(err);
     if (isNetworkError(err)) {
       console.error("[Paylabs VA] Network unreachable:", msg);
-      return { success: false, error: "Tidak dapat terhubung ke Paylabs. Periksa koneksi server." };
+      return {
+        success: false,
+        error: "Tidak dapat terhubung ke Paylabs. Periksa koneksi server.",
+      };
     }
     console.error("[Paylabs VA] Error:", msg, axErr.response?.data);
     return {
@@ -423,7 +452,8 @@ export async function createQRISPayment(
   const requestId = generateRequestId();
   const merchantId = getMerchantId(config);
   const timestamp = buildTimestamp();
-  const notifyUrl = params.notifyUrl ?? `${getAppBaseUrl()}/api/paylabs/webhook`;
+  const notifyUrl =
+    params.notifyUrl ?? `${getAppBaseUrl()}/api/paylabs/webhook`;
 
   const body = {
     merchantId,
@@ -472,7 +502,10 @@ export async function createQRISPayment(
         raw: data,
       };
     }
-    console.error(`[Paylabs QRIS] errCode=${String(data.errCode ?? "")} merchantId=${getMerchantId(config)} raw:`, JSON.stringify(data));
+    console.error(
+      `[Paylabs QRIS] errCode=${String(data.errCode ?? "")} merchantId=${getMerchantId(config)} raw:`,
+      JSON.stringify(data),
+    );
     return {
       success: false,
       error: String(
@@ -488,7 +521,10 @@ export async function createQRISPayment(
     const msg = err instanceof Error ? err.message : String(err);
     if (isNetworkError(err)) {
       console.error("[Paylabs QRIS] Network unreachable:", msg);
-      return { success: false, error: "Tidak dapat terhubung ke Paylabs. Periksa koneksi server." };
+      return {
+        success: false,
+        error: "Tidak dapat terhubung ke Paylabs. Periksa koneksi server.",
+      };
     }
     console.error("[Paylabs QRIS] Error:", msg, axErr.response?.data);
     return {
@@ -520,25 +556,46 @@ export interface InquireResult {
 }
 
 const CHANNEL_MAP: Record<string, string> = {
-  BNIVA: "BNIVA", BNI: "BNIVA",
-  MANDIRIVA: "MandiriVA", MANDIRI: "MandiriVA",
-  PERMATAVA: "PERMATAVA", PERMATA: "PERMATAVA",
-  MAYBANKVA: "MAYBANKVA", MAYBANK: "MAYBANKVA",
-  CIMBVA: "CIMBVA", CIMB: "CIMBVA", CIMBNIAGA: "CIMBVA",
-  BRIVA: "BRIVA", BRI: "BRIVA",
-  BCAVA: "BCAVA", BCA: "BCAVA",
-  BTNVA: "BTNVA", BTN: "BTNVA",
-  DANAMONVA: "DanamonVA", DANAMON: "DanamonVA",
-  BSIVA: "BSIVA", BSI: "BSIVA",
-  MUAMALATVA: "MUAMALATVA", MUAMALAT: "MUAMALATVA",
-  SINARMASVA: "SINARMASVA", SINARMAS: "SINARMASVA",
-  INAVA: "INAVA", INA: "INAVA",
+  BNIVA: "BNIVA",
+  BNI: "BNIVA",
+  MANDIRIVA: "MandiriVA",
+  MANDIRI: "MandiriVA",
+  PERMATAVA: "PERMATAVA",
+  PERMATA: "PERMATAVA",
+  MAYBANKVA: "MAYBANKVA",
+  MAYBANK: "MAYBANKVA",
+  CIMBVA: "CIMBVA",
+  CIMB: "CIMBVA",
+  CIMBNIAGA: "CIMBVA",
+  BRIVA: "BRIVA",
+  BRI: "BRIVA",
+  BCAVA: "BCAVA",
+  BCA: "BCAVA",
+  BTNVA: "BTNVA",
+  BTN: "BTNVA",
+  DANAMONVA: "DanamonVA",
+  DANAMON: "DanamonVA",
+  BSIVA: "BSIVA",
+  BSI: "BSIVA",
+  MUAMALATVA: "MUAMALATVA",
+  MUAMALAT: "MUAMALATVA",
+  SINARMASVA: "SINARMASVA",
+  SINARMAS: "SINARMASVA",
+  INAVA: "INAVA",
+  INA: "INAVA",
 };
 
 function isInquiryPaid(data: Record<string, unknown>): boolean {
   const PAID_CODES = new Set([
-    "02", "2", "success", "paid", "settled", "complete", "completed",
-    "payment_success", "trade_success",
+    "02",
+    "2",
+    "success",
+    "paid",
+    "settled",
+    "complete",
+    "completed",
+    "payment_success",
+    "trade_success",
   ]);
 
   // Check all possible status field names Paylabs might return
@@ -587,7 +644,11 @@ async function inquireByPath(
   try {
     signature = buildSignature("POST", apiPath, jsonBody, timestamp, cfg);
   } catch (err) {
-    return { success: false, isPaid: false, error: `RSA sign error: ${err instanceof Error ? err.message : String(err)}` };
+    return {
+      success: false,
+      isPaid: false,
+      error: `RSA sign error: ${err instanceof Error ? err.message : String(err)}`,
+    };
   }
 
   try {
@@ -598,37 +659,68 @@ async function inquireByPath(
     const data = response.data as Record<string, unknown>;
 
     // Log full raw response so we can see exactly which fields Paylabs returns
-    console.log(`[Paylabs Inquiry ${apiPath}] Raw response:`, JSON.stringify(data, null, 2));
+    console.log(
+      `[Paylabs Inquiry ${apiPath}] Raw response:`,
+      JSON.stringify(data, null, 2),
+    );
 
     const isPaid = isInquiryPaid(data);
     const detectedStatus = String(
-      data.tradeStatus ?? data.tradeState ?? data.status ??
-      data.paymentStatus ?? data.orderStatus ?? data.resultStatus ?? data.errCode ?? "",
+      data.tradeStatus ??
+        data.tradeState ??
+        data.status ??
+        data.paymentStatus ??
+        data.orderStatus ??
+        data.resultStatus ??
+        data.errCode ??
+        "",
     );
 
-    console.log(`[Paylabs Inquiry ${apiPath}] merchantTradeNo=${merchantTradeNo} detectedStatus="${detectedStatus}" isPaid=${isPaid}`);
+    console.log(
+      `[Paylabs Inquiry ${apiPath}] merchantTradeNo=${merchantTradeNo} detectedStatus="${detectedStatus}" isPaid=${isPaid}`,
+    );
 
     // Extract bank channel from any possible field name Paylabs might use
     const rawChannel = String(
-      data.channelType ?? data.bankCode ?? data.channel ??
-      data.paymentChannel ?? data.bankChannel ?? data.subPayType ??
-      data.payType ?? data.payChannel ?? ""
-    ).toUpperCase().trim();
-    const bankCode = rawChannel ? (CHANNEL_MAP[rawChannel] ?? undefined) : undefined;
+      data.channelType ??
+        data.bankCode ??
+        data.channel ??
+        data.paymentChannel ??
+        data.bankChannel ??
+        data.subPayType ??
+        data.payType ??
+        data.payChannel ??
+        "",
+    )
+      .toUpperCase()
+      .trim();
+    const bankCode = rawChannel
+      ? (CHANNEL_MAP[rawChannel] ?? undefined)
+      : undefined;
 
     // Extract VA number
-    const vaNumber = String(
-      data.vaNumber ?? data.vaAccount ?? data.accountNo ??
-      data.virtualAccountNumber ?? data.bankVaNo ?? data.paymentCode ?? ""
-    ).trim() || undefined;
+    const vaNumber =
+      String(
+        data.vaNumber ??
+          data.vaAccount ??
+          data.accountNo ??
+          data.virtualAccountNumber ??
+          data.bankVaNo ??
+          data.paymentCode ??
+          "",
+      ).trim() || undefined;
 
-    console.log(`[Paylabs Inquiry ${apiPath}] bankCode=${bankCode ?? "-"} vaNumber=${vaNumber ?? "-"}`);
+    console.log(
+      `[Paylabs Inquiry ${apiPath}] bankCode=${bankCode ?? "-"} vaNumber=${vaNumber ?? "-"}`,
+    );
 
     return {
       success: true,
       isPaid,
       status: detectedStatus,
-      transactionId: String(data.paymentId ?? data.tradeNo ?? data.transactionId ?? ""),
+      transactionId: String(
+        data.paymentId ?? data.tradeNo ?? data.transactionId ?? "",
+      ),
       paidAt: data.payTime ? String(data.payTime) : undefined,
       bankCode,
       vaNumber,
@@ -637,7 +729,11 @@ async function inquireByPath(
   } catch (err) {
     const axErr = err as { response?: { data: unknown; status: number } };
     const msg = err instanceof Error ? err.message : String(err);
-    console.error(`[Paylabs Inquiry ${apiPath}] Error:`, msg, JSON.stringify(axErr.response?.data ?? {}));
+    console.error(
+      `[Paylabs Inquiry ${apiPath}] Error:`,
+      msg,
+      JSON.stringify(axErr.response?.data ?? {}),
+    );
     return {
       success: false,
       isPaid: false,
@@ -647,32 +743,71 @@ async function inquireByPath(
   }
 }
 
-export async function inquireQRIS(merchantTradeNo: string, config?: PaylabsConfig): Promise<InquireResult> {
-  return inquireByPath("/payment/v2.1/qris/query", merchantTradeNo, { paymentType: "QRIS" }, config);
+export async function inquireQRIS(
+  merchantTradeNo: string,
+  config?: PaylabsConfig,
+): Promise<InquireResult> {
+  return inquireByPath(
+    "/payment/v2.1/qris/query",
+    merchantTradeNo,
+    { paymentType: "QRIS" },
+    config,
+  );
 }
 
-export async function inquireVA(merchantTradeNo: string, config?: PaylabsConfig): Promise<InquireResult> {
+export async function inquireVA(
+  merchantTradeNo: string,
+  config?: PaylabsConfig,
+): Promise<InquireResult> {
   return inquireByPath("/payment/v2.1/va/query", merchantTradeNo, {}, config);
 }
 
-export async function inquireH5(merchantTradeNo: string, config?: PaylabsConfig): Promise<InquireResult> {
+export async function inquireH5(
+  merchantTradeNo: string,
+  config?: PaylabsConfig,
+): Promise<InquireResult> {
   // Basic query — only required fields (merchantId, requestId, merchantTradeNo)
   // storeId="" causes paramInvalid on SIT merchant 010370
-  const result = await inquireByPath("/payment/v2/h5/query", merchantTradeNo, {}, config);
+  const result = await inquireByPath(
+    "/payment/v2/h5/query",
+    merchantTradeNo,
+    {},
+    config,
+  );
 
   // If failed, check raw errCode for paramInvalid and retry with paymentType field
-  const rawErrCode = String((result.raw as Record<string, unknown>)?.errCode ?? "");
+  const rawErrCode = String(
+    (result.raw as Record<string, unknown>)?.errCode ?? "",
+  );
   if (!result.isPaid && rawErrCode === "paramInvalid") {
-    console.log("[Paylabs H5 Inquiry] paramInvalid on basic query, retry with paymentType...");
-    return inquireByPath("/payment/v2/h5/query", merchantTradeNo, { paymentType: "h5" }, config);
+    console.log(
+      "[Paylabs H5 Inquiry] paramInvalid on basic query, retry with paymentType...",
+    );
+    return inquireByPath(
+      "/payment/v2/h5/query",
+      merchantTradeNo,
+      { paymentType: "h5" },
+      config,
+    );
   }
   return result;
 }
 
 const VA_BANK_CODES = new Set([
-  "BRIVA","BCAVA","BNIVA","MANDIRIVA","PERMATAVA",
-  "CIMBVA","BTNVA","DanamonVA","MAYBANKVA","BSIVA",
-  "MUAMALATVA","SINARMASVA","INAVA","VIRTUAL_ACCOUNT",
+  "BRIVA",
+  "BCAVA",
+  "BNIVA",
+  "MANDIRIVA",
+  "PERMATAVA",
+  "CIMBVA",
+  "BTNVA",
+  "DanamonVA",
+  "MAYBANKVA",
+  "BSIVA",
+  "MUAMALATVA",
+  "SINARMASVA",
+  "INAVA",
+  "VIRTUAL_ACCOUNT",
 ]);
 
 export async function inquirePayment(
@@ -686,7 +821,11 @@ export async function inquirePayment(
   if (paymentType === "QRIS") return inquireQRIS(merchantTradeNo, config);
   if (VA_BANK_CODES.has(paymentType)) return inquireVA(merchantTradeNo, config);
   if (paymentType === "H5") return inquireH5(merchantTradeNo, config);
-  return { success: false, isPaid: false, error: "Payment type tidak didukung untuk inquiry." };
+  return {
+    success: false,
+    isPaid: false,
+    error: "Payment type tidak didukung untuk inquiry.",
+  };
 }
 
 /**
@@ -714,7 +853,8 @@ export async function createH5Payment(
   const requestId = generateRequestId();
   const merchantId = getMerchantId(config);
   const timestamp = buildTimestamp();
-  const notifyUrl = params.notifyUrl ?? `${getAppBaseUrl()}/api/paylabs/webhook`;
+  const notifyUrl =
+    params.notifyUrl ?? `${getAppBaseUrl()}/api/paylabs/webhook`;
   console.log("[Paylabs H5] notifyUrl:", notifyUrl);
 
   const body = {
@@ -758,7 +898,10 @@ export async function createH5Payment(
         raw: data,
       };
     }
-    console.error(`[Paylabs H5] errCode=${String(data.errCode ?? "")} merchantId=${getMerchantId(config)} raw:`, JSON.stringify(data));
+    console.error(
+      `[Paylabs H5] errCode=${String(data.errCode ?? "")} merchantId=${getMerchantId(config)} raw:`,
+      JSON.stringify(data),
+    );
     return {
       success: false,
       error: String(
@@ -774,7 +917,10 @@ export async function createH5Payment(
     const msg = err instanceof Error ? err.message : String(err);
     if (isNetworkError(err)) {
       console.error("[Paylabs H5] Network unreachable:", msg);
-      return { success: false, error: "Tidak dapat terhubung ke Paylabs. Periksa koneksi server." };
+      return {
+        success: false,
+        error: "Tidak dapat terhubung ke Paylabs. Periksa koneksi server.",
+      };
     }
     console.error("[Paylabs H5] Error:", msg, axErr.response?.data);
     return {
