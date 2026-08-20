@@ -87,6 +87,9 @@ function classifyPaymentMethod(text: string): {
     ["QRIS", /\bQRIS\b/],
     ["Quick Response Code", /QUICK\s+RESPONSE\s+CODE/],
     ["NMID", /\bNMID\b/],
+    // Banking apps may omit the word QRIS on the success screen, but a
+    // Merchant PAN is specific to QRIS merchant payments.
+    ["Merchant PAN", /\bMERCHANT\s+PAN\b|\bMPAN\b/],
     ["QR Payment", /\bQR\s+(?:PAYMENT|PEMBAYARAN)\b/],
   ] as const;
   for (const [label, pattern] of qrisSignals) {
