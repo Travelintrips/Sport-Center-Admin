@@ -658,8 +658,8 @@ export async function postSportCenterBookingPayment(
       await client.query(
         `UPDATE public.accounting_entries
             SET source = 'sport_center_payment',
-                source_id = $2,
-                source_payment_id = $2,
+                source_id = $2::text,
+                source_payment_id = $2::integer,
                 company_id = $3,
                 payment_method = $4,
                 payment_provider = $5,
