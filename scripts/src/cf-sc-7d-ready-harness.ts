@@ -11,6 +11,11 @@ type CaseResult = {
   accountingEffects: number;
   publicMutations: number;
   sportCenterMutations: number;
+  settlementBatches: number;
+  canonicalSettlementLinks: number;
+  legacySettlementLinks: number;
+  grossSettlement: number | null;
+  netSettlement: number | null;
   taxLedgers: number;
   balanced: boolean;
   retryAlreadyPosted: boolean;
@@ -147,6 +152,19 @@ async function main(): Promise<void> {
         `SELECT id FROM sport_center.bank_mutations WHERE mutation_key = ANY($1::text[])`,
         [paymentIds.map((id) => `SC-PAY-${id}`)],
       );
+      const settlements = await client.query(
+        `SELECT id, canonical_bank_mutation_id, bank_mutation_id,
+                gross_amount, net_amount
+           FROM sport_center.payment_settlement_batches
+          WHERE EXISTS (
+              SELECT 1
+                FROM sport_center.payment_settlement_items i
+               WHERE i.settlement_id = payment_settlement_batches.id
+                 AND i.payment_id = ANY($2::int[])
+                 AND i.item_status = 'active'
+            )`,
+        [null, paymentIds],
+      );
       const retry = await postSportCenterBookingPayment({
         paymentNumber: `SCPAY-SC-${paymentIds[0]}`,
         sourcePaymentId: paymentIds[0],
@@ -168,6 +186,11 @@ async function main(): Promise<void> {
         accountingEffects: entries.rowCount ?? 0,
         publicMutations: mutations.rowCount ?? 0,
         sportCenterMutations: legacy.rowCount ?? 0,
+        settlementBatches: settlements.rowCount ?? 0,
+        canonicalSettlementLinks: settlements.rows.filter((row) => row.canonical_bank_mutation_id != null).length,
+        legacySettlementLinks: settlements.rows.filter((row) => row.bank_mutation_id != null).length,
+        grossSettlement: settlements.rows[0] ? Number(settlements.rows[0].gross_amount) : null,
+        netSettlement: settlements.rows[0] ? Number(settlements.rows[0].net_amount) : null,
         taxLedgers: tax.rowCount ?? 0,
         balanced,
         retryAlreadyPosted: retry.alreadyPosted,
@@ -207,8 +230,8 @@ async function main(): Promise<void> {
 
     const settlementBatches = await client.query(
       `SELECT count(*)::int AS count
-         FROM sport_center.payment_settlement_batches
-        WHERE correlation_id LIKE $1`,
+         FROM sport_center.payment_settlement_batches b
+        WHERE b.correlation_id LIKE $1`,
       [`${MARKER}%`],
     );
     const bookingEntries = await client.query(
@@ -237,7 +260,7 @@ async function main(): Promise<void> {
         totalConfirmedAmount: AMOUNTS.qris_dp + AMOUNTS.qris_pelunasan,
       },
       bookingLevelAccountingCreated: Number(bookingEntries.rows[0].count),
-      settlementBatches: Number(settlementBatches.rows[0].count),
+       settlementBatches: Number(settlementBatches.rows[0].count),
       concurrency: "database advisory-lock/idempotency path exercised by retry; concurrent external clients require committed fixtures and are not run in this rollback transaction",
       rollbackProof: "all fixture rows are in one transaction and rolled back below",
       blockedConfigShapes: ["Transfer Bank", "Paylabs", "unknown provider", "historical recovery"],
