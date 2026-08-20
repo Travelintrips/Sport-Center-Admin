@@ -3,7 +3,14 @@ import { useLocation } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
 import { getGetMeQueryKey } from "@workspace/api-client-react";
 import { setToken } from "@/lib/auth";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  CardFooter,
+} from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -28,14 +35,18 @@ export default function AdminLogin() {
         body: JSON.stringify({ email, password }),
       });
       let data: any = {};
-      try { data = await res.json(); } catch { /* non-JSON body */ }
+      try {
+        data = await res.json();
+      } catch {
+        /* non-JSON body */
+      }
       if (!res.ok) {
         const description =
           res.status === 401
-            ? (data.error || "Email atau password salah")
+            ? data.error || "Email atau password salah"
             : res.status >= 500
               ? "Server API tidak tersedia. Pastikan workflow API Server sedang berjalan, lalu coba lagi."
-              : (data.error || "Login tidak dapat diproses");
+              : data.error || "Login tidak dapat diproses";
         toast({
           title: "Login Gagal",
           description,
@@ -44,7 +55,11 @@ export default function AdminLogin() {
         return;
       }
       if (!data.token) {
-        toast({ title: "Login Gagal", description: "Respons tidak valid dari server", variant: "destructive" });
+        toast({
+          title: "Login Gagal",
+          description: "Respons tidak valid dari server",
+          variant: "destructive",
+        });
         return;
       }
       setToken(data.token);
@@ -52,7 +67,8 @@ export default function AdminLogin() {
       toast({ title: "Login berhasil", description: "Selamat datang, Admin." });
       setLocation("/admin/dashboard");
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Terjadi kesalahan. Coba lagi.";
+      const msg =
+        err instanceof Error ? err.message : "Terjadi kesalahan. Coba lagi.";
       console.error("[AdminLogin] error:", err);
       toast({ title: "Login Gagal", description: msg, variant: "destructive" });
     } finally {
@@ -68,7 +84,9 @@ export default function AdminLogin() {
           <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-4 text-primary">
             <Lock size={32} />
           </div>
-          <CardTitle className="text-2xl font-black tracking-tight">Admin Portal</CardTitle>
+          <CardTitle className="text-2xl font-black tracking-tight">
+            Admin Portal
+          </CardTitle>
           <CardDescription>
             Masukkan kredensial admin untuk mengakses dashboard
           </CardDescription>
@@ -103,9 +121,12 @@ export default function AdminLogin() {
             </div>
 
             <div className="bg-muted/50 p-4 rounded-md text-sm text-muted-foreground flex flex-col gap-1 border border-border">
-              <span className="font-semibold text-foreground">Kredensial Demo:</span>
+              {/**
+              <span className="font-semibold text-foreground">
+                Kredensial Demo:
+              </span>
               <span>Email: admin@sportcenter.com</span>
-              <span>Kata sandi: admin123</span>
+              <span>Kata sandi: admin123</span>*/}
             </div>
           </CardContent>
           <CardFooter className="pb-8">
