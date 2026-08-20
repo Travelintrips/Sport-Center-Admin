@@ -11,6 +11,8 @@ export interface DiscountSetting {
   customerType: string;
   discountPercentage: number;
   /** @nullable */
+  discountAmount?: number | null;
+  /** @nullable */
   description?: string | null;
   isActive: boolean;
 }

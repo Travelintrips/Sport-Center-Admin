@@ -6084,7 +6084,7 @@ export const getUpdateDiscountSettingUrl = (customerType: string,) => {
 }
 
 /**
- * @summary Update discount percentage and active state (admin)
+ * @summary Update discount percentage or fixed amount and active state (admin)
  */
 export const updateDiscountSetting = async (customerType: string,
     discountSettingUpdate: DiscountSettingUpdate, options?: RequestInit): Promise<DiscountSetting> => {
@@ -6134,7 +6134,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type UpdateDiscountSettingMutationError = ErrorType<unknown>
 
     /**
- * @summary Update discount percentage and active state (admin)
+ * @summary Update discount percentage or fixed amount and active state (admin)
  */
 export const useUpdateDiscountSetting = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateDiscountSetting>>, TError,{customerType: string;data: BodyType<DiscountSettingUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}

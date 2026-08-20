@@ -50,6 +50,32 @@ function isMultigunaFacility(facility: { name?: string | null; category?: string
   return normalized.includes("multiguna");
 }
 
+function getApDiscount(basePrice: number, setting: {
+  discountPercentage?: number | null;
+  discountAmount?: number | null;
+}, isMultiguna: boolean, durationHours: number): { amount: number; percentage: number; finalPrice: number } {
+  if (isMultiguna) {
+    const finalPrice = Math.min(basePrice, AP_MULTIGUNA_HOURLY_PRICE * durationHours);
+    const amount = Math.max(0, basePrice - finalPrice);
+    return {
+      amount,
+      finalPrice,
+      percentage: basePrice > 0 ? Number(((amount / basePrice) * 100).toFixed(2)) : 0,
+    };
+  }
+
+  const fixedAmount = Number(setting.discountAmount ?? 0);
+  const percentage = Number(setting.discountPercentage ?? 0);
+  const amount = fixedAmount > 0
+    ? Math.min(Math.round(fixedAmount), Math.max(0, basePrice))
+    : Math.min(Math.round((basePrice * percentage) / 100), Math.max(0, basePrice));
+  return {
+    amount,
+    finalPrice: Math.max(0, basePrice - amount),
+    percentage: basePrice > 0 ? Number(((amount / basePrice) * 100).toFixed(2)) : 0,
+  };
+}
+
 // ─── POST /bookings/track-payer-selection — log when customer toggles payer type ──
 router.post("/bookings/track-payer-selection", async (req, res) => {
   try {
@@ -513,17 +539,16 @@ router.post("/bookings", async (req, res) => {
         const [apSetting] = await db.select().from(discountSettingsTable)
           .where(and(eq(discountSettingsTable.customerType, "angkasa_pura"), eq(discountSettingsTable.isActive, true)))
           .limit(1);
-        if (apSetting && apSetting.discountPercentage > 0) {
+        if (apSetting && (Number(apSetting.discountAmount ?? 0) > 0 || apSetting.discountPercentage > 0)) {
           // AP Multiguna memakai harga khusus Rp300.000/jam, bukan diskon
           // persentase umum AP. Ini juga harus berlaku pada auto-verifikasi;
           // booking yang auto-verified tidak akan melewati endpoint /verify.
-          if (isMultigunaFacility(facility)) {
-            const specialMultigunaPrice = AP_MULTIGUNA_HOURLY_PRICE * durationHours;
-            const finalPrice = Math.min(basePrice, specialMultigunaPrice);
-            apAutoDiscountAmount = Math.max(0, basePrice - finalPrice);
-          } else {
-            apAutoDiscountAmount = Math.round((basePrice * apSetting.discountPercentage) / 100);
-          }
+          apAutoDiscountAmount = getApDiscount(
+            basePrice,
+            apSetting,
+            isMultigunaFacility(facility),
+            durationHours,
+          ).amount;
           apAutoVerified = true;
         } else {
           // Member valid tapi diskon nonaktif → tetap auto-verified
@@ -1050,8 +1075,13 @@ router.post("/bookings/recurring", async (req, res) => {
         const [apSettingR] = await db.select().from(discountSettingsTable)
           .where(and(eq(discountSettingsTable.customerType, "angkasa_pura"), eq(discountSettingsTable.isActive, true)))
           .limit(1);
-        if (apSettingR && apSettingR.discountPercentage > 0) {
-          apAutoDiscountAmountR = Math.round((basePrice * apSettingR.discountPercentage) / 100);
+        if (apSettingR && (Number(apSettingR.discountAmount ?? 0) > 0 || apSettingR.discountPercentage > 0)) {
+          apAutoDiscountAmountR = getApDiscount(
+            basePrice,
+            apSettingR,
+            isMultigunaFacility(facility),
+            durationHours,
+          ).amount;
           apAutoVerifiedR = true;
         } else {
           apAutoVerifiedR = true;
@@ -1843,9 +1873,10 @@ async function runApVerification(
         ? Number(((discountAmount / basePrice) * 100).toFixed(2))
         : 0;
     } else {
-      discountPct = Number(setting.discountPercentage);
-      discountAmount = Math.round((basePrice * discountPct) / 100);
-      finalPrice = Math.max(0, basePrice - discountAmount);
+      const apDiscount = getApDiscount(basePrice, setting, false, durationHours);
+      discountPct = apDiscount.percentage;
+      discountAmount = apDiscount.amount;
+      finalPrice = apDiscount.finalPrice;
     }
   }
   const taxCalc = await calculateTax(finalPrice, "sport_booking", booking.bookingDate);
@@ -1917,7 +1948,9 @@ async function runApVerification(
 
     for (const sibling of siblings) {
       const siblingBase = sibling.basePrice == null ? Number(sibling.totalPrice) : Number(sibling.basePrice);
-      const siblingDiscount = Math.round((siblingBase * discountPct) / 100);
+      const siblingDiscount = Number(setting?.discountAmount ?? 0) > 0
+        ? Math.min(Number(setting.discountAmount), siblingBase)
+        : Math.round((siblingBase * discountPct) / 100);
       const siblingFinal = siblingBase - siblingDiscount;
       const siblingTaxCalc = await calculateTax(siblingFinal, "sport_booking", sibling.bookingDate ?? undefined);
       await db.update(bookingsTable).set({
@@ -2009,9 +2042,15 @@ router.post("/bookings/:id/fix-discount", adminMiddleware, async (req, res) => {
         ? Number(((discountAmount / basePrice) * 100).toFixed(2))
         : 0;
     } else {
-      discountPercentage = Number(setting?.discountPercentage ?? 20);
-      discountAmount = Math.round((basePrice * discountPercentage) / 100);
-      finalPrice = Math.max(0, basePrice - discountAmount);
+      const apDiscount = getApDiscount(
+        basePrice,
+        setting ?? { discountPercentage: 20, discountAmount: null },
+        false,
+        durationHours,
+      );
+      discountAmount = apDiscount.amount;
+      finalPrice = apDiscount.finalPrice;
+      discountPercentage = apDiscount.percentage;
     }
 
     const taxCalc = await calculateTax(finalPrice, "sport_booking", booking.bookingDate);
@@ -2141,9 +2180,10 @@ router.post("/bookings/groups/:groupRef/reapply-discount", adminMiddleware, asyn
       .where(eq(discountSettingsTable.customerType, "angkasa_pura")).limit(1);
     const discountEnabled = !!setting && setting.isActive;
     const discountPct = discountEnabled ? setting.discountPercentage : 0;
+    const fixedDiscountAmount = discountEnabled ? Number(setting?.discountAmount ?? 0) : 0;
 
-    if (!discountEnabled || discountPct <= 0) {
-      res.status(400).json({ error: "Diskon AP sedang tidak aktif atau 0%" });
+    if (!discountEnabled || (discountPct <= 0 && fixedDiscountAmount <= 0)) {
+      res.status(400).json({ error: "Diskon AP sedang tidak aktif atau belum diatur" });
       return;
     }
 
@@ -2152,7 +2192,9 @@ router.post("/bookings/groups/:groupRef/reapply-discount", adminMiddleware, asyn
 
     for (const booking of allBookings) {
       const basePrice = booking.basePrice == null ? Number(booking.totalPrice) : Number(booking.basePrice);
-      const discountAmount = Math.round((basePrice * discountPct) / 100);
+      const discountAmount = fixedDiscountAmount > 0
+        ? Math.min(fixedDiscountAmount, basePrice)
+        : Math.round((basePrice * discountPct) / 100);
       const finalPrice = basePrice - discountAmount;
       const taxCalc = await calculateTax(finalPrice, "sport_booking", booking.bookingDate ?? undefined);
 
