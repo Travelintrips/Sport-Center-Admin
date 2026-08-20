@@ -5,6 +5,7 @@ import {
   taxTransactionsTable,
   paymentsTable,
 } from "@workspace/db";
+import { isCentralFinanceMode } from "./financeBoundary";
 import { eq, and } from "drizzle-orm";
 import pg from "pg";
 import { extractBookingDpp } from "./accountingMath";
@@ -1496,6 +1497,12 @@ type ConfirmedPaymentAccountingInput = {
 export function postConfirmedPaymentAccounting(
   input: ConfirmedPaymentAccountingInput,
 ): Promise<void> {
+  if (isCentralFinanceMode()) {
+    // Payment confirmation owns the canonical payment and the database-backed
+    // finance event. Central Finance owns all downstream accounting after
+    // cutover; keep this guard here so every legacy caller is fail-safe.
+    return Promise.resolve();
+  }
   const key = input.paymentId ?? input.bookingId;
   const running = paymentAccountingInFlight.get(key);
   if (running) return running;

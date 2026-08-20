@@ -4,6 +4,7 @@ import {
   postConfirmedPaymentAccounting,
   postSportCenterBookingPayment,
 } from "./accounting";
+import { isCentralFinanceMode, shouldRunLegacyFinanceWrites } from "./financeBoundary";
 
 const { Pool } = pg;
 
@@ -675,6 +676,21 @@ export async function initBizportalTables(): Promise<void> {
         id SERIAL PRIMARY KEY,
         payment_id INTEGER NOT NULL REFERENCES sport_center.sport_payments(id) ON DELETE CASCADE,
         event_type TEXT NOT NULL DEFAULT 'payment_confirmed',
+        source_project TEXT NOT NULL DEFAULT 'SPORT_CENTER',
+        source_schema TEXT NOT NULL DEFAULT 'sport_center',
+        source_table TEXT NOT NULL DEFAULT 'sport_payments',
+        booking_id INTEGER,
+        company_id INTEGER,
+        amount NUMERIC(14,2),
+        payment_type TEXT,
+        payment_method TEXT,
+        payment_provider TEXT,
+        provider_reference TEXT,
+        provider_order_id TEXT,
+        paid_at TIMESTAMPTZ,
+        confirmed_at TIMESTAMPTZ,
+        correlation_id TEXT,
+        schema_version INTEGER NOT NULL DEFAULT 1,
         status TEXT NOT NULL DEFAULT 'pending',
         attempts INTEGER NOT NULL DEFAULT 0,
         available_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -685,6 +701,25 @@ export async function initBizportalTables(): Promise<void> {
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         CONSTRAINT payment_accounting_outbox_payment_event_unique UNIQUE (payment_id, event_type)
       );
+      ALTER TABLE sport_center.payment_accounting_outbox
+        ADD COLUMN IF NOT EXISTS source_project TEXT NOT NULL DEFAULT 'SPORT_CENTER',
+        ADD COLUMN IF NOT EXISTS source_schema TEXT NOT NULL DEFAULT 'sport_center',
+        ADD COLUMN IF NOT EXISTS source_table TEXT NOT NULL DEFAULT 'sport_payments',
+        ADD COLUMN IF NOT EXISTS booking_id INTEGER,
+        ADD COLUMN IF NOT EXISTS company_id INTEGER,
+        ADD COLUMN IF NOT EXISTS amount NUMERIC(14,2),
+        ADD COLUMN IF NOT EXISTS payment_type TEXT,
+        ADD COLUMN IF NOT EXISTS payment_method TEXT,
+        ADD COLUMN IF NOT EXISTS payment_provider TEXT,
+        ADD COLUMN IF NOT EXISTS provider_reference TEXT,
+        ADD COLUMN IF NOT EXISTS provider_order_id TEXT,
+        ADD COLUMN IF NOT EXISTS paid_at TIMESTAMPTZ,
+        ADD COLUMN IF NOT EXISTS confirmed_at TIMESTAMPTZ,
+        ADD COLUMN IF NOT EXISTS correlation_id TEXT,
+        ADD COLUMN IF NOT EXISTS schema_version INTEGER NOT NULL DEFAULT 1;
+      CREATE UNIQUE INDEX IF NOT EXISTS payment_accounting_outbox_correlation_unique
+        ON sport_center.payment_accounting_outbox (correlation_id)
+        WHERE correlation_id IS NOT NULL;
       CREATE INDEX IF NOT EXISTS payment_accounting_outbox_ready_idx
         ON sport_center.payment_accounting_outbox (status, available_at, locked_at);
       CREATE OR REPLACE FUNCTION sport_center.enqueue_payment_accounting_outbox()
@@ -693,8 +728,17 @@ export async function initBizportalTables(): Promise<void> {
         IF NEW.status::text = 'confirmed' THEN
           IF TG_OP = 'INSERT' OR OLD.status::text IS DISTINCT FROM 'confirmed' THEN
             INSERT INTO sport_center.payment_accounting_outbox
-              (payment_id, event_type, status, available_at, created_at, updated_at)
-            VALUES (NEW.id, 'payment_confirmed', 'pending', NOW(), NOW(), NOW())
+              (payment_id, event_type, source_project, source_schema, source_table,
+               booking_id, company_id, amount, payment_type, payment_method,
+               payment_provider, provider_reference, provider_order_id, paid_at,
+               confirmed_at, correlation_id, schema_version, status, available_at,
+               created_at, updated_at)
+            VALUES (NEW.id, 'payment_confirmed', 'SPORT_CENTER', 'sport_center',
+                    'sport_payments', NEW.booking_id, NEW.company_id, NEW.amount,
+                    NEW.payment_type, NEW.payment_method, NEW.payment_provider,
+                    NEW.provider_reference, NEW.provider_order_id, NEW.paid_at,
+                    NEW.confirmed_at, 'sc_payment_' || NEW.id::text, 1, 'pending',
+                    NOW(), NOW(), NOW())
             ON CONFLICT (payment_id, event_type) DO UPDATE
               SET status = CASE
                     WHEN sport_center.payment_accounting_outbox.status = 'posted'
@@ -1277,6 +1321,7 @@ export async function pushConfirmedPaymentAsBankMutation(
   booking: Booking,
   confirmedAt?: Date | null,
 ): Promise<void> {
+  if (!shouldRunLegacyFinanceWrites()) return;
   const pool = getProdPool();
   if (!pool) return;
 
@@ -1516,8 +1561,17 @@ export async function countPendingPaymentMirrors(pool: pg.Pool): Promise<number>
 async function ensureMissingPaymentAccountingOutbox(pool: pg.Pool): Promise<number> {
   const result = await pool.query(`
     INSERT INTO sport_center.payment_accounting_outbox
-      (payment_id, event_type, status, available_at, locked_at, last_error, created_at, updated_at)
-    SELECT sp.id, 'payment_confirmed', 'pending', NOW(), NULL, NULL, NOW(), NOW()
+      (payment_id, event_type, source_project, source_schema, source_table,
+       booking_id, company_id, amount, payment_type, payment_method,
+       payment_provider, provider_reference, provider_order_id, paid_at,
+       confirmed_at, correlation_id, schema_version, status, available_at,
+       locked_at, last_error, created_at, updated_at)
+    SELECT sp.id, 'payment_confirmed', 'SPORT_CENTER', 'sport_center',
+           'sport_payments', sp.booking_id, sp.company_id, sp.amount,
+           sp.payment_type, sp.payment_method, sp.payment_provider,
+           sp.provider_reference, sp.provider_order_id, sp.paid_at,
+           sp.confirmed_at, 'sc_payment_' || sp.id::text, 1, 'pending',
+           NOW(), NULL, NULL, NOW(), NOW()
       FROM sport_center.sport_payments sp
       LEFT JOIN sport_center.accounting_journals aj
         ON aj.payment_id = sp.id
@@ -1613,6 +1667,11 @@ export async function processPaymentAccountingOutbox(): Promise<{
 }> {
   const pool = getProdPool();
   if (!pool) return { claimed: 0, posted: 0, retried: 0 };
+  if (isCentralFinanceMode()) {
+    // Central Finance will consume these durable events in the later cutover
+    // phase. Never claim or mark them posted while no central consumer exists.
+    return { claimed: 0, posted: 0, retried: 0 };
+  }
 
   // Repair historical confirmed payments as well as events created by the
   // trigger. This is idempotent and does not disturb active processing locks.
@@ -1757,6 +1816,9 @@ export async function processPaymentAccountingOutbox(): Promise<{
 }
 
 export async function bulkPushPaymentsToBizportal(): Promise<BulkPaymentPushResult> {
+  if (!shouldRunLegacyFinanceWrites()) {
+    return { total: 0, pushed: 0, skipped: 0, failed: 0, errors: [] };
+  }
   const pool = getProdPool();
   if (!pool) return { total: 0, pushed: 0, skipped: 0, failed: 0, errors: [] };
 
@@ -1963,6 +2025,7 @@ export async function syncStatusToBizportal(
   paidAt?: Date | null,
   booking?: Booking
 ): Promise<void> {
+  if (!shouldRunLegacyFinanceWrites()) return;
   const pool = getProdPool();
   if (!pool) return;
 
