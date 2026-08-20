@@ -3356,6 +3356,11 @@ components:
           enum: [dp, pelunasan, full_payment]
         notes:
           type: string
+        ocrScanToken:
+          type: string
+        ocrScan:
+          type: object
+          additionalProperties: true
 
     PaymentUpdate:
       type: object

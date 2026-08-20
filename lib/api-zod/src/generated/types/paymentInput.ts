@@ -18,4 +18,6 @@ export interface PaymentInput {
   providerOrderId?: string;
   paymentType?: PaymentInputPaymentType;
   notes?: string;
+  ocrScanToken?: string;
+  ocrScan?: Record<string, unknown>;
 }

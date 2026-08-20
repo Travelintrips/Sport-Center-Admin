@@ -116,6 +116,7 @@ function DocTypePanel({ docType, meta }: {
   // ── Background file template state ──────────────────────────────────────
   const bgFileInputRef = useRef<HTMLInputElement>(null);
   const [bgUploading, setBgUploading] = useState(false);
+  const [bgToggling, setBgToggling] = useState(false);
   const [bgTogglingId, setBgTogglingId] = useState<number | null>(null);
   const [bgDeletingId, setBgDeletingId] = useState<number | null>(null);
 
@@ -635,7 +636,7 @@ function DocTypePanel({ docType, meta }: {
         </div>
       )}
 
-      {innerTab === "bg" && (
+      {innerTab === "background" && (
         <div className="space-y-5">
           {/* Info box */}
           <div className="rounded-lg bg-blue-50 border border-blue-200 p-3 text-sm text-blue-800 space-y-1">

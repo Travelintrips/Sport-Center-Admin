@@ -158,7 +158,7 @@ async function loadDocTemplateSettings(): Promise<DocTemplateSettings> {
 // ─── PDF Print Helpers ────────────────────────────────────────────────────────
 
 
-function printInvoicePdf(invoice: any, signatureUrl?: string | null, financeName?: string | null, financeTitle?: string | null) {
+function printInvoicePdf(invoice: any, ds: DocTemplateSettings) {
 
   const items: any[] = invoice.items ?? [];
   const periodStr = periodLabel(invoice.periodMonth);
@@ -313,13 +313,13 @@ function printInvoicePdf(invoice: any, signatureUrl?: string | null, financeName
   <div style="margin-top:28px;display:flex;justify-content:flex-end;">
     <div style="text-align:center;min-width:200px;">
       <div style="font-size:12px;color:#374151;margin-bottom:4px;">Hormat kami,</div>
-      ${signatureUrl
-        ? `<img src="${signatureUrl}" alt="Tanda Tangan" style="height:72px;width:auto;object-fit:contain;margin:4px 0;" />`
+      ${ds.signatureUrl
+        ? `<img src="${ds.signatureUrl}" alt="Tanda Tangan" style="height:72px;width:auto;object-fit:contain;margin:4px 0;" />`
         : `<div style="height:80px;"></div>`
       }
       <div style="border-bottom:1px solid #374151;width:140px;margin:0 auto 6px;"></div>
-      <div style="font-weight:700;font-size:11.5px;color:#111827;">${financeName || "Admin Sport Center"}</div>
-      <div style="font-size:10.5px;color:#374151;">${financeTitle || "Sport Center Soekarno-Hatta"}</div>
+      <div style="font-weight:700;font-size:11.5px;color:#111827;">${ds.financeName || "Admin Sport Center"}</div>
+      <div style="font-size:10.5px;color:#374151;">${ds.financeTitle || "Sport Center Soekarno-Hatta"}</div>
 
     </div>
   </div>
@@ -627,15 +627,13 @@ function printBeritaAcara(invoice: any, ds: DocTemplateSettings) {
 
 
 async function downloadBillingPackage(invoice: any, requirements: any[], signatureUrl?: string | null, financeName?: string | null, financeTitle?: string | null) {
-
+  const ds = await loadDocTemplateSettings();
   const docTypes = requirements.map((r: any) => r.documentType);
   const delays: Array<{ fn: () => void; delay: number; doc: string }> = [];
   let delay = 0;
 
   if (docTypes.includes("invoice")) {
-
     delays.push({ fn: () => printInvoicePdf(invoice, ds), delay, doc: "invoice" });
-    delays.push({ fn: () => printInvoicePdf(invoice, signatureUrl, financeName, financeTitle), delay, doc: "invoice" });
     delay += 800;
   }
   if (docTypes.includes("lampiran_pemakaian")) {
@@ -1179,7 +1177,6 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
     if (!invoice) return;
     const ds = await loadDocTemplateSettings();
     printInvoicePdf(invoice, ds);
-    printInvoicePdf(invoice, invoiceSettings?.signatureUrl, invoiceSettings?.financeName, invoiceSettings?.financeTitle);
     await auditBillingAction(invoiceId, "COMPANY_DOCUMENT_DOWNLOADED", ["invoice"]);
     qc.invalidateQueries({ queryKey: ["company-invoice-audit", invoiceId] });
   };
