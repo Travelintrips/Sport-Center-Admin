@@ -764,6 +764,21 @@ CREATE TABLE IF NOT EXISTS sport_center.payment_accounting_outbox (
   id serial PRIMARY KEY,
   payment_id integer NOT NULL REFERENCES sport_center.sport_payments(id) ON DELETE CASCADE,
   event_type text NOT NULL DEFAULT 'payment_confirmed',
+  source_project text NOT NULL DEFAULT 'SPORT_CENTER',
+  source_schema text NOT NULL DEFAULT 'sport_center',
+  source_table text NOT NULL DEFAULT 'sport_payments',
+  booking_id integer,
+  company_id integer,
+  amount numeric(14,2),
+  payment_type text,
+  payment_method text,
+  payment_provider text,
+  provider_reference text,
+  provider_order_id text,
+  paid_at timestamptz,
+  confirmed_at timestamptz,
+  correlation_id text,
+  schema_version integer NOT NULL DEFAULT 1,
   status text NOT NULL DEFAULT 'pending',
   attempts integer NOT NULL DEFAULT 0,
   available_at timestamptz NOT NULL DEFAULT now(),
@@ -774,6 +789,25 @@ CREATE TABLE IF NOT EXISTS sport_center.payment_accounting_outbox (
   updated_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT payment_accounting_outbox_payment_event_unique UNIQUE (payment_id, event_type)
 );
+ALTER TABLE sport_center.payment_accounting_outbox
+  ADD COLUMN IF NOT EXISTS source_project text NOT NULL DEFAULT 'SPORT_CENTER',
+  ADD COLUMN IF NOT EXISTS source_schema text NOT NULL DEFAULT 'sport_center',
+  ADD COLUMN IF NOT EXISTS source_table text NOT NULL DEFAULT 'sport_payments',
+  ADD COLUMN IF NOT EXISTS booking_id integer,
+  ADD COLUMN IF NOT EXISTS company_id integer,
+  ADD COLUMN IF NOT EXISTS amount numeric(14,2),
+  ADD COLUMN IF NOT EXISTS payment_type text,
+  ADD COLUMN IF NOT EXISTS payment_method text,
+  ADD COLUMN IF NOT EXISTS payment_provider text,
+  ADD COLUMN IF NOT EXISTS provider_reference text,
+  ADD COLUMN IF NOT EXISTS provider_order_id text,
+  ADD COLUMN IF NOT EXISTS paid_at timestamptz,
+  ADD COLUMN IF NOT EXISTS confirmed_at timestamptz,
+  ADD COLUMN IF NOT EXISTS correlation_id text,
+  ADD COLUMN IF NOT EXISTS schema_version integer NOT NULL DEFAULT 1;
+CREATE UNIQUE INDEX IF NOT EXISTS payment_accounting_outbox_correlation_unique
+  ON sport_center.payment_accounting_outbox (correlation_id)
+  WHERE correlation_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS payment_accounting_outbox_ready_idx
   ON sport_center.payment_accounting_outbox (status, available_at, locked_at);
 
@@ -785,8 +819,17 @@ BEGIN
   IF NEW.status::text = 'confirmed' THEN
     IF TG_OP = 'INSERT' OR OLD.status::text IS DISTINCT FROM 'confirmed' THEN
       INSERT INTO sport_center.payment_accounting_outbox
-        (payment_id, event_type, status, available_at, created_at, updated_at)
-      VALUES (NEW.id, 'payment_confirmed', 'pending', now(), now(), now())
+        (payment_id, event_type, source_project, source_schema, source_table,
+         booking_id, company_id, amount, payment_type, payment_method,
+         payment_provider, provider_reference, provider_order_id, paid_at,
+         confirmed_at, correlation_id, schema_version, status, available_at,
+         created_at, updated_at)
+      VALUES (NEW.id, 'payment_confirmed', 'SPORT_CENTER', 'sport_center',
+              'sport_payments', NEW.booking_id, NEW.company_id, NEW.amount,
+              NEW.payment_type, NEW.payment_method, NEW.payment_provider,
+              NEW.provider_reference, NEW.provider_order_id, NEW.paid_at,
+              NEW.confirmed_at, 'sc_payment_' || NEW.id::text, 1, 'pending',
+              now(), now(), now())
       ON CONFLICT (payment_id, event_type) DO UPDATE
         SET status = CASE
               WHEN sport_center.payment_accounting_outbox.status = 'posted'
