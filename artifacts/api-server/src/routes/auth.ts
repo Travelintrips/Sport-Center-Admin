@@ -61,14 +61,17 @@ router.post("/auth/login", async (req, res) => {
 
 router.post("/auth/register", async (req, res) => {
   try {
-    const { name, email, password, phone } = req.body;
+    const name = String(req.body?.name ?? "").trim();
+    const email = String(req.body?.email ?? "").trim().toLowerCase();
+    const password = String(req.body?.password ?? "");
+    const phone = String(req.body?.phone ?? "").trim();
     if (!name || !email || !password) {
       res.status(400).json({ error: "Name, email and password required" });
       return;
     }
     const [existing] = await db.select().from(usersTable).where(eq(usersTable.email, email)).limit(1);
     if (existing) {
-      res.status(409).json({ error: "Email already registered" });
+      res.status(409).json({ error: "Email sudah terdaftar,silahkan hubungi admin atau lupa password" });
       return;
     }
     const passwordHash = await hashPassword(password);
@@ -82,6 +85,12 @@ router.post("/auth/register", async (req, res) => {
       token,
     });
   } catch (err) {
+    // The pre-check above handles the normal case; this also covers two
+    // registrations arriving concurrently and the database unique constraint.
+    if (err && typeof err === "object" && "code" in err && (err as { code?: string }).code === "23505") {
+      res.status(409).json({ error: "Email sudah terdaftar,silahkan hubungi admin atau lupa password" });
+      return;
+    }
     req.log.error({ err }, "Register error");
     res.status(500).json({ error: "Internal server error" });
   }

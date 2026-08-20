@@ -68,7 +68,11 @@ export default function Register() {
         setLocation("/my-bookings");
       },
       onError: (err: any) => {
-        const msg = err?.response?.data?.error ?? t("Gagal mendaftar. Coba lagi.", "Registration failed. Please try again.");
+        const isDuplicateEmail = err?.response?.status === 409 ||
+          err?.response?.data?.error === "Email already registered";
+        const msg = isDuplicateEmail
+          ? "Email sudah terdaftar,silahkan hubungi admin atau lupa password"
+          : err?.response?.data?.error ?? t("Gagal mendaftar. Coba lagi.", "Registration failed. Please try again.");
         toast({ title: t("Registrasi gagal", "Registration failed"), description: msg, variant: "destructive" });
       },
     },
