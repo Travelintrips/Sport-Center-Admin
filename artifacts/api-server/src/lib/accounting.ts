@@ -904,7 +904,7 @@ export async function postSportCenterBookingPayment(
     const message = String(err?.message ?? err).slice(0, 1000);
     await pool.query(
       `UPDATE public.sport_payments
-          SET posting_status = 'failed', posting_error = $2, updated_at = NOW()
+          SET posting_status = 'failed', posting_error = $2::text, updated_at = NOW()
         WHERE payment_number = $1`,
       [input.paymentNumber, message],
     ).catch(() => {});
