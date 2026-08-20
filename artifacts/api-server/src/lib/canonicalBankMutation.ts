@@ -50,7 +50,7 @@ export async function ensureCanonicalSportCenterBankMutation(
              'sport_center',$9,'sport_center','central_finance','sport_payments',
              $10,true,'sport_center_payment',$10,$11,'sport_center_payment',
              'unreconciled',$12,false,'synthetic',NOW(),NOW())
-     ON CONFLICT (canonical_key) DO UPDATE
+      ON CONFLICT (canonical_key) WHERE canonical_key IS NOT NULL DO UPDATE
        SET journal_entry_id = EXCLUDED.journal_entry_id,
            accounting_posted = true,
            linked_transaction_type = EXCLUDED.linked_transaction_type,

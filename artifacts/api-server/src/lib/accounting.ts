@@ -608,6 +608,9 @@ export async function postSportCenterBookingPayment(
     const merchantTradeNo = sourcePayment?.merchant_trade_no ?? input.merchantTradeNo ?? null;
     const providerTradeNo = sourcePayment?.provider_trade_no ?? input.providerTradeNo ?? null;
     const paymentType = sourcePayment?.payment_type ?? mirroredPayment.payment_type ?? input.paymentType ?? "full_payment";
+    const occurredAt = input.paidAt instanceof Date
+      ? input.paidAt.toISOString()
+      : input.paidAt ?? new Date().toISOString();
 
     if (mirroredPayment.posting_status === "posted" && mirroredPayment.entry_id) {
       const postedEntry = await client.query(
@@ -630,6 +633,21 @@ export async function postSportCenterBookingPayment(
           Number(posted.source_payment_id) === sourcePaymentId &&
           (canonicalMethod.toUpperCase() !== "QRIS" ||
             String(posted.payment_provider ?? "").trim().toLowerCase() === canonicalProvider)) {
+        if (isCentralFinanceMode()) {
+          await ensureCanonicalSportCenterBankMutation(client, {
+            paymentId: Number(sourcePaymentId),
+            companyId,
+            amount: requestedAmount,
+            paymentMethod: canonicalMethod,
+            paymentProvider: canonicalProvider,
+            bankAccountId,
+            providerReference,
+            providerOrderId,
+            orderNumber: input.orderNumber,
+            journalEntryId: Number(posted.id),
+            occurredAt,
+          });
+        }
         await client.query("COMMIT");
         return {
           entryId: Number(mirroredPayment.entry_id),
@@ -658,7 +676,7 @@ export async function postSportCenterBookingPayment(
       await client.query(
         `UPDATE public.accounting_entries
             SET source = 'sport_center_payment',
-                source_id = $2::text,
+                source_id = $2::integer,
                 source_payment_id = $2::integer,
                 company_id = $3,
                 payment_method = $4,
@@ -707,6 +725,21 @@ export async function postSportCenterBookingPayment(
           WHERE id = $1`,
         [mirroredPayment.id, Number(existing.id), input.sourcePaymentId ?? null],
       );
+      if (isCentralFinanceMode()) {
+        await ensureCanonicalSportCenterBankMutation(client, {
+          paymentId: Number(sourcePaymentId),
+          companyId,
+          amount: requestedAmount,
+          paymentMethod: canonicalMethod,
+          paymentProvider: canonicalProvider,
+          bankAccountId,
+          providerReference,
+          providerOrderId,
+          orderNumber: input.orderNumber,
+          journalEntryId: Number(existing.id),
+          occurredAt,
+        });
+      }
       await client.query("COMMIT");
       return {
         entryId: Number(existing.id),
@@ -880,7 +913,7 @@ export async function postSportCenterBookingPayment(
         providerOrderId,
         orderNumber: input.orderNumber,
         journalEntryId: entryId,
-        occurredAt: input.paidAt ?? journalDate,
+        occurredAt,
       });
     }
     await client.query(
