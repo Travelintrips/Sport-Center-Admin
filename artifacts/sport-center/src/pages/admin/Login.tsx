@@ -120,14 +120,14 @@ export default function AdminLogin() {
               />
             </div>
 
-            <div className="bg-muted/50 p-4 rounded-md text-sm text-muted-foreground flex flex-col gap-1 border border-border">
-              {/**
+            {/**  <div className="bg-muted/50 p-4 rounded-md text-sm text-muted-foreground flex flex-col gap-1 border border-border">
+              
               <span className="font-semibold text-foreground">
                 Kredensial Demo:
               </span>
               <span>Email: admin@sportcenter.com</span>
-              <span>Kata sandi: admin123</span>*/}
-            </div>
+              <span>Kata sandi: admin123</span>
+            </div> */}
           </CardContent>
           <CardFooter className="pb-8">
             <Button
