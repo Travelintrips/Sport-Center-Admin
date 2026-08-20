@@ -75,7 +75,7 @@ function parseName(text: string): string | null {
   return value.length >= 3 && value.length <= 120 ? value : null;
 }
 
-function classifyPaymentMethod(text: string): {
+export function classifyPaymentMethod(text: string): {
   paymentMethod: OcrPaymentMethod;
   confidence: number;
   signals: string[];
@@ -87,6 +87,7 @@ function classifyPaymentMethod(text: string): {
     ["QRIS", /\bQRIS\b/],
     ["Quick Response Code", /QUICK\s+RESPONSE\s+CODE/],
     ["NMID", /\bNMID\b/],
+    ["QR Code", /\bQR\s*CODE\b/],
     ["QR Payment", /\bQR\s+(?:PAYMENT|PEMBAYARAN)\b/],
   ] as const;
   for (const [label, pattern] of qrisSignals) {
@@ -110,17 +111,26 @@ function classifyPaymentMethod(text: string): {
     ["BSI", /\bBSI\b|BANK SYARIAH INDONESIA/],
     ["OCBC", /\bOCBC\b/],
     ["Maybank", /\bMAYBANK\b/],
-    ["Bank transfer", /\b(?:TRANSFER|TRF|PEMINDAHAN DANA)\b/],
   ] as const;
   const bankMatches = bankSignals.filter(([, pattern]) => pattern.test(normalized)).map(([label]) => label);
+  const explicitTransferEvidence = [
+    /\bTRANSFER\s+(?:BANK|KE\s+(?:REKENING|AKUN)|ANTAR\s*BANK)\b/,
+    /\b(?:NO|NOMOR)\.?\s*(?:REKENING|REK)\b/,
+    /\b(?:VIRTUAL\s+ACCOUNT|VA)\b/,
+    /\bREKENING\s+(?:TUJUAN|PENERIMA)\b/,
+  ].some((pattern) => pattern.test(normalized));
 
   if (signals.length > 0) {
     return { paymentMethod: "QRIS", confidence: signals.length > 1 ? 0.99 : 0.97, signals };
   }
-  if (bankMatches.length > 0) {
+  // A QRIS receipt can legitimately include the acquirer bank and generic
+  // success/transfer wording. A bank name by itself is not enough to reject a
+  // customer-selected QRIS payment; require explicit account/VA or transfer
+  // wording before classifying it as a bank transfer.
+  if (bankMatches.length > 0 && explicitTransferEvidence) {
     return {
       paymentMethod: "Transfer Bank",
-      confidence: bankMatches.includes("Bank transfer") && bankMatches.length > 1 ? 0.95 : 0.86,
+      confidence: 0.96,
       signals: bankMatches,
     };
   }
