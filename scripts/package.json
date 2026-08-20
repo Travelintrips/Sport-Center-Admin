@@ -24,6 +24,7 @@
     "repair:uat-qris": "tsx ./src/repair-uat-qris-fixture.ts",
     "repair:phase-b:13-14": "tsx ./src/repair-phase-b-payment-13-14.ts",
     "cf-sc-7ab:dev": "tsx ./src/cf-sc-7ab-harness.ts",
+    "cf-sc-7c:dev": "tsx ./src/cf-sc-7c-discovery.ts",
     "test:uat-qris": "tsx ./src/uat-qris-harness.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
