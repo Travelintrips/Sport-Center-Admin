@@ -160,10 +160,10 @@ async function main(): Promise<void> {
               SELECT 1
                 FROM sport_center.payment_settlement_items i
                WHERE i.settlement_id = payment_settlement_batches.id
-                 AND i.payment_id = ANY($2::int[])
+                 AND i.payment_id = ANY($1::int[])
                  AND i.item_status = 'active'
             )`,
-        [null, paymentIds],
+        [paymentIds],
       );
       const retry = await postSportCenterBookingPayment({
         paymentNumber: `SCPAY-SC-${paymentIds[0]}`,
@@ -229,10 +229,15 @@ async function main(): Promise<void> {
     results.push(await processCase("group_payment", [groupPayment], groupBooking, ["full_payment"]));
 
     const settlementBatches = await client.query(
-      `SELECT count(*)::int AS count
+      `SELECT count(DISTINCT b.id)::int AS count
          FROM sport_center.payment_settlement_batches b
-        WHERE b.correlation_id LIKE $1`,
-      [`${MARKER}%`],
+         JOIN sport_center.payment_settlement_items i
+           ON i.settlement_id = b.id
+          AND i.item_status = 'active'
+        JOIN sport_center.sport_payments p
+           ON p.id = i.payment_id
+        WHERE p.uat_marker = $1`,
+      [MARKER],
     );
     const bookingEntries = await client.query(
       `SELECT count(*)::int AS count
@@ -247,8 +252,18 @@ async function main(): Promise<void> {
         (SELECT count(*) FROM sport_center.central_finance_processing c JOIN sport_center.sport_payments p ON p.id=c.source_payment_id WHERE p.uat_marker=$1) AS central_processing,
         (SELECT count(*) FROM public.sport_payments WHERE source_payment_id = ANY($2::int[])) AS public_sport_payments,
         (SELECT count(*) FROM public.accounting_entries WHERE source_payment_id = ANY($2::int[])) AS accounting_entries,
-        (SELECT count(*) FROM public.bank_mutations WHERE source_id = ANY($2::int[])) AS bank_mutations`,
-      [MARKER, results.flatMap((result) => result.paymentIds)],
+         (SELECT count(*) FROM public.bank_mutations WHERE source_id = ANY($2::int[])) AS bank_mutations,
+         (SELECT count(DISTINCT b.id)
+            FROM sport_center.payment_settlement_batches b
+            JOIN sport_center.payment_settlement_items i
+              ON i.settlement_id = b.id AND i.item_status = 'active'
+           WHERE i.payment_id = ANY($2::int[])) AS settlement_batches,
+         (SELECT count(*) FROM sport_center.accounting_journals WHERE payment_id = ANY($2::int[])) AS internal_payment_journals,
+         (SELECT count(*) FROM sport_center.bank_mutations WHERE mutation_key = ANY($3::text[])) AS legacy_bank_mutations,
+         (SELECT count(*) FROM sport_center.bank_reconciliation_matches WHERE mutation_id IN (
+            SELECT id FROM sport_center.bank_mutations WHERE mutation_key = ANY($3::text[])
+         )) AS legacy_reconciliation_matches`,
+       [MARKER, results.flatMap((result) => result.paymentIds), results.flatMap((result) => result.paymentIds).map((id) => `SC-PAY-${id}`)],
     );
 
     console.log(JSON.stringify({

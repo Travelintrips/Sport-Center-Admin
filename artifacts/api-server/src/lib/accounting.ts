@@ -612,11 +612,14 @@ export async function postSportCenterBookingPayment(
      const providerTradeNo = sourcePayment?.provider_trade_no ?? input.providerTradeNo ?? null;
      const settlementDate = sourcePayment?.expected_settlement_date == null
        ? null
-       : String(sourcePayment.expected_settlement_date).slice(0, 10);
+       : sourcePayment.expected_settlement_date instanceof Date
+         ? sourcePayment.expected_settlement_date.toISOString().slice(0, 10)
+         : String(sourcePayment.expected_settlement_date).slice(0, 10);
     const paymentType = sourcePayment?.payment_type ?? mirroredPayment.payment_type ?? input.paymentType ?? "full_payment";
     const occurredAt = input.paidAt instanceof Date
       ? input.paidAt.toISOString()
       : input.paidAt ?? new Date().toISOString();
+     const journalDate = occurredAt.slice(0, 10);
 
     if (mirroredPayment.posting_status === "posted" && mirroredPayment.entry_id) {
       const postedEntry = await client.query(
@@ -655,10 +658,17 @@ export async function postSportCenterBookingPayment(
           });
           await ensureCentralPaymentSettlement(client, {
             paymentId: Number(sourcePaymentId),
+            bookingId: input.bookingId,
+            orderNumber: input.orderNumber,
             companyId,
             providerCode: canonicalProvider,
+            paymentMethod: canonicalMethod,
+            paymentType,
             bankAccountId,
             settlementDate,
+            journalDate,
+            grossAmount: requestedAmount,
+            ppnRate: Number(input.ppnRate ?? 0),
             canonicalBankMutationId,
           });
         }
@@ -755,10 +765,17 @@ export async function postSportCenterBookingPayment(
          });
          await ensureCentralPaymentSettlement(client, {
            paymentId: Number(sourcePaymentId),
+           bookingId: input.bookingId,
+           orderNumber: input.orderNumber,
            companyId,
            providerCode: canonicalProvider,
+           paymentMethod: canonicalMethod,
+           paymentType,
            bankAccountId,
            settlementDate,
+           journalDate: input.paidAt ? new Date(input.paidAt).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
+           grossAmount: requestedAmount,
+           ppnRate: Number(input.ppnRate ?? 0),
            canonicalBankMutationId,
          });
       }
@@ -780,9 +797,6 @@ export async function postSportCenterBookingPayment(
       ? Math.round((grossAmount * rate) / (100 + rate))
       : 0;
     const dpp = grossAmount - ppnAmount;
-    const journalDate = input.paidAt
-      ? new Date(input.paidAt).toISOString().slice(0, 10)
-      : new Date().toISOString().slice(0, 10);
     const year = new Date(journalDate).getFullYear();
     const entryNumber = await nextPublicEntryNumber(client, year);
     const ids = await getPublicIdsForQuery(client);
@@ -939,10 +953,17 @@ export async function postSportCenterBookingPayment(
        });
        await ensureCentralPaymentSettlement(client, {
          paymentId: Number(sourcePaymentId),
+         bookingId: input.bookingId,
+         orderNumber: input.orderNumber,
          companyId,
          providerCode: canonicalProvider,
+         paymentMethod: canonicalMethod,
+         paymentType,
          bankAccountId,
          settlementDate,
+         journalDate,
+         grossAmount,
+         ppnRate: rate,
          canonicalBankMutationId,
        });
     }
