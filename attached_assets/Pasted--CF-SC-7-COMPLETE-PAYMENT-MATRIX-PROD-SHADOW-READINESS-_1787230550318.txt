@@ -1,0 +1,295 @@
+# CF-SC-7 — COMPLETE PAYMENT MATRIX + PROD SHADOW READINESS
+## DEV RUNTIME + PROD READ-ONLY
+## NO PROD WRITE / NO CUTOVER
+
+CURRENT VERIFIED BASELINE:
+
+CF-SC-6 PASS.
+
+QRIS runtime proof:
+payment 92
+→ finance event posted
+→ central processing posted
+→ accounting posted
+→ tax posted
+→ public.bank_mutations id=67
+→ sport_center.bank_mutations created=0
+→ settlement batch id=15
+→ retry returns batch id=15
+→ canonical mutation FK populated
+→ legacy mutation FK NULL
+→ gross=100000
+→ net=99700
+→ rollback confirmed
+
+Quality gate:
+- full typecheck PASS / 0 errors
+- API build PASS
+- git diff --check PASS
+- API + Sport Center workflows running
+
+Production unchanged.
+
+OBJECTIVE:
+
+Complete runtime proof for all remaining payment shapes and determine
+whether PROD shadow mode is safe.
+
+PHASE 1 — DEV PAYMENT MATRIX
+
+Run controlled rollback fixtures for:
+
+1. Transfer Bank full_payment
+2. Paylabs full_payment
+3. QRIS DP
+4. QRIS pelunasan
+5. Transfer Bank DP
+6. Transfer Bank pelunasan
+7. group payment
+8. already-posted adoption
+9. historical confirmed payment without accounting
+10. provider unknown legacy-shaped payment
+
+For each prove:
+
+- exactly one finance event
+- exactly one central processing identity
+- mirror at most one
+- accounting payment at most one
+- accounting effect exactly one
+- balanced lines
+- tax correct
+- public.bank_mutations exactly one
+- sport_center.bank_mutations created = 0
+- settlement batch at most one
+- retry idempotent
+- canonical_bank_mutation_id populated where settlement applies
+- legacy bank_mutation_id NULL for new central rows
+
+PHASE 2 — PAYLABS PROOF
+
+Use mocked/controlled Paylabs fixture only.
+
+Prove:
+
+Paylabs callback/provider facts
+→ canonical sport payment
+→ Central Finance
+
+Verify provider identifiers preserved.
+
+Do not call external Paylabs.
+
+PHASE 3 — DP / PELUNASAN IDENTITY
+
+Prove DP and pelunasan remain separate payment identities.
+
+Required:
+
+DP payment ID != pelunasan payment ID
+
+Each:
+→ one finance event
+→ one accounting effect
+→ no collision through booking/group identity
+
+PHASE 4 — GROUP PAYMENT
+
+Prove group payment uses payment-level identity.
+
+No:
+source=sport_center_booking accounting entry.
+
+No duplicate posting across group bookings.
+
+PHASE 5 — ADOPTION
+
+Use controlled already-posted fixture.
+
+Central Finance must detect valid existing accounting and return:
+
+ALREADY_POSTED_ADOPT
+
+Do not create:
+- another accounting payment
+- another accounting entry
+- another ledger effect
+
+PHASE 6 — HISTORICAL RECOVERY
+
+Use controlled historical-shaped confirmed payment with no accounting.
+
+Resolve:
+- company
+- payment config
+- tax
+- COA
+- settlement
+
+If complete:
+classify RECOVERABLE.
+
+If incomplete:
+MANUAL_REVIEW_CONFIG.
+
+Do not silently use guessed config.
+
+PHASE 7 — PROVIDER UNKNOWN POLICY
+
+For legacy provider=unknown:
+
+Do not blindly map QRIS/Transfer Bank provider.
+
+Use available transaction evidence + effective config.
+
+Classify:
+RECOVERABLE
+or
+MANUAL_REVIEW_PROVIDER
+
+No partial accounting.
+
+PHASE 8 — CONFIG MATRIX
+
+For every successful fixture report:
+
+project
+company
+payment_method
+provider
+bank_account
+tax_rule
+tax_rate
+revenue_coa
+ppn_coa
+clearing/mdr_coa
+settlement_rule
+effective_date
+
+Mark each config source:
+
+CANONICAL
+LEGACY_FALLBACK
+MISSING
+AMBIGUOUS
+
+Required for future PROD shadow:
+no hidden hardcoded financial config.
+
+PHASE 9 — PROD HISTORICAL READ-ONLY CLASSIFICATION
+
+PROD READ ONLY ONLY.
+
+Classify the known 351 Sport Center finance events:
+
+- already posted
+- adoption required
+- recoverable
+- manual review config
+- provider review
+- legacy exception
+- stale lock
+
+No PROD mutation.
+
+Specifically reclassify the known:
+- 15 already-accounted non-posted events
+- 29 confirmed payments without accounting
+
+Return exact counts.
+
+PHASE 10 — PROD SHADOW CONFIG READINESS
+
+For a representative PROD sample covering:
+
+QRIS
+Transfer Bank
+Paylabs if available
+DP
+pelunasan
+group payment
+
+calculate Central Finance expected output READ ONLY.
+
+Compare against historical/legacy output:
+
+company
+gross
+bank
+provider
+tax
+revenue
+PPN
+COA
+MDR
+net settlement
+source identity
+
+Classify:
+MATCH
+MISMATCH_CONFIG
+MISMATCH_TAX
+MISMATCH_COA
+MISMATCH_PROVIDER
+LEGACY_EXCEPTION
+
+PHASE 11 — QUALITY GATE
+
+Run:
+
+- full workspace typecheck
+- Central Finance tests
+- accounting integration
+- settlement tests
+- Paylabs tests
+- boundary tests
+- API build
+- git diff --check
+
+Required:
+typecheck = 0 errors
+
+FINAL REPORT:
+
+TRANSFER BANK =
+PAYLABS =
+DP =
+PELUNASAN =
+GROUP PAYMENT =
+ADOPTION =
+HISTORICAL RECOVERY =
+PROVIDER UNKNOWN POLICY =
+
+PAYMENT MATRIX PASS COUNT =
+PAYMENT MATRIX BLOCKED COUNT =
+
+PUBLIC MUTATION DUPLICATES =
+SC MUTATIONS CREATED =
+SETTLEMENT DUPLICATES =
+ACCOUNTING DUPLICATES =
+
+CONFIG MATRIX =
+HARDCODED FINANCE CONFIG REMAINING =
+
+PROD 351 CLASSIFICATION =
+PROD 15 ADOPTION CLASSIFICATION =
+PROD 29 RECOVERY CLASSIFICATION =
+
+PROD SHADOW SAMPLE RESULT =
+MISMATCHES =
+
+TYPECHECK =
+TESTS =
+BUILD =
+GIT DIFF CHECK =
+
+PROD WRITES = 0
+PROD CUTOVER = NO
+
+READY FOR PROD SHADOW MODE = YES/NO
+READY FOR CONTROLLED CUTOVER = YES/NO
+READY FOR LEGACY CLEANUP = YES/NO
+
+BLOCKERS =
+
+STOP.
