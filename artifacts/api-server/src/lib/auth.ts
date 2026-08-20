@@ -52,6 +52,20 @@ export async function hashPassword(password: string): Promise<string> {
 }
 
 /**
+ * Accept only credential hashes produced by the supported password schemes.
+ * This guard must run before writing a password hash to the database so that
+ * unresolved promises, objects, and empty values cannot become "{}".
+ */
+export function isValidPasswordHash(value: unknown): value is string {
+  if (typeof value !== "string" || !value || value === "{}" || value === "[object Promise]") {
+    return false;
+  }
+  const isBcrypt = /^\$2[ab]\$\d{2}\$[./A-Za-z0-9]{53}$/.test(value);
+  const isLegacyHmac = /^[a-f0-9]{64}$/.test(value);
+  return isBcrypt || isLegacyHmac;
+}
+
+/**
  * Verify a password against a stored hash.
  * Supports both bcrypt hashes and the legacy HMAC-SHA256 scheme.
  * Returns: { valid: boolean, legacy: boolean }

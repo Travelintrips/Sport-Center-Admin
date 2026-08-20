@@ -1,0 +1,197 @@
+Audit dan perbaiki end-to-end bug **Sport Center Forgot/Reset Password**.
+
+## Evidence
+
+User:
+
+```text
+email: spothandling@gmail.com
+```
+
+Flow saat ini:
+
+1. Forgot password berhasil mengirim OTP WhatsApp.
+2. OTP diterima dan diterima oleh endpoint reset.
+3. Frontend menampilkan:
+   `Password berhasil diubah!`
+4. Password baru yang digunakan:
+   `Handling1122`
+5. Login sesudah reset gagal dengan:
+   `Email atau password salah.`
+6. Pada Supabase:
+
+```text
+sport_center.users
+email = spothandling@gmail.com
+password_hash = {}
+```
+
+Padahal row user lain mempunyai `password_hash` berupa hash password valid.
+
+## Target
+
+Cari root cause dan FIX langsung. Jangan berhenti pada laporan audit jika masalah dapat diperbaiki dalam repository/runtime yang tersedia.
+
+### 1. Audit reset-password
+
+Temukan endpoint/service aktual yang menangani:
+
+```text
+reset-password
+forgot-password
+OTP password reset
+```
+
+Trace penuh:
+
+```text
+frontend
+→ API
+→ OTP validation
+→ password hashing
+→ database update
+→ login password verification
+```
+
+Pastikan diketahui tabel autentikasi canonical yang digunakan Sport Center.
+
+### 2. Periksa async hashing
+
+Secara khusus cari kemungkinan bug seperti:
+
+```ts
+const hash = bcrypt.hash(password, rounds);
+```
+
+tanpa:
+
+```ts
+await
+```
+
+atau kasus lain di mana `Promise`, object, Buffer, atau object bcrypt/argon disimpan sehingga menghasilkan:
+
+```text
+{}
+```
+
+`password_hash` HARUS merupakan string hash valid.
+
+Contoh:
+
+```ts
+const passwordHash = await bcrypt.hash(newPassword, 10);
+```
+
+Jangan hardcode algoritma baru jika project sudah mempunyai canonical password hashing helper. REUSE helper yang sama dengan registration/change-password/login.
+
+### 3. Pastikan reset dan login memakai identity store yang sama
+
+Audit apakah reset password menulis ke:
+
+```text
+auth.users
+```
+
+sementara login membaca:
+
+```text
+sport_center.users
+```
+
+atau sebaliknya.
+
+Untuk customer Sport Center, reset password dan login harus menggunakan canonical credential source yang sama.
+
+Jangan membuat tabel autentikasi baru.
+
+### 4. Jangan return success sebelum update terbukti
+
+Endpoint reset-password tidak boleh mengembalikan success hanya karena OTP valid.
+
+Success hanya boleh diberikan setelah:
+
+* OTP valid
+* password berhasil di-hash
+* database update berhasil
+* row target benar
+* hash yang tersimpan valid/non-empty
+
+Jika update gagal, return error yang sesuai.
+
+### 5. Validasi hasil hash
+
+Tambahkan guard sebelum write, misalnya secara konseptual:
+
+```text
+typeof passwordHash === "string"
+passwordHash.length > minimum-valid-length
+passwordHash !== "{}"
+```
+
+Gunakan validasi yang sesuai algoritma existing project.
+
+Jangan pernah log plaintext password atau hash lengkap ke production log.
+
+### 6. Test
+
+Tambahkan regression test untuk:
+
+```text
+forgot password
+→ valid OTP
+→ reset password
+→ password_hash berubah menjadi valid hash
+→ bcrypt/verify(newPassword, storedHash) = true
+→ old password tidak valid
+→ login dengan password baru berhasil
+```
+
+Tambahkan test bahwa handler tidak dapat menyimpan:
+
+```text
+{}
+[object Promise]
+null
+empty string
+```
+
+sebagai `password_hash`.
+
+### 7. Existing corrupted row
+
+Setelah root cause diperbaiki, identifikasi row:
+
+```text
+sport_center.users
+email = spothandling@gmail.com
+```
+
+JANGAN mengarang hash secara manual.
+
+Biarkan password diperbaiki melalui reset-password flow yang sudah diperbaiki, atau lakukan controlled remediation menggunakan canonical hashing helper bila environment development memang mengizinkan.
+
+### 8. Verifikasi akhir
+
+Berikan evidence:
+
+```text
+RESET OTP      PASS/FAIL
+HASH GENERATED PASS/FAIL
+DB UPDATED     PASS/FAIL
+HASH VERIFY    PASS/FAIL
+LOGIN NEW PASS PASS/FAIL
+OLD PASS FAILS PASS/FAIL
+TESTS          PASS/FAIL
+TYPECHECK      PASS/FAIL
+BUILD          PASS/FAIL
+```
+
+Pastikan secara eksplisit menjawab:
+
+1. Mengapa `password_hash` sebelumnya menjadi `{}`?
+2. File/function mana yang menjadi root cause?
+3. Apakah reset dan login sekarang memakai credential source yang sama?
+4. Apakah password baru benar-benar dapat dipakai login?
+
+Kerjakan audit → fix → test → runtime verification end-to-end dalam satu eksekusi sejauh aman.

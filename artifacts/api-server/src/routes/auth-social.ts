@@ -2,7 +2,7 @@ import { Router } from "express";
 import { db, usersTable } from "@workspace/db";
 import { eq, or } from "drizzle-orm";
 import { OAuth2Client } from "google-auth-library";
-import { createToken, authMiddleware, hashPassword, verifyToken } from "../lib/auth";
+import { createToken, authMiddleware, hashPassword, isValidPasswordHash, verifyPassword, verifyToken } from "../lib/auth";
 import crypto from "crypto";
 import { logger } from "../lib/logger";
 
@@ -301,8 +301,27 @@ router.post("/auth/reset-password", async (req, res) => {
       return;
     }
 
+    const passwordHash = await hashPassword(newPassword);
+    if (!isValidPasswordHash(passwordHash)) {
+      throw new Error("Generated password hash failed validation");
+    }
+
+    const [updatedUser] = await db
+      .update(usersTable)
+      .set({ passwordHash })
+      .where(eq(usersTable.id, user.id))
+      .returning({ id: usersTable.id, passwordHash: usersTable.passwordHash });
+
+    if (!updatedUser || updatedUser.id !== user.id || !isValidPasswordHash(updatedUser.passwordHash)) {
+      throw new Error("Password hash update was not persisted");
+    }
+
+    const verification = await verifyPassword(newPassword, updatedUser.passwordHash);
+    if (!verification.valid) {
+      throw new Error("Persisted password hash did not verify");
+    }
+
     resetOtpStore.delete(cleaned);
-    await db.update(usersTable).set({ passwordHash: hashPassword(newPassword) }).where(eq(usersTable.id, user.id));
 
     res.json({ success: true, message: "Password berhasil diubah. Silakan login dengan password baru." });
   } catch (err) {
