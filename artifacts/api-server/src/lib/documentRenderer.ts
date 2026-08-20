@@ -1,7 +1,16 @@
 
-import { db, companyDocumentTemplatesTable, companyInvoicesTable, companyInvoiceItemsTable, bookingsTable, usersTable, facilitiesTable, settingsTable, documentFileTemplatesTable } from "@workspace/db";
-
-import { db, companyDocumentTemplatesTable, companyDocumentSettingsTable, companyInvoicesTable, companyInvoiceItemsTable, bookingsTable, usersTable, facilitiesTable, settingsTable } from "@workspace/db";
+import {
+  db,
+  companyDocumentTemplatesTable,
+  companyDocumentSettingsTable,
+  companyInvoicesTable,
+  companyInvoiceItemsTable,
+  bookingsTable,
+  usersTable,
+  facilitiesTable,
+  settingsTable,
+  documentFileTemplatesTable,
+} from "@workspace/db";
 
 import { eq, and, isNull } from "drizzle-orm";
 import type { DocumentTemplate } from "@workspace/db";
@@ -229,7 +238,13 @@ export async function renderDocument(params: {
   companyId?: number | null;
   printMode?: boolean;
   issueDocumentNumber?: boolean;
-}): Promise<{ html: string; templateId: number | null; documentNumber: string | null }> {
+}): Promise<{
+  html: string;
+  templateId: number | null;
+  documentNumber: string | null;
+  tplVars: Record<string, string>;
+  fileTemplateUrl: string | null;
+}> {
   const { documentType, entityId, companyId = null, printMode = false, issueDocumentNumber = false } = params;
   const tpl = await getTemplate(documentType, companyId);
   const settings = await getSettings();

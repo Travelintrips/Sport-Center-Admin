@@ -1379,6 +1379,7 @@ router.get("/paylabs/status/:tradeNo", async (req, res) => {
       // accounting journal is posted idempotently after the transaction.
       if (isCommittedPaymentOutcome(reconciliation.outcome) && reconciliation.bookingId) {
         const recoveredBookingId = reconciliation.bookingId;
+        const recoveredPaymentId = reconciliation.paymentId;
         db.select().from(bookingsTable)
           .where(eq(bookingsTable.id, recoveredBookingId))
           .limit(1)
@@ -1395,7 +1396,7 @@ router.get("/paylabs/status/:tradeNo", async (req, res) => {
               facilityId: bk.facilityId,
               journalDate: today,
               paymentMethod: reconciliation?.paymentMethod ?? "Transfer Bank",
-              paymentId: reconciliation.paymentId,
+              paymentId: recoveredPaymentId,
             }).catch((accountingErr) =>
               logAccountingError({
                 operation: "postConfirmedPaymentAccounting:autoInquiryRecovery",

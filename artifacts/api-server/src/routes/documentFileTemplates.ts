@@ -97,7 +97,7 @@ router.post(
 // ─── Activate a file template (deactivates others for same docType) ──────────
 router.patch("/api/admin/document-file-templates/:id/activate", adminMiddleware, async (req, res) => {
   try {
-    const id = parseInt(req.params.id);
+    const id = parseInt(String(req.params.id), 10);
     const [existing] = await db.select().from(documentFileTemplatesTable).where(eq(documentFileTemplatesTable.id, id)).limit(1);
     if (!existing) { res.status(404).json({ error: "Template tidak ditemukan" }); return; }
 
@@ -136,7 +136,7 @@ router.patch("/api/admin/document-file-templates/:id/activate", adminMiddleware,
 // ─── Deactivate a file template ──────────────────────────────────────────────
 router.patch("/api/admin/document-file-templates/:id/deactivate", adminMiddleware, async (req, res) => {
   try {
-    const id = parseInt(req.params.id);
+    const id = parseInt(String(req.params.id), 10);
     const [existing] = await db.select().from(documentFileTemplatesTable).where(eq(documentFileTemplatesTable.id, id)).limit(1);
     if (!existing) { res.status(404).json({ error: "Template tidak ditemukan" }); return; }
 
@@ -168,7 +168,7 @@ router.patch("/api/admin/document-file-templates/:id/deactivate", adminMiddlewar
 // ─── Delete a file template ──────────────────────────────────────────────────
 router.delete("/api/admin/document-file-templates/:id", adminMiddleware, async (req, res) => {
   try {
-    const id = parseInt(req.params.id);
+    const id = parseInt(String(req.params.id), 10);
     const [existing] = await db.select().from(documentFileTemplatesTable).where(eq(documentFileTemplatesTable.id, id)).limit(1);
     if (!existing) { res.status(404).json({ error: "Template tidak ditemukan" }); return; }
 

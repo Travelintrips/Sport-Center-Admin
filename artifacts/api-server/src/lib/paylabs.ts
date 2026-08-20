@@ -62,7 +62,7 @@ export function normalizeOptionalPaylabsStoreId(value?: string | null): string |
 }
 
 function getPaylabsEnvironmentCredentials(sandboxMode: boolean) {
-  const environment = sandboxMode ? "SANDBOX" : "PROD";
+  const environment: PaylabsConfig["environment"] = sandboxMode ? "SANDBOX" : "PROD";
   const merchantId = sandboxMode
     ? (process.env.MERCHANT_ID_SANDBOX || "")
     : (process.env.MERCHANT_ID_PROD || "");

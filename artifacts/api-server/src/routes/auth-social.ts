@@ -353,7 +353,8 @@ router.put("/auth/profile", authMiddleware, async (req, res) => {
       if (newPassword.length < 6) { res.status(400).json({ error: "Password baru minimal 6 karakter" }); return; }
       if (user.passwordHash) {
         if (!currentPassword) { res.status(400).json({ error: "Password saat ini wajib diisi" }); return; }
-        if (hashPassword(currentPassword) !== user.passwordHash) {
+        const passwordCheck = await verifyPassword(currentPassword, user.passwordHash);
+        if (!passwordCheck.valid) {
           res.status(400).json({ error: "Password saat ini salah" }); return;
         }
       }

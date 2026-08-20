@@ -347,7 +347,7 @@ router.post("/wa/customer/register", async (req, res) => {
     }
 
     // Password random untuk WA users
-    const passwordHash = hashPassword(randomBytes(16).toString("hex"));
+    const passwordHash = await hashPassword(randomBytes(16).toString("hex"));
 
     const [user] = await db.insert(usersTable).values({
       name: name.trim(),
@@ -430,7 +430,7 @@ router.post("/wa/register/:token", async (req, res) => {
       const [emailConflict] = await db.select({ id: usersTable.id }).from(usersTable)
         .where(eq(usersTable.email, baseEmail)).limit(1);
       const finalEmail = emailConflict ? `wa_${phone}_${Date.now()}@whatsapp.local` : baseEmail;
-      const passwordHash = hashPassword(randomBytes(16).toString("hex"));
+       const passwordHash = await hashPassword(randomBytes(16).toString("hex"));
 
       const [user] = await db.insert(usersTable).values({
         name: name.trim(),
@@ -2746,7 +2746,7 @@ async function ensureCustomer(phone: string, name: string): Promise<{ id: number
     .where(eq(usersTable.email, finalEmail)).limit(1);
 
   const email = emailConflict ? `wa_${phone}_${Date.now()}@whatsapp.local` : finalEmail;
-  const passwordHash = hashPassword(randomBytes(16).toString("hex"));
+  const passwordHash = await hashPassword(randomBytes(16).toString("hex"));
 
   const [user] = await db.insert(usersTable).values({
     name: name.trim(),
