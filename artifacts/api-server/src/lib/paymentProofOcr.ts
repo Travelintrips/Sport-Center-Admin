@@ -95,6 +95,9 @@ function classifyPaymentMethod(text: string): {
 
   // Bank names are intentionally checked after QRIS. A QRIS receipt may show
   // the acquiring bank name even though the selected method is still QRIS.
+  // Generic success words such as "BERHASIL" or "SUKSES" are deliberately
+  // excluded: they occur on both QRIS and bank receipts and are not evidence
+  // of a transfer method.
   const bankSignals = [
     ["BCA", /\bBCA\b|BANK CENTRAL ASIA/],
     ["Mandiri", /\bMANDIRI\b/],
