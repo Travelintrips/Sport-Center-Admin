@@ -42,6 +42,12 @@ type ConfigResult = {
   provider: string;
 };
 
+function normalizeTimestamp(value: unknown): string | null {
+  if (value == null) return null;
+  if (value instanceof Date) return value.toISOString();
+  return String(value);
+}
+
 function isDeterministicConfigError(message: string): boolean {
   return /COMPANY_|PROVIDER_MISSING|PAYMENT_METHOD_MISSING|CONFIG_|TAX_|COA_|AMBIGUOUS|INACTIVE/.test(message);
 }
@@ -81,8 +87,8 @@ async function resolveConfig(pool: pg.Pool, event: FinanceEvent): Promise<Config
        FROM sport_center.tax_settings
       WHERE is_active = true
         AND applies_to = 'sport_booking'
-        AND (effective_date IS NULL OR effective_date <= $1::date)
-      ORDER BY effective_date DESC NULLS LAST, id DESC
+         AND (effective_date IS NULL OR effective_date::date <= $1::date)
+       ORDER BY effective_date::date DESC NULLS LAST, id DESC
       LIMIT 2`,
     [effectiveDate],
   );
@@ -121,8 +127,8 @@ async function readEvent(pool: pg.Pool, outboxId: number, paymentId: number): Pr
     paymentProvider: row.payment_provider == null ? null : String(row.payment_provider),
     providerReference: row.provider_reference == null ? null : String(row.provider_reference),
     providerOrderId: row.provider_order_id == null ? null : String(row.provider_order_id),
-    paidAt: row.paid_at == null ? null : String(row.paid_at),
-    confirmedAt: row.confirmed_at == null ? null : String(row.confirmed_at),
+     paidAt: normalizeTimestamp(row.paid_at),
+     confirmedAt: normalizeTimestamp(row.confirmed_at),
     correlationId: String(row.correlation_id),
     orderNumber: String(row.order_number),
   };
@@ -133,8 +139,8 @@ async function markFailure(pool: pg.Pool, event: FinanceEvent, error: unknown): 
   const status = isDeterministicConfigError(message) ? "manual_review" : "failed";
   await pool.query(
     `UPDATE sport_center.payment_accounting_outbox
-        SET status = $2,
-            available_at = CASE WHEN $2 = 'failed'
+         SET status = $2::text,
+             available_at = CASE WHEN $2::text = 'failed'
               THEN NOW() + LEAST(INTERVAL '1 hour', INTERVAL '5 minutes' * GREATEST(attempts, 1))
               ELSE available_at END,
             locked_at = NULL, last_error = $3, updated_at = NOW()
@@ -143,8 +149,8 @@ async function markFailure(pool: pg.Pool, event: FinanceEvent, error: unknown): 
   );
   await pool.query(
     `UPDATE sport_center.central_finance_processing
-        SET status = $2,
-            available_at = CASE WHEN $2 = 'failed'
+         SET status = $2::text,
+             available_at = CASE WHEN $2::text = 'failed'
               THEN NOW() + LEAST(INTERVAL '1 hour', INTERVAL '5 minutes' * GREATEST(attempts, 1))
               ELSE available_at END,
             locked_at = NULL, last_error = $3, updated_at = NOW()
@@ -202,6 +208,24 @@ export async function processCentralFinance(): Promise<{
   }
 
   await pool.query(
+    `UPDATE sport_center.payment_accounting_outbox o
+        SET booking_id = COALESCE(o.booking_id, sp.booking_id),
+            company_id = COALESCE(o.company_id, sp.company_id),
+            amount = COALESCE(o.amount, sp.amount),
+            payment_type = COALESCE(o.payment_type, sp.payment_type::text),
+            payment_method = COALESCE(o.payment_method, sp.payment_method),
+            payment_provider = COALESCE(o.payment_provider, sp.payment_provider::text),
+            provider_reference = COALESCE(o.provider_reference, sp.provider_reference),
+            provider_order_id = COALESCE(o.provider_order_id, sp.provider_order_id),
+            paid_at = COALESCE(o.paid_at, sp.paid_at),
+            confirmed_at = COALESCE(o.confirmed_at, sp.confirmed_at),
+            updated_at = NOW()
+       FROM sport_center.sport_payments sp
+      WHERE o.payment_id = sp.id
+        AND (o.booking_id IS NULL OR o.amount IS NULL OR o.payment_method IS NULL)`,
+  );
+
+  await pool.query(
     `UPDATE sport_center.payment_accounting_outbox
         SET correlation_id = 'sc_payment_' || payment_id::text,
             updated_at = NOW()
@@ -219,20 +243,35 @@ export async function processCentralFinance(): Promise<{
   );
 
   const client = await pool.connect();
-  let claimed: Array<{ id: number; paymentId: number; correlationId: string }> = [];
+  let claimed: Array<{
+    id: number;
+    outboxId: number;
+    paymentId: number;
+    correlationId: string;
+  }> = [];
   try {
     await client.query("BEGIN");
     const result = await client.query(
-      `SELECT c.id, c.source_payment_id, c.correlation_id
+       `SELECT c.id, o.id AS outbox_id, c.source_payment_id, c.correlation_id
          FROM sport_center.central_finance_processing c
-        WHERE c.status IN ('pending', 'failed')
-          AND c.available_at <= NOW()
-          AND (c.locked_at IS NULL OR c.locked_at < NOW() - INTERVAL '15 minutes')
+          JOIN sport_center.payment_accounting_outbox o
+            ON o.payment_id = c.source_payment_id
+           AND o.event_type = c.event_type
+         WHERE (
+           c.status IN ('pending', 'failed')
+           OR (
+              c.status = 'processing'
+              AND c.locked_at < NOW() - INTERVAL '15 minutes'
+            )
+         )
+           AND c.available_at <= NOW()
+           AND (c.locked_at IS NULL OR c.locked_at < NOW() - INTERVAL '15 minutes')
         ORDER BY c.id
         FOR UPDATE SKIP LOCKED LIMIT 50`,
     );
     claimed = result.rows.map((row) => ({
       id: Number(row.id),
+       outboxId: Number(row.outbox_id),
       paymentId: Number(row.source_payment_id),
       correlationId: String(row.correlation_id),
     }));
@@ -264,7 +303,7 @@ export async function processCentralFinance(): Promise<{
   let retried = 0;
   let manualReview = 0;
   for (const claim of claimed) {
-    const event = await readEvent(pool, claim.id, claim.paymentId);
+    const event = await readEvent(pool, claim.outboxId, claim.paymentId);
     if (!event) continue;
     try {
       if (await processEvent(pool, event)) posted++;

@@ -805,6 +805,21 @@ ALTER TABLE sport_center.payment_accounting_outbox
   ADD COLUMN IF NOT EXISTS confirmed_at timestamptz,
   ADD COLUMN IF NOT EXISTS correlation_id text,
   ADD COLUMN IF NOT EXISTS schema_version integer NOT NULL DEFAULT 1;
+UPDATE sport_center.payment_accounting_outbox o
+   SET booking_id = COALESCE(o.booking_id, sp.booking_id),
+       company_id = COALESCE(o.company_id, sp.company_id),
+       amount = COALESCE(o.amount, sp.amount),
+       payment_type = COALESCE(o.payment_type, sp.payment_type::text),
+       payment_method = COALESCE(o.payment_method, sp.payment_method),
+       payment_provider = COALESCE(o.payment_provider, sp.payment_provider::text),
+       provider_reference = COALESCE(o.provider_reference, sp.provider_reference),
+       provider_order_id = COALESCE(o.provider_order_id, sp.provider_order_id),
+       paid_at = COALESCE(o.paid_at, sp.paid_at),
+       confirmed_at = COALESCE(o.confirmed_at, sp.confirmed_at),
+       updated_at = now()
+  FROM sport_center.sport_payments sp
+ WHERE o.payment_id = sp.id
+   AND (o.booking_id IS NULL OR o.amount IS NULL OR o.payment_method IS NULL);
 UPDATE sport_center.payment_accounting_outbox
    SET correlation_id = 'sc_payment_' || payment_id::text,
        updated_at = now()
