@@ -201,11 +201,13 @@ function PaymentMethodSelect({
   options,
   onChange,
   disabled = false,
+  lockedReason,
 }: {
   payment: any;
   options: PaymentMethodOption[];
   onChange: (paymentId: number, paymentMethod: string) => void;
   disabled?: boolean;
+  lockedReason?: string;
 }) {
   if (!payment) {
     return <span className="text-xs text-slate-300 dark:text-slate-600">—</span>;
@@ -217,14 +219,15 @@ function PaymentMethodSelect({
     : [{ value: currentValue, label: `${currentValue} (tersimpan)` }, ...options];
 
   return (
-    <Select
-      value={currentValue}
-      onValueChange={(value) => onChange(payment.id, value)}
-      disabled={disabled}
-    >
-      <SelectTrigger className="h-8 min-w-[150px] max-w-[190px] text-xs rounded-lg border-slate-200 dark:border-slate-700">
-        <SelectValue />
-      </SelectTrigger>
+    <div title={lockedReason}>
+      <Select
+        value={currentValue}
+        onValueChange={(value) => onChange(payment.id, value)}
+        disabled={disabled || Boolean(lockedReason)}
+      >
+        <SelectTrigger className={`h-8 min-w-[150px] max-w-[190px] text-xs rounded-lg border-slate-200 dark:border-slate-700 ${lockedReason ? "cursor-not-allowed opacity-70" : ""}`}>
+          <SelectValue />
+        </SelectTrigger>
       <SelectContent>
         {mergedOptions.map((option) => (
           <SelectItem key={option.value} value={option.value} className="text-xs">
@@ -232,7 +235,8 @@ function PaymentMethodSelect({
           </SelectItem>
         ))}
       </SelectContent>
-    </Select>
+      </Select>
+    </div>
   );
 }
 
@@ -1264,6 +1268,9 @@ function BookingDetailDrawer({
                           options={paymentMethodOptions}
                           onChange={onUpdatePaymentMethod}
                           disabled={isUpdating}
+                          lockedReason={isCompleted
+                            ? "Payment booking yang sudah selesai/terkonfirmasi dikunci karena sudah masuk jurnal akuntansi."
+                            : undefined}
                         />
                         {(() => {
                           const ocr = pmt.ocrData as {
@@ -3255,6 +3262,9 @@ export default function AdminBookings() {
                              })
                            }
                            disabled={updatePaymentMetadataMutation.isPending}
+                           lockedReason={["confirmed", "completed"].includes(String(b.status))
+                             ? "Payment booking yang sudah selesai/terkonfirmasi dikunci karena sudah masuk jurnal akuntansi."
+                             : undefined}
                          />
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">
