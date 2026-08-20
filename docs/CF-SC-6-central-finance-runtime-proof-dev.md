@@ -142,9 +142,12 @@ controlled cutover          = NO
 central mutation test       = PASS (3 tests)
 API build                   = PASS
 scripts typecheck           = PASS
+API typecheck               = PASS after building project references
+lib/db project build        = PASS
 git diff --check             = PASS
-API full typecheck          = baseline failure unrelated to CF-SC-6;
-                             existing missing db dist / implicit-any errors
+workspace typecheck         = BLOCKED by unrelated sport-center frontend
+                             errors in BookingDetail, CompanyBilling, and
+                             DocumentSettings
 ```
 
 ```text
