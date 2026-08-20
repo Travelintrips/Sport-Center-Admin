@@ -786,6 +786,61 @@ router.post("/paylabs/webhook", async (req, res) => {
   const keyOwnershipTrace = getPaylabsKeyOwnershipTrace(cfg);
   const notifyPath = paylabsEndpointFromNotifyUrl(notifyUrlForTrace);
   const pathMatch = notifyPath === signatureEndpoint;
+  const forensicBase = {
+    headerRequestId: requestId,
+    bodyRequestId: body.requestId ?? null,
+    timestampHeader: timestamp,
+    partnerId,
+    rawBodyAvailable: hasOriginalRawBody,
+    rawBodyLength: rawBodyBuffer?.length ?? 0,
+    rawBodyHash: hasOriginalRawBody
+      ? createHash("sha256").update(rawBodyBuffer as Buffer).digest("hex")
+      : null,
+    minifiedBodyLength: signatureTrace.minifiedBodyLength,
+    bodyHashUsedByVerifier: signatureTrace.bodyHash,
+    storedNotifyUrl: notifyUrlForTrace || null,
+    endpointUsedForSignature: signatureEndpoint,
+    pathMatch,
+    timestampUsedForSignature: timestamp,
+    timestampExactMatch: timestamp === String(req.headers["x-timestamp"] ?? ""),
+    canonicalString: signatureTrace.stringToVerify,
+    canonicalStringLength: signatureTrace.stringToVerify.length,
+    signatureCharacterLength: signature.length,
+    decodedSignatureByteLength: signature
+      ? Buffer.from(signature, "base64").length
+      : 0,
+    configuredPublicKeyFingerprint: keyOwnershipTrace.configuredPaylabsPublicKeyFingerprint,
+    merchantDerivedPublicKeyFingerprint: keyOwnershipTrace.merchantDerivedPublicKeyFingerprint,
+    sameKey: keyOwnershipTrace.sameKey,
+    receivedAt: new Date().toISOString(),
+  };
+  const persistForensic = async (result: {
+    signatureValid: boolean;
+    verificationReason: string;
+    notification?: Record<string, unknown>;
+  }) => {
+    try {
+      await ensureTransactionsTable();
+      await db.execute(sql`
+        UPDATE sport_center.paylabs_transactions
+        SET raw_notification = ${JSON.stringify({
+          ...(result.notification ?? body),
+          _forensic: {
+            ...forensicBase,
+            signatureValid: result.signatureValid,
+            verificationReason: result.verificationReason,
+          },
+        })}::jsonb,
+            updated_at = NOW()
+        WHERE merchant_trade_no = ${merchantTradeNo}
+      `);
+    } catch (err) {
+      logger.warn(
+        { err, merchantTradeNo, booking_id: bookingId, transaction_id: transactionId, requestId },
+        "[paylabs] forensic trace persistence failed",
+      );
+    }
+  };
   // Paylabs identifies the merchant in the header. Require the header to
   // match the credential pair selected by the active mode; if the callback
   // body also includes merchantId, it must agree too.
@@ -826,6 +881,11 @@ router.post("/paylabs/webhook", async (req, res) => {
 
   // ── Phase 6: signature verification ─────────────────────────────────────────
   if (!merchantMatch) {
+    await persistForensic({
+      signatureValid: false,
+      verificationReason: "ENVIRONMENT_MISMATCH",
+      notification: { _rejected: true, _reason: "ENVIRONMENT_MISMATCH", body, timestamp, partnerId },
+    });
     wlog("signature result", {
       paylabsMode: runtimeEnvironment,
       merchantMatch,
@@ -896,15 +956,11 @@ router.post("/paylabs/webhook", async (req, res) => {
       // Persist raw_notification even on rejection so we can distinguish
       // "webhook never arrived" (raw_notification=null) from "webhook arrived
       // but rejected" (raw_notification has content, status stays PENDING).
-      try {
-        await ensureTransactionsTable();
-        await db.execute(sql`
-          UPDATE sport_center.paylabs_transactions
-          SET raw_notification = ${JSON.stringify({ _rejected: true, _reason: "SIGNATURE_INVALID", body, timestamp, partnerId })}::jsonb,
-              updated_at       = NOW()
-          WHERE merchant_trade_no = ${merchantTradeNo}
-        `);
-      } catch { /* best-effort — don't block the response */ }
+      await persistForensic({
+        signatureValid: false,
+        verificationReason: "SIGNATURE_INVALID",
+        notification: { _rejected: true, _reason: "SIGNATURE_INVALID", body, timestamp, partnerId },
+      });
       // Paylabs retries notifications when the merchant response is not
       // successful. Returning 200 here would acknowledge a callback that we
       // deliberately rejected and would prevent recovery after the key or
@@ -948,15 +1004,13 @@ router.post("/paylabs/webhook", async (req, res) => {
       "[PAYLABS-ACK] inbound signature could not be verified",
     );
     // Persist raw_notification so we know a webhook arrived (even if no public key)
-    try {
-      await ensureTransactionsTable();
-      await db.execute(sql`
-        UPDATE sport_center.paylabs_transactions
-        SET raw_notification = ${JSON.stringify({ _rejected: true, _reason: "PUBLIC_KEY_NOT_CONFIGURED", body })}::jsonb,
-            updated_at       = NOW()
-        WHERE merchant_trade_no = ${merchantTradeNo}
-      `);
-    } catch { /* best-effort */ }
+    await persistForensic({
+      signatureValid: false,
+      verificationReason: cfg.paylabsPublicKey.trim()
+        ? "PUBLIC_KEY_INVALID"
+        : "PUBLIC_KEY_NOT_CONFIGURED",
+      notification: { _rejected: true, _reason: "PUBLIC_KEY_NOT_CONFIGURED", body },
+    });
     // A missing verification key is a merchant configuration failure. Use a
     // non-2xx response so Paylabs can retry after the key is configured.
     res.status(503).json({
@@ -965,6 +1019,11 @@ router.post("/paylabs/webhook", async (req, res) => {
     });
     return;
   }
+
+  await persistForensic({
+    signatureValid: true,
+    verificationReason: "VALID",
+  });
 
   // ── Phase 4: centralised status mapper ──────────────────────────────────────
   const internalStatus = mapPaylabsStatus(rawProviderStatus);
