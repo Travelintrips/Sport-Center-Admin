@@ -13,6 +13,7 @@
     "audit:schema": "tsx ./src/schema-diff-full.ts",
     "storage:compress-images": "tsx ./src/compress-supabase-images.ts",
     "migrate:ownership:dev": "tsx ./src/migrate-facility-company-ownership.ts",
+    "migrate:cf-sc-5:dev": "tsx ./src/apply-cf-sc-5-dev.ts",
     "backfill:payment-providers": "tsx ./src/backfill-payment-providers.ts",
     "migrate:diff": "tsx ./src/schema-diff.ts",
     "fix-admin:dev": "tsx ./src/fix-admin-hash.ts",
