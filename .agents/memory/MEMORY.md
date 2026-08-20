@@ -62,4 +62,5 @@
 - [Tesseract worker bundling](tesseract-worker-bundling.md) — keep OCR external to API bundle, available in App Engine runtime, and cache language files under /tmp.
 - [Sport Center workflow recovery](sport-center-workflow-recovery.md) — missing artifact node_modules causes `vite: not found`; keep one managed web workflow and use its actual port.
 - [Central Finance runtime invariants](central-finance-runtime-invariants.md) — adoption paths must still create canonical public evidence; partial canonical indexes require matching ON CONFLICT predicates.
+- [Read-only audit probes](readonly-audit-probes.md) — optional schema probes need savepoints and must be serialized on a single pg client to preserve the read-only transaction.
 

@@ -42,6 +42,11 @@ function requireDev(): void {
 const ident = (value: string) => `"${value.replace(/"/g, "\"\"")}"`;
 const text = (value: unknown): string | null => value == null ? null : String(value);
 const bool = (value: unknown): boolean | null => value == null ? null : value === true || value === "t" || value === "true";
+const redactAccount = (value: unknown): string | null => {
+  const account = text(value);
+  if (!account) return null;
+  return account.length <= 4 ? "REDACTED" : `${"*".repeat(Math.max(4, account.length - 4))}${account.slice(-4)}`;
+};
 
 async function main(): Promise<void> {
   requireDev();
@@ -64,19 +69,33 @@ async function main(): Promise<void> {
     const columns = async (schema: string, table: string) => (await client.query(
       `SELECT column_name FROM information_schema.columns WHERE table_schema=$1 AND table_name=$2 ORDER BY ordinal_position`, [schema, table],
     )).rows.map((r) => String(r.column_name));
+    let savepointId = 0;
+    const optionalQuery = async (sql: string, params: unknown[] = []): Promise<Row[]> => {
+      const savepoint = `cf_sc_7c_probe_${++savepointId}`;
+      await client.query(`SAVEPOINT ${savepoint}`);
+      try {
+        const result = await client.query(sql, params);
+        await client.query(`RELEASE SAVEPOINT ${savepoint}`);
+        return result.rows;
+      } catch {
+        await client.query(`ROLLBACK TO SAVEPOINT ${savepoint}`);
+        await client.query(`RELEASE SAVEPOINT ${savepoint}`);
+        return [];
+      }
+    };
     const select = async (schema: string, table: string, requested: string[], where = "", params: unknown[] = [], limit = 500): Promise<Row[]> => {
       if (!await exists(schema, table)) return [];
       const available = new Set(await columns(schema, table));
       const selected = requested.filter((column) => available.has(column));
       if (!selected.length) return [];
-      return (await client.query(
+      return optionalQuery(
         `SELECT ${selected.map(ident).join(", ")} FROM ${ident(schema)}.${ident(table)} ${where} LIMIT ${Math.max(1, Math.min(limit, 5000))}`,
         params,
-      )).rows;
+      );
     };
     const count = async (schema: string, table: string, where = "", params: unknown[] = []) => {
       if (!await exists(schema, table)) return 0;
-      return Number((await client.query(`SELECT count(*)::int AS count FROM ${ident(schema)}.${ident(table)} ${where}`, params)).rows[0]?.count ?? 0);
+      return Number((await optionalQuery(`SELECT count(*)::int AS count FROM ${ident(schema)}.${ident(table)} ${where}`, params))[0]?.count ?? 0);
     };
 
     const candidateTables = await client.query(`
@@ -113,17 +132,17 @@ async function main(): Promise<void> {
     const mappings = await select("sport_center", "facility_company_mappings", [
       "id", "facility_id", "company_id", "effective_from", "effective_until", "is_active", "evidence_source", "evidence_reference",
     ]);
-    const bookingOwnership = await client.query(`
+    const bookingOwnership = await optionalQuery(`
       SELECT company_id, count(*)::int AS row_count
         FROM sport_center.sport_bookings
        GROUP BY company_id ORDER BY company_id NULLS FIRST
-    `).catch(() => ({ rows: [] }));
-    const paymentOwnership = await client.query(`
+    `);
+    const paymentOwnership = await optionalQuery(`
       SELECT company_id, count(*)::int AS row_count
         FROM sport_center.sport_payments
        GROUP BY company_id ORDER BY company_id NULLS FIRST
-    `).catch(() => ({ rows: [] }));
-    report.companyOwnership = { companies, facilities, facilityCompanyMappings: mappings, bookingOwnership: bookingOwnership.rows, paymentOwnership: paymentOwnership.rows };
+    `);
+    report.companyOwnership = { companies, facilities, facilityCompanyMappings: mappings, bookingOwnership, paymentOwnership };
 
     const settingsTables = ["sport_settings", "payment_methods", "payment_method_configs", "payment_providers", "accounting_settings"];
     const settings: Record<string, Row[]> = {};
@@ -132,17 +151,17 @@ async function main(): Promise<void> {
       ...settingsTables.flatMap((table) => settings[table].flatMap((r) => [text(r.payment_method), text(r.name), text(r.code)])),
       ... (await select("sport_center", "payment_settlement_configs", ["provider_code", "is_active"])).map((r) => text(r.provider_code)),
     ].filter((v): v is string => Boolean(v)))].sort();
-    const actualMethods = await client.query(`SELECT payment_method, count(*)::int AS row_count FROM sport_center.sport_payments GROUP BY payment_method ORDER BY payment_method`).catch(() => ({ rows: [] }));
+    const actualMethods = await optionalQuery(`SELECT payment_method, count(*)::int AS row_count FROM sport_center.sport_payments GROUP BY payment_method ORDER BY payment_method`);
     const applicationMethods = ["QRIS", "Transfer Bank", "Cash"];
     report.paymentMethods = {
       configured: configuredMethods,
-      actualDevPayments: actualMethods.rows,
+      actualDevPayments: actualMethods,
       applicationContract: applicationMethods,
-      comparison: [...new Set([...configuredMethods, ...actualMethods.rows.map((r) => text(r.payment_method)), ...applicationMethods].filter((v): v is string => Boolean(v)))].sort().map((method) => ({
+      comparison: [...new Set([...configuredMethods, ...actualMethods.map((r) => text(r.payment_method)), ...applicationMethods].filter((v): v is string => Boolean(v)))].sort().map((method) => ({
         method,
-        classification: configuredMethods.includes(method) && actualMethods.rows.some((r) => text(r.payment_method) === method) ? "CONFIGURED_AND_USED"
+        classification: configuredMethods.includes(method) && actualMethods.some((r) => text(r.payment_method) === method) ? "CONFIGURED_AND_USED"
           : configuredMethods.includes(method) ? "CONFIGURED_NOT_USED"
-          : actualMethods.rows.some((r) => text(r.payment_method) === method) ? "USED_NOT_CONFIGURED"
+          : actualMethods.some((r) => text(r.payment_method) === method) ? "USED_NOT_CONFIGURED"
           : "APPLICATION_ONLY",
       })),
       settings,
@@ -155,36 +174,47 @@ async function main(): Promise<void> {
     const taxes = await select("sport_center", "tax_settings", [
       "id", "company_id", "project", "applies_to", "tax_code", "tax_type", "tax_rate", "is_inclusive", "effective_date", "effective_from", "effective_until", "is_active",
     ], "WHERE is_active = true ORDER BY id");
-    const coa = await select("sport_center", "coa_accounts", ["id", "code", "name", "account_type", "is_active", "notes"], "WHERE is_active = true ORDER BY code");
+    const coa = await select("sport_center", "coa_accounts", ["id", "code", "name", "account_type", "is_active"], "WHERE is_active = true ORDER BY code");
     const publicCoa = await select("public", "accounting_accounts", ["id", "code", "name", "account_type", "is_active"]);
+    const safeSettlements = settlements.map((row) => ({
+      ...row,
+      bank_account_id: redactAccount(row.bank_account_id),
+      bank_account_identity: bankAccounts.find((account) => text(account.id) === text(row.bank_account_id))
+        ? {
+          bank_name: bankAccounts.find((account) => text(account.id) === text(row.bank_account_id))?.bank_name ?? null,
+          name: bankAccounts.find((account) => text(account.id) === text(row.bank_account_id))?.name ?? null,
+        }
+        : null,
+    }));
     report.financeConfiguration = {
       receivingBankAccounts: bankAccounts.map(({ account_number: _redacted, ...row }) => row),
-      activeSettlementConfigs: settlements,
+      activeSettlementConfigs: safeSettlements,
       activeTaxConfigs: taxes,
       sportCenterCoa: coa,
       publicAccountingAccounts: publicCoa,
       coaMapping: { source: publicCoa.length ? "public.accounting_accounts" : coa.length ? "sport_center.coa_accounts" : null, rows: publicCoa.length || coa.length ? [...publicCoa, ...coa] : [] },
     };
 
-    const providers = await client.query(`
+    const providers = await optionalQuery(`
       SELECT payment_provider::text AS provider, payment_method, count(*)::int AS row_count,
              count(*) FILTER (WHERE company_id IS NOT NULL)::int AS company_rows,
              count(*) FILTER (WHERE bank_account_id IS NOT NULL AND btrim(bank_account_id) <> '')::int AS bank_rows
         FROM sport_center.sport_payments
        GROUP BY payment_provider::text, payment_method ORDER BY provider, payment_method
-    `).catch(() => ({ rows: [] }));
+    `);
     report.providers = {
       applicationContract: ["mandiri_direct", "paylabs", "unknown"],
       configured: [...new Set(settlements.map((r) => text(r.provider_code)).filter((v): v is string => Boolean(v)))],
-      actualDevPayments: providers.rows,
+      actualDevPayments: providers,
       paylabsIdentities: await select("sport_center", "paylabs_transactions", ["id", "booking_id", "order_number", "payment_method", "status", "provider_status", "paid_at", "created_at"]),
     };
 
-    const shapeRows = await Promise.all(SHAPES.map(async (shape) => {
+    const shapeRows: Row[] = [];
+    for (const shape of SHAPES) {
       const params = [shape.paymentMethod, shape.paymentType, shape.provider];
       const where = `WHERE payment_method = $1 AND payment_type::text = $2 AND COALESCE(payment_provider::text, 'unknown') = $3`;
       const rowCount = await count("sport_center", "sport_payments", where, params);
-      const hasCompany = bookingOwnership.rows.some((r) => r.company_id != null) || paymentOwnership.rows.some((r) => r.company_id != null);
+      const hasCompany = bookingOwnership.some((r) => r.company_id != null) || paymentOwnership.some((r) => r.company_id != null);
       const providerConfigured = settlements.some((r) => text(r.provider_code) === shape.provider);
       const bankConfigured = bankAccounts.some((r) => bool(r.is_active) && r.company_id != null);
       const taxConfigured = taxes.length === 1;
@@ -195,13 +225,13 @@ async function main(): Promise<void> {
         : !hasCompany || !providerConfigured || !bankConfigured || !taxConfigured || !coaConfigured ? "BLOCKED_CONFIG_MISSING"
         : rowCount > 0 ? "READY_FOR_ROLLBACK_FIXTURE"
         : fixturePossible ? "READY_FOR_ROLLBACK_FIXTURE" : "BLOCKED_AMBIGUOUS";
-      return {
+      shapeRows.push({
         paymentShape: shape.key, appSupport: shape.appSupport, devRowExists: rowCount > 0, devRowCount: rowCount,
         companyConfig: hasCompany, providerConfig: providerConfigured, bankConfig: bankConfigured,
         taxConfig: taxConfigured, coaConfig: coaConfigured, settlementConfig: providerConfigured,
         fixturePossible, classification,
-      };
-    }));
+      });
+    }
     report.paymentShapeMatrix = shapeRows;
 
     const unknown = await count("sport_center", "sport_payments", "WHERE payment_provider IS NULL OR payment_provider::text IN ('', 'unknown')");
