@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import crypto from "crypto";
-import bcrypt from "bcryptjs";
+import * as bcrypt from "bcryptjs";
 
 /**
  * requireEnv — reads a required env var and throws a safe startup error if missing.

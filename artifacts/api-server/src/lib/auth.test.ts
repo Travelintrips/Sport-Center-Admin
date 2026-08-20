@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@jest/globals";
-import bcrypt from "bcryptjs";
+import * as bcrypt from "bcryptjs";
 import { hashPassword, isValidPasswordHash, verifyPassword } from "./auth";
 
 describe("password hashing", () => {
