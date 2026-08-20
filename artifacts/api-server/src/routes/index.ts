@@ -62,6 +62,7 @@ import corporateDocumentationRouter from "./corporateDocumentation";
 import analyticsPublicRouter from "./analyticsPublic";
 import paylabsSettingsRouter from "./paylabsSettings";
 import paylabsPaymentRouter from "./paylabsPayment";
+import paymentSettlementConfigsRouter from "./paymentSettlementConfigs";
 
 const router: IRouter = Router();
 
@@ -127,5 +128,6 @@ router.use(corporateDocumentationRouter);
 router.use(analyticsPublicRouter);
 router.use(paylabsSettingsRouter);
 router.use(paylabsPaymentRouter);
+router.use(paymentSettlementConfigsRouter);
 
 export default router;
