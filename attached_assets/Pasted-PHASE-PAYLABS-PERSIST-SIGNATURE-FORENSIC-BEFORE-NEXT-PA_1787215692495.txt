@@ -1,0 +1,135 @@
+PHASE PAYLABS — PERSIST SIGNATURE FORENSIC BEFORE NEXT PAYMENT
+
+SC-0023 sudah membuktikan:
+
+Paylabs provider status = 02
+signatureValid = false
+HTTP response = 400
+ACK = tidak terkirim
+booking tetap pending_payment
+
+Masalah sekarang:
+live signature trace hilang sebelum dapat dianalisis.
+
+JANGAN buat transaksi baru dulu.
+JANGAN patch crypto/verifier.
+JANGAN bypass signature.
+
+TARGET:
+Pastikan callback asli berikutnya meninggalkan forensic evidence
+yang persisten sehingga tidak bergantung pada ephemeral API logs.
+
+==================================================
+1. PERSIST SAFE FORENSIC DATA
+==================================================
+
+Pada saat POST /api/paylabs/webhook diterima,
+SEBELUM verification result dikembalikan,
+simpan diagnostic NON-SECRET berikut.
+
+Boleh disimpan sebagai metadata diagnostic pada raw_notification
+jika tidak memerlukan schema baru, atau gunakan mekanisme audit
+existing yang paling aman.
+
+Simpan:
+
+headerRequestId
+bodyRequestId
+timestampHeader
+partnerId
+
+rawBodyAvailable
+rawBodyLength
+rawBodyHash
+
+minifiedBodyLength
+bodyHashUsedByVerifier
+
+storedNotifyUrl
+endpointUsedForSignature
+pathMatch
+
+timestampUsedForSignature
+timestampExactMatch
+
+canonicalString
+canonicalStringLength
+
+signatureCharacterLength
+decodedSignatureByteLength
+
+configuredPublicKeyFingerprint
+merchantDerivedPublicKeyFingerprint
+sameKey
+
+signatureValid
+verificationReason
+
+receivedAt
+
+==================================================
+2. SECURITY
+==================================================
+
+DILARANG menyimpan:
+
+X-SIGNATURE lengkap
+private key
+public key lengkap
+access token
+secret
+
+Fingerprint SHA-256 public key diperbolehkan.
+
+Canonical string boleh disimpan karena tidak berisi key/signature.
+
+==================================================
+3. RAW BODY
+==================================================
+
+Diagnostic HARUS dibuat langsung dari req.rawBody
+yang diterima callback tersebut.
+
+Dilarang reconstruct dari raw_notification JSONB.
+
+Buktikan:
+
+Buffer.isBuffer(req.rawBody) === true
+
+Hash raw body sebelum data hilang.
+
+==================================================
+4. DO NOT CHANGE VERIFICATION
+==================================================
+
+Jangan ubah:
+
+minifyPaylabsBody
+createPaylabsSignature
+verifyPaylabsSignature
+RSA algorithm
+padding
+key resolver
+ACK
+finalizePayment
+booking/payment logic
+
+Ini hanya observability patch.
+
+==================================================
+5. BUILD + RESTART
+==================================================
+
+Setelah instrumentation persistence selesai:
+
+build API
+restart API
+
+Buktikan API running dan instrumentation aktif.
+
+JANGAN membuat pembayaran Sandbox.
+
+STOP dan laporkan READY_FOR_ONE_FINAL_CALLBACK.
+
+Jangan commit.
+Jangan push.

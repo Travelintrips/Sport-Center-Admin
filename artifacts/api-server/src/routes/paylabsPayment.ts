@@ -9,7 +9,7 @@
  */
 
 import { Router, type Response } from "express";
-import { randomUUID } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import { db, bookingsTable, paymentsTable, bookingHistoryTable, paylabsSettingsTable } from "@workspace/db";
 import { eq, sql } from "drizzle-orm";
 import { logger } from "../lib/logger";
