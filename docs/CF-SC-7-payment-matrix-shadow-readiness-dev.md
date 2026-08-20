@@ -1,6 +1,6 @@
 # CF-SC-7 — Payment Matrix and PROD Shadow Readiness
 
-Status: DEV inventory and rollback-proof assessment completed. PROD
+Status: DEV inventory and rollback-only harness assessment completed. PROD
 read-only classification and shadow comparison are blocked because this
 workspace has no production database endpoint. No production write or
 cutover was performed.
@@ -121,9 +121,10 @@ API build                   = PASS
 git diff --check            = PASS
 API workflow                = RUNNING
 Sport Center web workflow   = RUNNING
-test assertions             = 73 PASS
-test suites                 = 10 PASS, 3 blocked before assertions by
-                              existing Jest ESM/vitest runner configuration
+test assertions             = 99 PASS
+test suites                 = 14 PASS, 0 blocked before assertions
+harness guard               = PASS (APP_ENV=development, DEV schema verified)
+harness transaction         = PASS (rollback confirmed)
 PROD writes                 = 0
 PROD cutover                = NO
 ```
@@ -134,7 +135,6 @@ PROD cutover                = NO
 READY FOR PROD SHADOW MODE       = NO
 READY FOR CONTROLLED CUTOVER     = NO
 READY FOR LEGACY CLEANUP         = NO
-BLOCKERS                         = missing DEV payment-shape fixtures,
-                                   unavailable PROD read-only database endpoint,
-                                   and existing test-runner configuration
+BLOCKERS                         = missing DEV payment-shape fixtures and
+                                   unavailable PROD read-only database endpoint
 ```

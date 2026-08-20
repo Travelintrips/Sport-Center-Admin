@@ -346,6 +346,10 @@ async function fakeQuery(text: string, values: unknown[] = []): Promise<{ rows: 
     return { rows: [], rowCount: 1 };
   }
 
+  if (sql.startsWith("INSERT INTO public.bank_mutations")) {
+    return { rows: [{ id: 10_000 + scalar(values[9]) }], rowCount: 1 };
+  }
+
   if (sql.startsWith("INSERT INTO public.gl_tax_lines")) {
     state.glTaxRows.push({
       entryId: scalar(values[1]),
