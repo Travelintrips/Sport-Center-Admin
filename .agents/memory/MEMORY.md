@@ -63,4 +63,5 @@
 - [Sport Center workflow recovery](sport-center-workflow-recovery.md) — missing artifact node_modules causes `vite: not found`; keep one managed web workflow and use its actual port.
 - [Central Finance runtime invariants](central-finance-runtime-invariants.md) — adoption paths must still create canonical public evidence; partial canonical indexes require matching ON CONFLICT predicates.
 - [Read-only audit probes](readonly-audit-probes.md) — optional schema probes need savepoints and must be serialized on a single pg client to preserve the read-only transaction.
+- [Payment-level accounting references](payment-level-accounting-references.md) — DP and pelunasan entries must use payment identity in public accounting refs, not the shared booking order.
 

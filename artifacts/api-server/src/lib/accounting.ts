@@ -484,6 +484,7 @@ async function ensureSportCenterPaymentMirror(
  */
 export async function postSportCenterBookingPayment(
   input: SportCenterBookingPaymentPosting,
+  transactionClient?: pg.PoolClient,
 ): Promise<SportCenterBookingPaymentPostingResult> {
   const pool = getPublicPool();
   if (!pool) {
@@ -494,10 +495,11 @@ export async function postSportCenterBookingPayment(
     input.paymentNumber,
     input.sourcePaymentId,
   );
-  const client = await pool.connect();
+  const ownsTransaction = !transactionClient;
+  const client = transactionClient ?? await pool.connect();
 
   try {
-    await client.query("BEGIN");
+    if (ownsTransaction) await client.query("BEGIN");
     // Serialize retries for the same payment at the database level. The
     // unique index remains the final guard, while this prevents concurrent
     // callbacks from both observing "no entry" before inserting.
@@ -648,7 +650,7 @@ export async function postSportCenterBookingPayment(
             occurredAt,
           });
         }
-        await client.query("COMMIT");
+        if (ownsTransaction) await client.query("COMMIT");
         return {
           entryId: Number(mirroredPayment.entry_id),
           postingStatus: "posted",
@@ -740,7 +742,7 @@ export async function postSportCenterBookingPayment(
           occurredAt,
         });
       }
-      await client.query("COMMIT");
+      if (ownsTransaction) await client.query("COMMIT");
       return {
         entryId: Number(existing.id),
         postingStatus: "posted",
@@ -774,14 +776,14 @@ export async function postSportCenterBookingPayment(
          total_debit, total_credit, company_id, correlation_id, governance_flags,
          payment_method, payment_provider, payment_type, source_payment_id,
          bank_account_id, provider_reference, provider_order_id, merchant_trade_no, provider_trade_no)
-       VALUES ($1,$2,$3::date,$4,$5,'draft','sport_center_payment',$6,$7,$7,$8,$9,'{}',
+         VALUES ($1,$2,$3::date,$4,$5,'draft','sport_center_payment',$6,$7,$7,$8,$9,'{}',
                $10,$11,$12,$13,$14,$15,$16,$17,$18)
        RETURNING id`,
       [
         entryNumber,
         ids.journalId,
         journalDate,
-        input.orderNumber,
+         input.paymentNumber,
         `Pembayaran Sport Center ${input.orderNumber} (${input.paymentNumber}, ${input.paymentType ?? "booking"}) via ${methodLabel}`,
         sourcePaymentId ?? input.bookingId,
         grossAmount,
@@ -944,32 +946,32 @@ export async function postSportCenterBookingPayment(
         `[accounting] Invariant payment mirror gagal untuk ${input.paymentNumber}: entry_id/posting_status tidak konsisten.`,
       );
     }
-    await client.query("COMMIT");
+    if (ownsTransaction) await client.query("COMMIT");
 
     console.info(`[accounting] ✓ Sport Center payment posted: ${input.paymentNumber} → entry ${entryId}`);
     return { entryId, postingStatus: "posted", alreadyPosted: false };
   } catch (err: any) {
-    await client.query("ROLLBACK").catch(() => {});
-    const message = String(err?.message ?? err).slice(0, 1000);
-    await pool.query(
-      `UPDATE public.sport_payments
-          SET posting_status = 'failed', posting_error = $2::text, updated_at = NOW()
-        WHERE payment_number = $1`,
-      [input.paymentNumber, message],
-    ).catch(() => {});
+    if (ownsTransaction) {
+      await client.query("ROLLBACK").catch(() => {});
+      const message = String(err?.message ?? err).slice(0, 1000);
+      await pool.query(
+        `UPDATE public.sport_payments
+            SET posting_status = 'failed', posting_error = $2::text, updated_at = NOW()
+          WHERE payment_number = $1`,
+        [input.paymentNumber, message],
+      ).catch(() => {});
+    }
     throw err;
   } finally {
-    client.release();
+    if (ownsTransaction) client.release();
   }
 }
 
 async function getPublicIdsForQuery(pool: pg.Pool | pg.PoolClient) {
-  const [journal, kas, pendapatan, ppn] = await Promise.all([
-    pool.query(`SELECT id FROM public.accounting_journals WHERE code = 'BNK-CST' LIMIT 1`),
-    pool.query(`SELECT id FROM public.chart_of_accounts WHERE code = '1-1020-CST' AND is_active = true LIMIT 1`),
-    pool.query(`SELECT id FROM public.chart_of_accounts WHERE code = '4-1017-CST' AND is_active = true LIMIT 1`),
-    pool.query(`SELECT id FROM public.chart_of_accounts WHERE code = '2-1020-CST' AND is_active = true LIMIT 1`),
-  ]);
+  const journal = await pool.query(`SELECT id FROM public.accounting_journals WHERE code = 'BNK-CST' LIMIT 1`);
+  const kas = await pool.query(`SELECT id FROM public.chart_of_accounts WHERE code = '1-1020-CST' AND is_active = true LIMIT 1`);
+  const pendapatan = await pool.query(`SELECT id FROM public.chart_of_accounts WHERE code = '4-1017-CST' AND is_active = true LIMIT 1`);
+  const ppn = await pool.query(`SELECT id FROM public.chart_of_accounts WHERE code = '2-1020-CST' AND is_active = true LIMIT 1`);
   const journalId = Number(journal.rows[0]?.id);
   const coaKas = Number(kas.rows[0]?.id);
   const coaPendapatan = Number(pendapatan.rows[0]?.id);
