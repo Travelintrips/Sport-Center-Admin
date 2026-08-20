@@ -9,6 +9,7 @@ import { isCentralFinanceMode } from "./financeBoundary";
 import { eq, and } from "drizzle-orm";
 import pg from "pg";
 import { extractBookingDpp } from "./accountingMath";
+import { ensureCanonicalSportCenterBankMutation } from "./canonicalBankMutation";
 
 export { extractBookingDpp } from "./accountingMath";
 
@@ -867,6 +868,21 @@ export async function postSportCenterBookingPayment(
       `UPDATE public.accounting_entries SET status = 'posted' WHERE id = $1`,
       [entryId],
     );
+    if (isCentralFinanceMode()) {
+      await ensureCanonicalSportCenterBankMutation(client, {
+        paymentId: Number(sourcePaymentId),
+        companyId,
+        amount: grossAmount,
+        paymentMethod: canonicalMethod,
+        paymentProvider: canonicalProvider,
+        bankAccountId,
+        providerReference,
+        providerOrderId,
+        orderNumber: input.orderNumber,
+        journalEntryId: entryId,
+        occurredAt: input.paidAt ?? journalDate,
+      });
+    }
     await client.query(
       `UPDATE public.sport_payments
           SET entry_id = $2,
