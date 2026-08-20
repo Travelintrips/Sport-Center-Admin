@@ -1,0 +1,375 @@
+# CF-SC-7A/7B — COMPLETE TEST HARNESS + ROLLBACK-ONLY PAYMENT MATRIX
+
+Continue from CF-SC-7.
+
+CURRENT BASELINE
+
+- Full workspace typecheck: PASS, 0 errors
+- API build: PASS
+- API workflow: RUNNING
+- Sport Center web: RUNNING
+- 73 assertions PASS across 10 suites
+- 3 finance suites fail before assertions because of existing Jest ESM/Vitest runner configuration
+- QRIS / mandiri_direct / full_payment runtime proof: PASS
+- Remaining 9 payment shapes: BLOCKED_FIXTURE_MISSING
+- PROD classification: BLOCKED because production DB endpoint is unavailable
+- PROD writes: 0
+
+Do not change PROD.
+Do not perform cutover.
+Do not clean legacy objects.
+
+============================================================
+PART A — FIX FINANCE TEST RUNNER
+============================================================
+
+Audit the existing package/workspace test configuration.
+
+Fix the ROOT CAUSE preventing the 3 finance suites from reaching assertions.
+
+Requirements:
+
+- preserve ESM semantics
+- preserve top-level await where required
+- do not convert application modules to CommonJS merely for tests
+- do not lower TypeScript strictness
+- do not add skipLibCheck
+- do not duplicate Jest/Vitest dependencies unnecessarily
+- reuse repository-declared runner/dependencies
+- do not rewrite valid tests simply to make them pass
+
+After repair, run ALL relevant finance suites.
+
+Required:
+ZERO finance suites blocked before assertion.
+
+Report exact:
+- runner root cause
+- config/files changed
+- suites executed
+- assertions passed/failed
+
+============================================================
+PART B — BUILD ROLLBACK-ONLY FIXTURE HARNESS
+============================================================
+
+Create a DEVELOPMENT-ONLY fixture harness for Central Finance.
+
+It must execute inside transactions and ALWAYS ROLLBACK.
+
+Hard guards:
+
+APP_ENV must be development
+NODE_ENV must not be production
+database target must be verified DEV
+
+If any environment identity is ambiguous:
+FAIL CLOSED.
+
+The harness must never:
+- call real Paylabs
+- send WhatsApp
+- write PROD
+- commit fixture data
+
+============================================================
+PART C — FIXTURE FACTORY
+============================================================
+
+Build reusable fixtures from the canonical schema/contracts.
+
+Do not depend on historical DEV rows already existing.
+
+Support:
+
+1. QRIS full payment
+2. Transfer Bank full payment
+3. Paylabs full payment
+4. QRIS DP
+5. QRIS pelunasan
+6. Transfer Bank DP
+7. Transfer Bank pelunasan
+8. Group payment
+9. Historical confirmed/no-accounting shape
+10. Provider unknown legacy shape
+
+Use the existing QRIS runtime proof as control.
+
+PAYLABS:
+simulate canonical verified provider facts only.
+NO external provider call.
+
+============================================================
+PART D — CONFIGURATION RULE
+============================================================
+
+Fixtures must NOT invent financial configuration merely to obtain PASS.
+
+Resolve existing DEV canonical configuration for:
+
+- company
+- payment method
+- provider
+- bank account
+- tax
+- revenue COA
+- PPN COA
+- clearing/MDR
+- settlement rule
+
+If the required canonical configuration genuinely does not exist:
+
+classify that case:
+
+BLOCKED_CONFIG_MISSING
+
+Do not silently seed fake production-like configuration.
+
+Test-only structural fixtures are allowed, but business configuration
+must remain distinguishable from canonical application configuration.
+
+============================================================
+PART E — EXECUTE COMPLETE MATRIX
+============================================================
+
+For each supported fixture execute:
+
+payment
+→ finance event
+→ central processing
+→ accounting
+→ tax
+→ public.bank_mutations
+→ settlement
+
+Verify per payment:
+
+finance event count = 1
+central processing identity = 1
+accounting financial effect = 1
+journal balanced = YES
+tax rule resolved = YES
+public.bank_mutations = 1
+sport_center.bank_mutations created = 0
+
+Where settlement applies:
+
+settlement batch = 1
+canonical_bank_mutation_id NOT NULL
+legacy bank_mutation_id NULL
+
+Retry entire processing.
+
+Required:
+same canonical identities
+same settlement identity
+zero additional financial effect
+
+============================================================
+PART F — DP + PELUNASAN
+============================================================
+
+Prove explicitly:
+
+DP payment ID != pelunasan payment ID
+
+Both may belong to the same booking/group but MUST remain distinct
+payment-level finance identities.
+
+Required:
+
+DP:
+sc_payment_<DP payment id>
+
+PELUNASAN:
+sc_payment_<pelunasan payment id>
+
+No booking-level accounting identity.
+
+No collision.
+
+============================================================
+PART G — GROUP PAYMENT
+============================================================
+
+Prove:
+
+group payment
+→ payment-level finance identity
+
+Required:
+
+source=sport_center_booking new accounting entry = 0
+
+No call from live processing to:
+createPublicAccountingEntryForGroup()
+
+One payment financial effect must not be multiplied by number of bookings.
+
+============================================================
+PART H — HISTORICAL RECOVERY
+============================================================
+
+Synthetic historical fixture:
+
+confirmed payment
+finance event exists
+no valid accounting effect
+
+Run Central Finance classification/processing.
+
+If canonical configuration is sufficient:
+RECOVERABLE
+
+Then prove processing creates exactly one effect.
+
+If configuration is insufficient:
+MANUAL_REVIEW_CONFIG
+
+Zero partial writes before manual review.
+
+============================================================
+PART I — PROVIDER UNKNOWN
+============================================================
+
+Synthetic legacy-shaped provider unknown payment.
+
+Central Finance must NOT guess provider.
+
+If deterministic evidence resolves it:
+RECOVERABLE
+
+Otherwise:
+MANUAL_REVIEW_PROVIDER
+
+Required for manual review:
+accounting writes = 0
+mutation writes = 0
+settlement writes = 0
+
+============================================================
+PART J — CONCURRENCY
+============================================================
+
+For representative:
+
+QRIS
+Transfer Bank
+Paylabs
+DP/pelunasan
+group
+
+attempt concurrent processing.
+
+Verify:
+
+finance event duplicates = 0
+accounting duplicates = 0
+public mutation duplicates = 0
+settlement duplicates = 0
+SC mutation projection = 0
+
+============================================================
+PART K — ROLLBACK PROOF
+============================================================
+
+After EACH fixture verify rollback.
+
+At end compare baseline vs final DEV counts for fixture-owned identities.
+
+Required:
+
+committed fixture payments = 0
+committed fixture accounting entries = 0
+committed fixture mutations = 0
+committed fixture settlement batches = 0
+
+============================================================
+PART L — QUALITY GATE
+============================================================
+
+Run:
+
+full workspace typecheck
+all Central Finance tests
+accounting integration tests
+settlement tests
+reconciliation tests
+Paylabs tests
+Sport Center boundary tests
+API build
+git diff --check
+
+Required:
+
+typecheck = PASS / 0 errors
+finance suites blocked before assertions = 0
+
+============================================================
+DO NOT HANDLE PROD BLOCKER BY WORKAROUND
+============================================================
+
+If production DB endpoint/authorized loader is unavailable:
+
+report:
+
+PROD_READ_ONLY = BLOCKED_EXTERNAL_ACCESS
+
+Do not:
+- substitute DEV data
+- infer PROD results
+- add PROD credentials
+- mutate Secret Manager
+- change environment configuration merely to bypass the gate
+
+============================================================
+FINAL REPORT
+============================================================
+
+TEST RUNNER ROOT CAUSE =
+TEST RUNNER FIX =
+FINANCE SUITES EXECUTABLE =
+
+QRIS FULL =
+TRANSFER FULL =
+PAYLABS FULL =
+QRIS DP =
+QRIS PELUNASAN =
+TRANSFER DP =
+TRANSFER PELUNASAN =
+GROUP PAYMENT =
+HISTORICAL RECOVERY =
+PROVIDER UNKNOWN =
+
+PASS =
+BLOCKED_CONFIG =
+FAILED =
+
+DP/PELUNASAN IDENTITY =
+GROUP PAYMENT IDENTITY =
+
+PUBLIC MUTATION DUPLICATES =
+SC MUTATIONS CREATED =
+SC BOOKING ACCOUNTING CREATED =
+SETTLEMENT DUPLICATES =
+ACCOUNTING DUPLICATES =
+
+CONCURRENCY =
+ROLLBACK PROOF =
+
+TESTS =
+TYPECHECK =
+BUILD =
+GIT DIFF CHECK =
+
+PROD_READ_ONLY =
+PROD_WRITES = 0
+PROD_CUTOVER = NO
+
+READY FOR PROD SHADOW MODE = YES/NO
+READY FOR CONTROLLED CUTOVER = NO
+READY FOR LEGACY CLEANUP = NO
+
+BLOCKERS =
+
+STOP.
