@@ -56,8 +56,8 @@ Inside a rollback transaction, the settlement function was called twice for
 payment 92:
 
 ```text
-first batch                  = 14
-retry batch                  = 14
+first batch                  = 15
+retry batch                  = 15
 batch status                 = calculated
 gross amount                 = 100000.00
 net settlement               = 99700.00
@@ -145,15 +145,20 @@ scripts typecheck           = PASS
 API typecheck               = PASS after building project references
 lib/db project build        = PASS
 git diff --check             = PASS
-workspace typecheck         = BLOCKED by unrelated sport-center frontend
-                             errors in BookingDetail, CompanyBilling, and
-                             DocumentSettings
+workspace typecheck         = PASS (0 errors)
+pre-CF-SC-6 baseline        = PASS (0 errors)
+post-CF-SC-6 typecheck      = PASS (0 errors)
+API workflow                = RUNNING
+Sport Center web workflow   = RUNNING
 ```
 
 ```text
 READY FOR PROD SHADOW MODE  = NO
 READY FOR CONTROLLED CUTOVER= NO
 READY FOR LEGACY CLEANUP    = NO
+PROD WRITES                 = 0
+PROD CUTOVER                = NO
+LEGACY CLEANUP              = NO
 BLOCKERS                    = production database unavailable; representative
                              DEV payment matrix incomplete
 ```
