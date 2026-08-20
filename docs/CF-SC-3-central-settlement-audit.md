@@ -15,7 +15,9 @@ data backfill, destructive SQL, Paylabs charge, or WhatsApp send was performed.
 - Central reconciliation source: `public.bank_reconciliation_matches` and the
   public mutation identity. Sport Center reconciliation rows are not created by
   this path.
-- Public-to-Sport-Center projection: **NO** for central payment processing.
+- Public-to-Sport-Center projection: **NO** from application code. Development
+  still has a database trigger that can project public mutations; see the
+  CF-SC-4 audit before claiming runtime zero-projection proof.
 
 The canonical mutation stores `source_app=sport_center`,
 `source_module=central_finance`, `source_table=sport_payments`,

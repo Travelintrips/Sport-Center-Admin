@@ -15,4 +15,11 @@ describe("central bank mutation ownership", () => {
     const source = readFileSync(resolve(process.cwd(), "src/lib/bizportalSync.ts"), "utf8");
     expect(source).toContain("if (!shouldRunLegacyFinanceWrites()) return;");
   });
+
+  it("does not let central application code call the projection or write SC mutations", () => {
+    const central = readFileSync(resolve(process.cwd(), "src/lib/centralFinance.ts"), "utf8");
+    const accounting = readFileSync(resolve(process.cwd(), "src/lib/accounting.ts"), "utf8");
+    expect(central).not.toContain("project_public_bank_mutation_to_canonical");
+    expect(accounting).not.toContain("INSERT INTO sport_center.bank_mutations");
+  });
 });
