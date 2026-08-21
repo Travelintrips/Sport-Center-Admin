@@ -69,4 +69,5 @@
 - [Central settlement wiring](central-settlement-wiring.md) — central payments call the existing settlement owner with payment-scoped identity; preserve canonical mutation ownership and DEV-only gating.
 - [Paylabs settlement rule invariant](paylabs-settlement-rule-invariant.md) — confirmed Paylabs payments require exactly one active OWNER_APPROVED rule matching company, provider, bank, and rule version.
 - [Booking flow audit invariants](booking-flow-audit-invariants.md) — all booking creation paths must share time, conflict, payment, approval, and lifecycle rules.
+- [Production secret bootstrap](secret-bootstrap.md) — load Secret Manager before importing the app; production startup must fail closed without required secrets.
 

@@ -2,7 +2,8 @@ import pg from "pg";
 
 const { Client } = pg;
 
-const DEV_URL = process.env.DATABASE_URL ?? "postgresql://postgres:password@helium/heliumdb?sslmode=disable";
+const DEV_URL = process.env.SUPABASE_DATABASE_URL_DEV;
+if (!DEV_URL) throw new Error("SUPABASE_DATABASE_URL_DEV is required; refusing a local/default database.");
 const rawProdUrl = process.env.SUPABASE_DATABASE_URL;
 if (!rawProdUrl) { console.error("SUPABASE_DATABASE_URL not set"); process.exit(1); }
 const PROD_URL = rawProdUrl.replace("pooler.supabase.com:6543", "pooler.supabase.com:5432");

@@ -2,7 +2,7 @@ runtime: nodejs20
 service: default
 
 # Entrypoint — compiled ESM bundle; PORT is injected by App Engine automatically.
-entrypoint: node --enable-source-maps ./dist/index.mjs
+entrypoint: node --enable-source-maps ./dist/bootstrap.mjs
 
 # ── Scaling ────────────────────────────────────────────────────────────────────
 # min_instances: 0 for cost savings on first/staging deployment.

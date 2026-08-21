@@ -9,8 +9,8 @@
  *     them into process.env so the rest of the app consumes them normally.
  *   - Only runs in production (NODE_ENV=production) and only when the
  *     GOOGLE_CLOUD_PROJECT env var (set automatically by GAE) is present.
- *   - If Secret Manager is unreachable or a secret is missing, logs clearly
- *     but does NOT crash — envValidation.ts will catch missing required vars.
+ *   - Production has no environment-variable fallback: Secret Manager failure
+ *     is fatal and the bootstrap refuses to load the application.
  *   - NEVER logs secret values.
  *
  * USAGE:
@@ -80,18 +80,24 @@ export async function loadSecretsFromGSM(): Promise<{
   loaded: string[];
   skipped: string[];
   failed: string[];
+  fatal: string[];
 }> {
   const loaded: string[] = [];
   const skipped: string[] = [];
   const failed: string[] = [];
+  const fatal: string[] = [];
 
   const isProd = process.env.NODE_ENV === "production";
   const project = process.env.GOOGLE_CLOUD_PROJECT;
 
   if (!isProd || !project) {
-    // Not running on GAE — skip silently
-    return { loaded, skipped, failed };
+    if (isProd) fatal.push("GOOGLE_CLOUD_PROJECT");
+    return { loaded, skipped, failed, fatal };
   }
+
+  // Production application secrets must come from Secret Manager. Remove any
+  // injected values before loading so stale env vars cannot become a fallback.
+  for (const envVar of Object.values(SECRET_MAP)) delete process.env[envVar];
 
   let SecretManagerServiceClient: new () => {
     accessSecretVersion(args: {
@@ -105,24 +111,14 @@ export async function loadSecretsFromGSM(): Promise<{
     const mod = await import("@google-cloud/secret-manager" as string);
     SecretManagerServiceClient = mod.SecretManagerServiceClient;
   } catch {
-    // Package not installed — log once and bail out gracefully.
-    console.warn(
-      "[secretLoader] @google-cloud/secret-manager not installed. " +
-      "Secrets must be injected via env vars (gcloud app deploy --update-env-vars). " +
-      "Add @google-cloud/secret-manager to gae-deploy/package.json to enable ADC loading.",
-    );
-    return { loaded, skipped, failed };
+    failed.push("@google-cloud/secret-manager unavailable");
+    fatal.push("@google-cloud/secret-manager");
+    return { loaded, skipped, failed, fatal };
   }
 
   const client = new SecretManagerServiceClient();
 
   for (const [secretId, envVar] of Object.entries(SECRET_MAP)) {
-    // If the var is already set, respect the existing value (allows emergency override)
-    if (process.env[envVar]) {
-      skipped.push(envVar);
-      continue;
-    }
-
     const name = `projects/${project}/secrets/${secretId}/versions/latest`;
     try {
       const [version] = await client.accessSecretVersion({ name });
@@ -142,5 +138,8 @@ export async function loadSecretsFromGSM(): Promise<{
     }
   }
 
-  return { loaded, skipped, failed };
+  for (const required of ["SUPABASE_DATABASE_URL", "SESSION_SECRET"]) {
+    if (!process.env[required]) fatal.push(required);
+  }
+  return { loaded, skipped, failed, fatal };
 }

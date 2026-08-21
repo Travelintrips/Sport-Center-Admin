@@ -7,19 +7,7 @@ import { initBizportalTables } from "./lib/bizportalSync";
 import { db, usersTable, settingsTable, facilitiesTable } from "@workspace/db";
 import { sql, eq } from "drizzle-orm";
 import { validateEnv } from "./lib/envValidation";
-import { loadSecretsFromGSM } from "./lib/secretLoader";
 import { startPaymentMirrorMigration } from "./lib/paymentMirrorMigration";
-
-// ── 1. Load secrets from Google Secret Manager (production/GAE only) ──────────
-// Must run before any other import reads process.env for secrets.
-// Non-fatal: if GSM is unavailable, envValidation below catches missing vars.
-const gsmResult = await loadSecretsFromGSM();
-if (gsmResult.loaded.length > 0) {
-  logger.info({ loaded: gsmResult.loaded }, "[secretLoader] Secrets loaded from Google Secret Manager");
-}
-if (gsmResult.failed.length > 0) {
-  logger.warn({ failed: gsmResult.failed }, "[secretLoader] Some secrets could not be loaded from GSM");
-}
 
 const rawPort = process.env["PORT"];
 
