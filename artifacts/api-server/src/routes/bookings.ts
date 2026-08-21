@@ -313,30 +313,39 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
       );
       const isPaylabsQrisPayment = payment?.paymentProvider === "paylabs" &&
         (paymentMethodCode === "qris" || paymentMethodCode === "paylabs - qris");
+      const isDirectQrisPayment = payment?.paymentProvider === "mandiri_direct" &&
+        paymentMethodCode === "qris";
       // Some older Paylabs finalization paths wrote the selected provider code
       // directly to sport_payments without leaving a usable transaction lookup
       // in the list query. Prefer the transaction code, then use the stored
-      // code when it matches a configured Paylabs method.
-      const legacyPaylabsCode = transactionPaylabsCode
-        ?? (isPaylabsQrisPayment ? "qris" : undefined)
-        ?? (configuredPaymentCode ? paymentMethodCode : undefined);
+      // code when it matches a configured Paylabs method. A QRIS Direct payment
+      // can still have a historical Paylabs transaction row, but that row must
+      // not overwrite the corrected QRIS Direct label.
+      const canUsePaylabsLegacyLabel = !isDirectQrisPayment &&
+        (payment?.paymentProvider === "paylabs" || configuredPaymentCode || Boolean(transactionPaylabsCode));
+      const legacyPaylabsCode = canUsePaylabsLegacyLabel
+        ? (transactionPaylabsCode
+          ?? (isPaylabsQrisPayment ? "qris" : undefined)
+          ?? (configuredPaymentCode ? paymentMethodCode : undefined))
+        : undefined;
       const selectedPaylabsLabel = legacyPaylabsCode
         ? resolvePaylabsDisplayLabel(legacyPaylabsCode, paylabsLabels)
         : undefined;
       const paymentForResponse = payment && selectedPaylabsLabel &&
-        (payment.paymentProvider === "paylabs" || configuredPaymentCode || transactionPaylabsCode)
+        canUsePaylabsLegacyLabel
         ? { ...payment, paymentMethod: selectedPaylabsLabel }
         : payment;
       const paymentsForResponse = bPayments.map((p) => {
         const paymentCode = String(p.paymentMethod ?? "").trim().toLowerCase();
         const isPaylabsQris = p.paymentProvider === "paylabs" &&
           (paymentCode === "qris" || paymentCode === "paylabs - qris");
+        const isDirectQris = p.paymentProvider === "mandiri_direct" && paymentCode === "qris";
         const isPaylabsPayment = p.paymentProvider === "paylabs"
           || paymentCode === transactionPaylabsCode
           || paylabsLabels.some((method) =>
             String(method.id ?? "").trim().toLowerCase() === paymentCode,
           );
-        const label = isPaylabsPayment
+        const label = isPaylabsPayment && !isDirectQris
           ? resolvePaylabsDisplayLabel(isPaylabsQris ? "qris" : paymentCode, paylabsLabels)
           : undefined;
         return {
