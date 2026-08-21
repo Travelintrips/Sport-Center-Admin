@@ -29,6 +29,17 @@ export function hasBookingSessionEnded(
   return now.getTime() >= end.getTime();
 }
 
+export function hasBookingSessionStarted(
+  bookingDate: string,
+  startTime: string,
+  now: Date = new Date(),
+): boolean {
+  const normalizedStartTime = String(startTime || "").slice(0, 5);
+  const start = new Date(`${bookingDate}T${normalizedStartTime}:00+07:00`);
+  if (Number.isNaN(start.getTime())) return false;
+  return now.getTime() >= start.getTime();
+}
+
 function todayJakarta(now: Date): string {
   return now.toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" });
 }
@@ -134,6 +145,12 @@ export async function checkInBooking(
     }
     if (booking.bookingDate !== todayJakarta(now)) {
       return { ok: false, reason: "Check-in hanya bisa dilakukan pada hari H booking" };
+    }
+    if (!hasBookingSessionStarted(booking.bookingDate, booking.startTime, now)) {
+      return { ok: false, reason: "Check-in belum dibuka sampai waktu mulai sesi" };
+    }
+    if (hasBookingSessionEnded(booking.bookingDate, booking.endTime, now)) {
+      return { ok: false, reason: "Sesi booking sudah berakhir dan tidak dapat check-in" };
     }
     if (await hasPendingReschedule(tx, bookingId)) {
       return { ok: false, reason: "Booking memiliki reschedule yang masih menunggu persetujuan" };

@@ -73,8 +73,10 @@ router.post("/bookings/:id/reschedule", async (req, res) => {
       return;
     }
 
+    const userInfo = getUserFromReq(req);
     const [request] = await db.insert(rescheduleRequestsTable).values({
       bookingId,
+      requestedBy: userInfo.userId ?? null,
       newDate,
       newStartTime,
       newEndTime,
@@ -151,10 +153,33 @@ router.patch("/reschedule-requests/:id", adminMiddleware, async (req, res) => {
 
       const reviewedAt = new Date();
       if (action === "approve") {
+        // Re-check inside the transaction so two approvals cannot reserve
+        // the same slot after the initial request-time check.
+        const competingBookings = await tx.select({
+          id: bookingsTable.id,
+          startTime: bookingsTable.startTime,
+          endTime: bookingsTable.endTime,
+          status: bookingsTable.status,
+        }).from(bookingsTable).where(and(
+          eq(bookingsTable.facilityId, currentBooking.facilityId),
+          eq(bookingsTable.bookingDate, lockedRequest.newDate),
+        ));
+        const hasConflict = competingBookings
+          .filter((candidate) => candidate.id !== currentBooking.id)
+          .filter((candidate) => !["cancelled", "expired", "rejected", "refunded"].includes(candidate.status))
+          .some((candidate) =>
+            timeToMinutes(lockedRequest.newStartTime) < timeToMinutes(candidate.endTime) &&
+            timeToMinutes(lockedRequest.newEndTime) > timeToMinutes(candidate.startTime),
+          );
+        if (hasConflict) throw new Error("RESCHEDULE_SLOT_UNAVAILABLE");
+
         await tx.update(bookingsTable).set({
           bookingDate: lockedRequest.newDate,
           startTime: lockedRequest.newStartTime,
           endTime: lockedRequest.newEndTime,
+           // A rescheduled session must be checked in again at its new time.
+           checkedInAt: null,
+           completedAt: null,
           updatedAt: reviewedAt,
         }).where(eq(bookingsTable.id, request.bookingId));
         await tx.insert(bookingHistoryTable).values({
@@ -176,10 +201,21 @@ router.patch("/reschedule-requests/:id", adminMiddleware, async (req, res) => {
 
     await logAudit({
       ...userInfo,
-      action: `reschedule_${action}`,
+      action: action === "approve" ? "RESCHEDULE_APPROVED" : "BOOKING_RESCHEDULE_REJECTED",
       entity: "reschedule_request",
       entityId: id,
-      after: { action, reviewNote },
+      before: action === "approve" ? {
+        bookingDate: booking.bookingDate,
+        startTime: booking.startTime,
+        endTime: booking.endTime,
+      } : { status: "pending" },
+      after: action === "approve" ? {
+        bookingDate: request.newDate,
+        startTime: request.newStartTime,
+        endTime: request.newEndTime,
+        reason: request.reason,
+        reviewNote,
+      } : { action, reviewNote },
       ...clientInfo,
     });
 
@@ -203,6 +239,14 @@ router.patch("/reschedule-requests/:id", adminMiddleware, async (req, res) => {
     res.json({ success: true, action });
   } catch (err) {
     req.log.error({ err }, "Review reschedule error");
+    if (err instanceof Error && err.message === "RESCHEDULE_SLOT_UNAVAILABLE") {
+      res.status(409).json({ error: "Slot baru sudah tidak tersedia. Pilih jadwal lain." });
+      return;
+    }
+    if (err instanceof Error && err.message === "RESCHEDULE_ALREADY_PROCESSED") {
+      res.status(409).json({ error: "Request reschedule sudah diproses." });
+      return;
+    }
     res.status(500).json({ error: "Internal server error" });
   }
 });
