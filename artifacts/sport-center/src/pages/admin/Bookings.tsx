@@ -194,6 +194,7 @@ function formatDate(d: string) {
 type PaymentMethodOption = {
   value: string;
   label: string;
+  providerCode?: string;
 };
 
 function PaymentMethodSelect({
@@ -213,10 +214,15 @@ function PaymentMethodSelect({
     return <span className="text-xs text-slate-300 dark:text-slate-600">—</span>;
   }
 
-  const currentValue = String(payment.paymentMethod ?? "Transfer Bank");
+  const storedValue = String(payment.paymentMethod ?? "Transfer Bank");
+  const storedCode = storedValue.trim().toLowerCase();
+  const configuredOption = options.find(
+    (option) => option.providerCode?.trim().toLowerCase() === storedCode,
+  );
+  const currentValue = configuredOption?.value ?? storedValue;
   const mergedOptions = options.some((option) => option.value === currentValue)
     ? options
-    : [{ value: currentValue, label: `${currentValue} (tersimpan)` }, ...options];
+    : [{ value: currentValue, label: `${storedValue} (tersimpan)` }, ...options];
 
   return (
     <div title={lockedReason}>
@@ -2200,7 +2206,7 @@ export default function AdminBookings() {
       if (id === "qris") continue;
       const label = method.name.trim();
       if (!options.some((option) => option.value === label)) {
-        options.push({ value: label, label });
+        options.push({ value: label, label, providerCode: id });
       }
     }
     return options;
