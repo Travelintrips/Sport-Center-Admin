@@ -274,7 +274,17 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
         bPayments.find((p) => p.status === "pending" || p.status === "confirmed") ??
         bPayments[bPayments.length - 1] ??
         null;
-      const legacyPaylabsCode = paylabsMethodByBookingId.get(b.id)?.trim().toLowerCase();
+      const transactionPaylabsCode = paylabsMethodByBookingId.get(b.id)?.trim().toLowerCase();
+      const paymentMethodCode = String(payment?.paymentMethod ?? "").trim().toLowerCase();
+      const configuredPaymentCode = paylabsLabels.some((method) =>
+        String(method.id ?? "").trim().toLowerCase() === paymentMethodCode,
+      );
+      // Some older Paylabs finalization paths wrote the selected provider code
+      // directly to sport_payments without leaving a usable transaction lookup
+      // in the list query. Prefer the transaction code, then use the stored
+      // code when it matches a configured Paylabs method.
+      const legacyPaylabsCode = transactionPaylabsCode
+        ?? (configuredPaymentCode ? paymentMethodCode : undefined);
       const selectedPaylabsLabel = legacyPaylabsCode
         ? paylabsLabels.find((method) =>
             String(method.id ?? "").trim().toLowerCase() === legacyPaylabsCode
@@ -283,7 +293,11 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
           )?.name?.toString().trim()
         : undefined;
       const paymentForResponse = payment && selectedPaylabsLabel
-        && (payment.paymentProvider === "paylabs" || /^[a-z0-9]+$/i.test(String(payment.paymentMethod ?? "")))
+        && (
+          payment.paymentProvider === "paylabs"
+          || configuredPaymentCode
+          || /^[a-z0-9]+$/i.test(String(payment.paymentMethod ?? ""))
+        )
         ? { ...payment, paymentMethod: selectedPaylabsLabel }
         : payment;
       const grandTotalNum = b.grandTotal != null ? Number(b.grandTotal) : Number(b.totalPrice);
