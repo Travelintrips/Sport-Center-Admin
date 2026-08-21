@@ -68,4 +68,5 @@
 - [Payment-level accounting references](payment-level-accounting-references.md) — DP and pelunasan entries must use payment identity in public accounting refs, not the shared booking order.
 - [Central settlement wiring](central-settlement-wiring.md) — central payments call the existing settlement owner with payment-scoped identity; preserve canonical mutation ownership and DEV-only gating.
 - [Paylabs settlement rule invariant](paylabs-settlement-rule-invariant.md) — confirmed Paylabs payments require exactly one active OWNER_APPROVED rule matching company, provider, bank, and rule version.
+- [Booking flow audit invariants](booking-flow-audit-invariants.md) — all booking creation paths must share time, conflict, payment, approval, and lifecycle rules.
 
