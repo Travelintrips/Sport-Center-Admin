@@ -5,7 +5,7 @@ description: Where facility images, payment proofs, and QRIS are stored and why;
 
 # Image / file storage
 
-All uploaded files (facility images, payment proofs, QRIS) are stored in **Supabase Storage**, NOT local disk. Public URLs are stored directly in the DB.
+Production uploaded files (facility images, payment proofs, QRIS) are stored in **Supabase Storage**, NOT local disk. In Replit development, Replit Object Storage is the primary adapter when available; Supabase DEV storage is the isolated fallback. Public URLs are stored directly in the DB.
 
 **Why:** App runs on Replit autoscale = ephemeral filesystem. Files written to local disk (`process.cwd()/uploads`) vanish on redeploy/restart, so images 404'd in production.
 
@@ -15,5 +15,6 @@ All uploaded files (facility images, payment proofs, QRIS) are stored in **Supab
 - Server helper `artifacts/api-server/src/lib/supabaseStorage.ts` wraps upload/delete/getPublicUrl using `@supabase/supabase-js` + service role key. All upload routes use `multer.memoryStorage()` then `uploadToStorage(...)`.
 - Storage is shared across dev & prod environments (same storage project), so one upload serves both DBs — only the per-environment DB URL rows differ.
 - Frontend renders stored URLs raw (`images[0].url`, `qrisImageUrl`); proof rendering passes `http...` URLs through unchanged. No frontend URL-prefixing — store absolute Supabase public URLs.
+- DEV may start without `SUPABASE_SERVICE_ROLE_KEY_DEV` when Replit Object Storage is available; never enable `ALLOW_DEV_ON_PROD_STORAGE` as a workaround.
 
 **Known gap:** `POST /payments/proof-upload` and `POST /storage/upload-proof` are intentionally unauthenticated (anonymous customers upload payment proof without an account). Size/mime limits are the only abuse guard. Adding auth would break anonymous booking; rate-limiting is a possible future hardening.
