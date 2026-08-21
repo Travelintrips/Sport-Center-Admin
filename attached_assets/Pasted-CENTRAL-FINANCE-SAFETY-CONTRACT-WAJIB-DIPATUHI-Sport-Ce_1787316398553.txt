@@ -1,0 +1,152 @@
+CENTRAL FINANCE SAFETY CONTRACT — WAJIB DIPATUHI
+
+Sport Center adalah modul operasional dan billing.
+Central Finance adalah source of truth untuk accounting/financial ledger.
+
+SEBELUM SETIAP PERUBAHAN:
+1. Audit terlebih dahulu bagaimana Sport Center saat ini terhubung ke Central Finance.
+2. Identifikasi source of truth untuk:
+   - Chart of Accounts
+   - Journal
+   - Journal Lines
+   - Payment accounting
+   - Revenue
+   - Expense accounting
+   - AR/AP
+   - Tax
+   - Bank/Reconciliation
+   - Settlement
+3. Jangan membuat accounting object baru jika Central Finance sudah memiliki object canonical.
+4. Jangan membuat duplicate journal/payment/revenue hanya karena Sport Center membutuhkan laporan.
+5. Jangan mengubah schema atau lifecycle Central Finance dari sisi Sport Center tanpa evidence dan kebutuhan yang jelas.
+
+ATURAN INTEGRASI:
+
+Sport Center:
+Booking
+→ Payment/Billing
+→ Accounting integration/outbox
+→ Central Finance
+
+Central Finance:
+→ canonical journal
+→ canonical ledger
+→ canonical reconciliation
+→ financial reporting
+
+Jika Sport Center membutuhkan informasi accounting:
+→ baca/refer ke Central Finance
+→ jangan membuat salinan ledger yang menjadi source of truth kedua.
+
+JIKA MENEMUKAN KONFLIK:
+
+Contoh:
+- Sport Center memiliki journal sendiri
+- Central Finance juga membuat journal
+- satu payment menghasilkan dua journal
+- satu expense menghasilkan dua posting
+- revenue tercatat dua kali
+- reconciliation memakai source yang berbeda
+
+Jangan memilih salah satu secara asumsi.
+
+Lakukan:
+AUDIT
+→ IDENTIFY CANONICAL SOURCE
+→ TRACE DEPENDENCIES
+→ FIX INTEGRATION
+→ TEST DUPLICATE PROTECTION
+→ VERIFY CENTRAL FINANCE BALANCE
+
+ATURAN DATA:
+
+Jangan:
+- menghapus historical accounting
+- memindahkan journal secara destructive
+- membuat journal manual untuk menutup selisih
+- mengubah saldo agar balance secara paksa
+- membuat fallback accounting ketika Central Finance gagal
+- membuat duplicate transaction untuk retry
+
+Gunakan:
+- existing canonical accounting service
+- existing outbox/event mechanism
+- idempotency key/source transaction ID
+- transaction reference
+- reconciliation reference
+
+SETIAP TRANSAKSI HARUS BISA DITELUSURI:
+
+Sport Center Booking
+→ Payment
+→ Central Finance transaction
+→ Journal
+→ Journal Lines
+→ Bank/Settlement
+→ Reconciliation
+
+atau untuk expense:
+
+Sport Center Expense
+→ Approval
+→ Payment
+→ Central Finance
+→ Journal
+→ Bank
+→ Reconciliation
+
+DUPLICATE PROTECTION:
+
+Satu source transaction hanya boleh menghasilkan satu accounting posting canonical.
+
+Gunakan identity/source reference yang sudah dipakai Central Finance.
+
+Jika retry:
+→ reuse existing posting
+→ jangan membuat journal kedua.
+
+FAIL-CLOSED:
+
+Jika Central Finance tidak tersedia atau posting belum dapat dipastikan:
+- jangan membuat duplicate/fallback journal di Sport Center
+- tandai transaction sebagai pending accounting/outbox sesuai architecture existing
+- retry secara aman
+- jangan mengubah balance secara manual.
+
+RECONCILIATION:
+
+Jangan membuat reconciliation baru di Sport Center jika Central Finance sudah memiliki reconciliation canonical.
+
+Sport Center hanya menyediakan source transaction/data operasional yang diperlukan.
+
+Jangan mengubah hasil reconciliation hanya untuk membuat Sport Center terlihat balance.
+
+FINAL VERIFICATION:
+
+Setiap remediation harus memastikan:
+
+Sport Center balance
+=
+Central Finance source transaction
+=
+Central Finance journal
+=
+Bank/reconciliation
+
+Dan:
+
+TOTAL DEBIT = TOTAL CREDIT
+
+tanpa duplicate posting.
+
+Jika perubahan berpotensi mengubah Central Finance:
+→ audit dependency terlebih dahulu
+→ gunakan integration layer yang sudah ada
+→ jangan melakukan perubahan destructive.
+
+Jika ada conflict yang tidak bisa diselesaikan secara teknis tanpa keputusan bisnis owner:
+→ STOP hanya pada bagian tersebut
+→ jelaskan conflict dan evidence.
+
+Selain kondisi tersebut:
+AUDIT → FIX → TEST → VERIFY → LANJUT.
