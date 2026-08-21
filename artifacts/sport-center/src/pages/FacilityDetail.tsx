@@ -42,6 +42,18 @@ const MULTIGUNA_ACTIVITIES = [
   { value: "voli", label: "Voli", icon: "🏐" },
 ];
 
+function effectiveCloseTime(facility: { name?: string | null; category?: string | null; closeTime: string }) {
+  return /multi\s*guna/i.test(`${facility.name ?? ""} ${facility.category ?? ""}`)
+    ? "00:00"
+    : facility.closeTime.substring(0, 5);
+}
+
+function addHoursToDisplayTime(time: string, hours: number) {
+  const [hour, minute] = time.split(":").map(Number);
+  const total = (hour * 60 + minute + hours * 60) % (24 * 60);
+  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+}
+
 export default function FacilityDetail() {
   const { t, lang } = useLang();
   const { addItem, items } = useCart();
@@ -111,9 +123,7 @@ export default function FacilityDetail() {
     if (phone.startsWith("0")) phone = "62" + phone.substring(1);
 
     const durationNum = durationHours;
-    const [startH, startM] = selectedTime.split(":").map(Number);
-    const endH = startH + durationNum;
-    const endTime = `${String(endH).padStart(2, "0")}:${String(startM).padStart(2, "00")}`;
+    const endTime = addHoursToDisplayTime(selectedTime, durationNum);
     const totalPrice = isWalkIn ? facility.pricePerHour : facility.pricePerHour * durationNum;
     const dateStr = format(date, "EEEE, d MMMM yyyy", { locale: lang === "en" ? enUS : id });
     const actLabel = isMultiguna && activityType ? ` (${activityType})` : "";
@@ -276,7 +286,7 @@ export default function FacilityDetail() {
                   
                   <div className="flex flex-wrap items-center gap-4 text-sm font-semibold text-muted-foreground">
                     <div className="flex items-center gap-2 bg-muted/50 px-3 py-1.5 rounded-lg text-foreground/80">
-                      <Clock className="w-4 h-4 text-primary" /> {facility.openTime.substring(0,5)} - {facility.closeTime.substring(0,5)} {t("WIB", "WIB")}
+                      <Clock className="w-4 h-4 text-primary" /> {facility.openTime.substring(0,5)} - {effectiveCloseTime(facility)} {t("WIB", "WIB")}
                     </div>
                     {facility.capacity && (
                       <div className="flex items-center gap-2 bg-muted/50 px-3 py-1.5 rounded-lg text-foreground/80">

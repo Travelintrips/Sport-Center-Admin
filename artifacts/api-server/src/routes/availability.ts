@@ -2,6 +2,7 @@ import { Router } from "express";
 import { db, facilitiesTable, bookingsTable, blockedSchedulesTable } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
 import { verifyToken } from "../lib/auth";
+import { closeTimeToMinutes, getEffectiveCloseTime } from "../lib/availability";
 
 const router = Router();
 
@@ -79,7 +80,7 @@ router.get(["/availability", "/bookings/availability"], async (req, res) => {
     );
 
     const openMinutes = timeToMinutes(facility.openTime);
-    const closeMinutes = timeToMinutes(facility.closeTime);
+    const closeMinutes = closeTimeToMinutes(getEffectiveCloseTime(facility));
     const slots: { time: string; available: boolean; reason: string | null }[] = [];
 
     const isToday = date === getTodayWIB();

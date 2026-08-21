@@ -3,6 +3,7 @@ import { db, bookingsTable, facilitiesTable, paymentsTable, promosTable, discoun
 import { eq, and, sql, or, ilike, desc, inArray, notExists, gte } from "drizzle-orm";
 import { adminMiddleware, authMiddleware, verifyToken } from "../lib/auth";
 import { broadcastAvailabilityChange } from "../lib/supabase";
+import { closeTimeToMinutes, getEffectiveCloseTime } from "../lib/availability";
 
 import {
   notifyBookingCreated,
@@ -462,11 +463,12 @@ router.post("/bookings", async (req, res) => {
 
       // Validate within operating hours
       const openMin = timeToMinutesLocal(facility.openTime);
-      const closeMin = timeToMinutesLocal(facility.closeTime);
+      const effectiveCloseTime = getEffectiveCloseTime(facility);
+      const closeMin = closeTimeToMinutes(effectiveCloseTime);
       const startMin = timeToMinutesLocal(startTime);
       const endMin = startMin + durationHours * 60;
       if (startMin < openMin || endMin > closeMin) {
-        res.status(400).json({ error: `Booking harus dalam jam operasional ${facility.openTime}–${facility.closeTime}` });
+        res.status(400).json({ error: `Booking harus dalam jam operasional ${facility.openTime}–${effectiveCloseTime}` });
         return;
       }
 
