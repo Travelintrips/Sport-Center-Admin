@@ -1,0 +1,575 @@
+DEV FINALIZATION — SPORT CENTER BOOKING MODULES
+
+JANGAN BERTANYA KONFIRMASI.
+LANGSUNG:
+AUDIT → FIX → TEST → VERIFY → LANJUT SAMPAI SEMUA DEV CRITICAL FLOW PASS.
+
+PRINSIP:
+- DEV harus fully verified sebelum production-data audit.
+- Central Finance tetap source of truth.
+- Jangan membuat accounting layer kedua.
+- Jangan mengubah historical data secara destructive.
+- Jika menemukan bug yang valid dan aman → langsung perbaiki.
+- Jangan berhenti hanya dengan laporan.
+
+==================================================
+PHASE 1 — GROUP BOOKING
+==================================================
+
+Audit seluruh flow:
+
+- create group
+- add booking
+- merge booking
+- payment group
+- invoice group
+- individual booking status
+- group status
+- check-in
+- completion
+- cancellation
+- reschedule
+
+Pastikan:
+
+1. Group hanya menerima 2–50 booking.
+2. Semua booking_id harus:
+   - valid
+   - unik
+   - ditemukan seluruhnya.
+3. Partial booking IDs harus ditolak seluruh operasi.
+4. Merge harus atomic.
+5. Group lama tidak dihapus secara destructive.
+6. Historical relationship tetap dapat ditelusuri.
+7. Group payment tidak mengubah future booking menjadi completed.
+8. Setiap booking tetap memiliki lifecycle sendiri.
+
+TEST:
+
+Group:
+SC-G1 → 25 Aug
+SC-G2 → 27 Aug
+SC-G3 → 30 Aug
+
+Invoice/payment group dibayar sebelum semua tanggal.
+
+EXPECTED:
+
+SC-G1 = confirmed
+SC-G2 = confirmed
+SC-G3 = confirmed
+
+Bukan completed.
+
+Masing-masing:
+
+check-in
+→ endTime
+→ completed
+
+secara individual.
+
+==================================================
+PHASE 2 — EVENT BOOKING
+==================================================
+
+Audit implementasi:
+
+bookingType = event
+
+Jangan membuat Event module baru kecuali memang dibutuhkan oleh existing contract.
+
+Pastikan Event saat ini konsisten sebagai booking dengan harga khusus.
+
+Diskon HARUS tepat:
+
+21.4%
+
+Gunakan decimal-safe calculation.
+
+Jangan menggunakan floating-point calculation yang menghasilkan 21.43% karena rounding.
+
+Test:
+
+Harga normal:
+Rp100.000
+
+Diskon:
+21,4%
+
+Harga setelah diskon:
+Rp78.600
+
+Kemudian tax calculation mengikuti canonical tax engine yang sudah digunakan Sport Center.
+
+Invoice harus menampilkan secara konsisten:
+
+Harga Normal
+Diskon Event 21,4%
+Harga Setelah Diskon
+DPP
+DPP Nilai Lain
+PPN
+Total
+
+Pastikan:
+
+TOTAL = DPP + PPN
+
+dan discount tidak dihitung dua kali.
+
+==================================================
+PHASE 3 — EVENT PAYMENT
+==================================================
+
+Test:
+
+Event Personal:
+event
+→ payment required
+→ payment approved
+→ confirmed
+→ check-in
+→ session selesai
+→ completed
+
+Event Corporate:
+event
+→ corporate billing
+→ unbilled
+→ invoice
+→ paid
+→ tetap active jika future
+→ check-in
+→ completed setelah sesi selesai.
+
+Event tidak boleh membuat accounting path baru.
+
+Event payment harus menggunakan payment architecture existing.
+
+==================================================
+PHASE 4 — RECURRING BOOKING
+==================================================
+
+Audit seluruh recurring.
+
+Setiap recurring session harus menjadi lifecycle individual.
+
+Contoh:
+
+R1 → 1 Sep
+R2 → 8 Sep
+R3 → 15 Sep
+R4 → 22 Sep
+
+Test:
+
+- tanggal lampau ditolak
+- tanggal duplikat ditolak
+- jam operasional
+- durasi
+- blocked schedule
+- conflict booking
+- hari ini + waktu lewat
+- corporate approval
+- personal payment
+
+Corporate:
+
+Jika requirePerBookingApproval = true:
+→ waiting_confirmation
+
+Jika false:
+→ confirmed
+
+Satu recurring session completed:
+
+EXPECTED:
+session lain tetap active.
+
+==================================================
+PHASE 5 — RESCHEDULE
+==================================================
+
+Audit:
+
+- request
+- approval
+- rejection
+- conflict
+- blocked schedule
+- history
+- check-in
+- completion
+
+Pastikan approval reschedule atomic.
+
+Saat approval:
+
+REVALIDATE:
+
+- date
+- start
+- end
+- duration
+- operating hours
+- blocked schedule
+- booking conflict
+- booking status
+
+Jika slot sudah diambil:
+→ reject reschedule
+→ old booking tetap valid
+→ tidak ada partial update.
+
+History harus menyimpan:
+
+old date/time
+new date/time
+reason
+requester
+approver
+timestamps
+status
+
+Booking number tetap sama.
+
+==================================================
+PHASE 6 — CORPORATE BOOKING
+==================================================
+
+Audit:
+
+Customer
+→ verified company membership
+→ company
+→ booking
+→ billing
+→ invoice
+
+Pastikan user tidak dapat mengirim company ID arbitrary.
+
+Backend harus menentukan company berdasarkan authorized relationship.
+
+Test:
+
+1. verified employee → allowed
+2. unverified employee → rejected
+3. employee perusahaan A mencoba company B → rejected
+4. personal user mencoba payerType company → rejected
+5. corporate booking → unbilled
+6. invoice paid → billing paid
+7. future booking tetap confirmed
+8. check-in → completed setelah sesi selesai.
+
+==================================================
+PHASE 7 — PAYMENT
+==================================================
+
+Test:
+
+- Personal
+- DP
+- final payment
+- group payment
+- corporate invoice payment
+- event
+- refund
+- cancellation
+
+Pastikan:
+
+ONE PAYMENT IDENTITY
+→ ONE CANONICAL ACCOUNTING POSTING
+
+DP dan final payment harus tetap terpisah sesuai architecture existing.
+
+Retry harus idempotent.
+
+==================================================
+PHASE 8 — REFUND / CANCELLATION
+==================================================
+
+Audit:
+
+Booking cancellation
+→ payment/refund
+→ accounting
+
+Pastikan:
+
+- cancelled booking tidak dapat check-in
+- cancelled booking tidak dapat completed
+- refund tidak membuat revenue tambahan
+- refund idempotent
+- original payment tetap dapat ditelusuri
+- accounting reversal mengikuti Central Finance contract.
+
+Jangan membuat journal lokal baru.
+
+==================================================
+PHASE 9 — CHECK-IN
+==================================================
+
+Test seluruh tipe:
+
+- personal
+- corporate
+- event
+- group
+- recurring
+- rescheduled
+
+Check-in harus:
+
+- idempotent
+- tercatat
+- audit logged
+- tidak berlaku untuk cancelled booking
+- tidak berlaku untuk old schedule yang sudah digantikan.
+
+Completion tetap:
+
+CHECK-IN
++
+END TIME
++
+VALID STATUS
+=
+COMPLETED
+
+==================================================
+PHASE 10 — DOCUMENTATION
+==================================================
+
+Audit corporate booking documentation.
+
+Setiap corporate booking harus dapat memiliki dokumentasi:
+
+- photo
+- PDF
+- caption
+- timestamp
+- uploader
+
+Dokumentasi terhubung ke booking individual.
+
+Saat monthly invoice dibuat:
+
+Invoice
+→ booking detail
+→ documentation reference/attachment
+
+Jangan menjadikan dokumentasi sebagai source of accounting.
+
+==================================================
+PHASE 11 — INVOICE & TAX
+==================================================
+
+Audit semua:
+
+- Personal invoice
+- Corporate monthly invoice
+- Event invoice
+- Group invoice
+- DP
+- Final payment
+
+Pastikan tax calculation hanya memiliki satu canonical source.
+
+Expected:
+
+hargaIncludePPN
+→ hargaDasar = hargaIncludePPN / 1.11
+→ DPP
+→ DPP Nilai Lain = DPP × 11/12
+→ PPN = DPP Nilai Lain × 12%
+→ Total = DPP + PPN
+
+Tampilkan:
+
+DPP
+DPP Nilai Lain
+PPN 12%
+Total
+
+Jangan menghitung ulang tax berbeda di frontend.
+
+==================================================
+PHASE 12 — CENTRAL FINANCE
+==================================================
+
+Audit ulang setelah semua booking module selesai.
+
+Pastikan:
+
+Event
+Group
+Recurring
+Corporate
+Personal
+Expense
+
+semuanya menggunakan accounting integration canonical.
+
+Tidak boleh ada:
+
+Sport Center Journal
++
+Central Finance Journal
+
+untuk source transaction yang sama.
+
+ONE SOURCE
+→ ONE CANONICAL POSTING.
+
+==================================================
+PHASE 13 — REGRESSION TEST
+==================================================
+
+Buat/running test matrix:
+
+PERSONAL
+✓ booking
+✓ payment
+✓ check-in
+✓ completion
+
+CORPORATE
+✓ verification
+✓ booking
+✓ billing
+✓ invoice
+✓ payment
+✓ check-in
+✓ completion
+
+GROUP
+✓ merge
+✓ payment
+✓ individual lifecycle
+✓ completion
+
+EVENT
+✓ 21.4% discount
+✓ tax
+✓ payment
+✓ invoice
+✓ corporate
+✓ completion
+
+RECURRING
+✓ validation
+✓ corporate approval
+✓ individual lifecycle
+
+RESCHEDULE
+✓ validation
+✓ approval
+✓ atomicity
+✓ history
+✓ conflict
+
+REFUND
+✓ cancellation
+✓ refund
+✓ reversal
+
+ACCOUNTING
+✓ payment
+✓ expense
+✓ Central Finance
+✓ duplicate protection
+✓ debit = credit
+
+==================================================
+PHASE 14 — FULL VERIFICATION
+==================================================
+
+Jalankan:
+
+- full test suite
+- typecheck seluruh workspace
+- API build
+- frontend build
+- workflow startup
+- git diff --check
+
+Jangan menerima test failure sebagai final.
+
+Jika test gagal:
+
+ROOT CAUSE
+→ FIX
+→ TEST ULANG
+
+Jika fixture outdated:
+→ perbaiki fixture.
+
+Jika production contract benar:
+→ jangan mengubah production logic hanya demi test.
+
+==================================================
+PHASE 15 — FINAL SEARCH
+==================================================
+
+Cari kembali seluruh repository untuk:
+
+completed
+payment paid
+invoice paid
+group payment
+event
+recurring
+reschedule
+check-in
+refund
+journal
+accounting
+
+Pastikan tidak ada bypass lifecycle atau accounting canonical path.
+
+==================================================
+FINAL VERDICT
+==================================================
+
+DEV dianggap selesai hanya jika:
+
+- Group PASS
+- Event PASS
+- Recurring PASS
+- Reschedule PASS
+- Corporate PASS
+- Personal PASS
+- Payment PASS
+- Refund PASS
+- Check-in PASS
+- Invoice/Tax PASS
+- Documentation PASS
+- Central Finance integration PASS
+- Full tests PASS
+- Typecheck PASS
+- Build PASS
+- Runtime PASS
+
+Jika ada temuan valid:
+→ langsung FIX.
+
+Jika false positive:
+→ buktikan.
+
+Jika ada test failure:
+→ perbaiki sampai PASS.
+
+Jangan berhenti di PARTIAL jika masih dapat diperbaiki.
+
+FINAL STATUS hanya:
+
+DEV FULLY VERIFIED
+
+atau
+
+BLOCKED — dengan blocker teknis/eksternal yang benar-benar tidak dapat diselesaikan dari repository.
+
+JANGAN MEMINTA KONFIRMASI.
+LANJUTKAN SAMPAI DEV FULLY VERIFIED.

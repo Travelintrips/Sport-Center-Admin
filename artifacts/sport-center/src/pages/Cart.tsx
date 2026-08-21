@@ -134,7 +134,10 @@ export default function Cart() {
 
   // Mode booking
   type BookingMode = "umum" | "angkasa_pura" | "perusahaan" | "event";
-  const EVENT_DISCOUNT_RATE = 3 / 14; // ≈ 21.43%
+  // Contract: Event discount is exactly 21.4%, not the derived 3/14 (21.428…%).
+  // Keep the calculation integer-safe in rupiah: 214/1000 of the normal price.
+  const EVENT_DISCOUNT_NUMERATOR = 214;
+  const EVENT_DISCOUNT_DENOMINATOR = 1000;
   const [bookingMode, setBookingMode] = useState<BookingMode>("umum");
   const isAP = bookingMode === "angkasa_pura";
   const isCompanyMode = bookingMode === "perusahaan";
@@ -307,7 +310,7 @@ export default function Cart() {
           body.payerType = "personal";
           body.idCardNumber = idCardNumber.trim();
         } else if (isEvent) {
-          // Event: diskon 21,43%
+          // Event: diskon tepat 21,4%; canonical amount is recalculated by the API.
           body.customerType = "umum";
           body.payerType = "personal";
           body.bookingType = "event";
@@ -612,7 +615,7 @@ export default function Cart() {
               {isEvent && (
                 <div className="mt-3 flex items-start gap-2 text-xs text-purple-700 bg-purple-50 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800 rounded-xl p-3">
                   <Tag className="w-4 h-4 shrink-0 mt-0.5" />
-                  <span>{t("Diskon Event 21,43% otomatis diterapkan pada semua lapangan di keranjang.", "21.43% Event discount automatically applied to all courts in the cart.")}</span>
+                   <span>{t("Diskon Event 21,4% otomatis diterapkan pada semua lapangan di keranjang.", "21.4% Event discount automatically applied to all courts in the cart.")}</span>
                 </div>
               )}
               {isCompanyMode && companyName && (
@@ -963,7 +966,9 @@ export default function Cart() {
                       : t(`× ${repeatCount} bulan`, `× ${repeatCount} mo`))
                   : null;
                 const subtotal = totalPrice * multiplier;
-                const eventDiscount = isEvent ? Math.round(subtotal * EVENT_DISCOUNT_RATE) : 0;
+                const eventDiscount = isEvent
+                  ? Math.floor((subtotal * EVENT_DISCOUNT_NUMERATOR + EVENT_DISCOUNT_DENOMINATOR / 2) / EVENT_DISCOUNT_DENOMINATOR)
+                  : 0;
                 const grandTotal = subtotal - eventDiscount;
 
                 return (
@@ -1028,7 +1033,7 @@ export default function Cart() {
 
                     {isEvent && (
                       <div className="flex justify-between text-purple-700 text-sm font-medium">
-                        <span className="flex items-center gap-1"><Tag size={12} /> {t("Diskon Event 21,43%", "Event Discount 21.43%")}</span>
+                         <span className="flex items-center gap-1"><Tag size={12} /> {t("Diskon Event 21,4%", "Event Discount 21.4%")}</span>
                         <span>−{formatCurrency(eventDiscount)}</span>
                       </div>
                     )}
@@ -1048,7 +1053,7 @@ export default function Cart() {
                       </p>
                     ) : isEvent ? (
                       <p className="text-xs text-purple-700 font-semibold">
-                        ✓ {t("Harga sudah termasuk diskon event 21,43%.", "Price includes 21.43% event discount.")}
+                        ✓ {t("Harga sudah termasuk diskon event 21,4%.", "Price includes 21.4% event discount.")}
                       </p>
                     ) : (
                       <p className="text-xs text-muted-foreground">
