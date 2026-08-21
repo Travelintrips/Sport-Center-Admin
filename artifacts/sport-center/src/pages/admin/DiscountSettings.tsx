@@ -132,7 +132,7 @@ export default function AdminDiscountSettings() {
         const label = CUSTOMER_TYPE_LABELS[ct] ?? ct;
         const isActive = Boolean(getFormVal(ct, "isActive", setting));
         const pct = Number(getFormVal(ct, "discountPercentage", setting));
-        const fixedAmount = getFormVal(ct, "discountAmount", setting);
+        const fixedAmount = getFormVal(ct, "discountAmount", setting) as number | null;
         const desc = String(getFormVal(ct, "description", setting));
         const isDirty = form[ct] !== undefined;
 
