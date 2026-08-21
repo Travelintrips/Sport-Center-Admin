@@ -1,0 +1,373 @@
+PRODUCTION DEPLOYMENT + IAM READINESS REMEDIATION
+SPORT CENTER — CONTINUE WITHOUT CONFIRMATION
+
+STATUS:
+
+DEV:
+- FULLY VERIFIED
+- 103/103 tests PASS
+- typecheck PASS
+- build PASS
+- runtime PASS
+- DB isolation PASS
+- storage isolation PASS
+
+PRODUCTION:
+- data audit BLOCKED
+- production deployment belum publish
+- isDeployed=false
+- App Engine runtime identity belum dapat dibuktikan
+- bootstrap production authentication berhasil
+- project metadata gagal
+- production Secret Manager access gagal
+- production DB belum disentuh
+
+KNOWN REQUIRED RUNTIME IDENTITY:
+
+sc-sport-center@appspot.gserviceaccount.com
+
+REQUIRED PRODUCTION SECRETS:
+
+sport-center-prod-supabase-database-url
+sport-center-prod-supabase-url
+sport-center-prod-supabase-anon-key
+sport-center-prod-supabase-service-role-key
+sport-center-prod-session-secret
+
+REQUIRED MINIMUM ROLE:
+
+roles/secretmanager.secretAccessor
+
+TARGET:
+
+Jangan melakukan production data audit dulu.
+
+Selesaikan production deployment/IAM readiness secara aman.
+
+==================================================
+PHASE 1 — AUDIT IAM CONFIGURATION
+==================================================
+
+Audit repository/deployment configuration untuk:
+
+- GAE deployment
+- app.yaml
+- service account
+- Secret Manager
+- IAM
+- project ID
+- project number
+- runtime identity
+- secret bindings
+- deployment scripts
+- GCP bootstrap
+
+Pastikan:
+
+App Engine production runtime
+→ sc-sport-center@appspot.gserviceaccount.com
+
+Jangan membuat service account baru jika existing runtime identity sudah benar.
+
+==================================================
+PHASE 2 — VERIFY PROJECT
+==================================================
+
+Tentukan project production dari configuration source yang sudah ada.
+
+Expected:
+
+GCP Project:
+sc-sport-center
+
+Project Number:
+212300252439
+
+Verifikasi menggunakan metadata/configuration yang tersedia.
+
+Jangan menampilkan credential.
+
+Jika bootstrap credential tidak mempunyai permission membaca project metadata:
+
+→ jangan bypass IAM
+→ identifikasi permission yang kurang
+→ lanjutkan bagian repository/deployment yang masih dapat diaudit.
+
+==================================================
+PHASE 3 — SECRET MANAGER IAM
+==================================================
+
+Untuk setiap secret:
+
+sport-center-prod-supabase-database-url
+sport-center-prod-supabase-url
+sport-center-prod-supabase-anon-key
+sport-center-prod-supabase-service-role-key
+sport-center-prod-session-secret
+
+Pastikan App Engine runtime identity:
+
+sc-sport-center@appspot.gserviceaccount.com
+
+memiliki minimum:
+
+roles/secretmanager.secretAccessor
+
+Prefer:
+SECRET-LEVEL IAM
+
+bukan broad project-level Owner/Editor.
+
+Jangan memberikan:
+
+roles/owner
+roles/editor
+
+hanya untuk membuat aplikasi berjalan.
+
+==================================================
+PHASE 4 — FIX IAM IF SAFE
+==================================================
+
+Jika bootstrap identity yang tersedia memiliki permission IAM yang cukup:
+
+→ langsung perbaiki IAM secara minimal.
+
+Grant hanya:
+
+roles/secretmanager.secretAccessor
+
+kepada:
+
+serviceAccount:sc-sport-center@appspot.gserviceaccount.com
+
+pada secret production yang diperlukan.
+
+Jangan mengubah secret value.
+
+Jangan membuat secret baru jika secret existing sudah benar.
+
+Jangan menghapus secret.
+
+Setelah perubahan:
+→ verify IAM policy read-only.
+
+Jika bootstrap tidak mempunyai permission untuk grant IAM:
+
+JANGAN bypass.
+
+Catat:
+
+EXTERNAL BLOCKER:
+IAM modification requires authorized production GCP principal.
+
+Berikan exact command/configuration yang diperlukan tetapi jangan execute menggunakan credential yang tidak berwenang.
+
+==================================================
+PHASE 5 — SECRET ACCESS VERIFICATION
+==================================================
+
+Setelah IAM tersedia:
+
+Test metadata/access version untuk setiap secret.
+
+Jangan print payload.
+
+Expected:
+
+database-url → ACCESS PASS
+supabase-url → ACCESS PASS
+anon-key → ACCESS PASS
+service-role-key → ACCESS PASS
+session-secret → ACCESS PASS
+
+Jika salah satu gagal:
+→ cari root cause
+→ fix permission/configuration
+→ verify ulang.
+
+==================================================
+PHASE 6 — PRODUCTION DEPLOYMENT READINESS
+==================================================
+
+Audit App Engine deployment configuration.
+
+Pastikan production deployment:
+
+- menggunakan project sc-sport-center
+- menggunakan App Engine service account yang benar
+- menggunakan production Secret Manager loader
+- tidak menggunakan DEV secret
+- tidak menggunakan DATABASE_URL fallback
+- tidak menggunakan DEV storage
+- tidak menjalankan test fixtures
+- tidak menjalankan DEV seed
+- tidak menjalankan destructive migration otomatis
+- tidak menjalankan duplicate accounting worker
+
+Production environment must fail closed jika secret unavailable.
+
+==================================================
+PHASE 7 — DO NOT PUBLISH DATA YET
+==================================================
+
+Jangan publish/deploy production application hanya untuk mendapatkan akses database jika deployment procedure belum terbukti aman.
+
+Pertama:
+
+- audit app.yaml
+- audit deployment config
+- audit secret loader
+- audit worker mode
+- audit database resolver
+- audit storage resolver
+- audit startup scripts
+
+Jika semuanya PASS dan deployment procedure memang existing/approved:
+
+→ deployment readiness = PASS.
+
+Jika actual production publish membutuhkan external owner action:
+→ jangan memaksakan publish.
+
+==================================================
+PHASE 8 — PRODUCTION RUNTIME IDENTITY
+==================================================
+
+Setelah production benar-benar deployed oleh deployment process yang sah:
+
+verify:
+
+isDeployed=true
+
+dan runtime identity:
+
+sc-sport-center@appspot.gserviceaccount.com
+
+Kemudian verify application environment:
+
+PROD
+→ production DB
+→ production storage
+→ production secrets
+
+Jangan menjalankan transaction audit sebelum identity ini terbukti.
+
+==================================================
+PHASE 9 — ONLY THEN DATABASE AUDIT
+==================================================
+
+Jika dan hanya jika:
+
+1. deployment identity verified
+2. Secret Manager access PASS
+3. production database identity verified
+4. connection is production
+5. read-only guard active
+
+baru jalankan:
+
+PRODUCTION TRANSACTION INTEGRITY AUDIT
+
+Audit:
+
+- booking lifecycle
+- payment
+- corporate billing
+- group
+- event
+- recurring
+- reschedule
+- refund
+- expense
+- invoice/tax
+- QRIS
+- settlement
+- reconciliation
+- Central Finance
+- duplicate journal
+- debit/credit
+
+Jangan melompat ke tahap ini sebelum identity verified.
+
+==================================================
+PHASE 10 — CENTRAL FINANCE SAFETY
+==================================================
+
+Selama deployment/IAM remediation:
+
+JANGAN mengubah:
+
+- accounting journals
+- journal lines
+- settlement
+- reconciliation
+- payments
+- invoices
+- historical financial data
+
+Jangan menjalankan backfill.
+
+Jangan menjalankan repair.
+
+Jangan mengubah finance mode.
+
+==================================================
+PHASE 11 — FINAL VERIFICATION
+==================================================
+
+Untuk code/config:
+
+- full tests
+- typecheck
+- build
+- git diff --check
+
+Untuk IAM:
+
+- runtime identity PASS
+- secret access PASS
+- least privilege PASS
+
+Untuk deployment:
+
+- production config PASS
+- environment isolation PASS
+
+Untuk database:
+
+hanya jika production identity sudah verified.
+
+==================================================
+FINAL VERDICT
+==================================================
+
+Kemungkinan hasil:
+
+A.
+
+PRODUCTION DEPLOYMENT READY
+IAM READY
+SECRET ACCESS READY
+PRODUCTION DATA AUDIT PENDING DEPLOYMENT
+
+atau:
+
+B.
+
+PRODUCTION DATA AUDIT BLOCKED
+karena runtime/deployment belum tersedia.
+
+Jika IAM dapat diperbaiki dari authorized bootstrap:
+→ FIX langsung.
+
+Jika IAM/deployment membutuhkan external authorized action:
+→ BLOCKED hanya pada external action tersebut.
+
+Jangan meminta konfirmasi untuk pekerjaan teknis yang dapat dilakukan.
+
+Jangan menggunakan DEV sebagai PROD.
+
+Jangan menyentuh production transaction data.
+
+Lanjutkan otomatis sampai seluruh bagian yang aman selesai.

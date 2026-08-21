@@ -2,7 +2,7 @@ import crypto from "crypto";
 import { db, usersTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 
-const configuredSecret = process.env.SESSION_SECRET;
+const configuredSecret = process.env.SESSION_SECRET ?? "";
 if (!configuredSecret) {
   throw new Error("SESSION_SECRET is required; refusing to seed an admin with a default secret.");
 }
