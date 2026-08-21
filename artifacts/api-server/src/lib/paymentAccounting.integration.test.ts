@@ -1,5 +1,8 @@
 import { jest } from "@jest/globals";
 
+const PAYMENT_DATE = "2026-08-09";
+const PAYMENT_TIMESTAMP = `${PAYMENT_DATE}T12:00:00.000Z`;
+
 type Mirror = {
   id: number;
   paymentNumber: string;
@@ -137,8 +140,9 @@ async function fakeQuery(text: string, values: unknown[] = []): Promise<{ rows: 
           provider_order_id: null,
           merchant_trade_no: null,
           provider_trade_no: null,
-          paid_at: "2026-08-09T12:00:00.000Z",
-          confirmed_at: "2026-08-09T12:00:00.000Z",
+           paid_at: PAYMENT_TIMESTAMP,
+           confirmed_at: PAYMENT_TIMESTAMP,
+           expected_settlement_date: PAYMENT_DATE,
         }]
         : [],
       rowCount: 1,
@@ -162,8 +166,8 @@ async function fakeQuery(text: string, values: unknown[] = []): Promise<{ rows: 
         provider_trade_no: null,
         company_id: 1,
         bank_account_id: "mandiri",
-        expected_settlement_date: null,
-        paid_at: "2026-08-09T12:00:00.000Z",
+         expected_settlement_date: PAYMENT_DATE,
+         paid_at: PAYMENT_TIMESTAMP,
         order_number: `SC-${sourcePaymentId}`,
         ppn_rate: sourcePaymentId === 42 || sourcePaymentId === 43 ? 11 : 0,
       }],
@@ -350,6 +354,66 @@ async function fakeQuery(text: string, values: unknown[] = []): Promise<{ rows: 
     return { rows: [{ id: 10_000 + scalar(values[9]) }], rowCount: 1 };
   }
 
+  if (
+    sql.includes("FROM public.bank_mutations") &&
+    sql.includes("canonical_key = $2") &&
+    sql.includes("source_app = 'sport_center'") &&
+    sql.includes("source_module = 'central_finance'")
+  ) {
+    return { rows: [{ id: scalar(values[0]) }], rowCount: 1 };
+  }
+
+  if (
+    sql.includes("FROM sport_center.accounting_journals") &&
+    sql.includes("payment_id = $1") &&
+    sql.includes("journal_type = 'payment_confirmed'")
+  ) {
+    return { rows: [], rowCount: 0 };
+  }
+
+  if (sql.startsWith("INSERT INTO sport_center.accounting_journals")) {
+    return { rows: [], rowCount: 1 };
+  }
+
+  if (
+    sql.includes("FROM sport_center.sport_payments p") &&
+    sql.includes("expected_settlement_date")
+  ) {
+    const paymentId = scalar(values[0]);
+    return {
+      rows: [{
+        id: paymentId,
+        status: "confirmed",
+        company_id: 1,
+        provider: paymentId === 42 || paymentId === 43 ? "mandiri_direct" : "unknown",
+        bank_account_id: "mandiri",
+        expected_settlement_date: PAYMENT_DATE,
+        journal_id: paymentId,
+        journal_status: "posted",
+        journal_type: "payment_confirmed",
+        is_reversal: false,
+      }],
+      rowCount: 1,
+    };
+  }
+
+  if (sql.includes("SELECT sport_center.create_payment_settlement_batch")) {
+    return { rows: [{ id: 20_000 + scalar(values[5]) }], rowCount: 1 };
+  }
+
+  if (
+    sql.includes("FROM sport_center.payment_settlement_batches") &&
+    sql.includes("canonical_bank_mutation_id")
+  ) {
+    return {
+      rows: [{
+        canonical_bank_mutation_id: 10_000 + scalar(values[0]) - 20_000,
+        bank_mutation_id: null,
+      }],
+      rowCount: 1,
+    };
+  }
+
   if (sql.startsWith("INSERT INTO public.gl_tax_lines")) {
     state.glTaxRows.push({
       entryId: scalar(values[1]),
@@ -464,7 +528,7 @@ describe("Sport Center payment accounting integration", () => {
       amount,
       paymentMethod,
       paymentType,
-      paidAt: "2026-08-09T12:00:00.000Z",
+       paidAt: PAYMENT_TIMESTAMP,
       ppnRate: expectedPpn > 0 ? 11 : 0,
     });
 
@@ -500,6 +564,7 @@ describe("Sport Center payment accounting integration", () => {
           amount: sourcePaymentId === 43 ? 50_000 : sourcePaymentId === 44 ? 150_000 : 100_000,
       paymentMethod: "QRIS",
       paymentType: "full_payment",
+      paidAt: PAYMENT_TIMESTAMP,
       ppnRate: 11,
     });
 
@@ -524,6 +589,7 @@ describe("Sport Center payment accounting integration", () => {
       amount: 100_000,
       paymentMethod: "Transfer Bank",
       paymentType: "pelunasan",
+      paidAt: PAYMENT_TIMESTAMP,
       ppnRate: 11,
     } as const;
 
