@@ -211,6 +211,44 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
     const bookingIds = bookings.map((b) => b.id);
     const allPayments = bookingIds.length > 0 ? await db.select().from(paymentsTable) : [];
 
+    // Legacy Paylabs rows may have been inserted with only the provider code
+    // ("bni", "bri", etc.). Resolve that code from the original transaction
+    // for the admin list so old bookings show the selected VA bank too.
+    const paylabsMethodByBookingId = new Map<number, string>();
+    if (bookingIds.length > 0) {
+      try {
+        const txRows = await db.execute(sql`
+          SELECT DISTINCT ON (booking_id) booking_id, payment_method
+          FROM sport_center.paylabs_transactions
+          WHERE booking_id IN (${sql.join(bookingIds.map((id) => sql`${id}`), sql`, `)})
+          ORDER BY booking_id, created_at DESC
+        `);
+        const rows = (txRows as any).rows ?? txRows;
+        for (const row of rows as Array<{ booking_id?: unknown; payment_method?: unknown }>) {
+          if (row.booking_id != null && row.payment_method != null) {
+            paylabsMethodByBookingId.set(Number(row.booking_id), String(row.payment_method));
+          }
+        }
+      } catch (err) {
+        // The transaction table is created lazily for older databases. The
+        // booking list must remain available while that table is unavailable.
+        req.log.warn({ err }, "Paylabs transaction lookup skipped for booking list");
+      }
+    }
+
+    let paylabsLabels: Array<{ id?: unknown; name?: unknown }> = [];
+    try {
+      const [paylabsSettings] = await db
+        .select({ paymentMethodsConfig: paylabsSettingsTable.paymentMethodsConfig })
+        .from(paylabsSettingsTable)
+        .limit(1);
+      paylabsLabels = Array.isArray(paylabsSettings?.paymentMethodsConfig)
+        ? paylabsSettings.paymentMethodsConfig as Array<{ id?: unknown; name?: unknown }>
+        : [];
+    } catch (err) {
+      req.log.warn({ err }, "Paylabs method label lookup skipped for booking list");
+    }
+
     // Ambil companyName dari usersTable untuk booking perusahaan
     const companyCustomerIds = [...new Set(bookings.map((b) => b.companyCustomerId).filter((id): id is number => id != null))];
     const companyUsers = companyCustomerIds.length > 0
@@ -236,6 +274,18 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
         bPayments.find((p) => p.status === "pending" || p.status === "confirmed") ??
         bPayments[bPayments.length - 1] ??
         null;
+      const legacyPaylabsCode = paylabsMethodByBookingId.get(b.id)?.trim().toLowerCase();
+      const selectedPaylabsLabel = legacyPaylabsCode
+        ? paylabsLabels.find((method) =>
+            String(method.id ?? "").trim().toLowerCase() === legacyPaylabsCode
+            && typeof method.name === "string"
+            && method.name.trim(),
+          )?.name?.toString().trim()
+        : undefined;
+      const paymentForResponse = payment && selectedPaylabsLabel
+        && (payment.paymentProvider === "paylabs" || /^[a-z0-9]+$/i.test(String(payment.paymentMethod ?? "")))
+        ? { ...payment, paymentMethod: selectedPaylabsLabel }
+        : payment;
       const grandTotalNum = b.grandTotal != null ? Number(b.grandTotal) : Number(b.totalPrice);
       const dpAmt = Number(b.downPayment ?? 0);
       return {
@@ -255,7 +305,7 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
         isDpPaid: b.isDpPaid ?? false,
         facilityName: facility?.name ?? "",
         facilityCategory: facility?.category ?? "",
-        payment: payment ? { ...payment, amount: Number(payment.amount) } : null,
+        payment: paymentForResponse ? { ...paymentForResponse, amount: Number(paymentForResponse.amount) } : null,
         payments: bPayments.map((p) => ({ ...p, amount: Number(p.amount) })),
         remainingAmount: (() => {
           const confirmedDp = bPayments
