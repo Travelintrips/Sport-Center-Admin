@@ -311,11 +311,14 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
       const configuredPaymentCode = paylabsLabels.some((method) =>
         String(method.id ?? "").trim().toLowerCase() === paymentMethodCode,
       );
+      const isPaylabsQrisPayment = payment?.paymentProvider === "paylabs" &&
+        (paymentMethodCode === "qris" || paymentMethodCode === "paylabs - qris");
       // Some older Paylabs finalization paths wrote the selected provider code
       // directly to sport_payments without leaving a usable transaction lookup
       // in the list query. Prefer the transaction code, then use the stored
       // code when it matches a configured Paylabs method.
       const legacyPaylabsCode = transactionPaylabsCode
+        ?? (isPaylabsQrisPayment ? "qris" : undefined)
         ?? (configuredPaymentCode ? paymentMethodCode : undefined);
       const selectedPaylabsLabel = legacyPaylabsCode
         ? resolvePaylabsDisplayLabel(legacyPaylabsCode, paylabsLabels)
@@ -326,13 +329,15 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
         : payment;
       const paymentsForResponse = bPayments.map((p) => {
         const paymentCode = String(p.paymentMethod ?? "").trim().toLowerCase();
+        const isPaylabsQris = p.paymentProvider === "paylabs" &&
+          (paymentCode === "qris" || paymentCode === "paylabs - qris");
         const isPaylabsPayment = p.paymentProvider === "paylabs"
           || paymentCode === transactionPaylabsCode
           || paylabsLabels.some((method) =>
             String(method.id ?? "").trim().toLowerCase() === paymentCode,
           );
         const label = isPaylabsPayment
-          ? resolvePaylabsDisplayLabel(paymentCode, paylabsLabels)
+          ? resolvePaylabsDisplayLabel(isPaylabsQris ? "qris" : paymentCode, paylabsLabels)
           : undefined;
         return {
           ...p,
