@@ -10,7 +10,7 @@ import { sendRekapPemakaianToAdmin } from "./rekapPemakaian";
 import { bulkPushPaymentsToBizportal, processPaymentAccountingOutbox, prunePaymentSyncErrorCache } from "./bizportalSync";
 import { processCentralFinance } from "./centralFinance";
 import { logger } from "./logger";
-import { hasBookingSessionEnded } from "./bookingLifecycle";
+import { completeBooking } from "./bookingLifecycle";
 
 function getAppUrl(): string {
   if (process.env.NODE_ENV !== "production" && process.env.REPLIT_DEV_DOMAIN) {
@@ -369,12 +369,13 @@ async function autoCompleteBookings(): Promise<void> {
       const endMinutes = endH * 60 + endM;
 
       // Selesaikan jika: hari sudah lewat, ATAU hari ini & jam sudah lewat
-      if ((isPastDay || nowMinutes >= endMinutes) && booking.checkedInAt && hasBookingSessionEnded(booking.bookingDate, booking.endTime)) {
-        await db
-          .update(bookingsTable)
-          .set({ status: "completed", completedAt: new Date(), updatedAt: new Date() })
-          .where(eq(bookingsTable.id, booking.id));
-        logger.info(`[scheduler] Auto-completed booking ${booking.orderNumber}`);
+      if ((isPastDay || nowMinutes >= endMinutes) && booking.checkedInAt) {
+        const completion = await completeBooking(booking.id, { userName: "scheduler", userRole: "system" });
+        if (completion.ok) {
+          logger.info(`[scheduler] Auto-completed booking ${booking.orderNumber}`);
+        } else {
+          logger.info(`[scheduler] Booking ${booking.orderNumber} was not completed: ${completion.reason}`);
+        }
       }
     }
   } catch (err) {

@@ -43,7 +43,7 @@ import { extractBookingDpp, postConfirmedPaymentAccounting } from "../lib/accoun
 import { hashPassword } from "../lib/auth";
 import { syncStatusToBizportal, pushConfirmedPaymentAsBankMutation } from "../lib/bizportalSync";
 import { calculateTax, recordTaxTransaction } from "../lib/tax";
-import { hasBookingSessionEnded } from "../lib/bookingLifecycle";
+import { checkInBooking, completeBooking } from "../lib/bookingLifecycle";
 import { ensurePaymentBankAccount, resolveRequiredPaymentEnrichment } from "../lib/paymentEnrichment";
 import { createPaymentProviderId, createPaymentProviderOrderId, normalizeProviderName } from "../lib/paymentMetadata";
 import { broadcastAvailabilityChange } from "../lib/supabase";
@@ -1005,67 +1005,18 @@ router.post("/wa/action/:token", async (req, res) => {
       }
 
       case "checkin": {
-        if (booking.status !== "confirmed") {
-          res.status(400).json({ error: "Check-in hanya bisa untuk booking yang sudah dikonfirmasi" }); return;
-        }
-
-        const nowJKT = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" });
-        if (booking.bookingDate !== nowJKT) {
-          res.status(400).json({ error: "Check-in hanya bisa pada hari H booking" }); return;
-        }
-
+        const checkIn = await checkInBooking(booking.id, { userName: "staff (WhatsApp)" });
+        if (!checkIn.ok) { res.status(400).json({ error: checkIn.reason }); return; }
         await consumeWaToken(req.params.token);
-
-        const now = new Date();
-        await db.update(bookingsTable).set({ checkedInAt: now, updatedAt: now })
-          .where(eq(bookingsTable.id, booking.id));
-        await db.insert(bookingHistoryTable).values({
-          bookingId: booking.id, fromStatus: booking.status, toStatus: booking.status,
-          changedByName: "staff (WhatsApp)",
-          note: `Check-in pukul ${now.toLocaleTimeString("id-ID", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit" })} WIB`,
-        });
-
-        await logAudit({
-          action: "wa_checkin",
-          entity: "booking",
-          entityId: booking.id,
-          after: { checkedInAt: now.toISOString() },
-          userName: "staff (WhatsApp)",
-        });
 
         res.json({ success: true, message: `Customer ${booking.customerName} berhasil check-in.` });
         break;
       }
 
       case "finish": {
-        if (!["confirmed"].includes(booking.status)) {
-          res.status(400).json({ error: "Booking belum dalam status yang bisa diselesaikan" }); return;
-        }
-        if (!booking.checkedInAt) {
-          res.status(400).json({ error: "Booking belum check-in" }); return;
-        }
-        if (!hasBookingSessionEnded(booking.bookingDate, booking.endTime)) {
-          res.status(400).json({ error: "Sesi booking belum selesai" }); return;
-        }
-
+        const completion = await completeBooking(booking.id, { userName: "staff (WhatsApp)" });
+        if (!completion.ok) { res.status(400).json({ error: completion.reason }); return; }
         await consumeWaToken(req.params.token);
-
-        const now = new Date();
-        await db.update(bookingsTable).set({ status: "completed", completedAt: now, updatedAt: now })
-          .where(eq(bookingsTable.id, booking.id));
-        await db.insert(bookingHistoryTable).values({
-          bookingId: booking.id, fromStatus: booking.status, toStatus: "completed",
-          changedByName: "staff (WhatsApp)", note: "Sesi selesai via WhatsApp",
-        });
-
-        await logAudit({
-          action: "wa_finish",
-          entity: "booking",
-          entityId: booking.id,
-          before: { status: booking.status },
-          after: { status: "completed" },
-          userName: "staff (WhatsApp)",
-        });
 
         res.json({ success: true, message: "Sesi selesai. Booking ditandai completed." });
         break;

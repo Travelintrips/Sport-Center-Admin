@@ -4,7 +4,7 @@ import { eq, and, sql, or, ilike, desc, inArray, notExists, gte } from "drizzle-
 import { adminMiddleware, authMiddleware, verifyToken } from "../lib/auth";
 import { broadcastAvailabilityChange } from "../lib/supabase";
 import { checkSlotAvailable, closeTimeToMinutes, getEffectiveCloseTime } from "../lib/availability";
-import { hasBookingSessionEnded } from "../lib/bookingLifecycle";
+import { checkInBooking, completeBooking, hasBookingSessionEnded } from "../lib/bookingLifecycle";
 
 import {
   notifyBookingCreated,
@@ -1709,21 +1709,20 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
     }
 
     const updateData: Record<string, unknown> = {};
-    if (status) updateData.status = status;
+    if (status && status !== "completed") updateData.status = status;
     if (adminNotes !== undefined) updateData.adminNotes = adminNotes;
 
     const [beforeUpdate] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, id)).limit(1);
     if (status === "completed" && beforeUpdate && beforeUpdate.status !== "completed") {
-      if (!beforeUpdate.checkedInAt) {
-        res.status(400).json({ error: "Booking belum check-in dan belum dapat diselesaikan" });
-        return;
-      }
-      if (!hasBookingSessionEnded(beforeUpdate.bookingDate, beforeUpdate.endTime)) {
-        res.status(400).json({ error: "Sesi booking belum selesai" });
+      const completion = await completeBooking(id, getUserFromReq(req));
+      if (!completion.ok) {
+        res.status(400).json({ error: completion.reason });
         return;
       }
     }
-    await db.update(bookingsTable).set(updateData).where(eq(bookingsTable.id, id));
+    if (Object.keys(updateData).length > 0) {
+      await db.update(bookingsTable).set(updateData).where(eq(bookingsTable.id, id));
+    }
     const result = await getBookingWithPayment(id);
     if (!result) { res.status(404).json({ error: "Not found" }); return; }
 
@@ -1932,19 +1931,8 @@ router.post("/bookings/:id/check-in", adminMiddleware, async (req, res) => {
     const id = parseInt(String(req.params.id));
     const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, id)).limit(1);
     if (!booking) { res.status(404).json({ error: "Booking tidak ditemukan" }); return; }
-    if (booking.checkedInAt) { res.status(400).json({ error: "Booking sudah check-in" }); return; }
-    if (booking.status !== "confirmed") { res.status(400).json({ error: "Check-in hanya bisa dilakukan untuk booking yang sudah dikonfirmasi" }); return; }
-    const now = new Date();
-    const todayJKT = now.toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" });
-    if (booking.bookingDate !== todayJKT) { res.status(400).json({ error: "Check-in hanya bisa dilakukan pada hari H booking" }); return; }
-    await db.update(bookingsTable).set({ checkedInAt: now, updatedAt: now }).where(eq(bookingsTable.id, id));
-    await db.insert(bookingHistoryTable).values({
-      bookingId: id,
-      fromStatus: booking.status,
-      toStatus: booking.status,
-      changedByName: "admin",
-      note: `Check-in pukul ${now.toLocaleTimeString("id-ID", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit" })} WIB`,
-    });
+    const checkIn = await checkInBooking(id, getUserFromReq(req));
+    if (!checkIn.ok) { res.status(400).json({ error: checkIn.reason }); return; }
     // Check-in selalu hari ini (divalidasi di atas) — trigger rekap otomatis
     triggerRekapIfToday(booking.bookingDate);
     const result = await getBookingWithPayment(id);
