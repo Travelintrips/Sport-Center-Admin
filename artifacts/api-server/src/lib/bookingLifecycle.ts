@@ -54,8 +54,6 @@ export async function completeBooking(
   actor: BookingLifecycleActor,
   now: Date = new Date(),
 ): Promise<LifecycleResult> {
-  let audit: { before: string; after: string } | null = null;
-
   const result = await db.transaction(async (tx): Promise<LifecycleResult> => {
     const [booking] = await tx
       .select()
@@ -98,18 +96,17 @@ export async function completeBooking(
       changedByName: actor.userName ?? "system",
       note: "Booking completed setelah check-in dan waktu sesi berakhir",
     });
-    audit = { before: booking.status, after: "completed" };
     return { ok: true, bookingId, alreadyCompleted: false };
   });
 
-  if (result.ok && !result.alreadyCompleted && audit) {
+  if (result.ok && !result.alreadyCompleted) {
     await logAudit({
       ...actor,
       action: "BOOKING_COMPLETED",
       entity: "booking",
       entityId: bookingId,
-      before: { status: audit.before },
-      after: { status: audit.after, completedAt: now.toISOString(), reason: "checked_in_and_session_ended" },
+      before: { status: "confirmed" },
+      after: { status: "completed", completedAt: now.toISOString(), reason: "checked_in_and_session_ended" },
     });
   }
   return result;

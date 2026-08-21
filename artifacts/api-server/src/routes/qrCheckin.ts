@@ -1,8 +1,9 @@
 import { Router } from "express";
-import { db, bookingsTable, bookingHistoryTable, facilitiesTable } from "@workspace/db";
+import { db, bookingsTable, facilitiesTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
-import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
+import { getUserFromReq } from "../lib/auditLog";
+import { checkInBooking } from "../lib/bookingLifecycle";
 
 const router = Router();
 
@@ -50,14 +51,6 @@ router.post("/bookings/checkin", adminMiddleware, async (req, res) => {
 
     if (!booking) { res.status(404).json({ error: "Booking tidak ditemukan" }); return; }
 
-    if (booking.status !== "confirmed") {
-      res.status(400).json({
-        error: `Booking berstatus '${booking.status}'. Hanya booking 'confirmed' yang bisa check-in.`,
-        status: booking.status,
-      });
-      return;
-    }
-
     if (booking.checkedInAt) {
       res.json({
         success: true,
@@ -69,26 +62,13 @@ router.post("/bookings/checkin", adminMiddleware, async (req, res) => {
       return;
     }
 
-    const now = new Date();
-    await db.update(bookingsTable).set({ checkedInAt: now, updatedAt: now }).where(eq(bookingsTable.id, booking.id));
-
     const userInfo = getUserFromReq(req);
-    await db.insert(bookingHistoryTable).values({
-      bookingId: booking.id,
-      fromStatus: "confirmed",
-      toStatus: "confirmed",
-      changedByName: userInfo.userName || "admin",
-      note: "Customer check-in",
-    });
-
-    await logAudit({
-      ...userInfo,
-      action: "checkin",
-      entity: "booking",
-      entityId: booking.id,
-      after: { checkedInAt: now.toISOString() },
-      ...getClientInfo(req),
-    });
+    const checkIn = await checkInBooking(booking.id, userInfo);
+    if (!checkIn.ok) {
+      res.status(400).json({ error: checkIn.reason, status: booking.status });
+      return;
+    }
+    const now = new Date();
 
     const [facility] = await db.select({ name: facilitiesTable.name }).from(facilitiesTable)
       .where(eq(facilitiesTable.id, booking.facilityId)).limit(1);

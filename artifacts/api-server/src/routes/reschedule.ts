@@ -140,29 +140,39 @@ router.patch("/reschedule-requests/:id", adminMiddleware, async (req, res) => {
 
     const [facility] = await db.select({ name: facilitiesTable.name }).from(facilitiesTable).where(eq(facilitiesTable.id, booking.facilityId)).limit(1);
 
-    if (action === "approve") {
-      await db.update(bookingsTable).set({
-        bookingDate: request.newDate,
-        startTime: request.newStartTime,
-        endTime: request.newEndTime,
-        updatedAt: new Date(),
-      }).where(eq(bookingsTable.id, request.bookingId));
+    await db.transaction(async (tx) => {
+      const [lockedRequest] = await tx.select().from(rescheduleRequestsTable)
+        .where(and(eq(rescheduleRequestsTable.id, id), eq(rescheduleRequestsTable.status, "pending")))
+        .limit(1);
+      if (!lockedRequest) throw new Error("RESCHEDULE_ALREADY_PROCESSED");
+      const [currentBooking] = await tx.select().from(bookingsTable)
+        .where(eq(bookingsTable.id, request.bookingId)).limit(1);
+      if (!currentBooking) throw new Error("BOOKING_NOT_FOUND");
 
-      await db.insert(bookingHistoryTable).values({
-        bookingId: request.bookingId,
-        fromStatus: booking.status,
-        toStatus: booking.status,
-        changedByName: userInfo.userName || "admin",
-        note: `Reschedule disetujui: ${booking.bookingDate} ${booking.startTime}-${booking.endTime} → ${request.newDate} ${request.newStartTime}-${request.newEndTime}`,
-      });
-    }
-
-    await db.update(rescheduleRequestsTable).set({
-      status: action === "approve" ? "approved" : "rejected",
-      reviewNote: reviewNote || null,
-      reviewedAt: new Date(),
-      updatedAt: new Date(),
-    }).where(eq(rescheduleRequestsTable.id, id));
+      const reviewedAt = new Date();
+      if (action === "approve") {
+        await tx.update(bookingsTable).set({
+          bookingDate: lockedRequest.newDate,
+          startTime: lockedRequest.newStartTime,
+          endTime: lockedRequest.newEndTime,
+          updatedAt: reviewedAt,
+        }).where(eq(bookingsTable.id, request.bookingId));
+        await tx.insert(bookingHistoryTable).values({
+          bookingId: request.bookingId,
+          fromStatus: currentBooking.status,
+          toStatus: currentBooking.status,
+          changedBy: userInfo.userId ?? null,
+          changedByName: userInfo.userName || "admin",
+          note: `Reschedule disetujui: ${currentBooking.bookingDate} ${currentBooking.startTime}-${currentBooking.endTime} → ${lockedRequest.newDate} ${lockedRequest.newStartTime}-${lockedRequest.newEndTime}`,
+        });
+      }
+      await tx.update(rescheduleRequestsTable).set({
+        status: action === "approve" ? "approved" : "rejected",
+        reviewNote: reviewNote || null,
+        reviewedAt,
+        updatedAt: reviewedAt,
+      }).where(and(eq(rescheduleRequestsTable.id, id), eq(rescheduleRequestsTable.status, "pending")));
+    });
 
     await logAudit({
       ...userInfo,

@@ -11,10 +11,12 @@ function generateGroupRef(): string {
   return `GRP-${String(n).padStart(5, "0")}`;
 }
 
-async function uniqueGroupRef(): Promise<string> {
+type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+async function uniqueGroupRef(tx: DbTransaction): Promise<string> {
   for (let i = 0; i < 10; i++) {
     const ref = generateGroupRef();
-    const [existing] = await db.select({ groupRef: bookingGroupsTable.groupRef })
+    const [existing] = await tx.select({ groupRef: bookingGroupsTable.groupRef })
       .from(bookingGroupsTable)
       .where(eq(bookingGroupsTable.groupRef, ref))
       .limit(1);
@@ -69,17 +71,21 @@ router.post("/bookings/merge", adminMiddleware, async (req, res) => {
       notes?: string;
     };
 
-    if (!customer_phone || !booking_ids?.length) {
-      res.status(400).json({ error: "customer_phone dan booking_ids wajib diisi" });
+    if (!customer_phone || !Array.isArray(booking_ids) || booking_ids.length < 2 || booking_ids.length > 50) {
+      res.status(400).json({ error: "customer_phone dan 2–50 booking_ids wajib diisi" });
+      return;
+    }
+    const normalizedIds = booking_ids.map((id) => String(id).trim()).filter(Boolean);
+    if (normalizedIds.length !== booking_ids.length || new Set(normalizedIds).size !== normalizedIds.length) {
+      res.status(400).json({ error: "booking_ids harus unik dan tidak boleh kosong" });
       return;
     }
 
-    // Fetch the bookings
     const bookings = await db.select().from(bookingsTable)
-      .where(inArray(bookingsTable.orderNumber, booking_ids));
+      .where(inArray(bookingsTable.orderNumber, normalizedIds));
 
-    if (!bookings.length) {
-      res.status(404).json({ error: "Booking tidak ditemukan" });
+    if (bookings.length !== normalizedIds.length) {
+      res.status(404).json({ error: "Satu atau lebih booking tidak ditemukan" });
       return;
     }
 
@@ -92,41 +98,43 @@ router.post("/bookings/merge", adminMiddleware, async (req, res) => {
 
     // Calculate total if not provided
     const computedTotal = total_payment ?? bookings.reduce((sum, b) => sum + Number(b.grandTotal ?? b.totalPrice), 0);
-
-    // If any booking already in a group, dissolve that group first
-    const existingGroups = [...new Set(bookings.map((b) => b.groupRef).filter(Boolean))] as string[];
-    if (existingGroups.length > 0) {
-      // Remove bookings from old groups
-      await db.update(bookingsTable)
-        .set({ groupRef: null })
-        .where(inArray(bookingsTable.groupRef, existingGroups));
-      // Delete old groups
-      await db.delete(bookingGroupsTable)
-        .where(inArray(bookingGroupsTable.groupRef, existingGroups));
+    if (!Number.isFinite(Number(computedTotal)) || Number(computedTotal) < 0) {
+      res.status(400).json({ error: "total_payment tidak valid" });
+      return;
     }
 
-    const groupRef = await uniqueGroupRef();
-    const customerName = bookings[0].customerName;
+    const created = await db.transaction(async (tx) => {
+      const current = await tx.select().from(bookingsTable)
+        .where(inArray(bookingsTable.orderNumber, normalizedIds));
+      if (current.length !== normalizedIds.length) {
+        throw new Error("BOOKINGS_CHANGED");
+      }
+      const existingGroups = [...new Set(current.map((b) => b.groupRef).filter(Boolean))] as string[];
+      if (existingGroups.length > 0) {
+        // Preserve old group rows as historical records; only detach their bookings.
+        await tx.update(bookingsTable)
+          .set({ groupRef: null, updatedAt: new Date() })
+          .where(inArray(bookingsTable.groupRef, existingGroups));
+      }
 
-    // Create group
-    await db.insert(bookingGroupsTable).values({
-      groupRef,
-      customerPhone: customer_phone,
-      customerName,
-      totalPayment: String(computedTotal),
-      status: "pending",
-      notes: notes ?? null,
+      const groupRef = await uniqueGroupRef(tx);
+      await tx.insert(bookingGroupsTable).values({
+        groupRef,
+        customerPhone: customer_phone,
+        customerName: current[0].customerName,
+        totalPayment: String(computedTotal),
+        status: "pending",
+        notes: notes ?? null,
+      });
+      await tx.update(bookingsTable)
+        .set({ groupRef, updatedAt: new Date() })
+        .where(inArray(bookingsTable.orderNumber, normalizedIds));
+      const [group] = await tx.select().from(bookingGroupsTable)
+        .where(eq(bookingGroupsTable.groupRef, groupRef)).limit(1);
+      return { group, groupRef };
     });
 
-    // Link bookings to group
-    await db.update(bookingsTable)
-      .set({ groupRef })
-      .where(inArray(bookingsTable.orderNumber, booking_ids));
-
-    const created = await db.select().from(bookingGroupsTable)
-      .where(eq(bookingGroupsTable.groupRef, groupRef)).limit(1);
-
-    res.json({ ...created[0], totalPayment: Number(created[0].totalPayment), bookingIds: booking_ids });
+    res.json({ ...created.group, totalPayment: Number(created.group.totalPayment), bookingIds: normalizedIds });
   } catch (err) {
     req.log.error({ err }, "Merge bookings error");
     res.status(500).json({ error: "Internal server error" });
