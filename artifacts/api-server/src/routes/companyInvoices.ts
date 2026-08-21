@@ -563,7 +563,7 @@ router.patch("/company-invoices/:id", adminMiddleware, async (req, res) => {
 
     if (status === "paid" && inv.status !== "paid") {
       await db.update(bookingsTable)
-        .set({ billingStatus: "paid", status: "completed" })
+        .set({ billingStatus: "paid" })
         .where(eq(bookingsTable.companyInvoiceId, id));
 
       await logAudit({
@@ -689,7 +689,7 @@ router.post("/company-invoices/:id/upload-payment-proof", adminMiddleware, uploa
 
     if (markPaid && inv.status !== "paid") {
       await db.update(bookingsTable)
-        .set({ billingStatus: "paid", status: "completed" })
+        .set({ billingStatus: "paid" })
         .where(eq(bookingsTable.companyInvoiceId, id));
     }
 

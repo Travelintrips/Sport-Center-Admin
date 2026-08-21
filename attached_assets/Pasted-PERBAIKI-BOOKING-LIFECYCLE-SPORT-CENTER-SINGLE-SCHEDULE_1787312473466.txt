@@ -1,0 +1,464 @@
+PERBAIKI BOOKING LIFECYCLE SPORT CENTER — SINGLE SCHEDULE, CHECK-IN, RESCHEDULE, DAN COMPLETION
+
+TUJUAN UTAMA:
+
+Jadikan satu booking sebagai satu sesi/jadwal bermain yang memiliki waktu check-in yang jelas.
+
+Booking TIDAK BOLEH dianggap `completed` hanya karena:
+
+* payment sudah paid,
+* invoice perusahaan sudah paid,
+* invoice sudah dibuat,
+* billing_status sudah paid,
+* admin melakukan konfirmasi pembayaran.
+
+Booking hanya boleh menjadi `completed` setelah sesi booking benar-benar selesai dan proses check-in/pelaksanaan booking telah tercatat sesuai lifecycle aplikasi.
+
+==================================================
+
+1. AUDIT TERLEBIH DAHULU
+   ==================================================
+
+Audit seluruh lifecycle booking yang sudah ada.
+
+Telusuri:
+
+* booking status
+* payment status
+* billing_status
+* check-in
+* check-out jika sudah ada
+* completion logic
+* corporate invoice
+* recurring
+* group booking
+* reschedule
+* cancellation
+* blocked schedule
+* calendar
+* dashboard
+* reporting
+* audit log
+
+Jangan langsung mengubah kode sebelum menemukan semua jalur yang dapat mengubah booking menjadi `completed`.
+
+Cari seluruh:
+
+* `status = completed`
+* `booking.status = "completed"`
+* `billingStatus = "paid"`
+* payment approval handler
+* invoice paid handler
+* check-in handler
+* scheduled jobs
+* worker/background jobs
+* webhook
+* admin action
+
+==================================================
+2. CONTRACT STATUS BOOKING
+==========================
+
+Pertahankan enum/status existing jika memungkinkan.
+
+Jangan membuat enum baru jika status existing sudah dapat digunakan.
+
+Secara bisnis lifecycle harus menjadi:
+
+PENDING PAYMENT
+→ CONFIRMED
+→ CHECK-IN
+→ COMPLETED
+
+Dengan kemungkinan:
+
+CONFIRMED
+→ CANCELLED
+
+atau:
+
+CONFIRMED
+→ RESCHEDULED
+→ CONFIRMED dengan jadwal baru
+
+Jika sistem sudah memiliki status `checked_in`, `in_progress`, atau status sejenis, gunakan status tersebut sesuai contract existing.
+
+Jangan membuat status duplikat yang memiliki arti sama.
+
+==================================================
+3. PAYMENT TIDAK BOLEH MENYELESAIKAN BOOKING
+============================================
+
+Perbaiki seluruh jalur payment.
+
+Aturan:
+
+payment = paid
+TIDAK berarti
+booking = completed.
+
+Untuk booking masa depan:
+
+payment = paid
+booking = confirmed / status lifecycle existing.
+
+Khusus corporate invoice:
+
+billing_status = paid
+TIDAK BOLEH otomatis:
+
+booking.status = completed
+
+Jika booking masih akan digunakan di masa depan, status tetap confirmed/scheduled sesuai lifecycle existing.
+
+==================================================
+4. CHECK-IN
+===========
+
+Setiap booking harus mempunyai jadwal:
+
+* booking_date
+* start_time
+* end_time
+* duration
+
+Check-in hanya dapat dilakukan untuk booking yang memang sudah memasuki waktu check-in sesuai aturan operasional.
+
+Saat check-in berhasil:
+
+* simpan timestamp check-in
+* simpan actor/admin yang melakukan check-in
+* simpan audit log
+* jangan mengubah payment/billing secara salah
+* jangan membuat payment baru
+
+Jika aplikasi sudah mempunyai check-in record, gunakan record tersebut.
+
+Jangan membuat sistem check-in kedua.
+
+==================================================
+5. COMPLETED
+============
+
+Booking hanya dapat menjadi `completed` setelah sesi benar-benar selesai.
+
+Minimal pastikan:
+
+* booking memiliki jadwal valid
+* check-in telah tercatat jika check-in diwajibkan
+* waktu sesi telah selesai / completion action valid
+* booking tidak cancelled
+* booking tidak rescheduled aktif
+* tidak ada kondisi yang membuat booking masih aktif
+
+Jangan mengubah booking future menjadi completed.
+
+Jangan menggunakan:
+
+invoice paid
+payment paid
+billing paid
+
+sebagai trigger langsung untuk completed.
+
+==================================================
+6. RESCHEDULE
+=============
+
+Reschedule adalah perubahan jadwal booking yang sama, bukan membuat booking baru tanpa hubungan.
+
+Contoh:
+
+SC-0438
+
+Original:
+23 Agustus 2026
+18:00–21:00
+
+Reschedule:
+25 Agustus 2026
+18:00–21:00
+
+Booking number tetap SC-0438.
+
+Simpan history:
+
+* old date
+* old start time
+* old end time
+* new date
+* new start time
+* new end time
+* reason
+* requested_by
+* approved_by
+* timestamp
+
+Sebelum reschedule:
+
+* cek slot baru tersedia
+* cek jam operasional
+* cek blocked schedule
+* cek konflik booking
+* validasi tanggal
+* validasi durasi
+
+Jika slot baru tidak valid → reject reschedule.
+
+Jangan mengubah jadwal secara partial.
+
+Gunakan database transaction jika perubahan melibatkan beberapa tabel.
+
+==================================================
+7. CANCEL + RESCHEDULE
+======================
+
+Jika fasilitas tidak dapat digunakan:
+
+OLD SCHEDULE
+→ CANCELLED / RESCHEDULED
+
+Kemudian:
+
+NEW SCHEDULE
+→ CONFIRMED
+
+Jangan menghapus histori jadwal lama.
+
+Histori harus tetap dapat dilihat admin.
+
+==================================================
+8. RECURRING BOOKING
+====================
+
+Recurring bukan satu booking yang mempunyai banyak sesi tanpa lifecycle individual.
+
+Jika recurring tetap dipertahankan:
+
+setiap sesi harus menjadi booking individual.
+
+Contoh:
+
+SC-1001 → 1 September
+SC-1002 → 8 September
+SC-1003 → 15 September
+SC-1004 → 22 September
+
+Setiap booking memiliki:
+
+* schedule sendiri
+* payment/billing sendiri sesuai contract
+* check-in sendiri
+* completion sendiri
+* cancellation/reschedule sendiri
+
+Jangan membuat satu status recurring yang menyebabkan seluruh sesi menjadi completed.
+
+Selain itu, recurring wajib menggunakan validation yang sama dengan single booking:
+
+* tanggal valid
+* tanggal tidak lampau
+* slot hari ini belum lewat
+* jam operasional
+* durasi
+* blocked schedule
+* conflict check
+* corporate approval
+
+==================================================
+9. CORPORATE BOOKING
+====================
+
+Corporate booking mengikuti lifecycle booking yang sama.
+
+Contoh:
+
+Corporate booking:
+25 Agustus
+18:00–21:00
+
+Invoice perusahaan dibayar:
+31 Agustus
+
+Jika tanggal booking belum selesai pada saat invoice dibayar:
+
+billing_status = paid
+
+Tetapi:
+
+booking.status ≠ completed
+
+Booking baru completed setelah sesi selesai sesuai lifecycle.
+
+==================================================
+10. GROUP BOOKING
+=================
+
+Group booking tidak boleh membuat booking individual kehilangan lifecycle masing-masing.
+
+Setiap booking dalam group tetap memiliki:
+
+* jadwal
+* check-in
+* completion
+* cancellation
+* reschedule
+
+Payment group hanya mengatur pembayaran/group settlement.
+
+Payment group tidak boleh otomatis membuat semua booking future menjadi completed.
+
+==================================================
+11. AUDIT LOG
+=============
+
+Pastikan tersedia audit log untuk:
+
+* BOOKING_CREATED
+* BOOKING_CONFIRMED
+* BOOKING_CHECKED_IN
+* BOOKING_COMPLETED
+* BOOKING_CANCELLED
+* BOOKING_RESCHEDULED
+* PAYMENT_CONFIRMED
+* CORPORATE_INVOICE_PAID
+
+Audit harus menunjukkan:
+
+* booking_id
+* actor
+* before
+* after
+* timestamp
+* alasan jika cancel/reschedule
+
+==================================================
+12. AUTOMATIC COMPLETION
+========================
+
+Jika aplikasi mempunyai scheduler/worker untuk otomatis menyelesaikan booking:
+
+scheduler hanya boleh menyelesaikan booking yang memang sudah melewati waktu sesi dan memenuhi aturan completion.
+
+Contoh:
+
+Booking:
+25 Agustus 18:00–21:00
+
+Sebelum 21:00:
+→ tidak completed
+
+Setelah sesi selesai:
+→ eligible untuk completed
+
+Pastikan scheduler tidak menggunakan:
+
+payment date
+invoice date
+invoice paid date
+
+sebagai dasar completion.
+
+==================================================
+13. REGRESSION TEST
+===================
+
+Wajib test:
+
+A. Personal
+
+* booking
+* payment
+* confirmed
+* check-in
+* session selesai
+* completed
+
+B. Corporate
+
+* booking
+* unbilled
+* invoice
+* invoice paid
+* booking future tetap confirmed
+* check-in
+* selesai
+* completed
+
+C. Reschedule
+
+* booking confirmed
+* reschedule
+* old schedule tidak tersedia
+* new schedule tersedia
+* histori tersimpan
+* check-in menggunakan jadwal baru
+* completed setelah sesi baru selesai
+
+D. Cancellation
+
+* booking cancelled
+* slot kembali tersedia
+* tidak dapat check-in
+* tidak dapat menjadi completed
+
+E. Recurring
+
+* setiap sesi individual
+* setiap sesi memiliki check-in sendiri
+* satu sesi completed tidak menyelesaikan sesi lain
+
+F. Group booking
+
+* payment group
+* beberapa booking
+* booking future tetap active
+* masing-masing check-in sendiri
+* completion masing-masing
+
+G. Idempotency
+
+* check-in dua kali tidak membuat duplicate
+* completion dua kali tidak membuat duplicate
+* reschedule dua kali tidak membuat data corrupt
+* payment confirmation dua kali tidak membuat duplicate payment
+
+==================================================
+14. FINAL AUDIT
+===============
+
+Setelah perbaikan:
+
+* run test suite
+* run typecheck
+* run build
+* audit semua endpoint yang dapat mengubah status booking
+* audit scheduler/worker
+* audit corporate invoice payment
+* audit recurring
+* audit group booking
+* audit reschedule
+* audit check-in
+
+Jangan berhenti hanya pada laporan.
+
+Jika ditemukan masalah yang aman dan root cause sudah jelas:
+→ perbaiki
+→ test
+→ verify
+
+Jangan melakukan perubahan destructive terhadap historical booking/payment.
+
+FINAL VERDICT harus menyatakan:
+
+* apakah booking future masih bisa berubah menjadi completed hanya karena payment/invoice paid
+* apakah check-in menjadi bagian wajib lifecycle
+* apakah reschedule mempertahankan histori
+* apakah recurring memiliki lifecycle individual
+* apakah group booking aman
+* apakah payment/billing sudah terpisah dari completion
+
+Status akhir:
+FIXED / BLOCKED
+
+Jika BLOCKED, jelaskan blocker eksternal atau keputusan bisnis yang benar-benar diperlukan.

@@ -3,7 +3,8 @@ import { db, bookingsTable, facilitiesTable, paymentsTable, promosTable, discoun
 import { eq, and, sql, or, ilike, desc, inArray, notExists, gte } from "drizzle-orm";
 import { adminMiddleware, authMiddleware, verifyToken } from "../lib/auth";
 import { broadcastAvailabilityChange } from "../lib/supabase";
-import { closeTimeToMinutes, getEffectiveCloseTime } from "../lib/availability";
+import { checkSlotAvailable, closeTimeToMinutes, getEffectiveCloseTime } from "../lib/availability";
+import { hasBookingSessionEnded } from "../lib/bookingLifecycle";
 
 import {
   notifyBookingCreated,
@@ -1053,6 +1054,34 @@ async function checkSlotConflict(
   });
 }
 
+function recurringScheduleError(
+  facility: typeof facilitiesTable.$inferSelect,
+  bookingDate: string,
+  startTime: string,
+  durationHours: number,
+): string | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(bookingDate))) return "Tanggal booking tidak valid";
+  const parsedDate = new Date(`${bookingDate}T00:00:00+07:00`);
+  if (Number.isNaN(parsedDate.getTime())) return "Tanggal booking tidak valid";
+  const today = todayWIB();
+  if (bookingDate < today) return "Tanggal booking sudah lewat";
+  if (!/^\d{2}:\d{2}$/.test(String(startTime))) return "Jam mulai tidak valid";
+
+  const startMin = timeToMinutes(startTime);
+  const openMin = timeToMinutes(facility.openTime);
+  const closeMin = closeTimeToMinutes(getEffectiveCloseTime(facility));
+  if (startMin < openMin || startMin >= 24 * 60) return "Jam mulai tidak valid";
+  if (!Number.isInteger(durationHours) || durationHours < 1) return "Durasi booking minimal 1 jam";
+  if (startMin + durationHours * 60 > closeMin) {
+    return `Booking harus dalam jam operasional ${facility.openTime}–${getEffectiveCloseTime(facility)}`;
+  }
+  if (bookingDate === today) {
+    const nowWib = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Jakarta" }));
+    if (startMin <= nowWib.getHours() * 60 + nowWib.getMinutes()) return "Slot hari ini sudah lewat";
+  }
+  return null;
+}
+
 // POST /bookings/recurring/check
 router.post("/bookings/recurring/check", async (req, res) => {
   try {
@@ -1061,13 +1090,19 @@ router.post("/bookings/recurring/check", async (req, res) => {
     const [facility] = await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, Number(facilityId))).limit(1);
     if (!facility) { res.status(404).json({ error: "Facility not found" }); return; }
 
+    const scheduleError = recurringScheduleError(facility, String(startDate), String(startTime), Number(durationHours));
+    if (scheduleError) {
+      res.json({ dates: [{ date: String(startDate), available: false, reason: scheduleError }], pricePerSession: 0, validCount: 0, totalPrice: 0 });
+      return;
+    }
     const endTime = addHours(startTime, durationHours);
     const dates = generateRecurringDates(startDate, repeatType, repeatCount);
 
     const results = await Promise.all(
       dates.map(async (date) => {
         const conflict = await checkSlotConflict(Number(facilityId), date, startTime, endTime);
-        return { date, available: !conflict, reason: conflict ? "Slot already booked" : null };
+        const available = !conflict && await checkSlotAvailable(Number(facilityId), date, startTime, durationHours);
+        return { date, available, reason: available ? null : "Slot tidak tersedia atau terblokir" };
       })
     );
 
@@ -1179,6 +1214,18 @@ router.post("/bookings/recurring", async (req, res) => {
     const dates: string[] = Array.isArray(specificDates) && specificDates.length > 0
       ? specificDates
       : generateRecurringDates(startDate, repeatType, repeatCount);
+    const uniqueDates = [...new Set(dates.map((date) => String(date)))];
+    if (uniqueDates.length !== dates.length) {
+      res.status(400).json({ error: "Tanggal recurring tidak boleh duplikat" });
+      return;
+    }
+    const scheduleErrors = uniqueDates
+      .map((date) => recurringScheduleError(facility, date, String(startTime), Number(durationHours)))
+      .filter(Boolean);
+    if (scheduleErrors.length > 0) {
+      res.status(400).json({ error: scheduleErrors[0] });
+      return;
+    }
     const basePrice = Number(facility.pricePerHour) * durationHours;
 
     // ── Diskon Event 21,4% (recurring) ──────────────────────────────────────
@@ -1307,7 +1354,7 @@ router.post("/bookings/recurring", async (req, res) => {
           paymentRequiredNow: false,
           paymentDeadline: null,
           billingStatus: "unbilled",
-          status: "confirmed",
+          status: companyBillingUser?.requirePerBookingApproval ? "waiting_confirmation" : "confirmed",
         } : {}),
       }).returning();
       // Release advisory lock untuk tanggal ini setelah INSERT berhasil
@@ -1666,6 +1713,16 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
     if (adminNotes !== undefined) updateData.adminNotes = adminNotes;
 
     const [beforeUpdate] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, id)).limit(1);
+    if (status === "completed" && beforeUpdate && beforeUpdate.status !== "completed") {
+      if (!beforeUpdate.checkedInAt) {
+        res.status(400).json({ error: "Booking belum check-in dan belum dapat diselesaikan" });
+        return;
+      }
+      if (!hasBookingSessionEnded(beforeUpdate.bookingDate, beforeUpdate.endTime)) {
+        res.status(400).json({ error: "Sesi booking belum selesai" });
+        return;
+      }
+    }
     await db.update(bookingsTable).set(updateData).where(eq(bookingsTable.id, id));
     const result = await getBookingWithPayment(id);
     if (!result) { res.status(404).json({ error: "Not found" }); return; }

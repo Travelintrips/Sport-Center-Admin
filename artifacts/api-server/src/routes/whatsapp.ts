@@ -43,6 +43,7 @@ import { extractBookingDpp, postConfirmedPaymentAccounting } from "../lib/accoun
 import { hashPassword } from "../lib/auth";
 import { syncStatusToBizportal, pushConfirmedPaymentAsBankMutation } from "../lib/bizportalSync";
 import { calculateTax, recordTaxTransaction } from "../lib/tax";
+import { hasBookingSessionEnded } from "../lib/bookingLifecycle";
 import { ensurePaymentBankAccount, resolveRequiredPaymentEnrichment } from "../lib/paymentEnrichment";
 import { createPaymentProviderId, createPaymentProviderOrderId, normalizeProviderName } from "../lib/paymentMetadata";
 import { broadcastAvailabilityChange } from "../lib/supabase";
@@ -1039,6 +1040,12 @@ router.post("/wa/action/:token", async (req, res) => {
       case "finish": {
         if (!["confirmed"].includes(booking.status)) {
           res.status(400).json({ error: "Booking belum dalam status yang bisa diselesaikan" }); return;
+        }
+        if (!booking.checkedInAt) {
+          res.status(400).json({ error: "Booking belum check-in" }); return;
+        }
+        if (!hasBookingSessionEnded(booking.bookingDate, booking.endTime)) {
+          res.status(400).json({ error: "Sesi booking belum selesai" }); return;
         }
 
         await consumeWaToken(req.params.token);

@@ -10,6 +10,7 @@ import { sendRekapPemakaianToAdmin } from "./rekapPemakaian";
 import { bulkPushPaymentsToBizportal, processPaymentAccountingOutbox, prunePaymentSyncErrorCache } from "./bizportalSync";
 import { processCentralFinance } from "./centralFinance";
 import { logger } from "./logger";
+import { hasBookingSessionEnded } from "./bookingLifecycle";
 
 function getAppUrl(): string {
   if (process.env.NODE_ENV !== "production" && process.env.REPLIT_DEV_DOMAIN) {
@@ -356,7 +357,11 @@ async function autoCompleteBookings(): Promise<void> {
     const confirmed = await db
       .select()
       .from(bookingsTable)
-      .where(and(eq(bookingsTable.status, "confirmed"), lte(bookingsTable.bookingDate, todayWIB)));
+      .where(and(
+        eq(bookingsTable.status, "confirmed"),
+        lte(bookingsTable.bookingDate, todayWIB),
+        isNotNull(bookingsTable.checkedInAt),
+      ));
 
     for (const booking of confirmed) {
       const isPastDay = booking.bookingDate < todayWIB;
@@ -364,7 +369,7 @@ async function autoCompleteBookings(): Promise<void> {
       const endMinutes = endH * 60 + endM;
 
       // Selesaikan jika: hari sudah lewat, ATAU hari ini & jam sudah lewat
-      if (isPastDay || nowMinutes >= endMinutes) {
+      if ((isPastDay || nowMinutes >= endMinutes) && booking.checkedInAt && hasBookingSessionEnded(booking.bookingDate, booking.endTime)) {
         await db
           .update(bookingsTable)
           .set({ status: "completed", completedAt: new Date(), updatedAt: new Date() })

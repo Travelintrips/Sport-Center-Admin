@@ -2,15 +2,11 @@ import { Router } from "express";
 import { db, bookingsTable, rescheduleRequestsTable, bookingHistoryTable, facilitiesTable, usersTable } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
+import { checkSlotAvailable, closeTimeToMinutes, getEffectiveCloseTime, timeToMinutes } from "../lib/availability";
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
 import { notifyRescheduleApproved, notifyRescheduleRejected } from "../lib/notifications";
 
 const router = Router();
-
-function timeToMinutes(t: string): number {
-  const [h, m] = t.split(":").map(Number);
-  return h * 60 + (m || 0);
-}
 
 // POST /bookings/:id/reschedule — customer requests reschedule
 router.post("/bookings/:id/reschedule", async (req, res) => {
@@ -31,13 +27,30 @@ router.post("/bookings/:id/reschedule", async (req, res) => {
       return;
     }
 
-    // Check availability for new slot
+    const [facility] = await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, booking.facilityId)).limit(1);
+    if (!facility) { res.status(404).json({ error: "Fasilitas tidak ditemukan" }); return; }
+    const newDurationHours = (timeToMinutes(newEndTime) - timeToMinutes(newStartTime)) / 60;
+    const todayWib = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" });
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(newDate)) || newDate < todayWib) {
+      res.status(400).json({ error: "Tanggal reschedule tidak valid atau sudah lewat" }); return;
+    }
+    if (!Number.isInteger(newDurationHours) || newDurationHours < 1) {
+      res.status(400).json({ error: "Durasi reschedule tidak valid" }); return;
+    }
+    const startMin = timeToMinutes(newStartTime);
+    const endMin = timeToMinutes(newEndTime);
+    const closeMin = closeTimeToMinutes(getEffectiveCloseTime(facility));
+    if (startMin < timeToMinutes(facility.openTime) || endMin > closeMin || endMin <= startMin) {
+      res.status(400).json({ error: `Jadwal harus dalam jam operasional ${facility.openTime}–${getEffectiveCloseTime(facility)}` }); return;
+    }
+
+    // Check availability for new slot, including blocked schedules.
     const conflicts = await db.select().from(bookingsTable).where(
       and(eq(bookingsTable.facilityId, booking.facilityId), eq(bookingsTable.bookingDate, newDate))
     );
-    const active = conflicts.filter((b) => b.id !== bookingId && !["cancelled", "expired", "rejected"].includes(b.status));
-    const sMin = timeToMinutes(newStartTime);
-    const eMin = timeToMinutes(newEndTime);
+    const active = conflicts.filter((b) => b.id !== bookingId && !["cancelled", "expired", "rejected", "refunded"].includes(b.status));
+    const sMin = startMin;
+    const eMin = endMin;
     const conflict = active.some((b) => {
       const bStart = timeToMinutes(b.startTime);
       const bEnd = timeToMinutes(b.endTime);
@@ -45,6 +58,10 @@ router.post("/bookings/:id/reschedule", async (req, res) => {
     });
     if (conflict) {
       res.status(409).json({ error: "Slot baru sudah dipesan. Pilih waktu lain." });
+      return;
+    }
+    if (!(await checkSlotAvailable(booking.facilityId, newDate, newStartTime, newDurationHours))) {
+      res.status(409).json({ error: "Slot baru sedang diblokir atau tidak tersedia." });
       return;
     }
 
