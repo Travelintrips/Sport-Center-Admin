@@ -1,4 +1,8 @@
+
 modules = ["nodejs-20", "web", "postgresql-16", "python-base-3.13"]
+
+modules = ["nodejs-20", "web"]
+
 
 
 [deployment]
@@ -151,3 +155,15 @@ TRAVELINTRIP_PRODUCTION_DATABASE_URL = "postgresql://postgres.nzdweipzckfszczzqt
 
 [nix]
 channel = "stable-25_05"
+
+[[ports]]
+localPort = 5000
+externalPort = 80
+
+[[ports]]
+localPort = 8080
+externalPort = 8080
+
+[[ports]]
+localPort = 21089
+externalPort = 3000

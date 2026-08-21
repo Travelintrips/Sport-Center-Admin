@@ -14,6 +14,7 @@
     "storage:compress-images": "tsx ./src/compress-supabase-images.ts",
     "migrate:ownership:dev": "tsx ./src/migrate-facility-company-ownership.ts",
     "migrate:cf-sc-5:dev": "tsx ./src/apply-cf-sc-5-dev.ts",
+    "migrate:cf-sc-8:dev": "tsx ./src/apply-cf-sc-8-dev.ts",
     "backfill:payment-providers": "tsx ./src/backfill-payment-providers.ts",
     "migrate:diff": "tsx ./src/schema-diff.ts",
     "fix-admin:dev": "tsx ./src/fix-admin-hash.ts",
@@ -24,8 +25,10 @@
     "repair:uat-qris": "tsx ./src/repair-uat-qris-fixture.ts",
     "repair:phase-b:13-14": "tsx ./src/repair-phase-b-payment-13-14.ts",
     "cf-sc-7ab:dev": "tsx ./src/cf-sc-7ab-harness.ts",
+    "cf-sc-9:dev": "tsx ./src/cf-sc-9-coverage.ts",
     "cf-sc-7c:dev": "tsx ./src/cf-sc-7c-discovery.ts",
     "cf-sc-7d:dev": "tsx ./src/cf-sc-7d-ready-harness.ts",
+
     "test:uat-qris": "tsx ./src/uat-qris-harness.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

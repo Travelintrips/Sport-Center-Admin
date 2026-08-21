@@ -53,6 +53,7 @@
 - [Tracked configuration secrets](tracked-config-secrets.md) — inspect `.replit` and legacy tracked config files for plaintext credentials before treating environment secrets as isolated.
 - [Payment accounting verification](payment-accounting-verification.md) — assess mirror completion from linkage, GL, tax, replay, and recovery evidence, not function presence or `posted` alone.
 - [Payment method OCR auto-detection](payment-method-ocr.md) — high-confidence OCR can update payment_method, but must persist detector evidence and audit the change.
+- [AP2 discount modes](ap2-discount-modes.md) — fixed nominal discount takes precedence over percentage; AP Multiguna keeps its special hourly-price rule.
 - [Company ownership evidence](company-ownership-evidence.md) — historical payment company resolution must use validated relations; missing or conflicting evidence stays NULL and blocks posting.
 - [Live accounting schema audit](live-accounting-schema-audit.md) — active Supabase public accounting columns may be legacy-shaped; inspect information_schema before diagnostic SQL.
 - [Confirmed payment reconciliation](confirmed-payment-reconciliation.md) — payment confirmation can precede booking confirmation; retries must repair only the narrow split state without reposting accounting.
@@ -62,6 +63,9 @@
 - [Tesseract worker bundling](tesseract-worker-bundling.md) — keep OCR external to API bundle, available in App Engine runtime, and cache language files under /tmp.
 - [Sport Center workflow recovery](sport-center-workflow-recovery.md) — missing artifact node_modules causes `vite: not found`; keep one managed web workflow and use its actual port.
 - [Central Finance runtime invariants](central-finance-runtime-invariants.md) — adoption paths must still create canonical public evidence; partial canonical indexes require matching ON CONFLICT predicates.
+- [PostgreSQL concurrency harnesses](postgres-concurrency-harnesses.md) — pg clients are single-flight; race independent clients and size pools for any retained audit connection.
 - [Read-only audit probes](readonly-audit-probes.md) — optional schema probes need savepoints and must be serialized on a single pg client to preserve the read-only transaction.
 - [Payment-level accounting references](payment-level-accounting-references.md) — DP and pelunasan entries must use payment identity in public accounting refs, not the shared booking order.
+- [Central settlement wiring](central-settlement-wiring.md) — central payments call the existing settlement owner with payment-scoped identity; preserve canonical mutation ownership and DEV-only gating.
+- [Paylabs settlement rule invariant](paylabs-settlement-rule-invariant.md) — confirmed Paylabs payments require exactly one active OWNER_APPROVED rule matching company, provider, bank, and rule version.
 

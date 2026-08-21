@@ -41,8 +41,17 @@ describe("detectPaymentMethodFromOcr", () => {
   it("does not auto-apply an ambiguous bank mention", () => {
     const result = detectPaymentMethodFromOcr("Bank");
 
-    expect(result.paymentMethod).toBe("Transfer Bank");
-    expect(result.highConfidence).toBe(true);
+    expect(result.paymentMethod).toBeNull();
+    expect(result.highConfidence).toBe(false);
+  });
+
+  it("does not mistake a QRIS-like success message for a bank transfer", () => {
+    const result = detectPaymentMethodFromOcr(
+      "Pembayaran berhasil ke Travelin Bandara Soekarno-Hatta",
+    );
+
+    expect(result.paymentMethod).toBeNull();
+    expect(result.highConfidence).toBe(false);
   });
 
   it("returns no classification for unrelated OCR text", () => {

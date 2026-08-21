@@ -11,6 +11,11 @@ type CaseResult = {
   accountingEffects: number;
   publicMutations: number;
   sportCenterMutations: number;
+  settlementBatches: number;
+  canonicalSettlementLinks: number;
+  legacySettlementLinks: number;
+  grossSettlement: number | null;
+  netSettlement: number | null;
   taxLedgers: number;
   balanced: boolean;
   retryAlreadyPosted: boolean;
@@ -147,6 +152,19 @@ async function main(): Promise<void> {
         `SELECT id FROM sport_center.bank_mutations WHERE mutation_key = ANY($1::text[])`,
         [paymentIds.map((id) => `SC-PAY-${id}`)],
       );
+      const settlements = await client.query(
+        `SELECT id, canonical_bank_mutation_id, bank_mutation_id,
+                gross_amount, net_amount
+           FROM sport_center.payment_settlement_batches
+          WHERE EXISTS (
+              SELECT 1
+                FROM sport_center.payment_settlement_items i
+               WHERE i.settlement_id = payment_settlement_batches.id
+                 AND i.payment_id = ANY($1::int[])
+                 AND i.item_status = 'active'
+            )`,
+        [paymentIds],
+      );
       const retry = await postSportCenterBookingPayment({
         paymentNumber: `SCPAY-SC-${paymentIds[0]}`,
         sourcePaymentId: paymentIds[0],
@@ -168,6 +186,11 @@ async function main(): Promise<void> {
         accountingEffects: entries.rowCount ?? 0,
         publicMutations: mutations.rowCount ?? 0,
         sportCenterMutations: legacy.rowCount ?? 0,
+        settlementBatches: settlements.rowCount ?? 0,
+        canonicalSettlementLinks: settlements.rows.filter((row) => row.canonical_bank_mutation_id != null).length,
+        legacySettlementLinks: settlements.rows.filter((row) => row.bank_mutation_id != null).length,
+        grossSettlement: settlements.rows[0] ? Number(settlements.rows[0].gross_amount) : null,
+        netSettlement: settlements.rows[0] ? Number(settlements.rows[0].net_amount) : null,
         taxLedgers: tax.rowCount ?? 0,
         balanced,
         retryAlreadyPosted: retry.alreadyPosted,
@@ -206,10 +229,15 @@ async function main(): Promise<void> {
     results.push(await processCase("group_payment", [groupPayment], groupBooking, ["full_payment"]));
 
     const settlementBatches = await client.query(
-      `SELECT count(*)::int AS count
-         FROM sport_center.payment_settlement_batches
-        WHERE correlation_id LIKE $1`,
-      [`${MARKER}%`],
+      `SELECT count(DISTINCT b.id)::int AS count
+         FROM sport_center.payment_settlement_batches b
+         JOIN sport_center.payment_settlement_items i
+           ON i.settlement_id = b.id
+          AND i.item_status = 'active'
+        JOIN sport_center.sport_payments p
+           ON p.id = i.payment_id
+        WHERE p.uat_marker = $1`,
+      [MARKER],
     );
     const bookingEntries = await client.query(
       `SELECT count(*)::int AS count
@@ -224,8 +252,18 @@ async function main(): Promise<void> {
         (SELECT count(*) FROM sport_center.central_finance_processing c JOIN sport_center.sport_payments p ON p.id=c.source_payment_id WHERE p.uat_marker=$1) AS central_processing,
         (SELECT count(*) FROM public.sport_payments WHERE source_payment_id = ANY($2::int[])) AS public_sport_payments,
         (SELECT count(*) FROM public.accounting_entries WHERE source_payment_id = ANY($2::int[])) AS accounting_entries,
-        (SELECT count(*) FROM public.bank_mutations WHERE source_id = ANY($2::int[])) AS bank_mutations`,
-      [MARKER, results.flatMap((result) => result.paymentIds)],
+         (SELECT count(*) FROM public.bank_mutations WHERE source_id = ANY($2::int[])) AS bank_mutations,
+         (SELECT count(DISTINCT b.id)
+            FROM sport_center.payment_settlement_batches b
+            JOIN sport_center.payment_settlement_items i
+              ON i.settlement_id = b.id AND i.item_status = 'active'
+           WHERE i.payment_id = ANY($2::int[])) AS settlement_batches,
+         (SELECT count(*) FROM sport_center.accounting_journals WHERE payment_id = ANY($2::int[])) AS internal_payment_journals,
+         (SELECT count(*) FROM sport_center.bank_mutations WHERE mutation_key = ANY($3::text[])) AS legacy_bank_mutations,
+         (SELECT count(*) FROM sport_center.bank_reconciliation_matches WHERE mutation_id IN (
+            SELECT id FROM sport_center.bank_mutations WHERE mutation_key = ANY($3::text[])
+         )) AS legacy_reconciliation_matches`,
+       [MARKER, results.flatMap((result) => result.paymentIds), results.flatMap((result) => result.paymentIds).map((id) => `SC-PAY-${id}`)],
     );
 
     console.log(JSON.stringify({
@@ -237,7 +275,7 @@ async function main(): Promise<void> {
         totalConfirmedAmount: AMOUNTS.qris_dp + AMOUNTS.qris_pelunasan,
       },
       bookingLevelAccountingCreated: Number(bookingEntries.rows[0].count),
-      settlementBatches: Number(settlementBatches.rows[0].count),
+       settlementBatches: Number(settlementBatches.rows[0].count),
       concurrency: "database advisory-lock/idempotency path exercised by retry; concurrent external clients require committed fixtures and are not run in this rollback transaction",
       rollbackProof: "all fixture rows are in one transaction and rolled back below",
       blockedConfigShapes: ["Transfer Bank", "Paylabs", "unknown provider", "historical recovery"],

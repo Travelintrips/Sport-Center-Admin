@@ -65,6 +65,11 @@ production runtime and migrations require `SUPABASE_DATABASE_URL`. The old
 the application path. Auxiliary accounting, health, payment-enrichment, and
 BizPortal pools follow the same environment selection.
 
+The Replit database pane may report that no production database exists because
+this project’s live data is in the external Supabase production database. For
+production data operations, use the production-scoped Supabase connection
+through a controlled runner and verify the target rows before mutating.
+
 **Why:** A fallback in a helper can silently bypass the primary database
 boundary even when the main startup log shows the correct database.
 

@@ -8,6 +8,7 @@ export const discountSettingsTable = scSchema.table("discount_settings", {
   id: serial("id").primaryKey(),
   customerType: text("customer_type").notNull().unique(),
   discountPercentage: integer("discount_percentage").notNull().default(0),
+  discountAmount: integer("discount_amount"),
   description: text("description"),
   isActive: boolean("is_active").notNull().default(true),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),

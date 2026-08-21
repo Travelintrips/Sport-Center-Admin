@@ -138,15 +138,18 @@ export function detectPaymentMethodFromOcr(
     });
   }
 
-  const transferPatterns = [
-    /\bTRANSFER\b/i,
-    /\bREKENING\b/i,
+  const explicitTransferPatterns = [
+    /\bTRANSFER\s+(?:BANK|KE\s+(?:REKENING|AKUN)|ANTAR\s*BANK)\b/i,
+    /\b(?:NO|NOMOR)\.?\s*(?:REKENING|REK)\b/i,
     /\bMUTASI\b/i,
-    /\bBANK\b/i,
-    /\bBERHASIL\b/i,
-    /\bSUKSES\b/i,
+    /\bVIRTUAL\s+ACCOUNT\b/i,
+    /\bREKENING\s+(?:TUJUAN|PENERIMA)\b/i,
   ];
-  const hasTransferSignal = matchesAny(text, transferPatterns);
+  const hasGenericTransferVerb = /\b(?:TRANSFER|TRF)\b/i.test(text);
+  const hasAccountLikeNumber = /\b\d{8,20}\b/.test(text);
+  const hasTransferSignal =
+    matchesAny(text, explicitTransferPatterns) ||
+    (hasGenericTransferVerb && hasAccountLikeNumber);
   for (const bank of BANK_PATTERNS) {
     const accountMatched = bank.accountNumbers?.find((account) => text.includes(account));
     const bankTerms = matchedTerms(text, bank.terms);
@@ -173,9 +176,9 @@ export function detectPaymentMethodFromOcr(
   if (hasTransferSignal && !candidates.some((candidate) => candidate.bank)) {
     candidates.push({
       paymentMethod: "Transfer Bank",
-      confidence: 0.86,
+      confidence: 0.72,
       signals: ["indikasi transfer bank tanpa nama bank spesifik"],
-      matchedTerms: matchedTerms(text, transferPatterns),
+      matchedTerms: matchedTerms(text, explicitTransferPatterns),
     });
   }
 

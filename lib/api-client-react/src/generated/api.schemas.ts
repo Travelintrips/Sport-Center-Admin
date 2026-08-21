@@ -832,6 +832,8 @@ export interface DiscountSetting {
   customerType: string;
   discountPercentage: number;
   /** @nullable */
+  discountAmount?: number | null;
+  /** @nullable */
   description?: string | null;
   isActive: boolean;
 }
@@ -841,7 +843,12 @@ export interface DiscountSettingUpdate {
      * @minimum 0
      * @maximum 100
      */
-  discountPercentage: number;
+  discountPercentage?: number;
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  discountAmount?: number | null;
   description?: string;
   isActive?: boolean;
 }

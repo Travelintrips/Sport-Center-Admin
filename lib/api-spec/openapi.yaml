@@ -1628,7 +1628,7 @@ paths:
     patch:
       operationId: updateDiscountSetting
       tags: [discounts]
-      summary: Update discount percentage and active state (admin)
+      summary: Update discount percentage or fixed amount and active state (admin)
       parameters:
         - name: customerType
           in: path
@@ -3837,6 +3837,8 @@ components:
           type: string
         discountPercentage:
           type: integer
+        discountAmount:
+          type: ["integer", "null"]
         description:
           type: ["string", "null"]
         isActive:
@@ -3844,12 +3846,14 @@ components:
 
     DiscountSettingUpdate:
       type: object
-      required: [discountPercentage]
       properties:
         discountPercentage:
           type: integer
           minimum: 0
           maximum: 100
+        discountAmount:
+          type: ["integer", "null"]
+          minimum: 0
         description:
           type: string
         isActive:

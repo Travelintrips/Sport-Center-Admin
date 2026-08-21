@@ -194,6 +194,7 @@ function formatDate(d: string) {
 type PaymentMethodOption = {
   value: string;
   label: string;
+  providerCode?: string;
 };
 
 function PaymentMethodSelect({
@@ -213,10 +214,25 @@ function PaymentMethodSelect({
     return <span className="text-xs text-slate-300 dark:text-slate-600">—</span>;
   }
 
-  const currentValue = String(payment.paymentMethod ?? "Transfer Bank");
-  const mergedOptions = options.some((option) => option.value === currentValue)
-    ? options
-    : [{ value: currentValue, label: `${currentValue} (tersimpan)` }, ...options];
+  const storedValue = String(payment.paymentMethod ?? "Transfer Bank");
+  const storedCode = storedValue.trim().toLowerCase();
+  const isDirectQris = payment.paymentProvider === "mandiri_direct" && storedCode === "qris";
+  const configuredOption = options.find(
+    (option) =>
+      option.providerCode?.trim().toLowerCase() === storedCode &&
+      (payment.paymentProvider === "paylabs" || !option.providerCode),
+  );
+  const currentValue = configuredOption?.value ?? storedValue;
+  // A QRIS Direct payment must not be changed back to a Paylabs display
+  // option. That would change the provider/settlement identity of an already
+  // classified payment and is correctly rejected by the accounting guard.
+  // Keep the valid direct method visible while hiding only gateway options.
+  const availableOptions = isDirectQris
+    ? options.filter((option) => !option.providerCode)
+    : options;
+  const mergedOptions = availableOptions.some((option) => option.value === currentValue)
+    ? availableOptions
+    : [{ value: currentValue, label: `${storedValue} (tersimpan)` }, ...availableOptions];
 
   return (
     <div title={lockedReason}>
@@ -2195,12 +2211,10 @@ export default function AdminBookings() {
 
     for (const method of configured) {
       if (!method?.active || typeof method.name !== "string" || !method.name.trim()) continue;
-      // QRIS is already in the static list above — skip duplicates from Paylabs config.
       const id = String(method.id ?? "").trim().toLowerCase();
-      if (id === "qris") continue;
       const label = method.name.trim();
       if (!options.some((option) => option.value === label)) {
-        options.push({ value: label, label });
+        options.push({ value: label, label, providerCode: id });
       }
     }
     return options;

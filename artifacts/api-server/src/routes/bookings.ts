@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { db, bookingsTable, facilitiesTable, paymentsTable, promosTable, discountSettingsTable, apMembersTable, bookingHistoryTable, usersTable, verificationLogsTable, companyUsersTable, bookingGroupsTable, settingsTable, waActionTokensTable, waNotifLogsTable } from "@workspace/db";
+import { db, bookingsTable, facilitiesTable, paymentsTable, promosTable, discountSettingsTable, apMembersTable, bookingHistoryTable, usersTable, verificationLogsTable, companyUsersTable, bookingGroupsTable, settingsTable, waActionTokensTable, waNotifLogsTable, paylabsSettingsTable } from "@workspace/db";
 import { eq, and, sql, or, ilike, desc, inArray, notExists, gte } from "drizzle-orm";
 import { adminMiddleware, authMiddleware, verifyToken } from "../lib/auth";
 import { broadcastAvailabilityChange } from "../lib/supabase";
@@ -30,6 +30,38 @@ import { reverseJournalEntry, reversePublicAccountingEntry } from "../lib/accoun
 const INACTIVE_STATUSES = ["cancelled", "expired", "rejected", "refunded"];
 const AP_MULTIGUNA_HOURLY_PRICE = 300000;
 
+const PAYLABS_METHOD_LABELS: Record<string, string> = {
+  qris: "Paylabs - QRIS",
+  bri: "Paylabs - BRI Virtual Account",
+  bca: "Paylabs - BCA Virtual Account",
+  bni: "Paylabs - BNI VA",
+  mandiri: "Paylabs - Mandiri VA",
+  permata: "Paylabs - Permata VA",
+  cimb: "Paylabs - CIMB VA",
+  btn: "Paylabs - BTN VA",
+  danamon: "Paylabs - Danamon VA",
+  maybank: "Paylabs - Maybank VA",
+  bsi: "Paylabs - BSI VA",
+  muamalat: "Paylabs - Muamalat Virtual Account",
+  sinarmas: "Paylabs - Sinarmas VA",
+  ina: "Paylabs - INA VA",
+};
+
+function resolvePaylabsDisplayLabel(
+  rawMethod: unknown,
+  configuredMethods: Array<{ id?: unknown; name?: unknown }>,
+): string | undefined {
+  const code = String(rawMethod ?? "").trim().toLowerCase();
+  if (!code) return undefined;
+  const configured = configuredMethods.find(
+    (method) =>
+      String(method.id ?? "").trim().toLowerCase() === code &&
+      typeof method.name === "string" &&
+      method.name.trim(),
+  );
+  return configured?.name?.toString().trim() || PAYLABS_METHOD_LABELS[code];
+}
+
 // Helper: kirim rekap hanya jika tanggal booking = hari ini (WIB)
 function todayWIB(): string {
   return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" });
@@ -49,6 +81,32 @@ function isMultigunaFacility(facility: { name?: string | null; category?: string
     .toLowerCase()
     .replace(/[^a-z0-9]/g, "");
   return normalized.includes("multiguna");
+}
+
+function getApDiscount(basePrice: number, setting: {
+  discountPercentage?: number | null;
+  discountAmount?: number | null;
+}, isMultiguna: boolean, durationHours: number): { amount: number; percentage: number; finalPrice: number } {
+  if (isMultiguna) {
+    const finalPrice = Math.min(basePrice, AP_MULTIGUNA_HOURLY_PRICE * durationHours);
+    const amount = Math.max(0, basePrice - finalPrice);
+    return {
+      amount,
+      finalPrice,
+      percentage: basePrice > 0 ? Number(((amount / basePrice) * 100).toFixed(2)) : 0,
+    };
+  }
+
+  const fixedAmount = Number(setting.discountAmount ?? 0);
+  const percentage = Number(setting.discountPercentage ?? 0);
+  const amount = fixedAmount > 0
+    ? Math.min(Math.round(fixedAmount), Math.max(0, basePrice))
+    : Math.min(Math.round((basePrice * percentage) / 100), Math.max(0, basePrice));
+  return {
+    amount,
+    finalPrice: Math.max(0, basePrice - amount),
+    percentage: basePrice > 0 ? Number(((amount / basePrice) * 100).toFixed(2)) : 0,
+  };
 }
 
 // ─── POST /bookings/track-payer-selection — log when customer toggles payer type ──
@@ -186,6 +244,44 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
     const bookingIds = bookings.map((b) => b.id);
     const allPayments = bookingIds.length > 0 ? await db.select().from(paymentsTable) : [];
 
+    // Legacy Paylabs rows may have been inserted with only the provider code
+    // ("bni", "bri", etc.). Resolve that code from the original transaction
+    // for the admin list so old bookings show the selected VA bank too.
+    const paylabsMethodByBookingId = new Map<number, string>();
+    if (bookingIds.length > 0) {
+      try {
+        const txRows = await db.execute(sql`
+          SELECT DISTINCT ON (booking_id) booking_id, payment_method
+          FROM sport_center.paylabs_transactions
+          WHERE booking_id IN (${sql.join(bookingIds.map((id) => sql`${id}`), sql`, `)})
+          ORDER BY booking_id, created_at DESC
+        `);
+        const rows = (txRows as any).rows ?? txRows;
+        for (const row of rows as Array<{ booking_id?: unknown; payment_method?: unknown }>) {
+          if (row.booking_id != null && row.payment_method != null) {
+            paylabsMethodByBookingId.set(Number(row.booking_id), String(row.payment_method));
+          }
+        }
+      } catch (err) {
+        // The transaction table is created lazily for older databases. The
+        // booking list must remain available while that table is unavailable.
+        req.log.warn({ err }, "Paylabs transaction lookup skipped for booking list");
+      }
+    }
+
+    let paylabsLabels: Array<{ id?: unknown; name?: unknown }> = [];
+    try {
+      const [paylabsSettings] = await db
+        .select({ paymentMethodsConfig: paylabsSettingsTable.paymentMethodsConfig })
+        .from(paylabsSettingsTable)
+        .limit(1);
+      paylabsLabels = Array.isArray(paylabsSettings?.paymentMethodsConfig)
+        ? paylabsSettings.paymentMethodsConfig as Array<{ id?: unknown; name?: unknown }>
+        : [];
+    } catch (err) {
+      req.log.warn({ err }, "Paylabs method label lookup skipped for booking list");
+    }
+
     // Ambil companyName dari usersTable untuk booking perusahaan
     const companyCustomerIds = [...new Set(bookings.map((b) => b.companyCustomerId).filter((id): id is number => id != null))];
     const companyUsers = companyCustomerIds.length > 0
@@ -211,6 +307,54 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
         bPayments.find((p) => p.status === "pending" || p.status === "confirmed") ??
         bPayments[bPayments.length - 1] ??
         null;
+      const transactionPaylabsCode = paylabsMethodByBookingId.get(b.id)?.trim().toLowerCase();
+      const paymentMethodCode = String(payment?.paymentMethod ?? "").trim().toLowerCase();
+      const configuredPaymentCode = paylabsLabels.some((method) =>
+        String(method.id ?? "").trim().toLowerCase() === paymentMethodCode,
+      );
+      const isPaylabsQrisPayment = payment?.paymentProvider === "paylabs" &&
+        (paymentMethodCode === "qris" || paymentMethodCode === "paylabs - qris");
+      const isDirectQrisPayment = payment?.paymentProvider === "mandiri_direct" &&
+        paymentMethodCode === "qris";
+      // Some older Paylabs finalization paths wrote the selected provider code
+      // directly to sport_payments without leaving a usable transaction lookup
+      // in the list query. Prefer the transaction code, then use the stored
+      // code when it matches a configured Paylabs method. A QRIS Direct payment
+      // can still have a historical Paylabs transaction row, but that row must
+      // not overwrite the corrected QRIS Direct label.
+      const canUsePaylabsLegacyLabel = !isDirectQrisPayment &&
+        (payment?.paymentProvider === "paylabs" || configuredPaymentCode || Boolean(transactionPaylabsCode));
+      const legacyPaylabsCode = canUsePaylabsLegacyLabel
+        ? (transactionPaylabsCode
+          ?? (isPaylabsQrisPayment ? "qris" : undefined)
+          ?? (configuredPaymentCode ? paymentMethodCode : undefined))
+        : undefined;
+      const selectedPaylabsLabel = legacyPaylabsCode
+        ? resolvePaylabsDisplayLabel(legacyPaylabsCode, paylabsLabels)
+        : undefined;
+      const paymentForResponse = payment && selectedPaylabsLabel &&
+        canUsePaylabsLegacyLabel
+        ? { ...payment, paymentMethod: selectedPaylabsLabel }
+        : payment;
+      const paymentsForResponse = bPayments.map((p) => {
+        const paymentCode = String(p.paymentMethod ?? "").trim().toLowerCase();
+        const isPaylabsQris = p.paymentProvider === "paylabs" &&
+          (paymentCode === "qris" || paymentCode === "paylabs - qris");
+        const isDirectQris = p.paymentProvider === "mandiri_direct" && paymentCode === "qris";
+        const isPaylabsPayment = p.paymentProvider === "paylabs"
+          || paymentCode === transactionPaylabsCode
+          || paylabsLabels.some((method) =>
+            String(method.id ?? "").trim().toLowerCase() === paymentCode,
+          );
+        const label = isPaylabsPayment && !isDirectQris
+          ? resolvePaylabsDisplayLabel(isPaylabsQris ? "qris" : paymentCode, paylabsLabels)
+          : undefined;
+        return {
+          ...p,
+          paymentMethod: label ?? p.paymentMethod,
+          amount: Number(p.amount),
+        };
+      });
       const grandTotalNum = b.grandTotal != null ? Number(b.grandTotal) : Number(b.totalPrice);
       const dpAmt = Number(b.downPayment ?? 0);
       return {
@@ -230,8 +374,8 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
         isDpPaid: b.isDpPaid ?? false,
         facilityName: facility?.name ?? "",
         facilityCategory: facility?.category ?? "",
-        payment: payment ? { ...payment, amount: Number(payment.amount) } : null,
-        payments: bPayments.map((p) => ({ ...p, amount: Number(p.amount) })),
+        payment: paymentForResponse ? { ...paymentForResponse, amount: Number(paymentForResponse.amount) } : null,
+        payments: paymentsForResponse,
         remainingAmount: (() => {
           const confirmedDp = bPayments
             .filter((p) => p.paymentType === "dp" && p.status === "confirmed")
@@ -515,17 +659,16 @@ router.post("/bookings", async (req, res) => {
         const [apSetting] = await db.select().from(discountSettingsTable)
           .where(and(eq(discountSettingsTable.customerType, "angkasa_pura"), eq(discountSettingsTable.isActive, true)))
           .limit(1);
-        if (apSetting && apSetting.discountPercentage > 0) {
+        if (apSetting && (Number(apSetting.discountAmount ?? 0) > 0 || apSetting.discountPercentage > 0)) {
           // AP Multiguna memakai harga khusus Rp300.000/jam, bukan diskon
           // persentase umum AP. Ini juga harus berlaku pada auto-verifikasi;
           // booking yang auto-verified tidak akan melewati endpoint /verify.
-          if (isMultigunaFacility(facility)) {
-            const specialMultigunaPrice = AP_MULTIGUNA_HOURLY_PRICE * durationHours;
-            const finalPrice = Math.min(basePrice, specialMultigunaPrice);
-            apAutoDiscountAmount = Math.max(0, basePrice - finalPrice);
-          } else {
-            apAutoDiscountAmount = Math.round((basePrice * apSetting.discountPercentage) / 100);
-          }
+          apAutoDiscountAmount = getApDiscount(
+            basePrice,
+            apSetting,
+            isMultigunaFacility(facility),
+            durationHours,
+          ).amount;
           apAutoVerified = true;
         } else {
           // Member valid tapi diskon nonaktif → tetap auto-verified
@@ -1052,8 +1195,13 @@ router.post("/bookings/recurring", async (req, res) => {
         const [apSettingR] = await db.select().from(discountSettingsTable)
           .where(and(eq(discountSettingsTable.customerType, "angkasa_pura"), eq(discountSettingsTable.isActive, true)))
           .limit(1);
-        if (apSettingR && apSettingR.discountPercentage > 0) {
-          apAutoDiscountAmountR = Math.round((basePrice * apSettingR.discountPercentage) / 100);
+        if (apSettingR && (Number(apSettingR.discountAmount ?? 0) > 0 || apSettingR.discountPercentage > 0)) {
+          apAutoDiscountAmountR = getApDiscount(
+            basePrice,
+            apSettingR,
+            isMultigunaFacility(facility),
+            durationHours,
+          ).amount;
           apAutoVerifiedR = true;
         } else {
           apAutoVerifiedR = true;
@@ -1845,9 +1993,10 @@ async function runApVerification(
         ? Number(((discountAmount / basePrice) * 100).toFixed(2))
         : 0;
     } else {
-      discountPct = Number(setting.discountPercentage);
-      discountAmount = Math.round((basePrice * discountPct) / 100);
-      finalPrice = Math.max(0, basePrice - discountAmount);
+      const apDiscount = getApDiscount(basePrice, setting, false, durationHours);
+      discountPct = apDiscount.percentage;
+      discountAmount = apDiscount.amount;
+      finalPrice = apDiscount.finalPrice;
     }
   }
   const taxCalc = await calculateTax(finalPrice, "sport_booking", booking.bookingDate);
@@ -1919,7 +2068,9 @@ async function runApVerification(
 
     for (const sibling of siblings) {
       const siblingBase = sibling.basePrice == null ? Number(sibling.totalPrice) : Number(sibling.basePrice);
-      const siblingDiscount = Math.round((siblingBase * discountPct) / 100);
+      const siblingDiscount = Number(setting?.discountAmount ?? 0) > 0
+        ? Math.min(Number(setting.discountAmount), siblingBase)
+        : Math.round((siblingBase * discountPct) / 100);
       const siblingFinal = siblingBase - siblingDiscount;
       const siblingTaxCalc = await calculateTax(siblingFinal, "sport_booking", sibling.bookingDate ?? undefined);
       await db.update(bookingsTable).set({
@@ -2011,9 +2162,15 @@ router.post("/bookings/:id/fix-discount", adminMiddleware, async (req, res) => {
         ? Number(((discountAmount / basePrice) * 100).toFixed(2))
         : 0;
     } else {
-      discountPercentage = Number(setting?.discountPercentage ?? 20);
-      discountAmount = Math.round((basePrice * discountPercentage) / 100);
-      finalPrice = Math.max(0, basePrice - discountAmount);
+      const apDiscount = getApDiscount(
+        basePrice,
+        setting ?? { discountPercentage: 20, discountAmount: null },
+        false,
+        durationHours,
+      );
+      discountAmount = apDiscount.amount;
+      finalPrice = apDiscount.finalPrice;
+      discountPercentage = apDiscount.percentage;
     }
 
     const taxCalc = await calculateTax(finalPrice, "sport_booking", booking.bookingDate);
@@ -2143,9 +2300,10 @@ router.post("/bookings/groups/:groupRef/reapply-discount", adminMiddleware, asyn
       .where(eq(discountSettingsTable.customerType, "angkasa_pura")).limit(1);
     const discountEnabled = !!setting && setting.isActive;
     const discountPct = discountEnabled ? setting.discountPercentage : 0;
+    const fixedDiscountAmount = discountEnabled ? Number(setting?.discountAmount ?? 0) : 0;
 
-    if (!discountEnabled || discountPct <= 0) {
-      res.status(400).json({ error: "Diskon AP sedang tidak aktif atau 0%" });
+    if (!discountEnabled || (discountPct <= 0 && fixedDiscountAmount <= 0)) {
+      res.status(400).json({ error: "Diskon AP sedang tidak aktif atau belum diatur" });
       return;
     }
 
@@ -2154,7 +2312,9 @@ router.post("/bookings/groups/:groupRef/reapply-discount", adminMiddleware, asyn
 
     for (const booking of allBookings) {
       const basePrice = booking.basePrice == null ? Number(booking.totalPrice) : Number(booking.basePrice);
-      const discountAmount = Math.round((basePrice * discountPct) / 100);
+      const discountAmount = fixedDiscountAmount > 0
+        ? Math.min(fixedDiscountAmount, basePrice)
+        : Math.round((basePrice * discountPct) / 100);
       const finalPrice = basePrice - discountAmount;
       const taxCalc = await calculateTax(finalPrice, "sport_booking", booking.bookingDate ?? undefined);
 

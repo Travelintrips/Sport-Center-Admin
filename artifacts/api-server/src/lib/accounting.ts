@@ -10,6 +10,7 @@ import { eq, and } from "drizzle-orm";
 import pg from "pg";
 import { extractBookingDpp } from "./accountingMath";
 import { ensureCanonicalSportCenterBankMutation } from "./canonicalBankMutation";
+import { ensureCentralPaymentSettlement } from "./centralSettlement";
 
 export { extractBookingDpp } from "./accountingMath";
 
@@ -539,8 +540,8 @@ export async function postSportCenterBookingPayment(
                   ) AS company_id,
                   amount, payment_method, payment_type,
                   payment_provider::text AS payment_provider, bank_account_id,
-                  provider_reference, provider_order_id, merchant_trade_no, provider_trade_no,
-                  paid_at, confirmed_at
+                   provider_reference, provider_order_id, merchant_trade_no, provider_trade_no,
+                   paid_at, confirmed_at, expected_settlement_date
              FROM sport_center.sport_payments
             WHERE id = $1
             FOR SHARE`,
@@ -608,11 +609,17 @@ export async function postSportCenterBookingPayment(
     const providerReference = sourcePayment?.provider_reference ?? input.providerReference ?? null;
     const providerOrderId = sourcePayment?.provider_order_id ?? input.providerOrderId ?? null;
     const merchantTradeNo = sourcePayment?.merchant_trade_no ?? input.merchantTradeNo ?? null;
-    const providerTradeNo = sourcePayment?.provider_trade_no ?? input.providerTradeNo ?? null;
+     const providerTradeNo = sourcePayment?.provider_trade_no ?? input.providerTradeNo ?? null;
+     const settlementDate = sourcePayment?.expected_settlement_date == null
+       ? null
+       : sourcePayment.expected_settlement_date instanceof Date
+         ? sourcePayment.expected_settlement_date.toISOString().slice(0, 10)
+         : String(sourcePayment.expected_settlement_date).slice(0, 10);
     const paymentType = sourcePayment?.payment_type ?? mirroredPayment.payment_type ?? input.paymentType ?? "full_payment";
     const occurredAt = input.paidAt instanceof Date
       ? input.paidAt.toISOString()
       : input.paidAt ?? new Date().toISOString();
+     const journalDate = occurredAt.slice(0, 10);
 
     if (mirroredPayment.posting_status === "posted" && mirroredPayment.entry_id) {
       const postedEntry = await client.query(
@@ -636,7 +643,7 @@ export async function postSportCenterBookingPayment(
           (canonicalMethod.toUpperCase() !== "QRIS" ||
             String(posted.payment_provider ?? "").trim().toLowerCase() === canonicalProvider)) {
         if (isCentralFinanceMode()) {
-          await ensureCanonicalSportCenterBankMutation(client, {
+          const canonicalBankMutationId = await ensureCanonicalSportCenterBankMutation(client, {
             paymentId: Number(sourcePaymentId),
             companyId,
             amount: requestedAmount,
@@ -648,6 +655,21 @@ export async function postSportCenterBookingPayment(
             orderNumber: input.orderNumber,
             journalEntryId: Number(posted.id),
             occurredAt,
+          });
+          await ensureCentralPaymentSettlement(client, {
+            paymentId: Number(sourcePaymentId),
+            bookingId: input.bookingId,
+            orderNumber: input.orderNumber,
+            companyId,
+            providerCode: canonicalProvider,
+            paymentMethod: canonicalMethod,
+            paymentType,
+            bankAccountId,
+            settlementDate,
+            journalDate,
+            grossAmount: requestedAmount,
+            ppnRate: Number(input.ppnRate ?? 0),
+            canonicalBankMutationId,
           });
         }
         if (ownsTransaction) await client.query("COMMIT");
@@ -728,7 +750,7 @@ export async function postSportCenterBookingPayment(
         [mirroredPayment.id, Number(existing.id), input.sourcePaymentId ?? null],
       );
       if (isCentralFinanceMode()) {
-        await ensureCanonicalSportCenterBankMutation(client, {
+         const canonicalBankMutationId = await ensureCanonicalSportCenterBankMutation(client, {
           paymentId: Number(sourcePaymentId),
           companyId,
           amount: requestedAmount,
@@ -740,7 +762,22 @@ export async function postSportCenterBookingPayment(
           orderNumber: input.orderNumber,
           journalEntryId: Number(existing.id),
           occurredAt,
-        });
+         });
+         await ensureCentralPaymentSettlement(client, {
+           paymentId: Number(sourcePaymentId),
+           bookingId: input.bookingId,
+           orderNumber: input.orderNumber,
+           companyId,
+           providerCode: canonicalProvider,
+           paymentMethod: canonicalMethod,
+           paymentType,
+           bankAccountId,
+           settlementDate,
+           journalDate: input.paidAt ? new Date(input.paidAt).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
+           grossAmount: requestedAmount,
+           ppnRate: Number(input.ppnRate ?? 0),
+           canonicalBankMutationId,
+         });
       }
       if (ownsTransaction) await client.query("COMMIT");
       return {
@@ -760,9 +797,6 @@ export async function postSportCenterBookingPayment(
       ? Math.round((grossAmount * rate) / (100 + rate))
       : 0;
     const dpp = grossAmount - ppnAmount;
-    const journalDate = input.paidAt
-      ? new Date(input.paidAt).toISOString().slice(0, 10)
-      : new Date().toISOString().slice(0, 10);
     const year = new Date(journalDate).getFullYear();
     const entryNumber = await nextPublicEntryNumber(client, year);
     const ids = await getPublicIdsForQuery(client);
@@ -904,7 +938,7 @@ export async function postSportCenterBookingPayment(
       [entryId],
     );
     if (isCentralFinanceMode()) {
-      await ensureCanonicalSportCenterBankMutation(client, {
+       const canonicalBankMutationId = await ensureCanonicalSportCenterBankMutation(client, {
         paymentId: Number(sourcePaymentId),
         companyId,
         amount: grossAmount,
@@ -916,7 +950,22 @@ export async function postSportCenterBookingPayment(
         orderNumber: input.orderNumber,
         journalEntryId: entryId,
         occurredAt,
-      });
+       });
+       await ensureCentralPaymentSettlement(client, {
+         paymentId: Number(sourcePaymentId),
+         bookingId: input.bookingId,
+         orderNumber: input.orderNumber,
+         companyId,
+         providerCode: canonicalProvider,
+         paymentMethod: canonicalMethod,
+         paymentType,
+         bankAccountId,
+         settlementDate,
+         journalDate,
+         grossAmount,
+         ppnRate: rate,
+         canonicalBankMutationId,
+       });
     }
     await client.query(
       `UPDATE public.sport_payments

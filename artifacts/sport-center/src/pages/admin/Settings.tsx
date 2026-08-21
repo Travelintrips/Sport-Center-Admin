@@ -17,6 +17,7 @@ function ApDiscountCard() {
   const { toast } = useToast();
   const { data: discountSettings, isLoading } = useListDiscountSettings();
   const [percentage, setPercentage] = useState("");
+  const [amount, setAmount] = useState("");
   const [isActive, setIsActive] = useState(true);
 
   const ap = (discountSettings || []).find((d) => d.customerType === "angkasa_pura");
@@ -24,6 +25,7 @@ function ApDiscountCard() {
   useEffect(() => {
     if (ap) {
       setPercentage(String(ap.discountPercentage));
+      setAmount(ap.discountAmount == null ? "" : String(ap.discountAmount));
       setIsActive(ap.isActive);
     }
   }, [ap]);
@@ -39,12 +41,13 @@ function ApDiscountCard() {
   });
 
   const handleSave = () => {
-    const pct = Number(percentage);
-    if (Number.isNaN(pct) || pct < 0 || pct > 100) {
+    const pct = Number(percentage || 0);
+    const fixedAmount = amount === "" ? null : Number(amount);
+    if (Number.isNaN(pct) || pct < 0 || pct > 100 || (fixedAmount !== null && (!Number.isFinite(fixedAmount) || fixedAmount < 0 || !Number.isInteger(fixedAmount)))) {
       toast({ title: "Persentase harus 0–100", variant: "destructive" });
       return;
     }
-    updateMutation.mutate({ customerType: "angkasa_pura", data: { discountPercentage: pct, isActive } });
+    updateMutation.mutate({ customerType: "angkasa_pura", data: { discountPercentage: pct, discountAmount: fixedAmount, isActive } });
   };
 
   return (
@@ -57,12 +60,12 @@ function ApDiscountCard() {
       </CardHeader>
       <CardContent className="space-y-4">
         <p className="text-sm text-muted-foreground">
-          Persentase diskon yang diterapkan setelah ID Card karyawan Angkasa Pura terverifikasi oleh admin.
+           Isi nominal tetap bila ingin memakai nominal manual; jika kosong, sistem memakai persentase.
         </p>
         {isLoading ? (
           <Skeleton className="h-10 w-full" />
         ) : (
-          <div className="flex flex-col sm:flex-row gap-4 sm:items-end">
+           <div className="flex flex-col sm:flex-row gap-4 sm:items-end">
             <div className="space-y-2 flex-1">
               <Label>Persentase Diskon (%)</Label>
               <Input
@@ -72,6 +75,17 @@ function ApDiscountCard() {
                 value={percentage}
                 onChange={(e) => setPercentage(e.target.value)}
                 placeholder="20"
+              />
+            </div>
+            <div className="space-y-2 flex-1">
+              <Label>Nominal Diskon Tetap (Rp)</Label>
+              <Input
+                type="number"
+                min={0}
+                step={1000}
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                placeholder="Kosongkan untuk persen"
               />
             </div>
             <div className="flex items-center justify-between gap-3 rounded-lg border p-3 sm:w-48">

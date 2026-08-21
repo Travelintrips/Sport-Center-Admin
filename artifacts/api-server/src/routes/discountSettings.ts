@@ -29,14 +29,21 @@ router.get("/discount-settings/:customerType", async (req, res) => {
 
 router.patch("/discount-settings/:customerType", adminMiddleware, async (req, res) => {
   try {
-    const { discountPercentage, description, isActive } = req.body;
-    if (discountPercentage === undefined) {
-      res.status(400).json({ error: "Persentase diskon wajib diisi" });
+    const { discountPercentage, discountAmount, description, isActive } = req.body;
+    if (discountPercentage === undefined && discountAmount === undefined) {
+      res.status(400).json({ error: "Persentase atau nominal diskon wajib diisi" });
       return;
     }
-    const pct = Number(discountPercentage);
-    if (Number.isNaN(pct) || pct < 0 || pct > 100) {
+    const pct = discountPercentage === undefined ? 0 : Number(discountPercentage);
+    const amount = discountAmount === undefined || discountAmount === null || discountAmount === ""
+      ? null
+      : Number(discountAmount);
+    if (!Number.isFinite(pct) || pct < 0 || pct > 100) {
       res.status(400).json({ error: "Persentase harus 0–100" });
+      return;
+    }
+    if (amount !== null && (!Number.isFinite(amount) || amount < 0 || !Number.isInteger(amount))) {
+      res.status(400).json({ error: "Nominal diskon harus berupa angka bulat 0 atau lebih" });
       return;
     }
 
@@ -45,7 +52,7 @@ router.patch("/discount-settings/:customerType", adminMiddleware, async (req, re
       .where(eq(discountSettingsTable.customerType, customerType)).limit(1);
 
     if (existing) {
-      const patch: Record<string, unknown> = { discountPercentage: pct };
+      const patch: Record<string, unknown> = { discountPercentage: pct, discountAmount: amount };
       if (description !== undefined) patch.description = description;
       if (isActive !== undefined) patch.isActive = !!isActive;
       await db.update(discountSettingsTable).set(patch)
@@ -54,6 +61,7 @@ router.patch("/discount-settings/:customerType", adminMiddleware, async (req, re
       await db.insert(discountSettingsTable).values({
         customerType,
         discountPercentage: pct,
+        discountAmount: amount,
         description: description ?? null,
         isActive: isActive === undefined ? true : !!isActive,
       });
