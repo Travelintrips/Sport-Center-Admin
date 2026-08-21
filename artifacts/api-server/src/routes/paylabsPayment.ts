@@ -215,6 +215,57 @@ function resolvePaylabsPaymentMethod(rawMethod?: string, rawChannel?: string): s
   return rawMethod ?? rawChannel ?? "Transfer Bank";
 }
 
+/**
+ * Return the customer-facing Paylabs method name that was configured by the
+ * admin. The transaction table stores the stable provider code (for example
+ * "bri"), while sport_payments.payment_method is also used directly by the
+ * admin booking table and accounting UI. Keeping the configured name here
+ * prevents that UI from losing the selected VA bank.
+ *
+ * The fallback map is intentionally kept for older environments where the
+ * settings row predates paymentMethodsConfig.
+ */
+async function resolveStoredPaylabsPaymentMethod(tx: any, rawMethod?: string): Promise<string> {
+  const raw = String(rawMethod ?? "").trim();
+  const normalized = raw.toLowerCase();
+
+  try {
+    const [settings] = await tx
+      .select({ paymentMethodsConfig: paylabsSettingsTable.paymentMethodsConfig })
+      .from(paylabsSettingsTable)
+      .limit(1);
+    const configured = Array.isArray(settings?.paymentMethodsConfig)
+      ? settings.paymentMethodsConfig as Array<{ id?: unknown; name?: unknown }>
+      : [];
+    const configuredMethod = configured.find(
+      (method) => String(method?.id ?? "").trim().toLowerCase() === normalized
+        && typeof method?.name === "string"
+        && method.name.trim(),
+    );
+    if (configuredMethod?.name) return configuredMethod.name.trim();
+  } catch (err) {
+    logger.warn({ err, rawMethod: raw }, "[paylabs] unable to load payment method label");
+  }
+
+  const fallbackLabels: Record<string, string> = {
+    qris: "Paylabs - QRIS",
+    bri: "Paylabs - BRI Virtual Account",
+    bca: "Paylabs - BCA Virtual Account",
+    bni: "Paylabs - BNI VA",
+    mandiri: "Paylabs - Mandiri VA",
+    permata: "Paylabs - Permata VA",
+    cimb: "Paylabs - CIMB VA",
+    btn: "Paylabs - BTN VA",
+    danamon: "Paylabs - Danamon VA",
+    maybank: "Paylabs - Maybank VA",
+    bsi: "Paylabs - BSI VA",
+    muamalat: "Paylabs - Muamalat Virtual Account",
+    sinarmas: "Paylabs - Sinarmas VA",
+    ina: "Paylabs - INA VA",
+  };
+  return fallbackLabels[normalized] ?? resolvePaylabsPaymentMethod(raw);
+}
+
 async function finalizePayment(opts: FinalizePaymentOptions): Promise<FinalizePaymentResult> {
   const {
     merchantTradeNo, paylabsTradeNo, providerStatus,
@@ -317,9 +368,9 @@ async function finalizePayment(opts: FinalizePaymentOptions): Promise<FinalizePa
           orderNumber: String(txRow.order_number),
           previousPaymentStatus,
           previousBookingStatus: String(booking.status ?? ""),
-          paymentMethod: existingPayment?.payment_method
-            ? String(existingPayment.payment_method)
-            : resolvePaylabsPaymentMethod(String(txRow.payment_method ?? "")),
+            paymentMethod: existingPayment?.payment_method
+              ? String(existingPayment.payment_method)
+              : await resolveStoredPaylabsPaymentMethod(tx, String(txRow.payment_method ?? "")),
         };
       }
 
@@ -413,7 +464,7 @@ async function finalizePayment(opts: FinalizePaymentOptions): Promise<FinalizePa
         amount     : String(amountPaid),
         proofUrl   : `paylabs:${paylabsTradeNo}`,
         notes      : `Auto-confirmed via Paylabs ${source} (${merchantTradeNo}) | reason: ${reason ?? "payment_notification"}`,
-        paymentMethod: resolvePaylabsPaymentMethod(String(txRow.payment_method ?? "")),
+        paymentMethod: await resolveStoredPaylabsPaymentMethod(tx, String(txRow.payment_method ?? "")),
         paymentProvider: "paylabs",
         providerName: normalizeProviderName("paylabs"),
         providerReference: (opts.providerReference ?? paylabsTradeNo) || null,
@@ -461,7 +512,7 @@ async function finalizePayment(opts: FinalizePaymentOptions): Promise<FinalizePa
         "[paylabs] commit success",
       );
 
-      const resolvedMethod = resolvePaylabsPaymentMethod(String(txRow.payment_method ?? ""));
+      const resolvedMethod = await resolveStoredPaylabsPaymentMethod(tx, String(txRow.payment_method ?? ""));
 
       return {
         outcome: "confirmed" as const,
