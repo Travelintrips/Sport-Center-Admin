@@ -78,7 +78,7 @@ router.post("/bookings/:id/extend", async (req, res) => {
     const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, bookingId)).limit(1);
     if (!booking) { res.status(404).json({ error: "Booking tidak ditemukan" }); return; }
 
-    if (!["confirmed", "paid", "waiting_confirmation"].includes(booking.status)) {
+    if (!["pending_payment", "confirmed", "paid", "waiting_confirmation"].includes(booking.status)) {
       res.status(400).json({ error: `Booking berstatus '${booking.status}' tidak dapat diperpanjang` });
       return;
     }

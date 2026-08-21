@@ -1096,16 +1096,9 @@ export default function BookingDetail() {
                   </a>
                 </div>
 
-                {/* Reschedule + Tambah Waktu — only for confirmed */}
+                {/* Reschedule — only for confirmed */}
                 {booking.status === "confirmed" && (
                   <div className="border-t border-green-200 pt-4 mt-2 space-y-2">
-                    <Button
-                      variant="outline"
-                      className="w-full border-orange-300 text-orange-600 hover:bg-orange-50 gap-2"
-                      onClick={() => setShowExtend(true)}
-                    >
-                      <Clock size={16} /> {t("Tambah Waktu", "Extend Time")}
-                    </Button>
                     <Button
                       variant="outline"
                       className="w-full border-orange-300 text-orange-600 hover:bg-orange-50 gap-2"
@@ -1165,6 +1158,35 @@ export default function BookingDetail() {
                     )}
                   </div>
                 )}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Tambah waktu — available before payment and while awaiting confirmation */}
+          {["pending_payment", "waiting_confirmation", "paid"].includes(booking.status) && (
+            <Card className="border-orange-200 bg-orange-50/50">
+              <CardContent className="p-5">
+                <div className="flex items-start gap-3">
+                  <div className="w-10 h-10 rounded-full bg-orange-100 flex items-center justify-center shrink-0">
+                    <Clock size={20} className="text-orange-600" />
+                  </div>
+                  <div className="flex-1">
+                    <h3 className="font-bold text-orange-900">{t("Ingin tambah waktu bermain?", "Need more playing time?")}</h3>
+                    <p className="text-sm text-orange-700 mt-1">
+                      {t(
+                        "Ajukan tambahan durasi sebelum pembayaran. Perpanjangan akan dicek ketersediaannya dan disetujui admin.",
+                        "Request extra time before payment. Availability will be checked and an admin will review it."
+                      )}
+                    </p>
+                    <Button
+                      variant="outline"
+                      className="w-full mt-3 border-orange-300 text-orange-700 hover:bg-orange-100 gap-2"
+                      onClick={() => setShowExtend(true)}
+                    >
+                      <Clock size={16} /> {t("Tambah Waktu Booking", "Extend Booking Time")}
+                    </Button>
+                  </div>
+                </div>
               </CardContent>
             </Card>
           )}
