@@ -1,0 +1,251 @@
+FINAL PRODUCTION ACCESS VERIFICATION — DO NOT TOUCH DATA
+
+DEV STATUS:
+FULLY VERIFIED.
+
+Production code readiness:
+PASS.
+
+Do NOT repeat DEV audit.
+
+The only remaining gap is:
+PRODUCTION DATA AUDIT = BLOCKED
+
+==================================================
+TARGET
+==================================================
+
+Establish a verifiable production-scoped runtime identity using the existing Google Cloud Secret Manager architecture.
+
+DO NOT:
+- use DEV as PROD
+- use DATABASE_URL fallback
+- use production credentials in source code
+- print secrets
+- modify production data
+- run migrations
+- run repair scripts
+- create/update/delete production records
+
+==================================================
+1. DISCOVER EXISTING PRODUCTION DEPLOYMENT
+==================================================
+
+Audit repository and configuration for the actual production deployment.
+
+Identify:
+
+- GCP project
+- production runtime service account
+- Secret Manager secret names
+- production secret loader
+- production environment marker
+- deployment configuration
+- production database configuration
+- production storage configuration
+
+Use metadata only.
+
+Never print secret values.
+
+==================================================
+2. VERIFY IAM
+==================================================
+
+Determine whether the current runtime identity has permission to:
+
+- access Secret Manager metadata
+- access the required production secret version
+- establish the production database connection
+
+Use least privilege.
+
+DO NOT grant Owner/Editor permissions.
+
+DO NOT change IAM if it requires owner-level external authorization.
+
+If permission is missing:
+
+report exactly:
+
+MISSING PERMISSION
+REQUIRED IDENTITY
+REQUIRED SECRET
+REQUIRED MINIMUM ROLE
+
+Do not expose secret values.
+
+==================================================
+3. VERIFY PRODUCTION DATABASE IDENTITY
+==================================================
+
+If secret access succeeds:
+
+load credential through the official loader.
+
+Open a READ-ONLY connection.
+
+Verify:
+
+- host/project identity
+- database identity
+- environment identity
+- schema
+- production marker if available
+
+Do not expose credentials.
+
+Do not execute mutations.
+
+If identity cannot be proven:
+STOP.
+
+==================================================
+4. PRODUCTION READ-ONLY AUDIT
+==================================================
+
+ONLY if production identity is proven, run:
+
+A. booking lifecycle
+B. payments
+C. corporate billing
+D. group
+E. event
+F. recurring
+G. reschedule
+H. refunds
+I. expenses
+J. accounting journals
+K. Central Finance linkage
+L. QRIS settlement
+M. reconciliation
+N. tax/invoices
+O. WhatsApp authorization
+
+Find:
+
+- duplicate transactions
+- orphan transactions
+- premature completion
+- amount mismatch
+- duplicate journals
+- debit/credit imbalance
+- duplicate settlement
+- duplicate reconciliation
+- company isolation violation
+- tax mismatch
+
+READ ONLY.
+
+==================================================
+5. CLASSIFY BEFORE REMEDIATION
+==================================================
+
+For every anomaly:
+
+LEGITIMATE
+EXPECTED
+HISTORICAL
+TEST
+FALSE POSITIVE
+REAL BUG
+REAL DATA ANOMALY
+
+Do not modify historical financial data merely because it differs from current logic.
+
+==================================================
+6. SOURCE FIX
+==================================================
+
+If the production anomaly is caused by a current code defect:
+
+FIX SOURCE
+→ TEST
+→ BUILD
+→ VERIFY
+
+Do not repair the production row blindly.
+
+==================================================
+7. DATA REMEDIATION
+==================================================
+
+Only if a production data anomaly is:
+
+- deterministic
+- clearly incorrect
+- safe
+- reversible
+- financially understood
+
+then prepare a targeted transactional remediation.
+
+Do NOT automatically execute destructive financial repair.
+
+No:
+- DELETE journal
+- force balance
+- duplicate posting
+- rewrite historical invoice
+- recreate settlement
+
+==================================================
+8. FINAL CHECK
+==================================================
+
+Production audit must prove:
+
+BOOKING
+→ PAYMENT
+→ CENTRAL FINANCE
+→ JOURNAL
+→ SETTLEMENT
+→ RECONCILIATION
+
+has no unexplained duplicate or orphan transactions.
+
+Accounting:
+
+TOTAL DEBIT = TOTAL CREDIT
+
+Booking:
+
+CHECK-IN + END TIME
+→ COMPLETED
+
+Payment/invoice:
+
+PAID
+≠
+COMPLETED
+
+Corporate:
+
+AUTHORIZED COMPANY
+→ CORPORATE BOOKING
+→ CORPORATE INVOICE
+
+==================================================
+FINAL STATUS
+==================================================
+
+If production access cannot be verified:
+
+BLOCKED — PRODUCTION ACCESS
+
+If production access is verified but anomalies exist:
+→ FIX safe source issues
+→ re-audit
+→ continue.
+
+If production audit is clean:
+
+PRODUCTION DATA AUDIT PASS
+CENTRAL FINANCE SAFE
+PRODUCTION READY
+
+Do not report PASS without production evidence.
+
+Do not ask for confirmation.
+
+Proceed automatically through every safe step.
