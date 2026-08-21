@@ -7,8 +7,9 @@
  *     available on App Engine via the runtime service account.
  *   - Reads named secrets from Google Secret Manager at startup and injects
  *     them into process.env so the rest of the app consumes them normally.
- *   - Only runs in production (NODE_ENV=production) and only when the
- *     GOOGLE_CLOUD_PROJECT env var (set automatically by GAE) is present.
+ *   - Production uses the GAE runtime service account and GOOGLE_CLOUD_PROJECT.
+ *   - Development may use the explicitly provisioned DEV bootstrap credential
+ *     and project/secret identifiers. It never reads a production identifier.
  *   - Production has no environment-variable fallback: Secret Manager failure
  *     is fatal and the bootstrap refuses to load the application.
  *   - NEVER logs secret values.
@@ -142,4 +143,73 @@ export async function loadSecretsFromGSM(): Promise<{
     if (!process.env[required]) fatal.push(required);
   }
   return { loaded, skipped, failed, fatal };
+}
+
+/**
+ * Load the explicitly configured development database URL.
+ *
+ * Replit development does not receive SUPABASE_DATABASE_URL_DEV directly.
+ * Instead, the existing DEV bootstrap credential reads one named Secret
+ * Manager version at startup. Missing configuration or IAM access is fatal:
+ * there is intentionally no DATABASE_URL, production URL, or anonymous
+ * fallback.
+ */
+export async function loadDevDatabaseSecretFromGSM(): Promise<{
+  loaded: boolean;
+  fatal: string[];
+}> {
+  const fatal: string[] = [];
+
+  if (process.env.NODE_ENV !== "development") {
+    return { loaded: false, fatal };
+  }
+
+  if (process.env.SUPABASE_DATABASE_URL_DEV) {
+    return { loaded: true, fatal };
+  }
+
+  const bootstrapJson = process.env.GCP_SECRET_MANAGER_BOOTSTRAP_JSON_DEV;
+  const projectId = process.env.GCP_PROJECT_ID_DEV;
+  const secretId = process.env.GCP_SECRET_ID_DEV;
+
+  if (typeof bootstrapJson !== "string") fatal.push("GCP_SECRET_MANAGER_BOOTSTRAP_JSON_DEV");
+  if (typeof projectId !== "string") fatal.push("GCP_PROJECT_ID_DEV");
+  if (typeof secretId !== "string") fatal.push("GCP_SECRET_ID_DEV");
+  if (fatal.length > 0) return { loaded: false, fatal };
+  if (typeof bootstrapJson !== "string" || typeof projectId !== "string" || typeof secretId !== "string") {
+    return { loaded: false, fatal: ["DEV Secret Manager configuration is invalid"] };
+  }
+
+  try {
+    const { GoogleAuth } = await import("google-auth-library");
+    const credentials = JSON.parse(bootstrapJson);
+    const auth = new GoogleAuth({
+      credentials,
+      scopes: ["https://www.googleapis.com/auth/cloud-platform"],
+    });
+    const client = await auth.getClient();
+    const response = await client.request<{ payload?: { data?: string | Buffer } }>({
+      url:
+        `https://secretmanager.googleapis.com/v1/projects/${encodeURIComponent(projectId)}` +
+        `/secrets/${encodeURIComponent(secretId)}/versions/latest:access`,
+    });
+    const encoded = response.data?.payload?.data;
+    if (!encoded) {
+      fatal.push("SUPABASE_DATABASE_URL_DEV (empty Secret Manager payload)");
+      return { loaded: false, fatal };
+    }
+
+    const value = Buffer.isBuffer(encoded)
+      ? encoded.toString("utf8")
+      : Buffer.from(encoded, "base64").toString("utf8");
+    if (!value.trim()) {
+      fatal.push("SUPABASE_DATABASE_URL_DEV (empty Secret Manager value)");
+      return { loaded: false, fatal };
+    }
+    process.env.SUPABASE_DATABASE_URL_DEV = value.trim();
+    return { loaded: true, fatal };
+  } catch {
+    fatal.push("SUPABASE_DATABASE_URL_DEV (DEV Secret Manager access failed)");
+    return { loaded: false, fatal };
+  }
 }

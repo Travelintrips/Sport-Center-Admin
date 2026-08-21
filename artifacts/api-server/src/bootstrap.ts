@@ -1,4 +1,4 @@
-import { loadSecretsFromGSM } from "./lib/secretLoader";
+import { loadDevDatabaseSecretFromGSM, loadSecretsFromGSM } from "./lib/secretLoader";
 
 // This file is the only runtime entry point. The application is imported
 // dynamically after Secret Manager has populated production env, so modules
@@ -16,6 +16,12 @@ if (result.loaded.length > 0) {
 
 if (result.failed.length > 0) {
   console.warn("[secretLoader] Optional secrets unavailable:", result.failed);
+}
+
+const devResult = await loadDevDatabaseSecretFromGSM();
+if (devResult.fatal.length > 0) {
+  console.error("[secretLoader] Development database bootstrap failed:", devResult.fatal);
+  process.exit(1);
 }
 
 await import("./index");
