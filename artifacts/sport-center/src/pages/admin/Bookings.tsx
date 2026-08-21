@@ -217,7 +217,9 @@ function PaymentMethodSelect({
   const storedValue = String(payment.paymentMethod ?? "Transfer Bank");
   const storedCode = storedValue.trim().toLowerCase();
   const configuredOption = options.find(
-    (option) => option.providerCode?.trim().toLowerCase() === storedCode,
+    (option) =>
+      option.providerCode?.trim().toLowerCase() === storedCode &&
+      (payment.paymentProvider === "paylabs" || !option.providerCode),
   );
   const currentValue = configuredOption?.value ?? storedValue;
   const mergedOptions = options.some((option) => option.value === currentValue)
@@ -2201,9 +2203,7 @@ export default function AdminBookings() {
 
     for (const method of configured) {
       if (!method?.active || typeof method.name !== "string" || !method.name.trim()) continue;
-      // QRIS is already in the static list above — skip duplicates from Paylabs config.
       const id = String(method.id ?? "").trim().toLowerCase();
-      if (id === "qris") continue;
       const label = method.name.trim();
       if (!options.some((option) => option.value === label)) {
         options.push({ value: label, label, providerCode: id });
