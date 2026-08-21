@@ -910,7 +910,7 @@ async function runStartupMigrations() {
       logger.warn({ err, stmt: stmt.slice(0, 80) }, "Startup migration warning (non-fatal)");
     }
   }
-  logger.info("Startup migrations OK");
+  logger.info("Development startup migrations OK");
 }
 
 // env validation already ran above (step 2) — no-op placeholder kept for clarity
@@ -1121,13 +1121,16 @@ app.listen(port, (err) => {
   }
 
   logger.info({ port }, "Server listening");
-  initBizportalTables().catch(() => {});
+  if (process.env.NODE_ENV !== "production") {
+    initBizportalTables().catch(() => {});
+    ensureDefaultTemplates().catch(() => {});
+  } else {
+    logger.info("Production schema provisioning is external; skipping BizPortal setup and template seeding");
+  }
   startScheduler();
-  ensureDefaultTemplates().catch(() => {});
 
-  // Local development uses Replit PostgreSQL and the local filesystem fallback.
-  // Do not make the API startup depend on an unreachable isolated Supabase
-  // Storage project when DATABASE_URL is present.
+  // Local development can use the configured local database without requiring
+  // Supabase Storage. Production always verifies its remote storage only.
   if (process.env.NODE_ENV === "development" && process.env.DATABASE_URL) {
     logger.info("Skipping Supabase Storage bucket validation for local development");
   } else {
@@ -1138,9 +1141,13 @@ app.listen(port, (err) => {
     });
   }
 
-  // Run DB migrations and seed after the port is bound so a slow/paused DB
-  // never blocks the deployment health check.
-  runStartupMigrations()
-    .then(() => runStartupSeed())
-    .catch((err) => logger.error({ err }, "Background startup task error"));
+  if (process.env.NODE_ENV !== "production") {
+    // Development-only schema/data setup. Production schema provisioning is
+    // handled externally and must never be performed by application startup.
+    runStartupMigrations()
+      .then(() => runStartupSeed())
+      .catch((err) => logger.error({ err }, "Background development startup task error"));
+  } else {
+    logger.info("Production startup migrations and seed disabled");
+  }
 });
