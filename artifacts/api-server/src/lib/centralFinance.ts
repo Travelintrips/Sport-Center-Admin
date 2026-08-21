@@ -52,7 +52,7 @@ function isDeterministicConfigError(message: string): boolean {
   return /COMPANY_|PROVIDER_MISSING|PAYMENT_METHOD_MISSING|CONFIG_|TAX_|COA_|AMBIGUOUS|INACTIVE/.test(message);
 }
 
-async function resolveConfig(pool: pg.Pool, event: FinanceEvent): Promise<ConfigResult> {
+async function resolveConfig(pool: pg.Pool | pg.PoolClient, event: FinanceEvent): Promise<ConfigResult> {
   if (event.companyId == null) throw new Error("COMPANY_MISSING");
 
   const company = await pool.query(
@@ -102,7 +102,7 @@ async function resolveConfig(pool: pg.Pool, event: FinanceEvent): Promise<Config
   };
 }
 
-async function readEvent(pool: pg.Pool, outboxId: number, paymentId: number): Promise<FinanceEvent | null> {
+async function readEvent(pool: pg.Pool | pg.PoolClient, outboxId: number, paymentId: number): Promise<FinanceEvent | null> {
   const result = await pool.query(
     `SELECT o.id AS outbox_id, o.payment_id, o.booking_id, o.company_id, o.amount,
             o.payment_type, o.payment_method, o.payment_provider,
@@ -134,7 +134,7 @@ async function readEvent(pool: pg.Pool, outboxId: number, paymentId: number): Pr
   };
 }
 
-async function markFailure(pool: pg.Pool, event: FinanceEvent, error: unknown): Promise<"retry" | "manual_review"> {
+async function markFailure(pool: pg.Pool | pg.PoolClient, event: FinanceEvent, error: unknown): Promise<"retry" | "manual_review"> {
   const message = String((error as { message?: string })?.message ?? error).slice(0, 1000);
   const status = isDeterministicConfigError(message) ? "manual_review" : "failed";
   await pool.query(
@@ -160,7 +160,7 @@ async function markFailure(pool: pg.Pool, event: FinanceEvent, error: unknown): 
   return status === "failed" ? "retry" : "manual_review";
 }
 
-async function processEvent(pool: pg.Pool, event: FinanceEvent): Promise<boolean> {
+async function processEvent(pool: pg.Pool | pg.PoolClient, event: FinanceEvent, transactionClient?: pg.PoolClient): Promise<boolean> {
   const config = await resolveConfig(pool, event);
   const posting: SportCenterBookingPaymentPosting = {
     paymentNumber: `SCPAY-SC-${event.paymentId}`,
@@ -178,7 +178,7 @@ async function processEvent(pool: pg.Pool, event: FinanceEvent): Promise<boolean
     providerReference: event.providerReference,
     providerOrderId: event.providerOrderId,
   };
-  const result = await postSportCenterBookingPayment(posting);
+  const result = await postSportCenterBookingPayment(posting, transactionClient);
   await pool.query(
     `UPDATE sport_center.payment_accounting_outbox
         SET status = 'posted', processed_at = NOW(), locked_at = NULL,
@@ -196,7 +196,7 @@ async function processEvent(pool: pg.Pool, event: FinanceEvent): Promise<boolean
   return !result.alreadyPosted;
 }
 
-export async function processCentralFinance(): Promise<{
+export async function processCentralFinance(transactionClient?: pg.PoolClient): Promise<{
   claimed: number;
   posted: number;
   retried: number;
@@ -207,7 +207,8 @@ export async function processCentralFinance(): Promise<{
     return { claimed: 0, posted: 0, retried: 0, manualReview: 0 };
   }
 
-  await pool.query(
+  const queryClient = transactionClient ?? pool;
+  await queryClient.query(
     `UPDATE sport_center.payment_accounting_outbox o
         SET booking_id = COALESCE(o.booking_id, sp.booking_id),
             company_id = COALESCE(o.company_id, sp.company_id),
@@ -225,14 +226,14 @@ export async function processCentralFinance(): Promise<{
         AND (o.booking_id IS NULL OR o.amount IS NULL OR o.payment_method IS NULL)`,
   );
 
-  await pool.query(
+  await queryClient.query(
     `UPDATE sport_center.payment_accounting_outbox
         SET correlation_id = 'sc_payment_' || payment_id::text,
             updated_at = NOW()
       WHERE correlation_id IS NULL`,
   );
 
-  await pool.query(
+  await queryClient.query(
     `INSERT INTO sport_center.central_finance_processing
        (source_project, source_payment_id, event_type, correlation_id)
      SELECT source_project, payment_id, event_type,
@@ -242,7 +243,8 @@ export async function processCentralFinance(): Promise<{
      ON CONFLICT (source_project, source_payment_id, event_type) DO NOTHING`,
   );
 
-  const client = await pool.connect();
+  const ownsTransaction = !transactionClient;
+  const client = transactionClient ?? await pool.connect();
   let claimed: Array<{
     id: number;
     outboxId: number;
@@ -250,7 +252,7 @@ export async function processCentralFinance(): Promise<{
     correlationId: string;
   }> = [];
   try {
-    await client.query("BEGIN");
+    if (ownsTransaction) await client.query("BEGIN");
     const result = await client.query(
        `SELECT c.id, o.id AS outbox_id, c.source_payment_id, c.correlation_id
          FROM sport_center.central_finance_processing c
@@ -291,24 +293,25 @@ export async function processCentralFinance(): Promise<{
         [claimed.map((row) => row.correlationId)],
       );
     }
-    await client.query("COMMIT");
+    if (ownsTransaction) await client.query("COMMIT");
   } catch (error) {
-    await client.query("ROLLBACK").catch(() => {});
+    if (ownsTransaction) await client.query("ROLLBACK").catch(() => {});
     throw error;
   } finally {
-    client.release();
+    if (ownsTransaction) client.release();
   }
 
   let posted = 0;
   let retried = 0;
   let manualReview = 0;
   for (const claim of claimed) {
-    const event = await readEvent(pool, claim.outboxId, claim.paymentId);
+    const event = await readEvent(queryClient, claim.outboxId, claim.paymentId);
     if (!event) continue;
     try {
-      if (await processEvent(pool, event)) posted++;
+        if (await processEvent(queryClient, event, transactionClient)) posted++;
     } catch (error) {
-      const result = await markFailure(pool, event, error);
+      if (transactionClient) throw error;
+       const result = await markFailure(queryClient, event, error);
       if (result === "retry") retried++;
       else manualReview++;
     }

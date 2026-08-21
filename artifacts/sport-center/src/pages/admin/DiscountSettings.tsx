@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
-import { Percent, Save, Plane } from "lucide-react";
+import { Percent, Save, Plane, Banknote } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getToken } from "@/lib/auth";
 
@@ -17,6 +17,7 @@ interface DiscountSetting {
   id: number;
   customerType: string;
   discountPercentage: number;
+  discountAmount: number | null;
   description: string | null;
   isActive: boolean;
   updatedAt: string;
@@ -42,21 +43,23 @@ export default function AdminDiscountSettings() {
     },
   });
 
-  const [form, setForm] = useState<Record<string, { discountPercentage: number; description: string; isActive: boolean }>>({});
+  const [form, setForm] = useState<Record<string, { discountPercentage: number; discountAmount: number | null; description: string; isActive: boolean }>>({});
 
-  const getFormVal = (ct: string, field: "discountPercentage" | "description" | "isActive", setting?: DiscountSetting) => {
+  const getFormVal = (ct: string, field: "discountPercentage" | "discountAmount" | "description" | "isActive", setting?: DiscountSetting) => {
     if (form[ct] !== undefined) return form[ct][field];
     if (setting) {
       if (field === "discountPercentage") return setting.discountPercentage;
+      if (field === "discountAmount") return setting.discountAmount;
       if (field === "description") return setting.description ?? "";
       if (field === "isActive") return setting.isActive;
     }
-    return field === "isActive" ? false : field === "discountPercentage" ? 0 : "";
+    return field === "isActive" ? false : field === "discountAmount" ? null : field === "discountPercentage" ? 0 : "";
   };
 
   const setFormVal = (ct: string, field: string, value: unknown, setting?: DiscountSetting) => {
     const defaults = {
       discountPercentage: Number(getFormVal(ct, "discountPercentage", setting)),
+      discountAmount: getFormVal(ct, "discountAmount", setting) == null ? null : Number(getFormVal(ct, "discountAmount", setting)),
       description: String(getFormVal(ct, "description", setting)),
       isActive: Boolean(getFormVal(ct, "isActive", setting)),
     };
@@ -67,7 +70,7 @@ export default function AdminDiscountSettings() {
   };
 
   const saveMutation = useMutation({
-    mutationFn: async ({ customerType, data }: { customerType: string; data: { discountPercentage: number; description: string; isActive: boolean } }) => {
+    mutationFn: async ({ customerType, data }: { customerType: string; data: { discountPercentage: number; discountAmount: number | null; description: string; isActive: boolean } }) => {
       const res = await fetch(`${API}/discount-settings/${customerType}`, {
         method: "PATCH",
         headers: authHeaders(),
@@ -95,6 +98,7 @@ export default function AdminDiscountSettings() {
       customerType: ct,
       data: {
         discountPercentage: Number(getFormVal(ct, "discountPercentage", setting)),
+        discountAmount: getFormVal(ct, "discountAmount", setting) == null ? null : Number(getFormVal(ct, "discountAmount", setting)),
         description: String(getFormVal(ct, "description", setting)),
         isActive: Boolean(getFormVal(ct, "isActive", setting)),
       },
@@ -128,6 +132,7 @@ export default function AdminDiscountSettings() {
         const label = CUSTOMER_TYPE_LABELS[ct] ?? ct;
         const isActive = Boolean(getFormVal(ct, "isActive", setting));
         const pct = Number(getFormVal(ct, "discountPercentage", setting));
+        const fixedAmount = getFormVal(ct, "discountAmount", setting);
         const desc = String(getFormVal(ct, "description", setting));
         const isDirty = form[ct] !== undefined;
 
@@ -154,7 +159,7 @@ export default function AdminDiscountSettings() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="space-y-1.5">
                   <Label>Persentase Diskon (%)</Label>
                   <div className="relative">
@@ -169,6 +174,19 @@ export default function AdminDiscountSettings() {
                     <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">%</span>
                   </div>
                 </div>
+                {ct === "angkasa_pura" && (
+                  <div className="space-y-1.5">
+                    <Label><Banknote className="inline mr-1" size={14} />Nominal Diskon Tetap (Rp)</Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      step={1000}
+                      value={fixedAmount == null ? "" : fixedAmount}
+                      onChange={e => setFormVal(ct, "discountAmount", e.target.value === "" ? null : Number(e.target.value), setting)}
+                      placeholder="Kosongkan untuk memakai persen"
+                    />
+                  </div>
+                )}
                 <div className="space-y-1.5">
                   <Label>Keterangan</Label>
                   <Input
@@ -179,7 +197,12 @@ export default function AdminDiscountSettings() {
                 </div>
               </div>
 
-              {pct > 0 && (
+              {ct === "angkasa_pura" && fixedAmount != null && Number(fixedAmount) > 0 ? (
+                <div className="rounded-lg bg-primary/5 border border-primary/20 px-4 py-2 text-sm">
+                  Nominal tetap: <span className="font-bold text-primary">Rp {Number(fixedAmount).toLocaleString("id-ID")}</span>{" "}
+                  <span className="text-muted-foreground">per sesi/booking. Nominal diprioritaskan daripada persen.</span>
+                </div>
+              ) : pct > 0 && (
                 <div className="rounded-lg bg-primary/5 border border-primary/20 px-4 py-2 text-sm">
                   <span className="text-muted-foreground">Contoh: tarif Rp 100.000 →</span>{" "}
                   <span className="font-bold text-primary">

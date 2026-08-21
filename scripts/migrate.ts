@@ -1506,5 +1506,9 @@ AFTER INSERT OR UPDATE OF payment_method, payment_provider
 ON sport_center.sport_payments
 FOR EACH ROW
 EXECUTE FUNCTION sport_center.sync_payment_accounting_journal();
+
+-- AP2 discount settings support a fixed nominal amount in addition to percentage.
+ALTER TABLE sport_center.discount_settings
+  ADD COLUMN IF NOT EXISTS discount_amount integer;
 `;
 

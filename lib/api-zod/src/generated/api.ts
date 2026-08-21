@@ -2214,6 +2214,7 @@ export const ListDiscountSettingsResponseItem = zod.object({
   "id": zod.number(),
   "customerType": zod.string(),
   "discountPercentage": zod.number(),
+  "discountAmount": zod.number().nullish(),
   "description": zod.string().nullish(),
   "isActive": zod.boolean()
 })
@@ -2231,13 +2232,14 @@ export const GetDiscountSettingResponse = zod.object({
   "id": zod.number(),
   "customerType": zod.string(),
   "discountPercentage": zod.number(),
+  "discountAmount": zod.number().nullish(),
   "description": zod.string().nullish(),
   "isActive": zod.boolean()
 })
 
 
 /**
- * @summary Update discount percentage and active state (admin)
+ * @summary Update discount percentage or fixed amount and active state (admin)
  */
 export const UpdateDiscountSettingParams = zod.object({
   "customerType": zod.coerce.string()
@@ -2246,10 +2248,13 @@ export const UpdateDiscountSettingParams = zod.object({
 export const updateDiscountSettingBodyDiscountPercentageMin = 0;
 export const updateDiscountSettingBodyDiscountPercentageMax = 100;
 
+export const updateDiscountSettingBodyDiscountAmountMin = 0;
+
 
 
 export const UpdateDiscountSettingBody = zod.object({
-  "discountPercentage": zod.number().min(updateDiscountSettingBodyDiscountPercentageMin).max(updateDiscountSettingBodyDiscountPercentageMax),
+  "discountPercentage": zod.number().min(updateDiscountSettingBodyDiscountPercentageMin).max(updateDiscountSettingBodyDiscountPercentageMax).optional(),
+  "discountAmount": zod.number().min(updateDiscountSettingBodyDiscountAmountMin).nullish(),
   "description": zod.string().optional(),
   "isActive": zod.boolean().optional()
 })
@@ -2258,6 +2263,7 @@ export const UpdateDiscountSettingResponse = zod.object({
   "id": zod.number(),
   "customerType": zod.string(),
   "discountPercentage": zod.number(),
+  "discountAmount": zod.number().nullish(),
   "description": zod.string().nullish(),
   "isActive": zod.boolean()
 })
