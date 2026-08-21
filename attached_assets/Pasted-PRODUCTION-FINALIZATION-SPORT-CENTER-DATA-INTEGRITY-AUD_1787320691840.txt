@@ -1,0 +1,589 @@
+PRODUCTION FINALIZATION — SPORT CENTER DATA INTEGRITY AUDIT
+
+STATUS DEV:
+DEV FULLY VERIFIED.
+
+Verified:
+- Full workspace typecheck PASS
+- API typecheck PASS
+- Sport Center typecheck PASS
+- Scripts typecheck PASS
+- API build PASS
+- Sport Center build/prerender PASS
+- Full workspace build PASS
+- 15 API suites / 103 tests PASS
+- DEV readiness PASS
+- DEV database verified as separate DEV database
+- Sport Center workflow RUNNING
+- API workflow RUNNING
+- Preview PASS
+- git diff --check PASS
+- Event discount 21.4% verified
+- Event recurring verified
+- Central Finance architecture unchanged
+- No executable 3/14 or 21.43% remains
+
+DEV IS DONE.
+DO NOT RE-AUDIT OR REFACTOR DEV UNNECESSARILY.
+
+NEXT TARGET:
+PRODUCTION DATA INTEGRITY.
+
+==================================================
+PHASE 1 — PRODUCTION ACCESS
+==================================================
+
+Production audit sebelumnya blocked because:
+
+- SUPABASE_DATABASE_URL unavailable
+- only SUPABASE_DATABASE_URL_DEV available
+- NODE_ENV=development
+- isDevUsingProdDb=false
+
+Resolve production access through the project's official secret architecture.
+
+SOURCE OF TRUTH:
+Google Cloud Secret Manager.
+
+DO NOT:
+- ask for password in chat
+- hardcode production DB URL
+- commit production credentials
+- create .env.production containing credentials
+- copy permanent production credentials into source code
+- use DEV database as production substitute
+
+Audit the existing production secret loader and deployment configuration.
+
+Find:
+- GCP_SECRET_MANAGER_BOOTSTRAP_JSON
+- Secret Manager loader
+- production database secret
+- production runtime identity
+- IAM permissions
+- existing production deployment configuration
+
+Do not print secret values.
+
+==================================================
+PHASE 2 — VERIFY PRODUCTION IDENTITY
+==================================================
+
+Before ANY production query:
+
+prove that the connection points to production.
+
+Verify safely using:
+- project identity
+- database identity
+- environment identity
+- application production configuration
+- Supabase project identity if available without exposing credentials
+
+If production identity cannot be proven:
+STOP production query execution.
+
+Do not use DEV.
+
+==================================================
+PHASE 3 — READ-ONLY GUARANTEE
+==================================================
+
+Production audit MUST be read-only.
+
+Allowed:
+SELECT
+read-only metadata queries
+
+Forbidden:
+INSERT
+UPDATE
+DELETE
+ALTER
+CREATE
+DROP
+TRUNCATE
+migration
+repair script
+manual journal
+manual balance adjustment
+
+If supported, use a read-only transaction/session.
+
+==================================================
+PHASE 4 — BOOKING LIFECYCLE AUDIT
+==================================================
+
+Audit production bookings.
+
+Find:
+
+1. completed without check-in
+2. completed before endTime
+3. future booking completed
+4. cancelled booking completed
+5. rescheduled booking still using old schedule
+6. pending reschedule but booking completed
+7. booking without valid facility
+8. booking without required customer/company linkage
+
+Remember:
+
+PAYMENT PAID != BOOKING COMPLETED
+
+CORPORATE INVOICE PAID != BOOKING COMPLETED
+
+Correct completion contract:
+
+CONFIRMED
++
+CHECK-IN
++
+SESSION ENDED
+=
+COMPLETED
+
+Classify anomalies before taking any action.
+
+==================================================
+PHASE 5 — PAYMENT AUDIT
+==================================================
+
+Audit:
+
+booking
+→ payment
+→ payment identity
+→ accounting outbox
+→ Central Finance
+
+Find:
+
+- duplicate payments
+- payment without booking
+- booking requiring payment but missing payment
+- paid payment with wrong amount
+- duplicate payment identity
+- DP/final payment collision
+- group payment duplication
+- corporate invoice payment duplication
+
+Expected:
+
+ONE SOURCE PAYMENT
+→ ONE PAYMENT IDENTITY
+→ ONE CANONICAL ACCOUNTING POSTING
+
+==================================================
+PHASE 6 — CORPORATE BILLING
+==================================================
+
+Audit:
+
+company member
+→ authorized company
+→ corporate booking
+→ unbilled
+→ monthly invoice
+→ paid
+
+Find:
+
+- corporate booking without company
+- unauthorized company linkage
+- duplicate invoice
+- booking included twice in invoice
+- booking omitted from invoice unexpectedly
+- paid invoice with future booking completed
+- invoice payment without canonical payment identity
+
+Do not modify production data.
+
+==================================================
+PHASE 7 — GROUP BOOKING
+==================================================
+
+Audit:
+
+- group membership
+- group merge
+- group payment
+- group invoice
+- individual booking lifecycle
+
+Find:
+
+- duplicate booking IDs
+- missing booking references
+- orphan group membership
+- group payment causing premature completion
+- duplicate group payment
+- booking incorrectly removed from group
+
+==================================================
+PHASE 8 — EVENT BOOKING
+==================================================
+
+Audit actual production Event bookings.
+
+Verify:
+
+bookingType = event
+
+and pricing follows:
+
+normal price
+→ 21.4% discount
+→ final price
+
+For example:
+
+Rp100.000
+→ Rp21.400 discount
+→ Rp78.600
+
+Check whether any historical production Event bookings were calculated using the previous 3/14 implementation.
+
+IMPORTANT:
+
+Do NOT automatically rewrite historical transactions.
+
+Classify:
+
+- legitimate historical transaction
+- old implementation
+- real production calculation defect
+
+If historical correction is required, DO NOT mutate it automatically.
+First identify exact affected transactions and financial impact.
+
+==================================================
+PHASE 9 — RECURRING
+==================================================
+
+Audit production recurring bookings.
+
+Find:
+
+- invalid dates
+- past dates
+- invalid operating hours
+- blocked schedule conflicts
+- duplicate dates
+- corporate approval bypass
+- one recurring session completing all others
+- recurring session without independent lifecycle
+
+==================================================
+PHASE 10 — RESCHEDULE
+==================================================
+
+Audit:
+
+- original schedule
+- new schedule
+- reschedule request
+- approval
+- history
+
+Find:
+
+- old slot still active
+- new slot conflict
+- missing history
+- pending reschedule completed
+- old schedule checked-in after replacement
+- duplicate reschedule
+
+Do not repair automatically.
+
+==================================================
+PHASE 11 — CENTRAL FINANCE
+==================================================
+
+This is CRITICAL.
+
+Verify production:
+
+Sport Center source transaction
+→ Central Finance
+
+Check:
+
+- duplicate journal
+- missing journal where posting is expected
+- orphan journal
+- duplicate correlation ID
+- duplicate payment_id
+- duplicate accounting entry
+- debit/credit mismatch
+- company mismatch
+- account mismatch
+
+ONE SOURCE TRANSACTION
+→ ONE CANONICAL ACCOUNTING POSTING
+
+Do NOT create another Sport Center ledger.
+
+Do NOT manually balance Central Finance.
+
+Do NOT delete historical journals.
+
+==================================================
+PHASE 12 — EXPENSE
+==================================================
+
+Audit:
+
+expense
+→ approval
+→ paid
+→ Central Finance
+
+Find:
+
+- expense paid without expected posting
+- duplicate posting
+- PPN Masukan mismatch
+- wrong vendor
+- wrong company
+- wrong account
+- expense classified as revenue
+
+==================================================
+PHASE 13 — QRIS / SETTLEMENT
+==================================================
+
+Audit:
+
+payment
+→ QRIS
+→ settlement
+→ bank mutation
+→ reconciliation
+→ Central Finance
+
+Check:
+
+- duplicate settlement
+- duplicate reconciliation
+- unmatched settlement
+- amount mismatch
+- MDR mismatch
+- settlement date mismatch
+- source identity mismatch
+
+Use canonical settlement architecture.
+
+==================================================
+PHASE 14 — REFUND
+==================================================
+
+Audit:
+
+original payment
+→ refund
+→ accounting reversal
+
+Find:
+
+- duplicate refund
+- refund > original payment
+- refund without original payment
+- refund without required accounting reversal
+- refunded booking remaining incorrectly active
+
+==================================================
+PHASE 15 — TAX / INVOICE
+==================================================
+
+Audit production invoice calculations.
+
+Expected contract:
+
+hargaDasar = hargaIncludePPN / 1.11
+
+dpp = hargaDasar × durasi
+
+dppNilaiLain = dpp × 11/12
+
+ppn = dppNilaiLain × 12%
+
+total = dpp + ppn
+
+Verify:
+
+- DPP
+- DPP Nilai Lain
+- PPN
+- Total
+
+Also audit Event discount:
+
+21.4%
+
+Ensure discount is not applied twice.
+
+Do not modify historical invoices automatically.
+
+==================================================
+PHASE 16 — DOCUMENTS
+==================================================
+
+Audit production:
+
+- invoice
+- SPP
+- kwitansi
+- lampiran
+- corporate documentation
+
+Verify that uploaded templates affect presentation only.
+
+Template must NOT become source of truth for:
+
+- payment
+- tax
+- booking
+- accounting
+- total amount
+
+==================================================
+PHASE 17 — WHATSAPP
+==================================================
+
+Audit production WA approval flow:
+
+customer booking
+→ admin notification
+→ secure mini form
+→ payment proof
+→ approval
+→ customer notification
+
+Check:
+
+- token scope
+- token expiry
+- replay protection
+- booking authorization
+- payment authorization
+- completion authorization
+
+==================================================
+PHASE 18 — DATA CLASSIFICATION
+==================================================
+
+For every anomaly:
+
+ID
+Entity
+Expected
+Actual
+Severity
+Classification
+
+Classification:
+
+LEGITIMATE
+EXPECTED
+HISTORICAL
+TEST
+FALSE POSITIVE
+REAL BUG
+REAL DATA ANOMALY
+
+Do not treat every mismatch as corruption.
+
+==================================================
+PHASE 19 — SAFE REMEDIATION
+==================================================
+
+If source code bug is found:
+
+FIX SOURCE
+→ TEST
+→ BUILD
+→ VERIFY
+
+If production data anomaly is found:
+
+DO NOT immediately UPDATE.
+
+First determine:
+
+- exact rows
+- financial impact
+- historical impact
+- Central Finance impact
+- whether remediation is reversible
+- whether owner decision is required
+
+Safe, deterministic, non-destructive remediation may be performed only if clearly justified by evidence.
+
+Never:
+- delete accounting history
+- recreate journal blindly
+- force balance
+- duplicate posting
+- rewrite historical financial data without contract
+
+==================================================
+PHASE 20 — FINAL VERIFICATION
+==================================================
+
+After audit/fix where applicable:
+
+Run:
+
+- production anomaly queries
+- duplicate payment checks
+- duplicate journal checks
+- booking lifecycle checks
+- corporate billing checks
+- Event calculation checks
+- recurring checks
+- reschedule checks
+- settlement checks
+- reconciliation checks
+- Central Finance balance checks
+
+Code verification:
+
+- full tests
+- typecheck
+- build
+- git diff --check
+
+==================================================
+FINAL VERDICT
+==================================================
+
+If production connection is unavailable:
+
+BLOCKED — PRODUCTION ACCESS
+
+Do not pretend production was audited.
+
+If connection is available and no real anomalies:
+
+PRODUCTION DATA AUDIT PASS
+CENTRAL FINANCE SAFE
+FIXED
+
+If anomalies are found:
+
+Do not stop at reporting.
+
+Fix source code where appropriate.
+Perform safe targeted remediation where clearly justified.
+Run verification again.
+
+Only use BLOCKED for:
+- missing production access
+- unavailable external service
+- missing owner/business decision
+- genuinely unsafe ambiguous data repair
+
+DO NOT ASK FOR CONFIRMATION.
+CONTINUE AUTOMATICALLY THROUGH ALL SAFE STEPS.
