@@ -216,15 +216,23 @@ function PaymentMethodSelect({
 
   const storedValue = String(payment.paymentMethod ?? "Transfer Bank");
   const storedCode = storedValue.trim().toLowerCase();
+  const isDirectQris = payment.paymentProvider === "mandiri_direct" && storedCode === "qris";
   const configuredOption = options.find(
     (option) =>
       option.providerCode?.trim().toLowerCase() === storedCode &&
       (payment.paymentProvider === "paylabs" || !option.providerCode),
   );
   const currentValue = configuredOption?.value ?? storedValue;
-  const mergedOptions = options.some((option) => option.value === currentValue)
-    ? options
-    : [{ value: currentValue, label: `${storedValue} (tersimpan)` }, ...options];
+  // A QRIS Direct payment must not be changed back to a Paylabs display
+  // option. That would change the provider/settlement identity of an already
+  // classified payment and is correctly rejected by the accounting guard.
+  // Keep the valid direct method visible while hiding only gateway options.
+  const availableOptions = isDirectQris
+    ? options.filter((option) => !option.providerCode)
+    : options;
+  const mergedOptions = availableOptions.some((option) => option.value === currentValue)
+    ? availableOptions
+    : [{ value: currentValue, label: `${storedValue} (tersimpan)` }, ...availableOptions];
 
   return (
     <div title={lockedReason}>
