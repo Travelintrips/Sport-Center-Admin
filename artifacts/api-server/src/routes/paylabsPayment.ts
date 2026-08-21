@@ -242,7 +242,9 @@ async function resolveStoredPaylabsPaymentMethod(tx: any, rawMethod?: string): P
         && typeof method?.name === "string"
         && method.name.trim(),
     );
-    if (configuredMethod?.name) return configuredMethod.name.trim();
+    if (typeof configuredMethod?.name === "string" && configuredMethod.name.trim()) {
+      return configuredMethod.name.trim();
+    }
   } catch (err) {
     logger.warn({ err, rawMethod: raw }, "[paylabs] unable to load payment method label");
   }

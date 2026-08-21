@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { db, bookingsTable, facilitiesTable, paymentsTable, promosTable, discountSettingsTable, apMembersTable, bookingHistoryTable, usersTable, verificationLogsTable, companyUsersTable, bookingGroupsTable, settingsTable, waActionTokensTable, waNotifLogsTable } from "@workspace/db";
+import { db, bookingsTable, facilitiesTable, paymentsTable, promosTable, discountSettingsTable, apMembersTable, bookingHistoryTable, usersTable, verificationLogsTable, companyUsersTable, bookingGroupsTable, settingsTable, waActionTokensTable, waNotifLogsTable, paylabsSettingsTable } from "@workspace/db";
 import { eq, and, sql, or, ilike, desc, inArray, notExists, gte } from "drizzle-orm";
 import { adminMiddleware, authMiddleware, verifyToken } from "../lib/auth";
 import { broadcastAvailabilityChange } from "../lib/supabase";
@@ -28,6 +28,38 @@ import { reverseJournalEntry, reversePublicAccountingEntry } from "../lib/accoun
 
 const INACTIVE_STATUSES = ["cancelled", "expired", "rejected", "refunded"];
 const AP_MULTIGUNA_HOURLY_PRICE = 300000;
+
+const PAYLABS_METHOD_LABELS: Record<string, string> = {
+  qris: "Paylabs - QRIS",
+  bri: "Paylabs - BRI Virtual Account",
+  bca: "Paylabs - BCA Virtual Account",
+  bni: "Paylabs - BNI VA",
+  mandiri: "Paylabs - Mandiri VA",
+  permata: "Paylabs - Permata VA",
+  cimb: "Paylabs - CIMB VA",
+  btn: "Paylabs - BTN VA",
+  danamon: "Paylabs - Danamon VA",
+  maybank: "Paylabs - Maybank VA",
+  bsi: "Paylabs - BSI VA",
+  muamalat: "Paylabs - Muamalat Virtual Account",
+  sinarmas: "Paylabs - Sinarmas VA",
+  ina: "Paylabs - INA VA",
+};
+
+function resolvePaylabsDisplayLabel(
+  rawMethod: unknown,
+  configuredMethods: Array<{ id?: unknown; name?: unknown }>,
+): string | undefined {
+  const code = String(rawMethod ?? "").trim().toLowerCase();
+  if (!code) return undefined;
+  const configured = configuredMethods.find(
+    (method) =>
+      String(method.id ?? "").trim().toLowerCase() === code &&
+      typeof method.name === "string" &&
+      method.name.trim(),
+  );
+  return configured?.name?.toString().trim() || PAYLABS_METHOD_LABELS[code];
+}
 
 // Helper: kirim rekap hanya jika tanggal booking = hari ini (WIB)
 function todayWIB(): string {
@@ -286,20 +318,28 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
       const legacyPaylabsCode = transactionPaylabsCode
         ?? (configuredPaymentCode ? paymentMethodCode : undefined);
       const selectedPaylabsLabel = legacyPaylabsCode
-        ? paylabsLabels.find((method) =>
-            String(method.id ?? "").trim().toLowerCase() === legacyPaylabsCode
-            && typeof method.name === "string"
-            && method.name.trim(),
-          )?.name?.toString().trim()
+        ? resolvePaylabsDisplayLabel(legacyPaylabsCode, paylabsLabels)
         : undefined;
-      const paymentForResponse = payment && selectedPaylabsLabel
-        && (
-          payment.paymentProvider === "paylabs"
-          || configuredPaymentCode
-          || /^[a-z0-9]+$/i.test(String(payment.paymentMethod ?? ""))
-        )
+      const paymentForResponse = payment && selectedPaylabsLabel &&
+        (payment.paymentProvider === "paylabs" || configuredPaymentCode || transactionPaylabsCode)
         ? { ...payment, paymentMethod: selectedPaylabsLabel }
         : payment;
+      const paymentsForResponse = bPayments.map((p) => {
+        const paymentCode = String(p.paymentMethod ?? "").trim().toLowerCase();
+        const isPaylabsPayment = p.paymentProvider === "paylabs"
+          || paymentCode === transactionPaylabsCode
+          || paylabsLabels.some((method) =>
+            String(method.id ?? "").trim().toLowerCase() === paymentCode,
+          );
+        const label = isPaylabsPayment
+          ? resolvePaylabsDisplayLabel(paymentCode, paylabsLabels)
+          : undefined;
+        return {
+          ...p,
+          paymentMethod: label ?? p.paymentMethod,
+          amount: Number(p.amount),
+        };
+      });
       const grandTotalNum = b.grandTotal != null ? Number(b.grandTotal) : Number(b.totalPrice);
       const dpAmt = Number(b.downPayment ?? 0);
       return {
@@ -320,7 +360,7 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
         facilityName: facility?.name ?? "",
         facilityCategory: facility?.category ?? "",
         payment: paymentForResponse ? { ...paymentForResponse, amount: Number(paymentForResponse.amount) } : null,
-        payments: bPayments.map((p) => ({ ...p, amount: Number(p.amount) })),
+        payments: paymentsForResponse,
         remainingAmount: (() => {
           const confirmedDp = bPayments
             .filter((p) => p.paymentType === "dp" && p.status === "confirmed")
