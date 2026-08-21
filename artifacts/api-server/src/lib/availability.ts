@@ -14,16 +14,15 @@ export function minutesToTimeStr(m: number): string {
   return `${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}`;
 }
 
-// Multiguna is the shared court shown in the customer booking flow and is
-// available through midnight. Treat 00:00 as the end of the same booking day
-// rather than as an earlier time than the opening hour.
+// All hourly-booking facilities are available through midnight. Treat 00:00
+// as the end of the same booking day rather than as an earlier time than the
+// opening hour.
 export function getEffectiveCloseTime(facility: {
   name?: string | null;
   category?: string | null;
   closeTime: string;
 }): string {
-  const isMultiguna = /multi\s*guna/i.test(`${facility.name ?? ""} ${facility.category ?? ""}`);
-  return isMultiguna ? "00:00" : facility.closeTime;
+  return "00:00";
 }
 
 export function closeTimeToMinutes(closeTime: string): number {

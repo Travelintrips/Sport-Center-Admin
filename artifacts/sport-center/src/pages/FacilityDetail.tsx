@@ -43,9 +43,7 @@ const MULTIGUNA_ACTIVITIES = [
 ];
 
 function effectiveCloseTime(facility: { name?: string | null; category?: string | null; closeTime: string }) {
-  return /multi\s*guna/i.test(`${facility.name ?? ""} ${facility.category ?? ""}`)
-    ? "00:00"
-    : facility.closeTime.substring(0, 5);
+  return "00:00";
 }
 
 function addHoursToDisplayTime(time: string, hours: number) {
