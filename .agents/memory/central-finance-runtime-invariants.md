@@ -32,3 +32,15 @@ contract rather than bypass it with null fixtures.
 **How to apply:** When adding payment accounting cases, populate settlement
 metadata in every source-payment mock and keep fake SQL responses aligned with
 `centralSettlement.ts`.
+
+The Central Finance Safety Contract is the governing rule for future Sport
+Center accounting changes: audit canonical ownership first, reuse existing
+integration/outbox paths, fail closed, preserve history, and verify traceability
+from source payment through journal, bank, settlement, and reconciliation.
+
+**Why:** Central Finance is the financial source of truth; creating a second
+ledger or fallback posting in Sport Center can create irreconcilable balances.
+
+**How to apply:** Before any accounting, payment, expense, tax, bank, or
+settlement change, identify the canonical object and duplicate-protection key
+before editing code or schema.
