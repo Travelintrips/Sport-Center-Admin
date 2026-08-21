@@ -128,6 +128,7 @@ export * from './myBookingItem';
 export * from './okResult';
 export * from './payment';
 export * from './paymentInput';
+export * from './paymentInputOcrScan';
 export * from './paymentInputPaymentMethod';
 export * from './paymentInputPaymentProvider';
 export * from './paymentInputPaymentType';

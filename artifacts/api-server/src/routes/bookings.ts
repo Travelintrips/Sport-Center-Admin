@@ -442,7 +442,9 @@ router.post("/bookings", async (req, res) => {
     const rawBookingType = req.body.bookingType;
     const bookingType: "regular" | "event" = rawBookingType === "event" ? "event" : "regular";
     const isEvent = bookingType === "event";
-    const EVENT_DISCOUNT_RATE = 3 / 14; // ≈ 21.43% — 350.000 → 275.000 tepat
+    // Contract: Event discount is exactly 21.4%; keep rupiah calculation integer-safe.
+    const EVENT_DISCOUNT_NUMERATOR = 214;
+    const EVENT_DISCOUNT_DENOMINATOR = 1000;
     let { startTime, durationHours } = req.body;
 
     // Deteksi user yang sedang login (opsional — tidak wajib)
@@ -679,7 +681,9 @@ router.post("/bookings", async (req, res) => {
     }
 
     // ── Diskon Event 21,4% ───────────────────────────────────────────────────
-    const eventDiscountAmountCalc = isEvent ? Math.round(basePrice * EVENT_DISCOUNT_RATE) : 0;
+    const eventDiscountAmountCalc = isEvent
+      ? Math.floor((basePrice * EVENT_DISCOUNT_NUMERATOR + EVENT_DISCOUNT_DENOMINATOR / 2) / EVENT_DISCOUNT_DENOMINATOR)
+      : 0;
 
     const discount = isAp
       ? apAutoDiscountAmount
@@ -1146,7 +1150,9 @@ router.post("/bookings/recurring", async (req, res) => {
       : null;
     const bookingTypeR: "regular" | "event" = rawBookingTypeR === "event" ? "event" : "regular";
     const isEventR = bookingTypeR === "event";
-    const EVENT_DISCOUNT_RATE_R = 3 / 14; // ≈ 21.43% — 350.000 → 275.000 tepat
+    // Contract: Event discount is exactly 21.4%; keep rupiah calculation integer-safe.
+    const EVENT_DISCOUNT_NUMERATOR_R = 214;
+    const EVENT_DISCOUNT_DENOMINATOR_R = 1000;
     const customerPhone: string = normalizePhone(String(req.body.customerPhone ?? "").trim());
     const customerType: "umum" | "angkasa_pura" = rawCustomerType === "angkasa_pura" ? "angkasa_pura" : "umum";
     const idCardNumber: string | null = customerType === "angkasa_pura"
@@ -1229,7 +1235,9 @@ router.post("/bookings/recurring", async (req, res) => {
     const basePrice = Number(facility.pricePerHour) * durationHours;
 
     // ── Diskon Event 21,4% (recurring) ──────────────────────────────────────
-    const eventDiscountAmountCalcR = isEventR ? Math.round(basePrice * EVENT_DISCOUNT_RATE_R) : 0;
+    const eventDiscountAmountCalcR = isEventR
+      ? Math.floor((basePrice * EVENT_DISCOUNT_NUMERATOR_R + EVENT_DISCOUNT_DENOMINATOR_R / 2) / EVENT_DISCOUNT_DENOMINATOR_R)
+      : 0;
 
     // ── Auto-verifikasi & diskon member AP2 (recurring) ─────────────────────
     let apAutoVerifiedR = false;

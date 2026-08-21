@@ -1059,7 +1059,7 @@ function BookingDetailDrawer({
             <div className="flex items-center gap-3 p-3 rounded-xl border border-purple-200 dark:border-purple-800 bg-purple-50 dark:bg-purple-900/20">
               <PartyPopper size={16} className="text-purple-600 dark:text-purple-400 shrink-0" />
               <div className="flex-1 min-w-0">
-                <div className="text-sm font-bold text-purple-700 dark:text-purple-300">Booking Event — Diskon 21,43%</div>
+                <div className="text-sm font-bold text-purple-700 dark:text-purple-300">Booking Event — Diskon 21,4%</div>
                 <div className="text-xs text-purple-500 dark:text-purple-400">
                   {(booking as any).eventDiscountAmount != null && Number((booking as any).eventDiscountAmount) > 0
                     ? `Diskon diterapkan: ${formatCurrency(Number((booking as any).eventDiscountAmount))} dari harga normal ${formatCurrency(Number((booking as any).basePrice ?? booking.totalPrice) + Number((booking as any).eventDiscountAmount))}`
@@ -1121,7 +1121,7 @@ function BookingDetailDrawer({
                     <span className="line-through text-slate-400">{formatCurrency(Number((booking as any).basePrice ?? booking.totalPrice) + Number((booking as any).eventDiscountAmount))}</span>
                   </div>
                   <div className="flex justify-between items-center text-sm">
-                    <span className="flex items-center gap-1 text-purple-600"><PartyPopper size={11} />Diskon Event 21,43%</span>
+                    <span className="flex items-center gap-1 text-purple-600"><PartyPopper size={11} />Diskon Event 21,4%</span>
                     <span className="font-semibold text-purple-600">−{formatCurrency(Number((booking as any).eventDiscountAmount))}</span>
                   </div>
                   <div className="flex justify-between items-center text-sm border-t border-purple-100 dark:border-purple-800 pt-1.5 mt-1">

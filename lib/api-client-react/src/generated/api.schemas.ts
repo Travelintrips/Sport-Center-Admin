@@ -467,6 +467,8 @@ export const PaymentInputPaymentType = {
   full_payment: 'full_payment',
 } as const;
 
+export type PaymentInputOcrScan = { [key: string]: unknown };
+
 export interface PaymentInput {
   bookingId: number;
   amount: number;
@@ -477,7 +479,7 @@ export interface PaymentInput {
   paymentType?: PaymentInputPaymentType;
   notes?: string;
   ocrScanToken?: string;
-  ocrScan?: Record<string, unknown>;
+  ocrScan?: PaymentInputOcrScan;
 }
 
 export type PaymentUpdateStatus = typeof PaymentUpdateStatus[keyof typeof PaymentUpdateStatus];

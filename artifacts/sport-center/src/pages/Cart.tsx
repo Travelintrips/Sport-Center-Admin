@@ -574,7 +574,7 @@ export default function Cart() {
                   {t("Angkasa Pura", "Angkasa Pura")}
                 </button>
 
-                {/* Event — diskon 21,43% */}
+                {/* Event — diskon 21,4% */}
                 <button
                   type="button"
                   onClick={() => setBookingMode("event")}

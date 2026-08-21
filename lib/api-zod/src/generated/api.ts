@@ -961,7 +961,9 @@ export const CreatePaymentBody = zod.object({
   "paymentProvider": zod.enum(['mandiri_direct', 'paylabs', 'unknown']).optional(),
   "providerOrderId": zod.string().optional(),
   "paymentType": zod.enum(['dp', 'pelunasan', 'full_payment']).optional(),
-  "notes": zod.string().optional()
+  "notes": zod.string().optional(),
+  "ocrScanToken": zod.string().optional(),
+  "ocrScan": zod.record(zod.string(), zod.unknown()).optional()
 })
 
 
