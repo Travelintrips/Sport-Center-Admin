@@ -2,7 +2,10 @@ import crypto from "crypto";
 import { db, usersTable, facilitiesTable, settingsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 
-const SECRET = process.env.SESSION_SECRET || "sport-center-secret-key-2024";
+const SECRET = process.env.SESSION_SECRET;
+if (!SECRET) {
+  throw new Error("SESSION_SECRET is required; refusing to seed with a default secret.");
+}
 
 function hashPassword(password: string): string {
   return crypto.createHmac("sha256", SECRET).update(password).digest("hex");

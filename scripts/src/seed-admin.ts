@@ -2,15 +2,17 @@ import crypto from "crypto";
 import { db, usersTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 
-const SECRET = process.env.SESSION_SECRET || "sport-center-secret-key-2024";
+const configuredSecret = process.env.SESSION_SECRET;
+if (!configuredSecret) {
+  throw new Error("SESSION_SECRET is required; refusing to seed an admin with a default secret.");
+}
 
-function hashPassword(password: string): string {
-  return crypto.createHmac("sha256", SECRET).update(password).digest("hex");
+function hashPassword(password: string, secret: string): string {
+  return crypto.createHmac("sha256", secret).update(password).digest("hex");
 }
 
 async function main() {
-  const passwordHash = hashPassword("admin123");
-  console.log("Hash:", passwordHash);
+  const passwordHash = hashPassword("admin123", configuredSecret);
 
   const existing = await db.select().from(usersTable).where(eq(usersTable.email, "admin@sportcenter.com")).limit(1);
   if (existing.length > 0) {

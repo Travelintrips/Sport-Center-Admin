@@ -152,9 +152,7 @@ try {
           if (isKasLike) {
             await client.query(`UPDATE public.accounting_entry_lines SET account_id=$1 WHERE id=$2`, [bankAccountId, dl.id]);
             updatedLines++;
-            console.log(`     → line id=${dl.id}: "${dl.acct_name}" (${dl.acct_code}) → Bank Mandiri CST`);
           } else {
-            console.log(`     ℹ️  line id=${dl.id}: "${dl.acct_name}" (${dl.acct_code}) — bukan kas, dibiarkan`);
           }
         }
       }

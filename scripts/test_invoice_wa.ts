@@ -66,7 +66,7 @@ async function main() {
 
   const targetPhone = "081386210415".replace(/^\+/, "").replace(/^0/, "62");
 
-  console.log("Mengirim via Fonnte ke:", targetPhone);
+    console.log("Sending invoice test message via Fonnte");
   const resp = await fetch("https://api.fonnte.com/send", {
     method: "POST",
     headers: { Authorization: fonnteToken, "Content-Type": "application/json" },
