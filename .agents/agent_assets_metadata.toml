@@ -53,3 +53,18 @@ id = "o3MgcoDMRIvjCng4tY3fB"
 uri = "file://ACCOUNTING_AUDIT_REPORT.md"
 type = "text"
 title = "Accounting Audit Report — Sport Center"
+logical_id = "d844684e-0ba7-4f68-b6ee-20610c6e9149"
+
+[[outputs]]
+id = "kEWYuhoRIIrpkq4fFHyyw"
+uri = "file://SPORT_CENTER_FINAL_PRODUCTION_CLOSURE_REPORT.md"
+type = "text"
+title = "Sport Center Final Production Closure Report"
+description = "Phase 3 closure report covering audit results, tests, builds, production smoke checks, blockers, and proof of no production mutation."
+logical_id = "c198947e-1fea-4535-8ac2-7176b6a43961"
+content_hash = "sha256:0bb03a7df20b4a421002b0e9d3a2a1bbcecc9569f239d231308e518d9552805a"
+size = 7749
+mtime_ms = 1787429082513
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:a70d59a0-a6f9-48db-a79c-d5b8a6a024f8/c198947e-1fea-4535-8ac2-7176b6a43961/51c73e70-4104-425f-98c7-292811137de7"
+storage_version_token = "1787429089464906"
+content_type = "text/markdown"

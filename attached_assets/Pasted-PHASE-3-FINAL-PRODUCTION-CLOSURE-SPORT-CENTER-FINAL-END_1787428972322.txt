@@ -1,0 +1,951 @@
+PHASE 3 — FINAL PRODUCTION CLOSURE
+SPORT CENTER
+FINAL END-TO-END VERIFICATION → SAFE FIX → REGRESSION → PRODUCTION SMOKE TEST
+
+OBJECTIVE
+=========
+
+Ini adalah FASE TERAKHIR untuk menutup project Sport Center.
+
+Jangan membuat fase berikutnya.
+
+Target akhir:
+
+SPORT CENTER PROJECT = FINALIZED
+
+Lakukan seluruh pekerjaan dalam SATU EKSEKUSI:
+
+AUDIT
+→ CLASSIFY
+→ SAFE FIX
+→ TEST
+→ BUILD
+→ DEPLOYMENT VERIFICATION
+→ PRODUCTION SMOKE TEST
+→ FINAL VERDICT
+
+Jangan berhenti hanya pada laporan.
+
+Jika ditemukan defect teknis yang deterministik dan aman diperbaiki:
+langsung perbaiki → test → verify.
+
+Jika ditemukan masalah yang membutuhkan keputusan owner atau berisiko
+mengubah historical financial meaning:
+jangan memaksakan perubahan; dokumentasikan sebagai REVIEW/BLOCKED.
+
+============================================================
+1. PROJECT SCOPE
+============================================================
+
+Scope utama:
+
+- Sport Center
+- Customer booking
+- Admin Sport Center
+- Payment
+- Booking lifecycle
+- Corporate billing
+- Invoice
+- Tax
+- Accounting
+- Reconciliation
+- Settlement
+- Central Finance boundary
+- Production deployment
+- Production database
+- Production storage
+- Payment method
+- Event booking
+- Recurring booking
+- Reschedule
+- Check-in
+- Group booking
+
+Jangan memperluas pekerjaan ke modul CST lain yang tidak terkait langsung
+dengan Sport Center.
+
+============================================================
+2. PRODUCTION IDENTITY
+============================================================
+
+Production runtime yang sudah diverifikasi:
+
+Domain:
+
+https://sc.travelintrips.co.id
+
+Production runtime:
+
+Replit Autoscale
+
+Production database:
+
+SUPABASE_DATABASE_URL melalui official production Secret Manager loader.
+
+Production Storage:
+
+Supabase Storage production.
+
+IMPORTANT:
+
+Jangan menggunakan DEV sebagai Production.
+
+Jangan menggunakan Replit database sebagai Production.
+
+Jangan mengubah Production GCP project.
+
+Jangan mengubah Secret Manager architecture.
+
+Jangan membuat secret baru jika tidak diperlukan.
+
+============================================================
+3. PRODUCTION DATABASE SAFETY
+============================================================
+
+Dedicated read-only audit role:
+
+sport_center_production_auditor
+
+Read-only verification wajib menggunakan:
+
+SUPABASE_PROD_AUDIT_DATABASE_URL
+
+Safety handshake:
+
+BEGIN;
+
+SET TRANSACTION READ ONLY;
+
+SHOW transaction_read_only;
+
+Lanjut hanya jika:
+
+transaction_read_only = on
+
+Semua read-only session:
+
+ROLLBACK;
+
+Untuk Production WRITE:
+
+gunakan hanya canonical application write path yang sudah ada.
+
+Jangan menggunakan audit role untuk WRITE.
+
+Jangan menggunakan direct SQL mutation untuk financial data kecuali memang
+merupakan canonical existing mechanism.
+
+============================================================
+4. FINAL SYSTEM AUDIT
+============================================================
+
+Audit seluruh route dan service Sport Center yang aktif.
+
+Cari:
+
+- TODO
+- FIXME
+- temporary workaround
+- disabled functionality
+- development-only branch
+- mock payment
+- hardcoded production value
+- hardcoded company_id
+- hardcoded facility
+- fallback payment
+- fallback database
+- fallback storage
+- DEV URL di production
+- production URL di DEV
+- unsafe secret fallback
+- direct database mutation bypassing service
+- duplicate lifecycle logic
+- duplicate payment logic
+- duplicate accounting logic
+
+Perbaiki hanya jika defect jelas dan safe.
+
+============================================================
+5. PAYMENT METHOD FINAL VERIFICATION
+============================================================
+
+Verifikasi masalah yang sebelumnya ditemukan:
+
+"payment method tidak dapat diganti."
+
+Trace:
+
+UI
+→ API
+→ validation
+→ service
+→ sport_center.sport_payments
+
+Pastikan:
+
+- payment method field konsisten
+- frontend menggunakan canonical values
+- backend menggunakan canonical values
+- dropdown tidak disabled secara salah
+- API menerima method yang valid
+- update tersimpan ke sport_center.sport_payments
+- error ditampilkan dengan benar
+
+Safe rule:
+
+Payment yang belum financial-locked:
+→ dapat diedit jika business rule mengizinkan.
+
+Payment confirmed/paid/financially posted:
+→ jangan ubah secara bebas.
+
+Jangan mengubah amount.
+
+Jangan membuat duplicate payment.
+
+Jangan membuat duplicate journal.
+
+Jangan mengubah invoice/tax/settlement hanya untuk mengganti method.
+
+Tambahkan regression tests.
+
+============================================================
+6. BOOKING LIFECYCLE FINAL VERIFICATION
+============================================================
+
+Verifikasi lifecycle:
+
+pending_payment
+→ waiting_confirmation
+→ waiting_admin_approval
+→ paid
+→ confirmed
+→ checked-in
+→ completed
+
+Pastikan:
+
+- invalid transition ditolak
+- completion sebelum session end ditolak
+- check-in sebelum session start ditolak
+- cancelled/expired/rejected/refunded tidak dapat dikonfirmasi ulang
+- pending reschedule memblokir transition yang memang harus diblokir
+- history dibuat atomic
+- group booking transition konsisten
+
+Jangan mengubah historical records hanya demi membuat data terlihat bersih.
+
+============================================================
+7. PAYMENT FINAL VERIFICATION
+============================================================
+
+Verify:
+
+- no orphan payments
+- no payment for non-existent booking
+- no confirmed payment on invalid terminal booking
+- payment amount integrity
+- payment status integrity
+- payment method integrity
+- provider reference integrity
+- idempotency
+- group payment propagation
+- corporate payment behavior
+
+Pastikan duplicate prevention bekerja untuk:
+
+booking_id
+payment_type
+provider_reference
+idempotency_key
+correlation_id
+
+Jangan menghapus historical payment.
+
+============================================================
+8. GROUP BOOKING FINAL VERIFICATION
+============================================================
+
+Verify:
+
+- group booking total
+- payment aggregation
+- payment propagation
+- booking grouping
+- corporate/group payer
+- invoice aggregation
+
+Payment group harus menggunakan canonical total.
+
+Jangan membuat payment per booking jika business flow menggunakan
+group payment.
+
+============================================================
+9. CORPORATE BILLING
+============================================================
+
+Verify:
+
+Personal:
+→ direct payment.
+
+Corporate:
+→ monthly billing.
+
+Verify:
+
+unbilled
+→ billed
+→ paid
+
+Invoice monthly harus:
+
+- satu invoice
+- detail customer
+- facility
+- duration
+- amount
+- tax
+- supporting documents
+
+Verify no:
+
+- duplicate invoice number
+- orphan invoice item
+- invoice total mismatch
+
+============================================================
+10. TAX
+============================================================
+
+Verify canonical Sport Center tax calculation.
+
+Current contract:
+
+harga include PPN.
+
+priceBeforeTax = price / 1.11
+
+DPP = priceBeforeTax × duration
+
+DPP Nilai Lain = DPP × 11/12
+
+PPN = DPP Nilai Lain × 12%
+
+Total = DPP + PPN
+
+Verify:
+
+- integer-safe calculation
+- rounding
+- invoice display
+- tax transaction
+- accounting mapping
+
+Do not rewrite historical tax transactions.
+
+============================================================
+11. EVENT
+============================================================
+
+Verify Event discount:
+
+21.4%
+
+Use the existing shared helper.
+
+Verify:
+
+- regular booking
+- recurring booking
+- invoice
+- payment
+- tax
+
+Add/retain regression tests.
+
+============================================================
+12. RECURRING
+============================================================
+
+Verify:
+
+- date generation
+- time generation
+- operating hours
+- conflict detection
+- facility availability
+- approval
+- payment
+- cancellation
+- reschedule
+
+Do not create historical bookings.
+
+============================================================
+13. CHECK-IN
+============================================================
+
+Verify canonical check-in flow.
+
+Check:
+
+- authorization
+- booking ownership
+- session timing
+- duplicate check-in
+- completed booking
+- history
+- audit trail
+
+Do not fabricate historical check-in timestamps.
+
+============================================================
+14. RESCHEDULE
+============================================================
+
+Verify:
+
+request
+→ validation
+→ conflict detection
+→ approval
+→ booking update
+→ history
+
+Must be:
+
+atomic
+idempotent
+concurrency-safe
+
+Pending reschedule count should remain valid.
+
+============================================================
+15. INVOICE / DOCUMENT
+============================================================
+
+Verify:
+
+Invoice
+SPP
+Kwitansi
+Lampiran
+
+Check:
+
+- template selection
+- logo
+- letterhead
+- signature block
+- materai space
+- payment information
+- PDF generation
+- storage path
+- production bucket
+
+Do not break existing production documents.
+
+============================================================
+16. ACCOUNTING
+============================================================
+
+Verify:
+
+payment
+→ accounting outbox
+→ journal
+→ journal lines
+
+Check:
+
+- debit = credit
+- no orphan journal lines
+- no duplicate journal
+- idempotency
+- source reference
+- payment linkage
+
+Do not manually create accounting entries.
+
+============================================================
+17. CENTRAL FINANCE BOUNDARY
+============================================================
+
+This is a FINAL SAFETY CHECK.
+
+Verify Sport Center accounting does NOT accidentally create unauthorized
+Central Finance postings.
+
+Check:
+
+- central_finance_processing
+- Sport Center accounting worker
+- payment accounting worker
+- startup backfill
+- manual sync
+- manual posting
+- refund accounting
+- MDR accounting
+- settlement accounting
+
+Current intended architecture:
+
+Sport Center accounting remains isolated unless an explicitly supported
+Central Finance integration path exists.
+
+Verify:
+
+NO DUPLICATE CENTRAL FINANCE POSTING
+NO UNAUTHORIZED CENTRAL FINANCE POSTING
+NO MISSING REQUIRED POSTING
+
+Do not change Central Finance architecture unless a concrete defect is
+found and the correction is already defined by the existing canonical
+contract.
+
+============================================================
+18. RECONCILIATION
+============================================================
+
+Verify canonical reconciliation flow.
+
+Check:
+
+bank mutation
+→ candidate
+→ matching
+→ approval
+→ settlement
+
+Do not approve historical candidates automatically.
+
+Verify:
+
+- source identity
+- candidate source
+- amount
+- payment
+- settlement
+- provider reference
+- bank mutation
+- duplicate protection
+- concurrency
+
+If schema conflict remains:
+
+mark BLOCKED.
+
+Do not modify historical reconciliation merely to achieve PASS.
+
+============================================================
+19. QRIS / SETTLEMENT
+============================================================
+
+Verify existing canonical contract:
+
+Company 1 / Mandiri Direct
+
+T+1 business day
+
+MDR:
+0.3%
+
+fixed fee:
+0
+
+fee tax:
+0
+
+effective:
+2026-08-10
+
+Verify:
+
+payment aggregation
+→ settlement
+→ expected bank settlement
+→ bank mutation
+→ reconciliation
+
+Do not create duplicate settlement.
+
+============================================================
+20. EXPENSE
+============================================================
+
+Verify:
+
+draft
+→ pending
+→ approved
+→ paid
+
+and:
+
+rejected
+cancelled
+
+Verify journal behavior only for legitimate paid expenses.
+
+Expense numbering:
+
+EXP-YYYYMMDD-000001
+
+No duplicate number.
+
+============================================================
+21. VENDOR
+============================================================
+
+Verify vendor/supplier master:
+
+- dropdown
+- canonical vendor records
+- no hardcoded vendor list
+- create/edit
+- payment linkage where applicable
+
+Do not duplicate vendor master data.
+
+============================================================
+22. SECURITY / ACCESS
+============================================================
+
+Verify:
+
+- authorization
+- role permissions
+- Super Admin protection
+- custom roles
+- admin-only payment approval
+- corporate verification
+- ownership checks
+- rate limits where required
+- no secret exposure
+- no credential logging
+
+Do not expose:
+
+password
+token
+bootstrap JSON
+database URL
+Secret Manager payload
+
+============================================================
+23. STORAGE
+============================================================
+
+Production must use Supabase Storage.
+
+Verify:
+
+facility-images
+payment-proofs
+invoice-templates
+document-templates
+doc-templates
+corporate-docs
+invoice-pdfs
+
+Production must not silently fallback to Replit Object Storage.
+
+Verify image compression paths where applicable.
+
+============================================================
+24. PRODUCTION SMOKE TEST
+============================================================
+
+Use SAFE, NON-DESTRUCTIVE smoke tests against:
+
+https://sc.travelintrips.co.id
+
+Verify:
+
+- health
+- homepage
+- booking page
+- facility listing
+- booking form
+- payment page
+- admin authentication
+- admin booking list
+- admin payment page
+- corporate billing
+- invoice
+- reconciliation
+- API health
+
+DO NOT create real customer bookings.
+
+DO NOT send real WhatsApp.
+
+DO NOT make real payment.
+
+DO NOT mutate financial Production data merely for smoke testing.
+
+For write-path tests use DEV/test environment.
+
+============================================================
+25. DATABASE FINAL READ-ONLY INTEGRITY
+============================================================
+
+Run final Production read-only audit.
+
+Handshake:
+
+BEGIN;
+SET TRANSACTION READ ONLY;
+SHOW transaction_read_only;
+
+Must be:
+
+on
+
+Verify:
+
+sport_bookings
+sport_payments
+booking_history
+company_invoices
+company_invoice_items
+payment_accounting_outbox
+accounting_journals
+accounting_journal_lines
+tax_transactions
+bank_mutations
+bank_reconciliation_matches
+central_finance_processing
+
+Compare against known baseline.
+
+Do not require historical anomalies to become zero.
+
+Instead verify:
+
+NO NEW ANOMALIES
+NO UNAUTHORIZED MUTATION
+NO ACCOUNTING IMBALANCE
+NO DUPLICATE POSTING
+NO CENTRAL FINANCE CORRUPTION
+
+ROLLBACK.
+
+============================================================
+26. AUTOMATIC SAFE FIX
+============================================================
+
+If during this phase a code defect is found:
+
+Fix it immediately if:
+
+- deterministic
+- minimal
+- tested
+- no historical financial rewrite
+- no schema-breaking change
+- no Central Finance risk
+
+Then rerun tests.
+
+Do not stop after identifying a bug.
+
+============================================================
+27. TEST / TYPECHECK / BUILD
+============================================================
+
+Run:
+
+pnpm --filter @workspace/scripts run typecheck
+
+pnpm --filter @workspace/api-server run typecheck
+
+pnpm --filter @workspace/api-server run test
+
+pnpm --filter @workspace/api-server run build
+
+git diff --check
+
+All must PASS.
+
+If a test fails:
+
+determine whether it is:
+
+- caused by current change
+- pre-existing
+- environment-only
+
+Fix current-change failures.
+
+Do not hide failures.
+
+============================================================
+28. DEPLOYMENT VERIFICATION
+============================================================
+
+Verify current production deployment:
+
+https://sc.travelintrips.co.id
+
+Confirm:
+
+HTTP 200 where expected
+TLS valid
+runtime healthy
+API healthy
+static assets healthy
+no production startup error
+
+Do not republish unless a concrete verified code fix requires deployment.
+
+If deployment is required:
+
+deploy using existing production deployment mechanism.
+
+After deployment:
+
+repeat smoke test.
+
+============================================================
+29. FINAL PRODUCTION MUTATION PROOF
+============================================================
+
+The final report must clearly state:
+
+Production data mutation during this phase:
+NONE
+
+unless a specific safe mutation was explicitly required.
+
+If any Production mutation occurred:
+
+list:
+
+table
+record
+old value
+new value
+reason
+canonical mechanism
+transaction
+verification
+
+No unexplained mutation is acceptable.
+
+============================================================
+30. FINAL PROJECT CLOSURE
+============================================================
+
+Create/update:
+
+SPORT_CENTER_FINAL_PRODUCTION_CLOSURE_REPORT.md
+
+Final report must contain:
+
+EXECUTIVE VERDICT
+
+PRODUCTION RUNTIME
+DATABASE
+STORAGE
+PAYMENT
+BOOKING
+CORPORATE BILLING
+INVOICE
+TAX
+EVENT
+RECURRING
+CHECK-IN
+RESCHEDULE
+ACCOUNTING
+RECONCILIATION
+SETTLEMENT
+EXPENSE
+VENDOR
+SECURITY
+CENTRAL FINANCE
+
+For every area:
+
+PASS
+PASS WITH REVIEW
+BLOCKED
+
+Explain every non-PASS item.
+
+============================================================
+31. FINAL CLOSURE CRITERIA
+============================================================
+
+The project may be declared FINALIZED only if:
+
+Production runtime = PASS
+Database connectivity = PASS
+Production smoke test = PASS
+Payment flow = PASS
+Booking lifecycle = PASS
+Accounting balance = PASS
+Central Finance boundary = PASS
+No unauthorized mutation = PASS
+Tests = PASS
+Typecheck = PASS
+Build = PASS
+Git diff check = PASS
+
+Historical anomalies do NOT need to be zero if they were already classified
+and documented by the previous remediation phase.
+
+They must not be silently ignored.
+
+============================================================
+32. FINAL VERDICT
+============================================================
+
+If all closure criteria pass:
+
+==================================================
+SPORT CENTER PROJECT
+FINAL PRODUCTION CLOSURE
+==================================================
+
+PRODUCTION RUNTIME       = PASS
+DATABASE                 = PASS
+PAYMENT                  = PASS
+BOOKING                  = PASS
+CORPORATE BILLING        = PASS
+INVOICE                  = PASS
+TAX                      = PASS
+EVENT                    = PASS
+RECURRING                = PASS
+CHECK-IN                 = PASS
+RESCHEDULE               = PASS
+ACCOUNTING               = PASS
+RECONCILIATION           = PASS
+SETTLEMENT               = PASS
+CENTRAL FINANCE          = PASS
+SECURITY                 = PASS
+STORAGE                  = PASS
+
+TESTS                    = PASS
+TYPECHECK                = PASS
+BUILD                    = PASS
+PRODUCTION SMOKE TEST    = PASS
+UNAUTHORIZED MUTATION   = NONE
+
+PROJECT STATUS           = FINALIZED
+==================================================
+
+If any criterion cannot be proven:
+
+PROJECT STATUS = NOT YET FINALIZED
+
+and identify the exact blocker.
+
+Do not invent PASS.
+
+Do not create another phase.
+
+Do not ask for confirmation.
+
+Work end-to-end until every safe closure item is completed.
