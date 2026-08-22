@@ -14,11 +14,17 @@ Use the App Engine runtime service account for the production service. Do not us
 
 ## 4. Required Secret Manager access
 
-Grant only `roles/secretmanager.secretAccessor`, scoped to the specific production secrets required by the application. Do not grant Owner, Editor, Secret Manager Admin, or broad project access merely to complete an audit.
+The App Engine runtime identity needs only `roles/secretmanager.secretAccessor` on the shared `sport-center` secret. Do not grant Owner, Editor, Secret Manager Admin, or broad project access merely to complete an audit.
 
 ## 5. Required secret metadata
 
-The deployment must define the documented production secret IDs for the database URL, Supabase URL/keys, session secret, and feature credentials. Secret values must remain in Secret Manager and must never be copied into source, `.replit`, build YAML, logs, fixtures, or this document.
+The shared configuration uses:
+
+- `GCP_SECRET_MANAGER_BOOTSTRAP_JSON` — bootstrap credential/configuration, never logged
+- `GCP_PROJECT_ID` — target project identifier
+- `GCP_SECRET_ID=sport-center` — one shared Secret Manager secret
+
+The shared secret contains environment-isolated configuration. Production reads only the non-`_DEV` fields and explicitly shared fields such as `SESSION_SECRET`. Secret values must remain in Secret Manager and must never be copied into source, `.replit`, build YAML, logs, fixtures, or this document.
 
 ## 6. Required IAM permission
 
@@ -26,12 +32,14 @@ The runtime identity needs `secretmanager.versions.access` through the least-pri
 
 ## 7. Verification steps
 
-1. Confirm the project and runtime identity through read-only GCP metadata.
-2. Confirm each required secret exists and has an accessible latest version without printing payloads.
-3. Confirm the application bootstrap loads production secrets from Secret Manager.
-4. Confirm startup fails when the project, accessor permission, or required secret is missing.
-5. Confirm production has no development-only URL/key variables.
-6. Confirm frontend bundles and API responses contain no service-role credential.
+1. Validate `GCP_SECRET_MANAGER_BOOTSTRAP_JSON` is present, parseable, and resolves `project_id`, `client_email`, and `GCP_SECRET_ID` without printing values.
+2. Confirm the target project and `sport-center` latest secret version through read-only metadata.
+3. Confirm the App Engine runtime identity separately from local `gcloud` authentication.
+4. Confirm the runtime identity has `secretmanager.versions.access` through the least-privilege accessor role.
+5. Confirm the application bootstrap loads the production section from the shared secret.
+6. Confirm startup fails when the production section, project, accessor permission, or required field is missing.
+7. Confirm production does not load any field ending in `_DEV`.
+8. Confirm frontend bundles and API responses contain no service-role credential.
 
 ## 8. Production DB read-only audit process
 

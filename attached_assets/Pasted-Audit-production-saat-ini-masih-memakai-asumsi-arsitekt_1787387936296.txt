@@ -1,0 +1,109 @@
+Audit production saat ini masih memakai asumsi arsitektur lama dan memblokir karena mencari:
+
+`GCP_SECRET_MANAGER_BOOTSTRAP_JSON_PROD`
+
+Arsitektur terbaru sudah menggunakan satu shared bootstrap:
+
+`GCP_SECRET_MANAGER_BOOTSTRAP_JSON`
+
+untuk DEV dan PROD.
+
+Tolong refactor audit/gate production agar konsisten dengan loader baru.
+
+Jangan membuat kembali bootstrap terpisah DEV/PROD.
+
+## Production gate yang benar
+
+Production bootstrap PASS jika:
+
+* `GCP_SECRET_MANAGER_BOOTSTRAP_JSON` tersedia
+* bootstrap dapat diparse
+* `project_id` berhasil di-resolve
+* `client_email` berhasil di-resolve
+* `GCP_SECRET_ID` berhasil di-resolve
+* runtime environment adalah `production`
+
+Jangan mensyaratkan:
+
+`GCP_SECRET_MANAGER_BOOTSTRAP_JSON_PROD`
+
+## Runtime identity
+
+Jangan menggunakan status login `gcloud` lokal sebagai satu-satunya bukti runtime identity App Engine.
+
+Error:
+
+`You do not currently have an active account selected`
+
+hanya berarti CLI lokal belum authenticated.
+
+Pisahkan:
+
+`LOCAL GCLOUD AUTH`
+
+dari:
+
+`APP ENGINE RUNTIME IDENTITY`
+
+Verifikasi App Engine runtime service account dari konfigurasi deployment/App Engine bila tersedia.
+
+Jangan melakukan mutation terhadap production.
+
+## Secret Manager
+
+Setelah identity berhasil ditentukan, lakukan hanya verifikasi read-only:
+
+* project target benar
+* secret ID `sport-center`
+* service account memiliki `roles/secretmanager.secretAccessor`
+* versi latest tersedia
+* production runtime dapat mengakses shared secret
+
+Jangan mencetak payload.
+
+## Production mapping
+
+Production harus menggunakan field non-DEV seperti:
+
+`SUPABASE_DATABASE_URL`
+`SUPABASE_URL`
+`SUPABASE_ANON_KEY`
+`SUPABASE_SERVICE_ROLE_KEY`
+
+dan global field yang memang diklasifikasikan shared, misalnya `SESSION_SECRET`.
+
+Production tidak boleh membaca field berakhiran `_DEV`.
+
+Tidak ada fallback PROD → DEV.
+
+## Fail closed
+
+Pertahankan fail-closed.
+
+Jika identity, IAM, secret access, atau production config belum terverifikasi:
+
+jangan lanjut ke query database production.
+
+## Output audit yang diinginkan
+
+Laporkan terpisah:
+
+`Shared bootstrap: PASS/FAIL`
+
+`Runtime environment: production`
+
+`App Engine runtime identity: <service-account>/UNVERIFIED`
+
+`Secret Manager IAM: PASS/FAIL/UNVERIFIED`
+
+`Shared secret access: PASS/FAIL`
+
+`PROD config mapping: PASS/FAIL`
+
+`PROD uses _DEV fields: NO`
+
+`Production DB connection: NOT TESTED / PASS`
+
+Jangan jalankan INSERT, UPDATE, DELETE, migration, repair, reconciliation, journal mutation, atau perubahan Central Finance.
+
+Jangan menyatakan production blocked hanya karena `gcloud` lokal belum memiliki active account jika runtime identity dapat diverifikasi melalui deployment configuration atau production logs.
