@@ -2,8 +2,9 @@
 
 ## Executive status
 
-**Historical classification: PARTIAL / BLOCKED**  
-**Production read-only mutation: NONE**
+**Historical classification: BLOCKED**
+**Production record-level access: BLOCKED**
+**Production data mutation: NONE**
 
 This report is intentionally conservative. The supplied production baseline
 contains aggregate counts and identifies bookings `380` and `511`, but it does
@@ -21,6 +22,18 @@ and no production data was read or changed. The only read-only harness found
 in the workspace is explicitly development-only and fail-closed for production.
 Therefore, unknown records remain `UNKNOWN`/`BLOCKED` instead of being
 inferred from aggregate counts.
+The official production Secret Manager bootstrap was requested but was not
+provided, so a dedicated production PostgreSQL audit connection could not be
+established. No production transaction was started, and no production data was
+read or changed during this phase. Therefore, unknown records remain
+`UNKNOWN`/`BLOCKED` instead of being inferred from aggregate counts.
+
+Required blocker resolution: provide the authorized
+`GCP_SECRET_MANAGER_BOOTSTRAP_JSON` through the workspace secret flow, with
+the production project and secret identifiers, then rerun the dedicated
+read-only gate: `BEGIN; SET TRANSACTION READ ONLY; SHOW transaction_read_only;`
+The expected value is `on`. Do not substitute `DATABASE_URL`, the development
+database, or the application write-capable pool.
 
 ## Verified baseline supplied for this audit
 
@@ -152,6 +165,8 @@ approval, posting, or repair operation.
 - **PRODUCTION READ-ONLY CONNECTION:** BLOCKED — no dedicated production session was available; `transaction_read_only=on` was not verified
 - **PRODUCTION DATA MUTATION:** NONE
 - **HISTORICAL CLASSIFICATION:** PARTIAL / BLOCKED — required record-level production evidence was not supplied or safely reachable
+- **PRODUCTION RECORD-LEVEL ACCESS:** BLOCKED — the authorized Secret Manager bootstrap was not provided, so the dedicated production connection could not be established
+- **HISTORICAL CLASSIFICATION:** BLOCKED — required record-level production evidence was not safely reachable
 - **BOOKING LIFECYCLE:** CLASSIFIED at code level; historical rows blocked
 - **PAYMENT DUPLICATES:** UNKNOWN / BLOCKED
 - **MISSING PAYMENT:** UNKNOWN / BLOCKED

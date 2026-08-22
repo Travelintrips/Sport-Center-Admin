@@ -24,6 +24,7 @@ type LoadResult = {
 const ENV_KEYS = [
   "SUPABASE_DATABASE_URL",
   "SUPABASE_DATABASE_URL_DEV",
+  "SUPABASE_PROD_AUDIT_DATABASE_URL",
   "SUPABASE_URL",
   "SUPABASE_URL_DEV",
   "SUPABASE_ANON_KEY",
@@ -57,6 +58,11 @@ const FIELD_ALIASES: Record<string, string[]> = {
     "SUPABASE_PG_URL",
     "supabase_database_url",
   ],
+  production_audit_database_url: [
+    "production_audit_database_url",
+    "SUPABASE_PROD_AUDIT_DATABASE_URL",
+    "supabase_prod_audit_database_url",
+  ],
   supabase_url: ["supabase_url", "SUPABASE_URL"],
   supabase_anon_key: [
     "supabase_anon_key",
@@ -86,12 +92,13 @@ const FIELD_ALIASES: Record<string, string[]> = {
   wati_base_url: ["wati_base_url", "WATI_BASE_URL"],
 };
 
-function runtimeEnvironment(): "dev" | "prod" | undefined {
+function runtimeEnvironment(): "dev" | "prod" | "audit" | undefined {
   const value = (process.env.APP_ENV ?? process.env.NODE_ENV ?? "")
     .trim()
     .toLowerCase();
   if (value === "dev" || value === "development") return "dev";
   if (value === "prod" || value === "production") return "prod";
+  if (value === "audit" || value === "production-audit") return "audit";
   return undefined;
 }
 
@@ -166,8 +173,11 @@ function flatPayloadSection(payload: JsonObject, env: "dev" | "prod"): JsonObjec
   return section;
 }
 
-function selectedSection(payload: JsonObject, env: "dev" | "prod"): JsonObject | undefined {
-  const section = payload[env] ?? payload[env === "dev" ? "development" : "production"];
+function selectedSection(payload: JsonObject, env: "dev" | "prod" | "audit"): JsonObject | undefined {
+  const section =
+    env === "audit"
+      ? payload.production ?? payload.prod
+      : payload[env] ?? payload[env === "dev" ? "development" : "production"];
   if (section && typeof section === "object" && !Array.isArray(section)) {
     const shared = payload.shared;
     return {
@@ -177,7 +187,8 @@ function selectedSection(payload: JsonObject, env: "dev" | "prod"): JsonObject |
       ...(section as JsonObject),
     };
   }
-  const flat = flatPayloadSection(payload, env);
+  const flat = env === "audit" ? undefined : flatPayloadSection(payload, env);
+  if (!flat) return undefined;
   return Object.keys(flat).length > 0 ? flat : undefined;
 }
 
@@ -243,6 +254,19 @@ async function accessSharedSecret(
   secretId: string,
   credentials?: JsonObject,
 ): Promise<JsonObject> {
+  const raw = await accessSecretValue(projectId, secretId, credentials);
+  const payload = JSON.parse(raw) as unknown;
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    throw new Error("Shared secret payload must be a JSON object");
+  }
+  return payload as JsonObject;
+}
+
+async function accessSecretValue(
+  projectId: string,
+  secretId: string,
+  credentials?: JsonObject,
+): Promise<string> {
   const { GoogleAuth } = await import("google-auth-library");
   const auth = credentials
     ? new GoogleAuth({ credentials, scopes: ["https://www.googleapis.com/auth/cloud-platform"] })
@@ -255,14 +279,9 @@ async function accessSharedSecret(
   });
   const encoded = response.data?.payload?.data;
   if (!encoded) throw new Error("Secret Manager returned an empty payload");
-  const raw = Buffer.isBuffer(encoded)
+  return Buffer.isBuffer(encoded)
     ? encoded.toString("utf8")
     : Buffer.from(encoded, "base64").toString("utf8");
-  const payload = JSON.parse(raw) as unknown;
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-    throw new Error("Shared secret payload must be a JSON object");
-  }
-  return payload as JsonObject;
 }
 
 /**
@@ -273,6 +292,10 @@ export async function loadSecretsFromGSM(): Promise<LoadResult> {
   const env = runtimeEnvironment();
   if (!env) {
     result.fatal.push("Unsupported or missing runtime environment");
+    return result;
+  }
+  if (env === "audit") {
+    result.fatal.push("Production audit environment requires the dedicated audit loader");
     return result;
   }
 
@@ -317,9 +340,65 @@ export async function loadSecretsFromGSM(): Promise<LoadResult> {
   return result;
 }
 
+
 /** Kept as a compatibility export for callers that used the old DEV-specific name. */
 export async function loadDevDatabaseSecretFromGSM(): Promise<{ loaded: boolean; fatal: string[] }> {
   if (runtimeEnvironment() !== "dev") return { loaded: false, fatal: [] };
   const result = await loadSecretsFromGSM();
   return { loaded: result.loaded.includes("SUPABASE_DATABASE_URL_DEV"), fatal: result.fatal };
+}
+
+/**
+ * Load only the dedicated production audit URL.
+ *
+ * Unlike the application loader, this path never maps application database
+ * credentials, service keys, or session settings into the process.
+ */
+export async function loadProductionAuditDatabaseSecretFromGSM(): Promise<LoadResult> {
+  const result: LoadResult = { loaded: [], skipped: [], failed: [], fatal: [] };
+  if (runtimeEnvironment() !== "audit") {
+    result.fatal.push("Production audit loader requires production-audit environment");
+    return result;
+  }
+
+  const bootstrapRaw = process.env.GCP_SECRET_MANAGER_BOOTSTRAP_JSON;
+  if (!bootstrapRaw) {
+    result.skipped.push("GCP_SECRET_MANAGER_BOOTSTRAP_JSON is unavailable");
+    return result;
+  }
+
+  let bootstrap: BootstrapConfig = {};
+  try {
+    bootstrap = parseBootstrap(bootstrapRaw);
+  } catch {
+    result.fatal.push("Bootstrap JSON is invalid");
+    return result;
+  }
+
+  const projectId =
+    process.env.GCP_PROJECT_ID ??
+    bootstrap.projectId ??
+    process.env.GOOGLE_CLOUD_PROJECT;
+  if (!projectId) result.fatal.push("GCP project ID is missing");
+  if (result.fatal.length) return result;
+
+  try {
+    const auditUrl = await accessSecretValue(
+      projectId as string,
+      "SUPABASE_PROD_AUDIT_DATABASE_URL",
+      bootstrap.credentials,
+    );
+    if (!auditUrl.trim()) throw new Error("Production audit secret is empty");
+    process.env.SUPABASE_PROD_AUDIT_DATABASE_URL = auditUrl.trim();
+    result.loaded.push("SUPABASE_PROD_AUDIT_DATABASE_URL");
+  } catch (err) {
+    const safe = safeError(err);
+    if (/\b404\b|not found|does not exist/i.test(safe)) {
+      result.skipped.push("SUPABASE_PROD_AUDIT_DATABASE_URL is unavailable");
+    } else {
+      result.failed.push(`Secret Manager access failed: ${safe}`);
+      result.fatal.push("Production audit secret access failed");
+    }
+  }
+  return result;
 }
