@@ -30,6 +30,7 @@ const config = {
   // Paylabs has its own Vitest contract and is intentionally outside this
   // accounting/payment validation suite.
   testPathIgnorePatterns: ["/node_modules/", "/dist/", "/src/lib/paylabs\\.test\\.ts$"],
+  setupFiles: ["<rootDir>/src/testSetup.ts"],
   // Only collect coverage from source (not tests)
   collectCoverageFrom: ["src/**/*.ts", "!src/**/__tests__/**"],
 };

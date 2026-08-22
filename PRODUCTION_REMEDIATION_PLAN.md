@@ -110,10 +110,12 @@ owners. Reschedule approval clears check-in/completion timestamps and
 revalidates conflicts inside a transaction. No historical amount or booking
 was changed in this phase.
 
-Event discount and recurring record-level verification remain
-`REVIEW` until the previously supplied production audit rows are attached to
-the classification report. Any code change must preserve the shared booking
-payment and lifecycle contract.
+Event discount is now implemented through one shared integer-safe helper used
+by both regular and recurring booking creation. The contract is covered by
+tests for 21.4% and rounding. Historical event rows and recurring
+record-level verification remain `REVIEW` until production audit rows are
+attached to the classification report. Any code change must preserve the
+shared booking payment and lifecycle contract.
 
 ## Verification
 
@@ -121,6 +123,8 @@ payment and lifecycle contract.
 - API development workflow: PASS (Secret Manager bootstrap and server on port
   8080)
 - Booking lifecycle regression tests: added
+- Event pricing tests: PASS (2/2)
+- Full API test suite: PASS (17 suites / 109 tests)
 - Production historical mutation: NONE
 - Central Finance unauthorized change: NONE
 
@@ -133,7 +137,7 @@ payment and lifecycle contract.
 - PAYMENT MISSING: historical classification REVIEW
 - OUTBOX: current worker hardened/idempotent; historical rows REVIEW
 - RECONCILIATION: runtime table identified, `candidate_source` schema identity REVIEW
-- EVENT: historical verification REVIEW
+- EVENT: CODE VERIFIED; historical record verification REVIEW
 - RECURRING: historical verification REVIEW
 - RESCHEDULE: current transactional guard VERIFIED
 - CROSS-ENTITY: current contract REVIEW for historical corporate exceptions
