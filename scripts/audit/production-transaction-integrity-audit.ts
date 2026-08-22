@@ -83,8 +83,14 @@ async function main() {
       duplicateBookingType: await query(
         "SELECT booking_id,payment_type,COUNT(*)::int AS rows FROM sport_center.sport_payments GROUP BY booking_id,payment_type HAVING COUNT(*)>1 ORDER BY booking_id,payment_type",
       ),
+      duplicateBookingTypeDetails: await query(
+        "SELECT p.id,p.booking_id,p.payment_type,p.amount,p.status,p.payment_provider,p.provider_reference,p.provider_order_id,p.merchant_trade_no,p.created_at,p.confirmed_at,p.company_id FROM sport_center.sport_payments p JOIN (SELECT booking_id,payment_type FROM sport_center.sport_payments GROUP BY booking_id,payment_type HAVING COUNT(*)>1) d ON d.booking_id=p.booking_id AND d.payment_type=p.payment_type ORDER BY p.booking_id,p.payment_type,p.id",
+      ),
       duplicateReferences: await query(
         "SELECT provider_reference,provider_order_id,merchant_trade_no,COUNT(*)::int AS rows FROM sport_center.sport_payments WHERE provider_reference IS NOT NULL OR provider_order_id IS NOT NULL OR merchant_trade_no IS NOT NULL GROUP BY provider_reference,provider_order_id,merchant_trade_no HAVING COUNT(*)>1 ORDER BY rows DESC",
+      ),
+      duplicateReferenceDetails: await query(
+        "SELECT p.id,p.booking_id,p.payment_type,p.amount,p.status,p.payment_provider,p.provider_reference,p.provider_order_id,p.merchant_trade_no,p.created_at,p.confirmed_at FROM sport_center.sport_payments p JOIN (SELECT provider_reference,provider_order_id,merchant_trade_no FROM sport_center.sport_payments WHERE provider_reference IS NOT NULL OR provider_order_id IS NOT NULL OR merchant_trade_no IS NOT NULL GROUP BY provider_reference,provider_order_id,merchant_trade_no HAVING COUNT(*)>1) d ON d.provider_reference IS NOT DISTINCT FROM p.provider_reference AND d.provider_order_id IS NOT DISTINCT FROM p.provider_order_id AND d.merchant_trade_no IS NOT DISTINCT FROM p.merchant_trade_no ORDER BY p.id",
       ),
       confirmedOnTerminalBooking: await query(
         "SELECT p.id,p.booking_id,p.payment_type,p.status,p.amount,b.status AS booking_status FROM sport_center.sport_payments p JOIN sport_center.sport_bookings b ON b.id=p.booking_id WHERE p.status='confirmed' AND b.status IN ('cancelled','expired','rejected','refunded') ORDER BY p.id",
@@ -121,6 +127,9 @@ async function main() {
       ),
       duplicateReferences: await query(
         "SELECT reference_type,reference_id,transaction_type,COUNT(*)::int AS rows FROM sport_center.tax_transactions GROUP BY reference_type,reference_id,transaction_type HAVING COUNT(*)>1 ORDER BY reference_type,reference_id",
+      ),
+      duplicateReferenceDetails: await query(
+        "SELECT t.id,t.reference_type,t.reference_id,t.reference_number,t.transaction_type,t.tax_code,t.tax_rate,t.dpp,t.dpp_nilai_lain,t.tax_amount,t.grand_total,t.transaction_date,t.created_at FROM sport_center.tax_transactions t JOIN (SELECT reference_type,reference_id,transaction_type FROM sport_center.tax_transactions GROUP BY reference_type,reference_id,transaction_type HAVING COUNT(*)>1) d ON d.reference_type=t.reference_type AND d.reference_id=t.reference_id AND d.transaction_type=t.transaction_type ORDER BY t.reference_type,t.reference_id,t.id",
       ),
     };
     findings.reconciliation = {
