@@ -33,3 +33,16 @@ evidence and makes audit/reconciliation reports unreliable.
 **How to apply:** Treat all journal-sync triggers as startup-critical
 dependencies. If a linked journal/entry cannot be synchronized, fail the
 payment update so the database rolls back the entire transaction.
+
+## Production provisioning order
+
+Provision new payment-accounting functions and triggers in production before
+releasing an API version that verifies them during startup.
+
+**Why:** The API correctly fails closed before opening its HTTP port when a
+required financial trigger is absent; Autoscale then rejects the release on its
+readiness check even though the source build succeeded.
+
+**How to apply:** Use the narrowly scoped, transactional production trigger
+migration, verify every required trigger after applying it, then publish the API
+release.

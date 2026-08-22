@@ -1507,6 +1507,63 @@ ON sport_center.sport_payments
 FOR EACH ROW
 EXECUTE FUNCTION sport_center.sync_payment_accounting_journal();
 
+-- Keep the public accounting-entry header aligned with the public payment
+-- mirror. This only changes payment classification metadata; financial values,
+-- tax, posting state, and journal lines remain immutable.
+CREATE OR REPLACE FUNCTION public.sync_sport_payment_entry_metadata()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path TO 'pg_catalog', 'public'
+AS $function$
+DECLARE
+  v_entry_status text;
+BEGIN
+  IF NEW.entry_id IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  SELECT ae.status::text
+    INTO v_entry_status
+    FROM public.accounting_entries ae
+   WHERE ae.id = NEW.entry_id;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION
+      'PUBLIC_PAYMENT_ACCOUNTING_ENTRY_MISSING: payment=% entry_id=%',
+      NEW.id,
+      NEW.entry_id
+      USING ERRCODE = 'P0001';
+  END IF;
+
+  IF v_entry_status = 'reversed' THEN
+    RAISE EXCEPTION
+      'REVERSED_PUBLIC_ACCOUNTING_ENTRY_IS_IMMUTABLE: entry_id=%',
+      NEW.entry_id
+      USING ERRCODE = 'P0001';
+  END IF;
+
+  UPDATE public.accounting_entries
+     SET payment_method = NEW.method,
+         payment_provider = NEW.payment_provider
+   WHERE id = NEW.entry_id
+     AND (
+       payment_method IS DISTINCT FROM NEW.method
+       OR payment_provider IS DISTINCT FROM NEW.payment_provider
+     );
+
+  RETURN NEW;
+END;
+$function$;
+
+DROP TRIGGER IF EXISTS trg_sync_sport_payment_entry_metadata
+  ON public.sport_payments;
+CREATE TRIGGER trg_sync_sport_payment_entry_metadata
+AFTER INSERT OR UPDATE OF method, payment_provider
+ON public.sport_payments
+FOR EACH ROW
+EXECUTE FUNCTION public.sync_sport_payment_entry_metadata();
+
 -- AP2 discount settings support a fixed nominal amount in addition to percentage.
 ALTER TABLE sport_center.discount_settings
   ADD COLUMN IF NOT EXISTS discount_amount integer;
