@@ -43,7 +43,11 @@ import { extractBookingDpp, postConfirmedPaymentAccounting } from "../lib/accoun
 import { hashPassword } from "../lib/auth";
 import { syncStatusToBizportal, pushConfirmedPaymentAsBankMutation } from "../lib/bizportalSync";
 import { calculateTax, recordTaxTransaction } from "../lib/tax";
-import { checkInBooking, completeBooking } from "../lib/bookingLifecycle";
+import {
+  checkInBooking,
+  completeBooking,
+  isBookingConfirmableStatus,
+} from "../lib/bookingLifecycle";
 import { ensurePaymentBankAccount, resolveRequiredPaymentEnrichment } from "../lib/paymentEnrichment";
 import { createPaymentProviderId, createPaymentProviderOrderId, normalizeProviderName } from "../lib/paymentMetadata";
 import { broadcastAvailabilityChange } from "../lib/supabase";
@@ -890,6 +894,12 @@ router.post("/wa/action/:token", async (req, res) => {
 
     switch (tokenRow.action) {
       case "approve_payment": {
+        if (!isBookingConfirmableStatus(booking.status)) {
+          res.status(409).json({
+            error: `Booking dengan status ${booking.status} tidak dapat dikonfirmasi melalui WhatsApp.`,
+          });
+          return;
+        }
         let [payment] = await db.select().from(paymentsTable)
           .where(eq(paymentsTable.bookingId, booking.id)).limit(1);
         if (!payment) { res.status(400).json({ error: "Tidak ada bukti pembayaran" }); return; }
@@ -1257,6 +1267,12 @@ router.post("/wa/review/:token", async (req, res) => {
       .where(eq(facilitiesTable.id, booking.facilityId)).limit(1);
 
     if (action === "approve") {
+      if (!isBookingConfirmableStatus(booking.status)) {
+        res.status(409).json({
+          error: `Booking dengan status ${booking.status} tidak dapat dikonfirmasi melalui WhatsApp.`,
+        });
+        return;
+      }
       let [payment] = await db.select().from(paymentsTable)
         .where(eq(paymentsTable.bookingId, booking.id)).limit(1);
       if (!payment) { res.status(400).json({ error: "Tidak ada bukti pembayaran" }); return; }

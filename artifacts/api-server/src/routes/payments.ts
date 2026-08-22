@@ -47,6 +47,7 @@ import {
   verifyProofOcrToken,
 } from "../lib/paymentProofOcr";
 import { readPaymentProofOcr } from "../lib/paymentOcr";
+import { isBookingConfirmableStatus } from "../lib/bookingLifecycle";
 
 // Helper: kirim rekap ke admin WA hanya jika tanggal booking = hari ini (WIB)
 function todayWIB(): string {
@@ -962,6 +963,12 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
     }
     const [booking] = await db.select().from(bookingsTable)
       .where(eq(bookingsTable.id, before.bookingId)).limit(1);
+    if (status === "confirmed" && booking && !isBookingConfirmableStatus(booking.status)) {
+      res.status(409).json({
+        error: `Booking dengan status ${booking.status} tidak dapat dikonfirmasi melalui pembayaran.`,
+      });
+      return;
+    }
 
     const paymentMethodChanged =
       normalizedPaymentMethod !== undefined &&
@@ -1160,6 +1167,7 @@ router.patch("/payments/:id", adminMiddleware, async (req, res) => {
         and(eq(bookingsTable.groupRef, booking.groupRef), ne(bookingsTable.id, payment.bookingId))
       );
       for (const sib of siblings) {
+        if (!isBookingConfirmableStatus(sib.status)) continue;
         const sibPrev = sib.status;
         await db.update(bookingsTable)
           .set({ status: targetStatus as any, updatedAt: new Date(), ...(extraFields ?? {}) })

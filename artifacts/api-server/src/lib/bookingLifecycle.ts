@@ -1,6 +1,16 @@
 import { db, bookingsTable, bookingHistoryTable, rescheduleRequestsTable } from "@workspace/db";
 import { and, eq } from "drizzle-orm";
 import { logAudit } from "./auditLog";
+export {
+  CONFIRMABLE_BOOKING_STATUSES,
+  hasBookingSessionEnded,
+  hasBookingSessionStarted,
+  isBookingConfirmableStatus,
+} from "./bookingLifecycleRules";
+import {
+  hasBookingSessionEnded,
+  hasBookingSessionStarted,
+} from "./bookingLifecycleRules";
 
 export type BookingLifecycleActor = {
   userId?: number | null;
@@ -11,34 +21,6 @@ export type BookingLifecycleActor = {
 export type LifecycleResult =
   | { ok: true; bookingId: number; alreadyCompleted: boolean }
   | { ok: false; reason: string };
-
-export function hasBookingSessionEnded(
-  bookingDate: string,
-  endTime: string,
-  now: Date = new Date(),
-): boolean {
-  const normalizedEndTime = String(endTime || "").slice(0, 5);
-  const end = new Date(`${bookingDate}T${normalizedEndTime}:00+07:00`);
-  if (Number.isNaN(end.getTime())) return false;
-
-  // The application represents midnight close as 00:00 on the booking day,
-  // but that means the end of that day, not its beginning.
-  if (normalizedEndTime === "00:00") {
-    end.setTime(end.getTime() + 24 * 60 * 60 * 1000);
-  }
-  return now.getTime() >= end.getTime();
-}
-
-export function hasBookingSessionStarted(
-  bookingDate: string,
-  startTime: string,
-  now: Date = new Date(),
-): boolean {
-  const normalizedStartTime = String(startTime || "").slice(0, 5);
-  const start = new Date(`${bookingDate}T${normalizedStartTime}:00+07:00`);
-  if (Number.isNaN(start.getTime())) return false;
-  return now.getTime() >= start.getTime();
-}
 
 function todayJakarta(now: Date): string {
   return now.toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" });
