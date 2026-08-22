@@ -30,6 +30,8 @@ const ENV_KEYS = [
   "SUPABASE_ANON_KEY_DEV",
   "SUPABASE_SERVICE_ROLE_KEY",
   "SUPABASE_SERVICE_ROLE_KEY_DEV",
+  "SUPABASE_STORAGE_BUCKET",
+  "SUPABASE_STORAGE_BUCKET_DEV",
   "SESSION_SECRET",
   "FONNTE_TOKEN",
   "OPENAI_API_KEY",
@@ -44,8 +46,17 @@ const ENV_KEYS = [
   "WATI_BASE_URL",
 ];
 
+// These values are explicitly global/shared in the existing application.
+// They may remain in the runtime environment when the GCP payload omits them.
+const SHARED_RUNTIME_ENV_KEYS = new Set(["SESSION_SECRET"]);
+
 const FIELD_ALIASES: Record<string, string[]> = {
-  database_url: ["database_url", "SUPABASE_DATABASE_URL", "supabase_database_url"],
+  database_url: [
+    "database_url",
+    "SUPABASE_DATABASE_URL",
+    "SUPABASE_PG_URL",
+    "supabase_database_url",
+  ],
   supabase_url: ["supabase_url", "SUPABASE_URL"],
   supabase_anon_key: [
     "supabase_anon_key",
@@ -57,6 +68,7 @@ const FIELD_ALIASES: Record<string, string[]> = {
     "supabase_service_role_key",
     "SUPABASE_SERVICE_ROLE_KEY",
   ],
+  supabase_storage_bucket: ["supabase_storage_bucket", "SUPABASE_STORAGE_BUCKET"],
   session_secret: ["session_secret", "SESSION_SECRET"],
   fonnte_token: ["fonnte_token", "FONNTE_TOKEN"],
   openai_api_key: ["openai_api_key", "OPENAI_API_KEY"],
@@ -114,15 +126,65 @@ function parseBootstrap(raw: string): BootstrapConfig {
   return { credentials, projectId, secretId };
 }
 
+const SHARED_FIELDS = new Set([
+  "SESSION_SECRET",
+  "FONNTE_TOKEN",
+  "OPENAI_API_KEY",
+  "GOOGLE_SERVICE_ACCOUNT_JSON",
+  "GOOGLE_CLIENT_ID",
+  "BIZPORTAL_SYNC_API_KEY",
+  "CASHIER_TOKEN_SECRET",
+  "VAPID_PUBLIC_KEY",
+  "VAPID_PRIVATE_KEY",
+  "ADMIN_WA_PHONES",
+  "WATI_API_TOKEN",
+  "WATI_BASE_URL",
+  "SMTP_FROM",
+  "SMTP_PASS",
+]);
+
+const PROD_FIELDS = new Set([
+  "SUPABASE_DATABASE_URL",
+  "SUPABASE_URL",
+  "SUPABASE_ANON_KEY",
+  "SUPABASE_SERVICE_ROLE_KEY",
+  "SUPABASE_STORAGE_BUCKET",
+]);
+
+function flatPayloadSection(payload: JsonObject, env: "dev" | "prod"): JsonObject {
+  const section: JsonObject = {};
+  for (const [key, value] of Object.entries(payload)) {
+    if (env === "dev" && key.endsWith("_DEV")) {
+      section[key.slice(0, -4)] = value;
+    } else if (env === "prod" && (PROD_FIELDS.has(key) || SHARED_FIELDS.has(key))) {
+      section[key] = value;
+    } else if (SHARED_FIELDS.has(key)) {
+      // Explicitly classified shared values are safe in either section.
+      section[key] = value;
+    }
+  }
+  return section;
+}
+
 function selectedSection(payload: JsonObject, env: "dev" | "prod"): JsonObject | undefined {
   const section = payload[env] ?? payload[env === "dev" ? "development" : "production"];
-  return section && typeof section === "object" && !Array.isArray(section)
-    ? (section as JsonObject)
-    : undefined;
+  if (section && typeof section === "object" && !Array.isArray(section)) {
+    const shared = payload.shared;
+    return {
+      ...(shared && typeof shared === "object" && !Array.isArray(shared)
+        ? (shared as JsonObject)
+        : {}),
+      ...(section as JsonObject),
+    };
+  }
+  const flat = flatPayloadSection(payload, env);
+  return Object.keys(flat).length > 0 ? flat : undefined;
 }
 
 function setEnvironmentConfig(section: JsonObject, env: "dev" | "prod"): string[] {
-  for (const key of ENV_KEYS) delete process.env[key];
+  for (const key of ENV_KEYS) {
+    if (!SHARED_RUNTIME_ENV_KEYS.has(key)) delete process.env[key];
+  }
 
   const suffix = env === "dev" ? "_DEV" : "";
   const loaded: string[] = [];
@@ -131,6 +193,7 @@ function setEnvironmentConfig(section: JsonObject, env: "dev" | "prod"): string[
     ["supabase_url", `SUPABASE_URL${suffix}`],
     ["supabase_anon_key", `SUPABASE_ANON_KEY${suffix}`],
     ["supabase_service_role_key", `SUPABASE_SERVICE_ROLE_KEY${suffix}`],
+    ["supabase_storage_bucket", `SUPABASE_STORAGE_BUCKET${suffix}`],
     ["session_secret", "SESSION_SECRET"],
     ["fonnte_token", "FONNTE_TOKEN"],
     ["openai_api_key", "OPENAI_API_KEY"],
@@ -157,7 +220,7 @@ function setEnvironmentConfig(section: JsonObject, env: "dev" | "prod"): string[
 
 function validationFailure(section: JsonObject): string[] {
   return ["database_url", "session_secret"]
-    .filter((field) => !findField(section, field))
+    .filter((field) => !findField(section, field) && !(field === "session_secret" && process.env.SESSION_SECRET))
     .map((field) => `${field} (required field missing)`);
 }
 
