@@ -1,0 +1,439 @@
+PHASE 3 — FINAL CLOSURE SIGN-OFF
+DO NOT CREATE ANOTHER PHASE
+
+Current evidence:
+
+Production runtime:
+https://sc.travelintrips.co.id = reachable
+
+Production read-only audit:
+PASS
+
+Audit role:
+sport_center_production_auditor
+
+transaction_read_only:
+on
+
+Final transaction:
+ROLLBACK
+
+Mutation queries:
+0
+
+Production integrity:
+PASS
+
+Production smoke:
+PASS
+
+Scripts typecheck:
+PASS
+
+API typecheck:
+PASS
+
+Tests:
+17 suites / 109 tests PASS
+
+API build:
+PASS
+
+Frontend build:
+PASS
+
+git diff --check:
+PASS
+
+Production mutation:
+NONE
+
+Current remaining items:
+
+1. Deployment metadata reports isDeployed=false while the production custom
+   domain is reachable.
+
+2. Historical financial anomalies remain documented for owner/accounting
+   classification. No unsafe cleanup was performed.
+
+3. Unauthenticated /api/auth/me returned HTTP 401 during browser testing.
+
+OBJECTIVE:
+
+Perform FINAL SIGN-OFF verification.
+
+DO NOT restart broad audits.
+
+DO NOT create another remediation phase.
+
+DO NOT mutate Production financial data.
+
+DO NOT change accounting.
+
+DO NOT change Central Finance.
+
+DO NOT change historical payment/bookings merely to achieve FINALIZED.
+
+============================================================
+1. DEPLOYMENT METADATA
+============================================================
+
+Investigate the meaning of:
+
+isDeployed=false
+
+using the actual Replit deployment tooling/API already available.
+
+Compare:
+
+- deployment metadata
+- active deployment URL
+- primary URL
+- custom domain
+- deployment type
+- build status
+- latest revision
+- runtime response
+
+Production domain:
+
+https://sc.travelintrips.co.id
+
+Replit deployment URL:
+
+https://sport-center-27917.replit.app
+
+If the actual runtime is active and healthy and the `isDeployed` field is
+not authoritative for the current deployment model:
+
+DO NOT redeploy.
+
+Classify:
+
+DEPLOYMENT = VERIFIED_BY_RUNTIME
+
+Do not treat a stale/unsupported metadata boolean as a production outage.
+
+Only classify deployment BLOCKED if there is actual evidence that the
+production deployment is inactive or serving an incorrect application.
+
+============================================================
+2. AUTHENTICATED ADMIN FLOW
+============================================================
+
+The previous test:
+
+GET /api/auth/me
+
+returned:
+
+401
+
+without authentication.
+
+This is NOT automatically a defect.
+
+Determine whether /api/auth/me is intentionally protected.
+
+Inspect:
+
+- authentication middleware
+- route definition
+- authorization requirement
+- admin session handling
+- frontend login flow
+
+Expected behavior:
+
+Unauthenticated:
+401/403
+
+Authenticated valid session:
+200 with current user/session information
+
+Therefore:
+
+DO NOT weaken authentication merely to make /api/auth/me return 200.
+
+Use an existing safe development/test authentication mechanism if available.
+
+Do NOT use real customer credentials.
+
+Do NOT expose session cookies/tokens.
+
+Verify the authenticated admin flow in DEV/test if Production credentials
+are not safely available.
+
+If protected route behavior is correct:
+
+AUTHENTICATION = PASS
+
+If authenticated admin flow can be safely verified:
+
+ADMIN AUTH FLOW = PASS
+
+If only unauthenticated behavior can be tested:
+
+ADMIN AUTH FLOW = NOT_RUNTIME_VERIFIED
+
+but do not classify the protected 401 itself as a defect.
+
+============================================================
+3. HISTORICAL FINANCIAL ANOMALIES
+============================================================
+
+Do NOT attempt another automatic cleanup.
+
+The previous production audit already established:
+
+- no orphan payments
+- no terminal confirmed payments
+- no invoice number mismatch
+- no invoice item mismatch
+- no invoice total mismatch
+- no unbalanced journals
+- no orphan journal lines
+- accounting balance verified
+- reconciliation integrity verified
+- Central Finance unchanged
+- no unauthorized mutation
+
+Historical items remain:
+
+- completed bookings without check-in
+- missing completion timestamps
+- historical terminal-history inconsistencies
+- duplicate payment groups
+- duplicate provider references
+- processing/failed outbox
+- duplicate tax references
+- reconciliation candidates
+- journals without lines
+
+These are historical classification items.
+
+DO NOT classify the entire PROJECT as technically blocked merely because
+historical records require owner/accounting decisions.
+
+Instead classify:
+
+HISTORICAL_REVIEW = DOCUMENTED
+
+FINANCIAL_INTEGRITY = VERIFIED
+
+NO_UNAUTHORIZED_MUTATION = PASS
+
+============================================================
+4. FINAL PRODUCTION READ-ONLY PROOF
+============================================================
+
+Run one final read-only Production handshake:
+
+BEGIN;
+
+SET TRANSACTION READ ONLY;
+
+SHOW transaction_read_only;
+
+Verify:
+
+transaction_read_only = on
+
+Verify:
+
+current_user = sport_center_production_auditor
+
+Run only final integrity queries.
+
+Do not perform INSERT/UPDATE/DELETE/DDL.
+
+End:
+
+ROLLBACK;
+
+Confirm:
+
+mutation queries = 0
+
+============================================================
+5. FINAL PRODUCTION SMOKE
+============================================================
+
+Verify:
+
+https://sc.travelintrips.co.id
+
+Homepage
+Health
+Facilities
+Promos
+Settings
+API health
+
+Expected:
+
+HTTP 200 where applicable.
+
+For protected endpoints:
+
+401/403 without authentication is expected.
+
+Do not use real payment.
+
+Do not create booking.
+
+Do not send WhatsApp.
+
+Do not mutate financial Production data.
+
+============================================================
+6. FINAL REGRESSION
+============================================================
+
+Run:
+
+pnpm --filter @workspace/scripts run typecheck
+
+pnpm --filter @workspace/api-server run typecheck
+
+pnpm --filter @workspace/api-server run test
+
+pnpm --filter @workspace/api-server run build
+
+git diff --check
+
+All must PASS.
+
+============================================================
+7. FINAL REPORT
+============================================================
+
+Update:
+
+SPORT_CENTER_FINAL_PRODUCTION_CLOSURE_REPORT.md
+
+The report must distinguish:
+
+TECHNICAL PRODUCTION READINESS
+
+from:
+
+HISTORICAL OWNER REVIEW
+
+Do NOT mix them.
+
+Use this structure:
+
+TECHNICAL PRODUCTION READINESS
+= PASS
+
+PRODUCTION RUNTIME
+= PASS if runtime is proven active
+
+PRODUCTION DATABASE
+= PASS
+
+READ-ONLY AUDIT
+= PASS
+
+PAYMENT SYSTEM
+= PASS
+
+BOOKING SYSTEM
+= PASS
+
+ACCOUNTING
+= PASS
+
+CENTRAL FINANCE
+= PASS / UNCHANGED
+
+RECONCILIATION
+= PASS WITH HISTORICAL REVIEW
+
+SECURITY
+= PASS
+
+AUTHENTICATION
+= PASS if protected 401 behavior is correct
+
+SMOKE TEST
+= PASS
+
+TESTS
+= PASS
+
+TYPECHECK
+= PASS
+
+BUILD
+= PASS
+
+GIT DIFF CHECK
+= PASS
+
+PRODUCTION MUTATION
+= NONE
+
+HISTORICAL FINANCIAL REVIEW
+= DOCUMENTED
+
+============================================================
+8. FINAL VERDICT
+============================================================
+
+If runtime is proven active, read-only audit is PASS, accounting is balanced,
+Central Finance is unchanged, authentication behavior is correct, smoke
+tests pass, and regression tests pass:
+
+declare:
+
+==================================================
+SPORT CENTER PROJECT
+FINAL PRODUCTION CLOSURE
+==================================================
+
+PROJECT STATUS = FINALIZED
+
+TECHNICAL PRODUCTION READINESS = PASS
+PRODUCTION DATABASE = PASS
+READ-ONLY AUDIT = PASS
+PAYMENT = PASS
+BOOKING = PASS
+ACCOUNTING = PASS
+CENTRAL FINANCE = PASS
+SECURITY = PASS
+AUTHENTICATION = PASS
+SMOKE TEST = PASS
+TESTS = PASS
+TYPECHECK = PASS
+BUILD = PASS
+DEPLOYMENT = VERIFIED
+PRODUCTION MUTATION = NONE
+
+HISTORICAL FINANCIAL REVIEW = DOCUMENTED
+OWNER ACCOUNTING REVIEW = REQUIRED ONLY FOR HISTORICAL ANOMALIES
+
+==================================================
+
+IMPORTANT:
+
+Historical anomalies do NOT prevent the technical project from being
+FINALIZED if:
+
+- they have already been audited,
+- financial integrity is verified,
+- no unauthorized mutation exists,
+- and they are explicitly documented as owner/accounting review items.
+
+Do not fabricate a PASS.
+
+Do not weaken authentication.
+
+Do not redeploy merely to change metadata.
+
+Do not mutate Production financial data.
+
+Do not create another phase.
+
+This is the FINAL SIGN-OFF.
