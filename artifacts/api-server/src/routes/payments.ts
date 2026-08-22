@@ -737,6 +737,11 @@ router.post("/payments", async (req, res) => {
  * accounting journal terjadi lewat trigger DB sync_payment_accounting_journal
  * yang metadata-only, dan guard_posted_accounting_journal menjaga field
  * finansial jurnal posted tetap immutable.
+ *
+ * Selama masa koreksi yang disetujui owner, transaksi endpoint ini memberi
+ * trigger database izin lokal untuk menyelaraskan metadata pada mirror/jurnal
+ * yang sudah posted. Izin itu hanya hidup selama transaksi, dan validasi di
+ * bawah tetap melarang semua field finansial maupun lifecycle pembayaran.
  */
 router.patch("/payments/:id/metadata", adminMiddleware, async (req, res) => {
   try {
@@ -771,18 +776,33 @@ router.patch("/payments/:id/metadata", adminMiddleware, async (req, res) => {
       return;
     }
 
-    const [payment] = await db
-      .update(paymentsTable)
-      .set({
-        ...(update.paymentMethod !== undefined ? { paymentMethod: update.paymentMethod } : {}),
-        ...(update.paymentProvider !== undefined
-          ? { paymentProvider: update.paymentProvider as any }
-          : {}),
-        ...(update.providerName !== undefined ? { providerName: update.providerName } : {}),
-        updatedAt: new Date(),
-      })
-      .where(eq(paymentsTable.id, id))
-      .returning();
+    const payment = await db.transaction(async (tx) => {
+      // TEMPORARY CORRECTION MODE: scope-nya hanya request admin ini dan
+      // otomatis hilang saat transaksi selesai. Hapus set_config ini setelah
+      // seluruh koreksi metadata selesai untuk mengaktifkan kembali conflict
+      // guard pada payment posted.
+      await tx.execute(sql`
+        SELECT set_config(
+          'sport_center.allow_posted_payment_metadata_correction',
+          'on',
+          true
+        )
+      `);
+
+      const [updated] = await tx
+        .update(paymentsTable)
+        .set({
+          ...(update.paymentMethod !== undefined ? { paymentMethod: update.paymentMethod } : {}),
+          ...(update.paymentProvider !== undefined
+            ? { paymentProvider: update.paymentProvider as any }
+            : {}),
+          ...(update.providerName !== undefined ? { providerName: update.providerName } : {}),
+          updatedAt: new Date(),
+        })
+        .where(eq(paymentsTable.id, id))
+        .returning();
+      return updated;
+    });
     if (!payment) { res.status(404).json({ error: "Not found" }); return; }
 
     await logAudit({

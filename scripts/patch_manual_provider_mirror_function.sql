@@ -220,7 +220,11 @@ BEGIN
           OR existing.source_table IS DISTINCT FROM 'sport_payments'
           OR existing.source_payment_id IS DISTINCT FROM NEW.id
         )
-    ) THEN
+    )
+    AND COALESCE(
+      current_setting('sport_center.allow_posted_payment_metadata_correction', true),
+      'off'
+    ) <> 'on' THEN
       RAISE EXCEPTION 'POSTED_ACCOUNTING_JOURNAL_PAYMENT_METADATA_CONFLICT: canonical payment % conflicts with an immutable posted public payment',
         NEW.id
         USING ERRCODE = 'P0001';
@@ -263,9 +267,9 @@ BEGIN
     ON CONFLICT (payment_number) DO UPDATE
       SET booking_id = COALESCE(public.sport_payments.booking_id, EXCLUDED.booking_id),
           company_id = CASE WHEN public.sport_payments.posting_status IN ('unposted', 'failed') THEN EXCLUDED.company_id ELSE public.sport_payments.company_id END,
-          provider_id = CASE WHEN public.sport_payments.posting_status IN ('unposted', 'failed') THEN EXCLUDED.provider_id ELSE public.sport_payments.provider_id END,
-          payment_provider = CASE WHEN public.sport_payments.posting_status IN ('unposted', 'failed') THEN EXCLUDED.payment_provider ELSE public.sport_payments.payment_provider END,
-          provider_code = CASE WHEN public.sport_payments.posting_status IN ('unposted', 'failed') THEN EXCLUDED.provider_code ELSE public.sport_payments.provider_code END,
+          provider_id = CASE WHEN public.sport_payments.posting_status IN ('unposted', 'failed') OR COALESCE(current_setting('sport_center.allow_posted_payment_metadata_correction', true), 'off') = 'on' THEN EXCLUDED.provider_id ELSE public.sport_payments.provider_id END,
+          payment_provider = CASE WHEN public.sport_payments.posting_status IN ('unposted', 'failed') OR COALESCE(current_setting('sport_center.allow_posted_payment_metadata_correction', true), 'off') = 'on' THEN EXCLUDED.payment_provider ELSE public.sport_payments.payment_provider END,
+          provider_code = CASE WHEN public.sport_payments.posting_status IN ('unposted', 'failed') OR COALESCE(current_setting('sport_center.allow_posted_payment_metadata_correction', true), 'off') = 'on' THEN EXCLUDED.provider_code ELSE public.sport_payments.provider_code END,
           bank_account_id = CASE WHEN public.sport_payments.posting_status IN ('unposted', 'failed') THEN NULL ELSE public.sport_payments.bank_account_id END,
           external_bank_account_id = CASE WHEN public.sport_payments.posting_status IN ('unposted', 'failed') THEN NULL ELSE public.sport_payments.external_bank_account_id END,
           expected_settlement_date = CASE WHEN public.sport_payments.posting_status IN ('unposted', 'failed') THEN NULL ELSE public.sport_payments.expected_settlement_date END,
@@ -275,7 +279,7 @@ BEGIN
           source_table = CASE WHEN public.sport_payments.posting_status IN ('unposted', 'failed') THEN EXCLUDED.source_table ELSE public.sport_payments.source_table END,
           source_payment_id = CASE WHEN public.sport_payments.posting_status IN ('unposted', 'failed') THEN EXCLUDED.source_payment_id ELSE public.sport_payments.source_payment_id END,
           amount = CASE WHEN public.sport_payments.posting_status IN ('unposted', 'failed') THEN EXCLUDED.amount ELSE public.sport_payments.amount END,
-          method = CASE WHEN public.sport_payments.posting_status IN ('unposted', 'failed') THEN EXCLUDED.method ELSE public.sport_payments.method END,
+          method = CASE WHEN public.sport_payments.posting_status IN ('unposted', 'failed') OR COALESCE(current_setting('sport_center.allow_posted_payment_metadata_correction', true), 'off') = 'on' THEN EXCLUDED.method ELSE public.sport_payments.method END,
           paid_at = CASE WHEN public.sport_payments.posting_status IN ('unposted', 'failed') THEN EXCLUDED.paid_at ELSE public.sport_payments.paid_at END,
           payment_type = CASE WHEN public.sport_payments.posting_status IN ('unposted', 'failed') THEN EXCLUDED.payment_type ELSE public.sport_payments.payment_type END,
           tax_rate = CASE WHEN public.sport_payments.posting_status IN ('unposted', 'failed') THEN EXCLUDED.tax_rate ELSE public.sport_payments.tax_rate END,
@@ -408,9 +412,9 @@ BEGIN
   ON CONFLICT (payment_number) DO UPDATE
     SET booking_id = COALESCE(public.sport_payments.booking_id, EXCLUDED.booking_id),
         company_id = CASE WHEN public.sport_payments.posting_status IN ('unposted', 'failed') THEN EXCLUDED.company_id ELSE public.sport_payments.company_id END,
-        provider_id = CASE WHEN public.sport_payments.posting_status IN ('unposted', 'failed') THEN EXCLUDED.provider_id ELSE public.sport_payments.provider_id END,
-        payment_provider = CASE WHEN public.sport_payments.posting_status IN ('unposted', 'failed') THEN EXCLUDED.payment_provider ELSE public.sport_payments.payment_provider END,
-        provider_code = CASE WHEN public.sport_payments.posting_status IN ('unposted', 'failed') THEN EXCLUDED.provider_code ELSE public.sport_payments.provider_code END,
+        provider_id = CASE WHEN public.sport_payments.posting_status IN ('unposted', 'failed') OR COALESCE(current_setting('sport_center.allow_posted_payment_metadata_correction', true), 'off') = 'on' THEN EXCLUDED.provider_id ELSE public.sport_payments.provider_id END,
+        payment_provider = CASE WHEN public.sport_payments.posting_status IN ('unposted', 'failed') OR COALESCE(current_setting('sport_center.allow_posted_payment_metadata_correction', true), 'off') = 'on' THEN EXCLUDED.payment_provider ELSE public.sport_payments.payment_provider END,
+        provider_code = CASE WHEN public.sport_payments.posting_status IN ('unposted', 'failed') OR COALESCE(current_setting('sport_center.allow_posted_payment_metadata_correction', true), 'off') = 'on' THEN EXCLUDED.provider_code ELSE public.sport_payments.provider_code END,
         bank_account_id = CASE WHEN public.sport_payments.posting_status IN ('unposted', 'failed') THEN EXCLUDED.bank_account_id ELSE public.sport_payments.bank_account_id END,
         external_bank_account_id = CASE WHEN public.sport_payments.posting_status IN ('unposted', 'failed') THEN EXCLUDED.external_bank_account_id ELSE public.sport_payments.external_bank_account_id END,
         expected_settlement_date = CASE WHEN public.sport_payments.posting_status IN ('unposted', 'failed') THEN EXCLUDED.expected_settlement_date ELSE public.sport_payments.expected_settlement_date END,
@@ -420,7 +424,7 @@ BEGIN
         source_table = CASE WHEN public.sport_payments.posting_status IN ('unposted', 'failed') THEN EXCLUDED.source_table ELSE public.sport_payments.source_table END,
         source_payment_id = CASE WHEN public.sport_payments.posting_status IN ('unposted', 'failed') THEN EXCLUDED.source_payment_id ELSE public.sport_payments.source_payment_id END,
         amount = CASE WHEN public.sport_payments.posting_status IN ('unposted', 'failed') THEN EXCLUDED.amount ELSE public.sport_payments.amount END,
-        method = CASE WHEN public.sport_payments.posting_status IN ('unposted', 'failed') THEN EXCLUDED.method ELSE public.sport_payments.method END,
+        method = CASE WHEN public.sport_payments.posting_status IN ('unposted', 'failed') OR COALESCE(current_setting('sport_center.allow_posted_payment_metadata_correction', true), 'off') = 'on' THEN EXCLUDED.method ELSE public.sport_payments.method END,
         paid_at = CASE WHEN public.sport_payments.posting_status IN ('unposted', 'failed') THEN EXCLUDED.paid_at ELSE public.sport_payments.paid_at END,
         payment_type = CASE WHEN public.sport_payments.posting_status IN ('unposted', 'failed') THEN EXCLUDED.payment_type ELSE public.sport_payments.payment_type END,
         tax_rate = CASE WHEN public.sport_payments.posting_status IN ('unposted', 'failed') THEN EXCLUDED.tax_rate ELSE public.sport_payments.tax_rate END,

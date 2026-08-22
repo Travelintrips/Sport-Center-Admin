@@ -18,3 +18,18 @@ Payment classification changes must be isolated from confirmation and financial 
 **Why:** A best-effort or background trigger migration leaves a window where one confirmation entry point can use outdated financial rules.
 
 **How to apply:** Fail startup if the payment mirror migration cannot install and verify the canonical trigger. Do not rely on route-by-route guards or a manually run development script for the live confirmation contract.
+
+## Journal metadata synchronization
+
+Every permitted payment-method/provider correction must propagate atomically from
+the canonical Sport Center payment to its internal accounting journal, public
+payment mirror, and linked public accounting entry. The propagation is
+metadata-only; it must never alter amounts, tax, lines, dates, settlement facts,
+or posting state.
+
+**Why:** Updating only the operational payment creates contradictory accounting
+evidence and makes audit/reconciliation reports unreliable.
+
+**How to apply:** Treat all journal-sync triggers as startup-critical
+dependencies. If a linked journal/entry cannot be synchronized, fail the
+payment update so the database rolls back the entire transaction.
