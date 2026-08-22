@@ -1,4 +1,5 @@
 import pg from "pg";
+import { loadProductionAuditDatabaseSecretFromGSM } from "../../artifacts/api-server/src/lib/secretLoader";
 
 /**
  * Production record-level audit runner.
@@ -93,6 +94,12 @@ const requiredTables = [
 ] as const;
 
 async function main(): Promise<void> {
+  if (!process.env.SUPABASE_PROD_AUDIT_DATABASE_URL) {
+    const secretResult = await loadProductionAuditDatabaseSecretFromGSM();
+    if (secretResult.fatal.length > 0) {
+      fail(secretResult.fatal.join("; "));
+    }
+  }
   const connectionString = requireAuditEnvironment();
   const pool = new pg.Pool({
     connectionString,
