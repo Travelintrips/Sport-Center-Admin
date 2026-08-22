@@ -1,10 +1,10 @@
 ---
-name: GAE production access
-description: The Sport Center custom domain runs on Google App Engine, separate from Replit deployment metadata and production database tooling.
+name: Production runtime identity
+description: The current Sport Center custom domain is attached to the active Replit Autoscale deployment; tracked GAE files are not evidence of the live runtime.
 ---
 
-The live Sport Center domain is served by Google App Engine in the `sc-sport-center` project. Replit deployment status, Replit production SQL, and Replit deployment logs do not represent this live environment. The Replit production SQL path may be unavailable entirely, and a bootstrap service account must have Secret Manager access before live Supabase data can be audited.
+The current Replit deployment metadata reports `https://sc.travelintrips.co.id` as the primary URL and `https://sport-center-27917.replit.app` as an additional URL, with an active public Autoscale deployment and successful build. The tracked `gae-deploy/app.yaml` and `cloudbuild.yaml` describe a separate legacy/unused GAE path unless new deployment evidence proves otherwise. Production still loads its Supabase configuration through the shared Google Secret Manager bootstrap.
 
-**Why:** The custom domain remained reachable while Replit reported no deployment and no production database; exact production failures therefore require Google Cloud Logging/GAE access.
+**Why:** Current deployment tooling directly associates the custom domain with Replit, so old GAE assumptions would send incident investigation to the wrong runtime.
 
-**How to apply:** Use the GAE/Cloud Build path for releases and read-only Cloud Logging for incident diagnosis. For data audits, verify Secret Manager IAM first, then query the official `sport_center.sport_*` tables in the Supabase production project. Do not infer live production state from Replit deployment metadata or legacy table names.
+**How to apply:** Start runtime audits with Replit deployment metadata and deployment logs. Treat GAE files as legacy configuration. For transaction audits, verify a separate safe read-only connection to the production Supabase database before querying; do not use the application's write-capable pool.

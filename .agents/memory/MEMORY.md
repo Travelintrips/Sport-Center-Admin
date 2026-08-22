@@ -58,7 +58,7 @@
 - [Live accounting schema audit](live-accounting-schema-audit.md) — active Supabase public accounting columns may be legacy-shaped; inspect information_schema before diagnostic SQL.
 - [Confirmed payment reconciliation](confirmed-payment-reconciliation.md) — payment confirmation can precede booking confirmation; retries must repair only the narrow split state without reposting accounting.
 - [Production payment-confirm trigger](payment-confirm-trigger-prod.md) — verify both function and trigger; production may have tables but neither mirroring object.
-- [GAE production access](gae-production-access.md) — custom domain runs on Google App Engine; Replit deployment metadata/logs/database do not represent live production.
+- [Production runtime identity](gae-production-access.md) — current custom domain is attached to Replit Autoscale; tracked GAE files are legacy unless new runtime evidence says otherwise.
 - [Payment metadata-only edits](payment-metadata-edit.md) — dedicated /metadata endpoint; provider NOT NULL uses 'unknown'; QRIS forces mandiri_direct; confirmed rows fail closed on missing settlement rule.
 - [Tesseract worker bundling](tesseract-worker-bundling.md) — keep OCR external to API bundle, available in App Engine runtime, and cache language files under /tmp.
 - [Sport Center workflow recovery](sport-center-workflow-recovery.md) — missing artifact node_modules causes `vite: not found`; keep one managed web workflow and use its actual port.
