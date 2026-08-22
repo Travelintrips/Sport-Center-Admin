@@ -64,6 +64,7 @@ import {
   MessageCircle,
   CheckCircle,
   AlertCircle,
+  Lock,
 } from "lucide-react";
 import { getToken } from "@/lib/auth";
 import VerifyIdDialog from "@/components/admin/VerifyIdDialog";
@@ -239,9 +240,11 @@ function PaymentMethodSelect({
       <Select
         value={currentValue}
         onValueChange={(value) => onChange(payment.id, value)}
+        aria-label={lockedReason ?? "Metode pembayaran"}
         disabled={disabled || Boolean(lockedReason)}
       >
         <SelectTrigger className={`h-8 min-w-[150px] max-w-[190px] text-xs rounded-lg border-slate-200 dark:border-slate-700 ${lockedReason ? "cursor-not-allowed opacity-70" : ""}`}>
+          {lockedReason && <Lock size={12} className="mr-1.5 shrink-0 text-slate-400" aria-hidden="true" />}
           <SelectValue />
         </SelectTrigger>
       <SelectContent>
@@ -1283,6 +1286,9 @@ function BookingDetailDrawer({
                           payment={pmt}
                           options={paymentMethodOptions}
                           onChange={onUpdatePaymentMethod}
+                           lockedReason={pmt.status === "confirmed"
+                             ? "Pembayaran sudah dikonfirmasi. Perubahan metode/provider dapat mengubah jurnal akuntansi; hubungi finance untuk koreksi."
+                             : undefined}
                           disabled={isUpdating}
                         />
                         {(() => {
@@ -3272,6 +3278,9 @@ export default function AdminBookings() {
                                data: { paymentMethod },
                              })
                            }
+                           lockedReason={b.payment?.status === "confirmed"
+                             ? "Pembayaran sudah dikonfirmasi. Perubahan metode/provider dapat mengubah jurnal akuntansi; hubungi finance untuk koreksi."
+                             : undefined}
                            disabled={updatePaymentMetadataMutation.isPending}
                          />
                       </td>
