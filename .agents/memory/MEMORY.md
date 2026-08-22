@@ -73,4 +73,5 @@
 - [Production secret bootstrap](secret-bootstrap.md) — load Secret Manager before importing the app; production startup must fail closed without required secrets.
 - [Shared GCP secret payload](shared-secret-flat-payload.md) — normalize flat `_DEV` pairs into isolated DEV/PROD config without cross-environment fallback.
 - [GSM-loaded test environment](gsm-test-environment.md) — managed API workflows load dev secrets before startup; shell Jest does not inherit them unless explicitly bootstrapped.
+- [Production audit runner](production-audit-runner.md) — isolate optional-query failures with savepoints so final read-only fingerprints remain valid.
 
