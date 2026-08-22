@@ -254,6 +254,19 @@ async function accessSharedSecret(
   secretId: string,
   credentials?: JsonObject,
 ): Promise<JsonObject> {
+  const raw = await accessSecretValue(projectId, secretId, credentials);
+  const payload = JSON.parse(raw) as unknown;
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    throw new Error("Shared secret payload must be a JSON object");
+  }
+  return payload as JsonObject;
+}
+
+async function accessSecretValue(
+  projectId: string,
+  secretId: string,
+  credentials?: JsonObject,
+): Promise<string> {
   const { GoogleAuth } = await import("google-auth-library");
   const auth = credentials
     ? new GoogleAuth({ credentials, scopes: ["https://www.googleapis.com/auth/cloud-platform"] })
@@ -266,14 +279,9 @@ async function accessSharedSecret(
   });
   const encoded = response.data?.payload?.data;
   if (!encoded) throw new Error("Secret Manager returned an empty payload");
-  const raw = Buffer.isBuffer(encoded)
+  return Buffer.isBuffer(encoded)
     ? encoded.toString("utf8")
     : Buffer.from(encoded, "base64").toString("utf8");
-  const payload = JSON.parse(raw) as unknown;
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-    throw new Error("Shared secret payload must be a JSON object");
-  }
-  return payload as JsonObject;
 }
 
 /**
@@ -371,24 +379,26 @@ export async function loadProductionAuditDatabaseSecretFromGSM(): Promise<LoadRe
     process.env.GCP_PROJECT_ID ??
     bootstrap.projectId ??
     process.env.GOOGLE_CLOUD_PROJECT;
-  const secretId = process.env.GCP_SECRET_ID ?? bootstrap.secretId;
   if (!projectId) result.fatal.push("GCP project ID is missing");
-  if (!secretId) result.fatal.push("GCP secret ID is missing");
   if (result.fatal.length) return result;
 
   try {
-    const payload = await accessSharedSecret(projectId as string, secretId as string, bootstrap.credentials);
-    const section = selectedSection(payload, "audit");
-    const auditUrl = section ? findField(section, "production_audit_database_url") : undefined;
-    if (!auditUrl) {
-      result.skipped.push("SUPABASE_PROD_AUDIT_DATABASE_URL is unavailable");
-      return result;
-    }
-    process.env.SUPABASE_PROD_AUDIT_DATABASE_URL = auditUrl;
+    const auditUrl = await accessSecretValue(
+      projectId as string,
+      "SUPABASE_PROD_AUDIT_DATABASE_URL",
+      bootstrap.credentials,
+    );
+    if (!auditUrl.trim()) throw new Error("Production audit secret is empty");
+    process.env.SUPABASE_PROD_AUDIT_DATABASE_URL = auditUrl.trim();
     result.loaded.push("SUPABASE_PROD_AUDIT_DATABASE_URL");
   } catch (err) {
-    result.failed.push(`Secret Manager access failed: ${safeError(err)}`);
-    result.fatal.push("Production audit secret access failed");
+    const safe = safeError(err);
+    if (/\b404\b|not found|does not exist/i.test(safe)) {
+      result.skipped.push("SUPABASE_PROD_AUDIT_DATABASE_URL is unavailable");
+    } else {
+      result.failed.push(`Secret Manager access failed: ${safe}`);
+      result.fatal.push("Production audit secret access failed");
+    }
   }
   return result;
 }
