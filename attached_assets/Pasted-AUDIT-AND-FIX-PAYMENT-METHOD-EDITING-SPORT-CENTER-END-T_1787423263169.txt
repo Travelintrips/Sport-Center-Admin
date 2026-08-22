@@ -1,0 +1,375 @@
+AUDIT AND FIX PAYMENT METHOD EDITING — SPORT CENTER
+END-TO-END — DO NOT STOP AT REPORT
+
+Saya ingin memperbaiki masalah:
+
+"Payment method pada aplikasi Sport Center tidak bisa diganti."
+
+Jangan mengubah schema/payment architecture secara spekulatif.
+
+==================================================
+OBJECTIVE
+==================================================
+
+Cari root cause mengapa payment method tidak dapat diubah dari aplikasi.
+
+Audit seluruh flow:
+
+Frontend
+→ API endpoint
+→ validation/schema
+→ service
+→ database query
+→ sport_center.sport_payments
+→ payment history
+→ accounting/outbox side effects
+
+Kemudian perbaiki root cause yang benar di source layer.
+
+Jangan hanya melaporkan masalah.
+
+Jika root cause aman diperbaiki, langsung perbaiki → test → verify.
+
+==================================================
+IMPORTANT DATABASE CONTRACT
+==================================================
+
+Sport Center payment canonical table:
+
+sport_center.sport_payments
+
+JANGAN memindahkan payment Sport Center ke public.
+
+JANGAN membuat payment baru hanya untuk mengganti method.
+
+JANGAN mengubah Central Finance.
+
+JANGAN mengubah:
+
+- payment amount
+- confirmed payment meaning
+- invoice
+- tax
+- accounting journal
+- settlement
+- reconciliation
+
+kecuali memang diperlukan oleh canonical payment-method transition yang
+sudah ada dan perubahan tersebut terbukti aman.
+
+==================================================
+PHASE 1 — FIND ALL PAYMENT METHOD REFERENCES
+==================================================
+
+Search seluruh repository untuk:
+
+payment_method
+paymentMethod
+payment_type
+paymentType
+payment method
+payment type
+
+Cari:
+
+- frontend form
+- select/dropdown
+- edit modal
+- booking payment UI
+- admin payment UI
+- API route
+- PATCH/PUT endpoint
+- POST payment endpoint
+- Zod schema
+- TypeScript enum
+- database schema
+- Drizzle schema
+- SQL
+- service
+- payment history
+- accounting mapping
+- outbox mapping
+
+Buat mapping:
+
+FRONTEND FIELD
+→ API FIELD
+→ VALIDATION FIELD
+→ DATABASE FIELD
+
+Pastikan tidak ada nama field mismatch.
+
+==================================================
+PHASE 2 — REPRODUCE
+==================================================
+
+Reproduce masalah secara aman menggunakan DEV/test environment terlebih dahulu.
+
+Cari:
+
+- HTTP status
+- response body
+- validation error
+- database error
+- authorization error
+- RLS error
+- enum error
+- immutable-state error
+
+Jangan gunakan Production write untuk reproduksi.
+
+==================================================
+PHASE 3 — CHECK DATABASE CONTRACT
+==================================================
+
+Inspect:
+
+sport_center.sport_payments
+
+Cari kolom:
+
+payment_method
+payment_type
+status
+booking_id
+amount
+provider
+provider_reference
+created_at
+confirmed_at
+updated_at
+
+Pastikan tipe/constraint/enum yang sebenarnya.
+
+Jangan mengubah schema hanya karena frontend menggunakan nama berbeda.
+
+==================================================
+PHASE 4 — CHECK PAYMENT STATUS RULE
+==================================================
+
+Tentukan apakah aplikasi saat ini mengizinkan perubahan method pada:
+
+pending
+waiting_confirmation
+waiting_admin_approval
+paid
+confirmed
+completed
+cancelled
+expired
+rejected
+refunded
+
+Dokumentasikan rule aktual.
+
+Expected safe behavior:
+
+Jika payment BELUM confirmed/paid:
+→ payment method boleh diedit jika business rule mengizinkan.
+
+Jika payment SUDAH confirmed/paid:
+→ jangan mengubah secara bebas karena dapat mengubah historical financial
+meaning.
+
+Jika business requirement memang mengizinkan correction setelah payment
+tertentu, gunakan canonical correction mechanism, bukan blind UPDATE.
+
+==================================================
+PHASE 5 — CHECK BACKEND
+==================================================
+
+Temukan endpoint yang menangani perubahan payment method.
+
+Verifikasi:
+
+- authentication
+- authorization
+- booking ownership
+- payment ownership
+- status validation
+- Zod validation
+- enum validation
+- transaction
+- update query
+- audit/history
+
+Cari kemungkinan seperti:
+
+paymentMethod !== existingPaymentMethod
+paymentType validation
+immutable payment
+confirmed payment protection
+status protection
+
+Jangan menghapus protection yang memang diperlukan.
+
+Jika backend sama sekali belum menyediakan update endpoint:
+
+buat endpoint minimal menggunakan pola API yang sudah ada.
+
+==================================================
+PHASE 6 — CHECK FRONTEND
+==================================================
+
+Pastikan UI:
+
+- menampilkan current payment method
+- dropdown/select dapat dibuka
+- pilihan berasal dari canonical payment method list
+- value dikirim ke API dengan field yang benar
+- tidak selalu mengirim nilai lama
+- tidak disabled secara salah
+- error API ditampilkan dengan benar
+- setelah berhasil, UI refresh/revalidate data
+
+Jika dropdown menggunakan hardcoded values, bandingkan dengan backend enum.
+
+==================================================
+PHASE 7 — PAYMENT METHOD CONTRACT
+==================================================
+
+Buat satu canonical payment method mapping.
+
+Contoh hanya jika memang sesuai dengan existing application contract:
+
+cash
+bank_transfer
+qris
+card
+other
+
+JANGAN menambahkan method baru hanya berdasarkan contoh.
+
+Ambil nilai sebenarnya dari database/schema/current application.
+
+Frontend dan backend harus menggunakan contract yang sama.
+
+==================================================
+PHASE 8 — ACCOUNTING SAFETY
+==================================================
+
+Perubahan payment method TIDAK boleh otomatis:
+
+- membuat duplicate payment
+- membuat duplicate journal
+- mengubah amount
+- membuat invoice baru
+- mengubah tax
+- membuat settlement baru
+- mengubah reconciliation
+
+Jika payment belum masuk accounting:
+
+update method secara normal.
+
+Jika payment sudah masuk accounting:
+
+jangan blind-update.
+
+Cari canonical accounting correction mechanism.
+
+Jika tidak ada:
+
+return safe error bahwa payment method sudah terkunci karena financial
+posting, daripada merusak accounting.
+
+==================================================
+PHASE 9 — FIX
+==================================================
+
+Perbaiki root cause yang ditemukan.
+
+Prioritas:
+
+1. field mismatch
+2. validation mismatch
+3. frontend disabled state
+4. incorrect status guard
+5. incorrect API update
+6. incorrect database mapping
+7. incorrect authorization
+8. RLS/permission issue
+
+Gunakan minimal diff.
+
+Jangan mengubah payment architecture.
+
+==================================================
+PHASE 10 — TESTS
+==================================================
+
+Tambahkan regression tests untuk minimal:
+
+1. pending payment → payment method dapat diubah
+2. waiting_confirmation → dapat diubah jika business rule mengizinkan
+3. confirmed/paid → tidak dapat diubah secara bebas
+4. invalid payment method → rejected
+5. unauthorized user → rejected
+6. payment milik booking lain → rejected
+7. successful update → database berubah
+8. successful update → frontend menampilkan method baru
+9. update tidak membuat duplicate payment
+10. update tidak membuat duplicate accounting
+11. update tidak mengubah amount
+12. update tidak mengubah invoice/tax
+
+Run:
+
+pnpm --filter @workspace/api-server run typecheck
+
+pnpm --filter @workspace/api-server run test
+
+pnpm --filter @workspace/api-server run build
+
+git diff --check
+
+==================================================
+PHASE 11 — VERIFY
+==================================================
+
+Verify end-to-end:
+
+UI
+→ API
+→ database
+
+Pastikan perubahan tersimpan di:
+
+sport_center.sport_payments
+
+dan bukan:
+
+public payment table
+
+Jangan melakukan perubahan Production selama test.
+
+==================================================
+FINAL REPORT
+==================================================
+
+Laporkan:
+
+ROOT CAUSE
+FIX APPLIED
+FILES CHANGED
+API ENDPOINT
+DATABASE COLUMN
+ALLOWED PAYMENT STATES
+LOCKED PAYMENT STATES
+TEST RESULTS
+TYPECHECK
+BUILD
+GIT DIFF CHECK
+
+Jika root cause ditemukan dan aman:
+
+PAYMENT METHOD EDIT = FIXED
+
+Jika masih blocked:
+
+PAYMENT METHOD EDIT = BLOCKED
+
+dan jelaskan blocker teknis spesifik.
+
+Jangan berhenti hanya pada audit.
+Audit → Fix → Test → Verify dalam satu eksekusi.
