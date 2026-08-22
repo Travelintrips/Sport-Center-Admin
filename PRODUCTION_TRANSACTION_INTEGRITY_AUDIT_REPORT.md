@@ -103,3 +103,71 @@ not available in the audited scope. Historical values were not rewritten.
 **Outbox retry/requeue:** none  
 **Reconciliation approval:** none  
 **Final action:** transaction rolled back
+
+## Final Phase Verdict
+
+### 1. EXECUTIVE VERDICT
+
+`PRODUCTION INTEGRITY = VERIFIED` for the executed read-only checks. This does
+not mean every historical anomaly is repaired; all non-deterministic anomalies
+remain documented as `REVIEW_REQUIRED` or `UNKNOWN`.
+
+### 2. SAFE FIXES EXECUTED
+
+`NONE`. No record met every safe-fix condition. No payment, invoice, tax,
+accounting, settlement, reconciliation, booking, or Central Finance record was
+changed.
+
+### 3. REVIEW REQUIRED
+
+Review is required for the 376 completion/check-in records, 8 missing
+`completed_at` records, bookings 380 and 511, 360 terminal-history
+inconsistencies, 16 payment duplicate groups, 6 provider-reference groups, 39
+processing/failed outbox rows, 3 tax duplicate groups, 68 reconciliation
+candidates, and 309 journals without lines. Historical meaning cannot be safely
+inferred from the available evidence.
+
+### 4. VERIFIED PASS AREAS
+
+No orphan payments, no terminal-booking confirmed payments, no invoice-number
+duplicates, no orphan invoice items, no invoice total mismatches, PPN 11%
+configuration, no orphan journal lines, no approved reconciliation matches,
+and unchanged baseline/final counts.
+
+### 5. ACCOUNTING / CENTRAL FINANCE SAFETY
+
+Accounting debit equals credit at Rp18,369,820.00. No unbalanced journal was
+found. Central Finance was unchanged and no Central Finance rows were present
+in the audited optional table.
+
+### 6. BEFORE / AFTER COUNTS
+
+All 11 audited table counts are unchanged; see the baseline table above.
+Final fingerprint: `PASS — NO COUNT CHANGES`.
+
+### 7. TEST / TYPECHECK / BUILD RESULTS
+
+- Scripts typecheck: `PASS`
+- API typecheck: `PASS`
+- API tests: `17 suites / 109 tests PASS`
+- API build: `PASS`
+- API workflow startup: `PASS`, listening on port 8080
+- Scripts test/build commands: not defined in `scripts/package.json`
+
+### 8. GIT DIFF CHECK
+
+`PASS`.
+
+### 9. PRODUCTION MUTATION PROOF
+
+Dedicated auditor role, `transaction_read_only=on`, zero mutation queries,
+zero skipped audit queries, and final transaction `ROLLBACK`.
+
+### 10. FINAL STATUS
+
+- `PRODUCTION INTEGRITY = VERIFIED`
+- `SAFE FIXES = NONE`
+- `REVIEW REQUIRED = DOCUMENTED`
+- `UNKNOWN = ONLY WHERE EVIDENCE IS INSUFFICIENT`
+- `CENTRAL FINANCE = UNCHANGED`
+- `UNAUTHORIZED FINANCIAL MUTATION = NONE`
