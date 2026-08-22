@@ -6,28 +6,30 @@ Date: 2026-08-23 (Asia/Bangkok)
 
 **PROJECT STATUS = NOT YET FINALIZED**
 
-The codebase passes the available development checks and the public production smoke endpoints respond successfully. Final closure cannot be declared because the official deployment metadata reports no active deployment and the required read-only audit of the Supabase production database was not available through the current workspace tools. No production data was mutated during this phase.
+The codebase passes the required development checks, public production smoke endpoints respond successfully, and the dedicated production read-only audit completed with the expected auditor role and `transaction_read_only=on`. Final closure cannot be declared because official deployment metadata still reports no active deployment, and the production audit contains historical anomalies requiring review rather than unsafe cleanup. No production data was mutated during this phase.
 
 ## Production Runtime
 
 **PASS WITH REVIEW**
 
-- The managed API workflow is running.
-- Secret Manager bootstrap is now passing.
+- The managed API workflow is running and Secret Manager bootstrap passes.
 - The known production domain `https://sc.travelintrips.co.id` responded with HTTP 200 for the homepage and API health.
 - The official deployment metadata reported `isDeployed=false`, with no primary URL. This conflicts with the reachable custom domain and must be resolved in the Publishing/deployment surface before closure.
-- Local visual screenshot validation was unavailable because the web workflow was not reachable on the screenshot tool's default port.
+- The local web workflow is running on its configured port and the homepage screenshot rendered successfully. The browser reported one 401 resource response, so authenticated admin resource health was not proven by the non-destructive public smoke test.
+- Public content routes respond through the existing trailing-slash redirect and are reachable at the redirected URL.
 
 ## Database
 
-**BLOCKED**
+**PASS WITH REVIEW**
 
 - The application is configured to use Supabase database configuration loaded by the official Secret Manager loader.
-- No direct production database mutation was performed.
-- The required `SUPABASE_PROD_AUDIT_DATABASE_URL` read-only handshake and final integrity queries could not be executed through the available database tool, which targets Replit's managed database rather than this project's Supabase production database.
+- The dedicated `sport_center_production_auditor` connection passed the required read-only handshake: `transaction_read_only=on`, server port 5432, and `ROLLBACK` completed.
+- The integrity audit completed with zero mutation queries, no skipped queries, and matching baseline/final counts: bookings 429, payments 374, booking history 1,231, payment outbox 363, invoices 4, invoice items 40, journals 381, journal lines 211, bank mutations 0, reconciliation matches 68, and tax transactions 1,134.
+- Required Sport Center tables are present. The optional public accounting tables were not present.
+- Historical findings remain classified for review and were not rewritten: completed-booking/history inconsistencies, duplicate booking/payment-type rows, duplicate provider-reference groups, processing/failed outbox rows, orphan reconciliation matches, duplicate tax references, journals without lines, and the existing expense schema classification mismatch.
 - No Replit database was substituted for the production database.
 
-Required unresolved proof: `BEGIN; SET TRANSACTION READ ONLY; SHOW transaction_read_only;` followed by the production integrity audit and `ROLLBACK`.
+Audit result: `PASS — NO COUNT CHANGES`; the transaction ended by `ROLLBACK`.
 
 ## Storage
 
@@ -47,7 +49,7 @@ Production API responses expose Supabase Storage URLs for configured assets. No 
 - Confirmed payment corrections retain accounting guards and do not create a duplicate payment or journal.
 - Regression validator tests passed: **21/21**.
 - Full API test suite passed: **17 suites, 109 tests**.
-- A live write-path edit was intentionally not executed because production mutation is prohibited and no isolated development fixture was created for this closure.
+- A live write-path edit was intentionally not executed because production mutation is prohibited. The read-only audit found zero orphan payments and zero confirmed payments attached to terminal bookings.
 
 ## Booking
 
@@ -104,13 +106,13 @@ Existing validation, conflict, approval, atomic update, and history behavior rem
 - API typecheck and build passed.
 - Existing payment-level idempotency and outbox/journal paths remain intact.
 - No accounting entry was manually created.
-- Production debit/credit balance, linkage, tax ledger, and outbox counts could not be independently verified without the required Supabase production audit connection.
+- Production audit found zero unbalanced journals and zero orphan journal lines. It also found 309 historical journals without lines and 39 processing/failed outbox rows; these require review and were not modified.
 
 ## Reconciliation
 
 **PASS WITH REVIEW**
 
-No candidate was approved and no historical reconciliation was modified. Production reconciliation integrity and duplicate protection remain unproven without the production read-only audit connection.
+No candidate was approved and no historical reconciliation was modified. Production audit found no duplicate reconciliation candidates, but found 68 orphan matches against current booking/mutation relations; these remain a historical/schema-review item.
 
 ## Settlement
 
@@ -137,13 +139,13 @@ Existing vendor master and linkage behavior remain intact. No vendor data was ch
 - Admin payment metadata editing is protected by admin authorization.
 - No secrets, tokens, bootstrap JSON, or database URLs were printed.
 - Secret Manager bootstrap passed in the managed API workflow.
-- A complete route-by-route security review and production audit-role verification were not completed in this phase.
+- Production audit-role verification passed. A complete route-by-route security review was not completed in this phase.
 
 ## Central Finance
 
 **PASS WITH REVIEW**
 
-No Central Finance posting was initiated or manually created. Existing Sport Center isolation and explicitly supported integration boundaries remain unchanged. Production duplicate/missing-posting proof requires the blocked database audit.
+No Central Finance posting was initiated or manually created. Existing Sport Center isolation and explicitly supported integration boundaries remain unchanged; the production audit found zero rows in `central_finance_processing`.
 
 ## Tests, Typecheck, Build
 
@@ -172,6 +174,7 @@ Read-only requests to the known production domain returned HTTP 200:
 - `/api/settings`
 
 The API health response reported `{"status":"ok"}`. No booking, payment, WhatsApp, invoice, reconciliation, or other financial mutation was performed.
+- Public content routes returned the existing 301 trailing-slash redirect and were reachable at the redirected URL.
 
 ## Production Mutation Proof
 
@@ -186,8 +189,9 @@ Production data mutation during this phase: **NONE**.
 - No WhatsApp message sent.
 - No production storage object changed.
 
-## Closure Blockers
+## Closure Blockers / Review Items
 
 1. Official deployment metadata must be reconciled with the reachable custom domain; `getDeploymentInfo()` currently reports no active deployment.
-2. The required Supabase production read-only auditor connection must be made available to perform the mandated transaction handshake and integrity queries.
-3. After those two items are resolved, repeat only the read-only deployment/database verification. No code change or republish is justified by the current evidence.
+2. Historical production anomalies listed in the Database, Accounting, and Reconciliation sections require owner/accounting classification. They must not be mass-cleaned merely to obtain a PASS.
+3. The screenshot/browser check recorded one 401 resource response; authenticated admin resource health was not proven by the non-destructive public smoke test.
+4. No code change or republish is justified by the current evidence. Any next verification should remain read-only unless the owner explicitly authorizes a canonical write-path test in DEV.
