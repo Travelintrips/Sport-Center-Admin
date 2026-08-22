@@ -70,4 +70,5 @@
 - [Paylabs settlement rule invariant](paylabs-settlement-rule-invariant.md) — confirmed Paylabs payments require exactly one active OWNER_APPROVED rule matching company, provider, bank, and rule version.
 - [Booking flow audit invariants](booking-flow-audit-invariants.md) — all booking creation paths must share time, conflict, payment, approval, and lifecycle rules.
 - [Production secret bootstrap](secret-bootstrap.md) — load Secret Manager before importing the app; production startup must fail closed without required secrets.
+- [Shared GCP secret payload](shared-secret-flat-payload.md) — normalize flat `_DEV` pairs into isolated DEV/PROD config without cross-environment fallback.
 

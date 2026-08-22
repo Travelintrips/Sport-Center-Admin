@@ -1,215 +1,325 @@
 /**
- * secretLoader.ts
- * Google Secret Manager loader for production GAE.
+ * Shared Google Secret Manager loader.
  *
- * DESIGN:
- *   - Uses Application Default Credentials (ADC), which are automatically
- *     available on App Engine via the runtime service account.
- *   - Reads named secrets from Google Secret Manager at startup and injects
- *     them into process.env so the rest of the app consumes them normally.
- *   - Production uses the GAE runtime service account and GOOGLE_CLOUD_PROJECT.
- *   - Development may use the explicitly provisioned DEV bootstrap credential
- *     and project/secret identifiers. It never reads a production identifier.
- *   - Production has no environment-variable fallback: Secret Manager failure
- *     is fatal and the bootstrap refuses to load the application.
- *   - NEVER logs secret values.
- *
- * USAGE:
- *   Call `await loadSecretsFromGSM()` at the very beginning of index.ts,
- *   before any other module reads from process.env.
- *
- * SECRET NAMING CONVENTION (GCP project: sc-sport-center):
- *   sport-center-prod-supabase-database-url   → SUPABASE_DATABASE_URL
- *   sport-center-prod-supabase-url            → SUPABASE_URL
- *   sport-center-prod-supabase-anon-key       → SUPABASE_ANON_KEY
- *   sport-center-prod-supabase-service-role-key → SUPABASE_SERVICE_ROLE_KEY
- *   sport-center-prod-session-secret          → SESSION_SECRET
- *   sport-center-prod-fonnte-token            → FONNTE_TOKEN
- *   sport-center-prod-openai-api-key          → OPENAI_API_KEY
- *   sport-center-prod-google-service-account-json → GOOGLE_SERVICE_ACCOUNT_JSON
- *   sport-center-prod-google-client-id        → GOOGLE_CLIENT_ID
- *   sport-center-prod-bizportal-sync-api-key  → BIZPORTAL_SYNC_API_KEY
- *   sport-center-prod-cashier-token-secret    → CASHIER_TOKEN_SECRET
- *   sport-center-prod-vapid-public-key        → VAPID_PUBLIC_KEY
- *   sport-center-prod-vapid-private-key       → VAPID_PRIVATE_KEY
- *   sport-center-prod-admin-wa-phones         → ADMIN_WA_PHONES
- *   sport-center-prod-wati-api-token          → WATI_API_TOKEN
- *   sport-center-prod-wati-base-url           → WATI_BASE_URL
- *
- * IAM REQUIREMENTS:
- *   The App Engine default service account (PROJECT_ID@appspot.gserviceaccount.com)
- *   must have `roles/secretmanager.secretAccessor` on each secret above.
- *
- *   Minimum IAM role: roles/secretmanager.secretAccessor
- *   Scope: per-secret (not project-wide) for least privilege.
- *
- * RUNTIME SERVICE ACCOUNT:
- *   App Engine default SA: sc-sport-center@appspot.gserviceaccount.com
- *   DO NOT grant broader roles (e.g. roles/secretmanager.admin) at project level.
+ * One GCP secret contains separate `dev` and `prod` sections. The runtime
+ * environment, never the secret name, decides which section is used.
+ * Secret values and bootstrap credentials are never logged.
  */
 
-/** Maps Secret Manager secret IDs → process.env variable names. */
-const SECRET_MAP: Record<string, string> = {
-  "sport-center-prod-supabase-database-url":         "SUPABASE_DATABASE_URL",
-  "sport-center-prod-supabase-url":                  "SUPABASE_URL",
-  "sport-center-prod-supabase-anon-key":             "SUPABASE_ANON_KEY",
-  "sport-center-prod-supabase-service-role-key":     "SUPABASE_SERVICE_ROLE_KEY",
-  "sport-center-prod-session-secret":                "SESSION_SECRET",
-  "sport-center-prod-fonnte-token":                  "FONNTE_TOKEN",
-  "sport-center-prod-openai-api-key":                "OPENAI_API_KEY",
-  "sport-center-prod-google-service-account-json":   "GOOGLE_SERVICE_ACCOUNT_JSON",
-  "sport-center-prod-google-client-id":              "GOOGLE_CLIENT_ID",
-  "sport-center-prod-bizportal-sync-api-key":        "BIZPORTAL_SYNC_API_KEY",
-  "sport-center-prod-cashier-token-secret":          "CASHIER_TOKEN_SECRET",
-  "sport-center-prod-vapid-public-key":              "VAPID_PUBLIC_KEY",
-  "sport-center-prod-vapid-private-key":             "VAPID_PRIVATE_KEY",
-  "sport-center-prod-admin-wa-phones":               "ADMIN_WA_PHONES",
-  "sport-center-prod-wati-api-token":                "WATI_API_TOKEN",
-  "sport-center-prod-wati-base-url":                 "WATI_BASE_URL",
+type JsonObject = Record<string, unknown>;
+
+type BootstrapConfig = {
+  credentials?: JsonObject;
+  projectId?: string;
+  secretId?: string;
 };
 
-/**
- * Load secrets from Google Secret Manager into process.env.
- *
- * - Runs only if NODE_ENV=production AND GOOGLE_CLOUD_PROJECT is set.
- * - Skips any variable that is already set in process.env (allows override
- *   via `gcloud app deploy --update-env-vars` for emergency hotfixes).
- * - Non-fatal: logs failures per secret but does not throw.
- * - Returns a summary for startup logs.
- */
-export async function loadSecretsFromGSM(): Promise<{
+type LoadResult = {
   loaded: string[];
   skipped: string[];
   failed: string[];
   fatal: string[];
-}> {
-  const loaded: string[] = [];
-  const skipped: string[] = [];
-  const failed: string[] = [];
-  const fatal: string[] = [];
+};
 
-  const isProd = process.env.NODE_ENV === "production";
-  const project = process.env.GOOGLE_CLOUD_PROJECT;
+const ENV_KEYS = [
+  "SUPABASE_DATABASE_URL",
+  "SUPABASE_DATABASE_URL_DEV",
+  "SUPABASE_URL",
+  "SUPABASE_URL_DEV",
+  "SUPABASE_ANON_KEY",
+  "SUPABASE_ANON_KEY_DEV",
+  "SUPABASE_SERVICE_ROLE_KEY",
+  "SUPABASE_SERVICE_ROLE_KEY_DEV",
+  "SUPABASE_STORAGE_BUCKET",
+  "SUPABASE_STORAGE_BUCKET_DEV",
+  "SESSION_SECRET",
+  "FONNTE_TOKEN",
+  "OPENAI_API_KEY",
+  "GOOGLE_SERVICE_ACCOUNT_JSON",
+  "GOOGLE_CLIENT_ID",
+  "BIZPORTAL_SYNC_API_KEY",
+  "CASHIER_TOKEN_SECRET",
+  "VAPID_PUBLIC_KEY",
+  "VAPID_PRIVATE_KEY",
+  "ADMIN_WA_PHONES",
+  "WATI_API_TOKEN",
+  "WATI_BASE_URL",
+];
 
-  if (!isProd || !project) {
-    if (isProd) fatal.push("GOOGLE_CLOUD_PROJECT");
-    return { loaded, skipped, failed, fatal };
+// These values are explicitly global/shared in the existing application.
+// They may remain in the runtime environment when the GCP payload omits them.
+const SHARED_RUNTIME_ENV_KEYS = new Set(["SESSION_SECRET"]);
+
+const FIELD_ALIASES: Record<string, string[]> = {
+  database_url: [
+    "database_url",
+    "SUPABASE_DATABASE_URL",
+    "SUPABASE_PG_URL",
+    "supabase_database_url",
+  ],
+  supabase_url: ["supabase_url", "SUPABASE_URL"],
+  supabase_anon_key: [
+    "supabase_anon_key",
+    "supabase_key",
+    "SUPABASE_ANON_KEY",
+    "SUPABASE_KEY",
+  ],
+  supabase_service_role_key: [
+    "supabase_service_role_key",
+    "SUPABASE_SERVICE_ROLE_KEY",
+  ],
+  supabase_storage_bucket: ["supabase_storage_bucket", "SUPABASE_STORAGE_BUCKET"],
+  session_secret: ["session_secret", "SESSION_SECRET"],
+  fonnte_token: ["fonnte_token", "FONNTE_TOKEN"],
+  openai_api_key: ["openai_api_key", "OPENAI_API_KEY"],
+  google_service_account_json: [
+    "google_service_account_json",
+    "GOOGLE_SERVICE_ACCOUNT_JSON",
+  ],
+  google_client_id: ["google_client_id", "GOOGLE_CLIENT_ID"],
+  bizportal_sync_api_key: ["bizportal_sync_api_key", "BIZPORTAL_SYNC_API_KEY"],
+  cashier_token_secret: ["cashier_token_secret", "CASHIER_TOKEN_SECRET"],
+  vapid_public_key: ["vapid_public_key", "VAPID_PUBLIC_KEY"],
+  vapid_private_key: ["vapid_private_key", "VAPID_PRIVATE_KEY"],
+  admin_wa_phones: ["admin_wa_phones", "ADMIN_WA_PHONES"],
+  wati_api_token: ["wati_api_token", "WATI_API_TOKEN"],
+  wati_base_url: ["wati_base_url", "WATI_BASE_URL"],
+};
+
+function runtimeEnvironment(): "dev" | "prod" | undefined {
+  const value = (process.env.APP_ENV ?? process.env.NODE_ENV ?? "")
+    .trim()
+    .toLowerCase();
+  if (value === "dev" || value === "development") return "dev";
+  if (value === "prod" || value === "production") return "prod";
+  return undefined;
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function findField(section: JsonObject, field: string): string | undefined {
+  const aliases = FIELD_ALIASES[field] ?? [field];
+  for (const alias of aliases) {
+    const value = stringValue(section[alias]);
+    if (value) return value;
   }
+  return undefined;
+}
 
-  // Production application secrets must come from Secret Manager. Remove any
-  // injected values before loading so stale env vars cannot become a fallback.
-  for (const envVar of Object.values(SECRET_MAP)) delete process.env[envVar];
+function parseBootstrap(raw: string): BootstrapConfig {
+  const parsed = JSON.parse(raw) as JsonObject;
+  const projectId =
+    stringValue(parsed.GCP_PROJECT_ID) ??
+    stringValue(parsed.project_id) ??
+    stringValue(parsed.projectId);
+  const secretId =
+    stringValue(parsed.GCP_SECRET_ID) ??
+    stringValue(parsed.secret_id) ??
+    stringValue(parsed.secretId) ??
+    stringValue(parsed.secretName);
+  const credentials =
+    (parsed.credentials as JsonObject | undefined) ??
+    (parsed.serviceAccount as JsonObject | undefined) ??
+    parsed;
+  return { credentials, projectId, secretId };
+}
 
-  let SecretManagerServiceClient: new () => {
-    accessSecretVersion(args: {
-      name: string;
-    }): Promise<[{ payload?: { data?: Buffer | string | null } }]>;
-  };
+const SHARED_FIELDS = new Set([
+  "SESSION_SECRET",
+  "FONNTE_TOKEN",
+  "OPENAI_API_KEY",
+  "GOOGLE_SERVICE_ACCOUNT_JSON",
+  "GOOGLE_CLIENT_ID",
+  "BIZPORTAL_SYNC_API_KEY",
+  "CASHIER_TOKEN_SECRET",
+  "VAPID_PUBLIC_KEY",
+  "VAPID_PRIVATE_KEY",
+  "ADMIN_WA_PHONES",
+  "WATI_API_TOKEN",
+  "WATI_BASE_URL",
+  "SMTP_FROM",
+  "SMTP_PASS",
+]);
 
-  try {
-    // Dynamic import so the package is not required in dev environments.
-    // Add @google-cloud/secret-manager to gae-deploy/package.json to enable.
-    const mod = await import("@google-cloud/secret-manager" as string);
-    SecretManagerServiceClient = mod.SecretManagerServiceClient;
-  } catch {
-    failed.push("@google-cloud/secret-manager unavailable");
-    fatal.push("@google-cloud/secret-manager");
-    return { loaded, skipped, failed, fatal };
-  }
+const PROD_FIELDS = new Set([
+  "SUPABASE_DATABASE_URL",
+  "SUPABASE_URL",
+  "SUPABASE_ANON_KEY",
+  "SUPABASE_SERVICE_ROLE_KEY",
+  "SUPABASE_STORAGE_BUCKET",
+]);
 
-  const client = new SecretManagerServiceClient();
-
-  for (const [secretId, envVar] of Object.entries(SECRET_MAP)) {
-    const name = `projects/${project}/secrets/${secretId}/versions/latest`;
-    try {
-      const [version] = await client.accessSecretVersion({ name });
-      const raw = version?.payload?.data;
-      if (!raw) {
-        failed.push(`${envVar} (secret "${secretId}" has empty payload)`);
-        continue;
-      }
-      const value = Buffer.isBuffer(raw) ? raw.toString("utf-8") : String(raw);
-      process.env[envVar] = value.trim();
-      loaded.push(envVar); // log NAME only, never the value
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      // Truncate message so secret-like strings don't leak via error text
-      const safeMsg = msg.slice(0, 120).replace(/[\r\n]/g, " ");
-      failed.push(`${envVar} (secret "${secretId}": ${safeMsg})`);
+function flatPayloadSection(payload: JsonObject, env: "dev" | "prod"): JsonObject {
+  const section: JsonObject = {};
+  for (const [key, value] of Object.entries(payload)) {
+    if (env === "dev" && key.endsWith("_DEV")) {
+      section[key.slice(0, -4)] = value;
+    } else if (env === "prod" && (PROD_FIELDS.has(key) || SHARED_FIELDS.has(key))) {
+      section[key] = value;
+    } else if (SHARED_FIELDS.has(key)) {
+      // Explicitly classified shared values are safe in either section.
+      section[key] = value;
     }
   }
+  return section;
+}
 
-  for (const required of ["SUPABASE_DATABASE_URL", "SESSION_SECRET"]) {
-    if (!process.env[required]) fatal.push(required);
+function selectedSection(payload: JsonObject, env: "dev" | "prod"): JsonObject | undefined {
+  const section = payload[env] ?? payload[env === "dev" ? "development" : "production"];
+  if (section && typeof section === "object" && !Array.isArray(section)) {
+    const shared = payload.shared;
+    return {
+      ...(shared && typeof shared === "object" && !Array.isArray(shared)
+        ? (shared as JsonObject)
+        : {}),
+      ...(section as JsonObject),
+    };
   }
-  return { loaded, skipped, failed, fatal };
+  const flat = flatPayloadSection(payload, env);
+  return Object.keys(flat).length > 0 ? flat : undefined;
+}
+
+function setEnvironmentConfig(section: JsonObject, env: "dev" | "prod"): string[] {
+  for (const key of ENV_KEYS) {
+    if (!SHARED_RUNTIME_ENV_KEYS.has(key)) delete process.env[key];
+  }
+
+  const suffix = env === "dev" ? "_DEV" : "";
+  const loaded: string[] = [];
+  const mappings: Array<[string, string]> = [
+    ["database_url", `SUPABASE_DATABASE_URL${suffix}`],
+    ["supabase_url", `SUPABASE_URL${suffix}`],
+    ["supabase_anon_key", `SUPABASE_ANON_KEY${suffix}`],
+    ["supabase_service_role_key", `SUPABASE_SERVICE_ROLE_KEY${suffix}`],
+    ["supabase_storage_bucket", `SUPABASE_STORAGE_BUCKET${suffix}`],
+    ["session_secret", "SESSION_SECRET"],
+    ["fonnte_token", "FONNTE_TOKEN"],
+    ["openai_api_key", "OPENAI_API_KEY"],
+    ["google_service_account_json", "GOOGLE_SERVICE_ACCOUNT_JSON"],
+    ["google_client_id", "GOOGLE_CLIENT_ID"],
+    ["bizportal_sync_api_key", "BIZPORTAL_SYNC_API_KEY"],
+    ["cashier_token_secret", "CASHIER_TOKEN_SECRET"],
+    ["vapid_public_key", "VAPID_PUBLIC_KEY"],
+    ["vapid_private_key", "VAPID_PRIVATE_KEY"],
+    ["admin_wa_phones", "ADMIN_WA_PHONES"],
+    ["wati_api_token", "WATI_API_TOKEN"],
+    ["wati_base_url", "WATI_BASE_URL"],
+  ];
+
+  for (const [field, envKey] of mappings) {
+    const value = findField(section, field);
+    if (value) {
+      process.env[envKey] = value;
+      loaded.push(envKey);
+    }
+  }
+  return loaded;
+}
+
+function validationFailure(section: JsonObject): string[] {
+  return ["database_url", "session_secret"]
+    .filter((field) => !findField(section, field) && !(field === "session_secret" && process.env.SESSION_SECRET))
+    .map((field) => `${field} (required field missing)`);
+}
+
+function safeError(err: unknown): string {
+  const error = err as { name?: unknown; code?: unknown; details?: unknown; message?: unknown };
+  const name = typeof error.name === "string" ? error.name : "Error";
+  const code =
+    typeof error.code === "string" || typeof error.code === "number"
+      ? String(error.code)
+      : "unknown";
+  const details = typeof error.details === "string" ? error.details.slice(0, 120) : "";
+  const message = typeof error.message === "string" ? error.message.slice(0, 120) : "";
+  return `${name} (${code}) ${message}${details ? ` ${details}` : ""}`
+    .replace(/[\r\n]/g, " ")
+    .replace(/(private[_ -]?key|access[_ -]?token|password|secret[_ -]?payload|postgres(?:ql)?:\/\/)[^ ]*/gi, "$1=[redacted]");
+}
+
+async function accessSharedSecret(
+  projectId: string,
+  secretId: string,
+  credentials?: JsonObject,
+): Promise<JsonObject> {
+  const { GoogleAuth } = await import("google-auth-library");
+  const auth = credentials
+    ? new GoogleAuth({ credentials, scopes: ["https://www.googleapis.com/auth/cloud-platform"] })
+    : new GoogleAuth({ scopes: ["https://www.googleapis.com/auth/cloud-platform"] });
+  const client = await auth.getClient();
+  const response = await client.request<{ payload?: { data?: string | Buffer } }>({
+    url:
+      `https://secretmanager.googleapis.com/v1/projects/${encodeURIComponent(projectId)}` +
+      `/secrets/${encodeURIComponent(secretId)}/versions/latest:access`,
+  });
+  const encoded = response.data?.payload?.data;
+  if (!encoded) throw new Error("Secret Manager returned an empty payload");
+  const raw = Buffer.isBuffer(encoded)
+    ? encoded.toString("utf8")
+    : Buffer.from(encoded, "base64").toString("utf8");
+  const payload = JSON.parse(raw) as unknown;
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    throw new Error("Shared secret payload must be a JSON object");
+  }
+  return payload as JsonObject;
 }
 
 /**
- * Load the explicitly configured development database URL.
- *
- * Replit development does not receive SUPABASE_DATABASE_URL_DEV directly.
- * Instead, the existing DEV bootstrap credential reads one named Secret
- * Manager version at startup. Missing configuration or IAM access is fatal:
- * there is intentionally no DATABASE_URL, production URL, or anonymous
- * fallback.
+ * Load exactly one environment section from the shared GCP secret.
  */
-export async function loadDevDatabaseSecretFromGSM(): Promise<{
-  loaded: boolean;
-  fatal: string[];
-}> {
-  const fatal: string[] = [];
-
-  if (process.env.NODE_ENV !== "development") {
-    return { loaded: false, fatal };
+export async function loadSecretsFromGSM(): Promise<LoadResult> {
+  const result: LoadResult = { loaded: [], skipped: [], failed: [], fatal: [] };
+  const env = runtimeEnvironment();
+  if (!env) {
+    result.fatal.push("Unsupported or missing runtime environment");
+    return result;
   }
 
-  if (process.env.SUPABASE_DATABASE_URL_DEV) {
-    return { loaded: true, fatal };
+  const bootstrapRaw = process.env.GCP_SECRET_MANAGER_BOOTSTRAP_JSON;
+  let bootstrap: BootstrapConfig = {};
+  try {
+    if (bootstrapRaw) bootstrap = parseBootstrap(bootstrapRaw);
+  } catch {
+    result.fatal.push("Bootstrap JSON is invalid");
+    return result;
   }
 
-  const bootstrapJson = process.env.GCP_SECRET_MANAGER_BOOTSTRAP_JSON_DEV;
-  const projectId = process.env.GCP_PROJECT_ID_DEV;
-  const secretId = process.env.GCP_SECRET_ID_DEV;
-
-  if (typeof bootstrapJson !== "string") fatal.push("GCP_SECRET_MANAGER_BOOTSTRAP_JSON_DEV");
-  if (typeof projectId !== "string") fatal.push("GCP_PROJECT_ID_DEV");
-  if (typeof secretId !== "string") fatal.push("GCP_SECRET_ID_DEV");
-  if (fatal.length > 0) return { loaded: false, fatal };
-  if (typeof bootstrapJson !== "string" || typeof projectId !== "string" || typeof secretId !== "string") {
-    return { loaded: false, fatal: ["DEV Secret Manager configuration is invalid"] };
-  }
+  const projectId =
+    process.env.GCP_PROJECT_ID ??
+    bootstrap.projectId ??
+    (env === "prod" ? process.env.GOOGLE_CLOUD_PROJECT : undefined);
+  const secretId = process.env.GCP_SECRET_ID ?? bootstrap.secretId;
+  if (!projectId) result.fatal.push("GCP project ID is missing");
+  if (!secretId) result.fatal.push("GCP secret ID is missing");
+  if (result.fatal.length) return result;
 
   try {
-    const { GoogleAuth } = await import("google-auth-library");
-    const credentials = JSON.parse(bootstrapJson);
-    const auth = new GoogleAuth({
-      credentials,
-      scopes: ["https://www.googleapis.com/auth/cloud-platform"],
-    });
-    const client = await auth.getClient();
-    const response = await client.request<{ payload?: { data?: string | Buffer } }>({
-      url:
-        `https://secretmanager.googleapis.com/v1/projects/${encodeURIComponent(projectId)}` +
-        `/secrets/${encodeURIComponent(secretId)}/versions/latest:access`,
-    });
-    const encoded = response.data?.payload?.data;
-    if (!encoded) {
-      fatal.push("SUPABASE_DATABASE_URL_DEV (empty Secret Manager payload)");
-      return { loaded: false, fatal };
+    const payload = await accessSharedSecret(projectId as string, secretId as string, bootstrap.credentials);
+    const section = selectedSection(payload, env);
+    if (!section) {
+      result.fatal.push(`${env.toUpperCase()} configuration is missing in shared GCP secret`);
+      return result;
     }
-
-    const value = Buffer.isBuffer(encoded)
-      ? encoded.toString("utf8")
-      : Buffer.from(encoded, "base64").toString("utf8");
-    if (!value.trim()) {
-      fatal.push("SUPABASE_DATABASE_URL_DEV (empty Secret Manager value)");
-      return { loaded: false, fatal };
+    const missing = validationFailure(section);
+    if (missing.length) {
+      result.fatal.push(`${env.toUpperCase()} configuration validation failed: ${missing.join(", ")}`);
+      return result;
     }
-    process.env.SUPABASE_DATABASE_URL_DEV = value.trim();
-    return { loaded: true, fatal };
-  } catch {
-    fatal.push("SUPABASE_DATABASE_URL_DEV (DEV Secret Manager access failed)");
-    return { loaded: false, fatal };
+    result.loaded = setEnvironmentConfig(section, env);
+    if (!result.loaded.includes(`SUPABASE_DATABASE_URL${env === "dev" ? "_DEV" : ""}`)) {
+      result.fatal.push("database_url could not be loaded");
+    }
+  } catch (err) {
+    result.failed.push(`Secret Manager access failed: ${safeError(err)}`);
+    result.fatal.push("Shared GCP secret access failed");
   }
+  return result;
+}
+
+/** Kept as a compatibility export for callers that used the old DEV-specific name. */
+export async function loadDevDatabaseSecretFromGSM(): Promise<{ loaded: boolean; fatal: string[] }> {
+  if (runtimeEnvironment() !== "dev") return { loaded: false, fatal: [] };
+  const result = await loadSecretsFromGSM();
+  return { loaded: result.loaded.includes("SUPABASE_DATABASE_URL_DEV"), fatal: result.fatal };
 }

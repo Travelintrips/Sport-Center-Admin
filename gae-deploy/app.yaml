@@ -45,6 +45,7 @@ automatic_scaling:
 # on each of the secrets above before first deployment.
 env_variables:
   NODE_ENV: "production"
+  GCP_SECRET_ID: "sport-center"
   VITE_PUBLIC_URL: "https://sc.travelintrips.co.id"
   # PDF generation via headless Chromium.
   # Set to "false" for first deployment — compatibility with App Engine Standard
