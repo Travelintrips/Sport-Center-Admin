@@ -9,14 +9,18 @@ This report is intentionally conservative. The supplied production baseline
 contains aggregate counts and identifies bookings `380` and `511`, but it does
 not contain the record-level rows required to classify every payment,
 outbox item, reconciliation candidate, recurring booking, and completion
-anomaly. The live production database for this project is the separately
-deployed GAE/Supabase environment; the configured Replit database is the
-isolated development database and must not be used as a production proxy.
+anomaly. The current production runtime is the active Replit Autoscale
+deployment, which resolves its external production database through
+`SUPABASE_DATABASE_URL` loaded from the production section of the shared
+Secret Manager payload. The configured Replit managed database and the
+development-only audit harness must not be used as a production proxy.
 
-No production connection was opened, no production transaction was started,
-and no production data was read or changed during this phase. Therefore,
-unknown records remain `UNKNOWN`/`BLOCKED` instead of being inferred from
-aggregate counts.
+No dedicated production read-only connection was available for this phase, so
+no production connection was opened, no production transaction was started,
+and no production data was read or changed. The only read-only harness found
+in the workspace is explicitly development-only and fail-closed for production.
+Therefore, unknown records remain `UNKNOWN`/`BLOCKED` instead of being
+inferred from aggregate counts.
 
 ## Verified baseline supplied for this audit
 
@@ -120,6 +124,12 @@ No migration, row copy, or candidate approval was performed.
 
 ## Safe read-only evidence query plan
 
+This plan was not executed because the required production read-only session
+could not be established. Before any query below is run, a dedicated
+production PostgreSQL client must execute `BEGIN; SET TRANSACTION READ ONLY;`
+and verify `SHOW transaction_read_only` returns `on`. The application pool and
+the development database are not acceptable substitutes.
+
 Run only against the verified production connection, inside a transaction with
 `SHOW transaction_read_only` returning `on`, and end with `ROLLBACK`:
 
@@ -139,7 +149,8 @@ approval, posting, or repair operation.
 
 ## Final verdict
 
-- **PRODUCTION READ-ONLY:** PASS — no production connection or mutation performed
+- **PRODUCTION READ-ONLY CONNECTION:** BLOCKED — no dedicated production session was available; `transaction_read_only=on` was not verified
+- **PRODUCTION DATA MUTATION:** NONE
 - **HISTORICAL CLASSIFICATION:** PARTIAL / BLOCKED — required record-level production evidence was not supplied or safely reachable
 - **BOOKING LIFECYCLE:** CLASSIFIED at code level; historical rows blocked
 - **PAYMENT DUPLICATES:** UNKNOWN / BLOCKED
@@ -149,7 +160,6 @@ approval, posting, or repair operation.
 - **RECURRING:** UNKNOWN / BLOCKED
 - **CROSS-ENTITY:** UNKNOWN / BLOCKED
 - **CENTRAL FINANCE:** SAFE at code level; historical linkage blocked
-- **PRODUCTION DATA MUTATION:** NONE
 - **CODE REMEDIATION:** PASS
 - **TESTS:** 17 suites / 109 tests PASS
 - **TYPECHECK:** PASS
