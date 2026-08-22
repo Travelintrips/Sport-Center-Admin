@@ -38,3 +38,10 @@ configureWorkflow({
 - On Supabase dev DB (SUPABASE_DATABASE_URL_DEV), all 126 statements apply cleanly.
 
 **Why:** The single `client.query(CUSTOM_MIGRATION_SQL)` call aborts on first error; statement-by-statement skipping ensures idempotent migrations work on both heliumdb and Supabase.
+
+## Artifact production entry point
+For an artifact deployment, the registered artifact production command takes precedence over the root deployment command. Its startup entry must preserve the secret-bootstrap sequence before importing the API.
+
+**Why:** Launching the API module directly bypasses runtime secret loading, so health checks can return 500 even though the build itself succeeded.
+
+**How to apply:** When changing the API build output or production entry point, validate the exact artifact command and its health endpoint, not only the root `.replit` deployment command.
