@@ -64,7 +64,6 @@ import {
   MessageCircle,
   CheckCircle,
   AlertCircle,
-  Lock,
 } from "lucide-react";
 import { getToken } from "@/lib/auth";
 import VerifyIdDialog from "@/components/admin/VerifyIdDialog";
@@ -1286,9 +1285,6 @@ function BookingDetailDrawer({
                           payment={pmt}
                           options={paymentMethodOptions}
                           onChange={onUpdatePaymentMethod}
-                           lockedReason={pmt.status === "confirmed"
-                             ? "Pembayaran sudah dikonfirmasi. Perubahan metode/provider dapat mengubah jurnal akuntansi; hubungi finance untuk koreksi."
-                             : undefined}
                           disabled={isUpdating}
                         />
                         {(() => {
@@ -3278,9 +3274,6 @@ export default function AdminBookings() {
                                data: { paymentMethod },
                              })
                            }
-                           lockedReason={b.payment?.status === "confirmed"
-                             ? "Pembayaran sudah dikonfirmasi. Perubahan metode/provider dapat mengubah jurnal akuntansi; hubungi finance untuk koreksi."
-                             : undefined}
                            disabled={updatePaymentMetadataMutation.isPending}
                          />
                       </td>
