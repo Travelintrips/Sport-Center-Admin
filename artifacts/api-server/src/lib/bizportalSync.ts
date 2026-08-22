@@ -23,7 +23,6 @@ export function getProdPool(): pg.Pool | null {
       connectionString: PROD_URL,
       ssl: { rejectUnauthorized: false },
       max: 10,
-      options: "-c search_path=sport_center,public",
     });
   }
   return _prodPool;
