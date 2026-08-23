@@ -6,7 +6,7 @@ Date: 2026-08-24 (Asia/Bangkok)
 
 **PROJECT STATUS = NOT FINALIZED**
 
-The isolated feature migration has been applied to the production application database, the API workflow is running, the full API suite passes, and the live custom domain responds correctly. Closure remains incomplete because the dedicated auditor connection has no SELECT privilege on the three additive feature tables, while deployment metadata reports no active published deployment.
+The isolated feature migration has been applied to the production application database, the API workflow is running, the full API suite passes, and the live custom domain responds correctly. The dedicated auditor now sees all three additive feature tables with the required read-only privileges. Closure remains incomplete because deployment metadata reports no active published deployment and the custom-domain relationship cannot be proven.
 
 ## 1. Development Implementation
 
@@ -34,9 +34,9 @@ The full DEV/PROD 429-object parity is intentionally not claimed or required.
 
 ## 4. Production Migration
 
-**PRIMARY DATABASE = PASS; AUDITOR VISIBILITY = BLOCKED**
+**PRIMARY DATABASE = PASS; AUDITOR VISIBILITY = PASS**
 
-The production application connection confirmed `corporate_subscriptions`, `corporate_occurrences`, and `usage_proofs`, with existing `reschedule_requests` and event columns. The dedicated auditor confirmed role `sport_center_production_auditor`, `current_database=postgres`, server port `5432`, `transaction_read_only=on`, and `ROLLBACK=PASS`. The auditor can see the feature indexes, but `information_schema.tables` and columns hide the feature tables; `has_schema_privilege(..., 'USAGE')` is true while table `SELECT` is false for all three. This proves a privilege-visibility issue rather than an unproven migration rerun or a guessed replica diagnosis. No grant was attempted because the auditor is read-only and no separate production-admin connection is provisioned in this workspace.
+The production application connection confirmed `corporate_subscriptions`, `corporate_occurrences`, and `usage_proofs`, with existing `reschedule_requests` and event columns. The dedicated auditor confirmed role `sport_center_production_auditor`, `current_database=postgres`, server port `5432`, `transaction_read_only=on`, and `ROLLBACK=PASS`. A follow-up read-only check confirmed all three feature tables and columns are visible, schema `USAGE` is true, and table `SELECT` is true for each required table. No grant was attempted using the auditor.
 
 Production data mutation: **NONE**; only the approved additive schema migration was applied.
 
@@ -60,7 +60,7 @@ The configured custom domain nevertheless responded successfully over HTTPS:
 - `/api/settings` → 200
 - `/api/auth/me` → 401, expected without credentials
 
-The deployment metadata and live custom-domain runtime disagree, so deployment is not marked as a clean PASS. No publish action was performed. The live runtime is proven healthy over HTTPS, but the custom-domain-to-current-Replit-deployment relationship cannot be proven from the available deployment metadata.
+The deployment metadata and live custom-domain runtime disagree, so deployment is not marked as a clean PASS. No publish action was performed. The live runtime is proven healthy over HTTPS, but the custom-domain-to-current-Replit-deployment relationship cannot be proven from the available deployment metadata. **DEPLOYMENT_RELATIONSHIP = UNVERIFIED**
 
 ## 6. Runtime Verification
 
@@ -178,7 +178,7 @@ The frontend emitted existing sourcemap and chunk-size warnings but completed su
 
 This session performed one approved additive production schema migration. It performed no production data write, booking/payment/invoice/tax/journal/reconciliation mutation, storage upload/deletion, WhatsApp message, or Central Finance mutation.
 
-The follow-up audit and privilege probes were read-only and ended with `ROLLBACK`; no production grant, migration, financial mutation, deployment, or WhatsApp send was performed.
+The follow-up audit and privilege probes were read-only and ended with `ROLLBACK`; this session performed no production grant, migration, financial mutation, deployment, or WhatsApp send.
 
 The dedicated production read-only handshake and integrity audit used role `sport_center_production_auditor`, confirmed `transaction_read_only=on`, executed zero mutation queries, and ended with `ROLLBACK`.
 
@@ -202,9 +202,7 @@ The financial row-count fingerprint was unchanged by the schema migration:
 
 ## Remaining Review Items / Exact Blockers
 
-1. A production administrator must grant only `USAGE ON SCHEMA sport_center` (already present) and `SELECT` on `corporate_subscriptions`, `corporate_occurrences`, and `usage_proofs` to `sport_center_production_auditor`, then rerun the read-only audit. No write privilege or ownership grant is permitted.
-2. Resolve the mismatch between Replit deployment metadata (`isDeployed=false`) and the live custom-domain runtime before marking deployment fully PASS.
-3. Publish the current implementation only after the auditor visibility gate is PASS.
+1. Resolve the mismatch between Replit deployment metadata (`isDeployed=false`, `hasSuccessfulBuild=false`, `primaryUrl=""`) and the live custom-domain runtime. The relationship is currently **UNVERIFIED**.
 
 ## Final Verdict
 
@@ -212,4 +210,4 @@ The required closure gates do not all pass. In accordance with the checklist:
 
 **PROJECT STATUS = NOT FINALIZED**
 
-Exact blockers: **Dedicated production auditor lacks SELECT on the additive feature tables; deployment publication state conflicts with the live custom-domain runtime.**
+Exact remaining external blocker: **DEPLOYMENT_RELATIONSHIP = UNVERIFIED**
