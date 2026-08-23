@@ -10,6 +10,7 @@ import { pushInvoicePaymentAsBankMutation } from "../lib/bizportalSync";
 import { createInvoiceJournalEntry, createPublicInvoiceAccountingEntry } from "../lib/accounting";
 import { BUCKETS, uploadToStorage } from "../lib/supabaseStorage";
 import { uploadProofWithFallback } from "./storage";
+import { allowWhatsAppProviderSend } from "../lib/whatsappSafety";
 
 const uploadMiddleware = multer({
   storage: multer.memoryStorage(),
@@ -745,7 +746,7 @@ router.post("/company-invoices/:id/send-wa", adminMiddleware, async (req, res) =
     );
 
     const token = process.env.FONNTE_TOKEN;
-    if (token) {
+    if (token && allowWhatsAppProviderSend()) {
       const phone = picPhone.replace(/^\+/, "").replace(/^0/, "62");
       await fetch("https://api.fonnte.com/send", {
         method: "POST",

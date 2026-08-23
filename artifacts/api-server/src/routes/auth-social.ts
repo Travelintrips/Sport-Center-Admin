@@ -5,6 +5,7 @@ import { OAuth2Client } from "google-auth-library";
 import { createToken, authMiddleware, hashPassword, isValidPasswordHash, verifyPassword, verifyToken } from "../lib/auth";
 import crypto from "crypto";
 import { logger } from "../lib/logger";
+import { allowWhatsAppProviderSend } from "../lib/whatsappSafety";
 
 const router = Router();
 
@@ -121,7 +122,7 @@ router.post("/auth/send-otp", async (req, res) => {
     const expires = Date.now() + 5 * 60 * 1000;
     otpStore.set(cleaned, { otp, expires });
 
-    if (FONNTE_TOKEN) {
+    if (FONNTE_TOKEN && allowWhatsAppProviderSend()) {
       try {
         await fetch("https://api.fonnte.com/send", {
           method: "POST",
@@ -241,7 +242,7 @@ router.post("/auth/forgot-password", async (req, res) => {
     const expires = Date.now() + 5 * 60 * 1000;
     resetOtpStore.set(cleaned, { otp, expires, email });
 
-    if (FONNTE_TOKEN) {
+    if (FONNTE_TOKEN && allowWhatsAppProviderSend()) {
       try {
         await fetch("https://api.fonnte.com/send", {
           method: "POST",

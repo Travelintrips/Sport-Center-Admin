@@ -89,6 +89,9 @@ const requiredTables = [
   ["sport_center", "bank_mutations"],
   ["sport_center", "bank_reconciliation_matches"],
   ["sport_center", "tax_transactions"],
+  ["sport_center", "corporate_subscriptions"],
+  ["sport_center", "corporate_occurrences"],
+  ["sport_center", "usage_proofs"],
   ["public", "accounting_entries"],
   ["public", "accounting_entry_lines"],
 ] as const;
@@ -148,6 +151,40 @@ async function main(): Promise<void> {
       table,
       present: availableKeys.has(`${schema}.${table}`),
     }));
+    const featureColumns = await select<{
+      table_name: string;
+      column_name: string;
+    }>(
+      client,
+      `SELECT table_name, column_name
+         FROM information_schema.columns
+        WHERE table_schema = 'sport_center'
+          AND table_name IN ('corporate_subscriptions', 'corporate_occurrences', 'usage_proofs')
+        ORDER BY table_name, ordinal_position`,
+    );
+    const featureIndexes = await select<{
+      index_name: string;
+      table_name: string;
+    }>(
+      client,
+      `SELECT indexname AS index_name, tablename AS table_name
+         FROM pg_catalog.pg_indexes
+        WHERE schemaname = 'sport_center'
+          AND tablename IN ('corporate_subscriptions', 'corporate_occurrences', 'usage_proofs')
+        ORDER BY tablename, indexname`,
+    );
+    const featurePrivileges = await select<{
+      schema_usage: boolean;
+      subscriptions_select: boolean;
+      occurrences_select: boolean;
+      usage_proofs_select: boolean;
+    }>(
+      client,
+      `SELECT has_schema_privilege(current_user, 'sport_center', 'USAGE') AS schema_usage,
+              has_table_privilege(current_user, 'sport_center.corporate_subscriptions', 'SELECT') AS subscriptions_select,
+              has_table_privilege(current_user, 'sport_center.corporate_occurrences', 'SELECT') AS occurrences_select,
+              has_table_privilege(current_user, 'sport_center.usage_proofs', 'SELECT') AS usage_proofs_select`,
+    );
 
     // This initial runner phase proves the safe connection and discovers the
     // audit surface. Record-level classification queries are deliberately not
@@ -159,6 +196,9 @@ async function main(): Promise<void> {
       identity: identity[0],
       auditRole: AUDIT_ROLE,
       scope,
+      featureColumns,
+      featureIndexes,
+      featurePrivileges: featurePrivileges[0] ?? null,
       mutationQueries: 0,
       transaction: "ROLLBACK_REQUIRED",
       classification: "NOT_EXECUTED_IN_GATE_PHASE",

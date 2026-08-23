@@ -5,6 +5,7 @@ import { trackSentMessage } from "./waSentTracker";
 import { logger } from "./logger";
 import { signKwitansiToken } from "./kwitansiToken";
 import { getBaseUrl } from "./appUrl";
+import { allowWhatsAppProviderSend, getWhatsAppDispatchMode } from "./whatsappSafety";
 
 const ENV_FONNTE_TOKEN = process.env.FONNTE_TOKEN || "";
 const ENV_FONNTE_CUSTOMER_TOKEN = process.env.FONNTE_CUSTOMER_TOKEN || "";
@@ -88,20 +89,15 @@ async function sendWA(
     if (ctx) logWaSend(cleanPhone || phone, message, "failed", "Nomor tidak valid", ctx).catch(() => {});
     return;
   }
-  // Warning #4 guard: jika NODE_ENV bukan production, log peringatan
-  if (process.env.NODE_ENV !== "production") {
-    logger.warn(
-      { target: cleanPhone, event: ctx?.event },
-      "[WA] ⚠️  PERINGATAN: Mengirim WA di lingkungan non-production. Set WA_DRY_RUN=true di env DEV untuk mencegah pengiriman nyata.",
-    );
-  }
-  // Dry-run mode: log pesan tapi tidak kirim ke Fonnte (set WA_DRY_RUN=true di env DEV)
-  if (process.env.WA_DRY_RUN === "true") {
-    logger.warn({ target: cleanPhone, event: ctx?.event }, "[WA] DRY RUN — pesan tidak dikirim ke Fonnte");
+  const dispatchMode = getWhatsAppDispatchMode();
+  if (dispatchMode !== "production") {
+    allowWhatsAppProviderSend();
+    logger.info({ target: cleanPhone, event: ctx?.event, mode: dispatchMode }, "[WA] simulated dispatch — pesan tidak dikirim ke Fonnte");
     logger.info({ target: cleanPhone, preview: message.slice(0, 200) }, "[WA] DRY RUN message preview");
-    if (ctx) logWaSend(cleanPhone, message, "sent", "DRY RUN — tidak dikirim ke Fonnte", ctx).catch(() => {});
+    if (ctx) logWaSend(cleanPhone, message, "sent", `${dispatchMode} — tidak dikirim ke Fonnte`, ctx).catch(() => {});
     return;
   }
+  if (!allowWhatsAppProviderSend()) return;
   // Catat SEGERA sebelum await apapun — Fonnte echo bisa datang saat getWaConfig() pending
   trackSentMessage(message);
   const config = await getWaConfig();

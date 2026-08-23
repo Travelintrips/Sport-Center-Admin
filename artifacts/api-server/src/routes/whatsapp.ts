@@ -60,6 +60,7 @@ import {
   detectIntent,
 } from "../services/aiSportCenterService";
 import { trackSentMessage, isBotEcho } from "../lib/waSentTracker";
+import { allowWhatsAppProviderSend } from "../lib/whatsappSafety";
 import { getHistory, appendTurn, clearHistory } from "../lib/aiConversationMemory";
 import {
   paymentMethodMatchesOcr,
@@ -641,6 +642,7 @@ async function sendWAReply(phone: string, message: string): Promise<void> {
     console.warn("[wa] sendWAReply: FONNTE_TOKEN kosong atau phone kosong", { phone, hasToken: !!FONNTE_TOKEN });
     return;
   }
+  if (!allowWhatsAppProviderSend()) return;
   try {
     const resp = await fetch("https://api.fonnte.com/send", {
       method: "POST",
@@ -1412,6 +1414,7 @@ router.post("/wa/review/:token", async (req, res) => {
 
 async function sendWAMsg(phone: string, message: string): Promise<void> {
   if (!phone) return;
+  if (!allowWhatsAppProviderSend()) return;
   // Catat SEGERA sebelum pengecekan token — race-condition: Fonnte bisa echo sebelum kita track
   trackSentMessage(message);
   const FONNTE_TOKEN = process.env.FONNTE_TOKEN || "";

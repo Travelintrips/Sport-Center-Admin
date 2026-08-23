@@ -4,6 +4,7 @@ import { db, usersTable, companyUsersTable, companyVerificationsTable, companyVe
 import { eq, and, desc } from "drizzle-orm";
 import { adminMiddleware, authMiddleware } from "../lib/auth";
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
+import { allowWhatsAppProviderSend } from "../lib/whatsappSafety";
 
 const router = Router();
 const APP_URL = process.env.APP_URL ?? "";
@@ -40,6 +41,7 @@ router.get("/companies", async (req, res) => {
 async function sendWA(phone: string, message: string): Promise<void> {
   const fonnteToken = process.env.FONNTE_TOKEN || "";
   if (!fonnteToken || !phone) return;
+  if (!allowWhatsAppProviderSend()) return;
   try {
     const cleanPhone = phone.replace(/^0/, "62").replace(/\D/g, "");
     await fetch("https://api.fonnte.com/send", {

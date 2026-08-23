@@ -8,6 +8,7 @@ import { resolveInvoiceData, resolveGroupInvoiceData } from "../lib/invoiceResol
 import { sendInvoiceToCustomer, sendGroupInvoiceToCustomer } from "../lib/invoiceDelivery";
 import { getInternalPdfToken } from "../lib/internalPdfToken";
 import { logger } from "../lib/logger";
+import { allowWhatsAppProviderSend } from "../lib/whatsappSafety";
 
 // ─── Internal PDF middleware ───────────────────────────────────────────────────
 // Digunakan oleh endpoint yang di-akses puppeteer saat generate PDF.
@@ -375,6 +376,11 @@ router.post("/invoices/booking/:orderNumber/send-wa", adminMiddleware, async (re
           `📄 *Download Invoice PDF:*\n${pdfLink}\n\n` +
           `Terima kasih telah memilih Sport Center Soekarno-Hatta! 🙏`
       );
+
+    if (!allowWhatsAppProviderSend()) {
+      res.json({ success: true, simulated: true, message: "WhatsApp dispatch blocked outside production" });
+      return;
+    }
 
     const token =
       req.body?.fonnteToken ??

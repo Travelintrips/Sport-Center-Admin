@@ -12,12 +12,14 @@ import {
 import { eq, and, desc, or, sql, ilike, inArray, like } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
 import { logAudit } from "../lib/auditLog";
+import { allowWhatsAppProviderSend } from "../lib/whatsappSafety";
 
 const router = Router();
 
 async function sendWAMsg(phone: string, message: string): Promise<void> {
   const token = process.env.FONNTE_TOKEN || "";
   if (!token || !phone) return;
+  if (!allowWhatsAppProviderSend()) return;
   try {
     await fetch("https://api.fonnte.com/send", {
       method: "POST",
