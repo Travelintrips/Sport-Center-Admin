@@ -1,0 +1,768 @@
+PHASE — AUDIT CORPORATE RECURRING + EVENT + RESCHEDULE
+READ-ONLY AUDIT ONLY — NO CODE/DATABASE/PRODUCTION CHANGES
+
+Saya ingin melakukan AUDIT terlebih dahulu sebelum melakukan perubahan apa pun.
+
+OBJECTIVE
+=========
+
+Audit implementasi Sport Center saat ini untuk mengetahui apakah sistem
+sudah mendukung:
+
+1. Corporate recurring/subscription booking
+2. Corporate weekly schedule
+3. Corporate monthly billing
+4. Stop subscription
+5. Event fixed schedule
+6. Mandatory check-in
+7. Mandatory photo proof of usage
+8. Reschedule Corporate occurrence
+9. Reschedule Event
+10. Availability/conflict checking saat reschedule
+11. History/audit trail reschedule
+12. Invoice setelah reschedule
+13. Check-in setelah reschedule
+
+IMPORTANT:
+
+AUDIT ONLY.
+
+JANGAN:
+
+- mengubah source code
+- membuat migration
+- mengubah schema
+- INSERT
+- UPDATE
+- DELETE
+- membuat booking
+- membuat subscription
+- membuat event
+- membuat payment
+- approve reschedule
+- mengubah invoice
+- mengubah accounting
+- mengubah reconciliation
+- mengubah Central Finance
+- mengubah Production data
+- melakukan deployment
+
+Jika perlu melakukan test runtime, gunakan DEV/test environment dan jangan
+membuat data permanen.
+
+============================================================
+1. CODEBASE INVENTORY
+============================================================
+
+Cari seluruh implementation terkait:
+
+Corporate
+corporate booking
+company booking
+payerType
+companyCustomerId
+company
+employee
+participant
+
+Recurring
+recurring
+recurrence
+subscription
+weekly
+weekly schedule
+repeat
+repeat_until
+subscription_status
+
+Event
+event
+event booking
+event discount
+event schedule
+event date
+event time
+
+Check-in
+checkin
+checked_in_at
+check_in
+usage verification
+proof
+photo
+evidence
+playing proof
+
+Reschedule
+reschedule
+reschedule request
+rescheduleStatus
+replacement booking
+new schedule
+reschedule approval
+
+Billing
+billingStatus
+unbilled
+billed
+paid
+corporate invoice
+company invoice
+invoice item
+
+============================================================
+2. DATABASE AUDIT
+============================================================
+
+Inspect schema ONLY.
+
+Cari tabel dan kolom terkait:
+
+- sport_bookings
+- booking_history
+- booking_groups
+- company_invoices
+- company_invoice_items
+- sport_payments
+- recurring/subscription tables
+- event tables
+- check-in tables
+- reschedule tables
+- media/proof tables
+- facility availability tables
+
+Jangan mengubah schema.
+
+Buat inventory:
+
+TABLE
+COLUMN
+TYPE
+PURPOSE
+RELATIONSHIP
+STATUS
+
+Identifikasi foreign key:
+
+company
+customer
+booking
+subscription
+event
+invoice
+invoice_item
+checkin
+photo
+reschedule
+
+============================================================
+3. CORPORATE BOOKING AUDIT
+============================================================
+
+Tentukan bagaimana Corporate booking saat ini bekerja.
+
+Verifikasi:
+
+- payerType
+- company reference
+- customer/PIC
+- employee/participant
+- company verification
+- billingStatus
+- invoice linkage
+- payment behavior
+
+Jawab:
+
+Apakah corporate booking sudah berbeda dari personal booking?
+
+Apakah corporate booking membutuhkan direct payment?
+
+Apakah corporate booking masuk company invoice?
+
+Apakah invoice item terhubung langsung ke booking?
+
+Apakah booking dapat berstatus:
+
+unbilled
+billed
+paid
+
+tanpa direct sport_payment?
+
+============================================================
+4. CORPORATE RECURRING AUDIT
+============================================================
+
+Tentukan apakah sudah ada subscription/recurring master.
+
+Cari apakah sistem memiliki:
+
+- subscription ID
+- company ID
+- facility ID
+- day of week
+- start time
+- end time
+- start date
+- period end date
+- billing cycle
+- subscription status
+- active/paused/stopped
+- generated occurrences
+
+Tentukan apakah sistem saat ini:
+
+A. benar-benar recurring/subscription
+
+B. hanya membuat beberapa booking sekaligus
+
+C. hanya menyimpan recurrence metadata
+
+D. belum memiliki recurring mechanism
+
+Jangan membuat perubahan.
+
+============================================================
+5. STOP SUBSCRIPTION AUDIT
+============================================================
+
+Cari implementasi:
+
+STOP
+CANCEL
+PAUSE
+END SUBSCRIPTION
+TERMINATE
+
+Tentukan:
+
+- apakah admin bisa menghentikan subscription
+- apakah stop menghentikan future occurrences
+- apakah existing bookings tetap dipertahankan
+- apakah histori subscription tetap tersimpan
+- apakah invoice periode berjalan tetap aman
+
+Jangan melakukan stop pada data apa pun.
+
+============================================================
+6. EVENT AUDIT
+============================================================
+
+Audit apakah Event saat ini merupakan fixed schedule.
+
+Verifikasi:
+
+- event date
+- start time
+- end time
+- facility
+- participant
+- payer
+- event discount
+- invoice
+- booking linkage
+
+Tentukan apakah Event benar-benar fixed schedule atau masih menggunakan
+recurring mechanism.
+
+============================================================
+7. CHECK-IN AUDIT
+============================================================
+
+Cari implementasi check-in.
+
+Verifikasi:
+
+- endpoint
+- frontend
+- database field/table
+- authorization
+- timestamp
+- admin identity
+- duplicate check-in protection
+- start/end time validation
+- booking status transition
+- booking history
+
+Tentukan apakah check-in saat ini WAJIB sebelum completed.
+
+============================================================
+8. PHOTO PROOF AUDIT
+============================================================
+
+Cari apakah sistem sudah memiliki bukti foto penggunaan fasilitas.
+
+Audit:
+
+- storage bucket
+- media table
+- booking attachment
+- check-in attachment
+- upload endpoint
+- photo metadata
+- uploaded_by
+- captured_at
+- relation ke booking
+
+Tentukan:
+
+A. photo proof sudah mandatory
+
+B. photo proof optional
+
+C. photo hanya attachment umum
+
+D. belum ada photo proof
+
+Jangan upload foto.
+
+============================================================
+9. EVENT CHECK-IN RULE AUDIT
+============================================================
+
+Verifikasi apakah Event dapat:
+
+event date
+→ admin check-in
+→ photo proof
+→ completed
+
+Cari apakah sistem sekarang memungkinkan:
+
+completed tanpa check-in
+
+completed tanpa photo
+
+Jika iya, catat sebagai GAP.
+
+Jangan memperbaiki historical records.
+
+============================================================
+10. CORPORATE CHECK-IN AUDIT
+============================================================
+
+Tentukan apakah recurring Corporate occurrence dapat:
+
+scheduled
+→ check-in
+→ proof
+→ used/completed
+
+Cari apakah setiap occurrence memiliki check-in sendiri.
+
+Jangan membuat check-in historical.
+
+============================================================
+11. RESCHEDULE AUDIT
+============================================================
+
+Cari seluruh reschedule implementation.
+
+Verifikasi:
+
+- request
+- approval
+- rejection
+- original booking
+- original date/time
+- new date/time
+- reason
+- approved_by
+- approved_at
+- history
+- replacement occurrence
+- cancellation
+- conflict checking
+
+Tentukan apakah reschedule sekarang:
+
+A. sudah fully implemented
+
+B. partially implemented
+
+C. hanya UI
+
+D. hanya database
+
+E. belum ada
+
+============================================================
+12. CORPORATE RESCHEDULE
+============================================================
+
+Audit apakah satu occurrence Corporate dapat di-reschedule tanpa mengubah
+master recurring rule.
+
+Expected architecture:
+
+SUBSCRIPTION
+    ↓
+OCCURRENCE
+    ↓
+RESCHEDULE
+    ↓
+NEW OCCURRENCE/SCHEDULE
+
+Tentukan apakah current system sudah seperti ini.
+
+Jika reschedule saat ini mengubah seluruh recurrence rule, tandai GAP.
+
+============================================================
+13. EVENT RESCHEDULE
+============================================================
+
+Audit apakah Event dapat dipindahkan dari:
+
+original date/time
+
+ke:
+
+new date/time
+
+tanpa kehilangan histori original.
+
+Cari:
+
+original schedule
+new schedule
+reason
+approval
+history
+
+Jangan melakukan reschedule.
+
+============================================================
+14. AVAILABILITY / CONFLICT AUDIT
+============================================================
+
+Cari conflict detection yang digunakan ketika:
+
+booking dibuat
+recurring booking dibuat
+event dibuat
+reschedule dilakukan
+
+Harus memperhitungkan:
+
+- facility
+- date
+- start time
+- end time
+- existing booking
+- event
+- recurring occurrence
+- pending reschedule
+- replacement occurrence
+
+Tentukan apakah conflict checking sudah aman.
+
+============================================================
+15. RESCHEDULE + CHECK-IN AUDIT
+============================================================
+
+Tentukan apakah setelah reschedule:
+
+original date tidak lagi meminta check-in
+
+dan:
+
+new date menjadi tanggal check-in.
+
+Cari apakah check-in membaca canonical occurrence date atau tanggal lama.
+
+============================================================
+16. RESCHEDULE + BILLING AUDIT
+============================================================
+
+Untuk Corporate:
+
+Jika occurrence:
+
+14 Sep → rescheduled → 18 Sep
+
+maka invoice harus menggunakan:
+
+18 Sep
+
+bukan 14 Sep.
+
+Audit hubungan:
+
+booking
+→ invoice item
+→ invoice
+
+Tentukan apakah sistem sudah mendukung ini.
+
+============================================================
+17. MONTHLY CORPORATE BILLING AUDIT
+============================================================
+
+Audit:
+
+subscription
+→ occurrences
+→ usage
+→ invoice
+
+Verifikasi invoice bulanan memiliki:
+
+- company
+- booking
+- facility
+- date
+- duration
+- amount
+- discount jika applicable
+- DPP
+- PPN
+- total
+
+Tentukan apakah invoice dibuat dari actual occurrence/usage atau hanya
+dari subscription.
+
+============================================================
+18. PAYMENT AUDIT
+============================================================
+
+Pastikan:
+
+Personal:
+→ direct payment
+
+Corporate:
+→ invoice payment
+
+Event:
+→ sesuai payer type
+
+Corporate booking tanpa sport_payment langsung JANGAN otomatis dianggap
+missing payment.
+
+Audit apakah current integrity audit sudah membedakan:
+
+payerType=personal
+
+dan:
+
+payerType=company
+
+============================================================
+19. ACCOUNTING SAFETY AUDIT
+============================================================
+
+Audit tanpa mutation:
+
+Corporate invoice payment
+→ accounting
+
+Event payment
+→ accounting
+
+Reschedule
+→ accounting
+
+Pastikan reschedule tidak membuat:
+
+duplicate payment
+duplicate invoice
+duplicate journal
+duplicate tax
+
+Jangan melakukan posting.
+
+============================================================
+20. CENTRAL FINANCE SAFETY AUDIT
+============================================================
+
+Pastikan audit ini tidak mengubah Central Finance.
+
+Verifikasi read-only:
+
+- central_finance_processing
+- accounting outbox
+- journal
+- journal lines
+
+Tidak ada mutation.
+
+============================================================
+21. PRODUCTION SAFETY
+============================================================
+
+Untuk Production:
+
+gunakan dedicated:
+
+sport_center_production_auditor
+
+dengan:
+
+BEGIN;
+
+SET TRANSACTION READ ONLY;
+
+SHOW transaction_read_only;
+
+Pastikan:
+
+transaction_read_only = on
+
+dan:
+
+ROLLBACK;
+
+Jangan menggunakan application write connection.
+
+============================================================
+22. GAP CLASSIFICATION
+============================================================
+
+Klasifikasikan setiap area:
+
+PASS
+PARTIAL
+MISSING
+BLOCKED
+UNKNOWN
+
+Gunakan tabel:
+
+| Area | Current State | Evidence | Gap | Severity |
+|------|---------------|----------|-----|----------|
+
+Minimal:
+
+Corporate booking
+Corporate subscription
+Weekly schedule
+Stop subscription
+Corporate billing
+Event schedule
+Event check-in
+Photo proof
+Corporate check-in
+Corporate reschedule
+Event reschedule
+Conflict detection
+Reschedule history
+Invoice after reschedule
+Payment handling
+Accounting
+Central Finance
+
+============================================================
+23. DO NOT FIX
+============================================================
+
+Sekali lagi:
+
+INI AUDIT ONLY.
+
+Tidak boleh ada:
+
+INSERT
+UPDATE
+DELETE
+ALTER
+CREATE
+DROP
+migration
+deployment
+
+Tidak ada historical correction.
+
+Tidak ada payment correction.
+
+Tidak ada booking correction.
+
+Tidak ada invoice correction.
+
+Tidak ada accounting correction.
+
+============================================================
+24. TEST AUDIT
+============================================================
+
+Cari test yang sudah tersedia.
+
+Tidak perlu mengubah test.
+
+Catat apakah sudah ada test untuk:
+
+- recurring
+- corporate billing
+- event
+- check-in
+- photo proof
+- reschedule
+- conflict
+- invoice
+- payment
+- accounting
+
+============================================================
+25. FINAL REPORT
+============================================================
+
+Buat/update:
+
+SPORT_CENTER_CORPORATE_EVENT_RESCHEDULE_AUDIT.md
+
+Isi:
+
+1. Executive Summary
+2. Current Architecture
+3. Corporate Flow
+4. Recurring Flow
+5. Stop Subscription
+6. Event Flow
+7. Check-in
+8. Photo Proof
+9. Reschedule
+10. Conflict Detection
+11. Billing
+12. Payment
+13. Accounting
+14. Central Finance
+15. Database Schema Evidence
+16. API Evidence
+17. Frontend Evidence
+18. Existing Tests
+19. Gaps
+20. Recommended Changes
+21. Risk Classification
+22. Final Verdict
+
+============================================================
+FINAL VERDICT
+============================================================
+
+Jangan mengatakan "PASS" hanya karena tabel/route ditemukan.
+
+Gunakan:
+
+IMPLEMENTED
+PARTIALLY IMPLEMENTED
+MISSING
+BLOCKED
+UNKNOWN
+
+Berikan kesimpulan:
+
+CURRENT SYSTEM STATUS
+
+dan:
+
+RECOMMENDED IMPLEMENTATION ORDER
+
+Tetapi JANGAN melakukan implementation pada fase ini.
+
+FINAL REQUIREMENT:
+
+AUDIT ONLY
+NO PRODUCTION MUTATION
+NO CODE CHANGE
+NO DATABASE CHANGE
+NO DEPLOYMENT
