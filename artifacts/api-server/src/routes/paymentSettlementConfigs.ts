@@ -1,6 +1,6 @@
 import { Router } from "express";
-import { and, asc, eq, sql } from "drizzle-orm";
-import { db, paymentSettlementConfigsTable, usersTable } from "@workspace/db";
+import { asc, eq, sql } from "drizzle-orm";
+import { db, paymentSettlementConfigsTable } from "@workspace/db";
 import { adminMiddleware } from "../lib/auth";
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
 
@@ -15,11 +15,19 @@ function asPositiveInt(value: unknown, label: string): number {
 router.get("/admin/payment-settlement-configs", adminMiddleware, async (req, res) => {
   try {
     const companyId = req.query.companyId ? asPositiveInt(req.query.companyId, "Company") : null;
-    const companies = await db
-      .select({ id: usersTable.id, name: usersTable.name, companyName: usersTable.companyName })
-      .from(usersTable)
-      .where(eq(usersTable.accountType, "company"))
-      .orderBy(asc(usersTable.companyName), asc(usersTable.name));
+    // Settlement ownership uses the canonical Supabase company master.
+    // Do not use sport_center.users here: those are login/customer identities
+    // and their IDs do not necessarily match facility_company_mappings.company_id.
+    const companiesResult = await db.execute(sql`
+      SELECT
+        id,
+        code,
+        COALESCE(name, company_name, code) AS name,
+        COALESCE(name, company_name, code) AS company_name
+      FROM public.companies
+      WHERE is_active = TRUE
+      ORDER BY COALESCE(name, company_name, code), code
+    `);
 
     const bankAccountsResult = await db.execute(sql`
       SELECT id, company_id, bank_name, name, account_number, coa_id, is_active
@@ -35,7 +43,7 @@ router.get("/admin/payment-settlement-configs", adminMiddleware, async (req, res
       .orderBy(asc(paymentSettlementConfigsTable.companyId), asc(paymentSettlementConfigsTable.effectiveFrom));
 
     res.json({
-      companies,
+      companies: (companiesResult as any).rows ?? companiesResult,
       bankAccounts: (bankAccountsResult as any).rows ?? bankAccountsResult,
       configs,
     });
@@ -57,12 +65,14 @@ router.post("/admin/payment-settlement-configs/bank-accounts", adminMiddleware, 
       return;
     }
 
-    const company = await db
-      .select({ id: usersTable.id })
-      .from(usersTable)
-      .where(and(eq(usersTable.id, companyId), eq(usersTable.accountType, "company")))
-      .limit(1);
-    if (!company[0]) {
+    const companyResult = await db.execute(sql`
+      SELECT id
+      FROM public.companies
+      WHERE id = ${companyId}
+        AND is_active = TRUE
+      LIMIT 1
+    `);
+    if (!((companyResult as any).rows ?? companyResult)[0]) {
       res.status(400).json({ error: "Company tidak ditemukan" });
       return;
     }
