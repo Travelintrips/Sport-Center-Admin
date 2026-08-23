@@ -901,6 +901,46 @@ async function runStartupMigrations() {
        created_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
        updated_at             TIMESTAMPTZ NOT NULL DEFAULT NOW()
      )`,
+     `DO $$ BEGIN
+        CREATE TYPE sport_center.corporate_subscription_status AS ENUM ('active','paused','stop_requested','stopped');
+      EXCEPTION WHEN duplicate_object THEN null; END $$`,
+     `CREATE TABLE IF NOT EXISTS sport_center.corporate_subscriptions (
+        id SERIAL PRIMARY KEY,
+        company_id INTEGER NOT NULL REFERENCES sport_center.users(id),
+        facility_id INTEGER NOT NULL REFERENCES sport_center.facilities(id),
+        day_of_week INTEGER NOT NULL CHECK (day_of_week BETWEEN 0 AND 6),
+        start_time TEXT NOT NULL,
+        end_time TEXT NOT NULL,
+        effective_start_date TEXT NOT NULL,
+        billing_period TEXT NOT NULL DEFAULT 'monthly',
+        status sport_center.corporate_subscription_status NOT NULL DEFAULT 'active',
+        created_by INTEGER REFERENCES sport_center.users(id) ON DELETE SET NULL,
+        stopped_at TIMESTAMPTZ,
+        stopped_by INTEGER REFERENCES sport_center.users(id) ON DELETE SET NULL,
+        stop_reason TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )`,
+     `CREATE TABLE IF NOT EXISTS sport_center.corporate_occurrences (
+        id SERIAL PRIMARY KEY,
+        subscription_id INTEGER NOT NULL REFERENCES sport_center.corporate_subscriptions(id) ON DELETE CASCADE,
+        occurrence_date TEXT NOT NULL,
+        booking_id INTEGER REFERENCES sport_center.sport_bookings(id) ON DELETE SET NULL,
+        status TEXT NOT NULL DEFAULT 'scheduled',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        CONSTRAINT corporate_occurrences_subscription_date_unique UNIQUE (subscription_id, occurrence_date)
+      )`,
+     `CREATE TABLE IF NOT EXISTS sport_center.usage_proofs (
+        id SERIAL PRIMARY KEY,
+        booking_id INTEGER NOT NULL REFERENCES sport_center.sport_bookings(id) ON DELETE CASCADE,
+        storage_path TEXT NOT NULL,
+        photo_url TEXT NOT NULL,
+        uploaded_by INTEGER REFERENCES sport_center.users(id) ON DELETE SET NULL,
+        captured_at TIMESTAMPTZ,
+        uploaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )`,
+     `ALTER TABLE sport_center.sport_bookings ADD COLUMN IF NOT EXISTS subscription_id INTEGER`,
+     `ALTER TABLE sport_center.sport_bookings ADD COLUMN IF NOT EXISTS occurrence_id INTEGER`,
   ];
 
   for (const stmt of migrations) {
@@ -1127,8 +1167,6 @@ app.listen(port, (err) => {
   } else {
     logger.info("Production schema provisioning is external; skipping BizPortal setup and template seeding");
   }
-  startScheduler();
-
   // Local development can use the configured local database without requiring
   // Supabase Storage. Production always verifies its remote storage only.
   if (process.env.NODE_ENV === "development" && process.env.DATABASE_URL) {
@@ -1146,8 +1184,10 @@ app.listen(port, (err) => {
     // handled externally and must never be performed by application startup.
     runStartupMigrations()
       .then(() => runStartupSeed())
+      .then(() => startScheduler())
       .catch((err) => logger.error({ err }, "Background development startup task error"));
   } else {
     logger.info("Production startup migrations and seed disabled");
+    startScheduler();
   }
 });
