@@ -74,6 +74,17 @@ Custom-domain relationship evidence:
 
 **DEPLOYMENT_RELATIONSHIP = PROVEN**
 
+Read-only relationship evidence:
+
+- Domain DNS A lookup: `34.111.179.208`; no CNAME/ALIAS relationship could be established with the available resolver.
+- HTTPS certificate: `CN=sc.travelintrips.co.id`, issued by Let's Encrypt, valid `2026-08-22` through `2026-11-20`.
+- HTTPS response: `200`, zero redirects, `server: Google Frontend`, with no exposed deployment or revision identifier.
+- Replit deployment metadata: `success=true`, `isDeployed=false`, `hasSuccessfulBuild=false`, `primaryUrl=""`, `deploymentType=""`, `visibility=""`, and no additional URLs.
+- Current working-tree revision: `ed6094b7a5516e8387e6179cbd0a123697ce1f0c`; the live runtime exposes no revision to compare against it.
+- `.replit` declares an Autoscale target, but configuration alone does not prove that the custom domain routes to the current build.
+
+Comparison result: the domain is healthy, but it cannot be conclusively matched to the current intended Replit deployment or source revision. This is classified as **DEPLOYMENT_RELATIONSHIP = UNVERIFIED**, not `PROVEN` or `MISMATCH`.
+
 ## 6. Runtime Verification
 
 **PASS**
