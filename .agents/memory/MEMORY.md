@@ -21,6 +21,7 @@
 - [Payment provider audit](payment-provider-audit.md) — QRIS payments now carry canonical provider/reference/timestamp metadata; preserve safe Paylabs callback and terminal-booking guards.
 - [Required payment provider metadata](payment-provider-order-metadata.md) — booking payments require receiving account, provider name/id, and provider order id; manual flows use traceable internal identifiers.
 - [QRIS settlement account](qris-bank-mandiri-mapping.md) — QRIS Sport Center settles to Bank Mandiri CST; never map it to cash or a separate QRIS COA.
+- [QRIS settlement rule periods](qris-settlement-rule-periods.md) — Mandiri QRIS needs exactly one active rule per effective date; replace forward with atomic audit, never rewrite active history.
 - [Incremental payment accounting](incremental-payment-accounting.md) — Idempotency must be keyed by payment mirror, not booking, because DP and pelunasan are separate payments.
 - [Data Connection Monitor](data-connection-monitor.md) — connectionHealth.ts lib; Drizzle sql.raw() needed for IN queries on information_schema; blocked_schedules (not "schedules") is the table name; system_connection_baselines table in sport_center schema.
 - [Prod schema sync approach](prod-schema-sync.md) — drizzle-kit push hangs on shared Supabase (150+ tables); use targeted ALTER TABLE script via scripts/src/ instead.
