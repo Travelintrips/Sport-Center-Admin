@@ -64,6 +64,7 @@ import {
   MessageCircle,
   CheckCircle,
   AlertCircle,
+  Lock as LockIcon,
 } from "lucide-react";
 import { getToken } from "@/lib/auth";
 import VerifyIdDialog from "@/components/admin/VerifyIdDialog";
@@ -243,7 +244,7 @@ function PaymentMethodSelect({
         disabled={disabled || Boolean(lockedReason)}
       >
         <SelectTrigger className={`h-8 min-w-[150px] max-w-[190px] text-xs rounded-lg border-slate-200 dark:border-slate-700 ${lockedReason ? "cursor-not-allowed opacity-70" : ""}`}>
-          {lockedReason && <Lock size={12} className="mr-1.5 shrink-0 text-slate-400" aria-hidden="true" />}
+          {lockedReason && <LockIcon size={12} className="mr-1.5 shrink-0 text-slate-400" aria-hidden="true" />}
           <SelectValue />
         </SelectTrigger>
       <SelectContent>

@@ -14,7 +14,7 @@ const API = import.meta.env.VITE_API_BASE_URL ?? "/api";
 const headers = () => ({ Authorization: `Bearer ${getToken()}`, "Content-Type": "application/json" });
 
 type ConfigData = {
-  companies: Array<{ id: number; name: string; companyName: string | null }>;
+  companies: Array<{ id: number; code: string | null; name: string }>;
   bankAccounts: Array<{ id: number; company_id: number; bank_name: string; name: string; account_number: string; coa_id: number | null; is_active: boolean }>;
   configs: Array<{ id: number; companyId: number; providerCode: string; bankAccountId: string; effectiveFrom: string; effectiveUntil: string | null; source: string; isActive: boolean }>;
 };
@@ -35,6 +35,8 @@ export default function PaymentSettlementConfigs() {
   const query = useQuery<ConfigData>({
     queryKey: ["payment-settlement-configs", companyId],
     queryFn: () => request(`/admin/payment-settlement-configs${companyId ? `?companyId=${companyId}` : ""}`),
+    staleTime: 30_000,
+    retry: 1,
   });
   const selectedAccounts = useMemo(
     () => (query.data?.bankAccounts ?? []).filter((account) => !companyId || String(account.company_id) === companyId),
@@ -60,10 +62,34 @@ export default function PaymentSettlementConfigs() {
       <Card>
         <CardHeader><CardTitle className="flex items-center gap-2"><Building2 size={18} /> Company</CardTitle></CardHeader>
         <CardContent>
-          <Select value={companyId} onValueChange={(value) => { setCompanyId(value); setRuleForm((current) => ({ ...current, bankAccountId: "" })); }}>
+          <Select
+            value={companyId}
+            onValueChange={(value) => { setCompanyId(value); setRuleForm((current) => ({ ...current, bankAccountId: "" })); }}
+            disabled={query.isLoading || query.isError || !(query.data?.companies?.length)}
+          >
             <SelectTrigger><SelectValue placeholder="Pilih company" /></SelectTrigger>
-            <SelectContent>{(query.data?.companies ?? []).map((company) => <SelectItem key={company.id} value={String(company.id)}>{company.companyName || company.name}</SelectItem>)}</SelectContent>
+            <SelectContent>
+              {query.isLoading && <SelectItem value="_loading" disabled>Memuat company...</SelectItem>}
+              {query.isError && <SelectItem value="_error" disabled>Gagal memuat company</SelectItem>}
+              {!query.isLoading && !query.isError && !(query.data?.companies?.length) && (
+                <SelectItem value="_empty" disabled>Tidak ada company aktif</SelectItem>
+              )}
+              {(query.data?.companies ?? []).map((company) => (
+                <SelectItem key={company.id} value={String(company.id)}>{company.name}</SelectItem>
+              ))}
+            </SelectContent>
           </Select>
+          {query.isError && (
+            <div className="mt-2 flex items-center justify-between gap-3 text-sm text-destructive">
+              <span>{(query.error as Error)?.message ?? "Daftar company tidak dapat dimuat."}</span>
+              <Button type="button" variant="outline" size="sm" onClick={() => query.refetch()}>Coba lagi</Button>
+            </div>
+          )}
+          {!query.isError && (
+            <p className="mt-2 text-xs text-muted-foreground">
+              Pilihan diambil dari company aktif pada Supabase environment yang sedang digunakan.
+            </p>
+          )}
         </CardContent>
       </Card>
       {companyId && (

@@ -22,11 +22,15 @@ router.get("/admin/payment-settlement-configs", adminMiddleware, async (req, res
       SELECT
         id,
         code,
-        COALESCE(name, company_name, code) AS name,
-        COALESCE(name, company_name, code) AS company_name
+        COALESCE(
+          NULLIF(BTRIM(name), ''),
+          NULLIF(BTRIM(company_name), ''),
+          NULLIF(BTRIM(code), ''),
+          'Company #' || id::text
+        ) AS name
       FROM public.companies
       WHERE is_active = TRUE
-      ORDER BY COALESCE(name, company_name, code), code
+      ORDER BY name, code
     `);
 
     const bankAccountsResult = await db.execute(sql`
@@ -42,8 +46,22 @@ router.get("/admin/payment-settlement-configs", adminMiddleware, async (req, res
       .where(companyId ? eq(paymentSettlementConfigsTable.companyId, companyId) : undefined)
       .orderBy(asc(paymentSettlementConfigsTable.companyId), asc(paymentSettlementConfigsTable.effectiveFrom));
 
+    const companyRows = ((companiesResult as any).rows ?? companiesResult) as Array<{
+      id: number | string;
+      code: string | null;
+      name: string;
+    }>;
+
     res.json({
-      companies: (companiesResult as any).rows ?? companiesResult,
+      // This is intentionally sourced from public.companies, the canonical
+      // Supabase company master. The db package selects the DEV or PROD
+      // Supabase URL based on NODE_ENV, so the same endpoint stays isolated
+      // between environments.
+      companies: companyRows.map((company) => ({
+        id: Number(company.id),
+        code: company.code,
+        name: company.name,
+      })),
       bankAccounts: (bankAccountsResult as any).rows ?? bankAccountsResult,
       configs,
     });
