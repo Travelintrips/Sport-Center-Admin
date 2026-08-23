@@ -1832,8 +1832,14 @@ router.patch("/bookings/:id/dates", adminMiddleware, async (req, res) => {
     const validateDate = (value: string | undefined, label: string) => {
       if (value === undefined) return null;
       if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return `${label} tidak valid`;
-      const parsed = new Date(`${value}T00:00:00+07:00`);
-      if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) {
+      const [year, month, day] = value.split("-").map(Number);
+      const calendarDate = new Date(Date.UTC(year, month - 1, day));
+      if (
+        Number.isNaN(calendarDate.getTime()) ||
+        calendarDate.getUTCFullYear() !== year ||
+        calendarDate.getUTCMonth() !== month - 1 ||
+        calendarDate.getUTCDate() !== day
+      ) {
         return `${label} tidak valid`;
       }
       return null;
