@@ -10,8 +10,18 @@ Payment classification changes must be isolated from confirmation and financial 
 **How to apply:**
 - Classify non-gateway/manual methods as `unknown`, never as a known processor merely to satisfy a non-null field. QRIS uses the owner-approved Mandiri settlement path.
 - A confirmed `unknown` payment is a valid manual receipt: project it as paid but unsettled, with no fabricated bank settlement account, settlement date, rule version, or MDR.
+- When a confirmed legacy/manual receipt is corrected to QRIS, derive the Mandiri CST receiving account server-side from the active owner-approved rule in the same transaction. Never reuse a legacy account value or accept an account from the browser.
 - Apply that manual-provider exception in both the projection trigger and the canonical metadata resolver; either can be invoked by a confirmed-payment update.
 - Known processors remain fail-closed until one exact owner-approved settlement rule matches the company, account, provider, and effective date.
+
+**Why:** Historical manual rows can retain a placeholder or obsolete receiving
+account even when the company's Mandiri CST configuration is correct. Reusing
+that value falsely rejects a legitimate QRIS correction; letting the client
+choose an account would weaken the settlement control.
+
+**How to apply:** Treat the server-derived QRIS account as a routing prerequisite
+for the metadata change, not a caller-controlled settlement edit. Keep all other
+financial values, lifecycle fields, and journal lines immutable.
 - Once a mirror is posted, source changes that would alter any projected financial, settlement, or state field are reconciliation/reversal work and must fail with a controlled conflict rather than silently update the journal.
 - A trigger that protects payment confirmation is a critical deployment migration: bundle it with the service, verify its dependency and enabled event definition, and finish that work before accepting HTTP traffic.
 

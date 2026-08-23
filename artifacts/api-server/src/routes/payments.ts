@@ -732,11 +732,13 @@ router.post("/payments", async (req, res) => {
  * Metadata-only payment edit.
  *
  * Hanya payment_method / payment_provider (+ provider_name turunan) yang
- * boleh berubah. Tidak ada konfirmasi, enrichment, settlement, rekonsiliasi,
- * posting jurnal, atau sinkronisasi BizPortal. Sinkronisasi metadata ke
- * accounting journal terjadi lewat trigger DB sync_payment_accounting_journal
- * yang metadata-only, dan guard_posted_accounting_journal menjaga field
- * finansial jurnal posted tetap immutable.
+ * boleh diubah oleh admin. Tidak ada konfirmasi, rekonsiliasi, posting jurnal,
+ * atau sinkronisasi BizPortal. Jika admin memilih QRIS, rekening penerimaan
+ * Mandiri CST diturunkan server dari konfigurasi settlement aktif; input
+ * rekening dari klien tetap ditolak. Sinkronisasi metadata ke accounting
+ * journal terjadi lewat trigger DB sync_payment_accounting_journal yang
+ * metadata-only, dan guard_posted_accounting_journal menjaga field finansial
+ * jurnal posted tetap immutable.
  *
  * Selama masa koreksi yang disetujui owner, transaksi endpoint ini memberi
  * trigger database izin lokal untuk menyelaraskan metadata pada mirror/jurnal
@@ -776,6 +778,39 @@ router.patch("/payments/:id/metadata", adminMiddleware, async (req, res) => {
       return;
     }
 
+    // QRIS tidak boleh meneruskan rekening legacy/manual yang mungkin tersisa
+    // pada payment lama. Ambil rekening Mandiri CST dari settlement config yang
+    // aktif, bukan dari request admin. Dengan begitu trigger canonical dapat
+    // memvalidasi provider QRIS terhadap rekening yang benar tanpa membuka
+    // endpoint metadata untuk perubahan rekening/settlement secara bebas.
+    let qrisReceivingAccountId: string | null = null;
+    if (update.paymentProvider === "mandiri_direct") {
+      const [booking] = await db
+        .select()
+        .from(bookingsTable)
+        .where(eq(bookingsTable.id, before.bookingId))
+        .limit(1);
+      if (!booking) {
+        res.status(409).json({
+          error: "Booking untuk pembayaran ini tidak ditemukan. Perubahan dibatalkan.",
+        });
+        return;
+      }
+
+      const paymentDate = before.paidAt ?? before.confirmedAt ?? before.createdAt;
+      const enrichment = await resolveRequiredPaymentEnrichment(
+        booking,
+        "mandiri_direct",
+        paymentDate,
+        {
+          sourcePaymentCompanyId: before.companyId,
+          explicitCompanyId: before.companyId,
+          effectiveDate: paymentEffectiveDate(paymentDate),
+        },
+      );
+      qrisReceivingAccountId = enrichment.bankAccountId;
+    }
+
     const payment = await db.transaction(async (tx) => {
       // TEMPORARY CORRECTION MODE: scope-nya hanya request admin ini dan
       // otomatis hilang saat transaksi selesai. Hapus set_config ini setelah
@@ -797,6 +832,9 @@ router.patch("/payments/:id/metadata", adminMiddleware, async (req, res) => {
             ? { paymentProvider: update.paymentProvider as any }
             : {}),
           ...(update.providerName !== undefined ? { providerName: update.providerName } : {}),
+          ...(qrisReceivingAccountId
+            ? { bankAccountId: qrisReceivingAccountId }
+            : {}),
           updatedAt: new Date(),
         })
         .where(eq(paymentsTable.id, id))
