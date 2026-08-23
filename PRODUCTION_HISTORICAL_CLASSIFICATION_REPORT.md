@@ -30,17 +30,17 @@ Audit ini berjalan pada dedicated PostgreSQL role `sport_center_production_audit
 
 | Table | Baseline | Final | |
 |---|---:|---:|---|
-| sport_center.sport_bookings | 432 | 432 | unchanged |
-| sport_center.sport_payments | 377 | 377 | unchanged |
-| sport_center.booking_history | 1238 | 1238 | unchanged |
-| sport_center.payment_accounting_outbox | 363 | 363 | unchanged |
+| sport_center.sport_bookings | 433 | 433 | unchanged |
+| sport_center.sport_payments | 378 | 378 | unchanged |
+| sport_center.booking_history | 1244 | 1244 | unchanged |
+| sport_center.payment_accounting_outbox | 367 | 367 | unchanged |
 | sport_center.company_invoices | 4 | 4 | unchanged |
 | sport_center.company_invoice_items | 40 | 40 | unchanged |
-| sport_center.accounting_journals | 381 | 381 | unchanged |
+| sport_center.accounting_journals | 385 | 385 | unchanged |
 | sport_center.accounting_journal_lines | 211 | 211 | unchanged |
 | sport_center.bank_mutations | 0 | 0 | unchanged |
 | sport_center.bank_reconciliation_matches | 68 | 68 | unchanged |
-| sport_center.tax_transactions | 1137 | 1137 | unchanged |
+| sport_center.tax_transactions | 1138 | 1138 | unchanged |
 
 ## Deterministic Record-Level Findings
 

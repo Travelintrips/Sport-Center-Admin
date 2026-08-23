@@ -16,19 +16,19 @@
   "baselineCounts": [
     {
       "table": "sport_center.sport_bookings",
-      "count": 432
+      "count": 433
     },
     {
       "table": "sport_center.sport_payments",
-      "count": 377
+      "count": 378
     },
     {
       "table": "sport_center.booking_history",
-      "count": 1238
+      "count": 1244
     },
     {
       "table": "sport_center.payment_accounting_outbox",
-      "count": 363
+      "count": 367
     },
     {
       "table": "sport_center.company_invoices",
@@ -40,7 +40,7 @@
     },
     {
       "table": "sport_center.accounting_journals",
-      "count": 381
+      "count": 385
     },
     {
       "table": "sport_center.accounting_journal_lines",
@@ -56,25 +56,25 @@
     },
     {
       "table": "sport_center.tax_transactions",
-      "count": 1137
+      "count": 1138
     }
   ],
   "finalCounts": [
     {
       "table": "sport_center.sport_bookings",
-      "count": 432
+      "count": 433
     },
     {
       "table": "sport_center.sport_payments",
-      "count": 377
+      "count": 378
     },
     {
       "table": "sport_center.booking_history",
-      "count": 1238
+      "count": 1244
     },
     {
       "table": "sport_center.payment_accounting_outbox",
-      "count": 363
+      "count": 367
     },
     {
       "table": "sport_center.company_invoices",
@@ -86,7 +86,7 @@
     },
     {
       "table": "sport_center.accounting_journals",
-      "count": 381
+      "count": 385
     },
     {
       "table": "sport_center.accounting_journal_lines",
@@ -102,7 +102,7 @@
     },
     {
       "table": "sport_center.tax_transactions",
-      "count": 1137
+      "count": 1138
     }
   ],
   "fingerprint": "PASS — NO COUNT CHANGES",
@@ -6175,7 +6175,7 @@
         },
         {
           "status": "posted",
-          "rows": 324
+          "rows": 328
         },
         {
           "status": "processing",
@@ -6356,7 +6356,7 @@
           "payment_id": 330,
           "booking_id": 467,
           "status": "failed",
-          "attempts": 68,
+          "attempts": 74,
           "correlation_id": "sc_payment_330",
           "locked_at": null,
           "last_error": "[accounting] PROVIDER_MISSING:SCPAY-SC-330",
@@ -6368,7 +6368,7 @@
           "payment_id": 335,
           "booking_id": 466,
           "status": "failed",
-          "attempts": 68,
+          "attempts": 74,
           "correlation_id": "sc_payment_335",
           "locked_at": null,
           "last_error": "[accounting] PROVIDER_MISSING:SCPAY-SC-335",
@@ -6380,7 +6380,7 @@
           "payment_id": 296,
           "booking_id": 439,
           "status": "failed",
-          "attempts": 68,
+          "attempts": 74,
           "correlation_id": "sc_payment_296",
           "locked_at": null,
           "last_error": "[accounting] PROVIDER_MISSING:SCPAY-SC-296",
@@ -6392,7 +6392,7 @@
           "payment_id": 315,
           "booking_id": 458,
           "status": "failed",
-          "attempts": 68,
+          "attempts": 74,
           "correlation_id": "sc_payment_315",
           "locked_at": null,
           "last_error": "[accounting] PROVIDER_MISSING:SCPAY-SC-315",
@@ -6404,7 +6404,7 @@
           "payment_id": 280,
           "booking_id": 387,
           "status": "failed",
-          "attempts": 68,
+          "attempts": 74,
           "correlation_id": "sc_payment_280",
           "locked_at": null,
           "last_error": "[accounting] PROVIDER_MISSING:SCPAY-SC-280",
@@ -6416,7 +6416,7 @@
           "payment_id": 297,
           "booking_id": 440,
           "status": "failed",
-          "attempts": 68,
+          "attempts": 74,
           "correlation_id": "sc_payment_297",
           "locked_at": null,
           "last_error": "[accounting] PROVIDER_MISSING:SCPAY-SC-297",
@@ -6428,7 +6428,7 @@
           "payment_id": 314,
           "booking_id": 459,
           "status": "failed",
-          "attempts": 68,
+          "attempts": 73,
           "correlation_id": "sc_payment_314",
           "locked_at": null,
           "last_error": "[accounting] PROVIDER_MISSING:SCPAY-SC-314",
@@ -6440,7 +6440,7 @@
           "payment_id": 304,
           "booking_id": 448,
           "status": "failed",
-          "attempts": 68,
+          "attempts": 73,
           "correlation_id": "sc_payment_304",
           "locked_at": null,
           "last_error": "[accounting] PROVIDER_MISSING:SCPAY-SC-304",
@@ -6608,7 +6608,7 @@
           "payment_id": 306,
           "booking_id": 449,
           "status": "failed",
-          "attempts": 68,
+          "attempts": 73,
           "correlation_id": "sc_payment_306",
           "locked_at": null,
           "last_error": "[accounting] PROVIDER_MISSING:SCPAY-SC-306",
@@ -6620,7 +6620,7 @@
           "payment_id": 308,
           "booking_id": 451,
           "status": "failed",
-          "attempts": 68,
+          "attempts": 73,
           "correlation_id": "sc_payment_308",
           "locked_at": null,
           "last_error": "[accounting] PROVIDER_MISSING:SCPAY-SC-308",
@@ -6632,7 +6632,7 @@
           "payment_id": 331,
           "booking_id": 468,
           "status": "failed",
-          "attempts": 68,
+          "attempts": 73,
           "correlation_id": "sc_payment_331",
           "locked_at": null,
           "last_error": "[accounting] PROVIDER_MISSING:SCPAY-SC-331",
@@ -6644,7 +6644,7 @@
           "payment_id": 397,
           "booking_id": 532,
           "status": "failed",
-          "attempts": 27,
+          "attempts": 33,
           "correlation_id": "sc_payment_397",
           "locked_at": null,
           "last_error": "Failed query: update \"sport_center\".\"accounting_journals\" set \"booking_id\" = $1, \"company_id\" = $2, \"status\" = $3, \"payment_method\" = $4, \"payment_provider\" = $5, \"payment_type\" = $6, \"bank_account_id\" = $7, \"gross_amount\" = $8, \"dpp_amount\" = $9, \"tax_amount\" = $10, \"provider_reference\" = $11, \"provider_order_id\" = $12, \"merchant_trade_no\" = $13, \"provider_trade_no\" = $14 where \"sport_center\".\"accounting_journals\".\"id\" = $15\nparams: 532,1,posted,QRIS,mandiri_direct,full_payment,1640006707220,400000,360360,39640,,internal-order-mandiri_direct-10552c98-6ad0-475a-8890-88f1a3c9dc28,,,723",
@@ -8798,6 +8798,26 @@
           "id": 725,
           "order_number": "SC-0470",
           "payment_id": 399
+        },
+        {
+          "id": 726,
+          "order_number": "SC-0476",
+          "payment_id": 403
+        },
+        {
+          "id": 727,
+          "order_number": "SC-0475",
+          "payment_id": 402
+        },
+        {
+          "id": 728,
+          "order_number": "SC-0474",
+          "payment_id": 401
+        },
+        {
+          "id": 729,
+          "order_number": "SC-0473",
+          "payment_id": 400
         }
       ],
       "orphanLines": [],
