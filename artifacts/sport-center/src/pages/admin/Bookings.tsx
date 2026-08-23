@@ -925,6 +925,7 @@ function BookingDetailDrawer({
   onUpdatePaymentMethod,
   isUpdating,
   settings,
+  onUpdateDates,
 }: {
   booking: any;
   onClose: () => void;
@@ -937,10 +938,19 @@ function BookingDetailDrawer({
   onUpdatePaymentMethod: (paymentId: number, paymentMethod: string) => void;
   isUpdating: boolean;
   settings?: any;
+  onUpdateDates: (bookingId: number, bookingDate: string, paymentDate?: string) => Promise<void>;
 }) {
   const [adminNotes, setAdminNotes] = useState(booking.adminNotes ?? "");
   const [confirmAction, setConfirmAction] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [bookingDate, setBookingDate] = useState(String(booking.bookingDate ?? ""));
+  const [paymentDate, setPaymentDate] = useState(
+    booking.payment?.paidAt?.slice(0, 10) ?? booking.payment?.confirmedAt?.slice(0, 10) ?? "",
+  );
+  const [savingDates, setSavingDates] = useState(false);
+  const originalBookingDate = String(booking.bookingDate ?? "");
+  const originalPaymentDate =
+    booking.payment?.paidAt?.slice(0, 10) ?? booking.payment?.confirmedAt?.slice(0, 10) ?? "";
 
   const cfg = STATUS_CONFIG[booking.status as BookingStatus] ?? STATUS_CONFIG.pending_payment;
   const StatusIcon = cfg.icon;
@@ -962,6 +972,17 @@ function BookingDetailDrawer({
     !isCompleted &&
     ["pending_payment", "waiting_confirmation", "paid"].includes(booking.status) &&
     allPayments.some((pmt) => pmt.status === "confirmed" && pmt.proofUrl);
+  const datesChanged = bookingDate !== originalBookingDate || paymentDate !== originalPaymentDate;
+
+  const saveDates = async () => {
+    if (!bookingDate || (paymentDate && !/^\d{4}-\d{2}-\d{2}$/.test(paymentDate))) return;
+    setSavingDates(true);
+    try {
+      await onUpdateDates(booking.id, bookingDate, paymentDate || undefined);
+    } finally {
+      setSavingDates(false);
+    }
+  };
 
   return (
     <AnimatePresence>
@@ -1112,7 +1133,41 @@ function BookingDetailDrawer({
                 <InfoRow icon={User} label="Nama" value={booking.customerName} span />
               )}
               <InfoRow icon={Building2} label="Fasilitas" value={booking.facilityName} span />
-              <InfoRow icon={CalendarDays} label="Tanggal" value={formatDate(booking.bookingDate)} />
+              <div className="col-span-2 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50/70 dark:bg-amber-900/20 p-3 space-y-2">
+                <div className="flex items-center gap-2 text-xs font-semibold text-amber-700 dark:text-amber-300">
+                  <CalendarDays size={13} /> Koreksi tanggal
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-1">
+                    <Label className="text-[11px] text-slate-500">Tanggal booking</Label>
+                    <Input
+                      type="date"
+                      value={bookingDate}
+                      onChange={(event) => setBookingDate(event.target.value)}
+                      className="h-8 text-xs bg-white dark:bg-slate-900"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[11px] text-slate-500">Tanggal pembayaran</Label>
+                    <Input
+                      type="date"
+                      value={paymentDate}
+                      onChange={(event) => setPaymentDate(event.target.value)}
+                      disabled={!booking.payment}
+                      className="h-8 text-xs bg-white dark:bg-slate-900"
+                    />
+                  </div>
+                </div>
+                {!booking.payment && <div className="text-[10px] text-slate-500">Belum ada pembayaran untuk dikoreksi.</div>}
+                <Button
+                  size="sm"
+                  onClick={saveDates}
+                  disabled={!datesChanged || savingDates || !bookingDate}
+                  className="h-8 text-xs"
+                >
+                  {savingDates ? "Menyimpan..." : "Simpan tanggal"}
+                </Button>
+              </div>
               <InfoRow icon={Clock} label="Waktu" value={`${booking.startTime?.slice(0, 5)} – ${booking.endTime?.slice(0, 5)}`} />
               <InfoRow icon={Hash} label="Durasi" value={`${booking.durationHours} jam`} />
               {/* Breakdown harga event */}
@@ -2438,6 +2493,26 @@ export default function AdminBookings() {
     },
   });
 
+  const updateDates = async (bookingId: number, bookingDate: string, paymentDate?: string) => {
+    const response = await fetch(`${API_BASE}/bookings/${bookingId}/dates`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${getToken()}`,
+      },
+      body: JSON.stringify({ bookingDate, paymentDate }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error ?? "Gagal memperbarui tanggal");
+    queryClient.setQueryData(getListBookingsQueryKey(), (current: any) =>
+      Array.isArray(current)
+        ? current.map((item) => item.id === data.id ? data : item)
+        : current,
+    );
+    setSelectedBooking(data);
+    toast({ title: "Tanggal berhasil diperbarui" });
+  };
+
   const clearProofMutation = useMutation({
     mutationFn: async (paymentId: number) => {
       const res = await fetch(`${API_BASE}/payments/${paymentId}/proof`, {
@@ -3592,6 +3667,7 @@ export default function AdminBookings() {
           onClearProof={(paymentId) => clearProofMutation.mutate(paymentId)}
           onDelete={handleDelete}
           isUpdating={isUpdating || clearProofMutation.isPending}
+           onUpdateDates={updateDates}
         />
       )}
 

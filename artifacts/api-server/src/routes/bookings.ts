@@ -1811,6 +1811,130 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
   }
 });
 
+// Koreksi tanggal administratif: tidak mengubah nominal maupun status.
+// Tanggal pembayaran disimpan pada payment dan booking agar seluruh tampilan
+// memakai tanggal pembayaran yang sama.
+router.patch("/bookings/:id/dates", adminMiddleware, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: "ID booking tidak valid" });
+      return;
+    }
+
+    const bookingDate =
+      req.body?.bookingDate === undefined ? undefined : String(req.body.bookingDate);
+    const paymentDate =
+      req.body?.paymentDate === undefined || req.body?.paymentDate === null || req.body?.paymentDate === ""
+        ? undefined
+        : String(req.body.paymentDate);
+
+    const validateDate = (value: string | undefined, label: string) => {
+      if (value === undefined) return null;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return `${label} tidak valid`;
+      const parsed = new Date(`${value}T00:00:00+07:00`);
+      if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) {
+        return `${label} tidak valid`;
+      }
+      return null;
+    };
+    const dateError = validateDate(bookingDate, "Tanggal booking") ?? validateDate(paymentDate, "Tanggal pembayaran");
+    if (dateError) {
+      res.status(400).json({ error: dateError });
+      return;
+    }
+    if (bookingDate === undefined && paymentDate === undefined) {
+      res.status(400).json({ error: "Tidak ada tanggal yang diubah" });
+      return;
+    }
+
+    const [before] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, id)).limit(1);
+    if (!before) {
+      res.status(404).json({ error: "Booking tidak ditemukan" });
+      return;
+    }
+
+    if (bookingDate !== undefined && bookingDate !== before.bookingDate) {
+      const conflict = await checkSlotConflict(
+        before.facilityId,
+        bookingDate,
+        before.startTime,
+        before.endTime,
+      );
+      if (conflict) {
+        res.status(409).json({ error: "Tanggal baru bentrok dengan booking lain pada jam yang sama" });
+        return;
+      }
+    }
+
+    const updated = await db.transaction(async (tx) => {
+      const [payment] = await tx
+        .select()
+        .from(paymentsTable)
+        .where(eq(paymentsTable.bookingId, id))
+        .orderBy(desc(paymentsTable.createdAt))
+        .limit(1);
+
+      if (paymentDate !== undefined && !payment) {
+        throw new Error("PAYMENT_NOT_FOUND");
+      }
+
+      const paymentTimestamp = paymentDate
+        ? new Date(`${paymentDate}T12:00:00+07:00`)
+        : undefined;
+      const [booking] = await tx
+        .update(bookingsTable)
+        .set({
+          ...(bookingDate !== undefined ? { bookingDate } : {}),
+          ...(paymentTimestamp ? { paidAt: paymentTimestamp } : {}),
+          updatedAt: new Date(),
+        })
+        .where(eq(bookingsTable.id, id))
+        .returning();
+
+      if (payment && paymentTimestamp) {
+        await tx
+          .update(paymentsTable)
+          .set({
+            paidAt: paymentTimestamp,
+            confirmedAt: paymentTimestamp,
+            updatedAt: new Date(),
+          })
+          .where(eq(paymentsTable.id, payment.id));
+      }
+      return { booking, payment: paymentTimestamp ? { ...payment, paidAt: paymentTimestamp, confirmedAt: paymentTimestamp } : payment };
+    });
+
+    await logAudit({
+      ...getUserFromReq(req),
+      action: "BOOKING_DATES_UPDATED",
+      entity: "booking",
+      entityId: id,
+      before: {
+        bookingDate: before.bookingDate,
+        paymentDate: before.paidAt,
+        paymentConfirmedAt: before.paidAt,
+      },
+      after: {
+        bookingDate: updated.booking.bookingDate,
+        paymentDate: updated.payment?.paidAt ?? before.paidAt,
+        paymentConfirmedAt: updated.payment?.confirmedAt ?? before.paidAt,
+      },
+      ...getClientInfo(req),
+    });
+
+    const result = await getBookingWithPayment(id);
+    res.json(result);
+  } catch (err: any) {
+    if (String(err?.message) === "PAYMENT_NOT_FOUND") {
+      res.status(400).json({ error: "Booking ini belum memiliki pembayaran yang dapat dikoreksi" });
+      return;
+    }
+    req.log.error({ err }, "Update booking dates error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 // POST /bookings/:id/fix-gym-people — koreksi jumlah orang dan harga walk-in Gym (admin)
 router.post("/bookings/:id/fix-gym-people", adminMiddleware, async (req, res) => {
   try {
