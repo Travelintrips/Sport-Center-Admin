@@ -1,6 +1,6 @@
 import { Router } from "express";
-import { db, bookingsTable, rescheduleRequestsTable, bookingHistoryTable, facilitiesTable, usersTable } from "@workspace/db";
-import { eq, and } from "drizzle-orm";
+import { db, bookingsTable, rescheduleRequestsTable, bookingHistoryTable, facilitiesTable, usersTable, blockedSchedulesTable } from "@workspace/db";
+import { eq, and, gte, lte } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
 import { checkSlotAvailable, closeTimeToMinutes, getEffectiveCloseTime, timeToMinutes } from "../lib/availability";
 import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
@@ -153,6 +153,10 @@ router.patch("/reschedule-requests/:id", adminMiddleware, async (req, res) => {
 
       const reviewedAt = new Date();
       if (action === "approve") {
+        // Serialize approvals for the same facility, then validate every
+        // reservation blocker in the same transaction as the booking update.
+        await tx.select({ id: facilitiesTable.id }).from(facilitiesTable)
+          .where(eq(facilitiesTable.id, currentBooking.facilityId)).for("update");
         // Re-check inside the transaction so two approvals cannot reserve
         // the same slot after the initial request-time check.
         const competingBookings = await tx.select({
@@ -172,6 +176,17 @@ router.patch("/reschedule-requests/:id", adminMiddleware, async (req, res) => {
             timeToMinutes(lockedRequest.newEndTime) > timeToMinutes(candidate.startTime),
           );
         if (hasConflict) throw new Error("RESCHEDULE_SLOT_UNAVAILABLE");
+        const blocked = await tx.select({
+          startTime: blockedSchedulesTable.startTime,
+          endTime: blockedSchedulesTable.endTime,
+        }).from(blockedSchedulesTable).where(and(
+          eq(blockedSchedulesTable.facilityId, currentBooking.facilityId),
+          eq(blockedSchedulesTable.date, lockedRequest.newDate),
+        ));
+        if (blocked.some((slot) =>
+          timeToMinutes(lockedRequest.newStartTime) < timeToMinutes(slot.endTime) &&
+          timeToMinutes(lockedRequest.newEndTime) > timeToMinutes(slot.startTime),
+        )) throw new Error("RESCHEDULE_SLOT_UNAVAILABLE");
 
         await tx.update(bookingsTable).set({
           bookingDate: lockedRequest.newDate,

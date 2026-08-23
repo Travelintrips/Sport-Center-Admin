@@ -1,4 +1,4 @@
-import { db, bookingsTable, bookingHistoryTable, rescheduleRequestsTable } from "@workspace/db";
+import { db, bookingsTable, bookingHistoryTable, rescheduleRequestsTable, usageProofsTable } from "@workspace/db";
 import { and, eq } from "drizzle-orm";
 import { logAudit } from "./auditLog";
 export {
@@ -66,6 +66,11 @@ export async function completeBooking(
     }
     if (!booking.checkedInAt) {
       return { ok: false, reason: "Booking belum check-in" };
+    }
+    if (booking.bookingType === "event") {
+      const [proof] = await tx.select({ id: usageProofsTable.id }).from(usageProofsTable)
+        .where(eq(usageProofsTable.bookingId, bookingId)).limit(1);
+      if (!proof) return { ok: false, reason: "Event wajib memiliki photo proof sebelum selesai" };
     }
     if (!hasBookingSessionEnded(booking.bookingDate, booking.endTime, now)) {
       return { ok: false, reason: "Sesi booking belum selesai" };

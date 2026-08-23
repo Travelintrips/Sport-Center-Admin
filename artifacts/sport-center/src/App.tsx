@@ -102,6 +102,7 @@ import AdminDiscountSettings from "@/pages/admin/DiscountSettings";
 import AdminVendors from "@/pages/admin/Vendors";
 import AdminPaylabsGateway from "@/pages/admin/PaylabsGateway";
 import AdminPaymentSettlementConfigs from "@/pages/admin/PaymentSettlementConfigs";
+import AdminCorporateSubscriptions from "@/pages/admin/CorporateSubscriptions";
 
 // WhatsApp Booking Flow Pages (standalone, no auth)
 import WaBookingForm from "@/pages/wa/BookingForm";
@@ -178,6 +179,7 @@ function AdminRouter() {
     if (location === "/admin/discount-settings") return <AdminDiscountSettings />;
     if (location === "/admin/paylabs") return <AdminPaylabsGateway />;
     if (location === "/admin/payment-settlement") return <AdminPaymentSettlementConfigs />;
+    if (location === "/admin/corporate-subscriptions") return <AdminCorporateSubscriptions />;
     return <NotFound />;
   })();
 
@@ -228,6 +230,7 @@ function Router() {
       <Route path="/admin/discount-settings" component={AdminRouter} />
       <Route path="/admin/paylabs" component={AdminRouter} />
       <Route path="/admin/payment-settlement" component={AdminRouter} />
+      <Route path="/admin/corporate-subscriptions" component={AdminRouter} />
       <Route path="/admin" component={AdminRouter} />
 
       {/* WhatsApp Booking Flow — standalone, no layout wrapper */}
