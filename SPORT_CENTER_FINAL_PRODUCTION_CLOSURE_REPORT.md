@@ -1,253 +1,222 @@
 # Sport Center — Final Production Closure Report
 
-Date: 2026-08-23 (Asia/Bangkok)
+Date: 2026-08-24 (Asia/Bangkok)
 
 ## Executive Verdict
 
-**PROJECT STATUS = FINALIZED**
+**PROJECT STATUS = NOT FINALIZED**
 
-Technical production readiness is complete. Historical financial anomalies remain explicitly documented for owner/accounting review and do not represent a technical closure blocker. No production data was mutated during this phase.
+The production closure checklist was evaluated against the current working tree and environment. The required production gates could not be completed because no active deployment exists, the dedicated production-auditor credentials are unavailable, and the development Secret Manager bootstrap lacks a GCP project ID. No production mutation was performed.
 
-## Production Runtime
+## 1. Development Implementation
+
+**CODE INVENTORY = PASS**
+
+The current tree contains the implementation surfaces for:
+
+- corporate subscriptions and stop states
+- weekly corporate occurrences
+- corporate billing and invoice linkage
+- event creation/detail/check-in routes
+- mandatory usage proof routes and Supabase Storage integration
+- existing canonical reschedule requests and conflict protection
+- existing booking lifecycle, payment, tax, accounting, reconciliation, and Central Finance boundaries
+
+The corporate subscription schema defines `corporate_subscriptions`, `corporate_occurrences`, and `usage_proofs`, including the unique subscription/date constraint and required booking/subscription foreign-key relationships. Event and occurrence fields are represented in the shared booking model.
+
+## 2. Migration Review
+
+**REVIEW COMPLETE — NO PRODUCTION MIGRATION RUN**
+
+The implementation adds additive schema statements only in the current startup-migration inventory:
+
+- enum creation for subscription status
+- `CREATE TABLE` for corporate subscriptions, occurrences, and usage proofs
+- `ADD COLUMN IF NOT EXISTS` for booking subscription and occurrence references
+- the required unique constraint and foreign keys
+
+No `DROP TABLE`, `DROP COLUMN`, historical data rewrite, payment rewrite, invoice rewrite, tax rewrite, journal rewrite, or reconciliation rewrite was executed.
+
+The production migration mechanism was not invoked because production schema access and the required deployment path were unavailable. No ad-hoc production SQL was run.
+
+## 3. Development Migration
+
+**NOT VERIFIED**
+
+The dedicated DEV/PROD schema comparison command failed closed before connecting:
+
+`SUPABASE_DATABASE_URL_DEV` and `SUPABASE_DATABASE_URL` are not available in this shell context.
+
+Therefore DEV-vs-PROD object parity, indexes, constraints, and migration completeness are not claimed.
+
+## 4. Production Migration
+
+**NOT REQUIRED TO RUN IN THIS SESSION**
+
+No missing production objects could be established because the required production schema comparison was unavailable. No production schema migration was applied.
+
+Production data mutation: **NONE**.
+
+## 5. Deployment
+
+**BLOCKED**
+
+Deployment metadata reports:
+
+- `isDeployed = false`
+- `hasSuccessfulBuild = false`
+- `primaryUrl = ""`
+
+There is no active published deployment available to verify. The configured custom domain was not treated as verified without current deployment evidence.
+
+No publish or deployment action was performed.
+
+## 6. Runtime Verification
+
+**NOT VERIFIED**
+
+The required production HTTPS runtime checks could not run because no active deployment was reported. Production homepage, health, facilities, promos, settings, and API responses are therefore not claimed as passing.
+
+## 7. Corporate Verification
+
+**CODE EVIDENCE = PASS; PRODUCTION EVIDENCE = NOT VERIFIED**
+
+Code and schema inventory contains corporate subscription, occurrence, stop-status, and invoice-linkage implementation. Production table existence, constraints, and route behavior were not verified against the dedicated production auditor connection.
+
+No production subscription, booking, invoice, or payment was created.
+
+## 8. Event Verification
+
+**CODE EVIDENCE = PASS; PRODUCTION EVIDENCE = NOT VERIFIED**
+
+Event routes and event booking fields are present in the current code. Production event schema and runtime endpoints were not verified.
+
+No production event was created and no production payment was created.
+
+## 9. Check-in Verification
+
+**CODE EVIDENCE = PRESENT; PRODUCTION RUNTIME = NOT VERIFIED**
+
+The current implementation includes event/corporate check-in handling and lifecycle guards. No authenticated production check-in was attempted.
+
+## 10. Usage Proof Verification
+
+**CODE EVIDENCE = PRESENT; PRODUCTION STORAGE = NOT VERIFIED**
+
+Usage-proof schema and upload routes are present, and the implementation uses Supabase Storage URLs. The production storage configuration and proof completion guard were not verified because the production runtime and auditor connection were unavailable.
+
+No production proof image was uploaded.
+
+## 11. Reschedule Verification
+
+**CODE EVIDENCE = PRESENT; PRODUCTION EVIDENCE = NOT VERIFIED**
+
+The existing canonical reschedule model and route surface remain in the tree, including request, approval, authorization, conflict, facility-lock, and booking-history paths. No production reschedule was performed.
+
+## 12. Payment Integrity
+
+**NOT VERIFIED IN PRODUCTION**
+
+No production payment was created, confirmed, rewritten, or reconciled. The production payment integrity audit could not start because the dedicated audit URL was unavailable.
+
+The corporate rule remains: corporate billing is invoice-based and must not be automatically classified as a missing direct `sport_payment`.
+
+## 13. Invoice Integrity
+
+**NOT VERIFIED IN PRODUCTION**
+
+No invoice or invoice item was changed. Duplicate invoice numbers, orphan invoice items, and invoice total consistency could not be checked against production.
+
+## 14. Tax Integrity
+
+**NOT VERIFIED IN PRODUCTION**
+
+No tax transaction was created or rewritten. The required production read-only audit was unavailable, so no production tax-integrity PASS is claimed.
+
+## 15. Accounting Integrity
+
+**NOT VERIFIED IN PRODUCTION**
+
+No journal or journal line was created or changed. Debit/credit balance, orphan lines, duplicate postings, and payment-level accounting linkage could not be checked against production.
+
+## 16. Reconciliation Status
+
+**NOT VERIFIED IN PRODUCTION**
+
+No reconciliation match, bank mutation, settlement, or related historical record was changed. The dedicated read-only integrity audit could not run.
+
+## 17. Central Finance Status
+
+**UNCHANGED BY THIS SESSION**
+
+No Central Finance mutation, backfill, replay, posting, or mode change was performed. Production state was not available for the requested read-only confirmation.
+
+## 18. Security
+
+**LOCAL FAIL-CLOSED BEHAVIOR = PASS; PRODUCTION SECURITY = NOT VERIFIED**
+
+The API workflow and test setup fail closed when the required GCP project configuration is absent. No authentication or RBAC was weakened, and no credentials, database URLs, bootstrap payloads, or secret values were printed.
+
+Unauthenticated production 401/403 checks were not possible without an active deployment.
+
+## 19. Tests
+
+**BLOCKED**
+
+`pnpm --filter @workspace/api-server run test` did not execute test cases. All 18 suites stopped in test setup because:
+
+`Development Secret Manager bootstrap failed: GCP project ID is missing`
+
+Result: **18 suites failed before tests ran; 0 tests executed**.
+
+## 20. Typecheck
 
 **PASS**
 
-- The managed API workflow is running and Secret Manager bootstrap passes.
-- The known production domain `https://sc.travelintrips.co.id` responded with HTTP 200 for the homepage and API health.
-- Replit deployment metadata reports `isDeployed=false`, but both the configured Replit URL `https://sport-center-27917.replit.app` and custom domain are active and serve the expected application and health endpoints with HTTP 200. The metadata boolean is not authoritative for this current runtime model.
-- Deployment classification: **VERIFIED_BY_RUNTIME**. No redeploy was performed.
-- The local web workflow is running on its configured port and the homepage screenshot rendered successfully.
-- The browser's 401 was `/api/auth/me` without credentials; this is intentional protection, not a defect.
-- Public content routes respond through the existing trailing-slash redirect and are reachable at the redirected URL.
-
-## Database
-
-**PASS**
-
-- The application is configured to use Supabase database configuration loaded by the official Secret Manager loader.
-- The dedicated `sport_center_production_auditor` connection passed the required read-only handshake: `transaction_read_only=on`, server port 5432, and `ROLLBACK` completed.
-- The integrity audit completed with zero mutation queries, no skipped queries, and matching baseline/final counts: bookings 429, payments 374, booking history 1,231, payment outbox 363, invoices 4, invoice items 40, journals 381, journal lines 211, bank mutations 0, reconciliation matches 68, and tax transactions 1,134.
-- Required Sport Center tables are present. The optional public accounting tables were not present.
-- Historical findings remain classified for review and were not rewritten: completed-booking/history inconsistencies, duplicate booking/payment-type rows, duplicate provider-reference groups, processing/failed outbox rows, orphan reconciliation matches, duplicate tax references, journals without lines, and the existing expense schema classification mismatch.
-- No Replit database was substituted for the production database.
-
-Audit result: `PASS — NO COUNT CHANGES`; the transaction ended by `ROLLBACK`.
-- Financial integrity: **VERIFIED**. Historical anomalies are documented review items only.
-
-## Storage
-
-**PASS**
-
-Production API responses expose Supabase Storage URLs for configured assets. No storage mutation was performed. The production read-only audit connection was available and completed successfully.
-
-## Payment
-
-**PASS**
-
-- Payment method editing uses the dedicated metadata endpoint:
-  `PATCH /api/payments/{id}/metadata`.
-- The endpoint is admin-protected and has an allowlist for metadata fields.
-- QRIS is normalized to `mandiri_direct`; non-QRIS methods use the canonical `unknown` provider.
-- Financial/status fields are rejected.
-- Confirmed payment corrections retain accounting guards and do not create a duplicate payment or journal.
-- Regression validator tests passed: **21/21**.
-- Full API test suite passed: **17 suites, 109 tests**.
-- A live write-path edit was intentionally not executed because production mutation is prohibited. The read-only audit found zero orphan payments and zero confirmed payments attached to terminal bookings.
-
-## Booking
-
-**PASS**
-
-Existing lifecycle and transition regression coverage passed as part of the full API suite. No historical booking was changed. Production row-level integrity audit completed successfully; historical lifecycle anomalies remain documented for review.
-
-## Corporate Billing
-
-**PASS**
-
-The existing implementation and regression checks remain intact. Production invoice integrity checks found no duplicate invoice numbers, orphan items, or invoice total mismatches.
-
-## Invoice
-
-**PASS**
-
-The existing document routes and storage configuration remain intact. No production documents were changed.
-
-## Tax
-
-**PASS**
-
-The existing canonical tax implementation and regression coverage remain intact. Historical tax transactions were not rewritten. Production audit found no configured tax-rate deviations; duplicate historical references remain documented for review.
-
-## Event
-
-**PASS**
-
-The existing shared discount implementation and available tests remain intact. No historical event booking was created or modified.
-
-## Recurring
-
-**PASS**
-
-The existing date, conflict, approval, payment, cancellation, and reschedule paths remain covered by the current code/tests. No historical recurring booking was created.
-
-## Check-in
-
-**PASS**
-
-Existing authorization, timing, duplicate protection, and history paths remain intact. No production check-in was created.
-
-## Reschedule
-
-**PASS**
-
-Existing validation, conflict, approval, atomic update, and history behavior remain intact. No production reschedule was created.
-
-## Accounting
-
-**PASS**
-
-- API typecheck and build passed.
-- Existing payment-level idempotency and outbox/journal paths remain intact.
-- No accounting entry was manually created.
-- Production audit found zero unbalanced journals and zero orphan journal lines. It also found 309 historical journals without lines and 39 processing/failed outbox rows; these require review and were not modified.
-
-## Reconciliation
-
-**PASS**
-
-No candidate was approved and no historical reconciliation was modified. Production audit found no duplicate reconciliation candidates, but found 68 orphan matches against current booking/mutation relations; these remain a historical/schema-review item.
-
-## Settlement
-
-**PASS**
-
-The existing QRIS/Mandiri settlement contract remains unchanged. No settlement was created or changed. Production settlement aggregation and bank mutation linkage remain unverified.
-
-## Expense
-
-**PASS**
-
-Existing expense lifecycle and accounting behavior remain covered by the current code/tests. No expense record was created or modified.
-
-## Vendor
-
-**PASS**
-
-Existing vendor master and linkage behavior remain intact. No vendor data was changed.
-
-## Security
-
-**PASS**
-
-- Admin payment metadata editing is protected by admin authorization.
-- No secrets, tokens, bootstrap JSON, or database URLs were printed.
-- Secret Manager bootstrap passed in the managed API workflow.
-- Production audit-role verification passed.
-
-## Central Finance
-
-**PASS**
-
-No Central Finance posting was initiated or manually created. Existing Sport Center isolation and explicitly supported integration boundaries remain unchanged; the production audit found zero rows in `central_finance_processing`.
-
-## Tests, Typecheck, Build
-
-**PASS**
-
-- `pnpm --filter @workspace/scripts run typecheck`
 - `pnpm --filter @workspace/api-server run typecheck`
-- `pnpm --filter @workspace/api-server run test`
-  - 17 suites passed
-  - 109 tests passed
+- `pnpm --filter @workspace/scripts run typecheck`
+- `pnpm --filter @workspace/sport-center run typecheck`
+
+## 21. Build
+
+**PASS**
+
 - `pnpm --filter @workspace/api-server run build`
-- `pnpm --filter @workspace/sport-center run build`
-- `git diff --check`
+- `pnpm --filter @workspace/sport-center run build` (Vite build and prerender completed)
 
-## Production Smoke Test
+The frontend emitted existing sourcemap/chunk-size warnings but completed successfully.
 
-**PASS WITH REVIEW**
-
-Read-only requests to both the configured production URL and custom domain returned HTTP 200:
-
-- `/`
-- `/health`
-- `/api/health`
-- `/api/facilities`
-- `/api/promos`
-- `/api/settings`
-
-The API health response reported `{"status":"ok"}`. `/api/auth/me` returned the expected 401 without credentials because the route is protected by `authMiddleware`. No booking, payment, WhatsApp, invoice, reconciliation, or other financial mutation was performed.
-- Public content routes returned the existing 301 trailing-slash redirect and were reachable at the redirected URL.
-
-## Production Mutation Proof
+## 22. Production Mutation
 
 **NONE**
 
-Production data mutation during this phase: **NONE**.
+This session performed:
 
-- No customer booking created.
-- No payment created or confirmed.
-- No payment method changed.
-- No invoice, tax, settlement, reconciliation, or accounting row changed.
-- No WhatsApp message sent.
-- No production storage object changed.
+- no production migration
+- no production data INSERT, UPDATE, DELETE, approval, retry, posting, or backfill
+- no booking, payment, invoice, tax, journal, reconciliation, or settlement mutation
+- no production storage upload or deletion
+- no WhatsApp message
+- no Central Finance mutation
 
-## Final Sign-Off
+The attached checklist’s required read-only production audit also did not connect, so it cannot be represented as a passing audit.
 
-### Technical Production Readiness
+## Remaining Review Items / Exact Blockers
 
-- Production runtime = **PASS**
-- Production database = **PASS**
-- Read-only audit = **PASS**
-- Payment system = **PASS**
-- Booking system = **PASS**
-- Accounting = **PASS**
-- Central Finance = **PASS / UNCHANGED**
-- Reconciliation = **PASS WITH HISTORICAL REVIEW**
-- Security = **PASS**
-- Authentication = **PASS** — protected unauthenticated requests correctly return 401
-- Admin authenticated flow = **NOT_RUNTIME_VERIFIED** — no real credentials were used
-- Smoke test = **PASS**
-- Tests = **PASS**
-- Typecheck = **PASS**
-- Build = **PASS**
-- Git diff check = **PASS**
-- Deployment = **VERIFIED_BY_RUNTIME**
-- Production mutation = **NONE**
+The following must be resolved before the checklist can be finalized:
 
-### Historical Owner Review
+1. Inject the non-secret GCP project configuration required by the official Secret Manager bootstrap, then restart the API workflow.
+2. Provide the scoped DEV and PROD database configuration required for the read-only schema comparison.
+3. Provision/inject `SUPABASE_PROD_AUDIT_DATABASE_URL` for the dedicated `sport_center_production_auditor` role, or make it retrievable through the configured Secret Manager bootstrap.
+4. Run the dedicated read-only production handshake and integrity audit, proving `transaction_read_only = on`, the expected auditor role, and a final `ROLLBACK`.
+5. Publish the current verified implementation, then verify the live production URL over HTTPS.
+6. Re-run the full API test suite after Secret Manager bootstrap is available.
+7. Capture the required before/after financial counts around any approved additive production schema migration.
 
-**HISTORICAL FINANCIAL REVIEW = DOCUMENTED**
+## Final Verdict
 
-Previously audited historical items remain unchanged: completed-booking/history inconsistencies, duplicate payment groups and provider references, processing/failed outbox rows, duplicate tax references, orphan reconciliation matches, and journals without lines. These require owner/accounting decisions only; no automatic cleanup was performed.
+The required closure gates do not all pass. In accordance with the checklist:
 
-**OWNER ACCOUNTING REVIEW = REQUIRED ONLY FOR HISTORICAL ANOMALIES**
+**PROJECT STATUS = NOT FINALIZED**
 
-==================================================
-
-SPORT CENTER PROJECT
-FINAL PRODUCTION CLOSURE
-==================================================
-
-PROJECT STATUS = FINALIZED
-
-TECHNICAL PRODUCTION READINESS = PASS
-PRODUCTION DATABASE = PASS
-READ-ONLY AUDIT = PASS
-PAYMENT = PASS
-BOOKING = PASS
-ACCOUNTING = PASS
-CENTRAL FINANCE = PASS / UNCHANGED
-SECURITY = PASS
-AUTHENTICATION = PASS
-SMOKE TEST = PASS
-TESTS = PASS
-TYPECHECK = PASS
-BUILD = PASS
-DEPLOYMENT = VERIFIED
-PRODUCTION MUTATION = NONE
-
-HISTORICAL FINANCIAL REVIEW = DOCUMENTED
-OWNER ACCOUNTING REVIEW = REQUIRED ONLY FOR HISTORICAL ANOMALIES
-
-==================================================
+Exact blockers: **active production deployment unavailable; dedicated production audit URL/role unavailable; DEV/PROD schema URLs unavailable; GCP project ID missing; API test suites did not execute.**
