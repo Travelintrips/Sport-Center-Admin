@@ -6,7 +6,7 @@ Date: 2026-08-24 (Asia/Bangkok)
 
 **PROJECT STATUS = NOT FINALIZED**
 
-Secret Manager access is now working. The API workflow is running, the full API suite passes, the dedicated production read-only audit passes, and the live custom domain responds correctly. Closure remains incomplete because the DEV/PROD schema comparison cannot receive both scoped URLs and Replit deployment metadata reports no active published deployment.
+The isolated feature migration has been applied to the production application database, the API workflow is running, the full API suite passes, and the live custom domain responds correctly. Closure remains incomplete because the dedicated auditor connection still sees the pre-migration schema, while deployment metadata reports no active published deployment.
 
 ## 1. Development Implementation
 
@@ -18,27 +18,27 @@ The corporate schema defines `corporate_subscriptions`, `corporate_occurrences`,
 
 ## 2. Migration Review
 
-**REVIEW COMPLETE — NO PRODUCTION MIGRATION RUN**
+**REVIEW COMPLETE — ISOLATED ADDITIVE MIGRATION**
 
-The current implementation’s migration inventory is additive: subscription-status enum creation, tables for subscriptions/occurrences/usage proofs, booking reference columns, indexes/constraints, and foreign keys. No destructive operation or historical financial rewrite was executed.
+The 429 DEV/PROD differences were not synchronized. Only the objects proven necessary by the current implementation were selected: `corporate_subscription_status`, `corporate_subscriptions`, `corporate_occurrences`, `corporate_occurrences_subscription_date_unique`, and `usage_proofs`.
 
-No ad-hoc production SQL was run.
+The exact executed migration was a single idempotent transaction containing only `CREATE SCHEMA IF NOT EXISTS`, guarded enum creation, `CREATE TABLE IF NOT EXISTS`, and `CREATE UNIQUE INDEX IF NOT EXISTS`. Foreign keys target the current `sport_center.users`, `sport_center.sport_facilities`, and `sport_center.sport_bookings` tables. No destructive operation, historical rewrite, backfill, or data deletion was executed.
 
 ## 3. Development Migration
 
-**BLOCKED — SCOPED URL CONFIGURATION**
+**PASS — FEATURE OBJECTS PRESENT**
 
-The DEV/PROD schema comparison failed closed because `SUPABASE_DATABASE_URL_DEV` and `SUPABASE_DATABASE_URL` were not available to that process. The Secret Manager bootstrap provides the selected application runtime scope, but the comparison requires both scopes simultaneously.
+DEV contains the corporate subscription enum and tables, the occurrence unique index and foreign keys, usage-proof metadata, existing reschedule requests, and event columns on `sport_bookings`.
 
-DEV-vs-PROD object parity, indexes, constraints, and migration completeness are not claimed.
+The full DEV/PROD 429-object parity is intentionally not claimed or required.
 
 ## 4. Production Migration
 
-**NOT RUN**
+**PRIMARY DATABASE = PASS; AUDITOR VISIBILITY = BLOCKED**
 
-No missing production objects could be established because the DEV/PROD schema comparison was unavailable. No production schema migration was applied.
+The production application connection confirmed `corporate_subscriptions`, `corporate_occurrences`, and `usage_proofs`, with existing `reschedule_requests` and event columns. The dedicated auditor confirmed role `sport_center_production_auditor`, `transaction_read_only=on`, and `ROLLBACK=PASS`, but still saw only `reschedule_requests` and `sport_bookings`. This is classified as auditor visibility/replica-lag or target-state mismatch, not treated as a schema PASS.
 
-Production data mutation: **NONE**.
+Production data mutation: **NONE**; only the approved additive schema migration was applied.
 
 ## 5. Deployment
 
@@ -173,17 +173,35 @@ The frontend emitted existing sourcemap and chunk-size warnings but completed su
 
 ## 22. Production Mutation
 
-**NONE**
+**SCHEMA-ONLY**
 
-This session performed no production migration, data write, booking/payment/invoice/tax/journal/reconciliation mutation, storage upload/deletion, WhatsApp message, or Central Finance mutation.
+This session performed one approved additive production schema migration. It performed no production data write, booking/payment/invoice/tax/journal/reconciliation mutation, storage upload/deletion, WhatsApp message, or Central Finance mutation.
 
 The dedicated production read-only handshake and integrity audit used role `sport_center_production_auditor`, confirmed `transaction_read_only=on`, executed zero mutation queries, and ended with `ROLLBACK`.
 
+## Financial row-count comparison
+
+The financial row-count fingerprint was unchanged by the schema migration:
+
+| Table | Before | After |
+|---|---:|---:|
+| sport_bookings | 433 | 433 |
+| sport_payments | 378 | 378 |
+| company_invoices | 4 | 4 |
+| company_invoice_items | 40 | 40 |
+| accounting_journals | 385 | 385 |
+| accounting_journal_lines | 211 | 211 |
+| tax_transactions | 1138 | 1138 |
+| payment_accounting_outbox | 367 | 367 |
+| bank_reconciliation_matches | 68 | 68 |
+
+**Financial row-count fingerprint = PASS — NO COUNT CHANGES**
+
 ## Remaining Review Items / Exact Blockers
 
-1. Provide both scoped DEV and PROD database URLs to the read-only schema comparison process and classify any differences.
+1. Resolve why the dedicated auditor still sees the pre-migration schema, then repeat read-only schema verification with that role.
 2. Resolve the mismatch between Replit deployment metadata (`isDeployed=false`) and the live custom-domain runtime before marking deployment fully PASS.
-3. If an additive production schema migration is required, capture the required before/after financial counts around it.
+3. Publish the current implementation only after the auditor visibility gate is PASS.
 
 ## Final Verdict
 
@@ -191,4 +209,4 @@ The required closure gates do not all pass. In accordance with the checklist:
 
 **PROJECT STATUS = NOT FINALIZED**
 
-Exact blockers: **DEV/PROD schema comparison unavailable; deployment publication state conflicts with live custom-domain runtime.**
+Exact blockers: **Dedicated production auditor does not yet observe the additive feature tables; deployment publication state conflicts with the live custom-domain runtime.**
