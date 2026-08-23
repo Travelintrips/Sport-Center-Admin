@@ -22,6 +22,20 @@ choose an account would weaken the settlement control.
 **How to apply:** Treat the server-derived QRIS account as a routing prerequisite
 for the metadata change, not a caller-controlled settlement edit. Keep all other
 financial values, lifecycle fields, and journal lines immutable.
+
+## Historical Mandiri rule resolution
+
+For Mandiri Direct QRIS, legacy owner-approved rules may not have a stored
+`rule_version`. Accept the effective historical rule and record a stable
+legacy-derived version identifier for auditability.
+
+**Why:** The settlement UI created earlier Mandiri rules without versions; a
+hardcoded current version made valid historical QRIS corrections impossible.
+
+**How to apply:** When same-account historical rules overlap, the latest
+effective start may win only when every matching rule has the same settlement
+delay. Different delays remain an ambiguous financial configuration and must
+fail closed. This exception is for Mandiri legacy configurations, not Paylabs.
 - Once a mirror is posted, source changes that would alter any projected financial, settlement, or state field are reconciliation/reversal work and must fail with a controlled conflict rather than silently update the journal.
 - A trigger that protects payment confirmation is a critical deployment migration: bundle it with the service, verify its dependency and enabled event definition, and finish that work before accepting HTTP traffic.
 

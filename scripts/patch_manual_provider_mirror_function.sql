@@ -21,8 +21,11 @@ DECLARE
   v_provider_id text;
   v_provider_name text;
   v_provider_code text;
+  v_provider_rule_id integer;
   v_provider_rule_version text;
   v_settlement_delay integer;
+  v_min_settlement_delay integer;
+  v_max_settlement_delay integer;
   v_payment_date date;
   v_expected_settlement_date date;
   v_business_day boolean;
@@ -329,27 +332,48 @@ BEGIN
   v_payment_date := (COALESCE(NEW.paid_at, NEW.confirmed_at, NEW.created_at)
     AT TIME ZONE 'Asia/Jakarta')::date;
 
-  SELECT COUNT(*)::integer, MIN(psc.rule_version), MIN(psc.settlement_delay_business_days)
-    INTO v_company_count, v_provider_rule_version, v_settlement_delay
+  SELECT COUNT(*)::integer,
+         MIN(psc.settlement_delay_business_days),
+         MAX(psc.settlement_delay_business_days)
+    INTO v_company_count, v_min_settlement_delay, v_max_settlement_delay
     FROM sport_center.payment_settlement_configs psc
    WHERE psc.company_id = v_company_id
      AND LOWER(BTRIM(psc.provider_code)) = v_provider_code
      AND psc.bank_account_id = v_external_bank_account_id
      AND psc.is_active = TRUE
      AND psc.source = 'OWNER_APPROVED'
-     AND psc.rule_version = 'PROD-MANDIRI-SC-20260810-v1'
      AND psc.effective_from <= v_payment_date
      AND (psc.effective_until IS NULL OR v_payment_date < psc.effective_until);
 
-  IF v_company_count = 0 OR v_provider_rule_version IS NULL OR v_settlement_delay IS NULL THEN
+  IF v_company_count = 0
+     OR v_min_settlement_delay IS NULL
+     OR v_max_settlement_delay IS NULL THEN
     RAISE EXCEPTION 'MIRROR_PROVIDER_RULE_UNRESOLVED: no owner-approved rule for company %, provider %, bank %',
       v_company_id, v_provider_code, v_external_bank_account_id
       USING ERRCODE = 'P0001';
-  ELSIF v_company_count > 1 THEN
-    RAISE EXCEPTION 'MIRROR_PROVIDER_RULE_UNRESOLVED: multiple owner-approved rules for company %, provider %, bank %',
+  ELSIF v_min_settlement_delay IS DISTINCT FROM v_max_settlement_delay THEN
+    RAISE EXCEPTION 'MIRROR_PROVIDER_RULE_UNRESOLVED: conflicting delays for company %, provider %, bank %',
       v_company_id, v_provider_code, v_external_bank_account_id
       USING ERRCODE = 'P0001';
   END IF;
+
+  SELECT psc.id, psc.rule_version, psc.settlement_delay_business_days
+    INTO v_provider_rule_id, v_provider_rule_version, v_settlement_delay
+    FROM sport_center.payment_settlement_configs psc
+   WHERE psc.company_id = v_company_id
+     AND LOWER(BTRIM(psc.provider_code)) = v_provider_code
+     AND psc.bank_account_id = v_external_bank_account_id
+     AND psc.is_active = TRUE
+     AND psc.source = 'OWNER_APPROVED'
+     AND psc.effective_from <= v_payment_date
+     AND (psc.effective_until IS NULL OR v_payment_date < psc.effective_until)
+   ORDER BY psc.effective_from DESC, psc.id DESC
+   LIMIT 1;
+
+  v_provider_rule_version := COALESCE(
+    v_provider_rule_version,
+    'LEGACY-MANDIRI-' || v_provider_rule_id::text
+  );
 
   v_expected_settlement_date := v_payment_date;
   v_remaining := GREATEST(v_settlement_delay, 0);
