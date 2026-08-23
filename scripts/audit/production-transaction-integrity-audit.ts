@@ -1,4 +1,5 @@
 import pg from "pg";
+import { writeFile } from "node:fs/promises";
 import { loadProductionAuditDatabaseSecretFromGSM } from "../../artifacts/api-server/src/lib/secretLoader";
 
 type Row = Record<string, unknown>;
@@ -172,7 +173,7 @@ async function main() {
       const row = (await query<Row>(`SELECT count(*)::int AS count FROM ${table}`))[0];
       finalCounts.push({ table, count: row?.count ?? null });
     }
-    console.log(JSON.stringify({
+    const auditOutput = {
       executiveSummary: "Read-only production transaction integrity audit",
       gate: { status: "PASS", transaction_read_only: mode[0]?.transaction_read_only, identity, mutationQueries: 0 },
       baselineCounts: counts,
@@ -183,7 +184,136 @@ async function main() {
       skipped,
       remediation: "REVIEW ONLY — no production changes performed",
       dataMutationProof: { mutationQueries: 0, transactionEndedBy: "ROLLBACK" },
-    }, null, 2));
+    };
+    if (auditOutput.fingerprint !== "PASS — NO COUNT CHANGES") fail("table count fingerprint changed during the audit");
+    console.log(JSON.stringify(auditOutput, null, 2));
+
+    const rowsIn = (value: unknown): number =>
+      Array.isArray(value) ? value.length : 0;
+    const lifecycle = findings.bookingLifecycle as Row;
+    const payments = findings.payments as Row;
+    const billing = findings.corporateBilling as Row;
+    const outbox = findings.outbox as Row;
+    const tax = findings.tax as Row;
+    const recon = findings.reconciliation as Row;
+    const accounting = findings.accounting as Row;
+    const phaseRows = [
+      ["Corporate booking", "PARTIALLY IMPLEMENTED", "sport_bookings has payer_type, company_customer_id, billing_status, and company_invoice_id; record-level corporate rows require business classification.", "No automatic conclusion from field presence alone.", "MEDIUM"],
+      ["Corporate subscription / recurring", "UNKNOWN", "No recurring master evidence was included in this transaction-integrity query.", "Requires code/schema inventory and occurrence-level joins.", "HIGH"],
+      ["Weekly schedule / stop subscription", "UNKNOWN", "No dedicated subscription evidence was included.", "Cannot prove stop behavior from booking rows.", "HIGH"],
+      ["Corporate billing", rowsIn(billing.totalMismatches) === 0 && rowsIn(billing.orphanItems) === 0 ? "NO ANOMALY FOUND" : "PARTIAL / REVIEW", `Invoice duplicate groups=${rowsIn(billing.duplicateInvoiceNumbers)}, orphan items=${rowsIn(billing.orphanItems)}, total mismatches=${rowsIn(billing.totalMismatches)}.`, "Invoice arithmetic/linkage requires review where rows are returned.", "HIGH"],
+      ["Event schedule", "PARTIALLY IMPLEMENTED", "Booking model contains booking_type and event pricing fields.", "Fixed-schedule behavior and event-specific workflow require code evidence.", "MEDIUM"],
+      ["Event / corporate check-in", rowsIn(lifecycle.completedWithoutCheckin) === 0 ? "NO ANOMALY FOUND" : "GAP / REVIEW", `Completed without check-in rows=${rowsIn(lifecycle.completedWithoutCheckin)}.`, "Historical rows can predate current guards; do not backfill automatically.", "HIGH"],
+      ["Photo proof", "UNKNOWN", "Not established by the transaction query.", "Need storage/media/code inventory; absence here is not proof of absence.", "MEDIUM"],
+      ["Corporate / event reschedule", "UNKNOWN", "No reschedule table query was part of this integrity runner.", "Requires dedicated reschedule schema and history evidence.", "HIGH"],
+      ["Conflict detection", "UNKNOWN", "Not inferable from historical transaction rows alone.", "Requires code-path audit and targeted read-only schedule checks.", "HIGH"],
+      ["Payment handling", rowsIn(payments.orphanPayments) === 0 && rowsIn(payments.confirmedOnTerminalBooking) === 0 ? "NO ANOMALY FOUND" : "GAP / REVIEW", `Duplicate booking/type=${rowsIn(payments.duplicateBookingType)}, duplicate references=${rowsIn(payments.duplicateReferences)}, orphan=${rowsIn(payments.orphanPayments)}, confirmed terminal=${rowsIn(payments.confirmedOnTerminalBooking)}.`, "Corporate invoice billing may legitimately have no direct sport payment.", "HIGH"],
+      ["Accounting", rowsIn(accounting.unbalancedJournals) === 0 && rowsIn(accounting.orphanLines) === 0 ? "NO ANOMALY FOUND" : "GAP / REVIEW", `Unbalanced journals=${rowsIn(accounting.unbalancedJournals)}, orphan lines=${rowsIn(accounting.orphanLines)}.`, "Validate payment-level linkage and tax ledgers before any repair.", "CRITICAL"],
+      ["Central Finance", findings.centralFinance ? "REVIEW" : "UNKNOWN", "Read-only processing evidence was queried when the table was present.", "No mutation or replay was attempted.", "HIGH"],
+    ];
+    const classificationTable = phaseRows.map((row) => `| ${row[0]} | ${row[1]} | ${row[2]} | ${row[3]} | ${row[4]} |`).join("\n");
+    const report = [
+      "# Sport Center — Production Historical Classification Report",
+      "",
+      "## Executive Summary",
+      "",
+      "**Production record-level access: PASS**",
+      "**Transaction read-only: on**",
+      "**Database mutation: NONE**",
+      "**Count fingerprint: PASS — NO COUNT CHANGES**",
+      "",
+      "Audit ini berjalan pada dedicated PostgreSQL role `sport_center_production_auditor` dalam satu transaksi read-only. Semua query dibatasi SELECT/WITH, query yang gagal diisolasi dengan savepoint, dan transaksi diakhiri dengan `ROLLBACK`. Tidak ada repair, retry, approval, posting, migration, atau deployment.",
+      "",
+      "## Gap Classification",
+      "",
+      "| Area | Current State | Evidence | Gap / Limitation | Severity |",
+      "|---|---|---|---|---|",
+      classificationTable,
+      "",
+      "## Baseline dan Final Fingerprint",
+      "",
+      "| Table | Baseline | Final | |",
+      "|---|---:|---:|---|",
+      ...counts.map((row, index) => `| ${row.table} | ${String(row.count)} | ${String(finalCounts[index]?.count)} | unchanged |`),
+      "",
+      "## Deterministic Record-Level Findings",
+      "",
+      `- Completed tanpa check-in: **${rowsIn(lifecycle.completedWithoutCheckin)}**`,
+      `- Completed tanpa completed_at: **${rowsIn(lifecycle.completedWithoutCompletedAt)}**`,
+      `- Future completed: **${rowsIn(lifecycle.futureCompleted)}**`,
+      `- Terminal history mismatch: **${rowsIn(lifecycle.terminalHistoryMismatch)}**`,
+      `- Duplicate booking/payment type: **${rowsIn(payments.duplicateBookingType)}**`,
+      `- Duplicate provider references: **${rowsIn(payments.duplicateReferences)}**`,
+      `- Confirmed payment pada terminal booking: **${rowsIn(payments.confirmedOnTerminalBooking)}**`,
+      `- Orphan payment: **${rowsIn(payments.orphanPayments)}**`,
+      `- Outbox processing/failed: **${rowsIn(outbox.processingOrFailed)}**`,
+      `- Tax configuration deviations: **${rowsIn(tax.configuredRateDeviations)}**`,
+      `- Reconciliation orphan matches: **${rowsIn(recon.orphanMatches)}**`,
+      `- Accounting unbalanced journals: **${rowsIn(accounting.unbalancedJournals)}**`,
+      `- Accounting orphan lines: **${rowsIn(accounting.orphanLines)}**`,
+      "",
+      "## Schema Source of Truth",
+      "",
+      `Canonical reconciliation table detected: \`${auditOutput.schemaArchitecture.sportCenterBankReconciliationMatches ? "sport_center.bank_reconciliation_matches" : "not detected"}\`.`,
+      `Public accounting entries available: **${auditOutput.schemaArchitecture.publicAccountingEntries ? "yes" : "no"}**; accounting evidence therefore uses the detected \`sport_center\` journal tables.`,
+      "",
+      "## Recommended Implementation Order",
+      "",
+      "1. Review every returned lifecycle/payment/accounting/reconciliation record using immutable evidence and payment identity.",
+      "2. Complete code/schema inventory for recurring, subscription stop, event, photo proof, and reschedule behavior.",
+      "3. Resolve only individually proven anomalies with a separately approved, idempotent change plan.",
+      "4. Re-run the same read-only audit and compare fingerprints before and after any future approved change.",
+      "",
+      "## Machine-Readable Evidence",
+      "",
+      "The complete result is stored in `PRODUCTION_TRANSACTION_INTEGRITY_AUDIT_REPORT.md`.",
+    ].join("\n") + "\n";
+    const historicalReportPath = new URL("../../PRODUCTION_HISTORICAL_CLASSIFICATION_REPORT.md", import.meta.url);
+    const integrityReportPath = new URL("../../PRODUCTION_TRANSACTION_INTEGRITY_AUDIT_REPORT.md", import.meta.url);
+    const phaseReportPath = new URL("../../SPORT_CENTER_CORPORATE_EVENT_RESCHEDULE_AUDIT.md", import.meta.url);
+    await writeFile(historicalReportPath, report, "utf8");
+    await writeFile(
+      integrityReportPath,
+      "# Production Transaction Integrity Audit\n\n```json\n" + JSON.stringify(auditOutput, null, 2) + "\n```\n",
+      "utf8",
+    );
+    await writeFile(phaseReportPath, [
+      "# Sport Center — Corporate, Recurring, Event & Reschedule Audit",
+      "",
+      "## Scope and safety",
+      "",
+      "Audit database Production dilakukan read-only dengan dedicated auditor role. Tidak ada INSERT, UPDATE, DELETE, DDL, approval, retry, posting, migration, atau deployment.",
+      "",
+      "## Current architecture evidence",
+      "",
+      "- Corporate booking fields tersedia pada `sport_bookings`: payer type, company customer, billing status, invoice link, DP, PPN, dan group reference.",
+      "- Event dibedakan melalui `booking_type` dan memiliki field pricing event.",
+      "- Check-in disimpan pada booking (`checked_in_at`); audit record-level menemukan completion tanpa check-in sebagai evidence yang perlu direview, bukan alasan untuk auto-fix.",
+      "- Invoice memiliki item yang menghubungkan invoice ke booking; arithmetic dan orphan item diperiksa dalam integrity report.",
+      "- Payment, accounting journal/lines, tax, outbox, dan reconciliation diperiksa dengan payment-level identity.",
+      "- Recurring master, stop-subscription semantics, photo-proof mandatory rules, dan reschedule occurrence lineage memerlukan code/schema inventory lanjutan; tidak disimpulkan hanya dari tabel booking.",
+      "",
+      "## Classification",
+      "",
+      "| Area | Verdict | Evidence boundary |",
+      "|---|---|---|",
+      "| Corporate booking/billing | PARTIALLY IMPLEMENTED | Data model mendukung corporate billing; setiap row tetap perlu klasifikasi payer/company/invoice/payment.",
+      "| Corporate recurring/subscription | UNKNOWN | Tidak ada bukti master subscription pada query integrity ini.",
+      "| Weekly schedule / stop subscription | UNKNOWN | Behavior tidak dapat dibuktikan dari historical booking rows saja.",
+      "| Event fixed schedule | PARTIALLY IMPLEMENTED | Event booking/pricing fields tersedia; workflow penuh perlu code evidence.",
+      "| Mandatory check-in | GAP / REVIEW | Completion tanpa check-in ditemukan atau perlu diverifikasi dari result JSON; historical remediation dilarang.",
+      "| Photo proof | UNKNOWN | Storage/media/mandatory linkage belum dibuktikan oleh query ini.",
+      "| Corporate/event reschedule | UNKNOWN | Lineage original→replacement dan approval history perlu audit khusus.",
+      "| Invoice after reschedule | UNKNOWN | Harus diverifikasi dari invoice item dan canonical occurrence date.",
+      "| Conflict checking | UNKNOWN | Memerlukan audit code path dan schedule-level evidence.",
+      "",
+      "## Final verdict",
+      "",
+      "Sistem saat ini **PARTIALLY IMPLEMENTED** untuk corporate/event data modeling dan payment/accounting controls. Fitur recurring subscription, stop subscription, photo proof mandatory, dan reschedule occurrence tidak boleh disebut implemented hanya karena ada field atau route; statusnya tetap UNKNOWN sampai evidence code dan record-level tersedia.",
+      "",
+      "Lihat `PRODUCTION_HISTORICAL_CLASSIFICATION_REPORT.md` untuk classification berbasis row dan `PRODUCTION_TRANSACTION_INTEGRITY_AUDIT_REPORT.md` untuk evidence JSON lengkap.",
+      "",
+    ].join("\n"), "utf8");
   } finally {
     await client.query("ROLLBACK").catch(() => undefined);
     client.release();
