@@ -42,6 +42,10 @@ export default function PaymentSettlementConfigs() {
     () => (query.data?.bankAccounts ?? []).filter((account) => !companyId || String(account.company_id) === companyId),
     [query.data, companyId],
   );
+  const selectableAccounts = useMemo(
+    () => selectedAccounts.filter((account) => account.is_active && String(account.account_number ?? "").trim().length > 0),
+    [selectedAccounts],
+  );
   const createAccount = useMutation({
     mutationFn: () => request("/admin/payment-settlement-configs/bank-accounts", { method: "POST", body: JSON.stringify({ companyId: Number(companyId), ...accountForm }) }),
     onSuccess: () => { toast({ title: "Rekening perusahaan dibuat" }); queryClient.invalidateQueries({ queryKey: ["payment-settlement-configs"] }); setAccountForm({ bankName: "Bank Mandiri", name: "Bank Mandiri CST", accountNumber: "", coaId: "" }); },
@@ -115,7 +119,13 @@ export default function PaymentSettlementConfigs() {
                 <Label>Rekening settlement</Label>
                 <Select value={ruleForm.bankAccountId} onValueChange={(value) => setRuleForm({ ...ruleForm, bankAccountId: value })}>
                   <SelectTrigger><SelectValue placeholder="Pilih rekening aktif" /></SelectTrigger>
-                  <SelectContent>{selectedAccounts.filter((account) => account.is_active).map((account) => <SelectItem key={account.id} value={account.account_number}>{account.name} · {account.account_number}</SelectItem>)}</SelectContent>
+                  <SelectContent>
+                    {selectableAccounts.map((account) => {
+                      const accountNumber = String(account.account_number).trim();
+                      return <SelectItem key={account.id} value={accountNumber}>{account.name} · {accountNumber}</SelectItem>;
+                    })}
+                    {!selectableAccounts.length && <SelectItem value="_no-valid-account" disabled>Tidak ada rekening aktif yang valid</SelectItem>}
+                  </SelectContent>
                 </Select>
                 <Label>Efektif mulai</Label><Input type="date" value={ruleForm.effectiveFrom} onChange={(e) => setRuleForm({ ...ruleForm, effectiveFrom: e.target.value })} />
                 <Label>Efektif sampai (opsional)</Label><Input type="date" value={ruleForm.effectiveUntil} onChange={(e) => setRuleForm({ ...ruleForm, effectiveUntil: e.target.value })} />
