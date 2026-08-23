@@ -1,0 +1,873 @@
+PHASE — COMPLETE CORPORATE/EVENT/RESCHEDULE → MIGRATION READINESS → FINAL VERIFY
+
+CONTINUE FROM CURRENT WORKING TREE.
+DO NOT RESTART THE PREVIOUS AUDIT.
+
+Current implementation already exists:
+
+- Corporate subscription master
+- Weekly occurrence generation
+- Idempotent occurrence generation
+- Stop subscription
+- Corporate occurrence billing
+- Fixed Event backend
+- usage_proofs backend
+- Supabase Storage proof upload backend
+- Reschedule transaction row locking
+- Reschedule conflict re-check
+- Admin corporate subscription UI
+
+Already verified:
+
+- API typecheck PASS
+- API build PASS
+- Frontend build/prerender PASS
+- 116 tests / 18 suites PASS
+- git diff --check PASS
+- API workflow RUNNING
+- Web workflow RUNNING
+- Production mutation NONE
+- Accounting preserved
+- Central Finance unchanged
+
+Do NOT repeat the previous broad audit.
+
+============================================================
+CURRENT GAPS THAT MUST BE CLOSED
+============================================================
+
+1. Event admin UI incomplete
+2. Event check-in UI incomplete
+3. Event photo upload UI incomplete
+4. Corporate reschedule incomplete
+5. Event reschedule incomplete
+6. Replacement occurrence model/logic incomplete
+7. Invoice linkage after reschedule incomplete
+8. Dedicated regression tests incomplete
+9. Production migration not yet performed
+10. Production final verification still required
+
+============================================================
+RULE: IMPLEMENT, TEST, VERIFY
+============================================================
+
+Do not stop at reporting.
+
+For each safe deterministic gap:
+
+IMPLEMENT
+→ TEST
+→ VERIFY
+
+If a financial correction would require guessing historical meaning:
+
+FAIL CLOSED.
+
+Do not rewrite historical financial data.
+
+============================================================
+1. FIRST — INSPECT CURRENT IMPLEMENTATION
+============================================================
+
+Read the current working tree and existing changes.
+
+Use:
+
+- SPORT_CENTER_CORPORATE_EVENT_RESCHEDULE_AUDIT.md
+- current schema
+- current migrations
+- current API
+- current frontend
+- current tests
+
+Do not undo existing working implementation.
+
+Use minimal diff.
+
+Reuse existing:
+
+- booking
+- booking_history
+- reschedule_requests
+- corporate invoice
+- invoice items
+- check-in
+- storage
+- RBAC
+- availability checker
+- accounting
+- payment
+- Central Finance boundary
+
+Do not create duplicate systems.
+
+============================================================
+2. EVENT ADMIN UI
+============================================================
+
+Complete the Admin Event flow.
+
+Required:
+
+/admin/events
+
+Features:
+
+CREATE EVENT
+
+Fields:
+
+- company/customer/payer
+- event name
+- facility
+- event date
+- start time
+- end time
+- participant information
+- notes
+- payment/billing type
+- applicable discount
+
+After creation:
+
+EVENT DETAIL
+
+Must display:
+
+- event
+- facility
+- date
+- time
+- participant
+- booking
+- payment/billing status
+- check-in status
+- usage proof status
+- reschedule status
+- history
+
+Use existing UI conventions.
+
+Do not create a separate disconnected Event architecture.
+
+============================================================
+3. EVENT CHECK-IN UI
+============================================================
+
+Admin must be able to open Event on the scheduled date.
+
+Flow:
+
+EVENT
+→ CHECK-IN
+→ TAKE/UPLOAD PHOTO
+→ VERIFY
+→ COMPLETE
+
+UI must clearly show:
+
+CHECK-IN REQUIRED
+
+before completion.
+
+If no photo:
+
+do not allow completion.
+
+Use existing upload mechanism.
+
+Do not store base64 blobs in database.
+
+Use Supabase Storage.
+
+Store metadata in usage_proofs.
+
+At minimum:
+
+booking_id
+storage reference
+uploaded_by
+uploaded_at
+
+============================================================
+4. EVENT COMPLETION GUARD
+============================================================
+
+Backend must enforce:
+
+Event cannot become COMPLETED unless:
+
+- valid booking
+- check-in exists
+- required usage proof exists
+- no pending reschedule
+- session is eligible for completion
+
+Do NOT rely only on frontend validation.
+
+Backend must be authoritative.
+
+Existing lifecycle protections must remain intact.
+
+============================================================
+5. CORPORATE CHECK-IN
+============================================================
+
+For every Corporate occurrence:
+
+scheduled
+→ check-in
+→ usage proof
+→ completed
+
+Reuse existing check-in mechanism.
+
+Do not create a second check-in system.
+
+If business rule requires proof for Corporate occurrences:
+
+enforce it server-side.
+
+If existing system already treats Corporate proof differently, preserve the
+existing contract and document it.
+
+============================================================
+6. CORPORATE RESCHEDULE
+============================================================
+
+Complete reschedule for ONE OCCURRENCE only.
+
+Example:
+
+Subscription:
+Every Monday
+
+Occurrence:
+14 Sep
+
+Reschedule:
+14 Sep → 18 Sep
+
+Must NOT modify:
+
+subscription day_of_week = Monday
+
+Only occurrence changes.
+
+Required fields/history:
+
+original booking/occurrence
+original date
+original start
+original end
+new date
+new start
+new end
+reason
+requested_by
+requested_at
+approved_by
+approved_at
+status
+
+============================================================
+7. EVENT RESCHEDULE
+============================================================
+
+Event:
+
+15 Sep
+09:00–17:00
+
+Reschedule:
+
+22 Sep
+09:00–17:00
+
+Preserve original history.
+
+Do NOT delete original schedule.
+
+Use existing reschedule_requests if possible.
+
+If a replacement occurrence is required, implement the smallest compatible
+model.
+
+============================================================
+8. REPLACEMENT OCCURRENCE
+============================================================
+
+Do not create duplicate bookings.
+
+Preferred model:
+
+ORIGINAL OCCURRENCE
+    ↓
+RESCHEDULE REQUEST
+    ↓
+APPROVED
+    ↓
+REPLACEMENT OCCURRENCE
+
+The original occurrence should become:
+
+RESCHEDULED
+
+The replacement occurrence becomes the active occurrence.
+
+There must be a deterministic relationship between original and replacement.
+
+Do not create two independently payable bookings.
+
+============================================================
+9. RESCHEDULE CONCURRENCY
+============================================================
+
+This is HIGH PRIORITY.
+
+Current implementation already locks the facility row and re-checks
+conflicts.
+
+Strengthen it if necessary.
+
+Approval transaction must atomically:
+
+BEGIN
+→ validate request
+→ lock appropriate facility/resource
+→ check conflicting booking
+→ check Event
+→ check Corporate occurrence
+→ check replacement occurrence
+→ update schedule
+→ create history
+→ commit
+
+If conflict:
+
+ROLLBACK.
+
+Do not perform:
+
+availability check
+→ separate later update
+
+without transactional protection.
+
+Add explicit regression tests.
+
+============================================================
+10. RESCHEDULE CHECK-IN
+============================================================
+
+If:
+
+14 Sep → 18 Sep
+
+Then:
+
+14 Sep:
+RESCHEDULED
+NO CHECK-IN
+
+18 Sep:
+CHECK-IN REQUIRED
+
+The check-in logic must use the active/replacement occurrence.
+
+No check-in may accidentally attach to the cancelled original date.
+
+============================================================
+11. RESCHEDULE BILLING
+============================================================
+
+Corporate invoice must reference the active occurrence.
+
+Example:
+
+14 Sep
+→ 18 Sep
+
+Invoice item must represent:
+
+18 Sep
+
+not:
+
+14 Sep.
+
+Do not create duplicate invoice items.
+
+Do not duplicate invoice totals.
+
+============================================================
+12. FINALIZED / PAID INVOICE SAFETY
+============================================================
+
+Critical rule:
+
+If invoice is:
+
+DRAFT / OPEN / UNBILLED
+
+and occurrence is safely rescheduled:
+
+update invoice linkage through canonical service.
+
+If invoice is:
+
+FINALIZED / PAID
+
+DO NOT silently change it.
+
+DO NOT:
+
+UPDATE invoice amount
+DELETE invoice item
+CREATE fake invoice item
+CREATE duplicate invoice
+change accounting directly
+
+Instead:
+
+FAIL CLOSED with explicit correction-required status.
+
+If existing correction mechanism exists:
+
+reuse it.
+
+If no correction mechanism exists:
+
+document:
+
+INVOICE_CORRECTION_REQUIRED
+
+Do not invent financial history.
+
+============================================================
+13. EVENT BILLING
+============================================================
+
+Event invoice/payment must follow existing payerType.
+
+Personal Event:
+
+direct payment if current contract requires it.
+
+Corporate Event:
+
+company invoice.
+
+Do not assume Event always means direct payment.
+
+Use payerType as canonical source.
+
+============================================================
+14. TAX
+============================================================
+
+Do not change the existing Sport Center tax contract.
+
+Current contract:
+
+price includes PPN.
+
+Verify any newly generated invoice uses the existing tax helper.
+
+Do not rewrite historical tax transactions.
+
+Do not duplicate tax transactions on reschedule.
+
+============================================================
+15. ACCOUNTING SAFETY
+============================================================
+
+Reschedule must NOT create:
+
+- duplicate payment
+- duplicate journal
+- duplicate journal lines
+- duplicate invoice
+- duplicate tax
+
+Corporate invoice payment uses existing accounting path.
+
+Event payment uses existing accounting path.
+
+Do not insert journals directly.
+
+============================================================
+16. CENTRAL FINANCE
+============================================================
+
+Central Finance must remain:
+
+UNCHANGED / SAFE.
+
+Do not enable old workers.
+
+Do not create backfill.
+
+Do not manually post Central Finance.
+
+Do not change finance mode.
+
+After implementation verify:
+
+NO unauthorized Central Finance mutation.
+
+============================================================
+17. REGRESSION TESTS
+============================================================
+
+Add dedicated tests for ALL of these.
+
+CORPORATE:
+
+1. create subscription
+2. generate weekly occurrence
+3. generation is idempotent
+4. stop subscription
+5. stopped subscription creates no new occurrence
+6. existing future bookings preserved
+7. corporate occurrence uses payerType=company
+8. corporate occurrence does not require direct payment
+9. corporate occurrence billing status starts unbilled
+
+EVENT:
+
+10. create event
+11. event is fixed schedule
+12. event does not auto-repeat
+13. event check-in required
+14. event proof required
+15. event cannot complete without check-in
+16. event cannot complete without proof
+
+RESCHEDULE:
+
+17. request Corporate reschedule
+18. approve Corporate reschedule
+19. master subscription remains unchanged
+20. original occurrence becomes rescheduled
+21. replacement occurrence is deterministic
+22. Event reschedule works
+23. original Event schedule remains in history
+24. replacement schedule becomes active
+25. check-in uses replacement occurrence
+26. invoice uses replacement occurrence
+27. no duplicate invoice item
+
+CONCURRENCY:
+
+28. concurrent reschedule approval cannot double-book
+29. concurrent booking cannot occupy same facility/time
+30. blocked schedule is checked inside approval transaction
+
+FINANCIAL:
+
+31. reschedule does not duplicate payment
+32. reschedule does not duplicate journal
+33. reschedule does not duplicate tax
+34. finalized invoice fails closed if correction mechanism unavailable
+
+SECURITY:
+
+35. unauthorized user cannot approve reschedule
+36. unauthorized user cannot check-in
+37. unauthorized user cannot upload proof
+38. unauthorized user cannot stop subscription
+
+Run focused tests first.
+
+Then run full suite.
+
+============================================================
+18. TYPECHECK / BUILD
+============================================================
+
+Run:
+
+pnpm --filter @workspace/api-server run typecheck
+
+pnpm --filter @workspace/api-server run test
+
+pnpm --filter @workspace/api-server run build
+
+pnpm --filter @workspace/scripts run typecheck
+
+git diff --check
+
+All current tests must continue passing.
+
+============================================================
+19. DEV MIGRATION
+============================================================
+
+Before Production:
+
+- validate migration in DEV
+- inspect generated SQL
+- verify no destructive statements
+- verify no historical financial rewrite
+- verify new constraints/indexes
+- verify rollback strategy if applicable
+
+Run migration in DEV.
+
+Verify:
+
+corporate subscription
+occurrence
+event
+usage proof
+reschedule
+
+Do not run Production migration yet if DEV migration fails.
+
+============================================================
+20. PRODUCTION MIGRATION READINESS
+============================================================
+
+Only after DEV migration PASS:
+
+Inspect Production schema read-only.
+
+Confirm required tables/columns/indexes do not already conflict.
+
+Prepare Production migration.
+
+Do not automatically run destructive migration.
+
+Production migration must be:
+
+- additive
+- backward compatible
+- minimal
+- no financial historical rewrite
+
+============================================================
+21. PRODUCTION DEPLOYMENT
+============================================================
+
+After all tests PASS:
+
+Deploy using the existing Production deployment mechanism.
+
+Do not change:
+
+- GCP architecture
+- Secret Manager architecture
+- Supabase architecture
+- Central Finance architecture
+
+Production domain:
+
+https://sc.travelintrips.co.id
+
+After deployment verify:
+
+homepage
+health
+facilities
+admin
+corporate subscription
+event
+payment page
+invoice page
+
+Do not create real financial transactions.
+
+============================================================
+22. PRODUCTION READ-ONLY AUDIT
+============================================================
+
+After deployment:
+
+use:
+
+sport_center_production_auditor
+
+Connection:
+
+SUPABASE_PROD_AUDIT_DATABASE_URL
+
+Handshake:
+
+BEGIN;
+
+SET TRANSACTION READ ONLY;
+
+SHOW transaction_read_only;
+
+Must return:
+
+on
+
+Verify:
+
+current_user = sport_center_production_auditor
+
+Then audit:
+
+sport_bookings
+sport_payments
+booking_history
+company_invoices
+company_invoice_items
+payment_accounting_outbox
+accounting_journals
+accounting_journal_lines
+tax_transactions
+bank_mutations
+bank_reconciliation_matches
+central_finance_processing
+
+No mutations.
+
+Finish:
+
+ROLLBACK;
+
+============================================================
+23. PRODUCTION SMOKE TEST
+============================================================
+
+Verify:
+
+https://sc.travelintrips.co.id
+
+- homepage
+- health
+- facilities
+- settings
+- promos
+- API health
+
+For protected endpoints:
+
+401 without credentials is expected.
+
+Do not weaken authentication.
+
+Admin authenticated UI should be verified through safe existing test/dev
+authentication where Production credentials are not appropriate.
+
+============================================================
+24. FINAL REPORT
+============================================================
+
+Create:
+
+SPORT_CENTER_CORPORATE_EVENT_RESCHEDULE_IMPLEMENTATION_REPORT.md
+
+Update:
+
+SPORT_CENTER_CORPORATE_EVENT_RESCHEDULE_AUDIT.md
+
+Report:
+
+IMPLEMENTED
+FILES CHANGED
+MIGRATIONS
+API
+FRONTEND
+DATABASE
+BUSINESS RULES
+TESTS
+TYPECHECK
+BUILD
+DEV VERIFICATION
+PRODUCTION VERIFICATION
+ACCOUNTING SAFETY
+CENTRAL FINANCE SAFETY
+PRODUCTION MUTATION
+
+============================================================
+25. FINAL STATUS
+============================================================
+
+Use exact status:
+
+Corporate Subscription:
+PASS / PARTIAL / BLOCKED
+
+Weekly Occurrence:
+PASS / PARTIAL / BLOCKED
+
+Stop Subscription:
+PASS / PARTIAL / BLOCKED
+
+Event:
+PASS / PARTIAL / BLOCKED
+
+Check-in:
+PASS / PARTIAL / BLOCKED
+
+Usage Proof:
+PASS / PARTIAL / BLOCKED
+
+Corporate Reschedule:
+PASS / PARTIAL / BLOCKED
+
+Event Reschedule:
+PASS / PARTIAL / BLOCKED
+
+Conflict Safety:
+PASS / PARTIAL / BLOCKED
+
+Invoice after Reschedule:
+PASS / PARTIAL / BLOCKED
+
+Accounting:
+PASS / PARTIAL / BLOCKED
+
+Central Finance:
+PASS / UNCHANGED / BLOCKED
+
+Production:
+PASS / BLOCKED
+
+============================================================
+FINAL CLOSURE CONDITION
+============================================================
+
+Only declare FINALIZED if:
+
+- Event admin flow PASS
+- Event check-in PASS
+- Mandatory proof PASS
+- Corporate reschedule PASS
+- Event reschedule PASS
+- Replacement occurrence PASS
+- Concurrency safety PASS
+- Invoice behavior PASS or explicit safe fail-closed contract
+- Dedicated regression tests PASS
+- Full tests PASS
+- Typecheck PASS
+- Build PASS
+- DEV migration PASS
+- Production migration PASS if required
+- Production smoke PASS
+- Production read-only audit PASS
+- Accounting PASS
+- Central Finance PASS/UNCHANGED
+- Production mutation NONE
+
+If any condition cannot be proven:
+
+DO NOT CLAIM FINALIZED.
+
+Identify the exact blocker.
+
+Do not hide failures.
+
+Do not fabricate historical corrections.
+
+Do not create duplicate payment/invoice/journal.
+
+Do not weaken authentication.
+
+Do not mutate Production financial data for testing.
+
+Continue automatically through every safe step.

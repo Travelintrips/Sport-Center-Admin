@@ -164,6 +164,31 @@ router.post("/events", adminMiddleware, async (req, res) => {
     const [facility] = await db.select({ id: facilitiesTable.id }).from(facilitiesTable)
       .where(and(eq(facilitiesTable.id, Number(facilityId)), eq(facilitiesTable.isActive, true))).limit(1);
     if (!facility) { res.status(404).json({ error: "Fasilitas tidak ditemukan" }); return; }
+    if (payerType === "company") {
+      const [company] = await db.select({ id: usersTable.id }).from(usersTable)
+        .where(and(eq(usersTable.id, Number(companyCustomerId)), eq(usersTable.accountType, "company"))).limit(1);
+      if (!company) { res.status(404).json({ error: "Perusahaan tidak ditemukan" }); return; }
+    }
+    const existingBookings = await db.select({
+      id: bookingsTable.id,
+      startTime: bookingsTable.startTime,
+      endTime: bookingsTable.endTime,
+      status: bookingsTable.status,
+    }).from(bookingsTable).where(and(
+      eq(bookingsTable.facilityId, Number(facilityId)),
+      eq(bookingsTable.bookingDate, String(bookingDate)),
+    ));
+    const activeStatuses = ["cancelled", "expired", "rejected", "refunded"];
+    const startMinutes = timeToMinutes(String(startTime));
+    const endMinutes = timeToMinutes(String(endTime));
+    if (existingBookings.some((booking) =>
+      !activeStatuses.includes(booking.status) &&
+      startMinutes < timeToMinutes(booking.endTime) &&
+      endMinutes > timeToMinutes(booking.startTime),
+    )) {
+      res.status(409).json({ error: "Slot event sudah digunakan. Pilih tanggal atau waktu lain." });
+      return;
+    }
     const orderNumber = `EVENT-${Date.now()}-${randomUUID().slice(0, 6).toUpperCase()}`;
     const actor = getUserFromReq(req);
     const [event] = await db.insert(bookingsTable).values({
@@ -187,6 +212,13 @@ router.post("/events", adminMiddleware, async (req, res) => {
 router.get("/events", adminMiddleware, async (req, res) => {
   const rows = await db.select().from(bookingsTable).where(eq(bookingsTable.bookingType, "event"));
   res.json(rows);
+});
+
+router.get("/bookings/:id/usage-proof", adminMiddleware, async (req, res) => {
+  const bookingId = Number(req.params.id);
+  if (!Number.isInteger(bookingId)) { res.status(400).json({ error: "ID booking tidak valid" }); return; }
+  const proofs = await db.select().from(usageProofsTable).where(eq(usageProofsTable.bookingId, bookingId));
+  res.json(proofs);
 });
 
 router.post("/bookings/:id/usage-proof", adminMiddleware, upload.single("photo"), async (req, res) => {

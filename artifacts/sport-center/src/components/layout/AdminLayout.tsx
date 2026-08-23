@@ -50,6 +50,7 @@ const NAV_GROUPS = [
     items: [
       { href: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard },
       { href: "/admin/bookings", label: "Pemesanan", icon: CalendarDays },
+      { href: "/admin/events", label: "Event", icon: CalendarDays },
       { href: "/admin/wa-bookings", label: "WA Booking", icon: MessageSquare },
       { href: "/admin/wa-ai", label: "AI WA Assistant", icon: Bot },
       { href: "/admin/calendar", label: "Kalender", icon: Calendar },

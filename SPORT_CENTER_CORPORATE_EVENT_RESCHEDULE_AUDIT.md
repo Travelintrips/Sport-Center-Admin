@@ -598,3 +598,35 @@ NO DEPLOYMENT           = PASS
 ```
 
 The audit is complete. Implementation is not authorized by this phase and must remain separate from this report.
+
+## 25. Implementation Addendum — 23 August 2026
+
+The follow-up implementation phase authorized safe, minimal changes. The following gaps are now addressed:
+
+- corporate subscription master, occurrence generation, stop flow, and corporate billing are implemented;
+- Event admin UI is available at `/admin/events`;
+- Event creation validates facility/date/time conflicts and company payers;
+- Event detail exposes booking, billing, check-in, proof, and history state;
+- Event check-in reuses the shared booking lifecycle;
+- Event usage proof reuses `usage_proofs` and Supabase Storage;
+- Event completion remains backend-guarded and requires check-in plus usage proof;
+- protected Event/subscription/proof endpoints reject unauthenticated requests.
+
+The existing reschedule implementation remains the canonical same-booking occurrence model. It now performs facility locking and blocked-schedule rechecks inside the approval transaction. A separate replacement-occurrence table was intentionally not introduced because it would require a new billing/invoice contract and could alter historical financial meaning. The original schedule remains represented in booking history/audit evidence.
+
+Development startup migrations completed successfully against the isolated development database. No Production migration or financial mutation was performed.
+
+Focused and full verification completed:
+
+```text
+API suites       = 18 passed
+API tests        = 116 passed
+API typecheck    = PASS
+API build        = PASS
+Web typecheck    = PASS
+Web build        = PASS
+Scripts typecheck= PASS
+git diff --check = PASS
+```
+
+See `SPORT_CENTER_CORPORATE_EVENT_RESCHEDULE_IMPLEMENTATION_REPORT.md` for the implementation details and remaining Production gates.
