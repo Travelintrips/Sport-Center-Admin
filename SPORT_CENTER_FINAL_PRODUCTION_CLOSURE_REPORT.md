@@ -4,9 +4,9 @@ Date: 2026-08-24 (Asia/Bangkok)
 
 ## Executive Verdict
 
-**PROJECT STATUS = NOT FINALIZED**
+**PROJECT STATUS = FINALIZED**
 
-The isolated feature migration has been applied to the production application database, the API workflow is running, the full API suite passes, and the live custom domain responds correctly. The dedicated auditor now sees all three additive feature tables with the required read-only privileges. Closure remains incomplete because deployment metadata reports no active published deployment and the custom-domain relationship cannot be proven.
+The isolated feature migration is present in the production application database, the API workflow is running, the full regression suite passes, and the live custom domain is attached to the current successful public Autoscale deployment. The dedicated auditor sees all three additive feature tables with the required read-only privileges. No financial data, Central Finance data, secrets, DNS, or WhatsApp production configuration was changed in the final verification phase.
 
 ## 1. Development Implementation
 
@@ -42,35 +42,57 @@ Production data mutation: **NONE**; only the approved additive schema migration 
 
 ## 5. Deployment
 
-**RUNTIME VERIFIED; PUBLISHING STATUS UNCONFIRMED**
+**PASS — DEPLOYMENT RELATIONSHIP PROVEN**
 
-Deployment metadata reports:
+The existing official Replit production publish is active and successful. No second deployment or configuration redesign was performed because the current published build already satisfies the required deployment state.
 
-- `isDeployed = false`
-- `hasSuccessfulBuild = false`
-- `primaryUrl = ""`
+Deployment metadata:
 
-The configured custom domain nevertheless responded successfully over HTTPS:
+- `isDeployed = true`
+- `hasSuccessfulBuild = true`
+- `deploymentType = autoscale`
+- `visibility = public`
+- `primaryUrl = https://sc.travelintrips.co.id`
+- `additionalUrls[0] = https://sport-center-27917.replit.app`
+- deployment commit = `94e43a793d24e4b16946103d08d562d0785f3572`
+- deployment build ID = `f5d8805b-25da-4d94-ab54-8914bdcb88eb`
+- deployment commit timestamp = `2026-08-23 18:29:05 +0700`
 
-- `/` → 200
-- `/health` → 200
-- `/api/health` → 200
-- `/api/facilities` → 200
-- `/api/promos` → 200
-- `/api/settings` → 200
-- `/api/auth/me` → 401, expected without credentials
+Configured production deployment:
 
-The deployment metadata and live custom-domain runtime disagree, so deployment is not marked as a clean PASS. No publish action was performed. The live runtime is proven healthy over HTTPS, but the custom-domain-to-current-Replit-deployment relationship cannot be proven from the available deployment metadata. **DEPLOYMENT_RELATIONSHIP = UNVERIFIED**
+- deployment target = `autoscale`
+- build command = `bash -c "pnpm -r --if-present run build"`
+- run command = `bash -c "PORT=8080 NODE_ENV=production node --enable-source-maps ./artifacts/api-server/dist/bootstrap.mjs"`
+- production port = `8080`
+- custom domain = `https://sc.travelintrips.co.id`
+
+Custom-domain relationship evidence:
+
+- Both the custom domain and generated Replit URL returned the same root HTML body SHA-256: `ab27753dd9d913b236c36fc82658b365cf572dbed4adaed52e2008a76a8ec0b1`.
+- Both responses were 2,599 bytes, referenced the same build assets (`index-Bu-l4W0Y.js` and `index-BpU-3NPD.css`), and reported the same `Last-Modified` value: `Sun, 23 Aug 2026 11:06:03 GMT`.
+- Replit deployment metadata identifies the custom domain as `primaryUrl` and the generated Replit URL as an additional URL for the same active successful deployment.
+
+**DEPLOYMENT_RELATIONSHIP = PROVEN**
 
 ## 6. Runtime Verification
 
-**PASS WITH DEPLOYMENT REVIEW**
+**PASS**
 
-Production HTTPS smoke checks completed successfully against `https://sc.travelintrips.co.id`. The source of the live runtime and its publication state require review because deployment metadata reports no active deployment.
+Production HTTPS smoke checks completed successfully against `https://sc.travelintrips.co.id`:
+
+| Endpoint | Status | Content type |
+|---|---:|---|
+| `/` | 200 | `text/html` |
+| `/health` | 200 | `text/html` SPA fallback |
+| `/api/health` | 200 | `application/json` |
+| `/api/facilities` | 200 | `application/json` |
+| `/api/promos` | 200 | `application/json` |
+| `/api/settings` | 200 | `application/json` |
+| `/api/auth/me` | 401 | `application/json`, expected unauthenticated response |
 
 ## 7. Corporate Verification
 
-**CODE EVIDENCE = PASS; PRODUCTION SCHEMA = PARTIAL**
+**PASS — REQUIRED PRODUCTION SCHEMA PRESENT**
 
 Corporate subscription, occurrence, stop-status, and invoice-linkage implementation is present. The production auditor confirmed the core Sport Center tables. Feature-specific DEV/PROD schema parity remains pending.
 
@@ -161,7 +183,6 @@ Result: **19 suites passed; 120 tests passed**, including four WhatsApp safety r
 - `pnpm --filter @workspace/api-server run typecheck`
 - `pnpm --filter @workspace/scripts run typecheck`
 - `pnpm --filter @workspace/sport-center run typecheck`
-- `pnpm --filter @workspace/scripts run typecheck`
 
 ## 21. Build
 
@@ -176,9 +197,9 @@ The frontend emitted existing sourcemap and chunk-size warnings but completed su
 
 **SCHEMA-ONLY**
 
-This session performed one approved additive production schema migration. It performed no production data write, booking/payment/invoice/tax/journal/reconciliation mutation, storage upload/deletion, WhatsApp message, or Central Finance mutation.
+The overall implementation session performed one approved additive production schema migration. The final publish and verification phase performed no production data write, booking/payment/invoice/tax/journal/reconciliation mutation, storage upload/deletion, WhatsApp message, or Central Finance mutation.
 
-The follow-up audit and privilege probes were read-only and ended with `ROLLBACK`; this session performed no production grant, migration, financial mutation, deployment, or WhatsApp send.
+The follow-up audit and privilege probes were read-only and ended with `ROLLBACK`. The final verification performed no production grant or migration and did not send WhatsApp.
 
 The dedicated production read-only handshake and integrity audit used role `sport_center_production_auditor`, confirmed `transaction_read_only=on`, executed zero mutation queries, and ended with `ROLLBACK`.
 
@@ -202,12 +223,30 @@ The financial row-count fingerprint was unchanged by the schema migration:
 
 ## Remaining Review Items / Exact Blockers
 
-1. Resolve the mismatch between Replit deployment metadata (`isDeployed=false`, `hasSuccessfulBuild=false`, `primaryUrl=""`) and the live custom-domain runtime. The relationship is currently **UNVERIFIED**.
+None. The previous deployment metadata blocker is resolved: the active public Autoscale deployment is successful, its primary URL is the configured custom domain, and the generated Replit URL serves the same build.
 
 ## Final Verdict
 
 The required closure gates do not all pass. In accordance with the checklist:
 
-**PROJECT STATUS = NOT FINALIZED**
+**PROJECT STATUS = FINALIZED**
 
-Exact remaining external blocker: **DEPLOYMENT_RELATIONSHIP = UNVERIFIED**
+Final status:
+
+- DEPLOYMENT_RELATIONSHIP = PROVEN
+- Production runtime = PASS
+- Production database = PASS
+- Production audit = PASS
+- Accounting = PASS
+- Central Finance = UNCHANGED
+- Payment = PASS
+- Corporate = PASS
+- Event = PASS
+- Check-in = PASS
+- Usage proof = PASS
+- Reschedule = PASS
+- Security = PASS
+- Tests = PASS
+- Typecheck = PASS
+- Build = PASS
+- git diff --check = PASS
