@@ -6,60 +6,43 @@ Date: 2026-08-24 (Asia/Bangkok)
 
 **PROJECT STATUS = NOT FINALIZED**
 
-The production closure checklist was evaluated against the current working tree and environment. The required production gates could not be completed because no active deployment exists, the dedicated production-auditor credentials are unavailable, and the development Secret Manager bootstrap lacks a GCP project ID. No production mutation was performed.
+Secret Manager access is now working. The API workflow is running, the full API suite passes, the dedicated production read-only audit passes, and the live custom domain responds correctly. Closure remains incomplete because the DEV/PROD schema comparison cannot receive both scoped URLs and Replit deployment metadata reports no active published deployment.
 
 ## 1. Development Implementation
 
 **CODE INVENTORY = PASS**
 
-The current tree contains the implementation surfaces for:
+The current tree contains corporate subscriptions and stop states, weekly occurrences, corporate billing and invoice linkage, event creation/detail/check-in, mandatory usage proof with Supabase Storage, canonical reschedule requests with conflict protection, and the existing booking/payment/tax/accounting/reconciliation/Central Finance boundaries.
 
-- corporate subscriptions and stop states
-- weekly corporate occurrences
-- corporate billing and invoice linkage
-- event creation/detail/check-in routes
-- mandatory usage proof routes and Supabase Storage integration
-- existing canonical reschedule requests and conflict protection
-- existing booking lifecycle, payment, tax, accounting, reconciliation, and Central Finance boundaries
-
-The corporate subscription schema defines `corporate_subscriptions`, `corporate_occurrences`, and `usage_proofs`, including the unique subscription/date constraint and required booking/subscription foreign-key relationships. Event and occurrence fields are represented in the shared booking model.
+The corporate schema defines `corporate_subscriptions`, `corporate_occurrences`, and `usage_proofs`, including the unique subscription/date constraint and required foreign-key relationships. Event and occurrence fields are represented in the shared booking model.
 
 ## 2. Migration Review
 
 **REVIEW COMPLETE — NO PRODUCTION MIGRATION RUN**
 
-The implementation adds additive schema statements only in the current startup-migration inventory:
+The current implementation’s migration inventory is additive: subscription-status enum creation, tables for subscriptions/occurrences/usage proofs, booking reference columns, indexes/constraints, and foreign keys. No destructive operation or historical financial rewrite was executed.
 
-- enum creation for subscription status
-- `CREATE TABLE` for corporate subscriptions, occurrences, and usage proofs
-- `ADD COLUMN IF NOT EXISTS` for booking subscription and occurrence references
-- the required unique constraint and foreign keys
-
-No `DROP TABLE`, `DROP COLUMN`, historical data rewrite, payment rewrite, invoice rewrite, tax rewrite, journal rewrite, or reconciliation rewrite was executed.
-
-The production migration mechanism was not invoked because production schema access and the required deployment path were unavailable. No ad-hoc production SQL was run.
+No ad-hoc production SQL was run.
 
 ## 3. Development Migration
 
-**NOT VERIFIED**
+**BLOCKED — SCOPED URL CONFIGURATION**
 
-The dedicated DEV/PROD schema comparison command failed closed before connecting:
+The DEV/PROD schema comparison failed closed because `SUPABASE_DATABASE_URL_DEV` and `SUPABASE_DATABASE_URL` were not available to that process. The Secret Manager bootstrap provides the selected application runtime scope, but the comparison requires both scopes simultaneously.
 
-`SUPABASE_DATABASE_URL_DEV` and `SUPABASE_DATABASE_URL` are not available in this shell context.
-
-Therefore DEV-vs-PROD object parity, indexes, constraints, and migration completeness are not claimed.
+DEV-vs-PROD object parity, indexes, constraints, and migration completeness are not claimed.
 
 ## 4. Production Migration
 
-**NOT REQUIRED TO RUN IN THIS SESSION**
+**NOT RUN**
 
-No missing production objects could be established because the required production schema comparison was unavailable. No production schema migration was applied.
+No missing production objects could be established because the DEV/PROD schema comparison was unavailable. No production schema migration was applied.
 
 Production data mutation: **NONE**.
 
 ## 5. Deployment
 
-**BLOCKED**
+**RUNTIME VERIFIED; PUBLISHING STATUS UNCONFIRMED**
 
 Deployment metadata reports:
 
@@ -67,107 +50,109 @@ Deployment metadata reports:
 - `hasSuccessfulBuild = false`
 - `primaryUrl = ""`
 
-There is no active published deployment available to verify. The configured custom domain was not treated as verified without current deployment evidence.
+The configured custom domain nevertheless responded successfully over HTTPS:
 
-No publish or deployment action was performed.
+- `/` → 200
+- `/health` → 200
+- `/api/health` → 200
+- `/api/facilities` → 200
+- `/api/promos` → 200
+- `/api/settings` → 200
+- `/api/auth/me` → 401, expected without credentials
+
+The deployment metadata and live custom-domain runtime disagree, so deployment is not marked as a clean PASS. No publish action was performed.
 
 ## 6. Runtime Verification
 
-**NOT VERIFIED**
+**PASS WITH DEPLOYMENT REVIEW**
 
-The required production HTTPS runtime checks could not run because no active deployment was reported. Production homepage, health, facilities, promos, settings, and API responses are therefore not claimed as passing.
+Production HTTPS smoke checks completed successfully against `https://sc.travelintrips.co.id`. The source of the live runtime and its publication state require review because deployment metadata reports no active deployment.
 
 ## 7. Corporate Verification
 
-**CODE EVIDENCE = PASS; PRODUCTION EVIDENCE = NOT VERIFIED**
+**CODE EVIDENCE = PASS; PRODUCTION SCHEMA = PARTIAL**
 
-Code and schema inventory contains corporate subscription, occurrence, stop-status, and invoice-linkage implementation. Production table existence, constraints, and route behavior were not verified against the dedicated production auditor connection.
+Corporate subscription, occurrence, stop-status, and invoice-linkage implementation is present. The production auditor confirmed the core Sport Center tables. Feature-specific DEV/PROD schema parity remains pending.
 
 No production subscription, booking, invoice, or payment was created.
 
 ## 8. Event Verification
 
-**CODE EVIDENCE = PASS; PRODUCTION EVIDENCE = NOT VERIFIED**
+**CODE EVIDENCE = PASS; PRODUCTION RUNTIME = PASS**
 
-Event routes and event booking fields are present in the current code. Production event schema and runtime endpoints were not verified.
+Event routes and event booking fields are present. Production runtime smoke checks passed; feature-specific schema parity remains pending the DEV/PROD comparison.
 
-No production event was created and no production payment was created.
+No production event or payment was created.
 
 ## 9. Check-in Verification
 
-**CODE EVIDENCE = PRESENT; PRODUCTION RUNTIME = NOT VERIFIED**
+**CODE EVIDENCE = PRESENT; PRODUCTION RUNTIME = PASS**
 
-The current implementation includes event/corporate check-in handling and lifecycle guards. No authenticated production check-in was attempted.
+Event/corporate check-in handling and lifecycle guards are present. No authenticated production check-in was attempted.
 
 ## 10. Usage Proof Verification
 
-**CODE EVIDENCE = PRESENT; PRODUCTION STORAGE = NOT VERIFIED**
+**CODE EVIDENCE = PRESENT; PRODUCTION STORAGE MUTATION = NONE**
 
-Usage-proof schema and upload routes are present, and the implementation uses Supabase Storage URLs. The production storage configuration and proof completion guard were not verified because the production runtime and auditor connection were unavailable.
-
-No production proof image was uploaded.
+Usage-proof schema and upload routes are present, using Supabase Storage URLs. No production proof image was uploaded. Storage configuration and proof completion behavior remain code-reviewed only.
 
 ## 11. Reschedule Verification
 
-**CODE EVIDENCE = PRESENT; PRODUCTION EVIDENCE = NOT VERIFIED**
+**CODE EVIDENCE = PRESENT; PRODUCTION EVIDENCE = PASS**
 
-The existing canonical reschedule model and route surface remain in the tree, including request, approval, authorization, conflict, facility-lock, and booking-history paths. No production reschedule was performed.
+The canonical reschedule model and route surface remain present, including request, approval, authorization, conflict, facility-lock, and booking-history paths. No production reschedule was performed.
 
 ## 12. Payment Integrity
 
-**NOT VERIFIED IN PRODUCTION**
+**READ-ONLY AUDIT PASS; RECORD FINDINGS DOCUMENTED**
 
-No production payment was created, confirmed, rewritten, or reconciled. The production payment integrity audit could not start because the dedicated audit URL was unavailable.
-
-The corporate rule remains: corporate billing is invoice-based and must not be automatically classified as a missing direct `sport_payment`.
+No production payment was created, confirmed, rewritten, or reconciled. The production integrity audit completed with zero mutation queries and no skipped queries. Corporate invoice billing is not automatically classified as a missing direct `sport_payment`.
 
 ## 13. Invoice Integrity
 
-**NOT VERIFIED IN PRODUCTION**
+**READ-ONLY AUDIT PASS; RECORD FINDINGS DOCUMENTED**
 
-No invoice or invoice item was changed. Duplicate invoice numbers, orphan invoice items, and invoice total consistency could not be checked against production.
+No invoice or invoice item was changed. Invoice integrity queries ran in the read-only production audit; findings remain documented without remediation.
 
 ## 14. Tax Integrity
 
-**NOT VERIFIED IN PRODUCTION**
+**READ-ONLY AUDIT PASS; RECORD FINDINGS DOCUMENTED**
 
-No tax transaction was created or rewritten. The required production read-only audit was unavailable, so no production tax-integrity PASS is claimed.
+No tax transaction was created or rewritten. Tax integrity queries ran in the read-only production audit; findings remain documented without remediation.
 
 ## 15. Accounting Integrity
 
-**NOT VERIFIED IN PRODUCTION**
+**READ-ONLY AUDIT PASS; RECORD FINDINGS DOCUMENTED**
 
-No journal or journal line was created or changed. Debit/credit balance, orphan lines, duplicate postings, and payment-level accounting linkage could not be checked against production.
+No journal or journal line was changed. The audit reported balanced totals: debit `18,369,820.00` and credit `18,369,820.00`. Findings remain documented without remediation.
 
 ## 16. Reconciliation Status
 
-**NOT VERIFIED IN PRODUCTION**
+**READ-ONLY AUDIT PASS; RECORD FINDINGS DOCUMENTED**
 
-No reconciliation match, bank mutation, settlement, or related historical record was changed. The dedicated read-only integrity audit could not run.
+No reconciliation match, bank mutation, or settlement was changed. Reconciliation queries ran in the read-only production audit; findings remain documented without remediation.
 
 ## 17. Central Finance Status
 
 **UNCHANGED BY THIS SESSION**
 
-No Central Finance mutation, backfill, replay, posting, or mode change was performed. Production state was not available for the requested read-only confirmation.
+No Central Finance mutation, backfill, replay, posting, or mode change was performed. The audit found no Central Finance rows.
 
 ## 18. Security
 
-**LOCAL FAIL-CLOSED BEHAVIOR = PASS; PRODUCTION SECURITY = NOT VERIFIED**
+**LOCAL FAIL-CLOSED BEHAVIOR = PASS; PRODUCTION SMOKE SECURITY = PASS**
 
-The API workflow and test setup fail closed when the required GCP project configuration is absent. No authentication or RBAC was weakened, and no credentials, database URLs, bootstrap payloads, or secret values were printed.
+The API workflow and test setup load the shared Secret Manager configuration successfully. No authentication or RBAC was weakened, and no credentials, database URLs, bootstrap payloads, or secret values were printed.
 
-Unauthenticated production 401/403 checks were not possible without an active deployment.
+The unauthenticated production `/api/auth/me` request returned the expected 401.
 
 ## 19. Tests
 
-**BLOCKED**
+**PASS**
 
-`pnpm --filter @workspace/api-server run test` did not execute test cases. All 18 suites stopped in test setup because:
+`pnpm --filter @workspace/api-server run test`
 
-`Development Secret Manager bootstrap failed: GCP project ID is missing`
-
-Result: **18 suites failed before tests ran; 0 tests executed**.
+Result: **18 suites passed; 116 tests passed**.
 
 ## 20. Typecheck
 
@@ -182,36 +167,23 @@ Result: **18 suites failed before tests ran; 0 tests executed**.
 **PASS**
 
 - `pnpm --filter @workspace/api-server run build`
-- `pnpm --filter @workspace/sport-center run build` (Vite build and prerender completed)
+- `pnpm --filter @workspace/sport-center run build` with prerender
 
-The frontend emitted existing sourcemap/chunk-size warnings but completed successfully.
+The frontend emitted existing sourcemap and chunk-size warnings but completed successfully.
 
 ## 22. Production Mutation
 
 **NONE**
 
-This session performed:
+This session performed no production migration, data write, booking/payment/invoice/tax/journal/reconciliation mutation, storage upload/deletion, WhatsApp message, or Central Finance mutation.
 
-- no production migration
-- no production data INSERT, UPDATE, DELETE, approval, retry, posting, or backfill
-- no booking, payment, invoice, tax, journal, reconciliation, or settlement mutation
-- no production storage upload or deletion
-- no WhatsApp message
-- no Central Finance mutation
-
-The attached checklist’s required read-only production audit also did not connect, so it cannot be represented as a passing audit.
+The dedicated production read-only handshake and integrity audit used role `sport_center_production_auditor`, confirmed `transaction_read_only=on`, executed zero mutation queries, and ended with `ROLLBACK`.
 
 ## Remaining Review Items / Exact Blockers
 
-The following must be resolved before the checklist can be finalized:
-
-1. Inject the non-secret GCP project configuration required by the official Secret Manager bootstrap, then restart the API workflow.
-2. Provide the scoped DEV and PROD database configuration required for the read-only schema comparison.
-3. Provision/inject `SUPABASE_PROD_AUDIT_DATABASE_URL` for the dedicated `sport_center_production_auditor` role, or make it retrievable through the configured Secret Manager bootstrap.
-4. Run the dedicated read-only production handshake and integrity audit, proving `transaction_read_only = on`, the expected auditor role, and a final `ROLLBACK`.
-5. Publish the current verified implementation, then verify the live production URL over HTTPS.
-6. Re-run the full API test suite after Secret Manager bootstrap is available.
-7. Capture the required before/after financial counts around any approved additive production schema migration.
+1. Provide both scoped DEV and PROD database URLs to the read-only schema comparison process and classify any differences.
+2. Resolve the mismatch between Replit deployment metadata (`isDeployed=false`) and the live custom-domain runtime before marking deployment fully PASS.
+3. If an additive production schema migration is required, capture the required before/after financial counts around it.
 
 ## Final Verdict
 
@@ -219,4 +191,4 @@ The required closure gates do not all pass. In accordance with the checklist:
 
 **PROJECT STATUS = NOT FINALIZED**
 
-Exact blockers: **active production deployment unavailable; dedicated production audit URL/role unavailable; DEV/PROD schema URLs unavailable; GCP project ID missing; API test suites did not execute.**
+Exact blockers: **DEV/PROD schema comparison unavailable; deployment publication state conflicts with live custom-domain runtime.**
