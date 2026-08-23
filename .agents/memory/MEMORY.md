@@ -77,4 +77,5 @@
 - [Production audit runner](production-audit-runner.md) — isolate optional-query failures with savepoints so final read-only fingerprints remain valid.
 - [Canonical settlement companies](canonical-company-settlement.md) — settlement company IDs come from active public Supabase companies, not Sport Center user identities.
 - [Development migration ordering](startup-migration-order.md) — start the development scheduler only after background schema migrations and seed complete.
+- [Production auditor schema visibility](production-auditor-schema-visibility.md) — primary and auditor connections can show different schema state; resolve target/replica visibility before declaring a migration verified.
 
