@@ -2564,6 +2564,7 @@ export default function AdminBookings() {
         const q = search.toLowerCase();
         return (
           b.customerName?.toLowerCase().includes(q) ||
+          b.companyName?.toLowerCase().includes(q) ||
           b.orderNumber?.toLowerCase().includes(q) ||
           b.facilityName?.toLowerCase().includes(q) ||
           b.customerPhone?.toLowerCase().includes(q)
