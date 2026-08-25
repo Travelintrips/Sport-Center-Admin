@@ -4,11 +4,7 @@ modules = ["nodejs-20", "web", "python-base-3.13", "postgresql-16"]
 [deployment]
 router = "application"
 deploymentTarget = "autoscale"
-run = [
-  "bash",
-  "-c",
-  "PORT=8080 NODE_ENV=production GCP_SECRET_ID=sport-center node --enable-source-maps ./artifacts/api-server/dist/bootstrap.mjs",
-]
+run = ["env", "PORT=8080", "NODE_ENV=production", "GCP_SECRET_ID=sport-center", "node", "--enable-source-maps", "./artifacts/api-server/dist/bootstrap.mjs"]
 build = ["bash", "-c", "pnpm -r --if-present run build"]
 
 [deployment.postBuild]
