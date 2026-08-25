@@ -1,0 +1,491 @@
+FINAL PRODUCTION AUDIT — SPORT CENTER
+READ-ONLY ONLY
+
+Tujuan:
+Membuktikan production infrastructure dan kemudian mengaudit seluruh transaksi production tanpa mengubah data.
+
+JANGAN menggunakan DEV sebagai PROD.
+JANGAN melakukan INSERT/UPDATE/DELETE.
+JANGAN migration.
+JANGAN repair.
+JANGAN membuat journal.
+JANGAN mengubah settlement/reconciliation.
+
+==================================================
+A. PRODUCTION BOOTSTRAP
+==================================================
+
+Gunakan:
+
+GCP_SECRET_MANAGER_BOOTSTRAP_JSON_PROD
+
+Jangan tampilkan nilainya.
+
+Validasi:
+
+- tersedia
+- JSON valid
+- credential structure valid
+- project target = sc-sport-center
+
+Jangan menampilkan:
+- private key
+- token
+- password
+- database URL
+- service role key
+
+==================================================
+B. GCP PROJECT
+==================================================
+
+Pastikan:
+
+Project:
+sc-sport-center
+
+Project Number:
+212300252439
+
+Jika tidak dapat diverifikasi:
+→ BLOCKED.
+
+==================================================
+C. APP ENGINE RUNTIME IDENTITY
+==================================================
+
+Verifikasi langsung dari GCP App Engine aktif.
+
+Gunakan:
+
+gcloud app versions list \
+  --service=default \
+  --project=sc-sport-center
+
+Untuk versi yang menerima traffic:
+
+gcloud app versions describe VERSION_ID \
+  --service=default \
+  --project=sc-sport-center \
+  --format='value(serviceAccount)'
+
+Expected:
+
+sc-sport-center@appspot.gserviceaccount.com
+
+Jangan menyebut runtime identity CONFIRMED hanya berdasarkan app.yaml.
+
+Jika tidak terbukti:
+→ RUNTIME IDENTITY = UNVERIFIED
+→ STOP production DB audit.
+
+==================================================
+D. SECRET MANAGER IAM
+==================================================
+
+Pastikan runtime identity:
+
+sc-sport-center@appspot.gserviceaccount.com
+
+memiliki minimum:
+
+roles/secretmanager.secretAccessor
+
+untuk:
+
+sport-center-prod-supabase-database-url
+sport-center-prod-supabase-url
+sport-center-prod-supabase-anon-key
+sport-center-prod-supabase-service-role-key
+sport-center-prod-session-secret
+
+Jangan memberikan Owner/Editor.
+
+Jangan mengubah secret value.
+
+==================================================
+E. PRODUCTION SECRET ACCESS
+==================================================
+
+Setelah runtime identity confirmed:
+
+uji akses metadata/version secret.
+
+Expected:
+
+database URL = PASS
+Supabase URL = PASS
+anon key = PASS
+service role key = PASS
+session secret = PASS
+
+Jangan print value.
+
+Jika gagal:
+→ BLOCKED
+→ identifikasi permission/root cause.
+
+==================================================
+F. PRODUCTION DATABASE
+==================================================
+
+Hanya jika semua gate sebelumnya PASS:
+
+load database credential melalui official Secret Manager loader.
+
+Buat koneksi READ-ONLY.
+
+Verifikasi:
+
+- database identity
+- project identity
+- schema
+- production environment
+
+Jika tidak dapat dibuktikan sebagai PROD:
+→ STOP.
+
+==================================================
+G. BOOKING LIFECYCLE
+==================================================
+
+Audit production:
+
+- completed without check-in
+- completed before endTime
+- future completed
+- cancelled completed
+- pending reschedule completed
+- old schedule completed
+- duplicate completion
+
+Expected:
+
+confirmed
++
+check-in
++
+session ended
+=
+completed
+
+Payment paid != completed.
+
+Corporate invoice paid != completed.
+
+==================================================
+H. PAYMENT
+==================================================
+
+Audit:
+
+booking
+→ payment
+→ payment identity
+→ outbox
+→ Central Finance
+
+Cari:
+
+- duplicate payment
+- orphan payment
+- amount mismatch
+- duplicate payment_id
+- DP/final collision
+- duplicate accounting posting
+
+==================================================
+I. CORPORATE
+==================================================
+
+Audit:
+
+employee
+→ company
+→ booking
+→ invoice
+→ payment
+
+Cari:
+
+- unauthorized company
+- duplicate invoice
+- duplicate booking invoice linkage
+- invoice paid causing future completion
+- missing corporate linkage
+
+==================================================
+J. GROUP
+==================================================
+
+Audit:
+
+- group membership
+- merge
+- payment
+- invoice
+- individual lifecycle
+
+Cari:
+
+- orphan membership
+- duplicate booking
+- premature completion
+- duplicate group payment
+
+==================================================
+K. EVENT
+==================================================
+
+Audit production Event.
+
+Expected:
+
+normal price
+→ 21.4% discount
+→ final price
+
+Rp100.000
+→ Rp21.400
+→ Rp78.600
+
+Cari transaksi yang masih memakai formula lama 3/14.
+
+JANGAN mengubah historical transaction.
+
+Hitung financial impact dan klasifikasikan.
+
+==================================================
+L. RECURRING
+==================================================
+
+Audit:
+
+- invalid date
+- duplicate date
+- operating hours
+- blocked schedule
+- conflict
+- corporate approval
+- independent lifecycle
+
+==================================================
+M. RESCHEDULE
+==================================================
+
+Audit:
+
+- old schedule
+- new schedule
+- approval
+- conflict
+- history
+
+Cari:
+
+- old slot active
+- new slot conflict
+- pending request completed
+- missing history
+
+==================================================
+N. EXPENSE
+==================================================
+
+Audit:
+
+expense
+→ approval
+→ paid
+→ Central Finance
+
+Cari:
+
+- missing posting
+- duplicate posting
+- wrong vendor
+- wrong company
+- PPN mismatch
+- wrong account
+
+==================================================
+O. QRIS / SETTLEMENT
+==================================================
+
+Audit:
+
+payment
+→ QRIS
+→ settlement
+→ bank mutation
+→ reconciliation
+
+Cari:
+
+- duplicate settlement
+- amount mismatch
+- MDR mismatch
+- settlement date mismatch
+- duplicate reconciliation
+- source identity mismatch
+
+==================================================
+P. REFUND
+==================================================
+
+Audit:
+
+payment
+→ refund
+→ accounting reversal
+
+Cari:
+
+- refund without payment
+- duplicate refund
+- refund > payment
+- missing reversal
+- refunded booking still active
+
+==================================================
+Q. TAX / INVOICE
+==================================================
+
+Verify:
+
+hargaDasar = hargaIncludePPN / 1.11
+
+dpp = hargaDasar × durasi
+
+dppNilaiLain = dpp × 11/12
+
+ppn = dppNilaiLain × 12%
+
+total = dpp + ppn
+
+Expected:
+
+TOTAL = DPP + PPN
+
+Event discount tidak boleh dihitung dua kali.
+
+Jangan mengubah historical invoice.
+
+==================================================
+R. CENTRAL FINANCE
+==================================================
+
+CRITICAL.
+
+Verify:
+
+ONE SOURCE TRANSACTION
+→ ONE CANONICAL ACCOUNTING POSTING
+
+Cari:
+
+- duplicate journal
+- duplicate correlation ID
+- duplicate payment_id
+- orphan journal
+- missing posting
+- debit/credit imbalance
+- company mismatch
+- account mismatch
+
+Expected:
+
+TOTAL DEBIT = TOTAL CREDIT
+
+Jangan:
+
+- delete journal
+- force balance
+- create replacement journal
+- modify historical accounting
+
+==================================================
+S. DATA CLASSIFICATION
+==================================================
+
+Setiap anomaly:
+
+ID
+ENTITY
+EXPECTED
+ACTUAL
+SEVERITY
+CLASSIFICATION
+
+Classification:
+
+LEGITIMATE
+EXPECTED
+HISTORICAL
+TEST
+FALSE POSITIVE
+REAL BUG
+REAL DATA ANOMALY
+
+==================================================
+T. REMEDIATION
+==================================================
+
+Source bug:
+
+FIX SOURCE
+→ TEST
+→ BUILD
+→ VERIFY
+
+Production data:
+
+JANGAN langsung diubah.
+
+Jika anomaly:
+
+- deterministic
+- jelas salah
+- financial impact dipahami
+- reversible
+- safe
+
+maka siapkan targeted transactional remediation.
+
+Jika ambigu:
+→ jangan mutate production.
+
+==================================================
+FINAL VERDICT
+==================================================
+
+Gunakan status terpisah:
+
+PRODUCTION RUNTIME IDENTITY
+CONFIRMED / UNVERIFIED / FAILED
+
+SECRET MANAGER IAM
+PASS / BLOCKED / FAILED
+
+PRODUCTION SECRET ACCESS
+PASS / BLOCKED / FAILED
+
+PRODUCTION DB IDENTITY
+VERIFIED / BLOCKED / FAILED
+
+PRODUCTION DATA AUDIT
+PASS / BLOCKED / FAILED
+
+CENTRAL FINANCE
+PASS / BLOCKED / FAILED
+
+JANGAN menyatakan production PASS tanpa evidence.
+
+Jika semua gate PASS:
+→ jalankan audit transaksi sampai selesai.
+
+Jika anomaly aman diperbaiki:
+→ FIX → TEST → VERIFY → ulangi audit.
+
+JANGAN bertanya konfirmasi.
+Lanjutkan semua langkah aman secara otomatis.

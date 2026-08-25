@@ -1,0 +1,50 @@
+Saat metode diubah, misalnya dari Transfer Bank ke QRIS, sistem harus memastikan:
+
+Rekening penerima masih aktif di company_bank_accounts.
+Rekening tersebut dimiliki oleh perusahaan yang terkait dengan booking.
+Ada aturan settlement aktif di payment_settlement_configs.
+Jurnal/payment lama tidak mengalami konflik dengan perubahan baru.
+Pada data production, payment tersebut mengarah ke rekening yang tidak ditemukan sebagai rekening perusahaan aktif, sehingga database menolak perubahan dengan pesan:
+
+Rekening penerima pada pembayaran ini belum terdaftar sebagai rekening perusahaan aktif.
+
+Ini adalah proteksi agar perubahan metode pada transaksi yang sudah selesai tidak membuat jurnal dan rekonsiliasi menjadi salah.
+
+Yang perlu diperbaiki di konfigurasi production:
+
+Aktifkan atau tambahkan rekening penerima di data perusahaan terkait.
+Pastikan nomor rekeningnya sama persis dengan bank_account_id pada payment.
+Untuk QRIS, pastikan ada settlement rule aktif:
+provider: mandiri_direct
+rekening: rekening Mandiri CST
+status/source: owner-approved
+tanggal efektif mencakup tanggal pembayaran
+Setelah konfigurasi benar, perubahan payment method dapat dilakukan kembali.
+Catatan: jangan mengubah payment method transaksi selesai hanya untuk mengoreksi tampilan sebelum rekening dan settlement rule diperbaiki, karena transaksi tersebut sudah terhubung ke jurnal akuntansi. Error ini berasal dari proteksi database, bukan dari komponen dropdown frontend.
+
+
+
+Worked for 1 minute
+perbaiki
+
+Free
+8 minutes ago
+
+3 actions
+Use a more capable model when needed for this request?
+Got it, staying on Free.
+
+Worked for 24 seconds
+
+7 actions
+Saya temukan akar teknisnya: dropdown masih mengizinkan perubahan pada booking confirmed/completed, padahal payment-nya sudah masuk jurnal dan mirror accounting. Saat dipaksa berubah, trigger database menolak karena rekening/settlement historis tidak boleh berubah. Saya perbaiki UI agar transaksi selesai tidak lagi mengirim request yang pasti ditolak, dengan keterangan yang jelas; transaksi yang masih aktif tetap bisa diedit.
+
+
+
+4 actions
+Perbaikannya sudah diterapkan pada dropdown daftar booking dan drawer detail. Saya build ulang frontend dan ambil preview untuk memastikan tidak ada error JSX/runtime setelah dropdown dikunci untuk transaksi selesai.
+
+
+
+2 actions
+You've reached your daily free quota limit. It will reset at 12:00 AM UTC.

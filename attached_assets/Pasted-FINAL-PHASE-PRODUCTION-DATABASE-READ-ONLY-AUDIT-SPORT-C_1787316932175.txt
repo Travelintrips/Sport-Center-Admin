@@ -1,0 +1,536 @@
+FINAL PHASE — PRODUCTION DATABASE READ-ONLY AUDIT
+SPORT CENTER ↔ CENTRAL FINANCE
+
+STATUS BASELINE:
+- 15 test suites PASS
+- 103 tests PASS
+- Full workspace typecheck PASS
+- Full workspace build PASS
+- git diff --check PASS
+- API workflow PASS
+- Web workflow PASS
+- Mockup workflow PASS
+- Preview PASS
+- Payment → outbox → accounting idempotent
+- DP/final payment identity terpisah
+- Legacy/Central Finance worker mutually exclusive
+- Duplicate journal protections verified
+- Central settlement canonical verified
+- No production data changed
+
+SISA PEKERJAAN:
+Production-data anomaly audit belum terverifikasi karena audit sebelumnya menggunakan DEV database.
+
+JANGAN MENGGUNAKAN DEV SEBAGAI PENGGANTI PRODUCTION.
+
+==================================================
+PHASE 1 — PRODUCTION CONNECTION
+==================================================
+
+Gunakan koneksi production database yang memang menjadi source of truth aplikasi.
+
+WAJIB:
+- READ-ONLY
+- jangan INSERT
+- jangan UPDATE
+- jangan DELETE
+- jangan ALTER
+- jangan CREATE/DROP
+- jangan menjalankan migration
+- jangan menjalankan repair script
+
+Verifikasi terlebih dahulu bahwa koneksi benar-benar production.
+
+Jangan hanya berdasarkan environment variable name.
+
+Cross-check dengan:
+- database identity
+- project/environment identity
+- application production configuration
+- connection metadata yang aman
+
+Jangan pernah menampilkan:
+- password
+- token
+- connection string lengkap
+- secret
+- credential
+
+==================================================
+PHASE 2 — PRODUCTION TRANSACTION INVENTORY
+==================================================
+
+Audit data production secara read-only.
+
+Fokus Sport Center dan transaksi yang terhubung Central Finance.
+
+Cari:
+
+1. booking
+2. payments
+3. company invoices
+4. expenses
+5. accounting journals
+6. accounting journal lines
+7. settlement
+8. bank reconciliation
+9. payment outbox
+10. refund
+11. group booking
+12. reschedule
+13. check-in
+
+Gunakan ID/reference existing untuk tracing.
+
+==================================================
+PHASE 3 — BOOKING ↔ PAYMENT
+==================================================
+
+Cari:
+
+A. payment tanpa booking
+B. booking personal dengan payment_required_now=true tetapi payment tidak ada
+C. duplicate payment untuk booking yang sama
+D. payment amount tidak sesuai source booking
+E. payment status tidak konsisten
+F. DP tanpa final payment padahal seharusnya lunas
+G. final payment tanpa payment identity yang benar
+H. payment paid tetapi booking future completed
+I. booking completed tanpa check-in
+J. booking completed sebelum endTime
+
+Jangan menganggap semua NULL sebagai anomaly.
+
+Klasifikasikan setiap hasil:
+
+- LEGITIMATE
+- EXPECTED_UNPAID
+- HISTORICAL
+- TEST/SEED
+- REAL_ANOMALY
+
+==================================================
+PHASE 4 — BOOKING LIFECYCLE
+==================================================
+
+Audit production booking:
+
+completed harus memenuhi contract:
+
+- confirmed
+- check-in exists
+- endTime sudah lewat
+- tidak ada pending reschedule
+- bukan cancelled
+- bukan replaced schedule
+
+Cari semua kemungkinan violation.
+
+Khusus corporate:
+
+invoice paid TIDAK boleh menjadi alasan booking future = completed.
+
+==================================================
+PHASE 5 — CORPORATE BILLING
+==================================================
+
+Audit:
+
+company member
+→ company
+→ booking
+→ company invoice
+→ payment
+
+Cari:
+
+- corporate booking tanpa company
+- unauthorized company association
+- invoice tanpa booking
+- booking corporate tidak masuk invoice ketika seharusnya masuk
+- booking masuk invoice lebih dari sekali
+- duplicate invoice untuk company + period
+- invoice paid tetapi booking future completed
+- invoice paid tanpa payment identity
+- payment invoice duplicate
+
+Jangan memperbaiki data dulu.
+
+==================================================
+PHASE 6 — PAYMENT → OUTBOX → CENTRAL FINANCE
+==================================================
+
+Untuk setiap payment yang seharusnya sudah diposting:
+
+trace:
+
+payment
+→ payment identity
+→ outbox
+→ accounting entry
+→ journal
+→ journal lines
+
+Cari:
+
+- payment tanpa accounting entry
+- accounting entry tanpa payment
+- duplicate accounting entry
+- duplicate journal
+- correlation ID duplicate
+- payment_id duplicate
+- journal amount mismatch
+- debit/credit mismatch
+
+Gunakan canonical identity:
+
+payment_id
+correlation ID
+source transaction
+
+Jangan membuat posting baru selama audit.
+
+==================================================
+PHASE 7 — CENTRAL FINANCE SAFETY
+==================================================
+
+Pastikan production tidak mempunyai kondisi:
+
+Sport Center posting
++
+Central Finance posting
+
+untuk source transaction yang sama.
+
+Expected:
+
+ONE SOURCE TRANSACTION
+→ ONE CANONICAL ACCOUNTING POSTING
+
+Jika ditemukan dua posting:
+
+JANGAN DELETE.
+
+Trace:
+- siapa yang membuat
+- kapan
+- source ID
+- worker
+- mode finance
+- correlation ID
+- status
+- apakah salah satu legitimate reversal/correction
+
+Klasifikasikan terlebih dahulu.
+
+==================================================
+PHASE 8 — JOURNAL BALANCE
+==================================================
+
+Audit production journal:
+
+TOTAL DEBIT = TOTAL CREDIT
+
+Cari:
+
+- journal tanpa lines
+- lines tanpa journal
+- debit only
+- credit only
+- journal duplicate
+- source reference duplicate
+- amount mismatch
+- company mismatch
+
+Jangan memperbaiki saldo dengan journal manual.
+
+==================================================
+PHASE 9 — EXPENSE
+==================================================
+
+Audit production Sport Center expenses:
+
+expense
+→ approval
+→ paid
+→ accounting
+
+Cari:
+
+- expense paid tanpa journal jika memang seharusnya posted
+- duplicate journal
+- expense journal tidak balance
+- vendor mismatch
+- PPN Masukan mismatch
+- expense masuk revenue
+- journal company salah
+
+Jangan membuat journal baru hanya karena query menemukan NULL.
+
+Periksa contract terlebih dahulu.
+
+==================================================
+PHASE 10 — QRIS / SETTLEMENT / RECONCILIATION
+==================================================
+
+Audit production settlement:
+
+payment
+→ settlement
+→ bank mutation
+→ reconciliation
+
+Cari:
+
+- settlement tanpa source payment
+- payment tanpa settlement ketika seharusnya settled
+- duplicate settlement
+- duplicate reconciliation match
+- amount mismatch
+- MDR mismatch
+- settlement date mismatch
+- source identity mismatch
+
+Gunakan canonical settlement function/schema yang sudah diverifikasi.
+
+JANGAN membuat settlement baru selama audit.
+
+==================================================
+PHASE 11 — REFUND / CANCELLATION
+==================================================
+
+Audit production refund:
+
+original payment
+→ refund
+→ accounting/reversal
+
+Cari:
+
+- refund tanpa original payment
+- duplicate refund
+- refund melebihi payment
+- refunded booking masih dianggap active
+- refund menyebabkan duplicate accounting posting
+- revenue tidak memiliki reversal ketika contract mengharuskannya
+
+Jangan mengubah historical refund.
+
+==================================================
+PHASE 12 — GROUP BOOKING
+==================================================
+
+Audit production group booking:
+
+- booking group valid
+- semua member booking ditemukan
+- payment group
+- individual booking
+- group invoice
+
+Cari:
+
+- booking tanpa group padahal seharusnya group
+- duplicate group membership
+- duplicate payment
+- future booking completed karena group payment
+- group payment tidak sesuai total source
+
+==================================================
+PHASE 13 — RESCHEDULE
+==================================================
+
+Audit production reschedule:
+
+- old schedule
+- new schedule
+- history
+- approval
+- conflict
+
+Cari:
+
+- old slot masih dianggap active
+- new slot conflict
+- booking completed berdasarkan old schedule
+- history hilang
+- reschedule request pending tetapi booking sudah completed
+
+READ-ONLY.
+
+==================================================
+PHASE 14 — PRODUCTION DATA RECONCILIATION
+==================================================
+
+Hitung secara read-only:
+
+A.
+Total booking
+
+B.
+Total personal payment
+
+C.
+Total corporate billing
+
+D.
+Total paid invoice
+
+E.
+Total expense
+
+F.
+Total accounting journal
+
+G.
+Total debit
+
+H.
+Total credit
+
+I.
+Total settlement
+
+J.
+Total reconciliation
+
+Jangan memaksakan semua angka harus sama karena setiap layer memiliki definisi berbeda.
+
+Jelaskan reconciliation relationship masing-masing.
+
+==================================================
+PHASE 15 — ANOMALY CLASSIFICATION
+==================================================
+
+Untuk setiap anomaly:
+
+| ID | Entity | Source | Expected | Actual | Severity | Classification |
+|----|--------|--------|----------|--------|----------|---------------|
+
+Severity:
+
+CRITICAL
+HIGH
+MEDIUM
+LOW
+INFO
+
+Classification:
+
+REAL BUG
+REAL DATA CORRUPTION
+EXPECTED
+HISTORICAL
+LEGITIMATE
+TEST DATA
+FALSE POSITIVE
+
+==================================================
+PHASE 16 — REMEDIATION DECISION
+==================================================
+
+Jika TIDAK ada real production anomaly:
+
+JANGAN mengubah database.
+
+Verdict:
+PRODUCTION DATA AUDIT PASS.
+
+Jika ada anomaly yang jelas merupakan bug source:
+
+1. Perbaiki source code terlebih dahulu.
+2. Tambahkan regression test.
+3. Run full tests.
+4. Build.
+5. Verify.
+6. Baru evaluasi apakah existing production rows membutuhkan remediation.
+
+Jika existing production data memang harus diperbaiki dan aman:
+
+WAJIB:
+- targeted
+- minimal
+- idempotent
+- transactional
+- auditable
+- tidak menghapus historical accounting
+- tidak membuat duplicate journal
+- tidak mengubah balance secara paksa
+
+Jika data repair berisiko ambigu:
+→ JANGAN mengubah production.
+→ Fix source logic.
+→ Laporkan sebagai BLOCKED DATA REMEDIATION dengan evidence.
+
+==================================================
+PHASE 17 — POST-AUDIT VERIFICATION
+==================================================
+
+Setelah source fix/data remediation jika memang diperlukan:
+
+jalankan kembali:
+
+- production anomaly queries
+- duplicate payment queries
+- duplicate journal queries
+- booking lifecycle queries
+- corporate invoice queries
+- settlement queries
+- reconciliation queries
+
+Expected:
+REAL ANOMALY = 0
+
+Kecuali historical/legitimate anomaly yang memang didokumentasikan.
+
+==================================================
+PHASE 18 — CENTRAL FINANCE FINAL GUARD
+==================================================
+
+Pastikan final production state:
+
+Sport Center
+→ operational transaction
+
+Central Finance
+→ canonical accounting
+
+Tidak ada:
+
+- duplicate posting
+- duplicate revenue
+- duplicate expense
+- duplicate journal
+- duplicate settlement
+- duplicate reconciliation
+
+Dan:
+
+TOTAL DEBIT = TOTAL CREDIT
+
+tanpa manual balancing.
+
+==================================================
+FINAL VERDICT
+==================================================
+
+Jika production database bersih:
+
+PRODUCTION-DATA AUDIT PASS
+CENTRAL-FINANCE SAFE
+FIXED
+
+Jika ditemukan bug dan dapat diperbaiki:
+→ FIX
+→ TEST
+→ VERIFY
+→ ulangi audit
+
+Jangan berhenti pada laporan anomaly.
+
+Jika ditemukan data anomaly yang tidak aman untuk diperbaiki tanpa keputusan owner:
+→ hanya bagian data tersebut yang BLOCKED
+→ source code tetap diperbaiki jika memungkinkan.
+
+JANGAN MEMINTA KONFIRMASI.
+LANJUTKAN LANGSUNG SAMPAI SELESAI SEJAUH AMAN.

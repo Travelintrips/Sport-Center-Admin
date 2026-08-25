@@ -1,0 +1,256 @@
+LANJUTKAN — RESOLVE PRODUCTION AUDIT ACCESS BLOCKER SECURELY
+
+KONTEKS:
+
+Production-data audit sebelumnya BLOCKED karena:
+
+- SUPABASE_DATABASE_URL tidak tersedia
+- hanya SUPABASE_DATABASE_URL_DEV tersedia
+- NODE_ENV=development
+- isDevUsingProdDb=false
+- DATABASE_URL bukan koneksi Supabase production yang digunakan application path
+
+JANGAN menggunakan DEV sebagai pengganti PROD.
+
+TUJUAN:
+Membuka akses production-scoped secara aman untuk READ-ONLY AUDIT tanpa memindahkan atau menyimpan permanent production credential secara sembarangan.
+
+==================================================
+1. AUDIT SECRET/CONFIG SOURCE
+==================================================
+
+Audit repository dan runtime untuk mengetahui bagaimana production application memperoleh database credential.
+
+Prioritaskan:
+
+Google Cloud Secret Manager
+→ existing production secret loader
+→ production database connection
+
+Jangan membuat mekanisme secret baru jika project sudah memiliki loader resmi.
+
+Cari:
+- GCP_SECRET_MANAGER_BOOTSTRAP_JSON
+- Secret Manager loader
+- production database secret name
+- environment/config resolver
+- existing production deployment configuration
+
+Jangan tampilkan:
+- password
+- token
+- connection string
+- private key
+- full secret payload
+
+==================================================
+2. JANGAN PINDAHKAN PRODUCTION SECRET KE SOURCE CODE
+==================================================
+
+Jangan:
+
+- hardcode production DB URL
+- commit secret
+- menulis password ke file
+- memasukkan secret ke git
+- mencetak secret ke console
+- membuat `.env.production` berisi credential
+- menyalin permanent production credential ke Replit Secrets jika architecture resmi menggunakan Secret Manager
+
+Gunakan existing Secret Manager architecture.
+
+==================================================
+3. IDENTIFIKASI SECRET PRODUCTION
+==================================================
+
+Gunakan metadata saja untuk menentukan:
+
+- secret name
+- project ID
+- version availability
+- access permission
+
+Jangan menampilkan secret value.
+
+Jika secret production tersedia:
+→ gunakan loader resmi untuk memperoleh credential hanya di runtime.
+
+Jika secret tidak tersedia:
+→ cari konfigurasi deployment production yang sudah ada.
+
+Jangan membuat secret baru secara asumsi.
+
+==================================================
+4. PRODUCTION DB IDENTITY CHECK
+==================================================
+
+Setelah loader berhasil:
+
+Buat koneksi READ-ONLY.
+
+Sebelum query audit, verifikasi identity database secara aman.
+
+Ambil hanya metadata non-sensitive seperti:
+
+- database host/domain yang sudah dimasking
+- Supabase project identity jika dapat diverifikasi tanpa secret
+- current database/schema
+- environment marker
+- read-only connection capability
+
+Jangan tampilkan password/token.
+
+Jika target tidak dapat dibuktikan sebagai production:
+→ STOP.
+→ jangan jalankan audit.
+
+==================================================
+5. READ-ONLY ENFORCEMENT
+==================================================
+
+Audit connection harus:
+
+- SELECT only
+- no INSERT
+- no UPDATE
+- no DELETE
+- no ALTER
+- no CREATE
+- no DROP
+- no migration
+- no repair
+
+Jika driver/database mendukung:
+→ gunakan read-only transaction/session.
+
+Tambahkan guard agar script audit tidak dapat melakukan mutation secara tidak sengaja.
+
+==================================================
+6. PRODUCTION AUDIT
+==================================================
+
+Jika dan hanya jika production identity terbukti:
+
+jalankan production audit yang sebelumnya BLOCKED:
+
+A. Booking/payment anomaly
+B. Booking lifecycle
+C. Corporate billing
+D. Payment → outbox → Central Finance
+E. Duplicate journal
+F. Debit/credit balance
+G. Expense
+H. QRIS settlement
+I. Bank reconciliation
+J. Refund
+K. Group booking
+L. Reschedule
+M. Central Finance duplicate posting
+N. Company/tenant isolation
+
+Gunakan query read-only.
+
+==================================================
+7. CENTRAL FINANCE PROTECTION
+==================================================
+
+Jangan melakukan:
+
+- journal repair
+- payment repair
+- settlement repair
+- reconciliation repair
+- balance adjustment
+
+pada tahap audit ini.
+
+Jika anomaly ditemukan:
+
+REAL BUG
+→ perbaiki source code jika aman
+→ test
+→ verify
+
+DATA ANOMALY
+→ klasifikasikan dahulu
+→ jangan ubah production secara otomatis.
+
+==================================================
+8. JIKA SECRET MANAGER ACCESS TIDAK TERSEDIA
+==================================================
+
+Jika runtime tidak mempunyai permission membaca production secret:
+
+Jangan bypass security.
+
+Jangan meminta user menempelkan password/database URL ke chat.
+
+Jangan hardcode credential.
+
+Lakukan audit terhadap:
+
+- existing IAM configuration
+- service account
+- deployment identity
+- Secret Manager access configuration
+- bootstrap mechanism
+
+Jika memang membutuhkan owner/external access yang tidak dapat diberikan dari repository:
+→ laporkan BLOCKED secara spesifik:
+
+BLOCKER:
+production Secret Manager access unavailable.
+
+Sertakan:
+- secret metadata yang dibutuhkan
+- IAM permission yang diperlukan
+- runtime identity yang membutuhkan access
+
+Jangan menyebut nilai secret.
+
+==================================================
+9. LOCAL/DEV VERIFICATION
+==================================================
+
+Sambil production access belum tersedia, jangan membuang pekerjaan yang sudah ada.
+
+Pastikan:
+
+- 103 tests tetap PASS
+- typecheck PASS
+- build PASS
+- workflow PASS
+
+Jika ada regression:
+→ fix sampai PASS.
+
+==================================================
+10. FINAL RESULT
+==================================================
+
+Jika production connection berhasil diperoleh dan identity terbukti:
+
+PROCEED WITH READ-ONLY PRODUCTION AUDIT.
+
+Jika production audit menemukan anomaly:
+
+→ classify
+→ fix source code jika valid
+→ test
+→ verify
+→ jangan mutate production data tanpa safe/evidence-based remediation.
+
+Jika production connection tetap tidak tersedia:
+
+FINAL STATUS:
+BLOCKED — PRODUCTION SECRET MANAGER ACCESS
+
+Jelaskan tepat apa yang kurang.
+
+JANGAN MEMINTA USER MEMBERIKAN PASSWORD DI CHAT.
+
+JANGAN MENGGUNAKAN DEV DATABASE SEBAGAI PENGGANTI PROD.
+
+JANGAN MENYATAKAN PRODUCTION AUDIT PASS TANPA EVIDENCE.
+
+LANJUTKAN SEJAUH YANG AMAN DAN SELESAIKAN SEMUA BAGIAN YANG TIDAK TERBLOCK.

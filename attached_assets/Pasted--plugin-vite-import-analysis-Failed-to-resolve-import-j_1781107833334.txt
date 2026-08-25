@@ -1,0 +1,20 @@
+[plugin:vite:import-analysis] Failed to resolve import "jsqr" from "src/pages/VerifyId.tsx". Does the file exist?
+/home/runner/workspace/artifacts/sport-center/src/pages/VerifyId.tsx:2:17
+3  |  var _s = $RefreshSig$();
+4  |  import { useState, useRef, useCallback, useEffect } from "react";
+5  |  import jsQR from "jsqr";
+   |                    ^
+6  |  import { useVerifyBookingByOrder } from "@workspace/api-client-react";
+7  |  import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+    at TransformPluginContext._formatLog (file:///home/runner/workspace/node_modules/.pnpm/vite@7.3.3_@types+node@25.6.2_jiti@2.7.0_lightningcss@1.32.0_tsx@4.21.0_yaml@2.8.4/node_modules/vite/dist/node/chunks/config.js:29019:43)
+    at TransformPluginContext.error (file:///home/runner/workspace/node_modules/.pnpm/vite@7.3.3_@types+node@25.6.2_jiti@2.7.0_lightningcss@1.32.0_tsx@4.21.0_yaml@2.8.4/node_modules/vite/dist/node/chunks/config.js:29016:14)
+    at normalizeUrl (file:///home/runner/workspace/node_modules/.pnpm/vite@7.3.3_@types+node@25.6.2_jiti@2.7.0_lightningcss@1.32.0_tsx@4.21.0_yaml@2.8.4/node_modules/vite/dist/node/chunks/config.js:27139:18)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at async file:///home/runner/workspace/node_modules/.pnpm/vite@7.3.3_@types+node@25.6.2_jiti@2.7.0_lightningcss@1.32.0_tsx@4.21.0_yaml@2.8.4/node_modules/vite/dist/node/chunks/config.js:27197:32
+    at async Promise.all (index 2)
+    at async TransformPluginContext.transform (file:///home/runner/workspace/node_modules/.pnpm/vite@7.3.3_@types+node@25.6.2_jiti@2.7.0_lightningcss@1.32.0_tsx@4.21.0_yaml@2.8.4/node_modules/vite/dist/node/chunks/config.js:27165:4)
+    at async EnvironmentPluginContainer.transform (file:///home/runner/workspace/node_modules/.pnpm/vite@7.3.3_@types+node@25.6.2_jiti@2.7.0_lightningcss@1.32.0_tsx@4.21.0_yaml@2.8.4/node_modules/vite/dist/node/chunks/config.js:28817:14)
+    at async loadAndTransform (file:///home/runner/workspace/node_modules/.pnpm/vite@7.3.3_@types+node@25.6.2_jiti@2.7.0_lightningcss@1.32.0_tsx@4.21.0_yaml@2.8.4/node_modules/vite/dist/node/chunks/config.js:22686:26)
+    at async viteTransformMiddleware (file:///home/runner/workspace/node_modules/.pnpm/vite@7.3.3_@types+node@25.6.2_jiti@2.7.0_lightningcss@1.32.0_tsx@4.21.0_yaml@2.8.4/node_modules/vite/dist/node/chunks/config.js:24562:20)
+Click outside, press Esc key, or fix the code to dismiss.
+You can also disable this overlay by setting server.hmr.overlay to false in vite.config.ts.

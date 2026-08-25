@@ -1,0 +1,633 @@
+# EXECUTE UAT DRY-RUN — QRIS RECONCILIATION
+
+## Dataset: UAT_QRIS_202608
+
+Jalankan UAT dry-run terhadap dataset development yang sudah disiapkan.
+
+Marker:
+
+`UAT_QRIS_202608`
+
+Environment:
+
+`development`
+
+Company ID:
+
+`62`
+
+Periode:
+
+`2026-08-03` sampai `2026-08-11`
+
+Import batch:
+
+`UAT_QRIS_202608_BANK_STATEMENT_IMPORT_001`
+
+JANGAN membaca atau memproses row di luar marker/periode UAT ini kecuali diperlukan untuk foreign-key/reference lookup.
+
+---
+
+# SAFETY
+
+WAJIB READ-ONLY / IN-MEMORY untuk evaluasi reconciliation.
+
+JANGAN:
+
+* final reconcile;
+* approve mutation;
+* update payment settlement status;
+* membuat `qris_settlements` final;
+* membuat accounting journal;
+* posting MDR;
+* mengubah provider rules;
+* mengubah holiday calendar;
+* mengubah fixture;
+* menjalankan migration;
+* deploy production.
+
+Jika candidate generator existing melakukan persistence, jangan gunakan persistence mode.
+
+Load data melalui SELECT lalu jalankan pure/in-memory engine.
+
+---
+
+# 1. PRE-FLIGHT
+
+Verifikasi:
+
+* environment = development;
+* `isDevUsingProdDb = false`;
+* `ALLOW_DEV_ON_PROD_DB = false`;
+* company = 62;
+* marker = `UAT_QRIS_202608`.
+
+Hitung ulang:
+
+* QRIS payments;
+* mutations;
+* provider rules;
+* holiday rows;
+* candidate matches existing;
+* journals/accounting.
+
+Expected baseline:
+
+* 22 QRIS payments;
+* 14 mutations;
+* candidate matches = 0;
+* journal entries = 0;
+* final reconciliation = 0.
+
+Jika baseline materially berbeda, STOP dan laporkan.
+
+---
+
+# 2. LOAD ONLY UAT DATA
+
+Load payment yang terkait marker:
+
+`UAT_QRIS_202608`
+
+Load mutation dari import batch:
+
+`UAT_QRIS_202608_BANK_STATEMENT_IMPORT_001`
+
+Pastikan tidak tercampur dengan historical development rows lain.
+
+---
+
+# 3. RUN IN-MEMORY ENGINE
+
+Jalankan candidate engine terhadap seluruh 14 mutation UAT.
+
+Untuk setiap mutation hasilkan:
+
+* mutation ID;
+* company ID;
+* bank account;
+* provider detected;
+* provider detection source;
+* transaction date;
+* expected settlement date;
+* payment IDs;
+* payment count;
+* gross batch;
+* bank credit;
+* observed deduction;
+* effective deduction rate;
+* configured UAT MDR;
+* variance;
+* reconciliation status;
+* confidence;
+* reason.
+
+JANGAN persist hasil.
+
+---
+
+# 4. VALIDATE PROVIDER SEPARATION
+
+Pastikan:
+
+`mandiri_direct`
+
+tidak pernah berisi Paylabs payment.
+
+`paylabs`
+
+tidak pernah berisi Mandiri Direct payment.
+
+`unknown`
+
+tidak pernah auto-MATCH.
+
+Laporkan PASS/FAIL.
+
+---
+
+# 5. VALIDATE BANK ACCOUNT SEPARATION
+
+Dataset memiliki:
+
+`UAT_QRIS_202608_MANDIRI`
+
+dan:
+
+`UAT_QRIS_202608_ALT`
+
+Pastikan payment/mutation antar-account tidak tercampur meskipun:
+
+* company sama;
+* provider sama;
+* tanggal sama;
+* nominal memungkinkan.
+
+Laporkan PASS/FAIL.
+
+---
+
+# 6. MANDIRI NORMAL CASE
+
+Cari fixture Mandiri normal.
+
+Expected secara konsep:
+
+* provider = mandiri_direct;
+* expected MDR fixture = 0.003;
+* bank mutation actual;
+* natural batch deterministic;
+* status = MATCHED jika dalam tolerance.
+
+Tampilkan exact:
+
+gross
+bank credit
+deduction
+effective rate
+expected rate
+variance
+status.
+
+---
+
+# 7. PAYLABS NORMAL CASE
+
+Cari fixture Paylabs normal.
+
+Expected:
+
+* provider = paylabs;
+* UAT MDR = 0.007;
+* natural batch deterministic;
+* status MATCHED jika dalam tolerance.
+
+Tampilkan detail yang sama.
+
+---
+
+# 8. FRIDAY / WEEKEND
+
+Validasi fixture:
+
+Friday
+Saturday
+Sunday
+
+terhadap:
+
+1 business day + holiday/business calendar.
+
+Untuk setiap case tampilkan:
+
+paid_at
+Jakarta business date
+expected settlement
+actual mutation date
+status.
+
+Pastikan weekend dilewati.
+
+---
+
+# 9. HOLIDAY CASE
+
+Holiday fixture:
+
+`2026-08-10`
+
+label:
+
+`UAT_TEST_HOLIDAY`
+
+Validasi bahwa expected settlement melewati tanggal tersebut.
+
+Contoh behavior:
+
+Friday
+→ weekend
+→ Monday holiday
+→ Tuesday.
+
+Laporkan PASS/FAIL.
+
+---
+
+# 10. UNKNOWN PROVIDER
+
+Fixture:
+
+provider = unknown.
+
+Expected:
+
+`REVIEW`
+
+Bukan MATCHED.
+
+Reason harus jelas seperti:
+
+`PROVIDER_UNKNOWN`
+
+atau equivalent.
+
+Laporkan PASS/FAIL.
+
+---
+
+# 11. AMOUNT MISMATCH
+
+Evaluasi fixture anomaly.
+
+Expected:
+
+`REVIEW`
+
+atau:
+
+`UNMATCHED`
+
+Bukan MATCHED.
+
+Laporkan:
+
+gross
+credit
+deduction
+effective rate
+expected MDR
+reason.
+
+---
+
+# 12. DIFFERENT BANK ACCOUNT
+
+Validasi fixture account isolation.
+
+Expected:
+
+tidak terjadi cross-account candidate.
+
+Jika nominal account lain kebetulan cocok, tetap tidak boleh masuk.
+
+---
+
+# 13. MULTIPLE SETTLEMENT DETERMINISTIC
+
+Fixture dengan:
+
+same company
+
+* same provider
+* same account
+* same date
+* deterministic reference.
+
+Expected:
+
+batch dapat dipartisi berdasarkan reference evidence.
+
+Tampilkan:
+
+reference evidence
+payment IDs per partition
+mutation
+gross
+credit
+status.
+
+---
+
+# 14. MULTIPLE SETTLEMENT AMBIGUOUS
+
+Fixture tanpa reference pembeda.
+
+Expected:
+
+`REVIEW`
+
+Reason:
+
+`AMBIGUOUS_PAYMENT_PARTITION`
+
+atau equivalent.
+
+Jangan arbitrary subset-match.
+
+---
+
+# 15. ROUNDING CASE
+
+Evaluasi fixture rounding.
+
+Bandingkan:
+
+`SUM(per-payment MDR rounded)`
+
+vs:
+
+`round(batch gross × MDR)`.
+
+Tampilkan:
+
+variance rupiah.
+
+Expected:
+
+MATCH jika variance masih dalam configured tolerance.
+
+Laporkan tolerance yang digunakan.
+
+---
+
+# 16. OBSERVED MDR VALIDATION
+
+Untuk setiap deterministic normal case:
+
+`observed deduction = gross - credit`
+
+`effective rate = observed deduction / gross`
+
+Bandingkan dengan UAT config:
+
+Mandiri:
+`0.003`
+
+Paylabs:
+`0.007`
+
+Jangan mengubah config untuk membuat hasil match.
+
+Buat tabel:
+
+| Provider | Gross | Credit | Deduction | Observed Rate | Expected Rate | Variance | Result |
+| -------- | ----: | -----: | --------: | ------------: | ------------: | -------: | ------ |
+
+---
+
+# 17. SETTLEMENT DATE VALIDATION
+
+Buat tabel:
+
+| Case | Provider | Paid Date | Rule Version | Expected Date | Mutation Date | Result |
+| ---- | -------- | --------- | ------------ | ------------- | ------------- | ------ |
+
+Gunakan timezone:
+
+`Asia/Jakarta`
+
+---
+
+# 18. PROVENANCE VALIDATION
+
+Untuk setiap mutation yang menjadi MATCHED, verifikasi provenance:
+
+* source_app;
+* source_module;
+* source table/import;
+* import batch ID;
+* sanitized raw payload/reference;
+* source_classification.
+
+MATCHED tidak boleh berasal hanya dari string label `actual_bank_mutation`.
+
+Laporkan provenance check PASS/FAIL.
+
+---
+
+# 19. IDEMPOTENCY
+
+Jalankan engine in-memory dua kali.
+
+Bandingkan:
+
+* provider;
+* payment IDs;
+* gross;
+* deduction;
+* rate;
+* status;
+* reason.
+
+Expected:
+
+identik.
+
+Laporkan:
+
+`IDEMPOTENCY PASS/FAIL`.
+
+---
+
+# 20. EXPECTED SCENARIO MATRIX
+
+Buat tabel:
+
+| Scenario                | Expected              | Actual | PASS/FAIL |
+| ----------------------- | --------------------- | ------ | --------- |
+| Mandiri normal          | MATCHED               |        |           |
+| Paylabs normal          | MATCHED               |        |           |
+| Friday/weekend          | correct business date |        |           |
+| Holiday                 | next business day     |        |           |
+| Unknown provider        | REVIEW                |        |           |
+| Amount mismatch         | REVIEW/UNMATCHED      |        |           |
+| Different bank account  | separated             |        |           |
+| Deterministic partition | separated/MATCHED     |        |           |
+| Ambiguous partition     | REVIEW                |        |           |
+| Rounding                | within tolerance      |        |           |
+
+---
+
+# 21. FALSE POSITIVE ANALYSIS
+
+Untuk setiap MATCHED, jelaskan kenapa match deterministic.
+
+Harus ada minimal:
+
+* company;
+* bank account;
+* provider;
+* business date;
+* mutation provenance;
+* natural batch/reference;
+* deduction validation.
+
+Jika salah satu tidak cukup:
+
+turunkan evaluasi menjadi REVIEW pada laporan UAT.
+
+---
+
+# 22. FALSE NEGATIVE ANALYSIS
+
+Untuk setiap fixture yang expected MATCHED tetapi actual REVIEW/UNMATCHED:
+
+jelaskan penyebab exact:
+
+* wrong provider;
+* missing provider;
+* date mismatch;
+* bank account mismatch;
+* rule lookup;
+* reference partition;
+* tolerance;
+* observed MDR;
+* bug candidate engine.
+
+Bedakan:
+
+`DATA ISSUE`
+
+vs
+
+`ENGINE ISSUE`
+
+vs
+
+`CONFIG ISSUE`.
+
+---
+
+# 23. SUMMARY
+
+Tampilkan:
+
+* mutations evaluated;
+* MATCHED;
+* REVIEW;
+* UNMATCHED;
+* provider unknown;
+* ambiguous partition;
+* amount mismatch;
+* date mismatch;
+* bank account mismatch;
+* rate mismatch.
+
+Hitung scenario pass rate.
+
+---
+
+# 24. PROVIDER COMPARISON
+
+Buat:
+
+| Metric             | Mandiri Direct | Paylabs |
+| ------------------ | -------------: | ------: |
+| Payment count      |                |         |
+| Gross              |                |         |
+| Mutation count     |                |         |
+| Bank credit        |                |         |
+| Observed deduction |                |         |
+| Avg observed rate  |                |         |
+| Expected UAT rate  |           0.3% |    0.7% |
+| Settlement delay   |                |         |
+| MATCHED            |                |         |
+| REVIEW             |                |         |
+| UNMATCHED          |                |         |
+
+---
+
+# 25. NO FIX DURING UAT
+
+Jika menemukan bug:
+
+JANGAN langsung patch code.
+
+Dokumentasikan:
+
+* file/function;
+* failing scenario;
+* expected behavior;
+* actual behavior;
+* proposed fix.
+
+UAT task ini hanya evaluasi.
+
+---
+
+# 26. FINAL DECISION
+
+Berikan salah satu:
+
+`READY_FOR_STAGING_RECONCILIATION`
+
+`NEEDS_FIX_BEFORE_STAGING`
+
+Jika READY:
+
+jelaskan batasannya bahwa rate 0.3%/0.7% masih merupakan UAT fixtures, bukan production contract.
+
+Jika NEEDS_FIX:
+
+urutkan blocker berdasarkan:
+
+CRITICAL
+HIGH
+MEDIUM.
+
+---
+
+# 27. WAJIB JAWAB
+
+1. Mandiri normal PASS?
+2. Paylabs normal PASS?
+3. Provider separation PASS?
+4. Bank account separation PASS?
+5. Weekend logic PASS?
+6. Holiday logic PASS?
+7. Deterministic partition PASS?
+8. Ambiguous partition menjadi REVIEW?
+9. Unknown provider menjadi REVIEW?
+10. Amount mismatch gagal MATCH?
+11. Rounding tolerance bekerja?
+12. Provenance validation bekerja?
+13. Idempotency PASS?
+14. Ada false positive?
+15. Ada false negative?
+16. Apakah engine siap staging?
+17. Apa saja yang masih belum boleh dianggap production-ready?
+
+Tetap dry-run.
+Jangan persist candidate.
+Jangan final reconcile.
+Jangan accounting post.

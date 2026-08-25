@@ -1,0 +1,5177 @@
+openapi: 3.1.0
+info:
+  title: Api
+  version: 0.1.0
+  description: Sport Center API specification
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+    description: Health operations
+  - name: company-verifications
+    description: Employee verification for corporate billing
+  - name: auth
+    description: Authentication
+  - name: facilities
+    description: Facility management
+  - name: bookings
+    description: Booking management
+  - name: payments
+    description: Payment management
+  - name: promos
+    description: Promo and event management
+  - name: schedules
+    description: Blocked schedule management
+  - name: customers
+    description: Customer management
+  - name: dashboard
+    description: Admin dashboard
+  - name: settings
+    description: App settings
+  - name: Storage
+    description: Object storage upload and serving endpoints.
+  - name: company-billing
+    description: Company customer billing and monthly invoices
+  - name: memberships
+    description: Gym monthly membership management
+  - name: tenants
+    description: Tenant (Penyewa Tenan) management
+  - name: tax
+    description: Tax settings and tax reporting (PPN)
+  - name: bank-reconciliation
+    description: Bank mutation import and reconciliation matching
+  - name: expenses
+    description: Operational expense management
+  - name: document-templates
+    description: Company document template management (invoice, SPP, faktur, kwitansi, etc.)
+paths:
+  /admin/facility-company-mappings:
+    get:
+      operationId: listFacilityCompanyMappings
+      tags: [facilities]
+      summary: List effective-dated facility ownership mappings
+      parameters:
+        - name: facilityId
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Ownership mappings
+    post:
+      operationId: createFacilityCompanyMapping
+      tags: [facilities]
+      summary: Create an effective-dated facility ownership mapping
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [facilityId, companyId, effectiveFrom]
+              properties:
+                facilityId: { type: integer }
+                companyId: { type: integer }
+                effectiveFrom: { type: string, format: date }
+                effectiveUntil: { type: string, format: date, nullable: true }
+                isActive: { type: boolean }
+                source: { type: string }
+                notes: { type: string, nullable: true }
+      responses:
+        "201":
+          description: Mapping created
+  /admin/facility-company-mappings/{id}:
+    patch:
+      operationId: updateFacilityCompanyMapping
+      tags: [facilities]
+      summary: Deactivate or supersede an ownership mapping
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                isActive: { type: boolean }
+                effectiveUntil: { type: string, format: date, nullable: true }
+                notes: { type: string, nullable: true }
+      responses:
+        "200":
+          description: Mapping updated
+  /admin/audit-sport-center-payments/13-14-dry-run:
+    get:
+      operationId: auditSportCenterPayments1314DryRun
+      tags: [payments]
+      summary: Dry-run repair readiness for payments 13 and 14
+      responses:
+        "200":
+          description: Read-only repair report
+  /admin/audit-sport-center-ownership/dry-run:
+    get:
+      operationId: auditSportCenterOwnershipDryRun
+      tags: [payments]
+      summary: Dry-run historical ownership classifier
+      responses:
+        "200":
+          description: Read-only ownership classification
+
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+  /auth/login:
+    post:
+      operationId: login
+      tags: [auth]
+      summary: Admin login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginInput"
+      responses:
+        "200":
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "401":
+          description: Invalid credentials
+
+  /auth/register:
+    post:
+      operationId: register
+      tags: [auth]
+      summary: Customer registration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterInput"
+      responses:
+        "201":
+          description: Registered successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "409":
+          description: Email already registered
+
+  /auth/google:
+    post:
+      operationId: loginWithGoogle
+      tags: [auth]
+      summary: Login or register with Google ID token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GoogleLoginInput"
+      responses:
+        "200":
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "401":
+          description: Invalid Google token
+
+  /auth/send-otp:
+    post:
+      operationId: sendOtp
+      tags: [auth]
+      summary: Send OTP via WhatsApp to phone number
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SendOtpInput"
+      responses:
+        "200":
+          description: OTP sent
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+        "400":
+          description: Invalid phone number
+
+  /auth/verify-otp:
+    post:
+      operationId: verifyOtp
+      tags: [auth]
+      summary: Verify OTP and login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VerifyOtpInput"
+      responses:
+        "200":
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "400":
+          description: Invalid or expired OTP
+
+  /auth/logout:
+    post:
+      operationId: logout
+      tags: [auth]
+      summary: Logout
+      responses:
+        "200":
+          description: Logged out
+
+  /my-bookings:
+    get:
+      operationId: getMyBookings
+      tags: [bookings]
+      summary: Get bookings for the currently logged-in customer
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: List of bookings
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MyBookingItem"
+        "401":
+          description: Not authenticated
+
+  /auth/me:
+    get:
+      operationId: getMe
+      tags: [auth]
+      summary: Get current user
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          description: Not authenticated
+
+  /auth/profile:
+    put:
+      operationId: updateProfile
+      tags: [auth]
+      summary: Update current user profile
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateProfileInput"
+      responses:
+        "200":
+          description: Profile updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          description: Validation error
+        "401":
+          description: Not authenticated
+
+  /auth/link-google:
+    post:
+      operationId: linkGoogle
+      tags: [auth]
+      summary: Link Google account to current user
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GoogleLoginInput"
+      responses:
+        "200":
+          description: Google account linked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          description: Not authenticated or invalid token
+        "409":
+          description: Google account already linked to another user
+
+  /facilities:
+    get:
+      operationId: listFacilities
+      tags: [facilities]
+      summary: List all facilities
+      parameters:
+        - name: activeOnly
+          in: query
+          schema:
+            type: boolean
+        - name: category
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of facilities
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Facility"
+    post:
+      operationId: createFacility
+      tags: [facilities]
+      summary: Create a facility
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FacilityInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Facility"
+
+  /facilities/{id}:
+    get:
+      operationId: getFacility
+      tags: [facilities]
+      summary: Get a facility by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Facility detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Facility"
+        "404":
+          description: Not found
+    patch:
+      operationId: updateFacility
+      tags: [facilities]
+      summary: Update a facility
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FacilityUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Facility"
+    delete:
+      operationId: deleteFacility
+      tags: [facilities]
+      summary: Delete a facility
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /availability:
+    get:
+      operationId: checkAvailability
+      tags: [facilities]
+      summary: Get availability slots for a facility on a date
+      parameters:
+        - name: facilityId
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: date
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Available time slots
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TimeSlot"
+
+  /vendors:
+    get:
+      operationId: listVendors
+      tags: [vendors]
+      summary: List active vendors (public dropdown)
+      responses:
+        "200":
+          description: List of active vendors
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/VendorSimple"
+
+  /bookings:
+    get:
+      operationId: listBookings
+      tags: [bookings]
+      summary: List bookings
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: date
+          in: query
+          schema:
+            type: string
+        - name: facilityId
+          in: query
+          schema:
+            type: integer
+        - name: customerId
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of bookings
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Booking"
+    post:
+      operationId: createBooking
+      tags: [bookings]
+      summary: Create a new booking
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BookingInput"
+      responses:
+        "201":
+          description: Booking created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Booking"
+        "409":
+          description: Time slot conflict
+
+  /bookings/recurring/check:
+    post:
+      operationId: checkRecurringBooking
+      tags: [bookings]
+      summary: Check availability for recurring booking dates
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RecurringBookingCheckInput"
+      responses:
+        "200":
+          description: Availability result for each date
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RecurringBookingCheckResult"
+
+  /bookings/recurring:
+    post:
+      operationId: createRecurringBooking
+      tags: [bookings]
+      summary: Create multiple bookings (recurring)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RecurringBookingInput"
+      responses:
+        "201":
+          description: Bookings created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RecurringBookingResult"
+
+  /bookings/{id}:
+    get:
+      operationId: getBooking
+      tags: [bookings]
+      summary: Get booking by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Booking detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Booking"
+    patch:
+      operationId: updateBooking
+      tags: [bookings]
+      summary: Update booking status or notes
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BookingUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Booking"
+
+  /bookings/{id}/dp:
+    patch:
+      operationId: payBookingDp
+      tags: [bookings]
+      summary: Set down payment for a booking
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DpPaymentInput"
+      responses:
+        "200":
+          description: DP recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Booking"
+        "400":
+          description: Invalid DP amount
+        "404":
+          description: Not found
+
+  /bookings/order/{orderNumber}:
+    get:
+      operationId: getBookingByOrder
+      tags: [bookings]
+      summary: Get booking by order number (for customers)
+      parameters:
+        - name: orderNumber
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Booking detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Booking"
+        "404":
+          description: Not found
+
+  /payments:
+    get:
+      operationId: listPayments
+      tags: [payments]
+      summary: List payments
+      parameters:
+        - name: bookingId
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of payments
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Payment"
+    post:
+      operationId: createPayment
+      tags: [payments]
+      summary: Upload payment proof
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PaymentInput"
+      responses:
+        "201":
+          description: Payment created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Payment"
+
+  /payments/{id}:
+    patch:
+      operationId: updatePayment
+      tags: [payments]
+      summary: Update payment status (admin confirm/reject)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PaymentUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Payment"
+
+  /payments/{id}/metadata:
+    patch:
+      operationId: updatePaymentMetadata
+      tags: [payments]
+      summary: Update payment metadata only (method/provider) without financial side effects
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PaymentMetadataUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Payment"
+
+  /promos:
+    get:
+      operationId: listPromos
+      tags: [promos]
+      summary: List promos/events
+      parameters:
+        - name: activeOnly
+          in: query
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: List of promos
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Promo"
+    post:
+      operationId: createPromo
+      tags: [promos]
+      summary: Create a promo/event
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PromoInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Promo"
+
+  /promos/{id}:
+    patch:
+      operationId: updatePromo
+      tags: [promos]
+      summary: Update a promo
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PromoUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Promo"
+    delete:
+      operationId: deletePromo
+      tags: [promos]
+      summary: Delete a promo
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /promos/register:
+    post:
+      operationId: registerPromo
+      tags: [promos]
+      summary: Customer registration for a promo/event
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PromoRegistrationInput"
+      responses:
+        "201":
+          description: Registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PromoRegistration"
+
+  /blocked-schedules:
+    get:
+      operationId: listBlockedSchedules
+      tags: [schedules]
+      summary: List blocked schedules
+      parameters:
+        - name: facilityId
+          in: query
+          schema:
+            type: integer
+        - name: date
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of blocked schedules
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/BlockedSchedule"
+    post:
+      operationId: createBlockedSchedule
+      tags: [schedules]
+      summary: Block a schedule slot
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BlockedScheduleInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BlockedSchedule"
+
+  /blocked-schedules/{id}:
+    delete:
+      operationId: deleteBlockedSchedule
+      tags: [schedules]
+      summary: Remove a blocked schedule
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /customers:
+    get:
+      operationId: listCustomers
+      tags: [customers]
+      summary: List customers
+      parameters:
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: accountType
+          in: query
+          schema:
+            type: string
+            enum: [personal, company]
+      responses:
+        "200":
+          description: List of customers
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Customer"
+    post:
+      operationId: createCustomer
+      tags: [customers]
+      summary: Create a customer account (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CustomerInput"
+      responses:
+        "201":
+          description: Customer created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Customer"
+        "409":
+          description: Email already exists
+
+  /customers/sheets/connect:
+    post:
+      operationId: connectCustomerSheet
+      tags: [customers]
+      summary: Verify Google Sheet access
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SheetConnectInput"
+      responses:
+        "200":
+          description: Sheet accessible
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SheetConnectResult"
+        "400":
+          description: Sheet not accessible or invalid
+
+  /customers/sheets/push:
+    post:
+      operationId: pushCustomersToSheet
+      tags: [customers]
+      summary: Export all customers to Google Sheet
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SheetSyncInput"
+      responses:
+        "200":
+          description: Push result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SheetPushResult"
+        "400":
+          description: Sheet error
+
+  /customers/sheets/pull:
+    post:
+      operationId: pullCustomersFromSheet
+      tags: [customers]
+      summary: Import customer updates from Google Sheet to DB
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SheetSyncInput"
+      responses:
+        "200":
+          description: Pull result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SheetPullResult"
+        "400":
+          description: Sheet error
+
+  /customers/{id}:
+    get:
+      operationId: getCustomer
+      tags: [customers]
+      summary: Get customer detail with booking history
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Customer detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Customer"
+    patch:
+      operationId: updateCustomer
+      tags: [customers]
+      summary: Update a customer account (admin)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CustomerUpdate"
+      responses:
+        "200":
+          description: Customer updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Customer"
+
+  /companies:
+    get:
+      operationId: listCompanies
+      tags: [company-verifications]
+      summary: List company accounts available for employee verification
+      responses:
+        "200":
+          description: List of company accounts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: integer
+                    name:
+                      type: string
+                    companyName:
+                      type: string
+
+  /company-verifications:
+    get:
+      operationId: listCompanyVerifications
+      tags: [company-verifications]
+      summary: List all company verification requests (admin)
+      parameters:
+        - in: query
+          name: status
+          schema:
+            type: string
+        - in: query
+          name: companyId
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of verifications
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CompanyVerification"
+    post:
+      operationId: createCompanyVerification
+      tags: [company-verifications]
+      summary: Submit employee verification request (customer)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompanyVerificationRequest"
+      responses:
+        "201":
+          description: Verification request submitted
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
+  /company-verifications/my:
+    get:
+      operationId: listMyCompanyVerifications
+      tags: [company-verifications]
+      summary: Get current customer's verification requests
+      responses:
+        "200":
+          description: My verifications
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CompanyVerification"
+
+  /company-verifications/billing-status:
+    get:
+      operationId: getCompanyBillingStatus
+      tags: [company-verifications]
+      summary: Check if current customer has corporate billing enabled
+      responses:
+        "200":
+          description: Billing eligibility
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingStatusResponse"
+
+  /company-verifications/{id}/approve:
+    patch:
+      operationId: approveCompanyVerification
+      tags: [company-verifications]
+      summary: Approve verification request (admin)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Approved
+
+  /company-verifications/{id}/reject:
+    patch:
+      operationId: rejectCompanyVerification
+      tags: [company-verifications]
+      summary: Reject verification request (admin)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RejectVerificationInput"
+      responses:
+        "200":
+          description: Rejected
+
+  /company-verifications/{id}/revoke:
+    patch:
+      operationId: revokeCompanyVerification
+      tags: [company-verifications]
+      summary: Revoke approved verification (admin)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RevokeVerificationInput"
+      responses:
+        "200":
+          description: Revoked
+
+  /company-users/{id}/toggle-billing:
+    patch:
+      operationId: toggleCompanyUserBilling
+      tags: [company-verifications]
+      summary: Toggle corporate billing for a verified employee (admin)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ToggleBillingInput"
+      responses:
+        "200":
+          description: Updated
+
+  /company-users/by-company/{companyId}:
+    get:
+      operationId: listCompanyUsers
+      tags: [company-verifications]
+      summary: List verified employees of a company (admin)
+      parameters:
+        - in: path
+          name: companyId
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of company users
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: integer
+                    customerId:
+                      type: integer
+                    companyId:
+                      type: integer
+                    employeeId:
+                      type: string
+                    officeEmail:
+                      type: string
+                      nullable: true
+                    verificationStatus:
+                      type: string
+                    corporateBillingEnabled:
+                      type: boolean
+                    customerName:
+                      type: string
+                    customerEmail:
+                      type: string
+
+  /company-invoices:
+    get:
+      operationId: listCompanyInvoices
+      tags: [company-billing]
+      summary: List company invoices (admin)
+      parameters:
+        - name: companyCustomerId
+          in: query
+          schema:
+            type: integer
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [unpaid, paid]
+      responses:
+        "200":
+          description: List of company invoices
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CompanyInvoice"
+    post:
+      operationId: generateCompanyInvoice
+      tags: [company-billing]
+      summary: Generate monthly invoice for a company customer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GenerateInvoiceInput"
+      responses:
+        "201":
+          description: Invoice generated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompanyInvoice"
+
+  /company-invoices/generate:
+    post:
+      operationId: generateCompanyInvoiceAlias
+      tags: [company-billing]
+      summary: Generate monthly invoice (alias endpoint matching task contract)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GenerateInvoiceInput"
+      responses:
+        "201":
+          description: Invoice generated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompanyInvoice"
+
+  /company-invoices/{id}:
+    get:
+      operationId: getCompanyInvoice
+      tags: [company-billing]
+      summary: Get a company invoice detail
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Invoice detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompanyInvoice"
+    patch:
+      operationId: updateCompanyInvoice
+      tags: [company-billing]
+      summary: Mark invoice as paid
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompanyInvoiceUpdate"
+      responses:
+        "200":
+          description: Invoice updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompanyInvoice"
+
+  /admin/tax-report:
+    get:
+      operationId: getTaxReport
+      tags: [tax]
+      summary: Laporan pajak PPN per periode
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: startDate
+          in: query
+          schema:
+            type: string
+        - name: endDate
+          in: query
+          schema:
+            type: string
+        - name: groupBy
+          in: query
+          schema:
+            type: string
+            enum: [day, month, year]
+            default: month
+      responses:
+        "200":
+          description: Tax report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaxReport"
+
+  /admin/dashboard:
+    get:
+      operationId: getDashboard
+      tags: [dashboard]
+      summary: Get admin dashboard stats
+      responses:
+        "200":
+          description: Dashboard statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardStats"
+
+  /admin/bookings/export:
+    get:
+      operationId: exportBookings
+      tags: [dashboard]
+      summary: Export bookings as CSV
+      parameters:
+        - name: startDate
+          in: query
+          schema:
+            type: string
+        - name: endDate
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: CSV data
+          content:
+            text/csv:
+              schema:
+                type: string
+
+  /memberships:
+    get:
+      operationId: listMemberships
+      tags: [memberships]
+      summary: List all gym memberships (admin)
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [active, expired, cancelled]
+      responses:
+        "200":
+          description: List of memberships
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/GymMembership"
+    post:
+      operationId: createMembership
+      tags: [memberships]
+      summary: Register a new gym membership
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GymMembershipInput"
+      responses:
+        "201":
+          description: Membership created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GymMembership"
+
+  /memberships/lookup:
+    post:
+      operationId: lookupMembership
+      tags: [memberships]
+      summary: Look up a membership by phone number (public)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MembershipLookupInput"
+      responses:
+        "200":
+          description: Membership found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MembershipLookupResult"
+        "404":
+          description: Not found
+
+  /memberships/{id}/payment-proof:
+    post:
+      operationId: submitMembershipPaymentProof
+      tags: [memberships]
+      summary: Submit payment proof for a membership
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MembershipPaymentProofInput"
+      responses:
+        "200":
+          description: Payment proof submitted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GymMembership"
+
+  /memberships/{id}:
+    get:
+      operationId: getMembership
+      tags: [memberships]
+      summary: Get membership detail
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Membership detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GymMembership"
+    patch:
+      operationId: updateMembership
+      tags: [memberships]
+      summary: Update membership (admin)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GymMembershipUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GymMembership"
+    delete:
+      operationId: deleteMembership
+      tags: [memberships]
+      summary: Delete membership (admin)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /settings:
+    get:
+      operationId: getSettings
+      tags: [settings]
+      summary: Get app settings
+      responses:
+        "200":
+          description: App settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Settings"
+    patch:
+      operationId: updateSettings
+      tags: [settings]
+      summary: Update app settings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SettingsUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Settings"
+
+  /discount-settings:
+    get:
+      operationId: listDiscountSettings
+      tags: [discounts]
+      summary: List discount settings per customer type
+      responses:
+        "200":
+          description: List of discount settings
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DiscountSetting"
+
+  /discount-settings/{customerType}:
+    get:
+      operationId: getDiscountSetting
+      tags: [discounts]
+      summary: Get discount setting for a customer type
+      parameters:
+        - name: customerType
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Discount setting
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DiscountSetting"
+        "404":
+          description: Not found
+    patch:
+      operationId: updateDiscountSetting
+      tags: [discounts]
+      summary: Update discount percentage or fixed amount and active state (admin)
+      parameters:
+        - name: customerType
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DiscountSettingUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DiscountSetting"
+
+  /ap-members:
+    get:
+      operationId: listApMembers
+      tags: [ap-members]
+      summary: List Angkasa Pura members (admin)
+      parameters:
+        - name: search
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of members
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ApMember"
+    post:
+      operationId: createApMember
+      tags: [ap-members]
+      summary: Add an Angkasa Pura member (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApMemberInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApMember"
+
+  /ap-members/{id}:
+    patch:
+      operationId: updateApMember
+      tags: [ap-members]
+      summary: Update an Angkasa Pura member (admin)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApMemberUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApMember"
+    delete:
+      operationId: deleteApMember
+      tags: [ap-members]
+      summary: Delete an Angkasa Pura member (admin)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /reviews:
+    get:
+      operationId: getReviews
+      tags: [reviews]
+      summary: List reviews (optionally filtered by facilityId)
+      parameters:
+        - name: facilityId
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of reviews
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Review"
+    post:
+      operationId: createReview
+      tags: [reviews]
+      summary: Submit a review for a completed booking
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateReviewInput"
+      responses:
+        "201":
+          description: Review created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Review"
+
+  /reviews/summary:
+    get:
+      operationId: getReviewsSummary
+      tags: [reviews]
+      summary: Average ratings per facility
+      responses:
+        "200":
+          description: Rating summary per facility
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ReviewSummary"
+
+  /bookings/{id}/check-in:
+    post:
+      operationId: checkInBooking
+      tags: [bookings]
+      summary: Mark booking as checked-in (admin)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Checked in
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Booking"
+        "400":
+          description: Already checked in
+        "404":
+          description: Booking not found
+
+  /bookings/{id}/wa-logs:
+    get:
+      operationId: getBookingWaLogs
+      tags: [bookings]
+      summary: Get WA notification logs for a booking (admin)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: WA notification logs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/WaNotifLog"
+        "404":
+          description: Booking not found
+
+  /bookings/{id}/resend-wa:
+    post:
+      operationId: resendBookingWa
+      tags: [bookings]
+      summary: Resend WA notification to customer based on booking status (admin)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: WA sent
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, message]
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+        "400":
+          description: Cannot resend for this status
+        "404":
+          description: Booking not found
+
+  /bookings/{id}/verify:
+    post:
+      operationId: verifyBooking
+      tags: [bookings]
+      summary: Verify Angkasa Pura ID card and apply discount (admin)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VerifyInput"
+      responses:
+        "200":
+          description: Verification result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerifyResult"
+
+  /bookings/verify-by-order:
+    post:
+      operationId: verifyBookingByOrder
+      tags: [bookings]
+      summary: Self-service AP2 ID card verification by order number (public)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VerifyByOrderInput"
+      responses:
+        "200":
+          description: Verification result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerifyResult"
+        "404":
+          description: Booking not found
+
+  /verification-logs:
+    get:
+      operationId: getVerificationLogs
+      tags: [bookings]
+      summary: List ID card verification activity logs (admin)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: bookingId
+          in: query
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of verification logs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/VerificationLog"
+
+  /tenant/me:
+    get:
+      operationId: getTenantMe
+      tags: [tenants]
+      summary: Get own tenant profile
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Tenant profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Tenant"
+        "404":
+          description: Not found
+
+  /tenant/bookings:
+    get:
+      operationId: listTenantBookings
+      tags: [tenants]
+      summary: List own tenant bookings
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: List of tenant bookings
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TenantBooking"
+    post:
+      operationId: createTenantBooking
+      tags: [tenants]
+      summary: Submit new tenant booking
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TenantBookingInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantBooking"
+
+  /tenant/bookings/{orderNumber}:
+    get:
+      operationId: getTenantBooking
+      tags: [tenants]
+      summary: Get tenant booking detail
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: orderNumber
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Booking detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantBooking"
+
+  /tenant/payments:
+    post:
+      operationId: createTenantPayment
+      tags: [tenants]
+      summary: Upload tenant payment proof
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TenantPaymentInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantPayment"
+
+  /admin/tenants:
+    get:
+      operationId: listAdminTenants
+      tags: [tenants]
+      summary: Admin list all tenants
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: List of tenants
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Tenant"
+    post:
+      operationId: createAdminTenant
+      tags: [tenants]
+      summary: Admin create tenant account
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTenantInput"
+      responses:
+        "201":
+          description: Created
+
+  /admin/tenants/{id}:
+    get:
+      operationId: getAdminTenant
+      tags: [tenants]
+      summary: Admin get tenant detail
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Tenant detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Tenant"
+
+  /admin/tenants/{id}/status:
+    put:
+      operationId: updateAdminTenantStatus
+      tags: [tenants]
+      summary: Admin update tenant status
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TenantStatusUpdateBody"
+      responses:
+        "200":
+          description: Updated
+
+  /admin/tenant-bookings:
+    get:
+      operationId: listAdminTenantBookings
+      tags: [tenants]
+      summary: Admin list all tenant bookings
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: tenantId
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of tenant bookings
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TenantBooking"
+
+  /admin/tenant-bookings/{id}:
+    put:
+      operationId: updateAdminTenantBooking
+      tags: [tenants]
+      summary: Admin update tenant booking
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TenantBookingUpdate"
+      responses:
+        "200":
+          description: Updated
+
+  /admin/tenant-payments/{id}/verify:
+    put:
+      operationId: verifyAdminTenantPayment
+      tags: [tenants]
+      summary: Admin verify tenant payment
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TenantPaymentActionBody"
+      responses:
+        "200":
+          description: Verified
+
+  /admin/tenant-payments/{id}/reject:
+    put:
+      operationId: rejectAdminTenantPayment
+      tags: [tenants]
+      summary: Admin reject tenant payment
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TenantPaymentActionBody"
+      responses:
+        "200":
+          description: Rejected
+
+  /bank-reconciliation/import:
+    post:
+      operationId: importBankMutations
+      tags: [bank-reconciliation]
+      summary: Import bank mutations (multipart file upload handled directly)
+      responses:
+        "200":
+          description: Import result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BankMutationImportResult"
+
+  /bank-reconciliation/mutations:
+    get:
+      operationId: listBankMutations
+      tags: [bank-reconciliation]
+      summary: List bank mutations with filters
+      parameters:
+        - in: query
+          name: status
+          schema: { type: string }
+        - in: query
+          name: direction
+          schema: { type: string }
+        - in: query
+          name: dateFrom
+          schema: { type: string }
+        - in: query
+          name: dateTo
+          schema: { type: string }
+        - in: query
+          name: minAmount
+          schema: { type: number }
+        - in: query
+          name: maxAmount
+          schema: { type: number }
+        - in: query
+          name: search
+          schema: { type: string }
+        - in: query
+          name: page
+          schema: { type: integer }
+        - in: query
+          name: pageSize
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Paginated list of mutations
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BankMutationListResult"
+    delete:
+      operationId: clearBankMutations
+      tags: [bank-reconciliation]
+      summary: Delete bank mutations (all or by status filter)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClearBankMutationsInput"
+      responses:
+        "200":
+          description: Delete result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClearBankMutationsResult"
+
+  /bank-reconciliation/matches/{mutationId}:
+    get:
+      operationId: getBankMutationMatches
+      tags: [bank-reconciliation]
+      summary: Get match candidates for a mutation
+      parameters:
+        - in: path
+          name: mutationId
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Mutation with match candidates
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BankMutationWithMatches"
+
+  /bank-reconciliation/{mutationId}/approve:
+    post:
+      operationId: approveBankMutation
+      tags: [bank-reconciliation]
+      summary: Approve a bank mutation match
+      parameters:
+        - in: path
+          name: mutationId
+          required: true
+          schema: { type: integer }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BankMutationApproveInput"
+      responses:
+        "200":
+          description: Approved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResult"
+
+  /bank-reconciliation/{mutationId}/reject:
+    post:
+      operationId: rejectBankMutation
+      tags: [bank-reconciliation]
+      summary: Reject a bank mutation
+      parameters:
+        - in: path
+          name: mutationId
+          required: true
+          schema: { type: integer }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BankMutationRejectInput"
+      responses:
+        "200":
+          description: Rejected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResult"
+
+  /bank-reconciliation/run-matching:
+    post:
+      operationId: runBankMatching
+      tags: [bank-reconciliation]
+      summary: Run matching algorithm for unmatched mutations
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RunMatchingInput"
+      responses:
+        "200":
+          description: Matching result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunMatchingResult"
+
+  /bank-reconciliation/mutations/{id}/candidates:
+    get:
+      operationId: getBankMutationCandidates
+      tags: [bank-reconciliation]
+      summary: Get enriched match candidates for a mutation
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Mutation with enriched candidates
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BankMutationCandidatesResult"
+
+  /bank-reconciliation/mutations/{id}/approve-candidate:
+    post:
+      operationId: approveBankMutationCandidate
+      tags: [bank-reconciliation]
+      summary: Approve a specific match candidate for a mutation
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApproveCandidateInput"
+      responses:
+        "200":
+          description: Approved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResult"
+
+  /bank-reconciliation/mutations/{id}/mark-unmatched:
+    post:
+      operationId: markBankMutationUnmatched
+      tags: [bank-reconciliation]
+      summary: Mark a mutation as unmatched
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Marked unmatched
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResult"
+
+  /bank-reconciliation/mutations/{id}/mark-duplicate:
+    post:
+      operationId: markBankMutationDuplicate
+      tags: [bank-reconciliation]
+      summary: Mark a mutation as duplicate needing review
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Marked duplicate
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResult"
+
+  /bank-reconciliation/sheets/connect:
+    post:
+      operationId: connectBankReconSheet
+      tags: [bank-reconciliation]
+      summary: Verify access to a Google Sheet for bank reconciliation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SheetConnectInput"
+      responses:
+        "200":
+          description: Sheet info
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SheetConnectResult"
+
+  /bank-reconciliation/sheets/pull:
+    post:
+      operationId: pullBankMutationsFromSheet
+      tags: [bank-reconciliation]
+      summary: Pull bank mutations from Google Sheet and import to DB
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SheetConnectInput"
+      responses:
+        "200":
+          description: Import result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BankSheetPullResult"
+
+  /bank-reconciliation/sheets/push:
+    post:
+      operationId: pushBankReconToSheet
+      tags: [bank-reconciliation]
+      summary: Push reconciliation results to Google Sheet
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BankSheetPushInput"
+      responses:
+        "200":
+          description: Push result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BankSheetPushResult"
+
+  /admin/expenses:
+    get:
+      operationId: listExpenses
+      tags: [expenses]
+      summary: List expenses with filters and summary
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: startDate
+          schema:
+            type: string
+        - in: query
+          name: endDate
+          schema:
+            type: string
+        - in: query
+          name: category
+          schema:
+            type: string
+        - in: query
+          name: status
+          schema:
+            type: string
+        - in: query
+          name: vendorName
+          schema:
+            type: string
+        - in: query
+          name: facilityId
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Expense list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExpenseListResult"
+    post:
+      operationId: createExpense
+      tags: [expenses]
+      summary: Create a new expense (draft)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ExpenseInput"
+      responses:
+        "201":
+          description: Created expense
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Expense"
+
+  /admin/expenses/{id}:
+    get:
+      operationId: getExpense
+      tags: [expenses]
+      summary: Get expense detail
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Expense detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExpenseDetail"
+    patch:
+      operationId: updateExpense
+      tags: [expenses]
+      summary: Update expense (only draft/rejected)
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ExpenseInput"
+      responses:
+        "200":
+          description: Updated expense
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Expense"
+
+  /admin/expenses/{id}/status:
+    patch:
+      operationId: updateExpenseStatus
+      tags: [expenses]
+      summary: Change expense status (submit/approve/reject/pay/cancel)
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ExpenseStatusInput"
+      responses:
+        "200":
+          description: Updated expense
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Expense"
+
+  /admin/document-templates:
+    get:
+      operationId: listDocumentTemplates
+      tags: [document-templates]
+      summary: List document templates with optional filters
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: companyId
+          schema:
+            type: string
+        - in: query
+          name: documentType
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of document templates
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DocumentTemplate"
+    post:
+      operationId: createDocumentTemplate
+      tags: [document-templates]
+      summary: Create a new document template
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DocumentTemplateInput"
+      responses:
+        "201":
+          description: Created template
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentTemplate"
+
+  /admin/document-templates/{id}:
+    get:
+      operationId: getDocumentTemplate
+      tags: [document-templates]
+      summary: Get a document template by ID
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Document template
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentTemplate"
+    put:
+      operationId: updateDocumentTemplate
+      tags: [document-templates]
+      summary: Update a document template
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DocumentTemplateInput"
+      responses:
+        "200":
+          description: Updated template
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentTemplate"
+    delete:
+      operationId: deleteDocumentTemplate
+      tags: [document-templates]
+      summary: Delete a document template (non-default only)
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+
+  /admin/documents/{documentType}/{entityId}/preview:
+    get:
+      operationId: previewDocument
+      tags: [document-templates]
+      summary: Render document as HTML preview (no number issuance)
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: documentType
+          required: true
+          schema:
+            type: string
+            enum: [invoice, spp, faktur, kwitansi, lampiran, berita_acara]
+        - in: path
+          name: entityId
+          required: true
+          schema:
+            type: integer
+        - in: query
+          name: companyId
+          schema:
+            type: integer
+        - in: query
+          name: _token
+          description: JWT token for browser window.open() flows (alternative to Authorization header)
+          schema:
+            type: string
+      responses:
+        "200":
+          description: HTML document preview
+          content:
+            text/html:
+              schema:
+                type: string
+
+  /admin/documents/{documentType}/{entityId}/pdf:
+    get:
+      operationId: generateDocumentPdf
+      tags: [document-templates]
+      summary: Generate PDF binary (Puppeteer) or print-ready HTML fallback; issues document number
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: documentType
+          required: true
+          schema:
+            type: string
+            enum: [invoice, spp, faktur, kwitansi, lampiran, berita_acara]
+        - in: path
+          name: entityId
+          required: true
+          schema:
+            type: integer
+        - in: query
+          name: companyId
+          schema:
+            type: integer
+        - in: query
+          name: _token
+          description: JWT token for browser window.open() flows (alternative to Authorization header)
+          schema:
+            type: string
+      responses:
+        "200":
+          description: PDF binary (application/pdf) or HTML fallback (text/html)
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+            text/html:
+              schema:
+                type: string
+
+components:
+  schemas:
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+      required:
+        - status
+
+    GoogleLoginInput:
+      type: object
+      required: [idToken]
+      properties:
+        idToken:
+          type: string
+
+    SendOtpInput:
+      type: object
+      required: [phone]
+      properties:
+        phone:
+          type: string
+
+    VerifyOtpInput:
+      type: object
+      required: [phone, otp]
+      properties:
+        phone:
+          type: string
+        otp:
+          type: string
+        name:
+          type: string
+
+    LoginInput:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+        password:
+          type: string
+
+    RegisterInput:
+      type: object
+      required: [name, email, password]
+      properties:
+        name:
+          type: string
+        email:
+          type: string
+        password:
+          type: string
+        phone:
+          type: string
+
+    AuthResponse:
+      type: object
+      required: [user, token]
+      properties:
+        user:
+          $ref: "#/components/schemas/User"
+        token:
+          type: string
+
+    UpdateProfileInput:
+      type: object
+      properties:
+        name:
+          type: string
+        phone:
+          type: string
+        currentPassword:
+          type: string
+        newPassword:
+          type: string
+
+    User:
+      type: object
+      required: [id, name, role]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        email:
+          type: ["string", "null"]
+        role:
+          type: string
+          enum: [admin, super_admin, admin_booking, finance, staff, customer, tenant, ap2_employee]
+        phone:
+          type: ["string", "null"]
+        googleId:
+          type: ["string", "null"]
+        hasPassword:
+          type: boolean
+        createdAt:
+          type: string
+
+    Facility:
+      type: object
+      required: [id, name, category, pricePerHour, openTime, closeTime, isActive, bookingMode]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        category:
+          type: string
+        description:
+          type: ["string", "null"]
+        pricePerHour:
+          type: number
+        openTime:
+          type: string
+        closeTime:
+          type: string
+        bookingMode:
+          type: string
+          enum: [time_slot, walk_in]
+        minDuration:
+          type: integer
+        maxDuration:
+          type: ["integer", "null"]
+        capacity:
+          type: ["integer", "null"]
+        isActive:
+          type: boolean
+        images:
+          type: array
+          items:
+            $ref: "#/components/schemas/FacilityImage"
+        createdAt:
+          type: string
+
+    FacilityImage:
+      type: object
+      required: [id, facilityId, url, isPrimary]
+      properties:
+        id:
+          type: integer
+        facilityId:
+          type: integer
+        url:
+          type: string
+        isPrimary:
+          type: boolean
+
+    FacilityInput:
+      type: object
+      required: [name, category, pricePerHour, openTime, closeTime]
+      properties:
+        name:
+          type: string
+        category:
+          type: string
+        description:
+          type: string
+        pricePerHour:
+          type: number
+        openTime:
+          type: string
+        closeTime:
+          type: string
+        minDuration:
+          type: integer
+        maxDuration:
+          type: integer
+        capacity:
+          type: integer
+        isActive:
+          type: boolean
+        imageUrls:
+          type: array
+          items:
+            type: string
+
+    FacilityUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+        category:
+          type: string
+        description:
+          type: string
+        pricePerHour:
+          type: number
+        openTime:
+          type: string
+        closeTime:
+          type: string
+        minDuration:
+          type: integer
+        maxDuration:
+          type: integer
+        capacity:
+          type: integer
+        isActive:
+          type: boolean
+        imageUrls:
+          type: array
+          items:
+            type: string
+
+    TimeSlot:
+      type: object
+      required: [time, available]
+      properties:
+        time:
+          type: string
+        available:
+          type: boolean
+        reason:
+          type: ["string", "null"]
+
+    Booking:
+      type: object
+      required: [id, orderNumber, customerName, customerEmail, customerPhone, facilityId, facilityName, bookingDate, startTime, endTime, durationHours, totalPrice, status]
+      properties:
+        id:
+          type: integer
+        orderNumber:
+          type: string
+        customerId:
+          type: ["integer", "null"]
+        customerName:
+          type: string
+        customerEmail:
+          type: string
+        customerPhone:
+          type: string
+        facilityId:
+          type: integer
+        facilityName:
+          type: string
+        facilityCategory:
+          type: string
+        bookingDate:
+          type: string
+        startTime:
+          type: string
+        endTime:
+          type: string
+        durationHours:
+          type: integer
+        totalPrice:
+          type: number
+        status:
+          type: string
+          enum: [pending_payment, waiting_confirmation, paid, confirmed, completed, cancelled, rejected, expired, refunded]
+        customerType:
+          type: string
+          enum: [umum, angkasa_pura]
+        idCardNumber:
+          type: ["string", "null"]
+        verificationStatus:
+          type: string
+          enum: [not_required, pending, verified, rejected]
+        basePrice:
+          type: ["number", "null"]
+        apDiscountAmount:
+          type: number
+        activityType:
+          type: ["string", "null"]
+        numberOfPeople:
+          type: ["integer", "null"]
+        notes:
+          type: ["string", "null"]
+        adminNotes:
+          type: ["string", "null"]
+        whatsappMessage:
+          type: ["string", "null"]
+        checkedInAt:
+          type: ["string", "null"]
+        completedAt:
+          type: ["string", "null"]
+        paymentDeadline:
+          type: ["string", "null"]
+        ppnRate:
+          type: ["number", "null"]
+        ppnAmount:
+          type: ["number", "null"]
+        grandTotal:
+          type: ["number", "null"]
+        downPayment:
+          type: number
+        isDpPaid:
+          type: boolean
+        payment:
+          $ref: "#/components/schemas/Payment"
+          nullable: true
+        payments:
+          type: array
+          items:
+            $ref: "#/components/schemas/Payment"
+        remainingAmount:
+          type: number
+        createdAt:
+          type: string
+
+    DpPaymentInput:
+      type: object
+      required: [downPaymentAmount]
+      properties:
+        downPaymentAmount:
+          type: number
+          minimum: 0
+
+    RecurringBookingCheckInput:
+      type: object
+      required: [facilityId, startDate, startTime, durationHours, repeatType, repeatCount]
+      properties:
+        facilityId:
+          type: integer
+        startDate:
+          type: string
+        startTime:
+          type: string
+        durationHours:
+          type: integer
+        repeatType:
+          type: string
+          enum: [weekly, monthly]
+        repeatCount:
+          type: integer
+          minimum: 1
+          maximum: 52
+
+    RecurringDateStatus:
+      type: object
+      required: [date, available]
+      properties:
+        date:
+          type: string
+        available:
+          type: boolean
+        reason:
+          type: ["string", "null"]
+
+    RecurringBookingCheckResult:
+      type: object
+      required: [dates, pricePerSession, validCount, totalPrice]
+      properties:
+        dates:
+          type: array
+          items:
+            $ref: "#/components/schemas/RecurringDateStatus"
+        pricePerSession:
+          type: number
+        validCount:
+          type: integer
+        totalPrice:
+          type: number
+
+    RecurringBookingInput:
+      type: object
+      required: [customerName, customerEmail, customerPhone, facilityId, startDate, startTime, durationHours, repeatType, repeatCount]
+      properties:
+        customerName:
+          type: string
+        customerEmail:
+          type: string
+        customerPhone:
+          type: string
+        facilityId:
+          type: integer
+        startDate:
+          type: string
+        startTime:
+          type: string
+        durationHours:
+          type: integer
+        repeatType:
+          type: string
+          enum: [weekly, monthly]
+        repeatCount:
+          type: integer
+        notes:
+          type: string
+
+        downPaymentAmount:
+          type: number
+          description: Total down payment for the recurring payment group. Must be less than the group grand total.
+
+        customerType:
+          type: string
+          enum: [umum, angkasa_pura]
+        idCardNumber:
+          type: string
+
+    RecurringBookingResult:
+      type: object
+      required: [created, skipped, totalBookings, grandTotal]
+      properties:
+        created:
+          type: array
+          items:
+            $ref: "#/components/schemas/Booking"
+        skipped:
+          type: array
+          items:
+            type: string
+        totalBookings:
+          type: integer
+        grandTotal:
+          type: number
+
+    Vendor:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        contactPerson:
+          type: ["string", "null"]
+        phone:
+          type: ["string", "null"]
+        email:
+          type: ["string", "null"]
+        address:
+          type: ["string", "null"]
+        notes:
+          type: ["string", "null"]
+        isActive:
+          type: boolean
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+
+    VendorSimple:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+
+    BookingInput:
+      type: object
+      required: [customerName, customerEmail, customerPhone, facilityId, bookingDate]
+      properties:
+        customerName:
+          type: string
+        customerEmail:
+          type: string
+        customerPhone:
+          type: string
+        facilityId:
+          type: integer
+        bookingDate:
+          type: string
+        startTime:
+          type: string
+        durationHours:
+          type: integer
+        activityType:
+          type: string
+        numberOfPeople:
+          type: integer
+        customerType:
+          type: string
+          enum: [umum, angkasa_pura]
+        idCardNumber:
+          type: string
+        notes:
+          type: string
+        vendorId:
+          type: integer
+          nullable: true
+
+    BookingUpdate:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [pending_payment, waiting_confirmation, paid, confirmed, completed, cancelled, rejected, expired, refunded]
+        adminNotes:
+          type: string
+
+    Payment:
+      type: object
+      required: [id, bookingId, amount, providerName, providerId, providerOrderId, bankAccountId, status]
+      properties:
+        id:
+          type: integer
+        bookingId:
+          type: integer
+        amount:
+          type: number
+        proofUrl:
+          type: ["string", "null"]
+        paymentMethod:
+          type: ["string", "null"]
+        paymentProvider:
+          type: ["string", "null"]
+          enum: [mandiri_direct, paylabs, unknown, null]
+        providerName:
+          type: string
+        providerId:
+          type: string
+        providerOrderId:
+          type: string
+        bankAccountId:
+          type: string
+        providerReference:
+          type: ["string", "null"]
+        merchantTradeNo:
+          type: ["string", "null"]
+        providerTradeNo:
+          type: ["string", "null"]
+        paymentType:
+          type: string
+          enum: [dp, pelunasan, full_payment]
+        status:
+          type: string
+          enum: [pending, confirmed, rejected]
+        confirmedAt:
+          type: ["string", "null"]
+        paidAt:
+          type: ["string", "null"]
+        notes:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+
+    PaymentInput:
+      type: object
+      required: [bookingId, amount]
+      properties:
+        bookingId:
+          type: integer
+        amount:
+          type: number
+        proofUrl:
+          type: string
+        paymentMethod:
+          type: string
+          enum: [Transfer Bank, QRIS]
+        paymentProvider:
+          type: string
+          enum: [mandiri_direct, paylabs, unknown]
+        providerOrderId:
+          type: string
+        paymentType:
+          type: string
+          enum: [dp, pelunasan, full_payment]
+        notes:
+          type: string
+        ocrScanToken:
+          type: string
+        ocrScan:
+          type: object
+          additionalProperties: true
+
+    PaymentUpdate:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [pending, confirmed, rejected]
+        paymentMethod:
+          type: string
+        paymentProvider:
+          type: string
+          enum: [mandiri_direct, paylabs, unknown]
+        notes:
+          type: string
+
+    PaymentMetadataUpdate:
+      type: object
+      additionalProperties: false
+      properties:
+        paymentMethod:
+          type: string
+        paymentProvider:
+          type: string
+          # QRIS manual Sport Center selalu settle via Bank Mandiri CST.
+          enum: [mandiri_direct]
+
+    Promo:
+      type: object
+      required: [id, title, type, isActive]
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        description:
+          type: ["string", "null"]
+        type:
+          type: string
+          enum: [promo, event]
+        discountPercent:
+          type: ["number", "null"]
+        startDate:
+          type: ["string", "null"]
+        endDate:
+          type: ["string", "null"]
+        imageUrl:
+          type: ["string", "null"]
+        isActive:
+          type: boolean
+        createdAt:
+          type: string
+
+    PromoInput:
+      type: object
+      required: [title, type]
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        type:
+          type: string
+          enum: [promo, event]
+        discountPercent:
+          type: number
+        startDate:
+          type: string
+        endDate:
+          type: string
+        imageUrl:
+          type: string
+        isActive:
+          type: boolean
+
+    PromoUpdate:
+      type: object
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        discountPercent:
+          type: number
+        startDate:
+          type: string
+        endDate:
+          type: string
+        imageUrl:
+          type: string
+        isActive:
+          type: boolean
+
+    PromoRegistrationInput:
+      type: object
+      required: [promoId, name, email, phone]
+      properties:
+        promoId:
+          type: integer
+        name:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+        message:
+          type: string
+
+    PromoRegistration:
+      type: object
+      required: [id, promoId, name, email, phone]
+      properties:
+        id:
+          type: integer
+        promoId:
+          type: integer
+        name:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+        message:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+
+    BlockedSchedule:
+      type: object
+      required: [id, facilityId, date, startTime, endTime, reason]
+      properties:
+        id:
+          type: integer
+        facilityId:
+          type: integer
+        facilityName:
+          type: ["string", "null"]
+        date:
+          type: string
+        startTime:
+          type: string
+        endTime:
+          type: string
+        reason:
+          type: string
+
+    BlockedScheduleInput:
+      type: object
+      required: [facilityId, date, startTime, endTime, reason]
+      properties:
+        facilityId:
+          type: integer
+        date:
+          type: string
+        startTime:
+          type: string
+        endTime:
+          type: string
+        reason:
+          type: string
+
+    Customer:
+      type: object
+      required: [id, name, email]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        email:
+          type: string
+        phone:
+          type: ["string", "null"]
+        customerCode:
+          type: ["string", "null"]
+        registrationSource:
+          type: ["string", "null"]
+        accountType:
+          type: string
+          enum: [personal, company]
+        companyName:
+          type: ["string", "null"]
+        picName:
+          type: ["string", "null"]
+        picPhone:
+          type: ["string", "null"]
+        picEmail:
+          type: ["string", "null"]
+        billingAddress:
+          type: ["string", "null"]
+        paymentTermsDays:
+          type: ["integer", "null"]
+        monthlyCreditLimit:
+          type: ["number", "null"]
+        allowMonthlyBilling:
+          type: ["boolean", "null"]
+        accountStatus:
+          type: ["string", "null"]
+        totalBookings:
+          type: integer
+        totalSpent:
+          type: number
+        createdAt:
+          type: string
+
+    CustomerInput:
+      type: object
+      required: [name, email, accountType]
+      properties:
+        name:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+        accountType:
+          type: string
+          enum: [personal, company]
+        companyName:
+          type: string
+        picName:
+          type: string
+        picPhone:
+          type: string
+        picEmail:
+          type: string
+        billingAddress:
+          type: string
+        paymentTermsDays:
+          type: integer
+        monthlyCreditLimit:
+          type: number
+        allowMonthlyBilling:
+          type: boolean
+        accountStatus:
+          type: string
+
+    CustomerUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+        accountType:
+          type: string
+          enum: [personal, company]
+        companyName:
+          type: string
+        picName:
+          type: string
+        picPhone:
+          type: string
+        picEmail:
+          type: string
+        billingAddress:
+          type: string
+        paymentTermsDays:
+          type: integer
+        monthlyCreditLimit:
+          type: number
+        allowMonthlyBilling:
+          type: boolean
+        accountStatus:
+          type: string
+
+    CompanyInvoice:
+      type: object
+      required: [id, invoiceNumber, companyCustomerId, periodMonth, totalAmount, ppnAmount, grandTotal, status, createdAt]
+      properties:
+        id:
+          type: integer
+        invoiceNumber:
+          type: string
+        companyCustomerId:
+          type: integer
+        companyName:
+          type: string
+        periodMonth:
+          type: string
+        totalAmount:
+          type: number
+        ppnAmount:
+          type: number
+        grandTotal:
+          type: number
+        status:
+          type: string
+          enum: [unpaid, paid]
+        paidAt:
+          type: ["string", "null"]
+        notes:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+        bookings:
+          type: array
+          items:
+            $ref: "#/components/schemas/Booking"
+
+    GenerateInvoiceInput:
+      type: object
+      required: [companyCustomerId, periodMonth]
+      properties:
+        companyCustomerId:
+          type: integer
+        periodMonth:
+          type: string
+        notes:
+          type: string
+        includePpn:
+          type: boolean
+
+    CompanyInvoiceUpdate:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [unpaid, paid]
+        notes:
+          type: string
+
+    DashboardStats:
+      type: object
+      required: [totalBookings, totalRevenue, todayBookings, pendingBookings, topFacilities, recentBookings, bookingsByStatus, revenueByMonth]
+      properties:
+        totalBookings:
+          type: integer
+        totalRevenue:
+          type: number
+        todayBookings:
+          type: integer
+        pendingBookings:
+          type: integer
+        membershipRevenue:
+          type: number
+          nullable: true
+        activeMemberships:
+          type: integer
+          nullable: true
+        topFacilities:
+          type: array
+          items:
+            $ref: "#/components/schemas/FacilityStat"
+        recentBookings:
+          type: array
+          items:
+            $ref: "#/components/schemas/Booking"
+        bookingsByStatus:
+          type: array
+          items:
+            $ref: "#/components/schemas/StatusCount"
+        revenueByMonth:
+          type: array
+          items:
+            $ref: "#/components/schemas/MonthRevenue"
+
+    FacilityStat:
+      type: object
+      required: [facilityId, facilityName, bookingCount, revenue]
+      properties:
+        facilityId:
+          type: integer
+        facilityName:
+          type: string
+        bookingCount:
+          type: integer
+        revenue:
+          type: number
+
+    StatusCount:
+      type: object
+      required: [status, count]
+      properties:
+        status:
+          type: string
+        count:
+          type: integer
+
+    MonthRevenue:
+      type: object
+      required: [month, revenue, bookings]
+      properties:
+        month:
+          type: string
+        revenue:
+          type: number
+        bookings:
+          type: integer
+
+    Settings:
+      type: object
+      required: [id, centerName, address, phone, whatsapp, email]
+      properties:
+        id:
+          type: integer
+        centerName:
+          type: string
+        address:
+          type: string
+        phone:
+          type: string
+        whatsapp:
+          type: string
+        email:
+          type: string
+        openHour:
+          type: ["string", "null"]
+        closeHour:
+          type: ["string", "null"]
+        logoUrl:
+          type: ["string", "null"]
+        bankName:
+          type: ["string", "null"]
+        bankAccount:
+          type: ["string", "null"]
+        bankAccountName:
+          type: ["string", "null"]
+        qrisImageUrl:
+          type: ["string", "null"]
+        fonnteToken:
+          type: ["string", "null"]
+        fonnteAdminWa:
+          type: ["string", "null"]
+        adminWaPhones:
+          type: ["string", "null"]
+        appUrl:
+          type: ["string", "null"]
+
+    SettingsUpdate:
+      type: object
+      properties:
+        centerName:
+          type: string
+        address:
+          type: string
+        phone:
+          type: string
+        whatsapp:
+          type: string
+        email:
+          type: string
+        openHour:
+          type: string
+        closeHour:
+          type: string
+        logoUrl:
+          type: string
+        bankName:
+          type: string
+        bankAccount:
+          type: string
+        bankAccountName:
+          type: string
+        qrisImageUrl:
+          type: string
+        fonnteToken:
+          type: string
+        fonnteAdminWa:
+          type: string
+        adminWaPhones:
+          type: string
+        appUrl:
+          type: string
+
+    DiscountSetting:
+      type: object
+      required: [id, customerType, discountPercentage, isActive]
+      properties:
+        id:
+          type: integer
+        customerType:
+          type: string
+        discountPercentage:
+          type: integer
+        discountAmount:
+          type: ["integer", "null"]
+        description:
+          type: ["string", "null"]
+        isActive:
+          type: boolean
+
+    DiscountSettingUpdate:
+      type: object
+      properties:
+        discountPercentage:
+          type: integer
+          minimum: 0
+          maximum: 100
+        discountAmount:
+          type: ["integer", "null"]
+          minimum: 0
+        description:
+          type: string
+        isActive:
+          type: boolean
+
+    ApMember:
+      type: object
+      required: [id, name, idCardNumber, isActive]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        phone:
+          type: ["string", "null"]
+        email:
+          type: ["string", "null"]
+        idCardNumber:
+          type: string
+        isActive:
+          type: boolean
+        createdAt:
+          type: string
+
+    ApMemberInput:
+      type: object
+      required: [name, idCardNumber]
+      properties:
+        name:
+          type: string
+        phone:
+          type: string
+        email:
+          type: string
+        idCardNumber:
+          type: string
+        isActive:
+          type: boolean
+
+    ApMemberUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+        phone:
+          type: string
+        email:
+          type: string
+        idCardNumber:
+          type: string
+        isActive:
+          type: boolean
+
+    MyBookingItem:
+      type: object
+      required: [id, orderNumber, facilityId, facilityName, facilityCategory, bookingDate, startTime, endTime, totalPrice, status, createdAt]
+      properties:
+        id:
+          type: integer
+        orderNumber:
+          type: string
+        facilityId:
+          type: integer
+        facilityName:
+          type: string
+        facilityCategory:
+          type: string
+        bookingDate:
+          type: string
+        startTime:
+          type: string
+        endTime:
+          type: string
+        totalPrice:
+          type: number
+        status:
+          type: string
+        paymentStatus:
+          type: string
+          nullable: true
+        paymentProofUrl:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          nullable: true
+        groupRef:
+          type: string
+          nullable: true
+        customerName:
+          type: string
+          nullable: true
+
+    Review:
+      type: object
+      required: [id, bookingId, facilityId, rating, reviewerName, createdAt]
+      properties:
+        id:
+          type: integer
+        bookingId:
+          type: integer
+        facilityId:
+          type: integer
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+        comment:
+          type: string
+          nullable: true
+        reviewerName:
+          type: string
+        facilityName:
+          type: string
+        bookingDate:
+          type: string
+        orderNumber:
+          type: string
+        createdAt:
+          type: string
+
+    CreateReviewInput:
+      type: object
+      required: [bookingId, rating]
+      properties:
+        bookingId:
+          type: integer
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+        comment:
+          type: string
+        reviewerName:
+          type: string
+
+    ReviewSummary:
+      type: object
+      required: [facilityId, facilityName, avgRating, count]
+      properties:
+        facilityId:
+          type: integer
+        facilityName:
+          type: string
+        avgRating:
+          type: number
+        count:
+          type: integer
+
+    VerifyInput:
+      type: object
+      required: [idCardNumber]
+      properties:
+        idCardNumber:
+          type: string
+
+    VerifyByOrderInput:
+      type: object
+      required: [orderNumber, idCardNumber]
+      properties:
+        orderNumber:
+          type: string
+        idCardNumber:
+          type: string
+
+    VerificationLog:
+      type: object
+      required: [id, idCardNumberInput, status, createdAt]
+      properties:
+        id:
+          type: integer
+        bookingId:
+          type: ["integer", "null"]
+        orderNumber:
+          type: ["string", "null"]
+        verifiedByUserId:
+          type: ["integer", "null"]
+        idCardNumberInput:
+          type: string
+        status:
+          type: string
+          enum: [success, failed, mismatch]
+        notes:
+          type: ["string", "null"]
+        ipAddress:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+
+    VerifyResult:
+      type: object
+      required: [success, result]
+      properties:
+        success:
+          type: boolean
+        result:
+          type: string
+          enum: [verified, invalid_card, mismatch, not_pending]
+        message:
+          type: string
+        discountApplied:
+          type: boolean
+        discountPercentage:
+          type: integer
+        discountAmount:
+          type: number
+        finalPrice:
+          type: number
+        memberName:
+          type: ["string", "null"]
+        booking:
+          $ref: "#/components/schemas/Booking"
+          nullable: true
+
+    GymMembership:
+      type: object
+      required: [id, name, email, phone, startDate, endDate, months, totalPrice, status]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+        startDate:
+          type: string
+        endDate:
+          type: string
+        months:
+          type: integer
+        totalPrice:
+          type: number
+        status:
+          type: string
+          enum: [pending_payment, waiting_confirmation, active, expired, cancelled]
+        notes:
+          type: ["string", "null"]
+        paymentMethod:
+          type: ["string", "null"]
+        paymentProofUrl:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+
+    GymMembershipInput:
+      type: object
+      required: [name, email, phone, startDate, months]
+      properties:
+        name:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+        startDate:
+          type: string
+        months:
+          type: integer
+          minimum: 1
+        notes:
+          type: string
+
+    GymMembershipUpdate:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [pending_payment, waiting_confirmation, active, expired, cancelled]
+        notes:
+          type: string
+
+    MembershipLookupInput:
+      type: object
+      required: [phone]
+      properties:
+        phone:
+          type: string
+
+    MembershipLookupResult:
+      type: object
+      required: [id, name, phone, email, status, startDate, endDate, months, totalPrice]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        phone:
+          type: string
+        email:
+          type: string
+        status:
+          type: string
+          enum: [pending_payment, waiting_confirmation, active, expired, cancelled]
+        startDate:
+          type: string
+        endDate:
+          type: string
+        months:
+          type: integer
+        totalPrice:
+          type: number
+
+    MembershipPaymentProofInput:
+      type: object
+      required: [paymentMethod, paymentProofUrl]
+      properties:
+        paymentMethod:
+          type: string
+          enum: [transfer, qris]
+        paymentProofUrl:
+          type: string
+
+    Tenant:
+      type: object
+      required: [id, userId, businessName, ownerName, status, createdAt]
+      properties:
+        id:
+          type: integer
+        userId:
+          type: integer
+        businessName:
+          type: string
+        ownerName:
+          type: string
+        phone:
+          type: ["string", "null"]
+        email:
+          type: ["string", "null"]
+        businessCategory:
+          type: ["string", "null"]
+        logoUrl:
+          type: ["string", "null"]
+        address:
+          type: ["string", "null"]
+        status:
+          type: string
+          enum: [pending, active, inactive]
+        bookingCount:
+          type: integer
+        createdAt:
+          type: string
+
+    TenantBooking:
+      type: object
+      required: [id, orderNumber, tenantId, bookingType, startDate, endDate, price, paymentStatus, status, createdAt]
+      properties:
+        id:
+          type: integer
+        orderNumber:
+          type: string
+        tenantId:
+          type: integer
+        userId:
+          type: ["integer", "null"]
+        bookingType:
+          type: string
+          enum: [booth, event_space, advertising_space, renewal]
+        startDate:
+          type: string
+        endDate:
+          type: string
+        durationMonths:
+          type: ["integer", "null"]
+        requestedArea:
+          type: ["string", "null"]
+        description:
+          type: ["string", "null"]
+        price:
+          type: number
+        paymentStatus:
+          type: string
+          enum: [pending, uploaded, verified, rejected]
+        status:
+          type: string
+          enum: [pending, approved, rejected, active, expired]
+        adminNotes:
+          type: ["string", "null"]
+        businessName:
+          type: string
+        ownerName:
+          type: string
+        payments:
+          type: array
+          items:
+            $ref: "#/components/schemas/TenantPayment"
+        createdAt:
+          type: string
+
+    TenantPayment:
+      type: object
+      required: [id, tenantBookingId, amount, status, createdAt]
+      properties:
+        id:
+          type: integer
+        tenantBookingId:
+          type: integer
+        proofImageUrl:
+          type: ["string", "null"]
+        amount:
+          type: number
+        notes:
+          type: ["string", "null"]
+        status:
+          type: string
+          enum: [pending, verified, rejected]
+        createdAt:
+          type: string
+
+    TenantBookingInput:
+      type: object
+      required: [bookingType, startDate, endDate]
+      properties:
+        bookingType:
+          type: string
+          enum: [booth, event_space, advertising_space, renewal]
+        startDate:
+          type: string
+        endDate:
+          type: string
+        durationMonths:
+          type: integer
+        requestedArea:
+          type: string
+        description:
+          type: string
+
+    TenantBookingUpdate:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [pending, approved, rejected, active, expired]
+        price:
+          type: number
+        adminNotes:
+          type: string
+
+    TenantPaymentInput:
+      type: object
+      required: [tenantBookingId, amount]
+      properties:
+        tenantBookingId:
+          type: integer
+        proofImageUrl:
+          type: string
+        amount:
+          type: number
+        notes:
+          type: string
+
+    CreateTenantInput:
+      type: object
+      required: [name, email, password, businessName, ownerName]
+      properties:
+        name:
+          type: string
+        email:
+          type: string
+        password:
+          type: string
+        phone:
+          type: string
+        businessName:
+          type: string
+        ownerName:
+          type: string
+        businessCategory:
+          type: string
+        address:
+          type: string
+
+    TenantStatusUpdateBody:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [pending, active, inactive]
+
+    TenantPaymentActionBody:
+      type: object
+      properties:
+        notes:
+          type: string
+
+    CompanyVerificationStatus:
+      type: string
+      enum: [pending, approved, rejected, revoked]
+
+    CompanyVerification:
+      type: object
+      properties:
+        id:
+          type: integer
+        companyId:
+          type: integer
+        customerId:
+          type: integer
+        companyUserId:
+          type: integer
+          nullable: true
+        employeeId:
+          type: string
+        officeEmail:
+          type: string
+          nullable: true
+        idCardUrl:
+          type: string
+          nullable: true
+        status:
+          $ref: "#/components/schemas/CompanyVerificationStatus"
+        requestedAt:
+          type: string
+          format: date-time
+        approvedAt:
+          type: string
+          format: date-time
+          nullable: true
+        rejectionReason:
+          type: string
+          nullable: true
+        customerName:
+          type: string
+        customerEmail:
+          type: string
+        customerPhone:
+          type: string
+          nullable: true
+        companyName:
+          type: string
+        approvedByName:
+          type: string
+          nullable: true
+
+    CompanyVerificationRequest:
+      type: object
+      required: [companyId, employeeId]
+      properties:
+        companyId:
+          type: integer
+        employeeId:
+          type: string
+        officeEmail:
+          type: string
+        idCardUrl:
+          type: string
+
+    RejectVerificationInput:
+      type: object
+      properties:
+        rejectionReason:
+          type: string
+
+    RevokeVerificationInput:
+      type: object
+      properties:
+        rejectionReason:
+          type: string
+
+    ToggleBillingInput:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+
+    BillingStatusResponse:
+      type: object
+      properties:
+        eligible:
+          type: boolean
+        companyId:
+          type: integer
+        companyName:
+          type: string
+        employeeId:
+          type: string
+    TaxTransaction:
+      type: object
+      required: [id, referenceType, referenceId, referenceNumber, taxCode, taxRate, dpp, taxAmount, transactionDate, createdAt]
+      properties:
+        id:
+          type: integer
+        referenceType:
+          type: string
+        referenceId:
+          type: integer
+        referenceNumber:
+          type: string
+        taxCode:
+          type: string
+        taxRate:
+          type: number
+        dpp:
+          type: number
+        taxAmount:
+          type: number
+        transactionDate:
+          type: string
+        createdAt:
+          type: string
+
+    TaxPeriodSummary:
+      type: object
+      required: [period, dpp, taxAmount, grandTotal, count]
+      properties:
+        period:
+          type: string
+        dpp:
+          type: number
+        taxAmount:
+          type: number
+        grandTotal:
+          type: number
+        count:
+          type: integer
+
+    TaxReport:
+      type: object
+      required: [summary, byPeriod, transactions]
+      properties:
+        summary:
+          type: object
+          required: [totalDpp, totalTaxAmount, totalGrandTotal, totalTransactions]
+          properties:
+            totalDpp:
+              type: number
+            totalTaxAmount:
+              type: number
+            totalGrandTotal:
+              type: number
+            totalTransactions:
+              type: integer
+        byPeriod:
+          type: array
+          items:
+            $ref: "#/components/schemas/TaxPeriodSummary"
+        transactions:
+          type: array
+          items:
+            $ref: "#/components/schemas/TaxTransaction"
+
+    SheetConnectInput:
+      type: object
+      required: [sheetId]
+      properties:
+        sheetId:
+          type: string
+        sheetName:
+          type: string
+
+    SheetConnectResult:
+      type: object
+      required: [ok, title, sheetNames]
+      properties:
+        ok:
+          type: boolean
+        title:
+          type: string
+        sheetNames:
+          type: array
+          items:
+            type: string
+
+    SheetSyncInput:
+      type: object
+      required: [sheetId]
+      properties:
+        sheetId:
+          type: string
+        sheetName:
+          type: string
+
+    SheetPushResult:
+      type: object
+      required: [ok, updatedRows]
+      properties:
+        ok:
+          type: boolean
+        updatedRows:
+          type: integer
+
+    SheetPullResult:
+      type: object
+      required: [ok, updatedCount, skippedCount]
+      properties:
+        ok:
+          type: boolean
+        updatedCount:
+          type: integer
+        skippedCount:
+          type: integer
+
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+
+    OkResult:
+      type: object
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+
+    BankMutation:
+      type: object
+      required: [id, transactionDate, description, amount, direction, mutationKey, status, createdAt, updatedAt]
+      properties:
+        id:
+          type: integer
+        bankAccountId:
+          type: string
+          nullable: true
+        transactionDate:
+          type: string
+        description:
+          type: string
+        creditAmount:
+          type: string
+          nullable: true
+        debitAmount:
+          type: string
+          nullable: true
+        amount:
+          type: string
+        direction:
+          type: string
+        mutationKey:
+          type: string
+        normalizedDescription:
+          type: string
+          nullable: true
+        providerName:
+          type: string
+          nullable: true
+        providerOrderId:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [unmatched, matched, duplicate_need_review, approved, rejected]
+        matchedPaymentId:
+          type: integer
+          nullable: true
+        matchedOrderId:
+          type: integer
+          nullable: true
+        uploadedProofUrl:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+
+    BankReconciliationMatch:
+      type: object
+      required: [id, mutationId, candidateType, candidateId, matchScore, status, createdAt]
+      properties:
+        id:
+          type: integer
+        mutationId:
+          type: integer
+        candidateType:
+          type: string
+          enum: [payment, order, invoice, expense]
+        candidateId:
+          type: integer
+        matchScore:
+          type: integer
+        matchReason:
+          type: string
+          nullable: true
+        amountMatch:
+          type: boolean
+        dateMatch:
+          type: boolean
+        nameMatch:
+          type: boolean
+        orderIdMatch:
+          type: boolean
+        proofMatch:
+          type: boolean
+        statusValidMatch:
+          type: boolean
+        toleranceUsed:
+          type: boolean
+        note:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [candidate, approved, rejected]
+        createdAt:
+          type: string
+        ocrAmount:
+          type: string
+          nullable: true
+
+    EnrichedBankCandidate:
+      type: object
+      required: [id, mutationId, candidateType, candidateId, matchScore, status, amountMatch, dateMatch, nameMatch, orderIdMatch, proofMatch, statusValidMatch, toleranceUsed, createdAt]
+      properties:
+        id:
+          type: integer
+        mutationId:
+          type: integer
+        candidateType:
+          type: string
+          enum: [payment, order, invoice, expense]
+        candidateId:
+          type: integer
+        matchScore:
+          type: integer
+        matchReason:
+          type: string
+          nullable: true
+        amountMatch:
+          type: boolean
+        dateMatch:
+          type: boolean
+        nameMatch:
+          type: boolean
+        orderIdMatch:
+          type: boolean
+        proofMatch:
+          type: boolean
+        statusValidMatch:
+          type: boolean
+        toleranceUsed:
+          type: boolean
+        note:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [candidate, approved, rejected]
+        createdAt:
+          type: string
+        customerName:
+          type: string
+          nullable: true
+        customerPhone:
+          type: string
+          nullable: true
+        customerEmail:
+          type: string
+          nullable: true
+        bookingOrderNumber:
+          type: string
+          nullable: true
+        bookingDate:
+          type: string
+          nullable: true
+        bookingStatus:
+          type: string
+          nullable: true
+        bookingAmount:
+          type: string
+          nullable: true
+        paymentProofUrl:
+          type: string
+          nullable: true
+        paymentStatus:
+          type: string
+          nullable: true
+        paymentDate:
+          type: string
+          nullable: true
+        facilityName:
+          type: string
+          nullable: true
+
+    BankMutationCandidatesResult:
+      type: object
+      required: [mutation, candidates]
+      properties:
+        mutation:
+          $ref: "#/components/schemas/BankMutation"
+        candidates:
+          type: array
+          items:
+            $ref: "#/components/schemas/EnrichedBankCandidate"
+
+    ApproveCandidateInput:
+      type: object
+      required: [candidateType, candidateId]
+      properties:
+        candidateType:
+          type: string
+          enum: [payment, order, invoice, expense]
+        candidateId:
+          type: integer
+        note:
+          type: string
+
+    BankMutationImportResult:
+      type: object
+      required: [ok, total, inserted, skipped]
+      properties:
+        ok:
+          type: boolean
+        total:
+          type: integer
+        inserted:
+          type: integer
+        skipped:
+          type: integer
+        matching:
+          type: object
+          properties:
+            processed: { type: integer }
+            autoApproved: { type: integer }
+            needsReview: { type: integer }
+            unmatched: { type: integer }
+            duplicates: { type: integer }
+
+    BankMutationListResult:
+      type: object
+      required: [mutations, total, page, pageSize]
+      properties:
+        mutations:
+          type: array
+          items:
+            $ref: "#/components/schemas/BankMutation"
+        total:
+          type: integer
+        page:
+          type: integer
+        pageSize:
+          type: integer
+        statusCounts:
+          type: object
+          additionalProperties:
+            type: integer
+
+    BankMutationWithMatches:
+      type: object
+      required: [mutation, matches]
+      properties:
+        mutation:
+          $ref: "#/components/schemas/BankMutation"
+        matches:
+          type: array
+          items:
+            $ref: "#/components/schemas/BankReconciliationMatch"
+
+    BankMutationApproveInput:
+      type: object
+      properties:
+        matchId:
+          type: integer
+        candidateType:
+          type: string
+        candidateId:
+          type: integer
+        sheetId:
+          type: string
+          description: Google Sheet ID untuk auto-update kolom H status rekonsiliasi
+        sheetName:
+          type: string
+          description: Nama tab/sheet yang aktif
+
+    BankMutationRejectInput:
+      type: object
+      properties:
+        sheetId:
+          type: string
+          description: Google Sheet ID untuk auto-update kolom H status rekonsiliasi
+        sheetName:
+          type: string
+          description: Nama tab/sheet yang aktif
+
+    RunMatchingInput:
+      type: object
+      properties:
+        mutationIds:
+          type: array
+          items:
+            type: integer
+
+    RunMatchingResult:
+      type: object
+      required: [ok, processed, autoApproved, needsReview, unmatched, duplicates]
+      properties:
+        ok:
+          type: boolean
+        processed:
+          type: integer
+        autoApproved:
+          type: integer
+        needsReview:
+          type: integer
+        unmatched:
+          type: integer
+        duplicates:
+          type: integer
+
+    ClearBankMutationsInput:
+      type: object
+      properties:
+        statusFilter:
+          type: array
+          items:
+            type: string
+
+    ClearBankMutationsResult:
+      type: object
+      required: [ok, deletedCount]
+      properties:
+        ok:
+          type: boolean
+        deletedCount:
+          type: integer
+
+    BankSheetPullResult:
+      type: object
+      required: [ok, importedCount, skippedCount]
+      properties:
+        ok:
+          type: boolean
+        importedCount:
+          type: integer
+        skippedCount:
+          type: integer
+
+    BankSheetPushInput:
+      type: object
+      required: [sheetId]
+      properties:
+        sheetId:
+          type: string
+        sheetName:
+          type: string
+        statusFilter:
+          type: array
+          items:
+            type: string
+
+    BankSheetPushResult:
+      type: object
+      required: [ok, updatedRows]
+      properties:
+        ok:
+          type: boolean
+        updatedRows:
+          type: integer
+
+    Expense:
+      type: object
+      required: [id, expenseNo, expenseDate, category, description, amount, ppnAmount, totalAmount, paymentStatus, createdAt, updatedAt]
+      properties:
+        id:
+          type: integer
+        expenseNo:
+          type: string
+        expenseDate:
+          type: string
+        category:
+          type: string
+        description:
+          type: string
+        vendorName:
+          type: string
+          nullable: true
+        facilityId:
+          type: integer
+          nullable: true
+        facilityName:
+          type: string
+          nullable: true
+        amount:
+          type: number
+        ppnAmount:
+          type: number
+        totalAmount:
+          type: number
+        paymentMethod:
+          type: string
+          nullable: true
+        paymentAccount:
+          type: string
+          nullable: true
+        paymentStatus:
+          type: string
+          enum: [draft, pending_approval, approved, paid, rejected, cancelled]
+        receiptUrl:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        createdBy:
+          type: integer
+          nullable: true
+        approvedBy:
+          type: integer
+          nullable: true
+        approvedAt:
+          type: string
+          nullable: true
+        paidAt:
+          type: string
+          nullable: true
+        rejectedReason:
+          type: string
+          nullable: true
+        journalId:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+
+    ExpenseDetail:
+      allOf:
+        - $ref: "#/components/schemas/Expense"
+        - type: object
+          properties:
+            createdByName:
+              type: string
+              nullable: true
+            approvedByName:
+              type: string
+              nullable: true
+
+    ExpenseListResult:
+      type: object
+      required: [expenses, summary, categories]
+      properties:
+        expenses:
+          type: array
+          items:
+            $ref: "#/components/schemas/Expense"
+        summary:
+          type: object
+          required: [totalThisMonth, pendingApproval, paid, unpaid]
+          properties:
+            totalThisMonth:
+              type: number
+            pendingApproval:
+              type: integer
+            paid:
+              type: number
+            unpaid:
+              type: number
+        categories:
+          type: array
+          items:
+            type: string
+
+    ExpenseInput:
+      type: object
+      required: [expenseDate, category, description, amount]
+      properties:
+        expenseDate:
+          type: string
+        category:
+          type: string
+        description:
+          type: string
+        vendorName:
+          type: string
+        facilityId:
+          type: integer
+        amount:
+          type: number
+        ppnAmount:
+          type: number
+        paymentMethod:
+          type: string
+        paymentAccount:
+          type: string
+        receiptUrl:
+          type: string
+        notes:
+          type: string
+
+    ExpenseStatusInput:
+      type: object
+      required: [action]
+      properties:
+        action:
+          type: string
+          enum: [submit, approve, reject, pay, cancel]
+        rejectedReason:
+          type: string
+
+    DocumentTemplate:
+      type: object
+      properties:
+        id:
+          type: integer
+        companyId:
+          type: integer
+          nullable: true
+        companyName:
+          type: string
+        documentType:
+          type: string
+          enum: [invoice, spp, faktur, kwitansi, lampiran, berita_acara]
+        isDefault:
+          type: boolean
+        headerLogoUrl:
+          type: string
+          nullable: true
+        kopSuratHtml:
+          type: string
+          nullable: true
+        footerHtml:
+          type: string
+          nullable: true
+        companyDisplayName:
+          type: string
+          nullable: true
+        financeName:
+          type: string
+          nullable: true
+        financeTitle:
+          type: string
+          nullable: true
+        financeSignature:
+          type: string
+          nullable: true
+        address:
+          type: string
+          nullable: true
+        phone:
+          type: string
+          nullable: true
+        email:
+          type: string
+          nullable: true
+        numberFormatPrefix:
+          type: string
+          nullable: true
+        numberFormatPattern:
+          type: string
+          nullable: true
+        paperStyle:
+          type: string
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+
+    DocumentTemplateInput:
+      type: object
+      required: [documentType]
+      properties:
+        companyId:
+          type: integer
+          nullable: true
+        documentType:
+          type: string
+          enum: [invoice, spp, faktur, kwitansi, lampiran, berita_acara]
+        isDefault:
+          type: boolean
+        headerLogoUrl:
+          type: string
+        kopSuratHtml:
+          type: string
+        footerHtml:
+          type: string
+        companyDisplayName:
+          type: string
+        financeName:
+          type: string
+        financeTitle:
+          type: string
+        financeSignature:
+          type: string
+        address:
+          type: string
+        phone:
+          type: string
+        email:
+          type: string
+        numberFormatPrefix:
+          type: string
+        numberFormatPattern:
+          type: string
+        paperStyle:
+          type: string
+
+    WaNotifLog:
+      type: object
+      required: [id, recipientPhone, status, sentAt]
+      properties:
+        id:
+          type: integer
+        bookingId:
+          type: integer
+          nullable: true
+        orderNumber:
+          type: string
+          nullable: true
+        event:
+          type: string
+          nullable: true
+        recipientPhone:
+          type: string
+        messagePreview:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [sent, failed]
+        errorMessage:
+          type: string
+          nullable: true
+        sentAt:
+          type: string

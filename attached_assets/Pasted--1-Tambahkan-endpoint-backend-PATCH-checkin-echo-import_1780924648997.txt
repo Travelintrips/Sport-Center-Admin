@@ -1,0 +1,62 @@
+# 1️⃣ Tambahkan endpoint backend PATCH /checkin
+echo "import express from 'express';
+import { db } from '../db/index.js'; 
+
+const router = express.Router();
+
+router.patch('/:id/checkin', async (req, res) => {
+  const bookingId = req.params.id;
+  try {
+    const booking = await db.getBookingById(bookingId);
+    if (!booking) return res.status(404).json({ error: 'Booking tidak ditemukan' });
+    if (booking.payment_status !== 'paid')
+      return res.status(400).json({ error: 'Booking belum bisa check-in (belum bayar)' });
+    const today = new Date().toISOString().slice(0,10);
+    if (booking.start_date !== today)
+      return res.status(400).json({ error: 'Check-in hanya bisa dilakukan pada hari booking' });
+    await db.checkInBooking(bookingId);
+    res.json({ success: true, bookingId });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Terjadi kesalahan server' });
+  }
+});
+
+export default router;" > backend/src/routes/sportCenter/checkin.js
+
+# 2️⃣ Tambahkan tombol di frontend dengan logika enable/disable
+echo "import { useState } from 'react';
+import axios from 'axios';
+
+export default function CheckInButton({ booking }) {
+  const [loading, setLoading] = useState(false);
+  const isCheckInAllowed = booking.payment_status === 'paid' &&
+    new Date(booking.start_date).toDateString() === new Date().toDateString();
+
+  const handleCheckIn = async () => {
+    if (!isCheckInAllowed) return;
+    setLoading(true);
+    try {
+      const res = await axios.patch(\`/api/sport-center/bookings/\${booking.id}/checkin\`);
+      if (res.data.success) window.location.reload();
+    } catch (err) {
+      alert('Gagal check-in: ' + (err.response?.data?.error || err.message));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <button disabled={!isCheckInAllowed || loading} onClick={handleCheckIn} className={\`btn \${isCheckInAllowed ? 'btn-success' : 'btn-disabled'}\`}>
+      {loading ? 'Memproses...' : 'Check-in'}
+    </button>
+  );
+}" > frontend/src/components/CheckInButton.tsx
+
+# 3️⃣ Update tabel Booking Row untuk pakai tombol baru
+echo "import CheckInButton from '../components/CheckInButton';
+
+{/* di row render */}
+<td>
+  <CheckInButton booking={booking} />
+</td>" >> frontend/src/pages/sport-center/bookings.tsx

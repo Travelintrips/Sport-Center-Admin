@@ -1,0 +1,238 @@
+CONTINUE — REPUBLISH THEN FINAL PRODUCTION READ-ONLY AUDIT
+
+STATUS:
+- search_path source fix = PASS
+- API typecheck = PASS
+- API build = PASS
+- frontend build = PASS
+- 96 tests = PASS
+- 1 test suite blocked karena shell tidak memuat DEV DB credentials
+- API health = PASS
+- tidak ada production mutation
+
+JANGAN mengulang audit DEV.
+
+==================================================
+1. REPUBLISH
+==================================================
+
+Republish production menggunakan deployment procedure resmi.
+
+Pastikan source terbaru yang berisi search_path fix benar-benar masuk deployment aktif.
+
+Jangan:
+- migration
+- data repair
+- accounting mutation
+- settlement mutation
+- reconciliation mutation
+
+==================================================
+2. VERIFY ACTIVE DEPLOYMENT
+==================================================
+
+Setelah republish:
+
+verify:
+
+- active App Engine version
+- version receiving traffic
+- deployment timestamp/version
+- runtime service account
+- production Secret Manager access
+- production DB connection
+
+Pastikan:
+
+sc-sport-center@appspot.gserviceaccount.com
+
+adalah runtime identity aktif.
+
+==================================================
+3. VERIFY SEARCH_PATH FIX
+==================================================
+
+Pastikan deployment aktif menggunakan fix terbaru.
+
+Periksa runtime logs/health/readiness.
+
+Legacy search_path error tidak boleh muncul lagi.
+
+Jika masih muncul:
+
+STOP PRODUCTION DATA AUDIT.
+
+Fix source/configuration
+→ test
+→ republish
+→ verify ulang.
+
+==================================================
+4. PRODUCTION READ-ONLY GUARD
+==================================================
+
+Setelah deployment verified:
+
+buat/gunakan connection READ-ONLY.
+
+Allowed:
+SELECT
+metadata inspection
+
+Forbidden:
+INSERT
+UPDATE
+DELETE
+ALTER
+CREATE
+DROP
+TRUNCATE
+migration
+repair
+backfill
+
+==================================================
+5. RUN FULL PRODUCTION TRANSACTION AUDIT
+==================================================
+
+Lanjutkan audit lengkap:
+
+- booking lifecycle
+- payment
+- DP/final payment
+- corporate billing
+- group booking
+- event 21.4%
+- recurring
+- reschedule
+- refund
+- expense
+- invoice/tax
+- QRIS
+- settlement
+- reconciliation
+- Central Finance
+- duplicate journal
+- debit/credit balance
+- company isolation
+- WhatsApp approval
+
+Gunakan canonical contracts yang sudah diverifikasi di DEV.
+
+==================================================
+6. CENTRAL FINANCE
+==================================================
+
+Pastikan:
+
+ONE SOURCE TRANSACTION
+→ ONE CANONICAL CENTRAL FINANCE POSTING
+
+Cari:
+
+- duplicate payment_id
+- duplicate correlation ID
+- duplicate journal
+- orphan journal
+- missing posting
+- amount mismatch
+- debit/credit imbalance
+
+JANGAN membuat journal baru.
+JANGAN menghapus historical journal.
+JANGAN force balance.
+
+==================================================
+7. BOOKING COMPLETION
+==================================================
+
+Cari:
+
+completed tanpa check-in
+completed sebelum endTime
+future completed
+cancelled completed
+pending reschedule completed
+
+Contract:
+
+CONFIRMED
++
+CHECK-IN
++
+SESSION ENDED
+=
+COMPLETED
+
+Payment/invoice paid tidak boleh menyebabkan completed.
+
+==================================================
+8. ANOMALY CLASSIFICATION
+==================================================
+
+Untuk setiap anomaly:
+
+ID
+ENTITY
+EXPECTED
+ACTUAL
+SEVERITY
+FINANCIAL IMPACT
+CLASSIFICATION
+
+Classification:
+
+LEGITIMATE
+EXPECTED
+HISTORICAL
+TEST
+FALSE POSITIVE
+REAL BUG
+REAL DATA ANOMALY
+
+==================================================
+9. REMEDIATION
+==================================================
+
+Jika source bug:
+
+FIX
+→ TEST
+→ BUILD
+→ REPUBLISH
+→ RE-AUDIT
+
+Jika production data anomaly:
+
+JANGAN langsung mutate.
+
+Evaluasi:
+- exact rows
+- financial impact
+- Central Finance impact
+- reversibility
+- historical impact
+
+Jika ambiguous:
+→ BLOCKED DATA REMEDIATION.
+
+Jika deterministic dan aman:
+→ targeted transactional remediation only.
+
+==================================================
+10. FINAL VERDICT
+==================================================
+
+Jika bersih:
+
+PRODUCTION DEPLOYMENT = PASS
+PRODUCTION DB = VERIFIED
+PRODUCTION TRANSACTION AUDIT = PASS
+CENTRAL FINANCE = SAFE
+
+Jika anomaly:
+FIX → VERIFY → RE-AUDIT
+
+Jangan meminta konfirmasi.
+Jangan menggunakan DEV sebagai PROD.
+Jangan berhenti pada laporan jika masalah aman diperbaiki.

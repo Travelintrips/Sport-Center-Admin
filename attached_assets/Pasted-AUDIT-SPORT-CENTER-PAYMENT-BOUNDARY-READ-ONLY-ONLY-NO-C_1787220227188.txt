@@ -1,0 +1,378 @@
+AUDIT SPORT CENTER PAYMENT BOUNDARY
+READ-ONLY ONLY — NO CODE CHANGE — NO DATABASE WRITE
+
+PROJECT:
+Sport Center
+
+OBJECTIVE:
+
+Audit Sport Center so its future responsibility can be reduced to:
+
+booking/business transaction
+→ payment
+→ payment confirmed
+→ STOP
+
+Everything after payment should eventually be owned by Central Finance /
+Supabase using configuration managed from BizPortal.
+
+IMPORTANT:
+
+Do NOT implement yet.
+Do NOT delete historical accounting.
+Do NOT create/drop triggers.
+Do NOT alter payment rows.
+Do NOT modify accounting.
+Do NOT retry outbox.
+Do NOT republish.
+
+Use repository + Supabase read-only evidence.
+
+============================================================
+PHASE 1 — MAP BUSINESS FLOW
+============================================================
+
+Trace all Sport Center transaction types:
+
+- individual booking
+- group booking
+- membership
+- corporate/member booking
+- event booking
+- DP
+- pelunasan
+- refund
+- cancellation
+- reschedule if financially relevant
+
+For each flow identify:
+
+BUSINESS TABLE =
+PAYMENT TABLE =
+PAYMENT IDENTITY =
+PAYMENT STATUS =
+WHEN CONSIDERED PAID =
+PAYMENT METHOD =
+PROOF HANDLING =
+
+============================================================
+PHASE 2 — CANONICAL PAYMENT OWNER
+============================================================
+
+Audit:
+
+sport_center.sport_payments
+
+Document:
+
+- payment ID
+- booking relation
+- amount
+- status
+- payment_type
+- payment_method
+- payment_provider
+- provider references
+- company_id
+- bank account fields
+- settlement fields
+- tax fields
+- proof fields
+
+Determine which fields should remain business facts versus which are finance
+configuration snapshots.
+
+Classify every important field:
+
+BUSINESS_FACT
+CONFIG_REFERENCE
+CONFIG_SNAPSHOT
+LEGACY
+DERIVED
+UNKNOWN
+
+============================================================
+PHASE 3 — TRACE EVERYTHING AFTER PAYMENT
+============================================================
+
+Find every current path after sport_center.sport_payments:
+
+- public.sport_payments mirror
+- payment_accounting_outbox
+- sport_center.accounting_journals
+- accounting_journal_lines
+- public.accounting_payments
+- public.accounting_entries
+- accounting_entry_lines
+- fleet_ledger_entries
+- settlement
+- MDR
+- reconciliation
+- PPN
+- mirror sync
+- correction/refund accounting
+
+Search:
+
+- triggers
+- PostgreSQL functions
+- workers
+- API services
+- startup jobs
+- cron
+- manual endpoints
+- backfills
+- realtime callbacks
+
+For each producer:
+
+NAME =
+TRIGGER/EVENT =
+SOURCE FILE/FUNCTION =
+TABLES WRITTEN =
+CURRENTLY ACTIVE =
+IDEMPOTENCY =
+RETRY =
+RISK =
+
+============================================================
+PHASE 4 — FIND DIRECT ACCOUNTING WRITES
+============================================================
+
+Explicitly find all paths where Sport Center itself can write:
+
+- public.accounting_entries
+- public.accounting_payments
+- sport_center.accounting_journals
+- journal lines
+- fleet ledger
+
+Identify legacy booking-based accounting producers:
+
+source = sport_center_booking
+
+and payment-based accounting producers:
+
+source = sport_center_payment
+
+Determine whether any new booking can still create:
+
+sport_center_booking → accounting entry
+
+This is a critical audit item.
+
+Expected future contract:
+NO booking-triggered financial posting.
+
+============================================================
+PHASE 5 — COMPANY CONFIG AUDIT
+============================================================
+
+Determine current company resolution for Sport Center:
+
+- facility company ownership
+- hardcoded company ID
+- payment company_id
+- default company
+- fallback logic
+
+Find whether payment edit uses:
+- transaction snapshot
+- current project setting
+- BizPortal setting
+- hardcoded account/company
+
+Document the exact source of company identity.
+
+============================================================
+PHASE 6 — PAYMENT METHOD CONFIG
+============================================================
+
+Trace behavior for:
+
+Transfer Bank
+QRIS
+other supported methods
+
+For each method determine current source of:
+
+- receiving account
+- company bank account
+- provider
+- provider code
+- settlement account
+- merchant identity
+- MDR
+- settlement rule
+
+Audit the current HTTP 409 behavior when changing legacy payment method.
+
+Determine whether old transaction metadata incorrectly overrides current config.
+
+NO FIX.
+
+============================================================
+PHASE 7 — TAX / PPN
+============================================================
+
+Identify all Sport Center PPN calculations.
+
+Report:
+
+- where PPN rate comes from
+- whether hardcoded
+- inclusive/exclusive logic
+- booking-level PPN
+- payment-level PPN
+- accounting-level PPN
+- effective date behavior
+- whether historic transactions store snapshots
+
+Determine what can be removed from Sport Center once BizPortal owns tax config.
+
+============================================================
+PHASE 8 — MIRROR OWNERSHIP
+============================================================
+
+Audit public.sport_payments.
+
+Determine:
+
+- who creates it
+- who updates it
+- sync direction
+- source_payment_id linkage
+- whether Sport Center app writes it directly
+- whether trigger/worker creates it
+- what happens on payment_method edits
+- whether mirror can become purely Central Finance-owned
+
+Target future contract:
+Sport Center should not own public mirror writes.
+
+============================================================
+PHASE 9 — OUTBOX / CENTRALIZATION READINESS
+============================================================
+
+Audit:
+
+sport_center.payment_accounting_outbox
+
+Determine whether it is suitable as the boundary:
+
+Sport Center payment confirmed
+→ enqueue event
+→ Sport Center responsibility ends
+
+Then Central Finance processes the event.
+
+Check:
+
+- uniqueness
+- event types
+- retry
+- deterministic/non-retryable failures
+- stale locks
+- idempotency
+- ownership
+- existing worker
+
+============================================================
+PHASE 10 — HISTORICAL/LEGACY RISKS
+============================================================
+
+Inventory remaining:
+
+- legacy sport_center_booking accounting entries
+- historical mirrors
+- orphan accounting payments
+- failed outbox rows
+- partial journals
+- payment/provider unknown rows
+- group-payment ambiguity
+- old tax/account config snapshots
+
+Do not clean them in this audit.
+
+============================================================
+PHASE 11 — TARGET CONTRACT
+============================================================
+
+Propose only:
+
+SPORT CENTER RESPONSIBILITY =
+- booking
+- business status
+- canonical payment
+- payment proof
+- payment method selected by user
+- confirmed payment event
+
+SPORT CENTER MUST NOT OWN =
+- public accounting entry
+- public accounting payment
+- journal
+- PPN calculation rule
+- COA
+- settlement accounting
+- reconciliation
+- public payment mirror
+
+CENTRAL FINANCE RESPONSIBILITY =
+- read payment event
+- resolve current BizPortal config
+- create/update mirror
+- tax
+- accounting
+- settlement
+- reconciliation
+
+============================================================
+FINAL REPORT ONLY
+============================================================
+
+SPORT CENTER PAYMENT FLOWS =
+
+CANONICAL PAYMENT TABLE =
+PAID STATUS CONTRACT =
+
+DIRECT ACCOUNTING PRODUCERS =
+BOOKING-BASED ACCOUNTING PRODUCERS =
+PAYMENT-BASED ACCOUNTING PRODUCERS =
+
+MIRROR OWNER =
+OUTBOX OWNER =
+ACCOUNTING OWNER =
+SETTLEMENT OWNER =
+RECONCILIATION OWNER =
+
+COMPANY RESOLUTION CURRENT =
+PAYMENT METHOD CONFIG CURRENT =
+QRIS CONFIG CURRENT =
+TRANSFER BANK CONFIG CURRENT =
+PPN CURRENT =
+
+HARDCODED VALUES =
+LEGACY SNAPSHOT FIELDS =
+DUPLICATED CONFIG =
+
+TRIGGERS =
+WORKERS =
+CRON/STARTUP JOBS =
+MANUAL ACCOUNTING ENDPOINTS =
+
+DOUBLE-POSTING RISKS =
+LEGACY DATA RISKS =
+
+TARGET SPORT CENTER BOUNDARY =
+TARGET CENTRAL FINANCE HANDOFF =
+
+WHAT MUST BE DISABLED/REMOVED LATER =
+WHAT MUST REMAIN =
+
+READY TO CENTRALIZE = YES/NO
+BLOCKERS =
+
+NO CODE CHANGES
+NO DATABASE WRITES
+STOP.

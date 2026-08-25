@@ -1,0 +1,673 @@
+CONTINUE PRODUCTION ANOMALY REMEDIATION
+SPORT CENTER — FINISH ALL SAFE REMAINING AREAS
+
+CURRENT STATUS:
+
+Production historical data:
+NO MUTATION
+
+Lifecycle hardening:
+DONE
+
+Focused lifecycle tests:
+4/4 PASS
+
+Existing non-DB tests:
+14 suites / 96 tests PASS
+
+Typecheck:
+PASS
+
+Build:
+PASS
+
+git diff --check:
+PASS
+
+API workflow:
+RUNNING
+
+Central Finance:
+NO UNAUTHORIZED CHANGE
+
+REMAINING WORK:
+
+1. Payment duplicate classification/root cause
+2. Payment-without-confirmed-payment classification
+3. Accounting outbox 27 processing + 12 failed
+4. Reconciliation 68 candidate + candidate_source conflict
+5. Event full verification
+6. Recurring full verification
+7. Historical reschedule audit
+8. Cross-entity contract verification
+
+IMPORTANT:
+
+DO NOT repeat the completed lifecycle audit.
+
+DO NOT mutate Production historical data.
+
+DO NOT delete payments.
+
+DO NOT merge payments.
+
+DO NOT create missing payments.
+
+DO NOT approve reconciliation.
+
+DO NOT alter settlement.
+
+DO NOT insert journal entries.
+
+DO NOT retry Production outbox manually.
+
+DO NOT migrate Production schema.
+
+DO NOT change Central Finance mode.
+
+DO NOT create another accounting path.
+
+Use:
+
+AUDIT → CLASSIFY → PROVE → FIX CODE → TEST → VERIFY
+
+Any historical Production record that is ambiguous remains untouched.
+
+==================================================
+PHASE 1 — PAYMENT DUPLICATE ROOT CAUSE
+==================================================
+
+Investigate all 16 duplicate groups / 32 payment rows.
+
+For every duplicate group classify:
+
+- exact technical duplicate
+- legitimate DP/final payment
+- retry attempt
+- separate payment attempt
+- provider duplicate
+- unknown
+
+Inspect:
+
+payment_id
+booking_id
+payment_type
+amount
+status
+provider reference
+external transaction ID
+correlation ID
+idempotency key
+created_at
+updated_at
+accounting linkage
+settlement linkage
+
+Do NOT classify:
+
+booking_id + payment_type
+
+alone as a duplicate.
+
+Determine the actual payment identity contract.
+
+Then inspect every current payment creation endpoint:
+
+- generic payment creation
+- admin confirmation
+- WhatsApp payment approval
+- group payment
+- payment webhook
+- retry
+- callback
+- recurring
+- corporate payment
+
+Find whether the CURRENT code can still create duplicate logical payments.
+
+If a real bypass exists:
+
+FIX CODE NOW.
+
+Use the existing payment identity/idempotency architecture.
+
+Do not introduce a second payment identity system.
+
+Add regression tests.
+
+==================================================
+PHASE 2 — 70 BOOKINGS WITHOUT CONFIRMED PAYMENT
+==================================================
+
+Classify all 70 records.
+
+Categories:
+
+CORPORATE_BILLING
+INVOICE_BILLED
+PAYMENT_PENDING
+PAYMENT_EXEMPT
+PAYMENT_MISSING
+HISTORICAL_LEGACY
+UNKNOWN
+
+Do not create payment records.
+
+Determine whether current application logic incorrectly requires/assumes
+confirmed payment for corporate bookings.
+
+Verify:
+
+Personal:
+booking → appropriate payment
+
+Corporate:
+booking → billing/invoice → payment according to corporate contract
+
+If a current code path incorrectly confirms a booking without the required
+approval/payment condition:
+
+FIX CODE.
+
+Do not repair historical rows.
+
+==================================================
+PHASE 3 — ACCOUNTING OUTBOX
+==================================================
+
+Analyze:
+
+27 processing
+12 failed
+
+For each record inspect:
+
+payment_id
+event type
+attempt count
+correlation ID
+error
+created_at
+updated_at
+journal linkage
+journal lines
+public accounting entry
+Central Finance entry
+
+Classify:
+
+ALREADY_POSTED
+SAFE_RETRY
+STALE_PROCESSING
+PERMANENT_FAILURE
+MISSING_PAYMENT
+UNKNOWN
+
+DO NOT change Production rows.
+
+Inspect worker implementation.
+
+Verify:
+
+- idempotency
+- payment_id uniqueness
+- correlation ID
+- advisory lock
+- existing journal detection
+- transaction atomicity
+- retry safety
+
+If current worker can duplicate accounting:
+
+FIX CODE.
+
+If stale processing cannot recover safely:
+
+FIX recovery logic using existing architecture.
+
+Do NOT create manual accounting entries.
+
+Add regression tests proving:
+
+same payment processed twice
+→ one accounting result.
+
+==================================================
+PHASE 4 — RECONCILIATION
+==================================================
+
+Investigate 68 candidate rows.
+
+Determine CURRENT CANONICAL runtime table.
+
+Search entire repository:
+
+- routes
+- services
+- queries
+- approval
+- settlement
+- reconciliation worker
+- schema
+- migrations
+- tests
+
+Compare:
+
+sport_center.bank_reconciliation_matches
+
+and:
+
+public.bank_reconciliation_matches
+
+Pay special attention to:
+
+candidate_source
+
+Determine:
+
+CANONICAL TABLE
+LEGACY TABLE
+CURRENT RUNTIME TABLE
+SOURCE IDENTITY
+COLLISION RISK
+
+Do NOT change Production schema.
+
+Do NOT copy public rows into sport_center.
+
+Do NOT approve candidate rows.
+
+If current code is source-blind and can cause collisions:
+
+FIX CODE FIRST.
+
+Prepare DEV-only migration if schema alignment is required.
+
+The fix must support:
+
+candidate_type
+candidate_id
+candidate_source
+
+and preserve historical NULL where contract allows it.
+
+Add concurrency tests.
+
+==================================================
+PHASE 5 — EVENT FULL VERIFICATION
+==================================================
+
+Audit current code and tests for:
+
+bookingType = event
+
+including:
+
+regular event
+recurring event
+
+Verify discount contract:
+
+214 / 1000
+
+Example:
+
+Rp100,000
+discount = Rp21,400
+final = Rp78,600
+
+Verify:
+
+- base facility price
+- duration
+- discount
+- final amount
+- invoice
+- payment
+- corporate billing
+- group booking
+
+Search for:
+
+3 / 14
+21.43%
+21,43%
+
+No executable usage should remain.
+
+If current code can calculate the wrong value:
+
+FIX CODE.
+
+Add tests.
+
+Do not rewrite historical Production amounts.
+
+==================================================
+PHASE 6 — RECURRING FULL VERIFICATION
+==================================================
+
+Audit recurring booking implementation against single booking.
+
+Verify:
+
+- past dates
+- today's elapsed slots
+- operating hours
+- closing time
+- duration
+- duplicate dates
+- blocked schedule
+- booking conflicts
+- corporate approval
+- waiting_confirmation
+- confirmed
+- payment deadline
+- lifecycle
+- completion
+- reschedule
+
+The rules must be equivalent to single booking unless business logic
+explicitly differs.
+
+Corporate recurring MUST honor:
+
+requirePerBookingApproval
+
+when enabled.
+
+Recurring booking MUST NOT become completed merely because:
+
+payment
+invoice
+billing
+
+occurred.
+
+If any bypass remains:
+
+FIX CODE.
+
+Add regression tests.
+
+==================================================
+PHASE 7 — RESCHEDULE
+==================================================
+
+Pending requests are currently 0.
+
+Audit historical reschedule implementation.
+
+Verify:
+
+- request creation
+- validation
+- approval
+- rejection
+- booking update
+- history
+- atomic transaction
+- schedule conflict
+- blocked schedule
+- check-in
+- completion
+
+Approval must atomically update:
+
+booking
++
+history
++
+request
+
+No partial state.
+
+Fix code if needed.
+
+Add tests.
+
+==================================================
+PHASE 8 — CROSS-ENTITY CONTRACT
+==================================================
+
+Formalize and verify:
+
+BOOKING
+→ PAYMENT
+→ INVOICE
+→ SETTLEMENT
+→ RECONCILIATION
+→ ACCOUNTING
+
+Classify each relationship:
+
+REQUIRED
+OPTIONAL
+NOT_APPLICABLE
+
+Important:
+
+Corporate billing may legitimately have no direct confirmed payment
+at booking level.
+
+Do not incorrectly classify legitimate corporate billing as missing payment.
+
+Personal payment must follow the correct payment lifecycle.
+
+Event and recurring must use the same appropriate payment contract.
+
+==================================================
+PHASE 9 — CENTRAL FINANCE SAFETY
+==================================================
+
+Audit code only.
+
+Verify Sport Center accounting uses the existing Central Finance path.
+
+Must remain:
+
+payment
+→ accounting outbox
+→ existing Central Finance processing
+
+Must NOT introduce:
+
+payment
+→ new Sport Center journal system
+
+Verify:
+
+payment identity
+correlation ID
+idempotency
+journal uniqueness
+debit/credit balance
+
+Do not change:
+
+SPORT_CENTER_FINANCE_MODE
+
+Do not create another worker.
+
+Do not create another journal path.
+
+==================================================
+PHASE 10 — TESTING
+==================================================
+
+Run focused tests for:
+
+Payment:
+- duplicate payment
+- DP/final distinction
+- idempotency
+
+Outbox:
+- duplicate processing
+- retry
+- existing journal detection
+- failed/processing recovery
+
+Reconciliation:
+- candidate_source
+- source collision
+- concurrency
+- approval
+
+Event:
+- 21.4%
+- recurring event
+
+Recurring:
+- validation parity
+- corporate approval
+- lifecycle
+
+Reschedule:
+- atomic approval
+- lifecycle
+
+Cross-entity:
+- personal
+- corporate
+- event
+- recurring
+
+Then run:
+
+full tests
+typecheck
+build
+git diff --check
+
+If full tests fail only because standalone Jest lacks DEV Secret Manager
+environment, fix the test runner/environment setup so the real test suite
+can execute using the official DEV bootstrap.
+
+Do NOT weaken tests.
+
+Do NOT hardcode credentials.
+
+Do NOT use Production credentials for tests.
+
+==================================================
+PHASE 11 — DEV VERIFICATION
+==================================================
+
+Any code/schema change must be verified in DEV.
+
+Expected:
+
+DEV database isolated
+DEV storage isolated
+tests PASS
+typecheck PASS
+build PASS
+API runtime PASS
+
+No Production mutation.
+
+==================================================
+PHASE 12 — FINAL PRODUCTION RECHECK
+==================================================
+
+After code hardening, do a READ-ONLY Production re-audit.
+
+Do NOT mutate.
+
+Compare against baseline:
+
+sport_bookings              429
+sport_payments              374
+company_invoices            4
+booking_groups              47
+accounting_journals         380
+accounting_journal_lines    211
+tax_transactions            1134
+bank_reconciliation_matches 68
+payment_accounting_outbox   362
+
+Expected:
+
+counts unchanged unless Production was independently changed by normal
+business operations during the audit window.
+
+No remediation script may modify them.
+
+Verify:
+
+- lifecycle anomalies
+- payment duplicate classification
+- outbox
+- reconciliation
+- event
+- recurring
+- cross-entity
+- accounting balance
+
+==================================================
+FINAL REPORT
+==================================================
+
+Return:
+
+CODE REMEDIATION:
+PASS / BLOCKED
+
+PAYMENT DUPLICATE ROOT CAUSE:
+RESOLVED / REVIEW
+
+PAYMENT MISSING CLASSIFICATION:
+COMPLETE / REVIEW
+
+OUTBOX:
+RESOLVED / REVIEW
+
+RECONCILIATION:
+RESOLVED / BLOCKED
+
+EVENT:
+VERIFIED
+
+RECURRING:
+VERIFIED
+
+RESCHEDULE:
+VERIFIED
+
+CROSS-ENTITY:
+VERIFIED / REVIEW
+
+CENTRAL FINANCE:
+SAFE
+
+PRODUCTION DATA MUTATION:
+NONE
+
+DEV TESTS:
+PASS/FAIL
+
+TYPECHECK:
+PASS/FAIL
+
+BUILD:
+PASS/FAIL
+
+GIT DIFF CHECK:
+PASS/FAIL
+
+PRODUCTION RE-AUDIT:
+PASS / REVIEW
+
+IMPORTANT:
+
+Do not stop at "pending" if the root cause can be fixed safely in code.
+
+Do not mutate ambiguous Production history.
+
+Do not ask for confirmation.
+
+Continue automatically until all safe code remediation and verification
+is complete.

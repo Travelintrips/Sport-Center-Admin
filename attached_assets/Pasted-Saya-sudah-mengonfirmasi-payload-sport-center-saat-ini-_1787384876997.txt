@@ -1,0 +1,64 @@
+Saya sudah mengonfirmasi payload `sport-center` saat ini menggunakan struktur flat dengan pola seperti:
+
+`SUPABASE_URL` dan `SUPABASE_URL_DEV`
+
+`SUPABASE_SERVICE_ROLE_KEY` dan `SUPABASE_SERVICE_ROLE_KEY_DEV`
+
+`SUPABASE_STORAGE_BUCKET` dan `SUPABASE_STORAGE_BUCKET_DEV`
+
+serta kemungkinan pasangan field lain dengan pola yang sama.
+
+Saat migrasi ke shared secret:
+
+* field Supabase/database dengan suffix `_DEV` harus dipetakan ke section `dev`
+* pasangan field tanpa `_DEV` yang memang merupakan konfigurasi production dipetakan ke section `prod`
+* hapus suffix `_DEV` pada nama field setelah masuk ke section `dev`, sehingga DEV dan PROD memiliki schema yang konsisten
+
+Contoh konseptual:
+
+```json
+{
+  "dev": {
+    "supabase_url": "<value dari SUPABASE_URL_DEV>",
+    "supabase_service_role_key": "<value dari SUPABASE_SERVICE_ROLE_KEY_DEV>",
+    "supabase_storage_bucket": "<value dari SUPABASE_STORAGE_BUCKET_DEV>"
+  },
+  "prod": {
+    "supabase_url": "<value dari SUPABASE_URL>",
+    "supabase_service_role_key": "<value dari SUPABASE_SERVICE_ROLE_KEY>",
+    "supabase_storage_bucket": "<value dari SUPABASE_STORAGE_BUCKET>"
+  }
+}
+```
+
+Untuk database URL dan session secret lakukan mapping yang sama berdasarkan nama field aktual yang ditemukan di payload dan kode.
+
+Jangan berasumsi bahwa **semua** field tanpa `_DEV` adalah PROD.
+
+Field yang benar-benar global/shared seperti SMTP, redirect/config umum, atau integrasi lain harus dianalisis berdasarkan penggunaannya di source code. Jika memang shared oleh DEV dan PROD, tempatkan dalam section `shared` atau pertahankan sebagai global sesuai schema loader yang paling sederhana.
+
+Jangan pernah mencetak nilai field dalam output, terminal, diagnostic log, atau laporan. Tampilkan nama field dan status presence saja.
+
+Sebelum mengubah Secret Manager, buat tabel mapping **nama field saja**:
+
+`OLD FIELD → TARGET SECTION → NEW FIELD`
+
+Contoh:
+
+`SUPABASE_URL_DEV → dev → supabase_url`
+
+`SUPABASE_URL → prod → supabase_url`
+
+Kemudian validasi mapping terhadap source code.
+
+Setelah schema disepakati, sesuaikan loader dengan perubahan seminimal mungkin dan tetap fail-closed:
+
+DEV hanya boleh mengambil `dev`.
+
+PROD hanya boleh mengambil `prod`.
+
+Tidak boleh ada DEV → PROD fallback.
+
+Field `shared` hanya boleh digunakan jika secara eksplisit diklasifikasikan sebagai konfigurasi shared.
+
+Jangan tampilkan atau menyalin secret value dalam proses ini.

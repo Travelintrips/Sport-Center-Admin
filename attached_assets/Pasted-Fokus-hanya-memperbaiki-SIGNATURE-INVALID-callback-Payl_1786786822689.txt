@@ -1,0 +1,115 @@
+Fokus hanya memperbaiki SIGNATURE_INVALID callback Paylabs Sandbox.
+
+Evidence callback terbaru:
+
+merchantId = 010728
+partnerId = 010728
+status = 02
+errCode = 0
+_rejected = true
+_reason = SIGNATURE_INVALID
+
+UI sedang Mode Sandbox.
+
+Jangan mengubah logic booking, PDF, WhatsApp, Email, atau database dulu.
+
+Audit verifier callback di:
+POST /api/paylabs/webhook
+
+Pastikan untuk SANDBOX menggunakan:
+
+MERCHANT_ID_SANDBOX
+PAYLABS_SANDBOX_PUBLIC_KEY
+
+Jangan menggunakan:
+PAYLABS_PROD_PUBLIC_KEY
+
+Verifikasi hal berikut secara runtime:
+
+1. HTTP method:
+   POST
+
+2. Exact callback endpoint path yang digunakan dalam canonical string.
+   Gunakan path notifyUrl saja, bukan full URL.
+
+3. X-TIMESTAMP:
+   gunakan nilai header callback Paylabs asli.
+   Jangan membuat timestamp baru.
+
+4. X-SIGNATURE:
+   ambil langsung dari header callback.
+
+5. X-PARTNER-ID:
+   pastikan = 010728 dan cocok dengan MERCHANT_ID_SANDBOX.
+
+6. Body:
+   gunakan body callback Paylabs yang benar-benar diterima.
+   Jangan menambahkan field internal seperti:
+   _reason
+   _rejected
+   partnerId
+   timestamp
+   ke body yang dihitung hash jika field tersebut bukan bagian body asli Paylabs.
+
+7. Canonical body:
+   minify sesuai dokumentasi Paylabs.
+   Jangan reorder JSON keys.
+   Jangan memasukkan field null ke proses signature jika memang ada.
+
+8. Hitung:
+   lowercase(SHA256Hex(minifiedBody))
+
+9. Bentuk exact string:
+   POST:<callback-path>:<lowercase-body-hash>:<X-TIMESTAMP>
+
+10. Verify menggunakan RSA-SHA256 dan
+    PAYLABS_SANDBOX_PUBLIC_KEY.
+
+11. Normalisasi PEM:
+    literal \n → newline aktual sebelum createPublicKey().
+
+Tambahkan debug aman sementara:
+
+paylabsMode = SANDBOX
+merchantMatch = true/false
+method
+endpointPath
+bodyHash
+timestampFromHeader
+publicKeyValid = true/false
+signatureValid = true/false
+
+Jangan log:
+- public/private key
+- full signature
+- secret
+
+Yang sangat penting:
+jangan memakai object raw_notification yang sudah ditambahkan:
+_reason
+_rejected
+partnerId
+timestamp
+untuk menghitung signature.
+
+Gunakan hanya ORIGINAL HTTP BODY yang diterima dari Paylabs.
+
+Setelah perbaikan, lakukan satu pembayaran Sandbox baru.
+
+Expected:
+
+status = 02
+errCode = 0
+signatureValid = true
+_rejected = false
+
+Baru setelah itu izinkan flow:
+
+Paylabs SUCCESS
+→ booking paid
+→ generate PDF
+→ Storage
+→ WhatsApp
+→ Email
+
+Jangan bypass signature verification.

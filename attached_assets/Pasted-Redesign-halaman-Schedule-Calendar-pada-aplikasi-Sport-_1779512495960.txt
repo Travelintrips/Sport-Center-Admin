@@ -1,0 +1,227 @@
+Redesign halaman “Schedule Calendar” pada aplikasi Sport Center menjadi modern premium scheduling dashboard seperti kombinasi:
+
+Google Calendar
+Calendly
+Linear
+Stripe Dashboard
+Notion Calendar
+
+Fokus utama:
+UI harus terlihat seperti aplikasi SaaS modern profesional, clean, premium, dan mudah digunakan admin booking.
+
+Gunakan:
+
+React + TypeScript
+TailwindCSS
+Framer Motion
+Responsive design
+Clean architecture
+Reusable components
+====================================
+REDESIGN GOALS
+Refactor total tampilan calendar agar:
+lebih modern
+lebih clean
+lebih visual
+lebih nyaman dibaca
+tidak terlihat seperti tabel biasa
+Improve:
+spacing
+typography
+hierarchy
+interaction
+color system
+booking visualization
+Support:
+desktop
+tablet
+mobile
+dark mode
+====================================
+LAYOUT STRUCTURE
+
+Buat struktur halaman modern:
+
+Sticky Top Toolbar
+Summary Statistics Section
+Calendar Control Bar
+Schedule Grid
+Right Detail Drawer (optional)
+Floating Action Button
+
+Gunakan container modern dengan:
+
+rounded-2xl
+soft shadow
+border subtle
+background layering
+smooth spacing
+====================================
+SUMMARY STATS REDESIGN
+
+Redesign cards:
+
+Booking Hari Ini
+Pending
+Bentrok
+Slot Diblokir
+
+Buat modern stat cards:
+
+icon modern
+soft gradient
+animated hover
+mini trend indicator
+large numbers
+subtle shadow
+responsive layout
+
+Contoh style:
+
+glassmorphism light
+modern SaaS dashboard card
+premium analytics feel
+====================================
+CALENDAR TOOLBAR
+
+Refactor toolbar menjadi modern scheduler control bar.
+
+Features:
+
+Facility filter dropdown
+Prev/next navigation
+Today button
+Day / Week / Month segmented control
+Search booking
+Quick add booking button
+
+Design:
+
+sticky toolbar
+blur background
+smooth animation
+active segmented button
+compact clean spacing
+====================================
+SCHEDULE GRID REDESIGN
+
+Current table terlalu plain.
+
+Buat modern scheduling grid:
+
+sticky time column
+sticky date row
+smooth borders
+hover slot highlight
+current time indicator
+peak hour overlay
+larger spacing
+rounded booking items
+
+Grid harus mirip:
+
+Google Calendar
+Calendly team scheduling
+====================================
+BOOKING CARD REDESIGN
+
+Refactor booking item menjadi modern booking card.
+
+Booking card wajib punya:
+
+rounded corners
+gradient background
+customer name
+booking time
+status badge
+facility name
+optional avatar/icon
+tooltip detail
+hover animation
+subtle shadow
+
+Gunakan warna:
+
+Confirmed → green
+Pending → amber
+Cancelled/Bentrok → red
+Blocked → gray
+====================================
+VISUAL ENHANCEMENTS
+
+Tambahkan:
+
+loading skeleton
+smooth transition
+hover effects
+fade animation
+slide animation
+active state animation
+realtime indicator
+pulse effect untuk current time
+====================================
+MOBILE UX
+
+Pastikan responsive:
+
+mobile horizontal scroll smooth
+compact mobile toolbar
+floating action button
+touch friendly
+optimized spacing
+====================================
+DARK MODE
+
+Tambahkan full dark mode support:
+
+modern dark SaaS look
+proper contrast
+adaptive colors
+dark glassmorphism
+====================================
+OPTIONAL ADVANCED FEATURES
+
+Jika memungkinkan tambahkan:
+
+drag & drop booking
+resize booking duration
+context menu
+quick booking modal
+realtime updates
+booking detail side panel
+====================================
+COMPONENT ARCHITECTURE
+
+Pisahkan component:
+
+CalendarToolbar
+SummaryStats
+ScheduleGrid
+BookingCard
+TimeColumn
+DateHeader
+StatusLegend
+FacilityFilter
+BookingDrawer
+
+Buat reusable dan scalable.
+
+====================================
+PERFORMANCE
+
+Optimasi:
+
+virtualization jika booking banyak
+memoized components
+lightweight rendering
+smooth scrolling
+====================================
+FINAL RESULT
+
+Hasil akhir harus terlihat seperti:
+
+premium SaaS scheduling platform
+modern enterprise booking system
+clean professional calendar dashboard
+
+Bukan tampilan tabel biasa lagi.

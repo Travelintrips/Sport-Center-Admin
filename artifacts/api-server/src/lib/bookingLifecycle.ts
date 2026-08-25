@@ -1,0 +1,177 @@
+import { db, bookingsTable, bookingHistoryTable, rescheduleRequestsTable, usageProofsTable } from "@workspace/db";
+import { and, eq } from "drizzle-orm";
+import { logAudit } from "./auditLog";
+export {
+  CONFIRMABLE_BOOKING_STATUSES,
+  hasBookingSessionEnded,
+  hasBookingSessionStarted,
+  isBookingConfirmableStatus,
+} from "./bookingLifecycleRules";
+import {
+  hasBookingSessionEnded,
+  hasBookingSessionStarted,
+} from "./bookingLifecycleRules";
+
+export type BookingLifecycleActor = {
+  userId?: number | null;
+  userName?: string | null;
+  userRole?: string | null;
+};
+
+export type LifecycleResult =
+  | { ok: true; bookingId: number; alreadyCompleted: boolean }
+  | { ok: false; reason: string };
+
+function todayJakarta(now: Date): string {
+  return now.toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" });
+}
+
+async function hasPendingReschedule(tx: Parameters<Parameters<typeof db.transaction>[0]>[0], bookingId: number): Promise<boolean> {
+  const [request] = await tx
+    .select({ id: rescheduleRequestsTable.id })
+    .from(rescheduleRequestsTable)
+    .where(and(
+      eq(rescheduleRequestsTable.bookingId, bookingId),
+      eq(rescheduleRequestsTable.status, "pending"),
+    ))
+    .limit(1);
+  return !!request;
+}
+
+/**
+ * The only write path for turning an active booking into completed.
+ * Payment/billing state is intentionally not consulted here.
+ */
+export async function completeBooking(
+  bookingId: number,
+  actor: BookingLifecycleActor,
+  now: Date = new Date(),
+): Promise<LifecycleResult> {
+  const result = await db.transaction(async (tx): Promise<LifecycleResult> => {
+    const [booking] = await tx
+      .select()
+      .from(bookingsTable)
+      .where(eq(bookingsTable.id, bookingId))
+      .limit(1);
+
+    if (!booking) return { ok: false, reason: "Booking tidak ditemukan" };
+    if (booking.status === "completed") {
+      return { ok: true, bookingId, alreadyCompleted: true };
+    }
+    if (["cancelled", "expired", "rejected", "refunded"].includes(booking.status)) {
+      return { ok: false, reason: "Booking sudah tidak aktif" };
+    }
+    if (booking.status !== "confirmed") {
+      return { ok: false, reason: "Booking harus berstatus confirmed sebelum diselesaikan" };
+    }
+    if (!booking.checkedInAt) {
+      return { ok: false, reason: "Booking belum check-in" };
+    }
+    if (booking.bookingType === "event") {
+      const [proof] = await tx.select({ id: usageProofsTable.id }).from(usageProofsTable)
+        .where(eq(usageProofsTable.bookingId, bookingId)).limit(1);
+      if (!proof) return { ok: false, reason: "Event wajib memiliki photo proof sebelum selesai" };
+    }
+    if (!hasBookingSessionEnded(booking.bookingDate, booking.endTime, now)) {
+      return { ok: false, reason: "Sesi booking belum selesai" };
+    }
+    if (await hasPendingReschedule(tx, bookingId)) {
+      return { ok: false, reason: "Booking memiliki reschedule yang masih menunggu persetujuan" };
+    }
+
+    const [updated] = await tx
+      .update(bookingsTable)
+      .set({ status: "completed", completedAt: now, updatedAt: now })
+      .where(and(eq(bookingsTable.id, bookingId), eq(bookingsTable.status, "confirmed")))
+      .returning({ id: bookingsTable.id });
+    if (!updated) return { ok: false, reason: "Booking berubah diproses oleh operator lain" };
+
+    await tx.insert(bookingHistoryTable).values({
+      bookingId,
+      fromStatus: booking.status,
+      toStatus: "completed",
+      changedBy: actor.userId ?? null,
+      changedByName: actor.userName ?? "system",
+      note: "Booking completed setelah check-in dan waktu sesi berakhir",
+    });
+    return { ok: true, bookingId, alreadyCompleted: false };
+  });
+
+  if (result.ok && !result.alreadyCompleted) {
+    await logAudit({
+      ...actor,
+      action: "BOOKING_COMPLETED",
+      entity: "booking",
+      entityId: bookingId,
+      before: { status: "confirmed" },
+      after: { status: "completed", completedAt: now.toISOString(), reason: "checked_in_and_session_ended" },
+    });
+  }
+  return result;
+}
+
+/**
+ * Shared check-in write path for admin and WhatsApp.
+ * It is idempotent at the database update boundary and records the actor.
+ */
+export async function checkInBooking(
+  bookingId: number,
+  actor: BookingLifecycleActor,
+  now: Date = new Date(),
+): Promise<LifecycleResult> {
+  const result = await db.transaction(async (tx): Promise<LifecycleResult> => {
+    const [booking] = await tx
+      .select()
+      .from(bookingsTable)
+      .where(eq(bookingsTable.id, bookingId))
+      .limit(1);
+    if (!booking) return { ok: false, reason: "Booking tidak ditemukan" };
+    if (booking.checkedInAt) return { ok: false, reason: "Booking sudah check-in" };
+    if (booking.status !== "confirmed") {
+      return { ok: false, reason: "Check-in hanya bisa dilakukan untuk booking yang sudah dikonfirmasi" };
+    }
+    if (booking.bookingDate !== todayJakarta(now)) {
+      return { ok: false, reason: "Check-in hanya bisa dilakukan pada hari H booking" };
+    }
+    if (!hasBookingSessionStarted(booking.bookingDate, booking.startTime, now)) {
+      return { ok: false, reason: "Check-in belum dibuka sampai waktu mulai sesi" };
+    }
+    if (hasBookingSessionEnded(booking.bookingDate, booking.endTime, now)) {
+      return { ok: false, reason: "Sesi booking sudah berakhir dan tidak dapat check-in" };
+    }
+    if (await hasPendingReschedule(tx, bookingId)) {
+      return { ok: false, reason: "Booking memiliki reschedule yang masih menunggu persetujuan" };
+    }
+
+    const [updated] = await tx
+      .update(bookingsTable)
+      .set({ checkedInAt: now, updatedAt: now })
+      .where(and(
+        eq(bookingsTable.id, bookingId),
+        eq(bookingsTable.status, "confirmed"),
+      ))
+      .returning({ id: bookingsTable.id });
+    if (!updated) return { ok: false, reason: "Booking berubah diproses oleh operator lain" };
+
+    await tx.insert(bookingHistoryTable).values({
+      bookingId,
+      fromStatus: booking.status,
+      toStatus: booking.status,
+      changedBy: actor.userId ?? null,
+      changedByName: actor.userName ?? "system",
+      note: `Check-in pukul ${now.toLocaleTimeString("id-ID", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit" })} WIB`,
+    });
+    return { ok: true, bookingId, alreadyCompleted: false };
+  });
+
+  if (result.ok) {
+    await logAudit({
+      ...actor,
+      action: "BOOKING_CHECKED_IN",
+      entity: "booking",
+      entityId: bookingId,
+      after: { checkedInAt: now.toISOString() },
+    });
+  }
+  return result;
+}

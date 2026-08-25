@@ -1,0 +1,370 @@
+FINAL PRODUCTION READ-ONLY HISTORICAL CLASSIFICATION
+SPORT CENTER — CONTINUE WITHOUT CONFIRMATION
+
+CODE REMEDIATION STATUS:
+
+17 API suites / 109 tests PASS
+Typecheck PASS
+Build PASS
+git diff --check PASS
+DEV runtime PASS
+DEV DB isolation PASS
+Event pricing PASS
+Payment confirmation guards PASS
+Central Finance unchanged
+Production mutation NONE
+
+DO NOT modify Production.
+
+The remaining task is ONLY historical record classification.
+
+==================================================
+READ-ONLY SAFETY
+==================================================
+
+Use the verified Production read-only transaction.
+
+Require:
+
+SHOW transaction_read_only;
+
+Expected:
+
+on
+
+Every audit transaction must end with:
+
+ROLLBACK
+
+No:
+
+INSERT
+UPDATE
+DELETE
+ALTER
+migration
+backfill
+repair
+retry
+requeue
+approval
+posting
+
+==================================================
+1. PAYMENT DUPLICATES
+==================================================
+
+Audit all 16 duplicate groups / 32 payment rows.
+
+For each group determine:
+
+- booking_id
+- payment_type
+- payment IDs
+- amount
+- status
+- provider reference
+- external transaction ID
+- correlation ID
+- idempotency key
+- created_at
+- accounting linkage
+- settlement linkage
+
+Classify:
+
+LEGITIMATE_DP_FINAL
+LEGITIMATE_MULTIPLE_ATTEMPT
+EXACT_TECHNICAL_DUPLICATE
+PROVIDER_DUPLICATE
+RETRY_DUPLICATE
+UNKNOWN
+
+Do NOT delete or merge anything.
+
+For EXACT_TECHNICAL_DUPLICATE determine whether there is exactly one
+canonical payment.
+
+==================================================
+2. 70 BOOKINGS WITHOUT CONFIRMED PAYMENT
+==================================================
+
+Classify each:
+
+CORPORATE_BILLING
+INVOICE_BILLED
+PAYMENT_PENDING
+PAYMENT_EXEMPT
+PAYMENT_MISSING
+HISTORICAL_LEGACY
+UNKNOWN
+
+Cross-check:
+
+booking
+→ payer type
+→ company
+→ invoice
+→ payment
+→ billing status
+
+Do not create payment records.
+
+==================================================
+3. OUTBOX
+==================================================
+
+Audit:
+
+27 processing
+12 failed
+
+For each:
+
+payment_id
+event
+attempts
+error
+correlation ID
+journal
+journal lines
+existing accounting entry
+
+Classify:
+
+ALREADY_POSTED
+SAFE_RETRY
+STALE_PROCESSING
+PERMANENT_FAILURE
+MISSING_PAYMENT
+UNKNOWN
+
+Do NOT retry.
+
+Do NOT change status.
+
+==================================================
+4. RECONCILIATION
+==================================================
+
+Audit all 68 candidate rows.
+
+For each:
+
+candidate
+bank mutation
+payment
+settlement
+amount
+date
+identity
+duplicate match
+source
+
+Determine:
+
+CANONICAL
+DUPLICATE
+AMBIGUOUS
+NO_MATCH
+
+Also determine which table is actually used by current runtime:
+
+sport_center.bank_reconciliation_matches
+or
+public.bank_reconciliation_matches
+
+Do not migrate.
+
+Do not approve.
+
+Do not copy rows.
+
+==================================================
+5. RECURRING HISTORY
+==================================================
+
+Audit every recurring booking.
+
+Check:
+
+past date
+operating hours
+duration
+closing time
+duplicate date
+conflict
+blocked schedule
+corporate approval
+status
+check-in
+completion
+
+Classify violations:
+
+PRE_REMEDIATION_LEGACY
+CURRENT_RULE_VIOLATION
+VALID
+UNKNOWN
+
+Do not modify historical rows.
+
+==================================================
+6. BOOKING COMPLETION HISTORY
+==================================================
+
+For the 376 missing-check-in completed bookings:
+
+determine whether each has:
+
+- QR check-in evidence
+- check-in history
+- lifecycle history
+- scheduler completion
+- admin completion
+- WhatsApp completion
+- invoice-driven completion
+- legacy completion path
+
+Classify:
+
+VALID_WITH_MISSING_EVIDENCE
+LEGACY_BYPASS
+DATA_INTEGRITY_ANOMALY
+UNKNOWN
+
+For booking IDs 380 and 511 specifically determine exact completion path.
+
+Do not modify.
+
+==================================================
+7. CROSS-ENTITY
+==================================================
+
+Build record-level relationships:
+
+booking
+→ payment
+→ invoice
+→ settlement
+→ reconciliation
+→ accounting
+
+Classify:
+
+CONSISTENT
+MISSING_EXPECTED_RELATION
+LEGITIMATE_NOT_APPLICABLE
+DUPLICATE
+MISMATCH
+UNKNOWN
+
+Do not infer financial meaning from absence alone.
+
+==================================================
+8. CENTRAL FINANCE
+==================================================
+
+Read-only verification:
+
+- journal count
+- journal lines
+- debit total
+- credit total
+- payment_id uniqueness
+- correlation ID
+- duplicate accounting entries
+- outbox → journal linkage
+
+Expected:
+
+debit = credit
+
+Do not post or repair.
+
+==================================================
+9. FINAL CLASSIFICATION REPORT
+==================================================
+
+Create:
+
+PRODUCTION_HISTORICAL_CLASSIFICATION_REPORT.md
+
+Include record-level classification for every:
+
+payment duplicate
+missing payment
+outbox anomaly
+reconciliation candidate
+future completed booking
+completed without check-in
+completed without completed_at
+recurring violation
+
+For every record:
+
+ID
+CLASSIFICATION
+EVIDENCE
+ROOT CAUSE
+FINANCIAL IMPACT
+SAFE TO AUTO-FIX?
+RECOMMENDED ACTION
+
+==================================================
+10. REMEDIATION DECISION
+==================================================
+
+Do NOT fix historical records during this task.
+
+Instead categorize:
+
+SAFE_DETERMINISTIC_FIX
+OWNER_REVIEW
+LEGACY_DATA
+NO_ACTION_REQUIRED
+BLOCKED
+
+SAFE_DETERMINISTIC_FIX still means:
+
+do not execute it now.
+
+Prepare the exact remediation plan for a separate controlled run.
+
+==================================================
+FINAL VERDICT
+==================================================
+
+PRODUCTION READ-ONLY = PASS
+
+HISTORICAL CLASSIFICATION = COMPLETE / PARTIAL
+
+BOOKING LIFECYCLE = CLASSIFIED
+
+PAYMENT DUPLICATES = CLASSIFIED
+
+MISSING PAYMENT = CLASSIFIED
+
+OUTBOX = CLASSIFIED
+
+RECONCILIATION = CLASSIFIED / BLOCKED
+
+RECURRING = CLASSIFIED
+
+CROSS-ENTITY = CLASSIFIED
+
+CENTRAL FINANCE = SAFE
+
+PRODUCTION DATA MUTATION = NONE
+
+CODE REMEDIATION = PASS
+
+TESTS = 109 PASS
+
+TYPECHECK = PASS
+
+BUILD = PASS
+
+Do not ask for confirmation.
+Do not mutate Production.
+Continue automatically.

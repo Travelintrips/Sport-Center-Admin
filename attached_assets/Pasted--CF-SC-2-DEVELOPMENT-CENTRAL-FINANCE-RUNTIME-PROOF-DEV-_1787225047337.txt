@@ -1,0 +1,374 @@
+# CF-SC-2 — DEVELOPMENT CENTRAL FINANCE RUNTIME PROOF
+## DEV ONLY — NO PROD CUTOVER
+
+CURRENT STATE:
+
+CF-SC-1 implemented.
+
+Objects:
+- sport_center.central_finance_processing
+- statuses:
+  pending
+  processing
+  posted
+  failed
+  manual_review
+
+Idempotency:
+- source_project
+- source_payment_id
+- event_type
+- correlation_id
+
+Consumer:
+- payment_accounting_outbox
+- FOR UPDATE SKIP LOCKED
+- retry/backoff
+- stale-lock recovery
+- company validation
+- payment_settlement_configs
+- tax_settings
+- canonical accounting posting guard
+
+Scheduler:
+- startup
+- every 5 minutes
+- only when SPORT_CENTER_FINANCE_MODE=central
+- disabled in NODE_ENV=production
+
+Production remains:
+SPORT_CENTER_FINANCE_MODE=legacy
+
+OBJECTIVE:
+
+Runtime-prove Central Finance in DEVELOPMENT only.
+
+DO NOT:
+- modify PROD mode
+- write to PROD
+- run real Paylabs charge
+- send real WA
+- modify BizPortal
+- migrate Tenant
+- create another accounting engine
+
+============================================================
+PHASE 1 — DEV ENVIRONMENT GATE
+============================================================
+
+Verify explicitly:
+
+APP_ENV = development
+NODE_ENV != production
+database = Supabase DEVELOPMENT
+
+Print:
+- DB project/database identity
+- finance mode
+- processor enabled state
+
+Then set DEVELOPMENT runtime only:
+
+SPORT_CENTER_FINANCE_MODE=central
+
+Do NOT change production secrets/configuration.
+
+Restart API.
+
+Verify readiness.
+
+============================================================
+PHASE 2 — BASELINE
+============================================================
+
+Capture DEV baseline:
+
+central_finance_processing count by status
+
+payment_accounting_outbox count by status
+
+public.sport_payments count
+
+public.accounting_payments count
+
+public.accounting_entries count
+
+sport_center accounting journal count
+
+No mutation yet beyond normal runtime startup.
+
+============================================================
+PHASE 3 — CONTROLLED DEV PAYMENT CASES
+============================================================
+
+Use controlled DEVELOPMENT fixtures/tests only.
+
+Process representative payments:
+
+1. Transfer Bank full_payment
+2. QRIS full_payment
+3. Paylabs-shaped payment
+4. DP
+5. pelunasan
+6. group payment
+
+For each:
+
+canonical sport payment
+→ confirmed
+→ one finance event
+→ one central processing row
+→ one canonical finance effect
+
+Verify:
+- mirror created/adopted once
+- accounting payment once
+- accounting entry once
+- balanced GL lines
+- tax result once
+- no sport_center_booking accounting entry
+
+============================================================
+PHASE 4 — IDEMPOTENCY
+============================================================
+
+For one payment:
+
+process once
+process same event again
+retry processor
+restart worker
+attempt concurrent claims
+
+Required:
+
+central processing rows = 1 canonical identity
+accounting payment count = 1
+accounting entry count = 1
+mirror count = 1
+financial effect = 1
+
+No duplicates.
+
+============================================================
+PHASE 5 — CONFIG FAILURE
+============================================================
+
+Controlled DEV case with missing/invalid deterministic config.
+
+Required:
+
+processing state = manual_review
+
+Examples:
+- missing company
+- missing settlement config
+- missing tax config
+- unsupported provider/method
+
+Do NOT create partial accounting.
+
+============================================================
+PHASE 6 — TRANSIENT FAILURE
+============================================================
+
+Use controlled test/mocked transient failure.
+
+Required:
+
+processing state transitions through failed/retry
+attempts increment
+available_at backoff applied
+
+Then recover successfully.
+
+No duplicate financial effect.
+
+============================================================
+PHASE 7 — STALE LOCK
+============================================================
+
+Create/use controlled DEV stale processing state.
+
+Verify:
+
+stale lock can be reclaimed according to existing timeout contract.
+
+Only one worker ultimately posts.
+
+============================================================
+PHASE 8 — LEGACY WORKER EXCLUSION
+============================================================
+
+With DEVELOPMENT mode=central prove:
+
+Sport Center legacy payment accounting worker does NOT:
+- claim old accounting outbox for downstream posting
+- create mirror
+- create accounting entries
+- create internal journal
+- push settlement accounting
+- push reconciliation accounting
+
+Central Finance is the only downstream processor.
+
+============================================================
+PHASE 9 — PAYLABS BOUNDARY
+============================================================
+
+Use tests/mocks only.
+
+Prove:
+
+Paylabs callback
+→ canonical sport payment confirmed
+→ finance event
+
+and then Central Finance consumes the event.
+
+Paylabs route itself does NOT perform downstream accounting in central mode.
+
+============================================================
+PHASE 10 — LEGACY VS CENTRAL COMPARISON
+============================================================
+
+For equivalent DEV fixture, calculate/compare:
+
+LEGACY expected result
+vs
+CENTRAL result
+
+Compare:
+
+- company
+- gross amount
+- receiving bank
+- payment method
+- provider
+- revenue
+- tax
+- debit total
+- credit total
+- COA IDs
+- source payment identity
+
+Classification:
+
+MATCH
+MISMATCH_CONFIG
+MISMATCH_TAX
+MISMATCH_COA
+MISMATCH_PROVIDER
+OTHER
+
+Do not hide mismatches.
+
+============================================================
+PHASE 11 — PROCESSING STATE OBSERVABILITY
+============================================================
+
+Report exact rows/status transitions for controlled cases:
+
+pending
+→ processing
+→ posted
+
+manual-review case
+
+retry case
+
+stale-lock case
+
+Ensure:
+last_error
+attempts
+locked_at
+processed_at
+available_at
+are correct.
+
+============================================================
+PHASE 12 — TEST / BUILD
+============================================================
+
+Run:
+
+- Central Finance focused tests
+- accounting integration tests
+- Sport Center boundary tests
+- Paylabs relevant tests
+- API build
+- typecheck delta analysis
+- git diff --check
+
+Restart development API with central mode.
+
+Health/readiness must pass.
+
+============================================================
+PHASE 13 — PROD READ-ONLY SHADOW PREPARATION
+============================================================
+
+Do NOT enable Central Finance production processing.
+
+Use PROD only read-only if available.
+
+Determine how many existing confirmed events would classify as:
+
+ALREADY_POSTED
+RECOVERABLE
+MANUAL_REVIEW
+CONFIG_MISSING
+STALE_LEGACY
+
+No PROD writes.
+
+============================================================
+FINAL REPORT ONLY
+============================================================
+
+DEV DB VERIFIED =
+DEV FINANCE MODE =
+CENTRAL PROCESSOR ACTIVE =
+
+TRANSFER BANK =
+QRIS =
+PAYLABS =
+DP =
+PELUNASAN =
+GROUP PAYMENT =
+
+IDEMPOTENCY =
+CONCURRENT CLAIM =
+RETRY =
+STALE LOCK =
+MANUAL REVIEW =
+
+LEGACY WORKER DOWNSTREAM WRITES IN CENTRAL MODE =
+
+MIRROR DUPLICATES =
+ACCOUNTING PAYMENT DUPLICATES =
+ACCOUNTING ENTRY DUPLICATES =
+
+LEGACY VS CENTRAL MATCH =
+MISMATCHES =
+
+TESTS =
+ACCOUNTING INTEGRATION =
+TYPECHECK =
+BUILD =
+GIT DIFF CHECK =
+API READY =
+
+PROD MODE =
+PROD WRITES = 0
+
+PROD HISTORICAL CLASSIFICATION =
+
+READY FOR PROD SHADOW MODE = YES/NO
+
+BLOCKERS =
+
+STOP.
+
+Do not perform production cutover.

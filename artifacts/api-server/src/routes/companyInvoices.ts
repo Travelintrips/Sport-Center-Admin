@@ -1,0 +1,777 @@
+import { Router } from "express";
+import { db, usersTable, bookingsTable, companyInvoicesTable, companyInvoiceItemsTable, facilitiesTable, auditLogsTable, corporateBookingDocumentationTable } from "@workspace/db";
+import { eq, and, gte, lt, inArray, isNull, or, desc } from "drizzle-orm";
+import multer from "multer";
+import path from "path";
+import { randomUUID } from "crypto";
+import { adminMiddleware } from "../lib/auth";
+import { logAudit, getClientInfo, getUserFromReq, logAccountingError } from "../lib/auditLog";
+import { pushInvoicePaymentAsBankMutation } from "../lib/bizportalSync";
+import { createInvoiceJournalEntry, createPublicInvoiceAccountingEntry } from "../lib/accounting";
+import { BUCKETS, uploadToStorage } from "../lib/supabaseStorage";
+import { uploadProofWithFallback } from "./storage";
+import { allowWhatsAppProviderSend } from "../lib/whatsappSafety";
+
+const uploadMiddleware = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const ok = file.mimetype.startsWith("image/") || file.mimetype === "application/pdf";
+    if (ok) cb(null, true); else cb(new Error("Hanya file gambar atau PDF yang diizinkan"));
+  },
+});
+
+const router = Router();
+
+function formatInvoiceNumber(id: number, periodMonth: string) {
+  const clean = periodMonth.replace("-", "");
+  return `INV-${clean}-${String(id).padStart(4, "0")}`;
+}
+
+function periodDateRange(periodMonth: string) {
+  const [year, month] = periodMonth.split("-").map(Number);
+  const startDate = `${year}-${String(month).padStart(2, "0")}-01`;
+  const endDate = month === 12 ? `${year + 1}-01-01` : `${year}-${String(month + 1).padStart(2, "0")}-01`;
+  return { startDate, endDate };
+}
+
+// totalAmountInclusive = harga jual termasuk PPN (yang customer bayar)
+// DPP              = totalAmountInclusive / 1.11
+// DPP Nilai Lain   = DPP × (11/12)
+// PPN 12%          = DPP Nilai Lain × 0.12  (≡ DPP × 11%)
+// Grand Total      = DPP + PPN ≈ totalAmountInclusive
+function calcTaxBreakdown(totalAmountInclusive: number) {
+  const dpp = Math.round(totalAmountInclusive / 1.11);
+  const dppNilaiLain = Math.round(dpp * 11 / 12);
+  const ppnAmount = Math.round(dppNilaiLain * 0.12);
+  const grandTotal = dpp + ppnAmount;
+  return { dpp, dppNilaiLain, ppnAmount, grandTotal };
+}
+
+function mapInvoice(
+  inv: typeof companyInvoicesTable.$inferSelect,
+  companyName?: string,
+  items?: any[],
+  company?: typeof usersTable.$inferSelect | null,
+) {
+  const totalAmount = Number(inv.totalAmount); // inclusive price (subtotal pemakaian)
+  const { dpp, dppNilaiLain, ppnAmount, grandTotal } = calcTaxBreakdown(totalAmount);
+  return {
+    id: inv.id,
+    invoiceNumber: inv.invoiceNumber,
+    companyCustomerId: inv.companyCustomerId,
+    companyName: companyName ?? "",
+    picName: company?.picName ?? null,
+    picPhone: company?.picPhone ?? null,
+    picEmail: company?.picEmail ?? null,
+    billingAddress: company?.billingAddress ?? null,
+    periodMonth: inv.periodMonth,
+    totalAmount,  // inclusive = subtotal pemakaian
+    dpp,
+    dppNilaiLain,
+    ppnAmount,
+    grandTotal,
+    status: inv.status,
+    paidAt: inv.paidAt ?? null,
+    paymentProofUrl: inv.paymentProofUrl ?? null,
+    paymentNotes: inv.paymentNotes ?? null,
+    notes: inv.notes ?? null,
+    createdAt: inv.createdAt,
+    items: (items ?? []).map((item: any) => ({
+      id: item.id,
+      invoiceId: item.invoiceId,
+      bookingId: item.bookingId,
+      orderNumber: item.orderNumber,
+      bookingDate: item.bookingDate,
+      facilityName: item.facilityName,
+      customerName: item.customerName,
+      customerPhone: item.customerPhone,
+      startTime: item.startTime,
+      endTime: item.endTime,
+      durationHours: Number(item.durationHours ?? 0),
+      pricePerHour: Number(item.pricePerHour ?? 0),
+      subtotal: Number(item.subtotal ?? 0),
+      taxAmount: Number(item.taxAmount ?? 0),
+      totalAmount: Number(item.totalAmount ?? 0),
+    })),
+  };
+}
+
+async function buildAndInsertItems(invoiceId: number, companyId: number, bookings: any[], facilityMap: Record<number, string>) {
+  const items = bookings.map((b) => ({
+    invoiceId,
+    bookingId: b.id,
+    companyId,
+    bookingDate: b.bookingDate ?? null,
+    facilityName: facilityMap[b.facilityId] ?? "",
+    customerName: b.customerName ?? null,
+    customerPhone: b.customerPhone ?? null,
+    startTime: b.startTime ?? null,
+    endTime: b.endTime ?? null,
+    durationHours: String(b.durationHours ?? 0),
+    pricePerHour: String(b.pricePerHour ?? 0),
+    subtotal: String(Number(b.totalPrice ?? 0)),
+    taxAmount: String(Number(b.ppnAmount ?? 0)),
+    totalAmount: String(Number(b.grandTotal ?? b.totalPrice ?? 0)),
+    orderNumber: b.orderNumber ?? null,
+  }));
+  if (items.length > 0) {
+    await db.insert(companyInvoiceItemsTable).values(items);
+  }
+}
+
+router.get("/company-invoices", adminMiddleware, async (req, res) => {
+  try {
+    const { companyCustomerId, status } = req.query;
+    // Keep the list query limited to the fields used by the portal. Production
+    // databases may contain legacy billing columns, and a SELECT * makes this
+    // endpoint unnecessarily sensitive to schema drift.
+    let invoices = await db.select({
+      id: companyInvoicesTable.id,
+      invoiceNumber: companyInvoicesTable.invoiceNumber,
+      companyCustomerId: companyInvoicesTable.companyCustomerId,
+      periodMonth: companyInvoicesTable.periodMonth,
+      totalAmount: companyInvoicesTable.totalAmount,
+      ppnAmount: companyInvoicesTable.ppnAmount,
+      grandTotal: companyInvoicesTable.grandTotal,
+      status: companyInvoicesTable.status,
+      paidAt: companyInvoicesTable.paidAt,
+      notes: companyInvoicesTable.notes,
+      createdAt: companyInvoicesTable.createdAt,
+    }).from(companyInvoicesTable);
+
+    if (companyCustomerId) {
+      invoices = invoices.filter((i) => i.companyCustomerId === parseInt(String(companyCustomerId)));
+    }
+    if (status) {
+      invoices = invoices.filter((i) => i.status === status);
+    }
+
+    const companies = await db.select({ id: usersTable.id, name: usersTable.name, companyName: usersTable.companyName }).from(usersTable);
+    const companyMap = Object.fromEntries(companies.map((c) => [c.id, c.companyName ?? c.name]));
+
+    const result = invoices.map((inv) => mapInvoice(inv as typeof companyInvoicesTable.$inferSelect, companyMap[inv.companyCustomerId]));
+    res.json(result.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
+  } catch (err) {
+    req.log.error({ err, query: req.query }, "List company invoices error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.get("/company-invoices/preview", adminMiddleware, async (req, res) => {
+  try {
+    const { companyCustomerId, periodMonth } = req.query;
+    if (!companyCustomerId || !periodMonth) {
+      res.status(400).json({ error: "companyCustomerId dan periodMonth wajib diisi" });
+      return;
+    }
+    const compId = parseInt(String(companyCustomerId));
+    const [company] = await db.select().from(usersTable).where(eq(usersTable.id, compId)).limit(1);
+    if (!company || company.accountType !== "company") {
+      res.status(404).json({ error: "Company customer tidak ditemukan" });
+      return;
+    }
+
+    const { startDate, endDate } = periodDateRange(String(periodMonth));
+
+    const unbilledBookings = await db.select().from(bookingsTable).where(
+      and(
+        eq(bookingsTable.companyCustomerId, compId),
+        eq(bookingsTable.billingStatus, "unbilled"),
+        gte(bookingsTable.bookingDate, startDate),
+        lt(bookingsTable.bookingDate, endDate),
+      )
+    );
+
+    const facilities = await db.select({ id: facilitiesTable.id, name: facilitiesTable.name }).from(facilitiesTable);
+    const facilityMap = Object.fromEntries(facilities.map((f) => [f.id, f.name]));
+
+    const bookingList = unbilledBookings.map((b) => ({
+      id: b.id,
+      orderNumber: b.orderNumber,
+      facilityName: facilityMap[b.facilityId] ?? "",
+      bookingDate: b.bookingDate,
+      startTime: b.startTime,
+      endTime: b.endTime,
+      durationHours: b.durationHours,
+      customerName: b.customerName,
+      customerPhone: b.customerPhone,
+      pricePerHour: 0,
+      totalPrice: Number(b.totalPrice ?? 0),
+      ppnAmount: b.ppnAmount == null ? null : Number(b.ppnAmount),
+      grandTotal: b.grandTotal == null ? null : Number(b.grandTotal),
+    }));
+
+    // subtotal = sum of inclusive prices (what customers paid)
+    const subtotal = bookingList.reduce((s, b) => s + b.totalPrice, 0);
+    const { dpp, dppNilaiLain, ppnAmount, grandTotal } = calcTaxBreakdown(subtotal);
+
+    // Check if invoice already exists for this company + period
+    const [existingInvoice] = await db.select().from(companyInvoicesTable).where(
+      and(
+        eq(companyInvoicesTable.companyCustomerId, compId),
+        eq(companyInvoicesTable.periodMonth, String(periodMonth))
+      )
+    ).limit(1);
+
+    res.json({
+      companyName: company.companyName ?? company.name,
+      picName: company.picName,
+      periodMonth: String(periodMonth),
+      bookingCount: bookingList.length,
+      subtotal,
+      dpp,
+      dppNilaiLain,
+      ppnAmount,
+      grandTotal,
+      bookings: bookingList,
+      existingInvoice: existingInvoice ? {
+        id: existingInvoice.id,
+        invoiceNumber: existingInvoice.invoiceNumber,
+        status: existingInvoice.status,
+      } : null,
+    });
+  } catch (err) {
+    req.log.error({ err }, "Preview company invoice error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+async function handleGenerateInvoice(req: any, res: any) {
+  try {
+    const { companyCustomerId, periodMonth, notes } = req.body;
+    if (!companyCustomerId || !periodMonth) {
+      res.status(400).json({ error: "companyCustomerId dan periodMonth wajib diisi" });
+      return;
+    }
+
+    const [company] = await db.select().from(usersTable).where(eq(usersTable.id, companyCustomerId)).limit(1);
+    if (!company || company.accountType !== "company") {
+      res.status(404).json({ error: "Company customer tidak ditemukan" });
+      return;
+    }
+
+    const { startDate, endDate } = periodDateRange(periodMonth);
+
+    const unbilledBookings = await db.select().from(bookingsTable).where(
+      and(
+        eq(bookingsTable.companyCustomerId, companyCustomerId),
+        eq(bookingsTable.billingStatus, "unbilled"),
+        gte(bookingsTable.bookingDate, startDate),
+        lt(bookingsTable.bookingDate, endDate),
+      )
+    );
+
+    const facilities = await db.select({ id: facilitiesTable.id, name: facilitiesTable.name }).from(facilitiesTable);
+    const facilityMap = Object.fromEntries(facilities.map((f) => [f.id, f.name]));
+
+    // Check for existing invoice
+    const [existingInvoice] = await db.select().from(companyInvoicesTable).where(
+      and(
+        eq(companyInvoicesTable.companyCustomerId, companyCustomerId),
+        eq(companyInvoicesTable.periodMonth, periodMonth)
+      )
+    ).limit(1);
+
+    const { ipAddress, userAgent } = getClientInfo(req);
+    const userInfo = getUserFromReq(req);
+
+    if (existingInvoice) {
+      if (existingInvoice.status === "paid") {
+        res.status(409).json({
+          error: `Invoice periode ini sudah ada dan sudah lunas: ${existingInvoice.invoiceNumber}`,
+          existingInvoice: {
+            id: existingInvoice.id,
+            invoiceNumber: existingInvoice.invoiceNumber,
+            status: existingInvoice.status,
+          },
+        });
+        return;
+      }
+
+      // Invoice exists and unpaid — add new unbilled bookings to it
+      if (unbilledBookings.length === 0) {
+        res.status(409).json({
+          error: `Invoice periode ini sudah ada: ${existingInvoice.invoiceNumber}. Tidak ada booking baru untuk ditambahkan.`,
+          existingInvoice: {
+            id: existingInvoice.id,
+            invoiceNumber: existingInvoice.invoiceNumber,
+            status: existingInvoice.status,
+          },
+        });
+        return;
+      }
+
+      // Add new bookings as items and recalculate totals
+      await buildAndInsertItems(existingInvoice.id, companyCustomerId, unbilledBookings, facilityMap);
+
+      // Get all items, recalc from inclusive subtotals
+      const allItems = await db.select().from(companyInvoiceItemsTable).where(
+        eq(companyInvoiceItemsTable.invoiceId, existingInvoice.id)
+      );
+      const newSubtotal = allItems.reduce((s, i) => s + Number(i.subtotal ?? 0), 0); // inclusive
+      const { dpp: nd, dppNilaiLain: newDppNilaiLain, ppnAmount: newPpn, grandTotal: newGrandTotal } = calcTaxBreakdown(newSubtotal);
+
+      const [updated] = await db.update(companyInvoicesTable)
+        .set({
+          totalAmount: String(newSubtotal),
+          dppNilaiLain: String(newDppNilaiLain),
+          ppnAmount: String(newPpn),
+          grandTotal: String(newGrandTotal),
+          ...(notes ? { notes } : {}),
+        })
+        .where(eq(companyInvoicesTable.id, existingInvoice.id))
+        .returning();
+
+      // Mark new bookings as billed
+      for (const b of unbilledBookings) {
+        await db.update(bookingsTable)
+          .set({ billingStatus: "billed", companyInvoiceId: existingInvoice.id })
+          .where(eq(bookingsTable.id, b.id));
+      }
+
+      await logAudit({
+        ...userInfo,
+        action: "CORPORATE_BILLING_AGGREGATED",
+        entity: "company_invoice",
+        entityId: existingInvoice.id,
+        after: { addedBookings: unbilledBookings.length, invoiceNumber: existingInvoice.invoiceNumber, dppNilaiLain: newDppNilaiLain, dpp: nd },
+        ipAddress,
+        userAgent,
+      });
+
+      const updatedItems = await db.select().from(companyInvoiceItemsTable).where(
+        eq(companyInvoiceItemsTable.invoiceId, existingInvoice.id)
+      );
+      return res.status(200).json({
+        ...mapInvoice(updated, company.companyName ?? company.name, updatedItems, company),
+        message: `${unbilledBookings.length} booking baru ditambahkan ke invoice existing ${existingInvoice.invoiceNumber}`,
+      });
+    }
+
+    // No existing invoice — create new one
+    // totalAmount = sum of inclusive prices (what customers paid)
+    const totalAmount = unbilledBookings.reduce((sum, b) => sum + Number(b.totalPrice), 0);
+    const { dpp, dppNilaiLain, ppnAmount, grandTotal } = calcTaxBreakdown(totalAmount);
+
+    const [inv] = await db.insert(companyInvoicesTable).values({
+      invoiceNumber: "TEMP",
+      companyCustomerId,
+      periodMonth,
+      totalAmount: String(totalAmount),
+      dppNilaiLain: String(dppNilaiLain),
+      ppnAmount: String(ppnAmount),
+      grandTotal: String(grandTotal),
+      status: "unpaid",
+      notes: notes ?? null,
+    }).returning();
+
+    const invoiceNumber = formatInvoiceNumber(inv.id, periodMonth);
+    const [updated] = await db.update(companyInvoicesTable)
+      .set({ invoiceNumber })
+      .where(eq(companyInvoicesTable.id, inv.id))
+      .returning();
+
+    // Insert line items
+    await buildAndInsertItems(inv.id, companyCustomerId, unbilledBookings, facilityMap);
+
+    // Mark bookings as billed
+    for (const b of unbilledBookings) {
+      await db.update(bookingsTable)
+        .set({ billingStatus: "billed", companyInvoiceId: inv.id })
+        .where(eq(bookingsTable.id, b.id));
+    }
+
+    await logAudit({
+      ...userInfo,
+      action: "MONTHLY_INVOICE_GENERATED",
+      entity: "company_invoice",
+      entityId: inv.id,
+      after: { invoiceNumber, companyId: companyCustomerId, periodMonth, bookingCount: unbilledBookings.length, totalAmount, dpp, dppNilaiLain, ppnAmount, grandTotal },
+      ipAddress,
+      userAgent,
+    });
+    await logAudit({
+      ...userInfo,
+      action: "CORPORATE_BILLING_AGGREGATED",
+      entity: "company_invoice",
+      entityId: inv.id,
+      after: { invoiceNumber, companyId: companyCustomerId, periodMonth, bookingCount: unbilledBookings.length, totalAmount, dpp, dppNilaiLain, ppnAmount, grandTotal },
+      ipAddress,
+      userAgent,
+    });
+
+    const items = await db.select().from(companyInvoiceItemsTable).where(
+      eq(companyInvoiceItemsTable.invoiceId, inv.id)
+    );
+    res.status(201).json(mapInvoice(updated, company.companyName ?? company.name, items, company));
+  } catch (err) {
+    req.log.error({ err }, "Generate company invoice error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+}
+
+router.post("/company-invoices/generate", adminMiddleware, handleGenerateInvoice);
+router.post("/company-invoices", adminMiddleware, handleGenerateInvoice);
+
+async function resolveInvoiceItems(id: number, inv: typeof companyInvoicesTable.$inferSelect) {
+  const facilities = await db.select({ id: facilitiesTable.id, name: facilitiesTable.name }).from(facilitiesTable);
+  const facilityMap = Object.fromEntries(facilities.map((f) => [f.id, f.name]));
+
+  // 1. Items table
+  let items = await db.select().from(companyInvoiceItemsTable).where(eq(companyInvoiceItemsTable.invoiceId, id));
+  if (items.length > 0) return items;
+
+  // 2. Backfill from bookings with companyInvoiceId set
+  const linkedBookings = await db.select().from(bookingsTable).where(eq(bookingsTable.companyInvoiceId, id));
+  if (linkedBookings.length > 0) {
+    await buildAndInsertItems(id, inv.companyCustomerId, linkedBookings, facilityMap);
+    return db.select().from(companyInvoiceItemsTable).where(eq(companyInvoiceItemsTable.invoiceId, id));
+  }
+
+  // 3. Fallback: find billed/paid company bookings in same period not yet linked to another invoice
+  const { startDate, endDate } = periodDateRange(inv.periodMonth);
+  const periodBookings = await db.select().from(bookingsTable).where(
+    and(
+      eq(bookingsTable.companyCustomerId, inv.companyCustomerId),
+      inArray(bookingsTable.billingStatus, ["billed", "paid"]),
+      gte(bookingsTable.bookingDate, startDate),
+      lt(bookingsTable.bookingDate, endDate),
+      or(isNull(bookingsTable.companyInvoiceId), eq(bookingsTable.companyInvoiceId, id)),
+    )
+  );
+  if (periodBookings.length > 0) {
+    await buildAndInsertItems(id, inv.companyCustomerId, periodBookings, facilityMap);
+    for (const b of periodBookings) {
+      await db.update(bookingsTable).set({ companyInvoiceId: id }).where(eq(bookingsTable.id, b.id));
+    }
+    return db.select().from(companyInvoiceItemsTable).where(eq(companyInvoiceItemsTable.invoiceId, id));
+  }
+
+  return [];
+}
+
+router.get("/company-invoices/:id", adminMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(String(req.params.id));
+    const [inv] = await db.select().from(companyInvoicesTable).where(eq(companyInvoicesTable.id, id)).limit(1);
+    if (!inv) { res.status(404).json({ error: "Not found" }); return; }
+
+    const [company] = await db.select().from(usersTable).where(eq(usersTable.id, inv.companyCustomerId)).limit(1);
+    const items = await resolveInvoiceItems(id, inv);
+
+    // Ambil dokumentasi corporate untuk setiap booking dalam invoice
+    const bookingIds = items.map((i) => i.bookingId).filter(Boolean) as number[];
+    let docsByBookingId: Record<number, any[]> = {};
+    if (bookingIds.length > 0) {
+      const allDocs = await db
+        .select()
+        .from(corporateBookingDocumentationTable)
+        .where(inArray(corporateBookingDocumentationTable.bookingId, bookingIds));
+      for (const doc of allDocs) {
+        if (!docsByBookingId[doc.bookingId]) docsByBookingId[doc.bookingId] = [];
+        docsByBookingId[doc.bookingId].push(doc);
+      }
+    }
+
+    const invoiceData = mapInvoice(inv, company?.companyName ?? company?.name, items, company);
+    // Sisipkan dokumentasi ke setiap item
+    const itemsWithDocs = invoiceData.items.map((item) => ({
+      ...item,
+      documentation: docsByBookingId[item.bookingId] ?? [],
+    }));
+
+    res.json({ ...invoiceData, items: itemsWithDocs });
+  } catch (err) {
+    req.log.error({ err }, "Get company invoice error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.post("/company-invoices/:id/rebuild-items", adminMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(String(req.params.id));
+    const [inv] = await db.select().from(companyInvoicesTable).where(eq(companyInvoicesTable.id, id)).limit(1);
+    if (!inv) { res.status(404).json({ error: "Not found" }); return; }
+
+    // Delete existing items and rebuild from scratch
+    await db.delete(companyInvoiceItemsTable).where(eq(companyInvoiceItemsTable.invoiceId, id));
+
+    const { startDate, endDate } = periodDateRange(inv.periodMonth);
+    const facilities = await db.select({ id: facilitiesTable.id, name: facilitiesTable.name }).from(facilitiesTable);
+    const facilityMap = Object.fromEntries(facilities.map((f) => [f.id, f.name]));
+
+    const bookings = await db.select().from(bookingsTable).where(
+      and(
+        eq(bookingsTable.companyCustomerId, inv.companyCustomerId),
+        inArray(bookingsTable.billingStatus, ["billed", "paid"]),
+        gte(bookingsTable.bookingDate, startDate),
+        lt(bookingsTable.bookingDate, endDate),
+        or(isNull(bookingsTable.companyInvoiceId), eq(bookingsTable.companyInvoiceId, id)),
+      )
+    );
+
+    if (bookings.length > 0) {
+      await buildAndInsertItems(id, inv.companyCustomerId, bookings, facilityMap);
+      for (const b of bookings) {
+        await db.update(bookingsTable).set({ companyInvoiceId: id }).where(eq(bookingsTable.id, b.id));
+      }
+    }
+
+    const [company] = await db.select().from(usersTable).where(eq(usersTable.id, inv.companyCustomerId)).limit(1);
+    const items = await db.select().from(companyInvoiceItemsTable).where(eq(companyInvoiceItemsTable.invoiceId, id));
+    const { ipAddress, userAgent } = getClientInfo(req);
+    const userInfo = getUserFromReq(req);
+    await logAudit({
+      ...userInfo,
+      action: "COMPANY_INVOICE_ITEMS_REBUILT",
+      entity: "company_invoice",
+      entityId: id,
+      after: {
+        invoiceNumber: inv.invoiceNumber,
+        companyId: inv.companyCustomerId,
+        rebuiltCount: items.length,
+        linkedBookingCount: bookings.length,
+      },
+      ipAddress,
+      userAgent,
+    });
+    res.json({ ...mapInvoice(inv, company?.companyName ?? company?.name, items, company), rebuiltCount: items.length });
+  } catch (err) {
+    req.log.error({ err }, "Rebuild invoice items error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.patch("/company-invoices/:id", adminMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(String(req.params.id));
+    const [inv] = await db.select().from(companyInvoicesTable).where(eq(companyInvoicesTable.id, id)).limit(1);
+    if (!inv) { res.status(404).json({ error: "Not found" }); return; }
+
+    const { status, notes } = req.body;
+    const updates: Partial<typeof companyInvoicesTable.$inferInsert> = {};
+    if (status !== undefined) updates.status = status;
+    if (notes !== undefined) updates.notes = notes;
+    if (status === "paid" && inv.status !== "paid") {
+      updates.paidAt = new Date();
+    }
+
+    const [updated] = await db.update(companyInvoicesTable).set(updates).where(eq(companyInvoicesTable.id, id)).returning();
+
+    const { ipAddress, userAgent } = getClientInfo(req);
+    const userInfo = getUserFromReq(req);
+
+    if (status === "paid" && inv.status !== "paid") {
+      await db.update(bookingsTable)
+        .set({ billingStatus: "paid" })
+        .where(eq(bookingsTable.companyInvoiceId, id));
+
+      await logAudit({
+        ...userInfo,
+        action: "COMPANY_INVOICE_PAID",
+        entity: "company_invoice",
+        entityId: id,
+        before: { status: inv.status },
+        after: { status: "paid", invoiceNumber: inv.invoiceNumber },
+        ipAddress,
+        userAgent,
+      });
+    } else if (status !== undefined || notes !== undefined) {
+      await logAudit({
+        ...userInfo,
+        action: "COMPANY_INVOICE_UPDATED",
+        entity: "company_invoice",
+        entityId: id,
+        before: {
+          status: inv.status,
+          notes: inv.notes,
+        },
+        after: {
+          status: updated.status,
+          notes: updated.notes,
+        },
+        ipAddress,
+        userAgent,
+      });
+    }
+
+    const [company] = await db.select().from(usersTable).where(eq(usersTable.id, updated.companyCustomerId)).limit(1);
+    const items = await db.select().from(companyInvoiceItemsTable).where(eq(companyInvoiceItemsTable.invoiceId, id));
+
+    if (status === "paid" && inv.status !== "paid") {
+      const paidDate = updated.paidAt ?? new Date();
+      const today = paidDate.toISOString().split("T")[0]!;
+      // totalAmount = harga inklusif PPN. Fungsi journal menerima DPP (sebelum PPN).
+      // Gunakan calcTaxBreakdown (sama seperti mapInvoice) untuk ekstrak DPP & ppnAmount.
+      const { dpp: invDpp, ppnAmount: invPpn } = calcTaxBreakdown(Number(updated.totalAmount));
+      pushInvoicePaymentAsBankMutation(updated, company?.companyName ?? company?.name, paidDate).catch(() => {});
+      createInvoiceJournalEntry(updated.id, updated.invoiceNumber, invDpp, invPpn, today).catch((err) =>
+        logAccountingError({ operation: "createInvoiceJournalEntry", orderNumber: updated.invoiceNumber, bookingId: updated.id, error: err }),
+      );
+      createPublicInvoiceAccountingEntry(updated.id, updated.invoiceNumber, invDpp, invPpn, today).catch((err) =>
+        logAccountingError({ operation: "createPublicInvoiceAccountingEntry", orderNumber: updated.invoiceNumber, bookingId: updated.id, error: err }),
+      );
+    }
+
+    res.json(mapInvoice(updated, company?.companyName ?? company?.name, items, company));
+  } catch (err) {
+    req.log.error({ err }, "Update company invoice error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// GET /company-invoices/:id/audit-trail — invoice-specific audit history
+router.get("/company-invoices/:id/audit-trail", adminMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(String(req.params.id));
+    if (!Number.isInteger(id)) {
+      res.status(400).json({ error: "ID invoice tidak valid" });
+      return;
+    }
+
+    const [invoice] = await db
+      .select({ id: companyInvoicesTable.id, invoiceNumber: companyInvoicesTable.invoiceNumber })
+      .from(companyInvoicesTable)
+      .where(eq(companyInvoicesTable.id, id))
+      .limit(1);
+
+    if (!invoice) {
+      res.status(404).json({ error: "Invoice tidak ditemukan" });
+      return;
+    }
+
+    const logs = await db
+      .select()
+      .from(auditLogsTable)
+      .where(and(
+        eq(auditLogsTable.entity, "company_invoice"),
+        eq(auditLogsTable.entityId, id),
+      ))
+      .orderBy(desc(auditLogsTable.createdAt))
+      .limit(100);
+
+    res.json({ invoiceId: id, invoiceNumber: invoice.invoiceNumber, logs });
+  } catch (err) {
+    req.log.error({ err }, "Company invoice audit trail error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Upload payment proof for company invoice
+router.post("/company-invoices/:id/upload-payment-proof", adminMiddleware, uploadMiddleware.single("file"), async (req, res) => {
+  try {
+    const id = parseInt(String(req.params.id));
+    const paymentNotes = String(req.body?.paymentNotes || "").trim() || null;
+    const markPaid = req.body?.markPaid === "true" || req.body?.markPaid === true;
+
+    const [inv] = await db.select().from(companyInvoicesTable).where(eq(companyInvoicesTable.id, id)).limit(1);
+    if (!inv) { res.status(404).json({ error: "Invoice tidak ditemukan" }); return; }
+
+    let proofUrl: string | null = inv.paymentProofUrl ?? null;
+
+    if (req.file) {
+      const ext = path.extname(req.file.originalname).toLowerCase() || ".jpg";
+      const objectPath = `invoice-proof-${randomUUID()}${ext}`;
+      proofUrl = await uploadToStorage(BUCKETS.proof, objectPath, req.file.buffer, req.file.mimetype);
+    }
+
+    const updates: Partial<typeof companyInvoicesTable.$inferInsert> = {
+      paymentProofUrl: proofUrl,
+      paymentNotes,
+    };
+
+    if (markPaid && inv.status !== "paid") {
+      updates.status = "paid";
+      updates.paidAt = new Date();
+    }
+
+    const [updated] = await db.update(companyInvoicesTable).set(updates).where(eq(companyInvoicesTable.id, id)).returning();
+
+    if (markPaid && inv.status !== "paid") {
+      await db.update(bookingsTable)
+        .set({ billingStatus: "paid" })
+        .where(eq(bookingsTable.companyInvoiceId, id));
+    }
+
+    const { ipAddress, userAgent } = getClientInfo(req);
+    const userInfo = getUserFromReq(req);
+    await logAudit({
+      ...userInfo,
+      action: "COMPANY_INVOICE_PROOF_UPLOADED",
+      entity: "company_invoice",
+      entityId: id,
+      after: { invoiceNumber: inv.invoiceNumber, proofUrl, markPaid },
+      ipAddress,
+      userAgent,
+    });
+
+    const [company] = await db.select().from(usersTable).where(eq(usersTable.id, updated.companyCustomerId)).limit(1);
+    const items = await db.select().from(companyInvoiceItemsTable).where(eq(companyInvoiceItemsTable.invoiceId, id));
+    res.json(mapInvoice(updated, company?.companyName ?? company?.name, items, company));
+  } catch (err) {
+    req.log.error({ err }, "Upload company invoice proof error");
+
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Send WhatsApp to PIC
+router.post("/company-invoices/:id/send-wa", adminMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(String(req.params.id));
+    const [inv] = await db.select().from(companyInvoicesTable).where(eq(companyInvoicesTable.id, id)).limit(1);
+    if (!inv) { res.status(404).json({ error: "Not found" }); return; }
+
+    const [company] = await db.select().from(usersTable).where(eq(usersTable.id, inv.companyCustomerId)).limit(1);
+    const picPhone = company?.picPhone;
+    if (!picPhone) {
+      res.status(400).json({ error: "Nomor WA PIC perusahaan belum diisi" });
+      return;
+    }
+
+    const [year, month] = inv.periodMonth.split("-").map(Number);
+    const periodLabel = new Date(year, month - 1, 1).toLocaleDateString("id-ID", { year: "numeric", month: "long" });
+
+    const message = encodeURIComponent(
+      `Halo ${company?.picName ?? company?.companyName ?? ""},\n\n` +
+      `Berikut tagihan perusahaan Anda:\n` +
+      `• No Invoice: *${inv.invoiceNumber}*\n` +
+      `• Periode: *${periodLabel}*\n` +
+      `• DPP: Rp ${Number(inv.totalAmount).toLocaleString("id-ID")}\n` +
+      `• PPN 11%: Rp ${Number(inv.ppnAmount).toLocaleString("id-ID")}\n` +
+      `• *Grand Total: Rp ${Number(inv.grandTotal).toLocaleString("id-ID")}*\n\n` +
+      `Mohon segera melakukan pembayaran. Terima kasih.\n\n` +
+      `Sport Center Soekarno-Hatta`
+    );
+
+    const token = process.env.FONNTE_TOKEN;
+    if (token && allowWhatsAppProviderSend()) {
+      const phone = picPhone.replace(/^\+/, "").replace(/^0/, "62");
+      await fetch("https://api.fonnte.com/send", {
+        method: "POST",
+        headers: { Authorization: token, "Content-Type": "application/json" },
+        body: JSON.stringify({ target: phone, message: decodeURIComponent(message) }),
+      });
+    }
+
+    const { ipAddress, userAgent } = getClientInfo(req);
+    const userInfo = getUserFromReq(req);
+    await logAudit({
+      ...userInfo,
+      action: "COMPANY_INVOICE_WA_SENT",
+      entity: "company_invoice",
+      entityId: id,
+      after: { invoiceNumber: inv.invoiceNumber, picPhone },
+      ipAddress,
+      userAgent,
+    });
+
+    res.json({ success: true, phone: picPhone, message: `Pesan WA berhasil dikirim ke ${picPhone}` });
+  } catch (err) {
+    req.log.error({ err }, "Send WA company invoice error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+export default router;

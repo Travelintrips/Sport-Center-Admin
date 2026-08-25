@@ -1,0 +1,105 @@
+Audit dan rapikan integrasi Supabase + BizPortal Sync dengan target berikut:
+
+1. Pisahkan database dev dan prod.
+
+* Jangan biarkan dev dan prod memakai `SUPABASE_DATABASE_URL` yang sama.
+* Update `lib/db/src/index.ts` agar prioritas environment menjadi:
+
+  1. Jika `NODE_ENV=production` gunakan `SUPABASE_DATABASE_URL`
+  2. Jika `NODE_ENV=development` gunakan `SUPABASE_DATABASE_URL_DEV`
+  3. Fallback hanya gunakan `DATABASE_URL` jika Supabase env tidak tersedia.
+* Tambahkan warning log jika dev memakai database prod.
+* Jangan menghapus data existing.
+
+2. Aktifkan konfigurasi `BIZPORTAL_SYNC_API_KEY`.
+
+* Pastikan semua endpoint `/api/sync/*` hanya aktif jika secret tersedia.
+* Buat dokumentasi `.env.example` untuk:
+
+  * `BIZPORTAL_SYNC_API_KEY`
+  * `SUPABASE_DATABASE_URL`
+  * `SUPABASE_DATABASE_URL_DEV`
+* Tambahkan health check endpoint `/api/sync/health` yang menampilkan status configured/unconfigured tanpa membocorkan key.
+
+3. Bersihkan env var Supabase yang tidak dipakai.
+
+* Audit penggunaan:
+
+  * `SUPABASE_URL_DEV`
+  * `SUPABASE_PG_URL`
+  * `SUPABASE_STORAGE_BUCKET`
+* Jika tidak dipakai, jangan hapus langsung, tetapi dokumentasikan sebagai deprecated.
+* Buat file dokumentasi `docs/supabase-env-audit.md` yang menjelaskan env aktif, fallback, dan deprecated.
+
+4. Perbaiki Supabase Storage.
+
+* Pastikan upload foto fasilitas tetap ke bucket `facility-images`.
+* Pastikan upload bukti bayar customer, admin, tenant, dan WA tetap ke bucket `payment-proofs`.
+* Jangan gunakan `SUPABASE_STORAGE_BUCKET` karena saat ini kode memakai bucket eksplisit.
+* Tambahkan validasi bucket exists saat server start, tetapi jangan auto-create di production tanpa log yang jelas.
+
+5. Perbaiki Realtime no-op.
+
+* Audit semua pemanggilan `broadcastAvailabilityChange` di:
+
+  * `bookings.ts`
+  * `schedules.ts`
+  * `whatsapp.ts`
+* Implementasikan mode aman:
+
+  * Jika Supabase Realtime env/config aktif, kirim broadcast availability.
+  * Jika tidak aktif, tetap no-op tetapi log sekali saat startup.
+* Jangan sampai booking gagal hanya karena realtime gagal.
+
+6. Rapikan BizPortal Sync dua arah.
+
+* Pastikan push Sport Center → BizPortal tetap jalan:
+
+  * booking baru
+  * upload bukti bayar
+  * admin confirm
+  * admin reject
+  * cancellation
+  * WA upload proof
+  * WA confirm
+* Pastikan pull BizPortal → Sport Center via `/api/sync/*` hanya bisa dengan header `X-API-Key`.
+* Tambahkan audit log setiap sync berhasil/gagal.
+* Tambahkan retry ringan untuk sync gagal, tanpa membuat duplicate record.
+
+7. Tambahkan proteksi duplicate sync.
+
+* Untuk tabel `sport_center_bookings`, gunakan `booking_code` sebagai unique sync key.
+* Untuk `sport_center_memberships`, gunakan `id` sebagai unique sync key.
+* Gunakan upsert, bukan insert biasa.
+* Jangan membuat booking/member ganda saat sync dipanggil berkali-kali.
+
+8. Tambahkan halaman/admin diagnostic sederhana.
+
+* Buat endpoint internal admin `/api/admin/system/supabase-status`.
+* Tampilkan:
+
+  * DB source yang sedang aktif
+  * Storage buckets status
+  * Realtime enabled/no-op
+  * BizPortal sync configured/unconfigured
+  * Last sync success/error
+* Jangan tampilkan secret/env value asli.
+
+9. Testing wajib.
+
+* Test customer booking baru.
+* Test upload bukti bayar dari customer portal.
+* Test admin confirm payment.
+* Test WA upload proof.
+* Test `/api/sync/bookings` tanpa API key harus 401/403.
+* Test `/api/sync/bookings` dengan API key benar harus sukses.
+* Test dev environment memakai `SUPABASE_DATABASE_URL_DEV`, bukan production.
+* Pastikan tidak ada data production yang berubah saat testing dev.
+
+Output akhir yang saya mau:
+
+* Ringkasan file yang diubah.
+* Env var yang wajib di-set.
+* Endpoint yang ditambahkan.
+* Hasil test manual/API.
+* Risiko yang masih tersisa.

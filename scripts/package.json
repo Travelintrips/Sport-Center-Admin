@@ -1,0 +1,49 @@
+{
+  "name": "@workspace/scripts",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "hello": "tsx ./src/hello.ts",
+    "seed-all": "tsx ./src/seed-all.ts",
+    "seed-admin": "tsx ./src/seed-admin.ts",
+    "migrate": "tsx ../migrate.ts",
+    "migrate:dev": "tsx ./src/db-migrate.ts",
+    "migrate:prod": "tsx ./src/db-migrate.ts --prod",
+    "migrate:payment-accounting:prod": "NODE_ENV=production tsx ./src/apply-payment-accounting-sync-prod.ts --prod --apply",
+    "audit:schema": "tsx ./src/schema-diff-full.ts",
+    "storage:compress-images": "tsx ./src/compress-supabase-images.ts",
+    "migrate:ownership:dev": "tsx ./src/migrate-facility-company-ownership.ts",
+    "migrate:cf-sc-5:dev": "tsx ./src/apply-cf-sc-5-dev.ts",
+    "migrate:cf-sc-8:dev": "tsx ./src/apply-cf-sc-8-dev.ts",
+    "backfill:payment-providers": "tsx ./src/backfill-payment-providers.ts",
+    "migrate:diff": "tsx ./src/schema-diff.ts",
+    "fix-admin:dev": "tsx ./src/fix-admin-hash.ts",
+    "test-ppn": "tsx ./src/test-ppn.ts",
+    "fix-ppn-journals": "tsx ./src/fix-ppn-journals.ts",
+    "backfill-payment-providers": "tsx ./src/backfill-payment-providers.ts",
+    "prepare:uat-qris": "tsx ./src/prepare-uat-qris-dataset.ts",
+    "repair:uat-qris": "tsx ./src/repair-uat-qris-fixture.ts",
+    "repair:phase-b:13-14": "tsx ./src/repair-phase-b-payment-13-14.ts",
+    "cf-sc-7ab:dev": "tsx ./src/cf-sc-7ab-harness.ts",
+    "cf-sc-9:dev": "tsx ./src/cf-sc-9-coverage.ts",
+    "cf-sc-7c:dev": "tsx ./src/cf-sc-7c-discovery.ts",
+    "cf-sc-7d:dev": "tsx ./src/cf-sc-7d-ready-harness.ts",
+    "audit:production-read-only": "NODE_ENV=production-audit tsx ./audit/production-read-only-runner.ts",
+    "audit:production-integrity": "NODE_ENV=production-audit tsx ./audit/production-transaction-integrity-audit.ts",
+
+    "test:uat-qris": "tsx ./src/uat-qris-harness.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@workspace/db": "workspace:*",
+    "drizzle-orm": "catalog:",
+    "pg": "^8.20.0",
+    "sharp": "^0.34.5"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@types/pg": "^8.11.11",
+    "tsx": "catalog:"
+  }
+}

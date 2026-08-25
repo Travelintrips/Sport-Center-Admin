@@ -1,0 +1,79 @@
+Tambahkan opsi Akun Perusahaan pada form booking customer.
+
+Lokasi UI:
+Di bawah section "Tipe Pemesan", tambahkan card ketiga:
+
+1. Umum
+   Harga normal
+
+2. Karyawan Angkasa Pura
+   Diskon khusus
+
+3. Perusahaan
+   Tagihan perusahaan
+
+Saat user pilih "Perusahaan":
+
+1. Tampilkan field baru:
+   - Pilih Perusahaan
+   - Pilih / ketik nama customer
+   - No WhatsApp customer
+   - Dipakai untuk / nama pengguna lapangan
+   - Catatan
+
+2. Field "Pilih Perusahaan" mengambil data dari table sport_companies yang status = active.
+
+3. Jika customer belum ada:
+   - customer bisa dibuat otomatis dari nama + nomor WhatsApp.
+   - customer otomatis terhubung ke perusahaan yang dipilih.
+   - buat record di sport_company_users.
+   - status awal company user = pending_verification atau approved sesuai setting perusahaan.
+
+4. Jika perusahaan memakai verification_method = employee_id:
+   - tampilkan field Nomor ID Karyawan.
+   - sistem cek ke sport_company_employees.
+   - jika cocok, langsung approved.
+   - jika tidak cocok, status pending_verification.
+
+5. Jika sudah approved:
+   - booking memakai Corporate Billing.
+   - payment_status = tagihan_perusahaan
+   - billing_status = unbilled
+   - payment_required_now = false.
+
+6. Jika masih pending_verification:
+   - booking jangan langsung confirmed.
+   - booking_status = pending_company_verification.
+   - kirim WA ke admin/PIC perusahaan untuk approve.
+
+7. Booking tetap menyimpan:
+   - customer_id
+   - company_id
+   - booked_for_name
+   - payment_mode = company
+   - payment_status = tagihan_perusahaan
+   - billing_status = unbilled
+
+8. Di ringkasan booking sebelah kanan:
+   Jika pilih Perusahaan, tampilkan:
+   - Perusahaan: {{company_name}}
+   - Pembayaran: Tagihan Perusahaan
+   - Bayar sekarang: Rp 0
+   - Total masuk tagihan: Rp {{grand_total}}
+
+9. Jangan tampilkan upload bukti pembayaran jika metode Perusahaan sudah approved.
+
+10. Setelah submit:
+   - booking masuk ke Admin Portal > Pemesanan
+   - booking juga masuk ke Tagihan Perusahaan sebagai Unbilled
+   - customer baru masuk ke Admin Portal > Pelanggan
+   - relasi customer-perusahaan muncul di Detail Perusahaan > Customer Terhubung
+
+11. Tambahkan audit log:
+   - CUSTOMER_AUTO_CREATED_FROM_COMPANY_BOOKING
+   - COMPANY_USER_LINKED_FROM_BOOKING
+   - COMPANY_BOOKING_CREATED
+   - COMPANY_BOOKING_PENDING_VERIFICATION
+   - COMPANY_BILLING_UNBILLED_CREATED
+
+Pastikan opsi Umum dan Karyawan Angkasa Pura tetap berjalan seperti sebelumnya.

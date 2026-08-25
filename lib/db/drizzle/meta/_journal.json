@@ -1,0 +1,34 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1780136939657,
+      "tag": "0000_fearless_adam_warlock",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1780148589415,
+      "tag": "0001_huge_plazm",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1781026638170,
+      "tag": "0002_init",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1781620946560,
+      "tag": "0003_init",
+      "breakpoints": true
+    }
+  ]
+}

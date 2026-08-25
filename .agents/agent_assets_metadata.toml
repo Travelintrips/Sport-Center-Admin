@@ -1,0 +1,84 @@
+uploads = []
+
+[[generated]]
+id = "YDdMT_89l0u49cYH90Wua"
+uri = "file://artifacts/sport-center/public/hero.png"
+type = "image"
+title = "Sport Center Hero Image"
+
+[[generated]]
+id = "YpxOmDP2YLFGQ_SdbaT3s"
+uri = "file://artifacts/sport-center/public/futsal.png"
+type = "image"
+title = "Futsal Court"
+
+[[generated]]
+id = "2sGYSXohD2n59wyOLMyac"
+uri = "file://artifacts/sport-center/public/basket.png"
+type = "image"
+title = "Basketball Court"
+
+[[generated]]
+id = "1whWZ63fitIqyQV2Kq0xL"
+uri = "file://artifacts/sport-center/public/voli.png"
+type = "image"
+title = "Volleyball Court"
+
+[[generated]]
+id = "fucFsZ3eXhKCNLKhX4ROf"
+uri = "file://artifacts/sport-center/public/tennis.png"
+type = "image"
+title = "Tennis Court"
+
+[[generated]]
+id = "wS8I69eIOG5E8wU3dHQdy"
+uri = "file://artifacts/sport-center/public/badminton.png"
+type = "image"
+title = "Badminton Court"
+
+[[generated]]
+id = "ElxhfGL22YGvlg1YdY0Cc"
+uri = "file://artifacts/sport-center/public/gym.png"
+type = "image"
+title = "Gym and Fitness"
+
+[[generated]]
+id = "JTbyYx_9iRTy5pwr4cJiJ"
+uri = "file://artifacts/sport-center/public/billiard.png"
+type = "image"
+title = "Billiard Lounge"
+
+[[outputs]]
+id = "o3MgcoDMRIvjCng4tY3fB"
+uri = "file://ACCOUNTING_AUDIT_REPORT.md"
+type = "text"
+title = "Accounting Audit Report — Sport Center"
+logical_id = "d844684e-0ba7-4f68-b6ee-20610c6e9149"
+
+[[outputs]]
+id = "kEWYuhoRIIrpkq4fFHyyw"
+uri = "file://SPORT_CENTER_FINAL_PRODUCTION_CLOSURE_REPORT.md"
+type = "text"
+title = "Sport Center Final Production Closure Report"
+description = "Phase 3 closure report covering audit results, tests, builds, production smoke checks, blockers, and proof of no production mutation."
+logical_id = "c198947e-1fea-4535-8ac2-7176b6a43961"
+content_hash = "sha256:0bb03a7df20b4a421002b0e9d3a2a1bbcecc9569f239d231308e518d9552805a"
+size = 7749
+mtime_ms = 1787429082513
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:a70d59a0-a6f9-48db-a79c-d5b8a6a024f8/c198947e-1fea-4535-8ac2-7176b6a43961/51c73e70-4104-425f-98c7-292811137de7"
+storage_version_token = "1787429089464906"
+content_type = "text/markdown"
+
+[[outputs]]
+id = "uhIAd9zylU6EB6F4WBYOm"
+uri = "file://SPORT_CENTER_CORPORATE_EVENT_RESCHEDULE_IMPLEMENTATION_REPORT.md"
+type = "text"
+title = "Corporate Event Reschedule Implementation Report"
+description = "Implementation details, API/frontend changes, migration status, verification results, and Production safety status."
+logical_id = "d367839c-a446-4596-a828-cf78edd41c2c"
+content_hash = "sha256:ff5a7bd37780fde9b797e628e22854784489fe91f74e140ac3fa321740adabeb"
+size = 5952
+mtime_ms = 1787506192762
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:a70d59a0-a6f9-48db-a79c-d5b8a6a024f8/d367839c-a446-4596-a828-cf78edd41c2c/f64b6ccc-b7d2-442f-8492-73ca0c27e138"
+storage_version_token = "1787506207136943"
+content_type = "text/markdown"

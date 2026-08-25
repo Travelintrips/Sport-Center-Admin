@@ -1,0 +1,409 @@
+PRODUCTION READ-ONLY AUDIT ACCESS — FINAL BLOCKER REMEDIATION
+SPORT CENTER — PREPARE AND VERIFY, DO NOT GUESS
+
+CURRENT STATUS:
+
+Production runtime:
+Replit Autoscale = PASS
+
+Production domain:
+https://sc.travelintrips.co.id = PASS
+
+Production database resolver:
+SUPABASE_DATABASE_URL = PASS
+
+Production secret source:
+Google Secret Manager = PASS
+
+Code remediation:
+PASS
+
+Tests:
+17 suites / 109 tests PASS
+
+Typecheck:
+PASS
+
+Build:
+PASS
+
+Production mutation:
+NONE
+
+Central Finance:
+UNCHANGED
+
+CURRENT BLOCKER:
+
+PRODUCTION_RECORD_LEVEL_ACCESS = BLOCKED
+
+Reason:
+
+There is no separately provisioned PostgreSQL audit credential that can be
+proven read-only.
+
+==================================================
+OBJECTIVE
+==================================================
+
+Prepare the complete Production read-only audit infrastructure.
+
+IMPORTANT:
+
+DO NOT use:
+
+SUPABASE_DATABASE_URL
+SUPABASE_DATABASE_URL_DEV
+application database pool
+DEV database
+Replit managed database
+
+DO NOT modify:
+
+payments
+bookings
+invoices
+journals
+journal lines
+settlements
+bank mutations
+reconciliation
+tax
+Central Finance
+
+Do not run Production transaction audit until the dedicated audit
+connection has been proven read-only.
+
+==================================================
+PHASE 1 — AUDIT CURRENT CONFIGURATION
+==================================================
+
+Inspect repository for:
+
+- database resolver
+- production Secret Manager loader
+- Supabase connection configuration
+- audit scripts
+- environment variable conventions
+- test database configuration
+
+Determine the cleanest existing architecture for:
+
+SUPABASE_PROD_AUDIT_DATABASE_URL
+
+Do NOT create a fallback.
+
+Do NOT reuse SUPABASE_DATABASE_URL.
+
+==================================================
+PHASE 2 — PREPARE AUDIT ROLE SQL
+==================================================
+
+Create:
+
+scripts/sql/production-audit-role.sql
+
+The SQL must create a dedicated PostgreSQL role with:
+
+CONNECT
+USAGE
+SELECT
+
+ONLY.
+
+No:
+
+INSERT
+UPDATE
+DELETE
+TRUNCATE
+REFERENCES
+TRIGGER
+CREATE
+ALTER
+DROP
+ROLE ADMIN
+SUPERUSER
+CREATEDB
+CREATEROLE
+
+The role must be explicitly non-superuser.
+
+Use a placeholder password mechanism.
+
+DO NOT hardcode a real password.
+
+The SQL must be reviewed for Supabase/PostgreSQL compatibility.
+
+==================================================
+PHASE 3 — GRANT SCOPE
+==================================================
+
+The audit role should receive SELECT only on the schemas/tables required
+for the Sport Center transaction audit.
+
+At minimum inspect required tables dynamically from the existing audit
+queries.
+
+Do NOT grant broad ownership.
+
+Prefer explicit table grants.
+
+If future tables need auditing, document them rather than granting
+unrestricted access automatically.
+
+==================================================
+PHASE 4 — DEFAULT PRIVILEGES
+==================================================
+
+Do NOT automatically grant future table privileges unless there is a
+clear existing project convention requiring it.
+
+If DEFAULT PRIVILEGES are proposed:
+
+document exactly why.
+
+Do not execute them automatically.
+
+==================================================
+PHASE 5 — PRODUCTION SECRET
+==================================================
+
+Prepare the required Secret Manager secret name/configuration:
+
+SUPABASE_PROD_AUDIT_DATABASE_URL
+
+The secret must contain ONLY the dedicated read-only connection string.
+
+Do NOT copy:
+
+SUPABASE_DATABASE_URL
+
+Do NOT print the value.
+
+Do NOT commit the value.
+
+Do NOT place the value in source code.
+
+If the secret does not exist:
+
+prepare the exact creation command/configuration.
+
+Do not create it automatically unless an authorized production Secret
+Manager operation is explicitly available.
+
+==================================================
+PHASE 6 — AUDIT RUNNER
+==================================================
+
+Create:
+
+scripts/audit/production-read-only-runner.ts
+
+or reuse the existing official audit runner if one exists.
+
+The runner MUST:
+
+1. Load ONLY:
+
+SUPABASE_PROD_AUDIT_DATABASE_URL
+
+2. Refuse to start if:
+
+NODE_ENV != production-audit
+
+3. Refuse to start if the URL is DEV.
+
+4. Refuse to start if it equals the application production URL.
+
+5. Connect using the dedicated audit role.
+
+6. Immediately execute:
+
+BEGIN;
+SET TRANSACTION READ ONLY;
+SHOW transaction_read_only;
+
+7. Abort unless:
+
+transaction_read_only = on
+
+8. Run ONLY SELECT queries.
+
+9. Never execute:
+
+INSERT
+UPDATE
+DELETE
+ALTER
+CREATE
+DROP
+TRUNCATE
+GRANT
+REVOKE
+CALL
+mutation RPC
+
+10. End every audit session with:
+
+ROLLBACK;
+
+==================================================
+PHASE 7 — SECOND DEFENSE
+==================================================
+
+Before executing audit queries, verify:
+
+SELECT current_user;
+
+Expected:
+
+dedicated audit role
+
+Verify:
+
+SELECT current_database();
+
+Do not expose credentials.
+
+Also verify transaction_read_only = on.
+
+If role is not the dedicated audit role:
+
+STOP.
+
+If transaction_read_only != on:
+
+STOP.
+
+==================================================
+PHASE 8 — SQL STATEMENT GUARD
+==================================================
+
+Add a runtime guard so audit queries are allowed only when they are
+read-only.
+
+The runner must reject query strings containing mutation/DDL statements.
+
+This is defense-in-depth only.
+
+Database privileges remain the primary protection.
+
+==================================================
+PHASE 9 — PRODUCTION AUDIT QUERY SET
+==================================================
+
+Reuse the previously prepared audit queries.
+
+Do not rewrite business rules.
+
+Audit:
+
+- booking lifecycle
+- payment
+- corporate billing
+- group
+- event
+- recurring
+- reschedule
+- check-in
+- refund discovery
+- expense
+- invoice/tax
+- QRIS
+- settlement
+- reconciliation
+- Central Finance
+- duplicate journal
+- debit/credit
+- cross-entity integrity
+
+==================================================
+PHASE 10 — NO PRODUCTION EXECUTION YET
+==================================================
+
+Until the dedicated credential exists and the runner proves:
+
+transaction_read_only = on
+
+DO NOT run transaction audit.
+
+Instead verify:
+
+- TypeScript
+- SQL syntax
+- runner configuration
+- secret name
+- environment isolation
+- mutation guard
+
+using DEV/local fixtures only.
+
+Do NOT substitute DEV results for Production.
+
+==================================================
+PHASE 11 — DOCUMENTATION
+==================================================
+
+Create/update:
+
+PRODUCTION_READ_ONLY_AUDIT_SETUP.md
+
+Include:
+
+1. required PostgreSQL role
+2. required grants
+3. required Secret Manager secret
+4. required runner environment
+5. read-only verification
+6. rollback behavior
+7. audit scope
+8. prohibited operations
+9. production safety rules
+
+Do NOT include any credential value.
+
+==================================================
+PHASE 12 — EXACT EXTERNAL ACTION
+==================================================
+
+If Production PostgreSQL role creation cannot be performed from the
+current authorized environment:
+
+STOP at the external boundary.
+
+Provide the exact SQL that the authorized Supabase/PostgreSQL administrator
+must execute.
+
+Also provide the exact Secret Manager configuration required.
+
+Do not pretend the role exists.
+
+Do not claim READ-ONLY PASS.
+
+==================================================
+FINAL VERDICT
+==================================================
+
+If the dedicated role and secret are not yet provisioned:
+
+PRODUCTION READ-ONLY AUDIT INFRASTRUCTURE = PREPARED
+PRODUCTION READ-ONLY ACCESS = BLOCKED
+PRODUCTION TRANSACTION AUDIT = BLOCKED
+
+If the authorized infrastructure is available and successfully verified:
+
+PRODUCTION READ-ONLY ACCESS = PASS
+
+Only then:
+
+PRODUCTION TRANSACTION AUDIT = READY
+
+Do not execute historical remediation.
+
+Do not mutate Production.
+
+Do not touch Central Finance.
+
+Do not ask for confirmation.
+Continue automatically until the external permission boundary is reached.

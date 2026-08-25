@@ -1,0 +1,36 @@
+ kontrak runtime dan sumber definisi yang sudah diverifikasi terlebih dahulu—tanpa membuat SQL baru—lalu memetakan installer startup serta URL DB DEV/PROD. Setelah itu saya hanya akan menerapkan definisi yang sama, dengan backup definisi PROD sebelum perubahan.
+
+
+
+11 actions
+Audit awal menemukan blocker penting: RUNTIME_DATABASE_POLICY.md tidak ada di workspace, dan tiga definisi kanonik yang diminta juga tidak ditemukan di file SQL/installer repository. Saya belum akan membuat atau menjalankan SQL baru. Saya lanjutkan dengan read-only discovery terhadap konfigurasi startup dan koneksi Secret Manager untuk memastikan apakah definisi DEV dapat diambil langsung dari runtime; jika tidak, promosi harus dihentikan sebelum perubahan DB.
+
+
+
+11 actions
+Koneksi DEV tersedia, tetapi kontrak kebijakan dan definisi kanonik belum ada di repo. Saya akan mengambil definisi live DEV secara read-only sekarang. Jika fungsi/trigger itu memang ada, saya bisa menjadikannya sumber tunggal; jika tidak, saya akan berhenti karena membuat definisi baru melanggar instruksi Anda.
+
+
+
+Ran a Node.js script
+Terblokir sebelum perubahan database.
+
+Temuan read-only:
+
+RUNTIME_DATABASE_POLICY.md tidak ada di workspace maupun file yang ter-track.
+Definisi live DEV berhasil ditemukan:
+sport_center.guard_posted_accounting_journal()
+sport_center.sync_payment_accounting_journal()
+sport_center.trg_sync_payment_accounting_journal
+Installer startup saat ini belum memasang ketiga definisi tersebut.
+Belum ada file yang diubah.
+Belum ada SQL yang dijalankan ke DEV maupun PROD.
+Belum ada business row yang tersentuh.
+Karena instruksi Anda mewajibkan penggunaan RUNTIME_DATABASE_POLICY.md dan melarang mengarang kontrak DEV/PROD, saya tidak dapat membuat migration atau menerapkan perubahan tanpa file policy tersebut.
+
+Silakan tambahkan/upload RUNTIME_DATABASE_POLICY.md ke workspace, lalu saya lanjutkan dari definisi live DEV yang sudah berhasil dicapture.
+
+
+
+Worked for 1 minute
+abaikan RUNTIME_DATABASE_POLICY.md

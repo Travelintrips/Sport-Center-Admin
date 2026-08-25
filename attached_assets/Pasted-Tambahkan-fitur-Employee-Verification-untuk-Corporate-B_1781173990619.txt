@@ -1,0 +1,66 @@
+Tambahkan fitur Employee Verification untuk Corporate Billing Sport Center.
+
+Tujuan:
+Customer hanya bisa memakai tagihan perusahaan jika sudah diverifikasi sebagai karyawan/member perusahaan.
+
+Database:
+1. Tambahkan table sport_company_verifications:
+   - id
+   - company_id
+   - customer_id
+   - employee_id
+   - office_email
+   - id_card_url
+   - status: pending, approved, rejected, revoked
+   - requested_at
+   - approved_at
+   - approved_by
+   - rejection_reason
+
+2. Tambahkan field ke sport_company_users:
+   - verification_status: pending, approved, rejected, revoked
+   - verified_at
+   - verified_by
+   - corporate_billing_enabled boolean
+
+Alur:
+1. Customer daftar akun pribadi.
+2. Customer pilih "Hubungkan ke Perusahaan".
+3. Customer isi:
+   - perusahaan
+   - nomor ID karyawan
+   - email kantor opsional
+   - upload ID card karyawan
+4. Setelah submit, status pending.
+5. Kirim WA ke admin/PIC perusahaan untuk approve/reject.
+6. Admin/PIC bisa approve/reject lewat link aman dari WhatsApp.
+7. Jika approved:
+   - buat/aktifkan record sport_company_users
+   - verification_status = approved
+   - corporate_billing_enabled = true
+8. Jika rejected:
+   - corporate_billing_enabled = false
+   - customer tidak bisa pilih Corporate Billing.
+9. Saat booking:
+   - hanya tampilkan opsi "Tagihkan ke Perusahaan" jika verification_status approved dan corporate_billing_enabled true.
+10. Tambahkan audit log:
+   - COMPANY_VERIFICATION_REQUESTED
+   - COMPANY_VERIFICATION_APPROVED
+   - COMPANY_VERIFICATION_REJECTED
+   - COMPANY_ACCESS_REVOKED
+
+Security:
+1. Link approve/reject wajib pakai token random, expiry maksimal 24 jam.
+2. Nomor WA customer harus sama dengan data customer.
+3. Employee ID tidak boleh duplicate dalam perusahaan yang sama.
+4. Admin bisa revoke akses kapan saja.
+5. Jika revoked, customer tidak bisa lagi booking dengan tagihan perusahaan.
+
+Admin Portal:
+1. Tambahkan halaman Company Verification Requests.
+2. Di detail customer tampilkan:
+   - perusahaan terhubung
+   - status verifikasi
+   - ID karyawan
+   - corporate billing enabled/disabled
+3. Di halaman perusahaan tampilkan daftar customer yang sudah approved.

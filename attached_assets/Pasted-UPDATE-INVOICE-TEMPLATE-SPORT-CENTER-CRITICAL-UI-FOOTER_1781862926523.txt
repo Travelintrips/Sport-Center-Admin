@@ -1,0 +1,89 @@
+UPDATE INVOICE TEMPLATE SPORT CENTER (CRITICAL UI + FOOTER CHANGE)
+
+TUJUAN:
+Menyesuaikan branding, alamat, dan bagian tanda tangan invoice agar sesuai format resmi terbaru.
+
+---------------------------------------
+1. UPDATE HEADER (KOP SURAT)
+
+Ganti seluruh header kiri atas menjadi:
+
+SPORT CENTER
+BANDARA SOEKARNO – HATTA
+
+Jl. C3 No. 831 RT 001 RW 010
+(Belakang Masjid Nurul Barkah)
+Pajang, Benda – Kota Tangerang Banten 15126
+
+RULE:
+- Pastikan format multi-line
+- Bold untuk "SPORT CENTER"
+- "BANDARA SOEKARNO – HATTA" uppercase
+- Sisanya normal font size kecil
+
+---------------------------------------
+2. UPDATE INFORMASI PEMBAYARAN
+
+Ganti section "INFORMASI PEMBAYARAN" menjadi:
+
+Pembayaran: PT CAHAYA SEJATI TEKNOLOGI
+Bank Mandiri
+Account No. 1640006707220
+
+RULE:
+- Hilangkan field lama (BCA / rekening lama / atas nama lama)
+- Format harus clean 3 baris saja
+- Tidak ada label tambahan selain di atas
+
+---------------------------------------
+3. UPDATE FOOTER / TANDA TANGAN
+
+Pada bagian kanan bawah (Hormat Kami):
+
+Tambahkan spacing kosong minimal 120–160px height sebelum tanda tangan.
+
+Layout menjadi:
+
+(blank space untuk materai / stempel)
+
+Hormat kami,
+
+SPORT CENTER
+
+RULE:
+- "SPORT CENTER" sebagai nama resmi tanda tangan
+- Center aligned atau right aligned sesuai template existing
+- Tambahkan ruang kosong jelas untuk:
+  - materai
+  - tanda tangan manual
+  - stempel perusahaan
+
+---------------------------------------
+4. FORMATTING RULE
+
+- Jangan ubah struktur invoice lain (DPP, PPN, TOTAL tetap)
+- Jangan ubah logic pajak
+- Hanya ubah UI/branding/footer
+
+---------------------------------------
+5. VISUAL CONSISTENCY
+
+Pastikan:
+- header tidak bertabrakan dengan logo INVOICE di kanan
+- spacing atas rapi
+- font alamat lebih kecil dari nama perusahaan
+- invoice tetap A4 printable layout
+
+---------------------------------------
+6. IMPORTANT
+
+DO NOT:
+- ubah calculation DPP / PPN
+- ubah table booking
+- ubah API structure
+
+ONLY:
+- branding
+- address
+- payment info
+- signature area spacing

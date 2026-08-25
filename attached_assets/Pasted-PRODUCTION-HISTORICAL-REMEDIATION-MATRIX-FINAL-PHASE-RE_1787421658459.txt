@@ -1,0 +1,796 @@
+PRODUCTION HISTORICAL REMEDIATION MATRIX
+FINAL PHASE — REVIEW → PROVE → TARGETED REPAIR → VERIFY
+
+DO NOT RE-RUN THE BROAD AUDIT FROM SCRATCH.
+
+The Production read-only audit has already been completed and verified.
+
+Current verified state:
+
+PRODUCTION DATABASE              = VERIFIED
+DEDICATED AUDIT ROLE             = sport_center_production_auditor
+READ-ONLY AUDIT                  = PASS
+transaction_read_only            = on
+MUTATION QUERIES                 = 0
+FINAL ROLLBACK                   = PASS
+ACCOUNTING BALANCE               = PASS
+CENTRAL FINANCE                  = UNCHANGED
+PRODUCTION DATA MUTATION         = NONE
+
+Current anomalies:
+
+1. 376 completed bookings without checked_in_at
+2. 8 completed bookings without completed_at
+3. Booking 380 and 511 future-completed
+4. 360 terminal-history inconsistencies
+5. 16 duplicate payment groups by booking_id + payment_type
+6. 6 duplicate provider-reference groups
+7. 27 payment accounting outbox rows = processing
+8. 12 payment accounting outbox rows = failed
+9. 3 duplicate tax-reference groups
+10. 68 reconciliation candidates
+11. 309 accounting journals without journal lines
+
+Current financial verification:
+
+Debit = Rp18.369.820
+Credit = Rp18.369.820
+
+No orphan journal lines.
+No orphan payments.
+No duplicate invoice numbers.
+No orphan invoice items.
+No invoice total mismatch.
+PPN_OUT_11 = 11%.
+No approved reconciliation matches.
+
+============================================================
+MISSION
+============================================================
+
+DO NOT merely produce another generic audit report.
+
+Build a complete RECORD-LEVEL REMEDIATION MATRIX for every anomaly.
+
+For each anomaly:
+
+1. Identify the exact record.
+2. Identify the canonical source of truth.
+3. Determine the intended target state.
+4. Determine whether the target state is provable.
+5. Determine financial impact.
+6. Determine whether an existing canonical application mechanism exists.
+7. If safe and deterministic, execute the repair.
+8. If not safe, classify the exact reason.
+9. Verify every repair.
+10. Produce one final remediation matrix.
+
+The objective is:
+
+REVIEW
+→ PROVE
+→ TARGETED REPAIR
+→ VERIFY
+
+NOT:
+
+AUDIT
+→ AUDIT
+→ AUDIT
+
+============================================================
+ABSOLUTE SAFETY RULE
+============================================================
+
+A production record may only be changed if ALL are true:
+
+- canonical source is proven
+- target state is exact
+- historical meaning is preserved
+- financial meaning is unchanged
+- no payment amount is changed
+- no invoice amount is changed
+- no tax meaning is changed
+- no accounting meaning is changed
+- no settlement meaning is changed
+- operation is idempotent
+- operation is atomic
+- existing application lifecycle rules are preserved
+- no duplicate financial transaction can be created
+- no Central Finance side effect occurs
+
+If any condition fails:
+
+DO NOT MODIFY.
+
+Instead classify:
+
+REVIEW_REQUIRED
+
+with an exact reason.
+
+Do not leave generic UNKNOWN when a more precise reason can be established.
+
+============================================================
+WRITE ACCESS
+============================================================
+
+The audit role is READ ONLY.
+
+Do not attempt to write using:
+
+sport_center_production_auditor
+
+If a safe repair is proven, use ONLY the existing authorized Production
+application write path/canonical service already present in the codebase.
+
+Do not create a new production credential.
+
+Do not use DEV.
+
+Do not use Replit database.
+
+Do not use DATABASE_URL as fallback.
+
+Do not bypass the application's canonical lifecycle/accounting services.
+
+If the canonical write path cannot be safely established:
+
+do not mutate that record.
+
+============================================================
+PHASE 1 — CREATE REMEDIATION MATRIX
+============================================================
+
+Create:
+
+PRODUCTION_REMEDIATION_MATRIX.md
+
+The matrix must contain:
+
+| Category | Record/Group ID | Current State | Evidence | Canonical Source | Target State | Financial Impact | Safe to Fix | Action | Result |
+
+Allowed Action values:
+
+FIX
+VERIFY_LEGACY
+VERIFY_VALID
+REVIEW_REQUIRED
+BLOCKED
+
+Do not collapse multiple records into one vague entry.
+
+Every affected record must be traceable.
+
+============================================================
+PHASE 2 — 376 CHECK-IN ANOMALIES
+============================================================
+
+For each completed booking without checked_in_at:
+
+Search authoritative evidence:
+
+- QR check-in
+- check-in records
+- booking history
+- lifecycle events
+- audit/activity events
+- existing canonical check-in source
+
+Determine:
+
+A. Exact check-in timestamp exists
+B. Check-in occurred but timestamp cannot be proven
+C. No check-in evidence
+D. Booking was completed through a legacy/manual path
+
+If A:
+
+Target:
+
+checked_in_at = exact authoritative timestamp
+
+This may be SAFE TO FIX only if the field is a projection of the authoritative
+source and no historical event needs to be fabricated.
+
+If B/C:
+
+REVIEW_REQUIRED.
+
+Never derive check-in from:
+
+payment timestamp
+invoice timestamp
+booking date
+completed_at
+updated_at
+NOW()
+
+============================================================
+PHASE 3 — 8 MISSING completed_at
+============================================================
+
+For each:
+
+Search authoritative completion events.
+
+If exact timestamp exists:
+
+restore completed_at.
+
+If exact timestamp does not exist:
+
+REVIEW_REQUIRED.
+
+Never use:
+
+NOW()
+updated_at
+payment timestamp
+invoice timestamp
+session end
+
+unless that exact value is explicitly the canonical completion event.
+
+============================================================
+PHASE 4 — FUTURE COMPLETED 380 / 511
+============================================================
+
+For bookings 380 and 511:
+
+Trace:
+
+booking
+history
+check-in
+completion event
+reschedule
+payment
+group
+invoice
+
+Determine the exact cause.
+
+If an authoritative event proves the correct state:
+
+use the existing canonical lifecycle mechanism.
+
+If not:
+
+REVIEW_REQUIRED.
+
+Never simply change status.
+
+============================================================
+PHASE 5 — 360 TERMINAL HISTORY
+============================================================
+
+For every inconsistent terminal booking:
+
+Compare:
+
+sport_bookings.status
+booking_history
+check-in
+completion
+payment
+invoice
+reschedule
+
+Classify:
+
+PROJECTION_MISMATCH
+LEGACY_HISTORY
+DUPLICATE_HISTORY
+INVALID_TRANSITION
+MISSING_HISTORY
+FINANCIAL_STATE_CONFLICT
+VALID_TERMINAL_STATE
+UNKNOWN
+
+Only repair projection mismatch if the canonical event already exists.
+
+Never fabricate historical events.
+
+============================================================
+PHASE 6 — 16 PAYMENT DUPLICATE GROUPS
+============================================================
+
+For every duplicate group inspect every payment row.
+
+Required fields:
+
+payment_id
+booking_id
+payment_type
+amount
+status
+provider
+provider_reference
+transaction_reference
+created_at
+confirmed_at
+idempotency_key
+correlation_id
+payment history
+invoice linkage
+accounting linkage
+outbox linkage
+group linkage
+
+Classify:
+
+TRUE_TECHNICAL_DUPLICATE
+LEGITIMATE_MULTIPLE_PAYMENT
+DP_PLUS_FINAL
+GROUP_PAYMENT
+CORPORATE_PAYMENT
+RETRY_ATTEMPT
+LEGACY
+FINANCIAL_CONFLICT
+UNKNOWN
+
+Only fix if exact canonical duplicate identity is proven.
+
+If the application has an existing idempotent duplicate-resolution mechanism,
+use it.
+
+Never:
+
+- delete blindly
+- merge blindly
+- change amount
+- change payment type
+- change provider reference
+- create replacement payment
+
+If accounting already exists for both rows:
+
+REVIEW_REQUIRED unless canonical reversal/correction mechanism is proven.
+
+============================================================
+PHASE 7 — 6 PROVIDER REFERENCES
+============================================================
+
+For each duplicate provider reference group:
+
+Compare:
+
+provider
+provider_reference
+payment_id
+booking_id
+amount
+status
+timestamps
+transaction reference
+
+Classify:
+
+TRUE_DUPLICATE
+PROVIDER_RETRY
+LEGITIMATE_REUSE
+GROUP_PAYMENT
+CORPORATE_PAYMENT
+UNKNOWN
+
+Do not rewrite provider references unless the canonical payment provider
+mechanism explicitly supports it and exact identity is proven.
+
+============================================================
+PHASE 8 — 27 PROCESSING OUTBOX
+============================================================
+
+For every processing row inspect:
+
+outbox_id
+payment_id
+event_type
+correlation_id
+idempotency_key
+created_at
+updated_at
+retry_count
+last_error
+journal linkage
+journal lines
+payment state
+
+Classify:
+
+ALREADY_ACCOUNTED
+SAFE_RETRY
+STALE_PROCESSING
+DUPLICATE_RISK
+INVALID
+UNKNOWN
+
+If ALREADY_ACCOUNTED:
+
+use the existing canonical outbox lifecycle mechanism to reconcile state,
+ONLY if idempotent.
+
+If SAFE_RETRY:
+
+invoke the existing canonical worker/service.
+
+Never manually:
+
+UPDATE status = posted
+
+Never manually insert accounting.
+
+============================================================
+PHASE 9 — 12 FAILED OUTBOX
+============================================================
+
+Inspect exact error for every row.
+
+Classify:
+
+TRANSIENT
+ALREADY_ACCOUNTED
+DUPLICATE
+INVALID_DATA
+SCHEMA_ERROR
+PERMANENT
+UNKNOWN
+
+Only retry TRANSIENT failures when the existing worker is idempotent.
+
+Do not retry INVALID_DATA, SCHEMA_ERROR, DUPLICATE, or ALREADY_ACCOUNTED
+unless the canonical recovery mechanism explicitly supports it.
+
+============================================================
+PHASE 10 — 3 TAX DUPLICATE GROUPS
+============================================================
+
+Compare:
+
+tax_transaction_id
+reference
+booking
+payment
+invoice
+tax code
+rate
+DPP
+PPN
+created_at
+
+Classify:
+
+TRUE_DUPLICATE
+LEGITIMATE_MULTI_DOCUMENT
+LEGACY
+FINANCIAL_CONFLICT
+UNKNOWN
+
+Never delete tax transactions merely because references match.
+
+Only fix if canonical duplicate identity is proven and the existing tax
+correction mechanism is safe.
+
+============================================================
+PHASE 11 — 68 RECONCILIATION CANDIDATES
+============================================================
+
+Inspect:
+
+sport_center.bank_reconciliation_matches
+
+and compare read-only against:
+
+public.bank_reconciliation_matches
+
+Determine the actual canonical source from:
+
+- active application code
+- current runtime queries
+- schema
+- foreign keys
+- existing reconciliation services
+
+For every candidate:
+
+candidate_id
+candidate_type
+candidate_id
+candidate_source
+bank_mutation_id
+payment_id
+settlement_id
+amount
+date
+provider_reference
+status
+
+Classify:
+
+VALID_CANONICAL_CANDIDATE
+DUPLICATE
+ORPHAN
+SOURCE_CONFLICT
+AMOUNT_MISMATCH
+REFERENCE_MISMATCH
+STALE
+UNKNOWN
+
+If canonical source is unambiguous and an existing approval/linking mechanism
+exists:
+
+execute only that canonical mechanism.
+
+Otherwise:
+
+RECONCILIATION = BLOCKED
+
+Do not:
+
+- approve all candidates
+- copy public rows
+- change schema
+- add candidate_source blindly
+- swap canonical source
+- change bank mutation status manually
+
+============================================================
+PHASE 12 — 309 JOURNALS WITHOUT LINES
+============================================================
+
+For every journal without lines inspect:
+
+journal_id
+status
+reference
+source
+source_type
+payment_id
+booking_id
+amount
+debit
+credit
+created_at
+posted_at
+reversal
+void
+outbox
+payment
+tax
+settlement
+
+Classify:
+
+VALID_HEADER_ONLY
+NON_POSTED
+VOIDED
+REVERSAL
+LEGACY
+INCOMPLETE_ACCOUNTING
+ORPHAN_JOURNAL
+UNKNOWN
+
+IMPORTANT:
+
+Do not assume journal without lines = broken.
+
+If valid header-only/non-posted/voided/legacy:
+
+VERIFY_LEGACY or VERIFY_VALID.
+
+If incomplete:
+
+Only repair if the exact journal lines can be reconstructed from an
+existing canonical accounting source/service.
+
+Do NOT manually invent journal lines.
+
+Do NOT use:
+
+journal amount / 2
+journal amount as debit
+journal amount as credit
+
+Do not create accounting merely to make the count look correct.
+
+============================================================
+PHASE 13 — FINANCIAL CROSS-CHECK
+============================================================
+
+For every candidate FIX:
+
+trace:
+
+BOOKING
+→ PAYMENT
+→ INVOICE
+→ TAX
+→ OUTBOX
+→ ACCOUNTING
+→ BANK
+→ RECONCILIATION
+→ SETTLEMENT
+
+Verify no financial duplication or omission is introduced.
+
+Before mutation:
+
+capture affected financial totals.
+
+After mutation:
+
+recalculate affected totals.
+
+Expected:
+
+No unexplained financial delta.
+
+============================================================
+PHASE 14 — EXECUTE SAFE FIXES
+============================================================
+
+Do not batch unrelated categories in one transaction.
+
+For each safe record/group:
+
+BEGIN;
+
+Re-read exact record.
+
+Verify evidence again.
+
+Execute minimum canonical correction.
+
+Re-read affected records.
+
+Run integrity checks.
+
+If PASS:
+
+COMMIT.
+
+If FAIL:
+
+ROLLBACK.
+
+Record:
+
+record_id
+old_state
+new_state
+source
+reason
+financial impact
+transaction result
+
+If no safe fixes exist:
+
+SAFE_FIXES = 0
+
+Do not manufacture fixes.
+
+============================================================
+PHASE 15 — FINAL READ-ONLY VERIFY
+============================================================
+
+After all safe fixes, use the dedicated read-only audit role.
+
+Verify:
+
+transaction_read_only = on
+
+Re-run targeted checks for EVERY category.
+
+Verify:
+
+- bookings
+- booking history
+- payments
+- invoices
+- tax
+- outbox
+- reconciliation
+- accounting
+- journal lines
+- Central Finance
+
+Capture before/after counts.
+
+Every count change must correspond to an explicitly documented safe fix.
+
+============================================================
+PHASE 16 — REGRESSION
+============================================================
+
+Run:
+
+pnpm --filter @workspace/scripts run typecheck
+pnpm --filter @workspace/api-server run typecheck
+pnpm --filter @workspace/api-server run test
+pnpm --filter @workspace/api-server run build
+git diff --check
+
+Do not weaken tests.
+
+============================================================
+PHASE 17 — FINAL REPORT
+============================================================
+
+Produce:
+
+PRODUCTION_REMEDIATION_MATRIX.md
+
+and update:
+
+PRODUCTION_TRANSACTION_INTEGRITY_AUDIT_REPORT.md
+
+Final report must contain:
+
+1. EXECUTIVE VERDICT
+
+2. TOTAL RECORDS REVIEWED
+
+3. SAFE FIXES EXECUTED
+
+4. VERIFIED VALID / LEGACY RECORDS
+
+5. REVIEW REQUIRED RECORDS
+
+6. BLOCKED RECORDS
+
+7. PAYMENT REMEDIATION
+
+8. BOOKING REMEDIATION
+
+9. OUTBOX REMEDIATION
+
+10. RECONCILIATION REMEDIATION
+
+11. TAX REMEDIATION
+
+12. ACCOUNTING REMEDIATION
+
+13. CENTRAL FINANCE IMPACT
+
+14. BEFORE / AFTER COUNTS
+
+15. BEFORE / AFTER FINANCIAL TOTALS
+
+16. TEST RESULTS
+
+17. PRODUCTION MUTATION PROOF
+
+18. FINAL VERDICT
+
+============================================================
+FINAL VERDICT RULE
+============================================================
+
+The final status must NOT simply say "safe fixes = none" without explaining
+why.
+
+Every unresolved record must have a concrete classification:
+
+REVIEW_REQUIRED because:
+<exact reason>
+
+or:
+
+BLOCKED because:
+<exact technical/canonical blocker>
+
+Every fixed record must have:
+
+FIXED because:
+<exact evidence>
+
+The goal is to maximize legitimate safe remediation while NEVER guessing
+historical or financial meaning.
+
+DO NOT ASK FOR CONFIRMATION.
+
+CONTINUE AUTOMATICALLY THROUGH ALL SAFE CASES.
+
+If one category is blocked, continue with every other category.
+
+Do not stop the entire phase because one category is blocked.

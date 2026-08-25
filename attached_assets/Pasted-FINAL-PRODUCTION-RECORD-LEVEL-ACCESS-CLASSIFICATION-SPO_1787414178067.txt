@@ -1,0 +1,407 @@
+FINAL PRODUCTION RECORD-LEVEL ACCESS + CLASSIFICATION
+SPORT CENTER — CONTINUE WITHOUT CONFIRMATION
+
+CURRENT STATUS:
+
+Production runtime = PASS
+Production DB resolver = PASS
+Read-only audit mechanism = PASS
+Code remediation = PASS
+Tests = 17 suites / 109 PASS
+Typecheck = PASS
+Build = PASS
+git diff --check = PASS
+API/Web/Mockup = RUNNING
+Production mutation = NONE
+Central Finance = UNCHANGED
+
+Historical record-level classification is currently:
+
+PAYMENT DUPLICATES = UNKNOWN/BLOCKED
+MISSING PAYMENT = UNKNOWN/BLOCKED
+OUTBOX = UNKNOWN/BLOCKED
+RECONCILIATION = UNKNOWN/BLOCKED
+RECURRING HISTORY = UNKNOWN/BLOCKED
+CROSS-ENTITY = UNKNOWN/BLOCKED
+
+DO NOT repeat code remediation.
+
+DO NOT use DEV as PROD.
+
+DO NOT mutate Production.
+
+==================================================
+PHASE 1 — VERIFY ACTUAL READ-ONLY ACCESS
+==================================================
+
+Use the official Production database resolver.
+
+Establish a dedicated PostgreSQL audit connection.
+
+Immediately enforce:
+
+BEGIN;
+SET TRANSACTION READ ONLY;
+
+Then verify:
+
+SHOW transaction_read_only;
+
+Expected:
+
+on
+
+Also capture safe metadata only:
+
+current_database()
+current_user
+server address if safe
+
+Never expose credentials.
+
+If read_only != on:
+
+STOP.
+
+==================================================
+PHASE 2 — DO NOT FALL BACK
+==================================================
+
+If the dedicated read-only connection cannot be established:
+
+DO NOT use the application write-capable pool.
+
+DO NOT use DEV.
+
+DO NOT infer Production rows from previous reports.
+
+Instead report the exact blocker:
+
+PRODUCTION_RECORD_LEVEL_ACCESS = BLOCKED
+
+and provide the exact configuration required to establish a safe read-only
+connection.
+
+Continue only with code-level verification that does not require Production
+data.
+
+==================================================
+PHASE 3 — IF READ-ONLY PASS, CLASSIFY PAYMENT
+==================================================
+
+Read all 16 duplicate groups / 32 rows.
+
+For each:
+
+payment_id
+booking_id
+payment_type
+amount
+status
+provider_reference
+external_transaction_id
+correlation_id
+idempotency_key
+created_at
+updated_at
+accounting linkage
+settlement linkage
+
+Classify:
+
+LEGITIMATE_DP_FINAL
+LEGITIMATE_MULTIPLE_ATTEMPT
+EXACT_TECHNICAL_DUPLICATE
+PROVIDER_DUPLICATE
+RETRY_DUPLICATE
+UNKNOWN
+
+Do not modify.
+
+==================================================
+PHASE 4 — CLASSIFY 70 MISSING PAYMENT BOOKINGS
+==================================================
+
+For each booking:
+
+booking status
+payer type
+corporate/company
+billing status
+invoice
+invoice item
+payment
+payment status
+
+Classify:
+
+CORPORATE_BILLING
+INVOICE_BILLED
+PAYMENT_PENDING
+PAYMENT_EXEMPT
+PAYMENT_MISSING
+HISTORICAL_LEGACY
+UNKNOWN
+
+Do not create payment rows.
+
+==================================================
+PHASE 5 — CLASSIFY OUTBOX
+==================================================
+
+Inspect all:
+
+27 processing
+12 failed
+
+Cross-reference:
+
+payment
+accounting journal
+journal lines
+public accounting entry
+correlation ID
+
+Classify:
+
+ALREADY_POSTED
+SAFE_RETRY
+STALE_PROCESSING
+PERMANENT_FAILURE
+MISSING_PAYMENT
+UNKNOWN
+
+Do not retry or modify.
+
+==================================================
+PHASE 6 — CLASSIFY RECONCILIATION
+==================================================
+
+Inspect all 68 candidate rows.
+
+Cross-reference:
+
+bank mutation
+payment
+settlement
+candidate identity
+candidate type
+candidate ID
+source
+amount
+date
+
+Determine:
+
+CANONICAL
+DUPLICATE
+AMBIGUOUS
+NO_MATCH
+
+Also prove which table is canonical:
+
+sport_center.bank_reconciliation_matches
+or
+public.bank_reconciliation_matches
+
+Do not migrate schema.
+
+Do not approve candidates.
+
+==================================================
+PHASE 7 — RECURRING HISTORY
+==================================================
+
+Read all recurring bookings and verify:
+
+date
+operating hours
+duration
+closing time
+conflict
+blocked schedule
+corporate approval
+status
+check-in
+completion
+
+Classify:
+
+VALID
+PRE_REMEDIATION_LEGACY
+CURRENT_RULE_VIOLATION
+UNKNOWN
+
+Do not modify.
+
+==================================================
+PHASE 8 — BOOKING 380 / 511
+==================================================
+
+Read-only deep investigation:
+
+booking
+history
+check-in
+completion
+scheduler
+admin action
+WhatsApp
+invoice
+payment
+reschedule
+
+Determine exact completion source.
+
+Do not change status.
+
+==================================================
+PHASE 9 — 376 COMPLETED WITHOUT CHECK-IN
+==================================================
+
+For every row determine whether authoritative evidence exists:
+
+QR check-in
+check-in history
+lifecycle history
+scheduler event
+admin completion
+WhatsApp completion
+
+Classify:
+
+VALID_WITH_MISSING_EVIDENCE
+LEGACY_BYPASS
+DATA_INTEGRITY_ANOMALY
+UNKNOWN
+
+Never fabricate check-in timestamps.
+
+==================================================
+PHASE 10 — CROSS ENTITY
+==================================================
+
+Verify:
+
+booking
+→ payment
+→ invoice
+→ settlement
+→ reconciliation
+→ accounting
+
+Classify each:
+
+CONSISTENT
+LEGITIMATE_NOT_APPLICABLE
+MISSING_EXPECTED_RELATION
+DUPLICATE
+MISMATCH
+UNKNOWN
+
+Pay particular attention to:
+
+Personal
+Corporate
+Event
+Recurring
+Group
+
+==================================================
+PHASE 11 — CENTRAL FINANCE
+==================================================
+
+Read-only only.
+
+Verify:
+
+journal debit
+journal credit
+payment_id uniqueness
+correlation ID uniqueness
+duplicate journal
+outbox → journal linkage
+
+Expected:
+
+debit = credit
+
+Do not post.
+Do not repair.
+Do not backfill.
+
+==================================================
+PHASE 12 — GENERATE FINAL REPORT
+==================================================
+
+Create/update:
+
+PRODUCTION_HISTORICAL_CLASSIFICATION_REPORT.md
+
+The report must contain record-level classification for:
+
+- 403 completed anomalies
+- payment duplicate groups
+- 70 missing-payment bookings
+- 39 outbox anomalies
+- 68 reconciliation candidates
+- recurring history
+- cross-entity anomalies
+- booking 380
+- booking 511
+
+For every record/group:
+
+ID
+CLASSIFICATION
+EVIDENCE
+ROOT CAUSE
+FINANCIAL IMPACT
+SAFE FIX?
+RECOMMENDED ACTION
+
+==================================================
+PHASE 13 — REMEDIATION CANDIDATES
+==================================================
+
+Separate results into:
+
+SAFE_DETERMINISTIC_FIX
+OWNER_REVIEW
+LEGACY_DATA
+NO_ACTION_REQUIRED
+BLOCKED
+
+Do NOT execute historical fixes in this phase.
+
+The next remediation can execute only:
+
+SAFE_DETERMINISTIC_FIX
+
+after a separate controlled run.
+
+==================================================
+FINAL VERDICT
+==================================================
+
+If read-only connection succeeds:
+
+PRODUCTION RECORD-LEVEL ACCESS = PASS
+HISTORICAL CLASSIFICATION = COMPLETE
+
+If it fails:
+
+PRODUCTION RECORD-LEVEL ACCESS = BLOCKED
+HISTORICAL CLASSIFICATION = BLOCKED
+
+In either case:
+
+PRODUCTION DATA MUTATION = NONE
+CENTRAL FINANCE = SAFE
+CODE REMEDIATION = PASS
+TESTS = 109 PASS
+TYPECHECK = PASS
+BUILD = PASS
+
+Do not ask for confirmation.
+Continue automatically.

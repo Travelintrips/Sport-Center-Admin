@@ -1,0 +1,18 @@
+User-agent: *
+Allow: /
+
+# Block private / admin areas
+Disallow: /admin/
+Disallow: /wa/
+Disallow: /bukti/
+Disallow: /ulasan/
+Disallow: /kwitansi/
+Disallow: /my-bookings
+Disallow: /my-profile
+Disallow: /verify-id
+Disallow: /cart
+Disallow: /booking/
+Disallow: /login
+Disallow: /register
+
+Sitemap: https://sc.travelintrips.co.id/sitemap.xml

@@ -1,0 +1,503 @@
+PRODUCTION READ-ONLY TRANSACTION INTEGRITY AUDIT — FINAL
+
+STATUS:
+- DEV FULLY VERIFIED
+- Security hardening FIXED
+- Secret/config remediation FIXED
+- Jangan mengulang audit DEV
+- Jangan mengubah production sebelum anomaly terbukti dan remediation aman
+
+TARGET:
+Audit database PRODUCTION secara read-only dan memastikan Sport Center tidak bertabrakan dengan Central Finance.
+
+==================================================
+1. VERIFY PRODUCTION CONNECTION
+==================================================
+
+Gunakan production Secret Manager / runtime configuration yang sudah diperbaiki.
+
+Pastikan koneksi benar-benar PRODUCTION.
+
+Verifikasi:
+- GCP project identity
+- database identity
+- environment identity
+- Supabase project identity bila tersedia
+
+Jangan tampilkan credential.
+
+Jika production identity tidak dapat dibuktikan:
+→ BLOCKED
+→ jangan query DEV
+→ jangan mengarang hasil.
+
+==================================================
+2. READ-ONLY GUARD
+==================================================
+
+Production audit hanya boleh menggunakan:
+
+SELECT
+read-only metadata
+
+DILARANG:
+INSERT
+UPDATE
+DELETE
+ALTER
+CREATE
+DROP
+TRUNCATE
+migration
+repair
+
+Jika memungkinkan gunakan read-only DB transaction/session.
+
+==================================================
+3. BOOKING LIFECYCLE
+==================================================
+
+Audit seluruh production booking.
+
+Cari:
+
+- completed tanpa check-in
+- completed sebelum endTime
+- future booking completed
+- cancelled booking completed
+- pending reschedule tetapi completed
+- old schedule completed setelah reschedule
+- check-in pada cancelled booking
+- duplicate completion
+- duplicate check-in
+
+Contract:
+
+CONFIRMED
++
+CHECK-IN
++
+END TIME PASSED
+=
+COMPLETED
+
+Payment paid bukan completion.
+
+Corporate invoice paid bukan completion.
+
+==================================================
+4. PAYMENT INTEGRITY
+==================================================
+
+Audit:
+
+booking
+→ payment
+→ payment identity
+→ accounting outbox
+→ Central Finance
+
+Cari:
+
+- payment tanpa booking
+- duplicate payment
+- duplicate payment identity
+- amount mismatch
+- DP/final payment collision
+- paid payment tanpa expected accounting posting
+- accounting posting tanpa source payment
+
+Expected:
+
+ONE SOURCE PAYMENT
+→ ONE CANONICAL ACCOUNTING POSTING
+
+==================================================
+5. CORPORATE BILLING
+==================================================
+
+Audit:
+
+company
+→ authorized customer
+→ corporate booking
+→ monthly invoice
+→ payment
+
+Cari:
+
+- unauthorized company linkage
+- corporate booking tanpa company
+- duplicate invoice
+- booking masuk invoice lebih dari sekali
+- invoice paid tanpa payment identity
+- invoice paid menyebabkan future booking completed
+
+==================================================
+6. GROUP
+==================================================
+
+Audit:
+
+- group membership
+- group merge
+- group payment
+- group invoice
+- individual lifecycle
+
+Cari:
+
+- duplicate booking ID
+- orphan membership
+- booking hilang dari group
+- group payment menyebabkan premature completion
+- duplicate group payment
+
+Setiap booking tetap memiliki lifecycle sendiri.
+
+==================================================
+7. EVENT
+==================================================
+
+Audit production event booking.
+
+Pastikan harga mengikuti:
+
+NORMAL PRICE
+→ DISCOUNT 21.4%
+→ FINAL PRICE
+
+Contoh:
+
+Rp100.000
+→ Rp21.400 discount
+→ Rp78.600
+
+Cari historical booking yang menggunakan implementation lama `3/14`.
+
+JANGAN mengubah historical transaction otomatis.
+
+Hitung financial impact jika ditemukan.
+
+Klasifikasikan:
+- legitimate historical
+- old implementation
+- actual financial anomaly
+
+==================================================
+8. RECURRING
+==================================================
+
+Audit recurring production booking:
+
+- invalid date
+- duplicate date
+- past date
+- operating hours violation
+- blocked schedule conflict
+- booking conflict
+- corporate approval bypass
+- completion propagation antar sesi
+
+Pastikan setiap sesi memiliki lifecycle individual.
+
+==================================================
+9. RESCHEDULE
+==================================================
+
+Audit:
+
+- original schedule
+- replacement schedule
+- approval
+- history
+- conflict
+
+Cari:
+
+- old slot masih active
+- new slot conflict
+- missing history
+- pending reschedule completed
+- old booking checked-in setelah replacement
+- duplicate reschedule
+
+==================================================
+10. CENTRAL FINANCE
+==================================================
+
+CRITICAL:
+
+Audit:
+
+Sport Center transaction
+→ Central Finance
+
+Cari:
+
+- duplicate journal
+- missing journal
+- orphan journal
+- duplicate payment_id
+- duplicate correlation ID
+- amount mismatch
+- company mismatch
+- account mismatch
+- debit/credit imbalance
+
+Expected:
+
+ONE SOURCE TRANSACTION
+→ ONE CANONICAL POSTING
+
+DO NOT create a second Sport Center ledger.
+
+DO NOT manually balance Central Finance.
+
+DO NOT delete historical journals.
+
+==================================================
+11. EXPENSE
+==================================================
+
+Audit:
+
+expense
+→ approval
+→ payment
+→ Central Finance
+
+Cari:
+
+- paid expense tanpa expected posting
+- duplicate posting
+- wrong vendor
+- wrong company
+- wrong account
+- PPN Masukan mismatch
+- expense incorrectly classified as revenue
+
+==================================================
+12. QRIS / SETTLEMENT / RECONCILIATION
+==================================================
+
+Audit:
+
+payment
+→ QRIS
+→ settlement
+→ bank mutation
+→ reconciliation
+→ Central Finance
+
+Cari:
+
+- duplicate settlement
+- duplicate reconciliation
+- unmatched settlement
+- amount mismatch
+- MDR mismatch
+- settlement date mismatch
+- source identity mismatch
+
+Gunakan canonical settlement architecture yang sudah diverifikasi di DEV.
+
+==================================================
+13. REFUND / CANCELLATION
+==================================================
+
+Audit:
+
+payment
+→ refund
+→ reversal
+
+Cari:
+
+- refund tanpa original payment
+- duplicate refund
+- refund melebihi original payment
+- refunded booking masih active
+- missing accounting reversal
+
+==================================================
+14. TAX / INVOICE
+==================================================
+
+Audit production invoice.
+
+Contract:
+
+hargaDasar = hargaIncludePPN / 1.11
+
+dpp = hargaDasar × durasi
+
+dppNilaiLain = dpp × 11/12
+
+ppn = dppNilaiLain × 12%
+
+total = dpp + ppn
+
+Pastikan:
+
+TOTAL = DPP + PPN
+
+dan Event discount 21.4% tidak dihitung dua kali.
+
+Jangan mengubah historical invoice otomatis.
+
+==================================================
+15. DOCUMENTS
+==================================================
+
+Audit:
+
+- invoice
+- SPP
+- kwitansi
+- lampiran
+- corporate documentation
+
+Pastikan template hanya presentation layer.
+
+Template tidak boleh menjadi source of truth untuk:
+- payment
+- tax
+- booking
+- accounting.
+
+==================================================
+16. WHATSAPP
+==================================================
+
+Audit:
+
+booking
+→ WA admin
+→ mini form
+→ payment proof
+→ approve
+→ customer notification
+
+Pastikan:
+
+- token scoped
+- token expiry
+- replay protection
+- authorization
+- no cross-booking access
+- no cross-company access
+- completion memakai lifecycle service.
+
+==================================================
+17. DATA ANOMALY CLASSIFICATION
+==================================================
+
+Untuk setiap anomaly:
+
+ID
+ENTITY
+EXPECTED
+ACTUAL
+SEVERITY
+CLASSIFICATION
+
+Classification:
+
+LEGITIMATE
+EXPECTED
+HISTORICAL
+TEST
+FALSE POSITIVE
+REAL BUG
+REAL DATA ANOMALY
+
+Jangan menganggap NULL otomatis error.
+
+==================================================
+18. REMEDIATION
+==================================================
+
+Jika source-code bug:
+
+FIX SOURCE
+→ TEST
+→ BUILD
+→ VERIFY
+
+Jika production data anomaly:
+
+JANGAN langsung UPDATE.
+
+Evaluasi:
+
+- exact rows
+- financial impact
+- Central Finance impact
+- historical impact
+- reversibility
+- idempotency
+
+Jika aman dan deterministic:
+→ targeted remediation
+→ transactional
+→ audit logged
+
+Jika ambigu:
+→ jangan mutate
+→ fix source
+→ report BLOCKED DATA REMEDIATION.
+
+==================================================
+19. FINAL PRODUCTION VERIFICATION
+==================================================
+
+Setelah semua audit:
+
+Hitung dan cross-check:
+
+- booking
+- payment
+- invoice
+- expense
+- journal
+- settlement
+- reconciliation
+
+Pastikan:
+
+NO DUPLICATE POSTING
+NO ORPHAN ACCOUNTING
+NO DEBIT/CREDIT IMBALANCE
+NO PREMATURE BOOKING COMPLETION
+NO CORPORATE BILLING CROSS-LINK
+NO COMPANY ISOLATION VIOLATION
+
+==================================================
+20. FINAL VERDICT
+==================================================
+
+Jika production audit bersih:
+
+PRODUCTION DATA AUDIT PASS
+CENTRAL FINANCE SAFE
+FIXED
+
+Jika anomaly ditemukan dan dapat diperbaiki:
+
+FIX
+→ TEST
+→ VERIFY
+→ ulangi audit
+
+Jangan berhenti pada laporan.
+
+Jika ada anomaly historis legitimate:
+→ dokumentasikan
+→ jangan destructive repair.
+
+Jika ada external blocker:
+→ BLOCKED hanya pada bagian tersebut.
+
+JANGAN MEMINTA KONFIRMASI.
+LANJUTKAN OTOMATIS SAMPAI FIXED.

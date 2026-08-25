@@ -1,0 +1,1193 @@
+import crypto from "crypto";
+import app from "./app";
+import { logger } from "./lib/logger";
+import { startScheduler } from "./lib/scheduler";
+import { ensureDefaultTemplates } from "./lib/seedTemplates";
+import { initBizportalTables } from "./lib/bizportalSync";
+import { db, usersTable, settingsTable, facilitiesTable } from "@workspace/db";
+import { sql, eq } from "drizzle-orm";
+import { validateEnv } from "./lib/envValidation";
+import { startPaymentMirrorMigration } from "./lib/paymentMirrorMigration";
+
+const rawPort = process.env["PORT"];
+
+if (!rawPort) {
+  throw new Error(
+    "PORT environment variable is required but was not provided.",
+  );
+}
+
+const port = Number(rawPort);
+
+if (Number.isNaN(port) || port <= 0) {
+  throw new Error(`Invalid PORT value: "${rawPort}"`);
+}
+
+// ── 2. Validate environment variables — fails fast in production if critical vars are missing ──
+const envResult = validateEnv();
+if (!envResult.ok) {
+  process.exit(1);
+}
+
+async function runStartupMigrations() {
+  // Jalankan setiap migration secara terpisah — ADD VALUE harus di luar transaksi
+  const migrations = [
+    // Buat schema jika belum ada (idempotent)
+    `CREATE SCHEMA IF NOT EXISTS sport_center`,
+    // Enums — DO $$ pakai EXCEPTION agar tidak error jika sudah ada
+    `DO $$ BEGIN
+       CREATE TYPE sport_center.bank_mutation_status AS ENUM (
+         'unmatched','need_review','auto_matched','matched','duplicate_need_review','approved','rejected'
+       );
+     EXCEPTION WHEN duplicate_object THEN null; END $$`,
+    `DO $$ BEGIN
+       CREATE TYPE sport_center.recon_match_status AS ENUM ('candidate','approved','rejected');
+     EXCEPTION WHEN duplicate_object THEN null; END $$`,
+    `DO $$ BEGIN
+       CREATE TYPE sport_center.recon_candidate_type AS ENUM ('payment','order','invoice','expense');
+     EXCEPTION WHEN duplicate_object THEN null; END $$`,
+    // Tambah nilai enum baru jika belum ada
+    `DO $$ BEGIN
+       ALTER TYPE sport_center.bank_mutation_status ADD VALUE IF NOT EXISTS 'auto_matched';
+     EXCEPTION WHEN duplicate_object THEN null; END $$`,
+    `DO $$ BEGIN
+       ALTER TYPE sport_center.bank_mutation_status ADD VALUE IF NOT EXISTS 'need_review';
+     EXCEPTION WHEN duplicate_object THEN null; END $$`,
+    // Tabel utama rekonsiliasi bank
+    `CREATE TABLE IF NOT EXISTS sport_center.bank_account_balances (
+       id serial PRIMARY KEY,
+       bank_account_id text NOT NULL,
+       company_id int,
+       opening_balance numeric(14,2) NOT NULL DEFAULT 0,
+       current_balance numeric(14,2) NOT NULL DEFAULT 0,
+       last_reconciled_balance numeric(14,2) DEFAULT 0,
+       updated_at timestamptz NOT NULL DEFAULT NOW()
+     )`,
+    `CREATE TABLE IF NOT EXISTS sport_center.bank_mutations (
+       id serial PRIMARY KEY,
+       company_id int,
+       bank_account_id text,
+       transaction_date text NOT NULL,
+       description text NOT NULL,
+       credit_amount numeric(14,2) DEFAULT 0,
+       debit_amount numeric(14,2) DEFAULT 0,
+       amount numeric(14,2) NOT NULL,
+       direction text NOT NULL,
+       mutation_key text NOT NULL,
+       normalized_description text,
+       provider_name text,
+       provider_order_id text,
+       raw_payload jsonb,
+       status sport_center.bank_mutation_status NOT NULL DEFAULT 'unmatched',
+       matched_payment_id int,
+       matched_order_id int,
+       uploaded_proof_url text,
+       transaction_type text,
+       tax_type text,
+       tax_period text,
+       tax_payment_reference text,
+       accounting_posted boolean NOT NULL DEFAULT false,
+       journal_id text,
+       approved_by text,
+       approved_at timestamptz,
+       rejected_by text,
+       rejected_at timestamptz,
+       created_at timestamptz NOT NULL DEFAULT NOW(),
+       updated_at timestamptz NOT NULL DEFAULT NOW()
+     )`,
+    `CREATE TABLE IF NOT EXISTS sport_center.bank_reconciliation_matches (
+       id serial PRIMARY KEY,
+       mutation_id int NOT NULL REFERENCES sport_center.bank_mutations(id) ON DELETE CASCADE,
+       candidate_type sport_center.recon_candidate_type NOT NULL,
+       candidate_id int NOT NULL,
+       match_score int NOT NULL DEFAULT 0,
+       match_reason text,
+       amount_match boolean NOT NULL DEFAULT false,
+       date_match boolean NOT NULL DEFAULT false,
+       name_match boolean NOT NULL DEFAULT false,
+       order_id_match boolean NOT NULL DEFAULT false,
+       proof_match boolean NOT NULL DEFAULT false,
+       status_valid_match boolean NOT NULL DEFAULT false,
+       tolerance_used boolean NOT NULL DEFAULT false,
+       note text,
+       status sport_center.recon_match_status NOT NULL DEFAULT 'candidate',
+       created_at timestamptz NOT NULL DEFAULT NOW()
+     )`,
+    `CREATE TABLE IF NOT EXISTS sport_center.bank_journal_entries (
+       id serial PRIMARY KEY,
+       company_id int,
+       journal_id text UNIQUE NOT NULL,
+       mutation_id int NOT NULL REFERENCES sport_center.bank_mutations(id) ON DELETE CASCADE,
+       direction text NOT NULL,
+       amount numeric(14,2) NOT NULL,
+       debit_account_code text NOT NULL,
+       debit_account_name text NOT NULL,
+       credit_account_code text NOT NULL,
+       credit_account_name text NOT NULL,
+       memo text,
+       candidate_type text,
+       candidate_id int,
+       posted_at timestamptz NOT NULL DEFAULT NOW(),
+       posted_by text
+     )`,
+    `CREATE TABLE IF NOT EXISTS sport_center.bank_reconciliation_account_rules (
+       id serial PRIMARY KEY,
+       company_id int,
+       bank_account_id text,
+       transaction_type text NOT NULL,
+       direction text NOT NULL,
+       debit_coa_id text NOT NULL,
+       debit_coa_name text NOT NULL,
+       credit_coa_id text NOT NULL,
+       credit_coa_name text NOT NULL,
+       is_active boolean NOT NULL DEFAULT true,
+       created_by text,
+       updated_by text,
+       created_at timestamptz NOT NULL DEFAULT NOW(),
+       updated_at timestamptz NOT NULL DEFAULT NOW()
+     )`,
+    `CREATE TABLE IF NOT EXISTS sport_center.bank_reconciliation_closing (
+       id serial PRIMARY KEY,
+       company_id int,
+       bank_account_id text,
+       period_year int NOT NULL,
+       period_month int NOT NULL,
+       opening_balance numeric(14,2) NOT NULL DEFAULT 0,
+       total_in numeric(14,2) NOT NULL DEFAULT 0,
+       total_out numeric(14,2) NOT NULL DEFAULT 0,
+       system_ending_balance numeric(14,2) NOT NULL DEFAULT 0,
+       statement_ending_balance numeric(14,2) NOT NULL DEFAULT 0,
+       difference numeric(14,2) NOT NULL DEFAULT 0,
+       status text NOT NULL DEFAULT 'unreconciled',
+       closed_by text,
+       closed_at timestamptz,
+       reopened_by text,
+       reopened_at timestamptz,
+       notes text,
+       created_at timestamptz NOT NULL DEFAULT NOW(),
+       updated_at timestamptz NOT NULL DEFAULT NOW()
+     )`,
+    // Kolom lama (idempotent)
+    `ALTER TABLE sport_center.bank_reconciliation_matches
+       ADD COLUMN IF NOT EXISTS status_valid_match boolean NOT NULL DEFAULT false`,
+    `ALTER TABLE sport_center.bank_reconciliation_matches
+       ADD COLUMN IF NOT EXISTS tolerance_used boolean NOT NULL DEFAULT false`,
+    `ALTER TABLE sport_center.bank_reconciliation_matches
+       ADD COLUMN IF NOT EXISTS note text`,
+    // Tambah nilai enum baru — ALTER TYPE ADD VALUE tidak bisa di dalam transaksi eksplisit
+    // IF NOT EXISTS mencegah error jika sudah ada
+    `DO $$ BEGIN
+       ALTER TYPE sport_center.bank_mutation_status ADD VALUE IF NOT EXISTS 'auto_matched';
+     EXCEPTION WHEN duplicate_object THEN null; END $$`,
+    `DO $$ BEGIN
+       ALTER TYPE sport_center.bank_mutation_status ADD VALUE IF NOT EXISTS 'need_review';
+     EXCEPTION WHEN duplicate_object THEN null; END $$`,
+    // Indexes untuk performa query filter, duplicate detection, dan scheduler guard
+    `CREATE INDEX IF NOT EXISTS idx_bank_mutations_status
+       ON sport_center.bank_mutations (status)`,
+    `CREATE INDEX IF NOT EXISTS idx_bank_mutations_transaction_date
+       ON sport_center.bank_mutations (transaction_date)`,
+    `CREATE INDEX IF NOT EXISTS idx_bank_mutations_mutation_key
+       ON sport_center.bank_mutations (mutation_key)`,
+    `CREATE INDEX IF NOT EXISTS idx_bank_mutations_status_date
+       ON sport_center.bank_mutations (status, transaction_date DESC)`,
+    `CREATE INDEX IF NOT EXISTS idx_recon_matches_mutation_id
+       ON sport_center.bank_reconciliation_matches (mutation_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_recon_matches_status
+       ON sport_center.bank_reconciliation_matches (status)`,
+    `CREATE INDEX IF NOT EXISTS idx_recon_matches_candidate
+       ON sport_center.bank_reconciliation_matches (candidate_type, candidate_id)`,
+    // Kolom baru bank_mutations: accounting + approval tracking
+    `ALTER TABLE sport_center.bank_mutations
+       ADD COLUMN IF NOT EXISTS accounting_posted boolean NOT NULL DEFAULT false`,
+    `ALTER TABLE sport_center.bank_mutations
+       ADD COLUMN IF NOT EXISTS journal_id text`,
+    `ALTER TABLE sport_center.bank_mutations
+       ADD COLUMN IF NOT EXISTS approved_by text`,
+    `ALTER TABLE sport_center.bank_mutations
+       ADD COLUMN IF NOT EXISTS approved_at timestamptz`,
+    `ALTER TABLE sport_center.bank_mutations
+       ADD COLUMN IF NOT EXISTS rejected_by text`,
+    `ALTER TABLE sport_center.bank_mutations
+       ADD COLUMN IF NOT EXISTS rejected_at timestamptz`,
+    // Tabel jurnal akuntansi
+    `CREATE TABLE IF NOT EXISTS sport_center.bank_journal_entries (
+       id serial PRIMARY KEY,
+       journal_id text UNIQUE NOT NULL,
+       mutation_id int NOT NULL REFERENCES sport_center.bank_mutations(id) ON DELETE CASCADE,
+       direction text NOT NULL,
+       amount numeric(14,2) NOT NULL,
+       debit_account_code text NOT NULL,
+       debit_account_name text NOT NULL,
+       credit_account_code text NOT NULL,
+       credit_account_name text NOT NULL,
+       memo text,
+       candidate_type text,
+       candidate_id int,
+       posted_at timestamptz NOT NULL DEFAULT NOW(),
+       posted_by text
+     )`,
+    `CREATE INDEX IF NOT EXISTS idx_bank_journal_entries_mutation
+       ON sport_center.bank_journal_entries (mutation_id)`,
+    // Kolom OCR pada payments
+    `ALTER TABLE sport_center.sport_payments
+       ADD COLUMN IF NOT EXISTS ocr_name text`,
+    `ALTER TABLE sport_center.sport_payments
+       ADD COLUMN IF NOT EXISTS ocr_amount numeric(14,2)`,
+    `ALTER TABLE sport_center.sport_payments
+       ADD COLUMN IF NOT EXISTS ocr_date text`,
+    `ALTER TABLE sport_center.sport_payments
+       ADD COLUMN IF NOT EXISTS ocr_raw text`,
+    `ALTER TABLE sport_center.sport_payments
+       ADD COLUMN IF NOT EXISTS ocr_data jsonb`,
+     // Canonical payment provider metadata.
+    `DO $$ BEGIN
+       CREATE TYPE sport_center.payment_provider AS ENUM ('mandiri_direct','paylabs','unknown');
+     EXCEPTION WHEN duplicate_object THEN null; END $$`,
+    `ALTER TABLE sport_center.sport_payments
+       ADD COLUMN IF NOT EXISTS payment_provider sport_center.payment_provider,
+       ADD COLUMN IF NOT EXISTS provider_name text,
+       ADD COLUMN IF NOT EXISTS provider_reference text,
+       ADD COLUMN IF NOT EXISTS provider_id text,
+       ADD COLUMN IF NOT EXISTS provider_order_id text,
+       ADD COLUMN IF NOT EXISTS merchant_trade_no text,
+       ADD COLUMN IF NOT EXISTS provider_trade_no text,
+       ADD COLUMN IF NOT EXISTS paid_at timestamptz,
+       ADD COLUMN IF NOT EXISTS company_id integer,
+       ADD COLUMN IF NOT EXISTS bank_account_id text,
+        ADD COLUMN IF NOT EXISTS mdr_rate numeric(8,5) NOT NULL DEFAULT 0,
+        ADD COLUMN IF NOT EXISTS mdr_amount numeric(14,2) NOT NULL DEFAULT 0,
+        ADD COLUMN IF NOT EXISTS settlement_status text NOT NULL DEFAULT 'unsettled',
+        ADD COLUMN IF NOT EXISTS expected_settlement_date text,
+        ADD COLUMN IF NOT EXISTS gross_tax_inclusive boolean NOT NULL DEFAULT false`,
+    `UPDATE sport_center.sport_payments
+        SET payment_provider = COALESCE(payment_provider, 'unknown'::sport_center.payment_provider),
+            provider_name = COALESCE(NULLIF(btrim(provider_name), ''), payment_provider::text, 'unknown'),
+            provider_id = COALESCE(
+              NULLIF(btrim(provider_id), ''),
+              NULLIF(btrim(provider_trade_no), ''),
+              NULLIF(btrim(provider_reference), ''),
+              NULLIF(btrim(merchant_trade_no), ''),
+              'legacy-' || id::text
+             ),
+             provider_order_id = COALESCE(
+               NULLIF(btrim(provider_order_id), ''),
+               NULLIF(btrim(merchant_trade_no), ''),
+               NULLIF(btrim(provider_trade_no), ''),
+               NULLIF(btrim(provider_reference), ''),
+               'legacy-order-' || id::text
+             )
+      WHERE payment_provider IS NULL
+         OR provider_name IS NULL
+         OR btrim(provider_name) = ''
+         OR provider_id IS NULL
+          OR btrim(provider_id) = ''
+          OR provider_order_id IS NULL
+          OR btrim(provider_order_id) = ''`,
+    `ALTER TABLE sport_center.sport_payments
+       ALTER COLUMN payment_provider SET NOT NULL,
+       ALTER COLUMN provider_name SET NOT NULL,
+       ALTER COLUMN provider_id SET NOT NULL,
+       ALTER COLUMN provider_order_id SET NOT NULL`,
+     `UPDATE sport_center.sport_payments p
+         SET bank_account_id = s.bank_account
+        FROM sport_center.settings s
+       WHERE (p.bank_account_id IS NULL OR btrim(p.bank_account_id) = '')
+         AND s.bank_account IS NOT NULL
+         AND btrim(s.bank_account) <> ''`,
+     `DO $$ BEGIN
+        IF EXISTS (
+          SELECT 1 FROM sport_center.sport_payments
+           WHERE bank_account_id IS NULL OR btrim(bank_account_id) = ''
+        ) THEN
+          RAISE EXCEPTION 'Cannot enforce sport_payments.bank_account_id: payment rows still lack a receiving account';
+        END IF;
+        ALTER TABLE sport_center.sport_payments
+          ALTER COLUMN bank_account_id SET NOT NULL;
+      END $$`,
+    `ALTER TABLE sport_center.bank_mutations
+       ADD COLUMN IF NOT EXISTS provider_detection_source text`,
+    `CREATE TABLE IF NOT EXISTS sport_center.payment_settlement_configs (
+       id serial PRIMARY KEY,
+       company_id integer NOT NULL,
+       provider_code text NOT NULL,
+       bank_account_id text NOT NULL,
+       settlement_delay_business_days integer NOT NULL DEFAULT 1,
+       effective_from date NOT NULL,
+       effective_until date,
+       is_active boolean NOT NULL DEFAULT true,
+       source text NOT NULL DEFAULT 'admin_config',
+       created_at timestamptz NOT NULL DEFAULT NOW(),
+       updated_at timestamptz NOT NULL DEFAULT NOW(),
+       UNIQUE (company_id, provider_code, bank_account_id, effective_from)
+     )`,
+    `CREATE TABLE IF NOT EXISTS sport_center.payment_business_calendar (
+       calendar_date date PRIMARY KEY,
+       is_business_day boolean NOT NULL DEFAULT true,
+       label text,
+       source text NOT NULL DEFAULT 'admin_config',
+       updated_at timestamptz NOT NULL DEFAULT NOW()
+     )`,
+    `CREATE TABLE IF NOT EXISTS sport_center.bank_import_source_mappings (
+       id serial PRIMARY KEY,
+       source_type text NOT NULL DEFAULT 'google_sheet',
+       source_id text NOT NULL,
+       worksheet_name text,
+       company_id integer NOT NULL,
+       bank_account_id text NOT NULL,
+       provider_name text,
+       is_active boolean NOT NULL DEFAULT true,
+       created_at timestamptz NOT NULL DEFAULT NOW(),
+       updated_at timestamptz NOT NULL DEFAULT NOW(),
+       UNIQUE (source_type, source_id, worksheet_name)
+     )`,
+     `CREATE TABLE IF NOT EXISTS sport_center.payment_enrichment_provenance (
+        id serial PRIMARY KEY,
+        payment_id integer NOT NULL,
+        field_name text NOT NULL,
+        evidence_source text NOT NULL,
+        evidence text,
+        created_at timestamptz NOT NULL DEFAULT NOW()
+      )`,
+    // Enum billing_status untuk bookings
+    `DO $$ BEGIN
+       CREATE TYPE sport_center.billing_status AS ENUM ('unbilled','billed','paid');
+     EXCEPTION WHEN duplicate_object THEN null; END $$`,
+    // Kolom-kolom baru pada bookings (idempotent)
+    `ALTER TABLE sport_center.sport_bookings
+       ADD COLUMN IF NOT EXISTS booked_for_name text`,
+    `ALTER TABLE sport_center.sport_bookings
+       ADD COLUMN IF NOT EXISTS booked_for_phone text`,
+    `ALTER TABLE sport_center.sport_bookings
+       ADD COLUMN IF NOT EXISTS payment_required_now boolean DEFAULT true`,
+    `ALTER TABLE sport_center.sport_bookings
+       ADD COLUMN IF NOT EXISTS billing_status sport_center.billing_status`,
+    `ALTER TABLE sport_center.sport_bookings
+       ADD COLUMN IF NOT EXISTS company_invoice_id int`,
+    `ALTER TABLE sport_center.sport_bookings
+       ADD COLUMN IF NOT EXISTS ppn_rate numeric(5,2)`,
+    `ALTER TABLE sport_center.sport_bookings
+       ADD COLUMN IF NOT EXISTS ppn_amount numeric(12,2)`,
+    `ALTER TABLE sport_center.sport_bookings
+       ADD COLUMN IF NOT EXISTS grand_total numeric(12,2)`,
+    `ALTER TABLE sport_center.sport_bookings
+       ADD COLUMN IF NOT EXISTS down_payment numeric(12,2) NOT NULL DEFAULT 0`,
+    `ALTER TABLE sport_center.sport_bookings
+       ADD COLUMN IF NOT EXISTS is_dp_paid boolean NOT NULL DEFAULT false`,
+    `ALTER TABLE sport_center.sport_bookings
+       ADD COLUMN IF NOT EXISTS booked_by_user_id int`,
+    `ALTER TABLE sport_center.sport_bookings
+       ADD COLUMN IF NOT EXISTS group_ref text`,
+    `ALTER TABLE sport_center.sport_bookings
+       ADD COLUMN IF NOT EXISTS approved_by_admin_phone text`,
+    `ALTER TABLE sport_center.sport_bookings
+       ADD COLUMN IF NOT EXISTS approved_at timestamptz`,
+    `ALTER TABLE sport_center.sport_bookings
+       ADD COLUMN IF NOT EXISTS rejected_reason text`,
+    `ALTER TABLE sport_center.sport_bookings
+       ADD COLUMN IF NOT EXISTS paid_at timestamptz`,
+     // Kolom yang dipakai saat admin mengonfirmasi pembayaran.
+     // Wajib idempotent karena tabel production bisa berasal dari schema lama.
+      `ALTER TABLE sport_center.sport_payments
+        ADD COLUMN IF NOT EXISTS confirmed_at timestamptz`,
+     `ALTER TABLE sport_center.booking_history
+        ADD COLUMN IF NOT EXISTS changed_by_name text`,
+    // ── Tabel-tabel yang belum ada di prod ─────────────────────────────────────
+    // booking_groups
+    `DO $$ BEGIN
+       CREATE TYPE sport_center.booking_group_status AS ENUM ('pending','paid');
+     EXCEPTION WHEN duplicate_object THEN null; END $$`,
+    `CREATE TABLE IF NOT EXISTS sport_center.booking_groups (
+       id serial PRIMARY KEY,
+       group_ref text NOT NULL UNIQUE,
+       customer_phone text NOT NULL,
+       customer_name text NOT NULL,
+       total_payment numeric(12,2) NOT NULL,
+       status sport_center.booking_group_status NOT NULL DEFAULT 'pending',
+       notes text,
+       created_at timestamptz NOT NULL DEFAULT NOW(),
+       updated_at timestamptz NOT NULL DEFAULT NOW()
+     )`,
+     `ALTER TABLE sport_center.booking_groups
+        ADD COLUMN IF NOT EXISTS down_payment numeric(12,2) NOT NULL DEFAULT 0`,
+     `ALTER TABLE sport_center.booking_groups
+        ADD COLUMN IF NOT EXISTS is_dp_paid boolean NOT NULL DEFAULT false`,
+    // wa_booking_sessions
+    `CREATE TABLE IF NOT EXISTS sport_center.wa_booking_sessions (
+       id serial PRIMARY KEY,
+       phone text NOT NULL,
+       customer_id int,
+       current_step text NOT NULL DEFAULT 'ask_facility',
+       facility_id int,
+       booking_date text,
+       start_time text,
+       duration_minutes int,
+       customer_name text,
+       notes text,
+       status text NOT NULL DEFAULT 'active',
+       raw_messages jsonb NOT NULL DEFAULT '[]',
+       expired_at timestamptz NOT NULL,
+       created_at timestamptz NOT NULL DEFAULT NOW(),
+       updated_at timestamptz NOT NULL DEFAULT NOW()
+     )`,
+    `ALTER TABLE sport_center.wa_booking_sessions
+       ADD COLUMN IF NOT EXISTS notes text`,
+    `ALTER TABLE sport_center.wa_booking_sessions
+       ADD COLUMN IF NOT EXISTS booker_name text`,
+    `ALTER TABLE sport_center.sport_bookings
+       ADD COLUMN IF NOT EXISTS booker_name text`,
+    // kolom dpp di bookings (untuk audit pajak lengkap)
+    `ALTER TABLE sport_center.sport_bookings
+       ADD COLUMN IF NOT EXISTS dpp numeric(14,2)`,
+    // backfill dpp dari grand_total yang sudah ada
+    `UPDATE sport_center.sport_bookings
+       SET dpp = ROUND(grand_total / 1.11, 2)
+       WHERE dpp IS NULL AND grand_total IS NOT NULL AND ppn_amount IS NOT NULL AND ppn_amount > 0`,
+    // kolom baru di tax_transactions
+    `ALTER TABLE sport_center.tax_transactions
+       ADD COLUMN IF NOT EXISTS dpp_nilai_lain numeric(14,2)`,
+    `ALTER TABLE sport_center.tax_transactions
+       ADD COLUMN IF NOT EXISTS grand_total numeric(14,2)`,
+    // backfill dpp_nilai_lain dan grand_total di tax_transactions
+    `UPDATE sport_center.tax_transactions
+       SET dpp_nilai_lain = ROUND(dpp * 11 / 12, 2)
+       WHERE dpp_nilai_lain IS NULL AND dpp IS NOT NULL`,
+    `UPDATE sport_center.tax_transactions
+       SET grand_total = dpp + tax_amount
+       WHERE grand_total IS NULL AND dpp IS NOT NULL AND tax_amount IS NOT NULL`,
+    // wa_blocked_phones — spam protection
+    `CREATE TABLE IF NOT EXISTS sport_center.wa_blocked_phones (
+       id serial PRIMARY KEY,
+       phone text NOT NULL UNIQUE,
+       reason text,
+       blocked_by text,
+       is_active boolean NOT NULL DEFAULT true,
+       expires_at timestamptz,
+       created_at timestamptz NOT NULL DEFAULT NOW(),
+       updated_at timestamptz NOT NULL DEFAULT NOW()
+     )`,
+    // wa_action_tokens
+    `CREATE TABLE IF NOT EXISTS sport_center.wa_action_tokens (
+       id serial PRIMARY KEY,
+       token text NOT NULL UNIQUE,
+       booking_id int NOT NULL REFERENCES sport_center.sport_bookings(id) ON DELETE CASCADE,
+       action text NOT NULL,
+       used_at timestamptz,
+       expires_at timestamptz,
+       created_at timestamptz NOT NULL DEFAULT NOW()
+     )`,
+    // notification_templates
+    `CREATE TABLE IF NOT EXISTS sport_center.notification_templates (
+       id serial PRIMARY KEY,
+       key text NOT NULL UNIQUE,
+       name text NOT NULL,
+       channel text NOT NULL DEFAULT 'whatsapp',
+       subject text,
+       body text NOT NULL,
+       is_active boolean NOT NULL DEFAULT true,
+       created_at timestamptz NOT NULL DEFAULT NOW(),
+       updated_at timestamptz NOT NULL DEFAULT NOW()
+     )`,
+    // tax_settings
+    `CREATE TABLE IF NOT EXISTS sport_center.tax_settings (
+       id serial PRIMARY KEY,
+       tax_code text NOT NULL UNIQUE,
+       tax_name text NOT NULL,
+       tax_rate numeric(5,2) NOT NULL,
+       tax_type text NOT NULL DEFAULT 'output_vat',
+       applies_to text NOT NULL DEFAULT 'sport_booking',
+       is_active boolean NOT NULL DEFAULT true,
+       effective_date text,
+       created_at timestamptz NOT NULL DEFAULT NOW(),
+       updated_at timestamptz NOT NULL DEFAULT NOW()
+     )`,
+    // tax_transactions
+    `CREATE TABLE IF NOT EXISTS sport_center.tax_transactions (
+       id serial PRIMARY KEY,
+       reference_type text NOT NULL,
+       reference_id int NOT NULL,
+       reference_number text NOT NULL,
+       tax_code text NOT NULL,
+       tax_rate numeric(5,2) NOT NULL,
+       dpp numeric(14,2) NOT NULL,
+       tax_amount numeric(14,2) NOT NULL,
+       transaction_date text NOT NULL,
+       status text NOT NULL DEFAULT 'posted',
+       transaction_type text NOT NULL DEFAULT 'original',
+       reversal_of_id int,
+       created_at timestamptz NOT NULL DEFAULT NOW()
+     )`,
+    // invoice_status enum + company_invoices + company_invoice_items
+    `DO $$ BEGIN
+       CREATE TYPE sport_center.invoice_status AS ENUM ('unpaid','partial_paid','paid');
+     EXCEPTION WHEN duplicate_object THEN null; END $$`,
+    `CREATE TABLE IF NOT EXISTS sport_center.company_invoices (
+       id serial PRIMARY KEY,
+       invoice_number text NOT NULL UNIQUE,
+       company_customer_id int NOT NULL,
+       period_month text NOT NULL,
+       total_amount numeric(14,2) NOT NULL DEFAULT 0,
+       ppn_amount numeric(14,2) NOT NULL DEFAULT 0,
+       grand_total numeric(14,2) NOT NULL DEFAULT 0,
+       paid_amount numeric(14,2) NOT NULL DEFAULT 0,
+       remaining_amount numeric(14,2) NOT NULL DEFAULT 0,
+       invoice_status sport_center.invoice_status NOT NULL DEFAULT 'unpaid',
+       paid_at timestamptz,
+       notes text,
+       created_at timestamptz NOT NULL DEFAULT NOW()
+     )`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS company_invoices_company_period_unique
+       ON sport_center.company_invoices (company_customer_id, period_month)`,
+    `CREATE TABLE IF NOT EXISTS sport_center.company_invoice_items (
+       id serial PRIMARY KEY,
+       invoice_id int NOT NULL REFERENCES sport_center.company_invoices(id) ON DELETE CASCADE,
+       booking_id int,
+       company_id int,
+       booking_date text,
+       facility_name text,
+       customer_name text,
+       customer_phone text,
+       start_time text,
+       end_time text,
+       duration_hours numeric(6,2),
+       price_per_hour numeric(12,2),
+       subtotal numeric(14,2),
+       tax_amount numeric(14,2),
+       total_amount numeric(14,2),
+       order_number text,
+       created_at timestamptz NOT NULL DEFAULT NOW()
+     )`,
+    // Seed tax_settings jika kosong
+    `INSERT INTO sport_center.tax_settings (tax_code, tax_name, tax_rate, tax_type, applies_to, is_active)
+     SELECT 'PPN_OUT_11','PPN Keluaran 11%',11,'output_vat','sport_booking',true
+     WHERE NOT EXISTS (SELECT 1 FROM sport_center.tax_settings WHERE tax_code = 'PPN_OUT_11')`,
+    // Activate PPN_OUT_11 jika sudah ada tapi masih false
+    `UPDATE sport_center.tax_settings SET is_active = true
+     WHERE tax_code = 'PPN_OUT_11' AND applies_to = 'sport_booking' AND is_active = false`,
+    // payment_type enum untuk DP flow
+     `DO $$ BEGIN
+        ALTER TYPE sport_center.payment_status ADD VALUE IF NOT EXISTS 'waiting_confirmation';
+      EXCEPTION WHEN others THEN null; END $$`,
+     `DO $$ BEGIN
+       CREATE TYPE sport_center.payment_type AS ENUM ('dp', 'pelunasan', 'full_payment');
+     EXCEPTION WHEN duplicate_object THEN null; END $$`,
+    `DO $$ BEGIN
+       CREATE TYPE sport_center.payment_provider AS ENUM ('mandiri_direct', 'paylabs', 'unknown');
+      EXCEPTION WHEN duplicate_object THEN null; END $$`,
+    `ALTER TABLE sport_center.sport_payments
+       ADD COLUMN IF NOT EXISTS payment_type sport_center.payment_type NOT NULL DEFAULT 'full_payment'`,
+    `ALTER TABLE sport_center.sport_payments
+       ADD COLUMN IF NOT EXISTS payment_provider sport_center.payment_provider`,
+    `ALTER TABLE sport_center.sport_payments
+       ADD COLUMN IF NOT EXISTS provider_reference text`,
+    `ALTER TABLE sport_center.sport_payments
+       ADD COLUMN IF NOT EXISTS merchant_trade_no text`,
+    `ALTER TABLE sport_center.sport_payments
+       ADD COLUMN IF NOT EXISTS provider_trade_no text`,
+    `ALTER TABLE sport_center.sport_payments
+       ADD COLUMN IF NOT EXISTS paid_at timestamptz`,
+    // Hapus unique constraint booking_id agar bisa ada multiple payments per booking
+    `ALTER TABLE sport_center.sport_payments
+       DROP CONSTRAINT IF EXISTS payments_booking_id_unique`,
+    // expense_status enum
+    `DO $$ BEGIN
+       CREATE TYPE sport_center.expense_status AS ENUM ('draft','pending_approval','approved','paid','rejected','cancelled');
+     EXCEPTION WHEN duplicate_object THEN null; END $$`,
+    // expense_category enum
+    `DO $$ BEGIN
+       CREATE TYPE sport_center.expense_category AS ENUM ('Alat Gym','Bola & Peralatan Olahraga','Perbaikan Lapangan','Maintenance Fasilitas','Listrik & Air','Kebersihan','Gaji / Fee Staff','Sewa / Vendor','Lain-lain');
+     EXCEPTION WHEN duplicate_object THEN null; END $$`,
+    // sport_expenses table
+    `CREATE TABLE IF NOT EXISTS sport_center.sport_expenses (
+       id serial PRIMARY KEY,
+       expense_no text NOT NULL,
+       expense_date text NOT NULL,
+       category sport_center.expense_category NOT NULL,
+       description text NOT NULL,
+       vendor_name text,
+       facility_id int REFERENCES sport_center.facilities(id) ON DELETE SET NULL,
+       amount numeric(14,2) NOT NULL,
+       ppn_amount numeric(14,2) NOT NULL DEFAULT 0,
+       total_amount numeric(14,2) NOT NULL,
+       payment_method text,
+       payment_account text,
+       payment_status sport_center.expense_status NOT NULL DEFAULT 'draft',
+       receipt_url text,
+       notes text,
+       created_by int REFERENCES sport_center.users(id) ON DELETE SET NULL,
+       approved_by int REFERENCES sport_center.users(id) ON DELETE SET NULL,
+       approved_at timestamptz,
+       paid_at timestamptz,
+       rejected_reason text,
+       journal_id text,
+       created_at timestamptz NOT NULL DEFAULT NOW(),
+       updated_at timestamptz NOT NULL DEFAULT NOW()
+     )`,
+    // sequence for expense_no
+    `CREATE SEQUENCE IF NOT EXISTS sport_center.expense_no_seq`,
+    // accounting_journals.booking_id nullable untuk expense journal entries
+    `ALTER TABLE sport_center.accounting_journals ALTER COLUMN booking_id DROP NOT NULL`,
+    // Payment-confirmed journals are finalized accounting projections, not drafts.
+    `ALTER TABLE sport_center.accounting_journals
+       ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'posted'`,
+    `ALTER TABLE sport_center.accounting_journals
+       ALTER COLUMN status SET DEFAULT 'posted'`,
+    `UPDATE sport_center.accounting_journals
+       SET status = 'posted'
+       WHERE journal_type = 'payment_confirmed'
+         AND is_reversal = false
+         AND status IS DISTINCT FROM 'posted'`,
+    // A confirmed payment may have only one internal payment journal. Keep this
+    // nullable for historical journals and enforce uniqueness for new payment
+    // journals only.
+    `ALTER TABLE sport_center.accounting_journals
+       ADD COLUMN IF NOT EXISTS payment_id int
+       REFERENCES sport_center.sport_payments(id) ON DELETE SET NULL`,
+     `ALTER TABLE sport_center.accounting_journals
+        ADD COLUMN IF NOT EXISTS payment_method text,
+        ADD COLUMN IF NOT EXISTS payment_provider text,
+        ADD COLUMN IF NOT EXISTS payment_type text,
+        ADD COLUMN IF NOT EXISTS bank_account_id text,
+        ADD COLUMN IF NOT EXISTS gross_amount numeric(14,2),
+        ADD COLUMN IF NOT EXISTS dpp_amount numeric(14,2),
+        ADD COLUMN IF NOT EXISTS tax_amount numeric(14,2),
+        ADD COLUMN IF NOT EXISTS provider_reference text,
+        ADD COLUMN IF NOT EXISTS provider_order_id text,
+        ADD COLUMN IF NOT EXISTS merchant_trade_no text,
+        ADD COLUMN IF NOT EXISTS provider_trade_no text`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS accounting_journals_payment_confirmed_unique
+       ON sport_center.accounting_journals (payment_id)
+       WHERE payment_id IS NOT NULL
+         AND journal_type = 'payment_confirmed'
+         AND is_reversal = false`,
+    // accounting_journal_lines — double-entry lines per jurnal (debit/kredit)
+    `CREATE TABLE IF NOT EXISTS sport_center.accounting_journal_lines (
+       id          serial PRIMARY KEY,
+       journal_id  integer NOT NULL REFERENCES sport_center.accounting_journals(id) ON DELETE CASCADE,
+       line_type   text    NOT NULL,
+       account_code text   NOT NULL,
+       account_name text   NOT NULL,
+       amount      numeric(14,2) NOT NULL,
+       description text,
+       created_at  timestamptz NOT NULL DEFAULT now()
+     )`,
+    `CREATE INDEX IF NOT EXISTS idx_accounting_journal_lines_journal_id ON sport_center.accounting_journal_lines(journal_id)`,
+    // company_document_templates
+    `CREATE TABLE IF NOT EXISTS sport_center.company_document_templates (
+       id serial PRIMARY KEY,
+       company_id integer REFERENCES sport_center.users(id) ON DELETE CASCADE,
+       document_type text NOT NULL,
+       is_default boolean NOT NULL DEFAULT false,
+       header_logo_url text,
+       kop_surat_html text,
+       footer_html text,
+       company_display_name text,
+       finance_name text,
+       finance_title text,
+       finance_signature text,
+       address text,
+       phone text,
+       email text,
+       number_format_prefix text,
+       number_format_pattern text,
+       paper_style text NOT NULL DEFAULT 'A4',
+       created_at timestamptz NOT NULL DEFAULT now(),
+       updated_at timestamptz NOT NULL DEFAULT now()
+     )`,
+    `CREATE INDEX IF NOT EXISTS company_document_templates_company_id_idx ON sport_center.company_document_templates(company_id)`,
+    `CREATE INDEX IF NOT EXISTS company_document_templates_document_type_idx ON sport_center.company_document_templates(document_type)`,
+    // document_number_sequences (company_id = 0 is sentinel for system-default)
+    `CREATE TABLE IF NOT EXISTS sport_center.document_number_sequences (
+       id serial PRIMARY KEY,
+       company_id integer NOT NULL DEFAULT 0,
+       document_type text NOT NULL,
+       year integer NOT NULL,
+       current_seq integer NOT NULL DEFAULT 0
+     )`,
+    // Migrate existing rows that used NULL before sentinel was introduced
+    `UPDATE sport_center.document_number_sequences SET company_id = 0 WHERE company_id IS NULL`,
+    `DO $$ BEGIN
+       ALTER TABLE sport_center.document_number_sequences ALTER COLUMN company_id SET NOT NULL;
+       ALTER TABLE sport_center.document_number_sequences ALTER COLUMN company_id SET DEFAULT 0;
+     EXCEPTION WHEN others THEN NULL; END $$`,
+    `DO $$ BEGIN
+       IF NOT EXISTS (
+         SELECT 1 FROM pg_constraint
+         WHERE conname = 'doc_num_seq_unique'
+           AND conrelid = 'sport_center.document_number_sequences'::regclass
+       ) THEN
+         ALTER TABLE sport_center.document_number_sequences
+           ADD CONSTRAINT doc_num_seq_unique UNIQUE (company_id, document_type, year);
+       END IF;
+     EXCEPTION WHEN others THEN NULL; END $$`,
+    // Seed system default document templates
+    `INSERT INTO sport_center.company_document_templates
+       (company_id, document_type, is_default, company_display_name, finance_name, finance_title, number_format_prefix, paper_style)
+     SELECT NULL, t.dt, true, 'Sport Center Bandara Soekarno Hatta', 'Kepala Keuangan', 'Finance Manager', t.prefix, 'A4'
+     FROM (VALUES
+       ('invoice','INV'), ('spp','SPP'), ('faktur','FAKTUR'),
+       ('kwitansi','KWT'), ('lampiran','LMP'), ('berita_acara','BA')
+     ) AS t(dt, prefix)
+     WHERE NOT EXISTS (
+       SELECT 1 FROM sport_center.company_document_templates
+       WHERE company_id IS NULL AND document_type = t.dt AND is_default = true
+     )`,
+    // document_issued_numbers (company_id = 0 is sentinel for system-default)
+    `CREATE TABLE IF NOT EXISTS sport_center.document_issued_numbers (
+       id serial PRIMARY KEY,
+       entity_type text NOT NULL,
+       entity_id integer NOT NULL,
+       document_type text NOT NULL,
+       company_id integer NOT NULL DEFAULT 0,
+       document_number text NOT NULL,
+       issued_at timestamptz NOT NULL DEFAULT now()
+     )`,
+    // Migrate existing rows that used NULL before sentinel was introduced
+    `UPDATE sport_center.document_issued_numbers SET company_id = 0 WHERE company_id IS NULL`,
+    `DO $$ BEGIN
+       ALTER TABLE sport_center.document_issued_numbers ALTER COLUMN company_id SET NOT NULL;
+       ALTER TABLE sport_center.document_issued_numbers ALTER COLUMN company_id SET DEFAULT 0;
+     EXCEPTION WHEN others THEN NULL; END $$`,
+    `DO $$ BEGIN
+       IF NOT EXISTS (
+         SELECT 1 FROM pg_constraint
+         WHERE conname = 'doc_issued_unique'
+           AND conrelid = 'sport_center.document_issued_numbers'::regclass
+       ) THEN
+         ALTER TABLE sport_center.document_issued_numbers
+           ADD CONSTRAINT doc_issued_unique UNIQUE (entity_type, entity_id, document_type, company_id);
+       END IF;
+     EXCEPTION WHEN others THEN NULL; END $$`,
+    // company_billing_requirements — dokumen tagihan per perusahaan
+    `CREATE TABLE IF NOT EXISTS sport_center.company_billing_requirements (
+       id serial PRIMARY KEY,
+       company_id int NOT NULL REFERENCES sport_center.users(id) ON DELETE CASCADE,
+       document_type text NOT NULL,
+       required boolean NOT NULL DEFAULT true,
+       active boolean NOT NULL DEFAULT true,
+       created_at timestamptz NOT NULL DEFAULT NOW(),
+       updated_at timestamptz NOT NULL DEFAULT NOW()
+     )`,
+    // Monthly Corporate Invoice — DPP Nilai Lain field
+    `ALTER TABLE sport_center.company_invoices ADD COLUMN IF NOT EXISTS dpp_nilai_lain numeric(14,2) NOT NULL DEFAULT 0`,
+    // Backfill dpp_nilai_lain for existing rows: DPP × (11/12)
+    `UPDATE sport_center.company_invoices SET dpp_nilai_lain = ROUND((total_amount * 11 / 12), 2) WHERE dpp_nilai_lain = 0 AND total_amount > 0`,
+    // sport_vendors master table
+    `CREATE TABLE IF NOT EXISTS sport_center.sport_vendors (
+       id serial PRIMARY KEY,
+       name text NOT NULL,
+       contact_person text,
+       phone text,
+       email text,
+       address text,
+       category text,
+       is_active boolean NOT NULL DEFAULT true,
+       notes text,
+       created_at timestamptz NOT NULL DEFAULT NOW(),
+       updated_at timestamptz NOT NULL DEFAULT NOW()
+     )`,
+    // vendor_id FK on sport_expenses (nullable, idempotent)
+    `ALTER TABLE sport_center.sport_expenses
+       ADD COLUMN IF NOT EXISTS vendor_id int REFERENCES sport_center.sport_vendors(id) ON DELETE SET NULL`,
+    // company_document_settings — background template overlay columns
+    `ALTER TABLE sport_center.company_document_settings
+       ADD COLUMN IF NOT EXISTS bg_template_url text`,
+    `ALTER TABLE sport_center.company_document_settings
+       ADD COLUMN IF NOT EXISTS bg_template_type text`,
+    `ALTER TABLE sport_center.company_document_settings
+       ADD COLUMN IF NOT EXISTS bg_template_active boolean NOT NULL DEFAULT false`,
+    // Daily admin WhatsApp usage-list delivery state
+    `CREATE TABLE IF NOT EXISTS sport_center.wa_daily_usage_snapshots (
+       id serial PRIMARY KEY,
+       usage_date text NOT NULL UNIQUE,
+       fingerprint text NOT NULL,
+       sent_at timestamptz NOT NULL DEFAULT NOW()
+     )`,
+    // ── gym_memberships (gym member bulanan) ─────────────────────────────
+    // membership_status enum (idempotent)
+    "DO $body$ BEGIN " +
+      "CREATE TYPE sport_center.membership_status AS ENUM " +
+      "('pending_payment','waiting_confirmation','active','expired','cancelled'); " +
+      "EXCEPTION WHEN duplicate_object THEN null; END $body$",
+    // enum values idempotently (required for pre-existing enums)
+    "DO $body$ BEGIN ALTER TYPE sport_center.membership_status ADD VALUE IF NOT EXISTS 'pending_payment'; EXCEPTION WHEN others THEN null; END $body$",
+    "DO $body$ BEGIN ALTER TYPE sport_center.membership_status ADD VALUE IF NOT EXISTS 'waiting_confirmation'; EXCEPTION WHEN others THEN null; END $body$",
+    "DO $body$ BEGIN ALTER TYPE sport_center.membership_status ADD VALUE IF NOT EXISTS 'active'; EXCEPTION WHEN others THEN null; END $body$",
+    "DO $body$ BEGIN ALTER TYPE sport_center.membership_status ADD VALUE IF NOT EXISTS 'expired'; EXCEPTION WHEN others THEN null; END $body$",
+    "DO $body$ BEGIN ALTER TYPE sport_center.membership_status ADD VALUE IF NOT EXISTS 'cancelled'; EXCEPTION WHEN others THEN null; END $body$",
+    `CREATE TABLE IF NOT EXISTS sport_center.sport_memberships (
+       id                serial PRIMARY KEY,
+       name              text NOT NULL,
+       email             text NOT NULL,
+       phone             text NOT NULL,
+       start_date        text NOT NULL,
+       end_date          text NOT NULL,
+       months            integer NOT NULL DEFAULT 1,
+       total_price       numeric(12,2) NOT NULL,
+       status            sport_center.membership_status NOT NULL DEFAULT 'active',
+       notes             text,
+       payment_method    text,
+       payment_proof_url text,
+       created_at        timestamptz NOT NULL DEFAULT NOW(),
+       updated_at        timestamptz NOT NULL DEFAULT NOW()
+     )`,
+    // ── ap_members (Angkasa Pura member list) ─────────────────────────────
+    `CREATE TABLE IF NOT EXISTS sport_center.ap_members (
+       id             serial PRIMARY KEY,
+       name           text NOT NULL,
+       phone          text,
+       email          text,
+       id_card_number text NOT NULL,
+       is_active      boolean NOT NULL DEFAULT true,
+       created_at     timestamptz NOT NULL DEFAULT NOW(),
+       updated_at     timestamptz NOT NULL DEFAULT NOW()
+     )`,
+    "DO $body$ BEGIN ALTER TABLE sport_center.ap_members ADD CONSTRAINT ap_members_id_card_number_unique UNIQUE (id_card_number); EXCEPTION WHEN others THEN null; END $body$",
+    // ── verification_logs ────────────────────────────────────────────────
+    `CREATE TABLE IF NOT EXISTS sport_center.verification_logs (
+       id                   serial PRIMARY KEY,
+       booking_id           integer REFERENCES sport_center.sport_bookings(id) ON DELETE CASCADE,
+       order_number         text,
+       verified_by_user_id  integer,
+       id_card_number_input text NOT NULL,
+       status               text NOT NULL,
+       notes                text,
+       ip_address           text,
+       created_at           timestamptz NOT NULL DEFAULT NOW()
+     )`,
+    // ── discount_settings ────────────────────────────────────────────────
+    `CREATE TABLE IF NOT EXISTS sport_center.discount_settings (
+       id                  serial PRIMARY KEY,
+       customer_type       text NOT NULL,
+       discount_percentage integer NOT NULL DEFAULT 0,
+       description         text,
+       is_active           boolean NOT NULL DEFAULT true,
+       updated_at          timestamptz NOT NULL DEFAULT NOW()
+     )`,
+    "DO $body$ BEGIN ALTER TABLE sport_center.discount_settings ADD CONSTRAINT discount_settings_customer_type_unique UNIQUE (customer_type); EXCEPTION WHEN others THEN null; END $body$",
+    // ── corporate_booking_documentation ──────────────────────────────────────
+    `CREATE TABLE IF NOT EXISTS sport_center.corporate_booking_documentation (
+       id          serial PRIMARY KEY,
+       booking_id  int NOT NULL REFERENCES sport_center.sport_bookings(id) ON DELETE CASCADE,
+       company_id  int REFERENCES sport_center.users(id) ON DELETE SET NULL,
+       uploaded_by text NOT NULL DEFAULT 'customer',
+       file_url    text NOT NULL,
+       file_name   text,
+       caption     text,
+       created_at  timestamptz NOT NULL DEFAULT NOW()
+     )`,
+    // ── company_invoices: payment proof fields + waiting_verification status ─
+    `ALTER TABLE sport_center.company_invoices ADD COLUMN IF NOT EXISTS payment_proof_url text`,
+    `ALTER TABLE sport_center.company_invoices ADD COLUMN IF NOT EXISTS payment_notes text`,
+    `DO $mig$ BEGIN ALTER TYPE sport_center.invoice_status ADD VALUE IF NOT EXISTS 'waiting_verification'; EXCEPTION WHEN OTHERS THEN null; END $mig$`,
+    // ── paylabs_settings ─────────────────────────────────────────────────────
+    `CREATE TABLE IF NOT EXISTS sport_center.paylabs_settings (
+       id                     SERIAL PRIMARY KEY,
+       title                  TEXT    NOT NULL DEFAULT 'Online Payment (Bank Transfer, Virtual Account, QRIS)',
+       description            TEXT    NOT NULL DEFAULT '',
+       send_invoice           BOOLEAN NOT NULL DEFAULT TRUE,
+       charge_customer        BOOLEAN NOT NULL DEFAULT FALSE,
+       new_order_status       TEXT    NOT NULL DEFAULT 'completed',
+       debug_mode             BOOLEAN NOT NULL DEFAULT FALSE,
+       sandbox_mode           BOOLEAN NOT NULL DEFAULT TRUE,
+       store_id               TEXT    NOT NULL DEFAULT '',
+       sandbox_public_key     TEXT    NOT NULL DEFAULT '',
+       sandbox_private_key    TEXT    NOT NULL DEFAULT '',
+       sandbox_merchant_id    TEXT    NOT NULL DEFAULT '',
+       prod_public_key        TEXT    NOT NULL DEFAULT '',
+       prod_private_key       TEXT    NOT NULL DEFAULT '',
+       prod_merchant_id       TEXT    NOT NULL DEFAULT '',
+       payment_methods_config JSONB,
+       created_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+       updated_at             TIMESTAMPTZ NOT NULL DEFAULT NOW()
+     )`,
+     `DO $$ BEGIN
+        CREATE TYPE sport_center.corporate_subscription_status AS ENUM ('active','paused','stop_requested','stopped');
+      EXCEPTION WHEN duplicate_object THEN null; END $$`,
+     `CREATE TABLE IF NOT EXISTS sport_center.corporate_subscriptions (
+        id SERIAL PRIMARY KEY,
+        company_id INTEGER NOT NULL REFERENCES sport_center.users(id),
+        facility_id INTEGER NOT NULL REFERENCES sport_center.facilities(id),
+        day_of_week INTEGER NOT NULL CHECK (day_of_week BETWEEN 0 AND 6),
+        start_time TEXT NOT NULL,
+        end_time TEXT NOT NULL,
+        effective_start_date TEXT NOT NULL,
+        billing_period TEXT NOT NULL DEFAULT 'monthly',
+        status sport_center.corporate_subscription_status NOT NULL DEFAULT 'active',
+        created_by INTEGER REFERENCES sport_center.users(id) ON DELETE SET NULL,
+        stopped_at TIMESTAMPTZ,
+        stopped_by INTEGER REFERENCES sport_center.users(id) ON DELETE SET NULL,
+        stop_reason TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )`,
+     `CREATE TABLE IF NOT EXISTS sport_center.corporate_occurrences (
+        id SERIAL PRIMARY KEY,
+        subscription_id INTEGER NOT NULL REFERENCES sport_center.corporate_subscriptions(id) ON DELETE CASCADE,
+        occurrence_date TEXT NOT NULL,
+        booking_id INTEGER REFERENCES sport_center.sport_bookings(id) ON DELETE SET NULL,
+        status TEXT NOT NULL DEFAULT 'scheduled',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        CONSTRAINT corporate_occurrences_subscription_date_unique UNIQUE (subscription_id, occurrence_date)
+      )`,
+     `CREATE TABLE IF NOT EXISTS sport_center.usage_proofs (
+        id SERIAL PRIMARY KEY,
+        booking_id INTEGER NOT NULL REFERENCES sport_center.sport_bookings(id) ON DELETE CASCADE,
+        storage_path TEXT NOT NULL,
+        photo_url TEXT NOT NULL,
+        uploaded_by INTEGER REFERENCES sport_center.users(id) ON DELETE SET NULL,
+        captured_at TIMESTAMPTZ,
+        uploaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )`,
+     `ALTER TABLE sport_center.sport_bookings ADD COLUMN IF NOT EXISTS subscription_id INTEGER`,
+     `ALTER TABLE sport_center.sport_bookings ADD COLUMN IF NOT EXISTS occurrence_id INTEGER`,
+  ];
+
+  for (const stmt of migrations) {
+    try {
+      await db.execute(sql.raw(stmt));
+    } catch (err) {
+      logger.warn({ err, stmt: stmt.slice(0, 80) }, "Startup migration warning (non-fatal)");
+    }
+  }
+  logger.info("Development startup migrations OK");
+}
+
+// env validation already ran above (step 2) — no-op placeholder kept for clarity
+
+async function runStartupSeed() {
+  // ── Pre-flight: SESSION_SECRET must be set — no hardcoded fallback ──────────
+  const SECRET = process.env.SESSION_SECRET;
+  if (!SECRET) {
+    logger.error(
+      "Startup seed SKIPPED: SESSION_SECRET is not set. " +
+      "Admin credentials cannot be seeded without a valid secret. " +
+      "Set SESSION_SECRET in the environment and restart the server."
+    );
+    return;
+  }
+
+  function hashPassword(password: string): string {
+    return crypto.createHmac("sha256", SECRET!).update(password).digest("hex");
+  }
+
+  // ── Pre-flight: verify core tables exist before attempting any seed ─────────
+  // If migrations failed or haven't run yet, the tables won't be present and we
+  // must skip rather than crash or partially seed.
+  try {
+    const checkResult = await db.execute<{ count: string }>(sql.raw(`
+      SELECT COUNT(*)::text AS count
+      FROM information_schema.tables
+      WHERE table_schema = 'sport_center'
+        AND table_name IN ('users', 'sport_settings', 'sport_facilities')
+    `));
+    const coreTableCount = parseInt((checkResult.rows as Array<{ count: string }>)[0]?.count ?? "0", 10);
+    if (coreTableCount < 3) {
+      logger.warn(
+        { coreTableCount },
+        "Startup seed SKIPPED: core tables (users / sport_settings / sport_facilities) " +
+        "are not all present yet — migrations may not have completed."
+      );
+      return;
+    }
+  } catch (err) {
+    logger.warn({ err }, "Startup seed SKIPPED: could not verify core table presence");
+    return;
+  }
+
+  // ── Seed within a transaction protected by a PostgreSQL advisory lock ───────
+  // pg_advisory_xact_lock ensures that even with multiple concurrent server
+  // instances starting simultaneously, exactly one performs the seed. The lock
+  // is released automatically when the transaction commits or rolls back.
+  // Lock key 6174737363 = "scsc" in ASCII (sport-center startup seed coordinator).
+  const SEED_LOCK_ID = 6174737363;
+
+  const facilitySeed = [
+    {
+      name: "Lapangan Badminton A",
+      category: "Badminton",
+      description: "Lapangan badminton indoor premium dengan lantai kayu parket, pencahayaan LED terang, dan AC.",
+      pricePerHour: "80000",
+      openTime: "06:00",
+      closeTime: "22:00",
+      minDuration: 1,
+      maxDuration: 4,
+      capacity: 4,
+      isActive: true,
+    },
+    {
+      name: "Lapangan Badminton B",
+      category: "Badminton",
+      description: "Lapangan badminton indoor dengan fasilitas lengkap. Cocok untuk latihan dan pertandingan.",
+      pricePerHour: "75000",
+      openTime: "06:00",
+      closeTime: "22:00",
+      minDuration: 1,
+      maxDuration: 4,
+      capacity: 4,
+      isActive: true,
+    },
+    {
+      name: "Lapangan Tenis",
+      category: "Tenis",
+      description: "Lapangan tenis indoor dengan permukaan hard court standar ITF dan net berkualitas.",
+      pricePerHour: "120000",
+      openTime: "06:00",
+      closeTime: "21:00",
+      minDuration: 1,
+      maxDuration: 3,
+      capacity: 4,
+      isActive: true,
+    },
+  ];
+
+  try {
+    await db.transaction(async (tx) => {
+      // Acquire transaction-scoped advisory lock — blocks until acquired, then
+      // released automatically on transaction end (commit or rollback).
+      await tx.execute(sql.raw(`SELECT pg_advisory_xact_lock(${SEED_LOCK_ID})`));
+
+      // ── Admin user (INSERT only — never overwrite an existing account) ──────
+      // All existence checks happen AFTER acquiring the lock so a second instance
+      // that waited for the lock will observe the already-seeded data and skip.
+      //
+      // Credential strategy:
+      //   1. Use ADMIN_BOOTSTRAP_PASSWORD env var if explicitly set by the operator.
+      //   2. Otherwise generate a cryptographically random 24-char password and log
+      //      it ONCE to stdout so the operator can retrieve it from deployment logs.
+      //      This is equivalent to the GitLab/Jenkins first-boot pattern — the
+      //      password is never hardcoded and never sent to any client.
+      const existingAdmin = await tx
+        .select({ id: usersTable.id })
+        .from(usersTable)
+        .where(eq(usersTable.email, "admin@sportcenter.com"))
+        .limit(1);
+
+      if (existingAdmin.length === 0) {
+        const bootstrapEnvPassword = process.env.ADMIN_BOOTSTRAP_PASSWORD;
+        const isGeneratedPassword = !bootstrapEnvPassword;
+        const plainPassword = bootstrapEnvPassword ?? crypto.randomBytes(18).toString("base64url");
+        const passwordHash = hashPassword(plainPassword);
+
+        const adminEmail = process.env.ADMIN_BOOTSTRAP_EMAIL ?? "admin@sportcenter.com";
+
+        await tx.insert(usersTable).values({
+          name: "Admin",
+          email: adminEmail,
+          passwordHash,
+          role: "admin",
+        });
+
+        if (isGeneratedPassword) {
+          // Log the generated password prominently — operator MUST read this from
+          // deployment logs. This value is never sent to any client.
+          logger.info(
+            "\n╔══════════════════════════════════════════════════════════════╗\n" +
+            "║  FIRST-BOOT ADMIN CREDENTIALS — SAVE IMMEDIATELY            ║\n" +
+            "║  These will not be shown again.                             ║\n" +
+            "╠══════════════════════════════════════════════════════════════╣\n" +
+            `║  Email   : ${adminEmail.padEnd(50)}║\n` +
+            `║  Password: ${plainPassword.padEnd(50)}║\n` +
+            "║                                                              ║\n" +
+            "║  Change this password at your earliest opportunity.         ║\n" +
+            "╚══════════════════════════════════════════════════════════════╝\n"
+          );
+        } else {
+          logger.info({ email: adminEmail }, "Startup seed: admin user created with ADMIN_BOOTSTRAP_PASSWORD");
+        }
+      } else {
+        logger.info("Startup seed: admin user already exists — leaving untouched");
+      }
+
+      // ── Default settings (INSERT only when table is empty) ─────────────────
+      const existingSettings = await tx
+        .select({ id: settingsTable.id })
+        .from(settingsTable)
+        .limit(1);
+
+      if (existingSettings.length === 0) {
+        await tx.insert(settingsTable).values({
+          centerName: "Sport Center Jakarta",
+          address: "Jl. Sudirman No. 123, Jakarta Pusat",
+          phone: "+62-21-1234567",
+          whatsapp: "+6281216104734",
+          email: "info@sportcenterjakarta.com",
+          openHour: "06:00",
+          closeHour: "22:00",
+          bankName: "BCA",
+          bankAccount: "1234567890",
+          bankAccountName: "Sport Center Jakarta",
+          qrisImageUrl: "/uploads/qris-263226c1-c51d-4353-9165-cedaba32adb4.jpeg",
+        });
+        logger.info("Startup seed: default settings created");
+      }
+
+      // ── Default facilities (only those that don't already exist) ───────────
+      const existingFacilities = await tx
+        .select({ name: facilitiesTable.name })
+        .from(facilitiesTable);
+      const existingNames = new Set(existingFacilities.map((f: { name: string }) => f.name));
+      const missing = facilitySeed.filter((f) => !existingNames.has(f.name));
+      if (missing.length > 0) {
+        await tx.insert(facilitiesTable).values(missing);
+        logger.info({ count: missing.length }, "Startup seed: default facilities created");
+      }
+    });
+  } catch (err) {
+    logger.error({ err }, "Startup seed ERROR: seed transaction failed");
+  }
+}
+
+// This is a financial safety migration, not a best-effort schema migration.
+// Finish it before binding the port so every confirmation entry point
+// (admin, WhatsApp, reconciliation, and gateway callbacks) sees the same
+// verified trigger from its first request.
+try {
+  await startPaymentMirrorMigration();
+  logger.info("Payment mirror migration verified");
+} catch (err) {
+  logger.error({ err }, "Payment mirror migration FAILED; refusing to accept traffic");
+  throw err;
+}
+
+// Bind the port immediately so the deployment health check passes, then run
+// migrations and seed in the background. Previously migrations ran before
+// app.listen(), which meant a slow/paused Supabase DB would timeout and
+// the port would never open, causing the deploy to fail.
+app.listen(port, (err) => {
+  if (err) {
+    logger.error({ err }, "Error listening on port");
+    process.exit(1);
+  }
+
+  logger.info({ port }, "Server listening");
+  if (process.env.NODE_ENV !== "production") {
+    initBizportalTables().catch(() => {});
+    ensureDefaultTemplates().catch(() => {});
+  } else {
+    logger.info("Production schema provisioning is external; skipping BizPortal setup and template seeding");
+  }
+  // Local development can use the configured local database without requiring
+  // Supabase Storage. Production always verifies its remote storage only.
+  if (process.env.NODE_ENV === "development" && process.env.DATABASE_URL) {
+    logger.info("Skipping Supabase Storage bucket validation for local development");
+  } else {
+    import("./lib/supabaseStorage").then(({ validateBuckets }) => {
+      validateBuckets().catch((err) =>
+        logger.warn({ err }, "Storage bucket validation failed (non-fatal)")
+      );
+    });
+  }
+
+  if (process.env.NODE_ENV !== "production") {
+    // Development-only schema/data setup. Production schema provisioning is
+    // handled externally and must never be performed by application startup.
+    runStartupMigrations()
+      .then(() => runStartupSeed())
+      .then(() => startScheduler())
+      .catch((err) => logger.error({ err }, "Background development startup task error"));
+  } else {
+    logger.info("Production startup migrations and seed disabled");
+    startScheduler();
+  }
+});

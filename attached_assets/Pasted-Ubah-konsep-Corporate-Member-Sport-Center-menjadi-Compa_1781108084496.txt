@@ -1,0 +1,102 @@
+Ubah konsep Corporate Member Sport Center menjadi Company Customer Account saja.
+
+Konsep:
+1. Tidak perlu akun karyawan/member perusahaan.
+2. Buat 1 akun customer khusus perusahaan di sport_customers.
+3. Customer perusahaan bisa booking berkali-kali tanpa bayar langsung.
+4. Semua booking atas nama customer perusahaan masuk ke tagihan bulanan.
+5. Invoice akhir bulan dibuat untuk customer perusahaan tersebut.
+
+Tambahkan field ke sport_customers:
+- customer_type: personal/company
+- company_name
+- pic_name
+- pic_phone
+- pic_email
+- billing_address
+- payment_terms_days
+- monthly_credit_limit
+- allow_monthly_billing boolean
+- status
+
+Tambahkan field ke sport_bookings:
+- payer_type: personal/company
+- company_customer_id
+- booked_for_name optional
+- booked_for_phone optional
+- payment_required_now boolean
+- payment_status: menunggu_pembayaran, pembayaran_selesai, tagihan_perusahaan, dibatalkan, pengembalian_dana
+- billing_status: unbilled, billed, paid
+
+Alur booking:
+1. Saat customer login/booking via WhatsApp, sistem cek apakah nomor WA terdaftar sebagai customer_type = company.
+2. Jika customer_type = company dan allow_monthly_billing = true:
+   - Booking tidak wajib bayar langsung.
+   - payment_required_now = false
+   - payment_status = tagihan_perusahaan
+   - billing_status = unbilled
+   - booking_status = confirmed
+3. Form booking cukup isi:
+   - fasilitas
+   - tanggal
+   - jam mulai
+   - durasi
+   - catatan
+   - booked_for_name optional
+   - booked_for_phone optional
+4. Sistem tetap cek bentrok jadwal.
+5. Booking langsung masuk ke Admin Portal > Sport Center > Booking.
+
+Invoice akhir bulan:
+1. Tambahkan menu Sport Center > Company Billing.
+2. Admin bisa pilih customer perusahaan dan periode bulan.
+3. Sistem menampilkan semua booking dengan:
+   customer_type = company
+   billing_status = unbilled
+4. Admin klik Generate Monthly Invoice.
+5. Invoice berisi:
+   - nama perusahaan
+   - PIC perusahaan
+   - periode tagihan
+   - daftar booking
+   - tanggal
+   - fasilitas
+   - jam
+   - durasi
+   - booked_for_name jika ada
+   - harga
+   - subtotal
+   - PPN jika aktif
+   - total tagihan
+6. Setelah invoice dibuat:
+   - billing_status booking berubah menjadi billed
+   - invoice status = unpaid
+7. Setelah perusahaan bayar:
+   - invoice status = paid
+   - booking billing_status = paid
+   - payment_status = pembayaran_selesai
+
+WhatsApp:
+1. Jika customer perusahaan booking via WA, balasan:
+   "Booking berhasil atas nama {{companyName}}. Pembayaran akan masuk ke tagihan bulanan."
+2. Admin menerima WA:
+   "Booking perusahaan masuk: {{companyName}}, {{facility}}, {{date}}, {{time}}."
+3. Akhir bulan, sistem bisa kirim WA ke PIC perusahaan:
+   - total tagihan
+   - link invoice PDF
+   - jatuh tempo pembayaran
+
+Admin Portal:
+1. Di Customer, tambahkan pilihan jenis customer:
+   - Personal
+   - Company
+2. Di Booking, tampilkan badge:
+   - Company Billing
+   - Unbilled / Billed / Paid
+3. Di Payment, booking company tidak perlu bukti pembayaran saat awal booking.
+4. Di laporan revenue, pisahkan:
+   - Revenue personal paid
+   - Corporate billing unpaid
+   - Corporate billing paid
+
+Pastikan tidak membuat tabel company_members lagi dan tidak membutuhkan akun karyawan/pelanggan.

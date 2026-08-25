@@ -1,0 +1,152 @@
+import { createRequire } from "node:module";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { build as esbuild } from "esbuild";
+import esbuildPluginPino from "esbuild-plugin-pino";
+import { rm, writeFile } from "node:fs/promises";
+
+// Plugins (e.g. 'esbuild-plugin-pino') may use `require` to resolve dependencies
+globalThis.require = createRequire(import.meta.url);
+
+const artifactDir = path.dirname(fileURLToPath(import.meta.url));
+
+async function buildAll() {
+  const distDir = path.resolve(artifactDir, "dist");
+  await rm(distDir, { recursive: true, force: true });
+
+  await esbuild({
+    entryPoints: [path.resolve(artifactDir, "src/bootstrap.ts")],
+    platform: "node",
+    bundle: true,
+    format: "esm",
+    outdir: distDir,
+    outExtension: { ".js": ".mjs" },
+    // Database migrations stored as SQL files are bundled as strings so the
+    // deployed API can apply them at startup; runtime file paths are not
+    // reliable in the artifact deployment bundle.
+    loader: { ".sql": "text" },
+    logLevel: "info",
+    // Some packages may not be bundleable, so we externalize them, we can add more here as needed.
+    // Some of the packages below may not be imported or installed, but we're adding them in case they are in the future.
+    // Examples of unbundleable packages:
+    // - uses native modules and loads them dynamically (e.g. sharp)
+    // - use path traversal to read files (e.g. @google-cloud/secret-manager loads sibling .proto files)
+    external: [
+      "*.node",
+      "sharp",
+      "better-sqlite3",
+      "sqlite3",
+      "canvas",
+      "bcrypt",
+      "argon2",
+      "fsevents",
+      "re2",
+      "farmhash",
+      "xxhash-addon",
+      "ws",
+      "bufferutil",
+      "utf-8-validate",
+      "ssh2",
+      "cpu-features",
+      "dtrace-provider",
+      "isolated-vm",
+      "lightningcss",
+      "pg",
+      "pg-native",
+      "oracledb",
+      "mongodb-client-encryption",
+      "nodemailer",
+      "handlebars",
+      "knex",
+      "typeorm",
+      "protobufjs",
+      "onnxruntime-node",
+      "@tensorflow/*",
+      "@prisma/client",
+      "@mikro-orm/*",
+      "@grpc/*",
+      "@swc/*",
+      "@aws-sdk/*",
+      "@azure/*",
+      "@opentelemetry/*",
+      "@google-cloud/*",
+      "@google/*",
+      "firebase-admin",
+      "@parcel/watcher",
+      "@sentry/profiling-node",
+      "@tree-sitter/*",
+      "aws-sdk",
+      "classic-level",
+      "dd-trace",
+      "ffi-napi",
+      "grpc",
+      "hiredis",
+      "kerberos",
+      "leveldown",
+      "miniflare",
+      "mysql2",
+      "newrelic",
+      "odbc",
+      "piscina",
+      "realm",
+      "ref-napi",
+      "rocksdb",
+      "sass-embedded",
+      "sequelize",
+      "serialport",
+      "snappy",
+      "tinypool",
+      "usb",
+      "workerd",
+      "wrangler",
+      "zeromq",
+      "zeromq-prebuilt",
+      "xlsx",
+      "googleapis",
+      "openai",
+      // tesseract.js creates a Node worker by resolving sibling files at
+      // runtime. Bundling moves its worker-script path beside dist/ and makes
+      // every image proof upload crash the API with MODULE_NOT_FOUND.
+      // Keep it external so Node executes it from node_modules, where the
+      // worker assets remain available.
+      "tesseract.js",
+      // "@replit/object-storage" intentionally removed from external list.
+      // gae-deploy/package.json excludes this Replit-only package, so it must
+      // be bundled inline. The code that calls it is guarded by IS_PRODUCTION,
+      // so it is never executed on App Engine — but the module must resolve at
+      // import time. Bundling inline prevents the missing-package crash.
+      "playwright",
+      "puppeteer",
+      "puppeteer-core",
+      "electron",
+    ],
+    sourcemap: "linked",
+    plugins: [
+      // pino relies on workers to handle logging, instead of externalizing it we use a plugin to handle it
+      esbuildPluginPino({ transports: ["pino-pretty"] })
+    ],
+    // Make sure packages that are cjs only (e.g. express) but are bundled continue to work in our esm output file
+    banner: {
+      js: `import { createRequire as __bannerCrReq } from 'node:module';
+import __bannerPath from 'node:path';
+import __bannerUrl from 'node:url';
+
+globalThis.require = __bannerCrReq(import.meta.url);
+globalThis.__filename = __bannerUrl.fileURLToPath(import.meta.url);
+globalThis.__dirname = __bannerPath.dirname(globalThis.__filename);
+    `,
+    },
+  });
+
+  // Artifact service metadata launches dist/index.mjs, while the application
+  // entry point must be bootstrap.mjs so Secret Manager runs before modules
+  // read production configuration. Keep a tiny compatibility launcher for
+  // the registered artifact command and the explicit bootstrap artifact used
+  // by the workspace deployment configuration.
+  await writeFile(path.join(distDir, "index.mjs"), 'import "./bootstrap.mjs";\n');
+}
+
+buildAll().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

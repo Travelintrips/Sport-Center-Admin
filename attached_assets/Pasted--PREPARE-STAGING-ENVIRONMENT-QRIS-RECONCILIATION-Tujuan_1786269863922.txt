@@ -1,0 +1,463 @@
+# PREPARE STAGING ENVIRONMENT — QRIS RECONCILIATION
+
+Tujuan task ini adalah menyiapkan environment **staging yang benar-benar terpisah dari development dan production** agar QRIS smoke test dapat dijalankan dengan aman.
+
+JANGAN menjalankan final reconciliation, accounting posting, historical backfill, atau production deployment.
+
+---
+
+# 1. ENVIRONMENT GATE
+
+Sebelum melakukan write apa pun, identifikasi environment.
+
+Staging harus mempunyai identity yang eksplisit, misalnya:
+
+`APP_ENV=staging`
+
+dan database/project yang berbeda dari:
+
+* development;
+* production.
+
+Tampilkan secara sanitized:
+
+* APP_ENV;
+* database host;
+* project reference;
+* database name;
+* schema;
+* deployment/workflow target.
+
+Jangan tampilkan secret.
+
+Jika staging menggunakan database development yang sama:
+
+STOP.
+
+Jika staging menggunakan production:
+
+STOP.
+
+Status:
+
+`STAGING_ISOLATION_FAILED`
+
+---
+
+# 2. STAGING SECRETS
+
+Pastikan staging memiliki secret/config terpisah.
+
+Minimal:
+
+* database URL staging;
+* Supabase URL staging;
+* service role staging;
+* session secret staging;
+* GCP Secret Manager bootstrap/config jika digunakan;
+* Paylabs staging/sandbox credentials jika smoke test Paylabs akan dilakukan.
+
+Jangan copy production secret secara manual ke source code.
+
+Jangan print secret values.
+
+---
+
+# 3. STAGING DATABASE
+
+Pastikan staging database/schema memiliki migration enrichment terbaru.
+
+Verifikasi secara read-only terlebih dahulu:
+
+`sport_center.sport_payments`
+
+dan:
+
+`public.sport_payments`
+
+memiliki:
+
+* company_id
+* bank_account_id
+* payment_provider
+* provider_reference
+* merchant_trade_no
+* provider_trade_no
+* paid_at
+* expected_settlement_date
+
+Pastikan reconciliation/config tables tersedia.
+
+Migration harus additive/backward-compatible.
+
+---
+
+# 4. STAGING COMPANY
+
+Siapkan dedicated staging company jika belum ada.
+
+Gunakan nama eksplisit seperti:
+
+`CST QRIS STAGING COMPANY`
+
+Jangan menggunakan company production sebagai test target kecuali staging memang mirror sanitized dan prosedurnya menyatakan aman.
+
+Catat:
+
+`company_id`
+
+untuk smoke test.
+
+---
+
+# 5. STAGING BANK ACCOUNTS
+
+Siapkan minimal satu settlement account staging.
+
+Ideal:
+
+`QRIS STAGING SETTLEMENT ACCOUNT`
+
+Jika ingin menguji account separation, siapkan account kedua:
+
+`QRIS STAGING ALT ACCOUNT`
+
+Jangan menggunakan nomor rekening production asli.
+
+Jika schema memerlukan bank identity/account number, gunakan staging/test/sanitized value.
+
+---
+
+# 6. PAYMENT SETTLEMENT CONFIGS
+
+Isi configuration staging untuk:
+
+`company + provider + effective date → bank account`
+
+Minimal:
+
+### Mandiri Direct
+
+`company_id = staging company`
+
+`provider = mandiri_direct`
+
+`bank_account_id = staging settlement account`
+
+### Paylabs
+
+`company_id = staging company`
+
+`provider = paylabs`
+
+`bank_account_id = staging settlement account`
+
+Rekening boleh sama jika memang ingin menguji same-account multi-provider behavior.
+
+Config harus:
+
+* effective-dated;
+* active/current;
+* auditable.
+
+---
+
+# 7. PROVIDER SETTLEMENT RULES
+
+Siapkan staging rules untuk:
+
+`mandiri_direct`
+
+dan:
+
+`paylabs`.
+
+Minimal:
+
+* provider
+* company
+* bank account
+* settlement delay business days
+* match window business days
+* effective from
+* rule version
+* status/active semantics sesuai schema
+
+Untuk smoke test boleh menggunakan:
+
+`1 business day`
+
+jika diberi label:
+
+`STAGING_TEST_RULE`
+
+Jangan menyebut rule tersebut production truth.
+
+---
+
+# 8. BUSINESS CALENDAR
+
+Isi staging business calendar.
+
+Minimal:
+
+* weekend handling;
+* beberapa tanggal sekitar smoke-test period;
+* satu staging/test holiday.
+
+Gunakan timezone:
+
+`Asia/Jakarta`.
+
+Jika menggunakan holiday synthetic:
+
+beri marker:
+
+`STAGING_TEST_HOLIDAY`.
+
+Jangan memasukkan test holiday ke production calendar.
+
+---
+
+# 9. MDR TEST CONFIG
+
+Siapkan staging-only MDR validation configuration.
+
+Boleh gunakan:
+
+Mandiri Direct:
+`0.003`
+
+Paylabs:
+`0.007`
+
+HANYA jika diberi label:
+
+`STAGING_TEST_ONLY`
+
+dan tidak dianggap kontrak production.
+
+Simpan tolerance yang konservatif.
+
+Jangan hardcode angka di matcher.
+
+---
+
+# 10. GOOGLE SHEET SOURCE MAPPING
+
+Siapkan dedicated Google Sheet/import source staging.
+
+Mapping:
+
+`staging source`
+→ `staging company`
+→ `staging bank account`
+
+Gunakan identifier source yang stabil:
+
+* spreadsheet ID;
+* sheet/tab;
+* import source ID.
+
+Jangan menggunakan production Google Sheet.
+
+---
+
+# 11. PROVIDER EVIDENCE
+
+Jika staging sheet digunakan untuk Mandiri/Paylabs mutations:
+
+pastikan provider evidence dapat diuji.
+
+Boleh melalui:
+
+* provider-specific staging source;
+* settlement/reference field;
+* deterministic sanitized description.
+
+Jangan menentukan provider hanya karena bank account bertipe Mandiri.
+
+---
+
+# 12. STAGING PAYLABS
+
+Jika Paylabs sandbox/staging tersedia:
+
+konfigurasikan gateway hanya ke sandbox/staging endpoint.
+
+Jangan melakukan request ke production Paylabs.
+
+Verifikasi:
+
+* merchant ID staging/sandbox;
+* store ID staging/sandbox;
+* callback URL staging;
+* signing key staging.
+
+Jangan tampilkan credential.
+
+---
+
+# 13. STAGING MANDIRI DIRECT
+
+Jika tidak ada Mandiri QRIS sandbox nyata:
+
+jangan melakukan financial transaction ke rekening production.
+
+Gunakan staging/manual QRIS simulation sesuai existing test mechanism.
+
+Tujuan smoke test adalah memvalidasi:
+
+payment creation
+→ enrichment
+→ mirror
+→ candidate engine
+
+bukan memindahkan uang nyata.
+
+---
+
+# 14. CONFIGURATION VALIDATION
+
+Setelah staging config dibuat, jalankan SELECT/read-only report.
+
+Expected:
+
+`payment_settlement_configs > 0`
+
+`provider settlement rules > 0`
+
+`business calendar rows > 0`
+
+`bank import source mappings > 0`
+
+staging company exists
+
+staging bank account exists.
+
+Buat tabel:
+
+| Configuration             | Count | Status |
+| ------------------------- | ----: | ------ |
+| Company                   |       |        |
+| Bank account              |       |        |
+| Mandiri settlement config |       |        |
+| Paylabs settlement config |       |        |
+| Mandiri rule              |       |        |
+| Paylabs rule              |       |        |
+| Calendar                  |       |        |
+| Sheet mapping             |       |        |
+| MDR test config           |       |        |
+
+---
+
+# 15. RUN CODE VALIDATION
+
+Sebelum smoke transaction:
+
+* typecheck libs;
+* scripts typecheck;
+* API typecheck;
+* API build;
+* payment/provider tests;
+* classifier tests;
+* environment diagnostic;
+* strict UAT 14/14 regression.
+
+Jangan lanjut jika regression muncul.
+
+---
+
+# 16. DEPLOY TO STAGING ONLY
+
+Deploy enrichment application to staging using project standard deployment process.
+
+Jangan production.
+
+After deploy verify:
+
+`/health`
+
+`/readiness`
+
+`/api/health`
+
+all PASS.
+
+---
+
+# 17. NO SMOKE TRANSACTION YET IF CONFIG INCOMPLETE
+
+Jangan membuat Mandiri/Paylabs smoke transaction jika salah satu belum tersedia:
+
+* company;
+* settlement account;
+* provider rule;
+* business calendar;
+* source mapping;
+* gateway/test route.
+
+Laporkan missing config.
+
+---
+
+# 18. OUTPUT
+
+Berikan:
+
+## A. Staging identity
+
+Buktikan environment/database berbeda dari dev/prod.
+
+## B. Secrets/config readiness
+
+Tanpa secret values.
+
+## C. Schema readiness
+
+## D. Company/account setup
+
+## E. Settlement config
+
+## F. Provider rules
+
+## G. Business calendar
+
+## H. MDR staging test config
+
+## I. Google Sheet source mapping
+
+## J. Paylabs sandbox readiness
+
+## K. Mandiri test readiness
+
+## L. Validation results
+
+## M. Runtime health
+
+## N. Final decision
+
+Gunakan:
+
+`STAGING_READY_FOR_QRIS_SMOKE_TEST`
+
+atau:
+
+`STAGING_NOT_READY`
+
+---
+
+# 19. SAFETY
+
+Jangan:
+
+* production deploy;
+* production DB access/write;
+* production Paylabs;
+* production bank mutation;
+* actual production money movement;
+* final reconciliation;
+* accounting posting;
+* historical backfill apply.
+
+Task selesai ketika staging siap menerima smoke test, bukan ketika reconciliation final dijalankan.
