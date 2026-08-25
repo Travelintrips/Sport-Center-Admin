@@ -1898,6 +1898,9 @@ router.patch("/bookings/:id/dates", adminMiddleware, async (req, res) => {
         return;
       }
     }
+    // Koreksi tanggal administratif adalah perbaikan data historis untuk admin.
+    // Jangan menerapkan aturan ketersediaan di sini: tanggal baru boleh
+    // bertepatan dengan booking lain karena slot tersebut bukan booking baru.
 
     const updated = await db.transaction(async (tx) => {
       const [payment] = await tx
