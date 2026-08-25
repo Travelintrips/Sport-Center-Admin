@@ -939,7 +939,7 @@ function BookingDetailDrawer({
   onUpdatePaymentMethod: (paymentId: number, paymentMethod: string) => void;
   isUpdating: boolean;
   settings?: any;
-  onUpdateDates: (bookingId: number, bookingDate: string, paymentDate?: string) => Promise<void>;
+  onUpdateDates: (bookingId: number, bookingDate?: string, paymentDate?: string) => Promise<void>;
 }) {
   const [adminNotes, setAdminNotes] = useState(booking.adminNotes ?? "");
   const [confirmAction, setConfirmAction] = useState<string | null>(null);
@@ -977,9 +977,16 @@ function BookingDetailDrawer({
 
   const saveDates = async () => {
     if (!bookingDate || (paymentDate && !/^\d{4}-\d{2}-\d{2}$/.test(paymentDate))) return;
+    const nextBookingDate = bookingDate !== originalBookingDate ? bookingDate : undefined;
+    const nextPaymentDate =
+      paymentDate !== originalPaymentDate ? paymentDate || undefined : undefined;
+    if (nextBookingDate === undefined && nextPaymentDate === undefined) return;
+
     setSavingDates(true);
     try {
-      await onUpdateDates(booking.id, bookingDate, paymentDate || undefined);
+      await onUpdateDates(booking.id, nextBookingDate, nextPaymentDate);
+    } catch {
+      // Parent menampilkan notifikasi error yang lebih spesifik dari respons API.
     } finally {
       setSavingDates(false);
     }
@@ -2494,17 +2501,24 @@ export default function AdminBookings() {
     },
   });
 
-  const updateDates = async (bookingId: number, bookingDate: string, paymentDate?: string) => {
+  const updateDates = async (bookingId: number, bookingDate?: string, paymentDate?: string) => {
     const response = await fetch(`${API_BASE}/bookings/${bookingId}/dates`, {
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${getToken()}`,
       },
-      body: JSON.stringify({ bookingDate, paymentDate }),
+      body: JSON.stringify({
+        ...(bookingDate !== undefined ? { bookingDate } : {}),
+        ...(paymentDate !== undefined ? { paymentDate } : {}),
+      }),
     });
     const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data.error ?? "Gagal memperbarui tanggal");
+    if (!response.ok) {
+      const message = data.error ?? "Gagal memperbarui tanggal";
+      toast({ title: "Tanggal tidak dapat diperbarui", description: message, variant: "destructive" });
+      throw new Error(message);
+    }
     queryClient.setQueryData(getListBookingsQueryKey(), (current: any) =>
       Array.isArray(current)
         ? current.map((item) => item.id === data.id ? data : item)

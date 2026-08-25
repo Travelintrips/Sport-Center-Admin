@@ -1936,6 +1936,18 @@ router.patch("/bookings/:id/dates", adminMiddleware, async (req, res) => {
       res.status(400).json({ error: "Booking ini belum memiliki pembayaran yang dapat dikoreksi" });
       return;
     }
+    const message = `${String(err?.message ?? "")} ${String(err?.cause?.message ?? "")}`;
+    if (
+      message.includes("PUBLIC_PAYMENT_ACCOUNTING_ENTRY_MISSING") ||
+      message.includes("REVERSED_PUBLIC_ACCOUNTING_ENTRY_IS_IMMUTABLE") ||
+      message.includes("POSTED_ACCOUNTING_JOURNAL_FINANCIAL_FIELDS_IMMUTABLE")
+    ) {
+      res.status(409).json({
+        error:
+          "Tanggal pembayaran belum dapat dikoreksi karena jurnal akuntansi pembayaran ini belum lengkap atau sudah dikunci. Rekonsiliasi pembayaran terlebih dahulu, lalu coba kembali.",
+      });
+      return;
+    }
     req.log.error({ err }, "Update booking dates error");
     res.status(500).json({ error: "Internal server error" });
   }
