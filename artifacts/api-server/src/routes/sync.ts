@@ -672,7 +672,7 @@ router.get("/admin/audit-bizportal-payment-links", financeMiddleware, async (_re
     res.json({
       success: true,
       mode: "dry_run",
-      policy: "Only unique ref+amount links are eligible; no rows are deleted or voided.",
+      policy: "Only unique, balanced, posted, tax-matched legacy links are eligible; no financial row is created, deleted, voided, or repriced.",
       ...audit,
     });
   } catch (err: any) {
@@ -682,14 +682,14 @@ router.get("/admin/audit-bizportal-payment-links", financeMiddleware, async (_re
 
 /**
  * POST /api/admin/reconcile-bizportal-payment-links
- * Dry-run secara default. Kirim { "apply": true } untuk mengisi hanya
- * public.sport_payments.accounting_payment_id pada pasangan deterministik.
+ * Dry-run secara default. Kirim { "apply": true } untuk mengisi link legacy
+ * yang deterministik dan memulihkan entry/tax pointer yang terbukti yatim.
  */
 router.post("/admin/reconcile-bizportal-payment-links", financeMiddleware, async (req, res) => {
   const apply = req.body?.apply === true;
   try {
     const result = await reconcileLegacySportCenterPaymentLinks({ apply });
-    if (apply && result.linkedRows > 0) {
+    if (apply && (result.linkedRows > 0 || result.repairedEntryRows > 0)) {
       await logAudit({
         action: "RECONCILE_LEGACY_SPORT_CENTER_PAYMENT_LINKS",
         entity: "sport_payments",
@@ -697,15 +697,18 @@ router.post("/admin/reconcile-bizportal-payment-links", financeMiddleware, async
           linkedRows: result.linkedRows,
           appliedCandidateCount: result.appliedCandidateCount,
           appliedCandidateAmount: result.appliedCandidateAmount,
+          repairedEntryRows: result.repairedEntryRows,
+          repairedTaxRows: result.repairedTaxRows,
+          repairedEntryLinks: result.staleEntryRepairCandidates,
           appliedAt: new Date().toISOString(),
-          policy: "No payment, accounting entry, or audit row deleted/voided.",
+          policy: "Only validated foreign-key links were restored; no financial row was created, deleted, voided, or repriced.",
         },
       });
     }
     res.json({
       success: true,
       mode: result.applied ? "apply_safe_links" : "dry_run",
-      policy: "Only unique ref+amount links are eligible; no rows are deleted or voided.",
+      policy: "Only unique, balanced, posted, tax-matched legacy links are eligible; no financial row is created, deleted, voided, or repriced.",
       ...result,
     });
   } catch (err: any) {
