@@ -85,6 +85,18 @@ function isMultigunaFacility(facility: { name?: string | null; category?: string
   return normalized.includes("multiguna");
 }
 
+function isGymFacility(facility: {
+  name?: string | null;
+  category?: string | null;
+  bookingMode?: string | null;
+}): boolean {
+  return (
+    facility.bookingMode === "walk_in" ||
+    /gym|fitness/i.test(facility.name ?? "") ||
+    /gym|fitness/i.test(facility.category ?? "")
+  );
+}
+
 function getApDiscount(basePrice: number, setting: {
   discountPercentage?: number | null;
   discountAmount?: number | null;
@@ -560,10 +572,7 @@ router.post("/bookings", async (req, res) => {
 
     // Legacy Gym records may still have booking_mode = time_slot. Gym access
     // is per visit, so identify it by name/category as a safe fallback.
-    const isGymFacility =
-      /gym|fitness/i.test(facility.name ?? "") ||
-      /gym|fitness/i.test(facility.category ?? "");
-    const isWalkIn = facility.bookingMode === "walk_in" || isGymFacility;
+    const isWalkIn = isGymFacility(facility);
 
     if (isWalkIn) {
       // Gym walk-in: no time slot required, flat rate per visit
@@ -1860,7 +1869,24 @@ router.patch("/bookings/:id/dates", adminMiddleware, async (req, res) => {
       return;
     }
 
-    if (bookingDate !== undefined && bookingDate !== before.bookingDate) {
+    const [facility] = await db
+      .select()
+      .from(facilitiesTable)
+      .where(eq(facilitiesTable.id, before.facilityId))
+      .limit(1);
+    if (!facility) {
+      res.status(404).json({ error: "Fasilitas booking tidak ditemukan" });
+      return;
+    }
+
+    // Gym/walk-in tidak memakai slot jam. Booking lama mungkin masih
+    // menyimpan 06:00–07:00, tetapi tanggalnya tetap boleh dikoreksi tanpa
+    // dibandingkan dengan interval booking lain.
+    if (
+      bookingDate !== undefined &&
+      bookingDate !== before.bookingDate &&
+      !isGymFacility(facility)
+    ) {
       const conflict = await checkSlotConflict(
         before.facilityId,
         bookingDate,
