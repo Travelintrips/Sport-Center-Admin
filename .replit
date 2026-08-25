@@ -7,7 +7,7 @@ deploymentTarget = "autoscale"
 run = [
   "bash",
   "-c",
-  "PORT=8080 NODE_ENV=production node --enable-source-maps ./artifacts/api-server/dist/bootstrap.mjs",
+  "PORT=8080 NODE_ENV=production GCP_SECRET_ID=sport-center node --enable-source-maps ./artifacts/api-server/dist/bootstrap.mjs",
 ]
 build = ["bash", "-c", "pnpm -r --if-present run build"]
 
