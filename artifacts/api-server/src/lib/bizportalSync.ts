@@ -819,8 +819,134 @@ export type LegacySportCenterPaymentAudit = {
   byClassification: Record<LegacyPaymentLinkClassification, { rows: number; amount: number }>;
   safeCandidateCount: number;
   safeCandidateAmount: number;
+  staleEntryRepairCandidateCount: number;
+  staleEntryRepairCandidateAmount: number;
+  staleEntryRepairCandidates: LegacyStaleEntryRepairCandidate[];
   exceptions: LegacySportCenterPaymentAuditRow[];
 };
+
+export type LegacyStaleEntryRepairCandidate = {
+  mirrorId: number;
+  sourcePaymentId: number;
+  accountingPaymentId: number;
+  staleEntryId: number;
+  restoredEntryId: number;
+  taxLineId: number;
+  amount: number;
+};
+
+type PgQueryable = Pick<pg.Pool, "query"> | Pick<pg.PoolClient, "query">;
+
+/**
+ * A stale public.sport_payments.entry_id cannot be restored merely because an
+ * old accounting row shares a reference. Require a unique ref+amount match,
+ * a posted and balanced replacement entry, and matching source/public tax
+ * evidence before returning a candidate.
+ */
+async function findRepairableStaleEntryLinks(
+  pool: PgQueryable,
+): Promise<LegacyStaleEntryRepairCandidate[]> {
+  const { rows } = await pool.query(`
+    SELECT
+      sp.id AS mirror_id,
+      sp.source_payment_id,
+      ap.id AS accounting_payment_id,
+      sp.entry_id AS stale_entry_id,
+      ap.entry_id AS restored_entry_id,
+      tax_line.id AS tax_line_id,
+      sp.amount
+    FROM public.sport_payments sp
+    JOIN sport_center.sport_payments source_payment
+      ON source_payment.id = sp.source_payment_id
+     AND source_payment.status = 'confirmed'
+    JOIN public.accounting_payments ap
+      ON ap.source_type = 'sport_center'
+     AND ap.ref = sp.payment_number
+     AND ap.amount = sp.amount
+    JOIN public.accounting_entries restored_entry
+      ON restored_entry.id = ap.entry_id
+     AND restored_entry.status = 'posted'
+    LEFT JOIN public.accounting_entries stale_entry
+      ON stale_entry.id = sp.entry_id
+    JOIN sport_center.tax_transactions internal_tax
+      ON internal_tax.reference_type = 'sport_center_payment'
+     AND internal_tax.reference_id = source_payment.id
+     AND internal_tax.transaction_type = 'original'
+     AND internal_tax.status = 'posted'
+    JOIN public.gl_tax_lines tax_line
+      ON tax_line.accounting_entry_id = sp.entry_id
+     AND tax_line.tax_type = 'PPN_OUT'
+     AND tax_line.entity_type = 'sport_center_payment'
+     AND tax_line.entity_id = source_payment.id::text
+     AND tax_line.direction = 'out'
+     AND tax_line.rate = internal_tax.tax_rate
+     AND tax_line.base_amount = internal_tax.dpp
+     AND tax_line.tax_amount = internal_tax.tax_amount
+     AND tax_line.period = to_char(internal_tax.transaction_date::date, 'YYYY-MM')
+    WHERE sp.source_payment_id IS NOT NULL
+      AND sp.entry_id IS NOT NULL
+      AND stale_entry.id IS NULL
+      AND (sp.accounting_payment_id IS NULL OR sp.accounting_payment_id = ap.id)
+      AND (restored_entry.source_payment_id IS NULL
+           OR restored_entry.source_payment_id = sp.source_payment_id)
+      AND restored_entry.total_debit = sp.amount
+      AND restored_entry.total_credit = sp.amount
+      AND (
+        SELECT COUNT(*)
+        FROM public.accounting_entry_lines lines
+        WHERE lines.entry_id = restored_entry.id
+      ) >= 2
+      AND (
+        SELECT COALESCE(SUM(lines.debit), 0)
+        FROM public.accounting_entry_lines lines
+        WHERE lines.entry_id = restored_entry.id
+      ) = sp.amount
+      AND (
+        SELECT COALESCE(SUM(lines.credit), 0)
+        FROM public.accounting_entry_lines lines
+        WHERE lines.entry_id = restored_entry.id
+      ) = sp.amount
+      AND (
+        SELECT COUNT(*)
+        FROM public.sport_payments same_payment
+        WHERE same_payment.payment_number = ap.ref
+          AND same_payment.amount = ap.amount
+      ) = 1
+      AND (
+        SELECT COUNT(*)
+        FROM public.accounting_payments same_accounting_payment
+        WHERE same_accounting_payment.source_type = 'sport_center'
+          AND same_accounting_payment.ref = ap.ref
+          AND same_accounting_payment.amount = ap.amount
+      ) = 1
+      AND (
+        SELECT COUNT(*)
+        FROM sport_center.tax_transactions same_internal_tax
+        WHERE same_internal_tax.reference_type = 'sport_center_payment'
+          AND same_internal_tax.reference_id = source_payment.id
+          AND same_internal_tax.transaction_type = 'original'
+          AND same_internal_tax.status = 'posted'
+      ) = 1
+      AND (
+        SELECT COUNT(*)
+        FROM public.gl_tax_lines same_tax_line
+        WHERE same_tax_line.accounting_entry_id = sp.entry_id
+          AND same_tax_line.tax_type = 'PPN_OUT'
+          AND same_tax_line.entity_type = 'sport_center_payment'
+          AND same_tax_line.entity_id = source_payment.id::text
+      ) = 1
+    ORDER BY sp.id
+  `);
+  return rows.map((row: any) => ({
+    mirrorId: Number(row.mirror_id),
+    sourcePaymentId: Number(row.source_payment_id),
+    accountingPaymentId: Number(row.accounting_payment_id),
+    staleEntryId: Number(row.stale_entry_id),
+    restoredEntryId: Number(row.restored_entry_id),
+    taxLineId: Number(row.tax_line_id),
+    amount: Number(row.amount),
+  }));
+}
 
 function classifyLegacyPaymentLink(row: {
   linkedSportPaymentId: number | null;
@@ -855,6 +981,9 @@ export async function auditLegacySportCenterPayments(): Promise<LegacySportCente
     byClassification: emptyByClassification(),
     safeCandidateCount: 0,
     safeCandidateAmount: 0,
+    staleEntryRepairCandidateCount: 0,
+    staleEntryRepairCandidateAmount: 0,
+    staleEntryRepairCandidates: [],
     exceptions: [],
   };
   if (!pool) return empty;
@@ -945,6 +1074,7 @@ export async function auditLegacySportCenterPayments(): Promise<LegacySportCente
     bucket.rows++;
     bucket.amount += row.amount;
   }
+  const staleEntryRepairCandidates = await findRepairableStaleEntryLinks(pool);
 
   return {
     configured: true,
@@ -954,6 +1084,12 @@ export async function auditLegacySportCenterPayments(): Promise<LegacySportCente
     byClassification,
     safeCandidateCount: byClassification.safe_candidate.rows,
     safeCandidateAmount: byClassification.safe_candidate.amount,
+    staleEntryRepairCandidateCount: staleEntryRepairCandidates.length,
+    staleEntryRepairCandidateAmount: staleEntryRepairCandidates.reduce(
+      (sum, candidate) => sum + candidate.amount,
+      0,
+    ),
+    staleEntryRepairCandidates: staleEntryRepairCandidates.slice(0, 100),
     // Keep the endpoint useful without exposing the entire historical table.
     exceptions: auditRows
       .filter((row) => row.classification !== "linked")
@@ -974,18 +1110,26 @@ export async function reconcileLegacySportCenterPaymentLinks(options?: {
     linkedRows: number;
     appliedCandidateCount: number;
     appliedCandidateAmount: number;
+    repairedEntryRows: number;
+    repairedTaxRows: number;
   }
 > {
   const audit = await auditLegacySportCenterPayments();
   const apply = options?.apply === true;
   const pool = getProdPool();
-  if (!apply || !pool || audit.safeCandidateCount === 0) {
+  if (
+    !apply ||
+    !pool ||
+    (audit.safeCandidateCount === 0 && audit.staleEntryRepairCandidateCount === 0)
+  ) {
     return {
       ...audit,
       applied: false,
       linkedRows: 0,
       appliedCandidateCount: 0,
       appliedCandidateAmount: 0,
+      repairedEntryRows: 0,
+      repairedTaxRows: 0,
     };
   }
 
@@ -993,6 +1137,8 @@ export async function reconcileLegacySportCenterPaymentLinks(options?: {
   const appliedCandidateAmount = audit.safeCandidateAmount;
   const client = await pool.connect();
   let linkedRows = 0;
+  let repairedEntryRows = 0;
+  let repairedTaxRows = 0;
   try {
     await client.query("BEGIN");
     const updateResult = await client.query(`
@@ -1024,6 +1170,57 @@ export async function reconcileLegacySportCenterPaymentLinks(options?: {
          ) = 1
     `);
     linkedRows = updateResult.rowCount ?? 0;
+
+    const repairCandidates = await findRepairableStaleEntryLinks(client);
+    for (const candidate of repairCandidates) {
+      const entryUpdate = await client.query(
+        `UPDATE public.accounting_entries
+            SET source_payment_id = $2
+          WHERE id = $1
+            AND status = 'posted'
+            AND (source_payment_id IS NULL OR source_payment_id = $2)`,
+        [candidate.restoredEntryId, candidate.sourcePaymentId],
+      );
+      if (entryUpdate.rowCount !== 1) {
+        throw new Error(`LEGACY_ENTRY_REPAIR_ENTRY_CONFLICT:${candidate.restoredEntryId}`);
+      }
+
+      const mirrorUpdate = await client.query(
+        `UPDATE public.sport_payments
+            SET accounting_payment_id = $2,
+                entry_id = $3,
+                posting_status = 'posted',
+                posting_error = NULL,
+                updated_at = NOW()
+          WHERE id = $1
+            AND source_payment_id = $4
+            AND entry_id = $5
+            AND (accounting_payment_id IS NULL OR accounting_payment_id = $2)`,
+        [
+          candidate.mirrorId,
+          candidate.accountingPaymentId,
+          candidate.restoredEntryId,
+          candidate.sourcePaymentId,
+          candidate.staleEntryId,
+        ],
+      );
+      if (mirrorUpdate.rowCount !== 1) {
+        throw new Error(`LEGACY_ENTRY_REPAIR_MIRROR_CONFLICT:${candidate.mirrorId}`);
+      }
+
+      const taxUpdate = await client.query(
+        `UPDATE public.gl_tax_lines
+            SET accounting_entry_id = $2
+          WHERE id = $1
+            AND accounting_entry_id = $3`,
+        [candidate.taxLineId, candidate.restoredEntryId, candidate.staleEntryId],
+      );
+      if (taxUpdate.rowCount !== 1) {
+        throw new Error(`LEGACY_ENTRY_REPAIR_TAX_CONFLICT:${candidate.taxLineId}`);
+      }
+      repairedEntryRows++;
+      repairedTaxRows++;
+    }
     await client.query("COMMIT");
   } catch (err) {
     await client.query("ROLLBACK").catch(() => {});
@@ -1039,6 +1236,8 @@ export async function reconcileLegacySportCenterPaymentLinks(options?: {
     linkedRows,
     appliedCandidateCount,
     appliedCandidateAmount,
+    repairedEntryRows,
+    repairedTaxRows,
   };
 }
 

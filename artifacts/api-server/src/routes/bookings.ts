@@ -85,6 +85,18 @@ function isMultigunaFacility(facility: { name?: string | null; category?: string
   return normalized.includes("multiguna");
 }
 
+function isGymFacility(facility: {
+  name?: string | null;
+  category?: string | null;
+  bookingMode?: string | null;
+}): boolean {
+  return (
+    facility.bookingMode === "walk_in" ||
+    /gym|fitness/i.test(facility.name ?? "") ||
+    /gym|fitness/i.test(facility.category ?? "")
+  );
+}
+
 function getApDiscount(basePrice: number, setting: {
   discountPercentage?: number | null;
   discountAmount?: number | null;
@@ -560,10 +572,7 @@ router.post("/bookings", async (req, res) => {
 
     // Legacy Gym records may still have booking_mode = time_slot. Gym access
     // is per visit, so identify it by name/category as a safe fallback.
-    const isGymFacility =
-      /gym|fitness/i.test(facility.name ?? "") ||
-      /gym|fitness/i.test(facility.category ?? "");
-    const isWalkIn = facility.bookingMode === "walk_in" || isGymFacility;
+    const isWalkIn = isGymFacility(facility);
 
     if (isWalkIn) {
       // Gym walk-in: no time slot required, flat rate per visit
@@ -1878,7 +1887,42 @@ router.patch("/bookings/:id/dates", adminMiddleware, async (req, res) => {
       res.status(404).json({ error: "Booking tidak ditemukan" });
       return;
     }
+    const nextStartTime = startTime ?? before.startTime;
+    const nextEndTime = endTime ?? before.endTime;
+    if (nextStartTime >= nextEndTime) {
+      res.status(400).json({ error: "Jam selesai harus lebih besar dari jam mulai" });
+      return;
+    }
 
+    const [facility] = await db
+      .select()
+      .from(facilitiesTable)
+      .where(eq(facilitiesTable.id, before.facilityId))
+      .limit(1);
+    if (!facility) {
+      res.status(404).json({ error: "Fasilitas booking tidak ditemukan" });
+      return;
+    }
+
+    // Gym/walk-in tidak memakai slot jam. Booking lama mungkin masih
+    // menyimpan 06:00–07:00, tetapi tanggalnya tetap boleh dikoreksi tanpa
+    // dibandingkan dengan interval booking lain.
+    if (
+      bookingDate !== undefined &&
+      bookingDate !== before.bookingDate &&
+      !isGymFacility(facility)
+    ) {
+      const conflict = await checkSlotConflict(
+        before.facilityId,
+        bookingDate,
+        before.startTime,
+        before.endTime,
+      );
+      if (conflict) {
+        res.status(409).json({ error: "Tanggal baru bentrok dengan booking lain pada jam yang sama" });
+        return;
+      }
+    }
     // Koreksi tanggal administratif adalah perbaikan data historis untuk admin.
     // Jangan menerapkan aturan ketersediaan di sini: tanggal baru boleh
     // bertepatan dengan booking lain karena slot tersebut bukan booking baru.
@@ -1891,11 +1935,13 @@ router.patch("/bookings/:id/dates", adminMiddleware, async (req, res) => {
         .orderBy(desc(paymentsTable.createdAt))
         .limit(1);
 
+      if (paymentDate !== undefined && !payment) {
+        throw new Error("PAYMENT_NOT_FOUND");
+      }
+
       const paymentTimestamp = paymentDate
         ? new Date(`${paymentDate}T12:00:00+07:00`)
         : undefined;
-      const nextStartTime = startTime ?? before.startTime;
-      const nextEndTime = endTime ?? before.endTime;
       const durationHours = Math.round(
         (timeToMinutes(nextEndTime) - timeToMinutes(nextStartTime)) / 60,
       );
@@ -1934,15 +1980,15 @@ router.patch("/bookings/:id/dates", adminMiddleware, async (req, res) => {
         bookingDate: before.bookingDate,
         paymentDate: before.paidAt,
         paymentConfirmedAt: before.paidAt,
-          startTime: before.startTime,
-          endTime: before.endTime,
+        startTime: before.startTime,
+        endTime: before.endTime,
       },
       after: {
         bookingDate: updated.booking.bookingDate,
         paymentDate: updated.payment?.paidAt ?? before.paidAt,
         paymentConfirmedAt: updated.payment?.confirmedAt ?? before.paidAt,
-          startTime: updated.booking.startTime,
-          endTime: updated.booking.endTime,
+        startTime: updated.booking.startTime,
+        endTime: updated.booking.endTime,
       },
       ...getClientInfo(req),
     });
@@ -1950,6 +1996,22 @@ router.patch("/bookings/:id/dates", adminMiddleware, async (req, res) => {
     const result = await getBookingWithPayment(id);
     res.json(result);
   } catch (err: any) {
+    if (String(err?.message) === "PAYMENT_NOT_FOUND") {
+      res.status(400).json({ error: "Booking ini belum memiliki pembayaran yang dapat dikoreksi" });
+      return;
+    }
+    const message = `${String(err?.message ?? "")} ${String(err?.cause?.message ?? "")}`;
+    if (
+      message.includes("PUBLIC_PAYMENT_ACCOUNTING_ENTRY_MISSING") ||
+      message.includes("REVERSED_PUBLIC_ACCOUNTING_ENTRY_IS_IMMUTABLE") ||
+      message.includes("POSTED_ACCOUNTING_JOURNAL_FINANCIAL_FIELDS_IMMUTABLE")
+    ) {
+      res.status(409).json({
+        error:
+          "Tanggal pembayaran belum dapat dikoreksi karena jurnal akuntansi pembayaran ini belum lengkap atau sudah dikunci. Rekonsiliasi pembayaran terlebih dahulu, lalu coba kembali.",
+      });
+      return;
+    }
     req.log.error({ err }, "Update booking dates error");
     res.status(500).json({ error: "Internal server error" });
   }

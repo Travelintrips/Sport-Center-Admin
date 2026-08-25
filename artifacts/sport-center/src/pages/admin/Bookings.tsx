@@ -941,7 +941,7 @@ function BookingDetailDrawer({
   settings?: any;
   onUpdateDates: (
     bookingId: number,
-    bookingDate: string,
+    bookingDate?: string,
     paymentDate?: string,
     startTime?: string,
     endTime?: string,
@@ -1004,14 +1004,25 @@ function BookingDetailDrawer({
       !/^\d{2}:\d{2}$/.test(endTime) ||
       startTime >= endTime
     ) return;
+    const nextBookingDate = bookingDate !== originalBookingDate ? bookingDate : undefined;
+    const nextPaymentDate =
+      paymentDate !== originalPaymentDate ? paymentDate || undefined : undefined;
+    const nextStartTime = startTime !== originalStartTime ? startTime : undefined;
+    const nextEndTime = endTime !== originalEndTime ? endTime : undefined;
+    if (
+      nextBookingDate === undefined &&
+      nextPaymentDate === undefined &&
+      nextStartTime === undefined &&
+      nextEndTime === undefined
+    ) return;
     setSavingDates(true);
     try {
       await onUpdateDates(
         booking.id,
-        bookingDate,
-        paymentDate || undefined,
-        startTime,
-        endTime,
+        nextBookingDate,
+        nextPaymentDate,
+        nextStartTime,
+        nextEndTime,
       );
     } finally {
       setSavingDates(false);
@@ -2549,7 +2560,7 @@ export default function AdminBookings() {
 
   const updateDates = async (
     bookingId: number,
-    bookingDate: string,
+    bookingDate?: string,
     paymentDate?: string,
     startTime?: string,
     endTime?: string,
@@ -2560,10 +2571,19 @@ export default function AdminBookings() {
         "Content-Type": "application/json",
         Authorization: `Bearer ${getToken()}`,
       },
-      body: JSON.stringify({ bookingDate, paymentDate, startTime, endTime }),
+      body: JSON.stringify({
+        ...(bookingDate !== undefined ? { bookingDate } : {}),
+        ...(paymentDate !== undefined ? { paymentDate } : {}),
+        ...(startTime !== undefined ? { startTime } : {}),
+        ...(endTime !== undefined ? { endTime } : {}),
+      }),
     });
     const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data.error ?? "Gagal memperbarui tanggal");
+    if (!response.ok) {
+      const message = data.error ?? "Gagal memperbarui tanggal";
+      toast({ title: "Tanggal tidak dapat diperbarui", description: message, variant: "destructive" });
+      throw new Error(message);
+    }
     queryClient.setQueryData(getListBookingsQueryKey(), (current: any) =>
       Array.isArray(current)
         ? current.map((item) => item.id === data.id ? data : item)
