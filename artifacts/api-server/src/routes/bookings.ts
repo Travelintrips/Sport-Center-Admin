@@ -1828,6 +1828,10 @@ router.patch("/bookings/:id/dates", adminMiddleware, async (req, res) => {
       req.body?.paymentDate === undefined || req.body?.paymentDate === null || req.body?.paymentDate === ""
         ? undefined
         : String(req.body.paymentDate);
+    const startTime =
+      req.body?.startTime === undefined ? undefined : String(req.body.startTime);
+    const endTime =
+      req.body?.endTime === undefined ? undefined : String(req.body.endTime);
 
     const validateDate = (value: string | undefined, label: string) => {
       if (value === undefined) return null;
@@ -1844,13 +1848,28 @@ router.patch("/bookings/:id/dates", adminMiddleware, async (req, res) => {
       }
       return null;
     };
-    const dateError = validateDate(bookingDate, "Tanggal booking") ?? validateDate(paymentDate, "Tanggal pembayaran");
+    const validateTime = (value: string | undefined, label: string) => {
+      if (value === undefined) return null;
+      if (!/^\d{2}:\d{2}$/.test(value)) return `${label} tidak valid`;
+      const [hour, minute] = value.split(":").map(Number);
+      if (hour > 23 || minute > 59) return `${label} tidak valid`;
+      return null;
+    };
+    const dateError =
+      validateDate(bookingDate, "Tanggal booking") ??
+      validateDate(paymentDate, "Tanggal pembayaran") ??
+      validateTime(startTime, "Jam mulai") ??
+      validateTime(endTime, "Jam selesai");
     if (dateError) {
       res.status(400).json({ error: dateError });
       return;
     }
-    if (bookingDate === undefined && paymentDate === undefined) {
-      res.status(400).json({ error: "Tidak ada tanggal yang diubah" });
+    if (startTime !== undefined && endTime !== undefined && startTime >= endTime) {
+      res.status(400).json({ error: "Jam selesai harus lebih besar dari jam mulai" });
+      return;
+    }
+    if (bookingDate === undefined && paymentDate === undefined && startTime === undefined && endTime === undefined) {
+      res.status(400).json({ error: "Tidak ada tanggal atau jam yang diubah" });
       return;
     }
 
@@ -1872,17 +1891,21 @@ router.patch("/bookings/:id/dates", adminMiddleware, async (req, res) => {
         .orderBy(desc(paymentsTable.createdAt))
         .limit(1);
 
-      if (paymentDate !== undefined && !payment) {
-        throw new Error("PAYMENT_NOT_FOUND");
-      }
-
       const paymentTimestamp = paymentDate
         ? new Date(`${paymentDate}T12:00:00+07:00`)
         : undefined;
+      const nextStartTime = startTime ?? before.startTime;
+      const nextEndTime = endTime ?? before.endTime;
+      const durationHours = Math.round(
+        (timeToMinutes(nextEndTime) - timeToMinutes(nextStartTime)) / 60,
+      );
       const [booking] = await tx
         .update(bookingsTable)
         .set({
           ...(bookingDate !== undefined ? { bookingDate } : {}),
+          ...(startTime !== undefined ? { startTime } : {}),
+          ...(endTime !== undefined ? { endTime } : {}),
+          ...(startTime !== undefined || endTime !== undefined ? { durationHours } : {}),
           ...(paymentTimestamp ? { paidAt: paymentTimestamp } : {}),
           updatedAt: new Date(),
         })
@@ -1911,11 +1934,15 @@ router.patch("/bookings/:id/dates", adminMiddleware, async (req, res) => {
         bookingDate: before.bookingDate,
         paymentDate: before.paidAt,
         paymentConfirmedAt: before.paidAt,
+          startTime: before.startTime,
+          endTime: before.endTime,
       },
       after: {
         bookingDate: updated.booking.bookingDate,
         paymentDate: updated.payment?.paidAt ?? before.paidAt,
         paymentConfirmedAt: updated.payment?.confirmedAt ?? before.paidAt,
+          startTime: updated.booking.startTime,
+          endTime: updated.booking.endTime,
       },
       ...getClientInfo(req),
     });
@@ -1923,10 +1950,6 @@ router.patch("/bookings/:id/dates", adminMiddleware, async (req, res) => {
     const result = await getBookingWithPayment(id);
     res.json(result);
   } catch (err: any) {
-    if (String(err?.message) === "PAYMENT_NOT_FOUND") {
-      res.status(400).json({ error: "Booking ini belum memiliki pembayaran yang dapat dikoreksi" });
-      return;
-    }
     req.log.error({ err }, "Update booking dates error");
     res.status(500).json({ error: "Internal server error" });
   }

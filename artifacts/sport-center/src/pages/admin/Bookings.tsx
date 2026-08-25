@@ -939,19 +939,37 @@ function BookingDetailDrawer({
   onUpdatePaymentMethod: (paymentId: number, paymentMethod: string) => void;
   isUpdating: boolean;
   settings?: any;
-  onUpdateDates: (bookingId: number, bookingDate: string, paymentDate?: string) => Promise<void>;
+  onUpdateDates: (
+    bookingId: number,
+    bookingDate: string,
+    paymentDate?: string,
+    startTime?: string,
+    endTime?: string,
+  ) => Promise<void>;
 }) {
+  const allPayments: any[] = booking.payments ?? (booking.payment ? [booking.payment] : []);
+  const editablePayment =
+    [...allPayments]
+      .sort((a, b) => Number(b.id ?? 0) - Number(a.id ?? 0))
+      .find((payment) => payment.status === "pending" || payment.status === "confirmed") ??
+    [...allPayments].sort((a, b) => Number(b.id ?? 0) - Number(a.id ?? 0))[0] ??
+    booking.payment ??
+    null;
+  const paymentDateValue = editablePayment?.paidAt ?? editablePayment?.confirmedAt ?? booking.paidAt;
   const [adminNotes, setAdminNotes] = useState(booking.adminNotes ?? "");
   const [confirmAction, setConfirmAction] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [bookingDate, setBookingDate] = useState(String(booking.bookingDate ?? ""));
   const [paymentDate, setPaymentDate] = useState(
-    booking.payment?.paidAt?.slice(0, 10) ?? booking.payment?.confirmedAt?.slice(0, 10) ?? "",
+    paymentDateValue?.slice(0, 10) ?? "",
   );
+  const [startTime, setStartTime] = useState(String(booking.startTime ?? "").slice(0, 5));
+  const [endTime, setEndTime] = useState(String(booking.endTime ?? "").slice(0, 5));
   const [savingDates, setSavingDates] = useState(false);
   const originalBookingDate = String(booking.bookingDate ?? "");
-  const originalPaymentDate =
-    booking.payment?.paidAt?.slice(0, 10) ?? booking.payment?.confirmedAt?.slice(0, 10) ?? "";
+  const originalPaymentDate = paymentDateValue?.slice(0, 10) ?? "";
+  const originalStartTime = String(booking.startTime ?? "").slice(0, 5);
+  const originalEndTime = String(booking.endTime ?? "").slice(0, 5);
 
   const cfg = STATUS_CONFIG[booking.status as BookingStatus] ?? STATUS_CONFIG.pending_payment;
   const StatusIcon = cfg.icon;
@@ -967,19 +985,34 @@ function BookingDetailDrawer({
     }
   };
 
-  const allPayments: any[] = booking.payments ?? (booking.payment ? [booking.payment] : []);
   const isCompleted = booking.status === "completed" || booking.status === "confirmed";
   const hasConfirmedPaymentBookingMismatch =
     !isCompleted &&
     ["pending_payment", "waiting_confirmation", "paid"].includes(booking.status) &&
     allPayments.some((pmt) => pmt.status === "confirmed" && pmt.proofUrl);
-  const datesChanged = bookingDate !== originalBookingDate || paymentDate !== originalPaymentDate;
+  const datesChanged =
+    bookingDate !== originalBookingDate ||
+    paymentDate !== originalPaymentDate ||
+    startTime !== originalStartTime ||
+    endTime !== originalEndTime;
 
   const saveDates = async () => {
-    if (!bookingDate || (paymentDate && !/^\d{4}-\d{2}-\d{2}$/.test(paymentDate))) return;
+    if (
+      !bookingDate ||
+      (paymentDate && !/^\d{4}-\d{2}-\d{2}$/.test(paymentDate)) ||
+      !/^\d{2}:\d{2}$/.test(startTime) ||
+      !/^\d{2}:\d{2}$/.test(endTime) ||
+      startTime >= endTime
+    ) return;
     setSavingDates(true);
     try {
-      await onUpdateDates(booking.id, bookingDate, paymentDate || undefined);
+      await onUpdateDates(
+        booking.id,
+        bookingDate,
+        paymentDate || undefined,
+        startTime,
+        endTime,
+      );
     } finally {
       setSavingDates(false);
     }
@@ -1136,7 +1169,7 @@ function BookingDetailDrawer({
               <InfoRow icon={Building2} label="Fasilitas" value={booking.facilityName} span />
               <div className="col-span-2 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50/70 dark:bg-amber-900/20 p-3 space-y-2">
                 <div className="flex items-center gap-2 text-xs font-semibold text-amber-700 dark:text-amber-300">
-                  <CalendarDays size={13} /> Koreksi tanggal
+                  <CalendarDays size={13} /> Koreksi tanggal & jam
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <div className="space-y-1">
@@ -1154,12 +1187,32 @@ function BookingDetailDrawer({
                       type="date"
                       value={paymentDate}
                       onChange={(event) => setPaymentDate(event.target.value)}
-                      disabled={!booking.payment}
+                      disabled={!booking.payment && !booking.paidAt}
                       className="h-8 text-xs bg-white dark:bg-slate-900"
                     />
                   </div>
                 </div>
-                {!booking.payment && <div className="text-[10px] text-slate-500">Belum ada pembayaran untuk dikoreksi.</div>}
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-1">
+                    <Label className="text-[11px] text-slate-500">Jam mulai</Label>
+                    <Input
+                      type="time"
+                      value={startTime}
+                      onChange={(event) => setStartTime(event.target.value)}
+                      className="h-8 text-xs bg-white dark:bg-slate-900"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[11px] text-slate-500">Jam selesai</Label>
+                    <Input
+                      type="time"
+                      value={endTime}
+                      onChange={(event) => setEndTime(event.target.value)}
+                      className="h-8 text-xs bg-white dark:bg-slate-900"
+                    />
+                  </div>
+                </div>
+                {!booking.payment && !booking.paidAt && <div className="text-[10px] text-slate-500">Belum ada pembayaran untuk dikoreksi.</div>}
                 <Button
                   size="sm"
                   onClick={saveDates}
@@ -2494,14 +2547,20 @@ export default function AdminBookings() {
     },
   });
 
-  const updateDates = async (bookingId: number, bookingDate: string, paymentDate?: string) => {
+  const updateDates = async (
+    bookingId: number,
+    bookingDate: string,
+    paymentDate?: string,
+    startTime?: string,
+    endTime?: string,
+  ) => {
     const response = await fetch(`${API_BASE}/bookings/${bookingId}/dates`, {
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${getToken()}`,
       },
-      body: JSON.stringify({ bookingDate, paymentDate }),
+      body: JSON.stringify({ bookingDate, paymentDate, startTime, endTime }),
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error ?? "Gagal memperbarui tanggal");
