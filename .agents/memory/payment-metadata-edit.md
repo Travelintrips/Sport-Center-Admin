@@ -70,3 +70,15 @@ readiness check even though the source build succeeded.
 **How to apply:** Use the narrowly scoped, transactional production trigger
 migration, verify every required trigger after applying it, then publish the API
 release.
+
+Existence-only checks are insufficient for replace-in-place PostgreSQL
+functions. Production startup verification must also recognize the behavioral
+markers required by the current payment contract.
+
+**Why:** An older function with the same signature and enabled trigger can pass
+`to_regprocedure`/trigger checks while still hardcoding a current rule version,
+causing valid historical owner-approved Mandiri rules to be rejected.
+
+**How to apply:** Verify both the resolver's manual-provider branch and the
+mirror function's manual-metadata correction support before marking the payment
+mirror migration ready.
