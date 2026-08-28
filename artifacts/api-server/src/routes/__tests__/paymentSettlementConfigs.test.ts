@@ -351,14 +351,32 @@ describe("payment settlement rule periods", () => {
     ]);
   });
 
-  it("rejects a replacement that would close an effective period retroactively", async () => {
+  it("allows a historical replacement and closes the previous period", async () => {
     const existing = seedConfig({ effectiveFrom: isoDate(-10), effectiveUntil: null });
 
     const response = await createRule(isoDate(-1), { closeRuleIds: [existing.id] });
 
-    expect(response.status).toBe(409);
-    expect(response.body.code).toBe("SETTLEMENT_RULE_RETROACTIVE_REPLACEMENT_BLOCKED");
-    expect(state.configs).toEqual([expect.objectContaining({ id: existing.id, effectiveUntil: null })]);
+    expect(response.status).toBe(201);
+    expect(state.configs.find((config) => config.id === existing.id)?.effectiveUntil).toBe(isoDate(-2));
+    expect(state.audits.map((audit) => audit.action)).toEqual([
+      "PAYMENT_SETTLEMENT_RULE_CLOSED",
+      "PAYMENT_SETTLEMENT_RULE_CREATED",
+    ]);
+  });
+
+  it("deactivates a future rule when a historical replacement supersedes it", async () => {
+    const existing = seedConfig({ effectiveFrom: isoDate(1), effectiveUntil: null });
+
+    const response = await createRule(isoDate(-1), { closeRuleIds: [existing.id] });
+
+    expect(response.status).toBe(201);
+    expect(state.configs.find((config) => config.id === existing.id)).toEqual(
+      expect.objectContaining({ isActive: false, effectiveFrom: isoDate(1), effectiveUntil: null }),
+    );
+    expect(state.audits.map((audit) => audit.action)).toEqual([
+      "PAYMENT_SETTLEMENT_RULE_DEACTIVATED",
+      "PAYMENT_SETTLEMENT_RULE_CREATED",
+    ]);
   });
 
   it("rejects deactivation of a rule that is already effective", async () => {
