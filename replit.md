@@ -199,7 +199,7 @@ Web app untuk manajemen dan pemesanan fasilitas olahraga — customer-facing boo
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
 - DB migrations: `pnpm migrate:dev` — apply to Supabase DEV, `pnpm migrate:prod` — apply to Supabase PROD. Script idempotent, otomatis baseline jika schema sudah ada. Untuk schema baru: `drizzle-kit generate` lalu `pnpm migrate:dev`.
-- Required env: `SUPABASE_DATABASE_URL` (prod) / `SUPABASE_DATABASE_URL_DEV` (dev) — Supabase Postgres pooler connection, `SESSION_SECRET` — used for HMAC password hashing
+- Required env: `SUPABASE_DATABASE_URL` (prod) / `SUPABASE_DATABASE_URL_DEV` (dev) — Supabase Postgres pooler connection, `SESSION_SECRET` — used for HMAC password hashing. In Replit, runtime configuration is loaded from Google Secret Manager using `GCP_PROJECT_ID`, `GCP_SECRET_ID`, and `GCP_SECRET_MANAGER_BOOTSTRAP_JSON`; the Supabase variables remain inside the loaded environment section.
 
 ## Stack
 
