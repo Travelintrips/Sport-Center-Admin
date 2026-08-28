@@ -4,13 +4,13 @@ import { normalizeProviderName } from "./paymentMetadata";
 /**
  * Contract for the metadata-only payment edit.
  *
- * Only payment method and payment provider (plus the derived provider name)
- * may change. Every financial, status, settlement, or reconciliation field is
+ * Payment method/provider and explicitly supplied revision identifiers may
+ * change. Financial, status, settlement, and reconciliation fields remain
  * rejected explicitly so a caller can never smuggle a broad update through
  * this endpoint.
  */
 
-const ALLOWED_FIELDS = new Set(["paymentMethod", "paymentProvider"]);
+const ALLOWED_FIELDS = new Set(["paymentMethod", "paymentProvider", "companyId", "bankAccountId"]);
 
 // Explicitly named so the error message tells the caller exactly what was
 // rejected instead of a generic "unknown field".
@@ -21,8 +21,6 @@ const FORBIDDEN_FIELDS = new Set([
   "notes",
   "paidAt",
   "confirmedAt",
-  "companyId",
-  "bankAccountId",
   "expectedSettlementDate",
   "settlementStatus",
   "providerId",
@@ -39,12 +37,16 @@ const FORBIDDEN_FIELDS = new Set([
 export type PaymentMetadataUpdateInput = {
   paymentMethod?: unknown;
   paymentProvider?: unknown;
+  companyId?: unknown;
+  bankAccountId?: unknown;
 } & Record<string, unknown>;
 
 export type ValidatedPaymentMetadataUpdate = {
   paymentMethod?: string;
   paymentProvider?: string;
   providerName?: string;
+  companyId?: number | null;
+  bankAccountId?: string;
 };
 
 export type PaymentMetadataValidationResult =
@@ -83,6 +85,24 @@ export function validatePaymentMetadataUpdate(
       return { ok: false, error: "Metode pembayaran terlalu panjang" };
     }
     update.paymentMethod = normalizedMethod;
+  }
+
+  if (input.companyId !== undefined) {
+    if (input.companyId !== null && (!Number.isInteger(input.companyId) || Number(input.companyId) < 1)) {
+      return { ok: false, error: "Company ID harus berupa angka positif atau null" };
+    }
+    update.companyId = input.companyId === null ? null : Number(input.companyId);
+  }
+
+  if (input.bankAccountId !== undefined) {
+    if (input.bankAccountId !== null && typeof input.bankAccountId !== "string") {
+      return { ok: false, error: "Bank account ID harus berupa teks atau null" };
+    }
+    const bankAccountId = input.bankAccountId === null ? "" : input.bankAccountId.trim();
+    if (bankAccountId.length > 120) {
+      return { ok: false, error: "Bank account ID terlalu panjang" };
+    }
+    update.bankAccountId = bankAccountId;
   }
 
   const effectiveMethod = (normalizedMethod ?? current.paymentMethod ?? "")

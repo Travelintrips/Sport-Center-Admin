@@ -87,6 +87,24 @@ describe("validatePaymentMetadataUpdate", () => {
     });
   });
 
+  it("accepts revision identifiers without validating settlement ownership", () => {
+    const r = validatePaymentMetadataUpdate({
+      paymentMethod: "QRIS",
+      companyId: 1,
+      bankAccountId: "1640006707220",
+    }, transferCurrent);
+    expect(r).toEqual({
+      ok: true,
+      update: {
+        paymentMethod: "QRIS",
+        paymentProvider: "mandiri_direct",
+        providerName: "mandiri_direct",
+        companyId: 1,
+        bankAccountId: "1640006707220",
+      },
+    });
+  });
+
   it("rejects provider on a non-QRIS payment", () => {
     const r = validatePaymentMetadataUpdate(
       { paymentProvider: "mandiri_direct" },
@@ -108,7 +126,7 @@ describe("validatePaymentMetadataUpdate", () => {
     expect(r.ok).toBe(false);
   });
 
-  it.each(["status", "amount", "paidAt", "companyId", "bankAccountId", "notes", "providerOrderId"])(
+  it.each(["status", "amount", "paidAt", "notes", "providerOrderId"])(
     "rejects forbidden financial/status field '%s'",
     (field) => {
       const r = validatePaymentMetadataUpdate(

@@ -731,14 +731,11 @@ router.post("/payments", async (req, res) => {
 /**
  * Metadata-only payment edit.
  *
- * Hanya payment_method / payment_provider (+ provider_name turunan) yang
- * boleh diubah oleh admin. Tidak ada konfirmasi, rekonsiliasi, posting jurnal,
- * atau sinkronisasi BizPortal. Jika admin memilih QRIS, rekening penerimaan
- * Mandiri CST diturunkan server dari konfigurasi settlement aktif; input
- * rekening dari klien tetap ditolak. Sinkronisasi metadata ke accounting
- * journal terjadi lewat trigger DB sync_payment_accounting_journal yang
- * metadata-only, dan guard_posted_accounting_journal menjaga field finansial
- * jurnal posted tetap immutable.
+ * Hanya metadata revisi yang boleh diubah oleh admin: metode/provider dan,
+ * bila perlu, company_id/bank_account_id. Tidak ada konfirmasi,
+ * rekonsiliasi, posting jurnal, atau sinkronisasi BizPortal. Mismatch settlement
+ * menjadi warning selama mode revisi; field finansial dan lifecycle tetap
+ * ditolak.
  *
  * Selama masa koreksi yang disetujui owner, transaksi endpoint ini memberi
  * trigger database izin lokal untuk menyelaraskan metadata pada mirror/jurnal
@@ -783,8 +780,8 @@ router.patch("/payments/:id/metadata", adminMiddleware, async (req, res) => {
     // aktif, bukan dari request admin. Dengan begitu trigger canonical dapat
     // memvalidasi provider QRIS terhadap rekening yang benar tanpa membuka
     // endpoint metadata untuk perubahan rekening/settlement secara bebas.
-    let qrisReceivingAccountId: string | null = null;
-    if (update.paymentProvider === "mandiri_direct") {
+     const revisionWarnings: string[] = [];
+     if (update.paymentProvider === "mandiri_direct") {
       const [booking] = await db
         .select()
         .from(bookingsTable)
@@ -798,17 +795,26 @@ router.patch("/payments/:id/metadata", adminMiddleware, async (req, res) => {
       }
 
       const paymentDate = before.paidAt ?? before.confirmedAt ?? before.createdAt;
-      const enrichment = await resolveRequiredPaymentEnrichment(
-        booking,
-        "mandiri_direct",
-        paymentDate,
-        {
-          sourcePaymentCompanyId: before.companyId,
-          explicitCompanyId: before.companyId,
-          effectiveDate: paymentEffectiveDate(paymentDate),
-        },
-      );
-      qrisReceivingAccountId = enrichment.bankAccountId;
+       try {
+         await resolveRequiredPaymentEnrichment(
+           booking,
+           "mandiri_direct",
+           paymentDate,
+           {
+             sourcePaymentCompanyId: update.companyId ?? before.companyId,
+             explicitCompanyId: update.companyId ?? before.companyId,
+             effectiveDate: paymentEffectiveDate(paymentDate),
+           },
+         );
+       } catch (error) {
+         const message = String((error as any)?.message ?? error);
+         revisionWarnings.push(
+           message.includes("COMPANY") || message.includes("PROVIDER")
+             ? "Company/provider settlement belum cocok; silakan koreksi saat revisi."
+             : "Bank account atau settlement rule belum cocok; silakan koreksi saat revisi.",
+         );
+         req.log.warn({ err: error, paymentId: id }, "Payment metadata revision warning");
+       }
     }
 
     const payment = await db.transaction(async (tx) => {
@@ -832,9 +838,8 @@ router.patch("/payments/:id/metadata", adminMiddleware, async (req, res) => {
             ? { paymentProvider: update.paymentProvider as any }
             : {}),
           ...(update.providerName !== undefined ? { providerName: update.providerName } : {}),
-          ...(qrisReceivingAccountId
-            ? { bankAccountId: qrisReceivingAccountId }
-            : {}),
+           ...(update.companyId !== undefined ? { companyId: update.companyId } : {}),
+           ...(update.bankAccountId !== undefined ? { bankAccountId: update.bankAccountId || "unknown" } : {}),
           updatedAt: new Date(),
         })
         .where(eq(paymentsTable.id, id))
@@ -861,7 +866,11 @@ router.patch("/payments/:id/metadata", adminMiddleware, async (req, res) => {
       ...getClientInfo(req),
     });
 
-    res.json({ ...payment, amount: Number(payment.amount) });
+     res.json({
+       ...payment,
+       amount: Number(payment.amount),
+       warnings: revisionWarnings,
+     });
   } catch (err: any) {
     const message = String(err?.message ?? "") + " " + String((err as any)?.cause?.message ?? "");
     if (message.includes("POSTED_ACCOUNTING_JOURNAL") || message.includes("PAYMENT_ACCOUNTING_JOURNAL_AMBIGUOUS")) {
