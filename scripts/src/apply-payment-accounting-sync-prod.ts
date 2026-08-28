@@ -28,10 +28,10 @@ if (!rawConnectionString) {
   process.exit(1);
 }
 
-const connectionString = rawConnectionString.replace(
-  "pooler.supabase.com:6543",
-  "pooler.supabase.com:5432",
-);
+// Provision through the exact runtime connection. Rewriting the Supabase
+// transaction-pooler port to the session-pooler port can verify a different
+// catalog view than the one used by the published API.
+const connectionString = rawConnectionString;
 const { Client } = pg;
 const client = new Client({
   connectionString,

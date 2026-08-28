@@ -94,6 +94,17 @@ same function bodies before it can pass readiness.
 **How to apply:** Treat fresh-connection verification as the final provisioning
 step, and do not start publishing while any behavior marker remains false.
 
+Production provisioning and final verification must use the exact unmodified
+database connection selected by the published runtime; do not rewrite the
+Supabase pooler port for this startup-critical check.
+
+**Why:** Port 5432 and port 6543 exposed different function-body marker results
+for the same configured production secret, so provisioning one did not satisfy
+the API startup predicate on the other.
+
+**How to apply:** Run payment function DDL and the fresh-connection marker query
+through the raw production connection URL that `lib/db` will consume.
+
 Serialize replace-in-place payment function migrations with one shared
 transaction-scoped PostgreSQL advisory lock in both development startup and
 production provisioning.

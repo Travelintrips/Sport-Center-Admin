@@ -111,7 +111,21 @@ export function startPaymentMirrorMigration(): Promise<void> {
           !row.public_entry_sync_trigger_exists ||
           !row.internal_journal_sync_trigger_exists
         ) {
-          throw new Error("PAYMENT_MIRROR_MIGRATION_NOT_PROVISIONED");
+          const markerState = {
+            resolverExists: Boolean(row?.resolver_exists),
+            resolverSupportsManualProvider: Boolean(row?.resolver_supports_manual_provider),
+            triggerExists: Boolean(row?.trigger_exists),
+            mirrorSupportsManualMetadataCorrection: Boolean(
+              row?.mirror_supports_manual_metadata_correction,
+            ),
+            publicEntrySyncTriggerExists: Boolean(row?.public_entry_sync_trigger_exists),
+            internalJournalSyncTriggerExists: Boolean(
+              row?.internal_journal_sync_trigger_exists,
+            ),
+          };
+          throw new Error(
+            `PAYMENT_MIRROR_MIGRATION_NOT_PROVISIONED ${JSON.stringify(markerState)}`,
+          );
         }
       })
     : db.transaction(async (tx) => {
