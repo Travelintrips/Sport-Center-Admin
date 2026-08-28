@@ -1368,11 +1368,45 @@ BEGIN
   END IF;
 
 
-  -- POSTED: hanya 2 metadata ini yang boleh berubah
+  -- POSTED: payment method/provider boleh berubah melalui metadata flow.
+  -- Koreksi company/bank historis hanya boleh melalui transaksi koreksi
+  -- eksplisit yang mengaktifkan local GUC ini; field finansial tetap immutable.
   IF TG_OP = 'UPDATE'
      AND OLD.status = 'posted' THEN
 
-    IF
+    IF COALESCE(
+         current_setting(
+           'sport_center.allow_posted_accounting_metadata_correction',
+           true
+         ),
+         'off'
+       ) = 'on' THEN
+      IF
+        (
+          to_jsonb(NEW)
+          - ARRAY[
+              'payment_method',
+              'payment_provider',
+              'company_id',
+              'bank_account_id'
+            ]::text[]
+        )
+        IS DISTINCT FROM
+        (
+          to_jsonb(OLD)
+          - ARRAY[
+              'payment_method',
+              'payment_provider',
+              'company_id',
+              'bank_account_id'
+            ]::text[]
+        )
+      THEN
+        RAISE EXCEPTION
+          'POSTED_ACCOUNTING_JOURNAL_FINANCIAL_FIELDS_IMMUTABLE: %',
+          OLD.id;
+      END IF;
+    ELSIF
       (
         to_jsonb(NEW)
         - ARRAY[
