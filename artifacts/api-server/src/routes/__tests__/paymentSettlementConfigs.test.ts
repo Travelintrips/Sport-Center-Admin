@@ -364,6 +364,29 @@ describe("payment settlement rule periods", () => {
     ]);
   });
 
+  it("revises the existing row when the new effective date is identical", async () => {
+    const existing = seedConfig({ effectiveFrom: isoDate(0), effectiveUntil: null });
+
+    const response = await createRule(isoDate(0), {
+      settlementDelayBusinessDays: 3,
+      closeRuleIds: [existing.id],
+    });
+
+    expect(response.status).toBe(201);
+    expect(state.configs).toHaveLength(1);
+    expect(state.configs[0]).toEqual(
+      expect.objectContaining({
+        id: existing.id,
+        effectiveFrom: isoDate(0),
+        settlementDelayBusinessDays: 3,
+        isActive: true,
+      }),
+    );
+    expect(state.audits.map((audit) => audit.action)).toEqual([
+      "PAYMENT_SETTLEMENT_RULE_REVISED",
+    ]);
+  });
+
   it("deactivates a future rule when a historical replacement supersedes it", async () => {
     const existing = seedConfig({ effectiveFrom: isoDate(1), effectiveUntil: null });
 
