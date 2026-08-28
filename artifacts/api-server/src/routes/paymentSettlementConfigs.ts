@@ -258,12 +258,19 @@ router.post("/admin/payment-settlement-configs/rules", adminMiddleware, async (r
 
       }
 
+      const revisionRule = overlappingRules
+        .filter((rule) => String(rule.effective_from) === effectiveFrom)
+        .sort((left, right) => Number(right.id) - Number(left.id))[0] ?? null;
       const changedRules: Array<{
         before: Record<string, unknown>;
         after: Record<string, unknown>;
-        action: "PAYMENT_SETTLEMENT_RULE_CLOSED" | "PAYMENT_SETTLEMENT_RULE_DEACTIVATED";
+        action:
+          | "PAYMENT_SETTLEMENT_RULE_CLOSED"
+          | "PAYMENT_SETTLEMENT_RULE_DEACTIVATED"
+          | "PAYMENT_SETTLEMENT_RULE_REVISED";
       }> = [];
       for (const rule of overlappingRules) {
+        if (revisionRule && Number(rule.id) === Number(revisionRule.id)) continue;
         const previousEffectiveFrom = String(rule.effective_from);
         const shouldDeactivate =
           previousEffectiveFrom >= effectiveFrom &&
@@ -285,19 +292,40 @@ router.post("/admin/payment-settlement-configs/rules", adminMiddleware, async (r
         });
       }
 
-      const [config] = await tx
-        .insert(paymentSettlementConfigsTable)
-        .values({
-          companyId,
-          providerCode: SETTLEMENT_PROVIDER,
-          bankAccountId,
-          settlementDelayBusinessDays: delay,
-          effectiveFrom,
-          effectiveUntil,
-          isActive: true,
-          source: "OWNER_APPROVED",
-        })
-        .returning();
+      let config: Record<string, unknown>;
+      if (revisionRule) {
+        const [revised] = await tx
+          .update(paymentSettlementConfigsTable)
+          .set({
+            companyId,
+            providerCode: SETTLEMENT_PROVIDER,
+            bankAccountId,
+            settlementDelayBusinessDays: delay,
+            effectiveFrom,
+            effectiveUntil,
+            isActive: true,
+            source: "OWNER_APPROVED",
+            updatedAt: new Date(),
+          })
+          .where(eq(paymentSettlementConfigsTable.id, Number(revisionRule.id)))
+          .returning();
+        config = revised as Record<string, unknown>;
+      } else {
+        const [created] = await tx
+          .insert(paymentSettlementConfigsTable)
+          .values({
+            companyId,
+            providerCode: SETTLEMENT_PROVIDER,
+            bankAccountId,
+            settlementDelayBusinessDays: delay,
+            effectiveFrom,
+            effectiveUntil,
+            isActive: true,
+            source: "OWNER_APPROVED",
+          })
+          .returning();
+        config = created as Record<string, unknown>;
+      }
 
       // Settlement rules are financial configuration. Their audit records must
       // be committed atomically with the period changes, never best-effort.
@@ -313,9 +341,11 @@ router.post("/admin/payment-settlement-configs/rules", adminMiddleware, async (r
       }
       await tx.insert(auditLogsTable).values({
         ...auditContext,
-        action: "PAYMENT_SETTLEMENT_RULE_CREATED",
+        action: revisionRule
+          ? "PAYMENT_SETTLEMENT_RULE_REVISED"
+          : "PAYMENT_SETTLEMENT_RULE_CREATED",
         entity: "payment_settlement_config",
-        entityId: config.id,
+        entityId: Number(config.id),
         after: {
           ...config,
           closedRuleIds: changedRules
@@ -324,9 +354,10 @@ router.post("/admin/payment-settlement-configs/rules", adminMiddleware, async (r
           deactivatedRuleIds: changedRules
             .filter((rule) => rule.action === "PAYMENT_SETTLEMENT_RULE_DEACTIVATED")
             .map((rule) => Number(rule.after.id)),
+          revisedRuleId: revisionRule ? Number(revisionRule.id) : null,
         } as any,
       });
-      return { config, changedRules };
+      return { config };
     });
 
     res.status(201).json(config);
