@@ -40,5 +40,6 @@ export function createPaymentProviderOrderId(
 }
 
 export function normalizeProviderName(provider: PaymentProvider): string {
-  return provider.trim().toLowerCase();
+  const normalized = provider.trim().toLowerCase();
+  return normalized === "unknown" ? "manual" : normalized;
 }

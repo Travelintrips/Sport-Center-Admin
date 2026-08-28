@@ -14,7 +14,7 @@ describe("validatePaymentMetadataUpdate", () => {
       update: {
         paymentMethod: "Transfer Bank",
         paymentProvider: "unknown",
-        providerName: "unknown",
+        providerName: "manual",
       },
     });
   });
