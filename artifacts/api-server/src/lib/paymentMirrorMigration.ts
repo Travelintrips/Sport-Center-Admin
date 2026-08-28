@@ -115,6 +115,12 @@ export function startPaymentMirrorMigration(): Promise<void> {
         }
       })
     : db.transaction(async (tx) => {
+         // CREATE OR REPLACE FUNCTION updates PostgreSQL system catalogs. A
+         // second dev workflow restart can otherwise race the first one and
+         // fail with "tuple concurrently updated".
+         await tx.execute(sql`
+           SELECT pg_advisory_xact_lock(918274615)
+         `);
         // The resolver may be reached by older/direct database triggers before
         // the mirror projection runs. Install its manual-payment branch first,
         // then install the public-entry sync and mirror triggers that depend

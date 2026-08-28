@@ -93,3 +93,14 @@ same function bodies before it can pass readiness.
 
 **How to apply:** Treat fresh-connection verification as the final provisioning
 step, and do not start publishing while any behavior marker remains false.
+
+Serialize replace-in-place payment function migrations with one shared
+transaction-scoped PostgreSQL advisory lock in both development startup and
+production provisioning.
+
+**Why:** Concurrent `CREATE OR REPLACE FUNCTION` calls can race on PostgreSQL
+catalog tuples and fail with `tuple concurrently updated`, preventing the API
+from opening its port.
+
+**How to apply:** Acquire the lock before the first payment function DDL and
+hold it through trigger verification and commit.

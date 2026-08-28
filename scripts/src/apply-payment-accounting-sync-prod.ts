@@ -52,6 +52,9 @@ const migrationFiles = [
 try {
   await client.connect();
   await client.query("BEGIN");
+  // Serialize replace-in-place function updates with another provisioning run
+  // or a concurrent startup migration against the same Supabase database.
+  await client.query("SELECT pg_advisory_xact_lock(918274615)");
 
   for (const file of migrationFiles) {
     const sql = await fs.readFile(path.join(scriptsDir, file), "utf8");
