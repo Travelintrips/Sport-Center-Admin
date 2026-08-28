@@ -29,12 +29,6 @@ type OverlapRule = {
   effectiveUntil: string | null;
 };
 
-function nextIsoDate(value: string): string {
-  const date = new Date(`${value}T00:00:00Z`);
-  date.setUTCDate(date.getUTCDate() + 1);
-  return date.toISOString().slice(0, 10);
-}
-
 class ApiRequestError extends Error {
   constructor(message: string, public readonly status: number, public readonly body: Record<string, any>) {
     super(message);
@@ -99,13 +93,6 @@ export default function PaymentSettlementConfigs() {
   });
 
   const today = new Date().toISOString().slice(0, 10);
-  const hasCurrentRule = (query.data?.configs ?? []).some((config) =>
-    config.companyId === Number(companyId) &&
-    config.isActive &&
-    config.effectiveFrom <= today &&
-    (!config.effectiveUntil || config.effectiveUntil >= today),
-  );
-  const minimumRuleStart = hasCurrentRule ? nextIsoDate(today) : today;
   const statusLabel: Record<NonNullable<ConfigData["configs"][number]["status"]>, string> = {
     active: "Aktif",
     scheduled: "Akan berlaku",
@@ -205,7 +192,15 @@ export default function PaymentSettlementConfigs() {
                     {!selectableAccounts.length && <SelectItem value="_no-valid-account" disabled>Tidak ada rekening aktif yang valid</SelectItem>}
                   </SelectContent>
                 </Select>
-                <Label>Efektif mulai</Label><Input type="date" min={minimumRuleStart} value={ruleForm.effectiveFrom} onChange={(e) => setRuleForm({ ...ruleForm, effectiveFrom: e.target.value })} />
+                <Label>Efektif mulai</Label>
+                <Input
+                  type="date"
+                  value={ruleForm.effectiveFrom}
+                  onChange={(e) => setRuleForm({ ...ruleForm, effectiveFrom: e.target.value })}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Tanggal historis diperbolehkan untuk memperbaiki konfigurasi settlement pembayaran lama.
+                </p>
                 <Label>Efektif sampai (opsional)</Label><Input type="date" value={ruleForm.effectiveUntil} onChange={(e) => setRuleForm({ ...ruleForm, effectiveUntil: e.target.value })} />
                 <Label>Delay settlement (hari kerja)</Label><Input type="number" min="0" value={ruleForm.delay} onChange={(e) => setRuleForm({ ...ruleForm, delay: e.target.value })} />
                 <Button disabled={!ruleForm.bankAccountId || createRule.isPending} onClick={() => createRule.mutate({})}><Plus size={16} className="mr-2" /> Buat rule `mandiri_direct`</Button>

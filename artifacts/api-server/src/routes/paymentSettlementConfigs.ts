@@ -205,7 +205,7 @@ router.post("/admin/payment-settlement-configs/rules", adminMiddleware, async (r
       return;
     }
 
-    const { config, closedRules } = await db.transaction(async (tx) => {
+    const { config } = await db.transaction(async (tx) => {
       // Serialize rule changes for this company/provider. The overlap check and
       // any explicit period closure must commit together with the new rule.
       await tx.execute(sql`
@@ -256,34 +256,33 @@ router.post("/admin/payment-settlement-configs/rules", adminMiddleware, async (r
           );
         }
 
-        for (const rule of overlappingRules) {
-          const previousEffectiveFrom = String(rule.effective_from);
-          if (previousEffectiveFrom >= effectiveFrom) {
-            throw new SettlementRuleRequestError(
-              "Rule yang bentrok dimulai pada atau setelah tanggal rule baru. Ubah rentang tanggal atau nonaktifkan rule tersebut secara terpisah; periode masa depan tidak dapat ditutup sebagai rule sebelumnya.",
-              409,
-              { code: "SETTLEMENT_RULE_FUTURE_OVERLAP", ruleId: Number(rule.id) },
-            );
-          }
-          const today = new Date().toISOString().slice(0, 10);
-          if (previousEffectiveFrom <= today && dayBefore(effectiveFrom) < today) {
-            throw new SettlementRuleRequestError(
-              "Rule aktif tidak boleh ditutup secara surut melalui penggantian. Buat rule baru mulai besok agar histori settlement hari ini tetap konsisten.",
-              409,
-              { code: "SETTLEMENT_RULE_RETROACTIVE_REPLACEMENT_BLOCKED", ruleId: Number(rule.id) },
-            );
-          }
-        }
       }
 
-      const closedRules: Array<{ before: Record<string, unknown>; after: Record<string, unknown> }> = [];
+      const changedRules: Array<{
+        before: Record<string, unknown>;
+        after: Record<string, unknown>;
+        action: "PAYMENT_SETTLEMENT_RULE_CLOSED" | "PAYMENT_SETTLEMENT_RULE_DEACTIVATED";
+      }> = [];
       for (const rule of overlappingRules) {
+        const previousEffectiveFrom = String(rule.effective_from);
+        const shouldDeactivate =
+          previousEffectiveFrom >= effectiveFrom &&
+          (rule.effective_until == null || String(rule.effective_until) >= effectiveFrom);
+        const updateValues = shouldDeactivate
+          ? { isActive: false, updatedAt: new Date() }
+          : { effectiveUntil: dayBefore(effectiveFrom), updatedAt: new Date() };
         const [closed] = await tx
           .update(paymentSettlementConfigsTable)
-          .set({ effectiveUntil: dayBefore(effectiveFrom), updatedAt: new Date() })
+          .set(updateValues)
           .where(eq(paymentSettlementConfigsTable.id, Number(rule.id)))
           .returning();
-        closedRules.push({ before: rule, after: closed as Record<string, unknown> });
+        changedRules.push({
+          before: rule,
+          after: closed as Record<string, unknown>,
+          action: shouldDeactivate
+            ? "PAYMENT_SETTLEMENT_RULE_DEACTIVATED"
+            : "PAYMENT_SETTLEMENT_RULE_CLOSED",
+        });
       }
 
       const [config] = await tx
@@ -302,14 +301,14 @@ router.post("/admin/payment-settlement-configs/rules", adminMiddleware, async (r
 
       // Settlement rules are financial configuration. Their audit records must
       // be committed atomically with the period changes, never best-effort.
-      for (const closedRule of closedRules) {
+      for (const changedRule of changedRules) {
         await tx.insert(auditLogsTable).values({
           ...auditContext,
-          action: "PAYMENT_SETTLEMENT_RULE_CLOSED",
+          action: changedRule.action,
           entity: "payment_settlement_config",
-          entityId: Number(closedRule.after.id),
-          before: closedRule.before as any,
-          after: closedRule.after as any,
+          entityId: Number(changedRule.after.id),
+          before: changedRule.before as any,
+          after: changedRule.after as any,
         });
       }
       await tx.insert(auditLogsTable).values({
@@ -317,9 +316,17 @@ router.post("/admin/payment-settlement-configs/rules", adminMiddleware, async (r
         action: "PAYMENT_SETTLEMENT_RULE_CREATED",
         entity: "payment_settlement_config",
         entityId: config.id,
-        after: { ...config, closedRuleIds: closedRules.map((rule) => Number(rule.after.id)) } as any,
+        after: {
+          ...config,
+          closedRuleIds: changedRules
+            .filter((rule) => rule.action === "PAYMENT_SETTLEMENT_RULE_CLOSED")
+            .map((rule) => Number(rule.after.id)),
+          deactivatedRuleIds: changedRules
+            .filter((rule) => rule.action === "PAYMENT_SETTLEMENT_RULE_DEACTIVATED")
+            .map((rule) => Number(rule.after.id)),
+        } as any,
       });
-      return { config, closedRules };
+      return { config, changedRules };
     });
 
     res.status(201).json(config);
