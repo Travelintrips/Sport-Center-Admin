@@ -8,6 +8,7 @@ import { db, usersTable, settingsTable, facilitiesTable } from "@workspace/db";
 import { sql, eq } from "drizzle-orm";
 import { validateEnv } from "./lib/envValidation";
 import { startPaymentMirrorMigration } from "./lib/paymentMirrorMigration";
+import { markStartupReady } from "./lib/startupReadiness";
 
 const rawPort = process.env["PORT"];
 
@@ -1184,7 +1185,10 @@ app.listen(port, (err) => {
     // handled externally and must never be performed by application startup.
     runStartupMigrations()
       .then(() => runStartupSeed())
-      .then(() => startScheduler())
+      .then(() => {
+        markStartupReady();
+        return startScheduler();
+      })
       .catch((err) => logger.error({ err }, "Background development startup task error"));
   } else {
     logger.info("Production startup migrations and seed disabled");
