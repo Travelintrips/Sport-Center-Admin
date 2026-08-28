@@ -60,13 +60,24 @@ try {
 
   const verification = await client.query<{
     resolver_exists: boolean;
+    resolver_supports_manual_provider: boolean;
     mirror_trigger_exists: boolean;
+    mirror_supports_manual_metadata_correction: boolean;
     internal_journal_trigger_exists: boolean;
     public_entry_trigger_exists: boolean;
   }>(`
     SELECT
       to_regprocedure('sport_center.resolve_and_persist_payment_metadata(integer)') IS NOT NULL
         AS resolver_exists,
+      COALESCE(
+        POSITION(
+          'v_provider_code = ''unknown'''
+          IN pg_get_functiondef(
+            to_regprocedure('sport_center.resolve_and_persist_payment_metadata(integer)')
+          )
+        ) > 0,
+        FALSE
+      ) AS resolver_supports_manual_provider,
       EXISTS (
         SELECT 1
         FROM pg_trigger t
@@ -80,6 +91,21 @@ try {
           AND p.proname = 'mirror_confirmed_payment_to_public'
           AND t.tgenabled IN ('O', 'A')
       ) AS mirror_trigger_exists,
+      COALESCE(
+        POSITION(
+          'v_provider_code = ''unknown'''
+          IN pg_get_functiondef(
+            to_regprocedure('sport_center.mirror_confirmed_payment_to_public()')
+          )
+        ) > 0
+        AND POSITION(
+          'allow_posted_payment_metadata_correction'
+          IN pg_get_functiondef(
+            to_regprocedure('sport_center.mirror_confirmed_payment_to_public()')
+          )
+        ) > 0,
+        FALSE
+      ) AS mirror_supports_manual_metadata_correction,
       EXISTS (
         SELECT 1
         FROM pg_trigger t
@@ -111,7 +137,9 @@ try {
   const state = verification.rows[0];
   if (
     !state?.resolver_exists ||
+    !state.resolver_supports_manual_provider ||
     !state.mirror_trigger_exists ||
+    !state.mirror_supports_manual_metadata_correction ||
     !state.internal_journal_trigger_exists ||
     !state.public_entry_trigger_exists
   ) {

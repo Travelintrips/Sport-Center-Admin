@@ -27,6 +27,15 @@ export function startPaymentMirrorMigration(): Promise<void> {
         SELECT
           to_regprocedure('sport_center.resolve_and_persist_payment_metadata(integer)') IS NOT NULL
             AS resolver_exists,
+          COALESCE(
+            POSITION(
+              'v_provider_code = ''unknown'''
+              IN pg_get_functiondef(
+                to_regprocedure('sport_center.resolve_and_persist_payment_metadata(integer)')
+              )
+            ) > 0,
+            FALSE
+          ) AS resolver_supports_manual_provider,
           EXISTS (
             SELECT 1
             FROM pg_trigger t
@@ -39,7 +48,22 @@ export function startPaymentMirrorMigration(): Promise<void> {
               AND NOT t.tgisinternal
               AND p.proname = 'mirror_confirmed_payment_to_public'
               AND t.tgenabled IN ('O', 'A')
-          ) AS trigger_exists
+          ) AS trigger_exists,
+          COALESCE(
+            POSITION(
+              'v_provider_code = ''unknown'''
+              IN pg_get_functiondef(
+                to_regprocedure('sport_center.mirror_confirmed_payment_to_public()')
+              )
+            ) > 0
+            AND POSITION(
+              'allow_posted_payment_metadata_correction'
+              IN pg_get_functiondef(
+                to_regprocedure('sport_center.mirror_confirmed_payment_to_public()')
+              )
+            ) > 0,
+            FALSE
+          ) AS mirror_supports_manual_metadata_correction
           ,
           EXISTS (
             SELECT 1
@@ -72,14 +96,18 @@ export function startPaymentMirrorMigration(): Promise<void> {
         const row = result.rows[0] as
           | {
               resolver_exists?: boolean;
+              resolver_supports_manual_provider?: boolean;
               trigger_exists?: boolean;
+              mirror_supports_manual_metadata_correction?: boolean;
               public_entry_sync_trigger_exists?: boolean;
               internal_journal_sync_trigger_exists?: boolean;
             }
           | undefined;
         if (
           !row?.resolver_exists ||
+          !row.resolver_supports_manual_provider ||
           !row.trigger_exists ||
+          !row.mirror_supports_manual_metadata_correction ||
           !row.public_entry_sync_trigger_exists ||
           !row.internal_journal_sync_trigger_exists
         ) {
