@@ -82,3 +82,14 @@ causing valid historical owner-approved Mandiri rules to be rejected.
 **How to apply:** Verify both the resolver's manual-provider branch and the
 mirror function's manual-metadata correction support before marking the payment
 mirror migration ready.
+
+After committing a production function migration, repeat the exact startup
+predicate through a fresh connection using the runtime-selected production
+secret.
+
+**Why:** In-transaction verification only proves that the provisioning session
+can see its own definitions; the publish container must independently see the
+same function bodies before it can pass readiness.
+
+**How to apply:** Treat fresh-connection verification as the final provisioning
+step, and do not start publishing while any behavior marker remains false.
