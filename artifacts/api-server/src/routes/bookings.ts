@@ -1939,6 +1939,20 @@ router.patch("/bookings/:id/dates", adminMiddleware, async (req, res) => {
         throw new Error("PAYMENT_NOT_FOUND");
       }
 
+      if (paymentDate !== undefined) {
+        // TEMPORARY CORRECTION MODE: during the approved historical correction
+        // window, allow this admin transaction to update the canonical payment
+        // date without rewriting posted public accounting evidence. The setting
+        // is transaction-local and automatically returns to "off" afterward.
+        await tx.execute(sql`
+          SELECT set_config(
+            'sport_center.allow_posted_payment_metadata_correction',
+            'on',
+            true
+          )
+        `);
+      }
+
       const paymentTimestamp = paymentDate
         ? new Date(`${paymentDate}T12:00:00+07:00`)
         : undefined;
