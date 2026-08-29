@@ -28,6 +28,7 @@ import { syncBookingToBizportal, syncStatusToBizportal, deleteBookingFromBizport
 import { getBaseUrl } from "../lib/appUrl";
 import { calculateTax, recordTaxTransaction, reverseTaxTransaction } from "../lib/tax";
 import { reverseJournalEntry, reversePublicAccountingEntry } from "../lib/accounting";
+import { generateBookingOrderNumber } from "../lib/orderNumber";
 
 const INACTIVE_STATUSES = ["cancelled", "expired", "rejected", "refunded"];
 const AP_MULTIGUNA_HOURLY_PRICE = 300000;
@@ -145,26 +146,6 @@ router.post("/bookings/track-payer-selection", async (req, res) => {
     res.status(500).json({ error: "Internal server error" });
   }
 });
-
-async function generateOrderNumber(): Promise<string> {
-  // Advisory lock (bigint namespace) serializes order number generation across concurrent requests
-  await db.execute(sql`SELECT pg_advisory_lock(42001)`);
-  try {
-    const rows = await db.select({ orderNumber: bookingsTable.orderNumber }).from(bookingsTable);
-    let maxNum = 0;
-    for (const row of rows) {
-      const match = row.orderNumber.match(/^SC-(\d+)$/);
-      if (match) {
-        const n = parseInt(match[1], 10);
-        if (n > maxNum) maxNum = n;
-      }
-    }
-    const next = maxNum + 1;
-    return `SC-${String(next).padStart(4, "0")}`;
-  } finally {
-    await db.execute(sql`SELECT pg_advisory_unlock(42001)`);
-  }
-}
 
 function addHours(time: string, hours: number): string {
   const [h, m] = time.split(":").map(Number);
@@ -697,7 +678,7 @@ router.post("/bookings", async (req, res) => {
         : Math.min(Number(discountAmount) || 0, basePrice);
     const totalPrice = basePrice - discount;
     const taxCalc = await calculateTax(totalPrice, "sport_booking", bookingDate);
-    const orderNumber = await generateOrderNumber();
+    const orderNumber = await generateBookingOrderNumber();
 
     // customerId: admin → bodyCustomerId atau null; admin_booking/customer → bodyCustomerId atau loggedInUserId
     const effectiveCustomerId = bodyCustomerId ?? (loggedInRole !== "admin" ? loggedInUserId : null);
@@ -1317,7 +1298,7 @@ router.post("/bookings/recurring", async (req, res) => {
       }
       // Per-date tax calc: respects effectiveDate backward-compat rule
       const taxCalc = taxByDate.get(bookingDate)!;
-      const orderNumber = await generateOrderNumber();
+      const orderNumber = await generateBookingOrderNumber();
       const [booking] = await db.insert(bookingsTable).values({
         orderNumber,
         customerId: effectiveCustomerId,

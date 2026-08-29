@@ -43,6 +43,7 @@ import { extractBookingDpp, postConfirmedPaymentAccounting } from "../lib/accoun
 import { hashPassword } from "../lib/auth";
 import { syncStatusToBizportal, pushConfirmedPaymentAsBankMutation } from "../lib/bizportalSync";
 import { calculateTax, recordTaxTransaction } from "../lib/tax";
+import { generateBookingOrderNumber } from "../lib/orderNumber";
 import {
   checkInBooking,
   completeBooking,
@@ -171,19 +172,6 @@ async function generateCustomerCode(): Promise<string> {
     }
   }
   return `SC-CUST-${String(maxNum + 1).padStart(6, "0")}`;
-}
-
-async function generateOrderNumber(): Promise<string> {
-  const rows = await db.select({ orderNumber: bookingsTable.orderNumber }).from(bookingsTable);
-  let maxNum = 0;
-  for (const row of rows) {
-    const match = row.orderNumber.match(/^SC-(\d+)$/);
-    if (match) {
-      const n = parseInt(match[1], 10);
-      if (n > maxNum) maxNum = n;
-    }
-  }
-  return `SC-${String(maxNum + 1).padStart(4, "0")}`;
 }
 
 async function checkConflict(facilityId: number, bookingDate: string, startTime: string, endTime: string): Promise<boolean> {
@@ -697,7 +685,7 @@ router.post("/wa/booking", async (req, res) => {
     const totalPrice = Number(facility.pricePerHour) * Number(durationHours);
     // Hitung PPN — mengikuti effective_date backward-compat rule
     const taxCalc = await calculateTax(totalPrice, "sport_booking", bookingDate);
-    const orderNumber = await generateOrderNumber();
+    const orderNumber = await generateBookingOrderNumber();
     const paymentDeadline = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
 
     const [booking] = await db.insert(bookingsTable).values({
@@ -2860,7 +2848,7 @@ async function execCreateBookingFromSession(session: WaBookingSessionRow, phone:
   // ── 9. Hitung PPN ──────────────────────────────────────────────────────────
   const taxCalc = await calculateTax(totalPrice, "sport_booking", session.bookingDate);
   const grandTotal = taxCalc.taxAmount > 0 ? taxCalc.grandTotal : totalPrice;
-  const orderNumber = await generateOrderNumber();
+  const orderNumber = await generateBookingOrderNumber();
 
   // ── 10. Buat booking dengan status waiting_admin_approval ──────────────────
   const [booking] = await db.insert(bookingsTable).values({
