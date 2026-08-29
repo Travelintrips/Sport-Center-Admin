@@ -683,6 +683,11 @@ function SummaryStats({
   activeFilter: string;
   onStatClick: (filter: string) => void;
 }) {
+  const verificationKeys = new Set(
+    bookings
+      .filter((b) => b.status === "waiting_confirmation" || b.status === "paid")
+      .map((b) => b.groupRef ? `group:${b.groupRef}` : `booking:${b.id}`),
+  );
   const stats = [
     {
       label: "Total Booking",
@@ -697,7 +702,7 @@ function SummaryStats({
     },
     {
       label: "Perlu Verifikasi",
-      value: bookings.filter((b) => b.status === "waiting_confirmation" || b.status === "paid").length,
+      value: verificationKeys.size,
       filter: "waiting_confirmation",
       icon: CreditCard,
       color: "text-amber-600 dark:text-amber-400",
@@ -2396,6 +2401,14 @@ export default function AdminBookings() {
     return m;
   }, [bookings]);
 
+  const bookingsByGroupRef = useMemo(() => {
+    const m: Record<string, any[]> = {};
+    for (const b of bookings as any[]) {
+      if (b.groupRef) (m[b.groupRef] ??= []).push(b);
+    }
+    return m;
+  }, [bookings]);
+
   const dissolveGroup = async (groupRef: string) => {
     setDissolvingRef(groupRef);
     try {
@@ -2500,9 +2513,19 @@ export default function AdminBookings() {
 
   const updatePaymentMutation = useUpdatePayment({
     mutation: {
-      onSuccess: (data, variables) => {
-        queryClient.invalidateQueries({ queryKey: getListBookingsQueryKey() });
-        toast({ title: "Pembayaran diperbarui" });
+      onSuccess: async (data: any, variables: any) => {
+        // Konfirmasi payment grup memperbarui semua sibling di server. Tunggu
+        // refetch selesai sebelum menutup drawer agar tabel tidak sempat
+        // menampilkan tombol verifikasi untuk sesi-sesi yang sudah ikut
+        // terkonfirmasi.
+        await queryClient.invalidateQueries({ queryKey: getListBookingsQueryKey() });
+        await refetchBookings();
+        toast({
+          title: "Pembayaran diperbarui",
+          description: variables.data.status === "confirmed" && selectedBooking?.groupRef
+            ? "Status seluruh sesi dalam grup sudah disinkronkan."
+            : undefined,
+        });
         if (variables.data.paymentMethod !== undefined) {
           setSelectedBooking((current: any) => {
             if (!current) return current;
@@ -2652,6 +2675,25 @@ export default function AdminBookings() {
       return true;
     }).sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }, [bookings, statusFilter, search, dateFrom, dateTo]);
+
+  // Satu groupRef hanya boleh memiliki satu entry aksi verifikasi pada
+  // tampilan saat ini. Memilih row dengan bukti pembayaran membuat aksi tetap
+  // tersedia walaupun admin sedang memakai pencarian/filter.
+  const groupVerificationRowByRef = useMemo(() => {
+    const m: Record<string, any> = {};
+    for (const b of filtered as any[]) {
+      if (!b.groupRef || m[b.groupRef]) continue;
+      const isWaiting = b.status === "waiting_confirmation" || b.status === "paid";
+      if (isWaiting && b.payment?.proofUrl) m[b.groupRef] = b;
+    }
+    for (const b of filtered as any[]) {
+      if (b.groupRef && !m[b.groupRef] &&
+          (b.status === "waiting_confirmation" || b.status === "paid")) {
+        m[b.groupRef] = b;
+      }
+    }
+    return m;
+  }, [filtered]);
 
   const handleStatusUpdate = (status: string, adminNotes?: string) => {
     if (!selectedBooking) return;
@@ -2809,7 +2851,14 @@ export default function AdminBookings() {
   });
 
   const isUpdating = updateBookingMutation.isPending || updatePaymentMutation.isPending || updatePaymentMetadataMutation.isPending || deletingId !== null;
-  const pendingVerification = bookings.filter((b: any) => b.status === "paid").length;
+  const pendingVerification = useMemo(() => {
+    const keys = new Set(
+      bookings
+        .filter((b: any) => b.status === "waiting_confirmation" || b.status === "paid")
+        .map((b: any) => b.groupRef ? `group:${b.groupRef}` : `booking:${b.id}`),
+    );
+    return keys.size;
+  }, [bookings]);
 
   const mergeSelectedBookings = useMemo(
     () => filtered.filter((b: any) => selectedIds.has(b.id)),
@@ -3333,7 +3382,24 @@ export default function AdminBookings() {
               </thead>
               <tbody>
                 <AnimatePresence mode="popLayout">
-                  {filtered.map((b: any, i: number) => (
+                  {filtered.map((b: any, i: number) => {
+                    const groupRows = b.groupRef ? (bookingsByGroupRef[b.groupRef] ?? []) : [];
+                    const isMultiSessionGroup = Boolean(b.groupRef && groupRows.length > 1);
+                    const groupPendingRows = groupRows.filter(
+                      (row: any) => row.status === "waiting_confirmation" || row.status === "paid",
+                    );
+                    const isPendingVerificationBooking =
+                      b.status === "waiting_confirmation" || b.status === "paid";
+                    const groupVerificationRow = b.groupRef
+                      ? groupVerificationRowByRef[b.groupRef]
+                      : undefined;
+                    const isGroupVerificationRow =
+                      isMultiSessionGroup &&
+                      isPendingVerificationBooking &&
+                      groupPendingRows.length > 0 &&
+                      groupVerificationRow?.id === b.id;
+
+                    return (
                     <motion.tr
                       key={b.id}
                       initial={{ opacity: 0, y: 4 }}
@@ -3501,7 +3567,27 @@ export default function AdminBookings() {
                         )}
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">
-                        {(b.status === "confirmed" || b.status === "completed" || b.checkedInAt) ? (
+                        {isMultiSessionGroup && isPendingVerificationBooking && groupPendingRows.length > 0 ? (
+                          isGroupVerificationRow ? (
+                            <button
+                              onClick={() => setSelectedBooking(b)}
+                              className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full border bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100 dark:bg-amber-900/20 dark:text-amber-300 dark:border-amber-800 dark:hover:bg-amber-900/40 transition-colors"
+                              title="Verifikasi satu kali untuk seluruh sesi dalam grup"
+                            >
+                              <CreditCard size={11} />
+                              Verifikasi Grup
+                              <span className="text-[10px] opacity-70">({groupRows.length} sesi)</span>
+                            </button>
+                          ) : (
+                            <span
+                              className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full border bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-900/20 dark:text-violet-300 dark:border-violet-800"
+                              title="Sesi ini ikut terverifikasi saat pembayaran grup dikonfirmasi"
+                            >
+                              <Users size={11} />
+                              Ikut Grup
+                            </span>
+                          )
+                        ) : (b.status === "confirmed" || b.status === "completed" || b.checkedInAt) ? (
                           <InlineCheckInSelect
                             booking={b}
                             onCheckIn={(id) => checkInMutation.mutate({ id })}
@@ -3693,7 +3779,8 @@ export default function AdminBookings() {
                         </div>
                       </td>
                     </motion.tr>
-                  ))}
+                    );
+                  })}
                 </AnimatePresence>
                 {filtered.length === 0 && (
                   <tr>
