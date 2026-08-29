@@ -2114,7 +2114,9 @@ export const UpdateMembershipParams = zod.object({
 
 export const UpdateMembershipBody = zod.object({
   "status": zod.enum(['pending_payment', 'waiting_confirmation', 'active', 'expired', 'cancelled']).optional(),
-  "notes": zod.string().optional()
+  "notes": zod.string().optional(),
+  "startDate": zod.coerce.date().optional(),
+  "endDate": zod.coerce.date().optional()
 })
 
 export const UpdateMembershipResponse = zod.object({

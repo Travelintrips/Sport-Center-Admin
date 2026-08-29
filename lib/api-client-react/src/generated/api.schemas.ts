@@ -1049,6 +1049,8 @@ export const GymMembershipUpdateStatus = {
 export interface GymMembershipUpdate {
   status?: GymMembershipUpdateStatus;
   notes?: string;
+  startDate?: string;
+  endDate?: string;
 }
 
 export interface MembershipLookupInput {
