@@ -1639,5 +1639,24 @@ EXECUTE FUNCTION public.sync_sport_payment_entry_metadata();
 -- AP2 discount settings support a fixed nominal amount in addition to percentage.
 ALTER TABLE sport_center.discount_settings
   ADD COLUMN IF NOT EXISTS discount_amount integer;
+
+-- Group payments are one financial event. This table stores only the
+-- invoice allocation references for each session; it must never be mirrored
+-- as a payment or posted to accounting.
+CREATE TABLE IF NOT EXISTS sport_center.sport_payment_allocations (
+  id serial PRIMARY KEY,
+  payment_id integer NOT NULL
+    REFERENCES sport_center.sport_payments(id) ON DELETE CASCADE,
+  booking_id integer NOT NULL
+    REFERENCES sport_center.sport_bookings(id) ON DELETE CASCADE,
+  amount numeric(14,2) NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT NOW(),
+  CONSTRAINT sport_payment_allocations_payment_booking_unique
+    UNIQUE (payment_id, booking_id),
+  CONSTRAINT sport_payment_allocations_amount_positive
+    CHECK (amount > 0)
+);
+CREATE INDEX IF NOT EXISTS sport_payment_allocations_booking_idx
+  ON sport_center.sport_payment_allocations (booking_id);
 `;
 

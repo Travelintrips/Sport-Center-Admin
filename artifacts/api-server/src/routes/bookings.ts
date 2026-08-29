@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { db, bookingsTable, facilitiesTable, paymentsTable, promosTable, discountSettingsTable, apMembersTable, bookingHistoryTable, usersTable, verificationLogsTable, companyUsersTable, bookingGroupsTable, settingsTable, waActionTokensTable, waNotifLogsTable, paylabsSettingsTable } from "@workspace/db";
+import { db, bookingsTable, facilitiesTable, paymentsTable, paymentAllocationsTable, promosTable, discountSettingsTable, apMembersTable, bookingHistoryTable, usersTable, verificationLogsTable, companyUsersTable, bookingGroupsTable, settingsTable, waActionTokensTable, waNotifLogsTable, paylabsSettingsTable } from "@workspace/db";
 import { eq, and, sql, or, ilike, desc, inArray, notExists, gte } from "drizzle-orm";
 import { adminMiddleware, authMiddleware, verifyToken } from "../lib/auth";
 import { broadcastAvailabilityChange } from "../lib/supabase";
@@ -159,12 +159,21 @@ async function getBookingWithPayment(id: number) {
   const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, id)).limit(1);
   if (!booking) return null;
   const [facility] = await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, booking.facilityId)).limit(1);
-  const allPayments = await db.select().from(paymentsTable).where(eq(paymentsTable.bookingId, id));
+  const groupBookingIds = booking.groupRef
+    ? (await db.select({ id: bookingsTable.id }).from(bookingsTable)
+        .where(eq(bookingsTable.groupRef, booking.groupRef))).map((row) => row.id)
+    : [id];
+  const allPayments = await db.select().from(paymentsTable)
+    .where(inArray(paymentsTable.bookingId, groupBookingIds));
   allPayments.sort((a, b) => a.id - b.id);
   const payment =
     allPayments.find((p) => p.status === "pending" || p.status === "confirmed") ??
     allPayments[allPayments.length - 1] ??
     null;
+  const allocations = booking.groupRef
+    ? await db.select().from(paymentAllocationsTable)
+      .where(inArray(paymentAllocationsTable.bookingId, groupBookingIds))
+    : [];
 
   // Jika booking bagian dari grup recurring, ambil info grup
   let groupInfo: { groupTotalPayment: number; groupSessionCount: number; groupRef: string } | null = null;
@@ -207,6 +216,10 @@ async function getBookingWithPayment(id: number) {
     isDpPaid: booking.isDpPaid ?? false,
     payment: payment ? { ...payment, amount: Number(payment.amount) } : null,
     payments: allPayments.map((p) => ({ ...p, amount: Number(p.amount) })),
+    paymentAllocations: allocations.map((allocation) => ({
+      ...allocation,
+      amount: Number(allocation.amount),
+    })),
     remainingAmount: (() => {
       const total = payableTotal;
 

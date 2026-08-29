@@ -48,6 +48,7 @@ import {
 } from "../lib/paymentProofOcr";
 import { readPaymentProofOcr } from "../lib/paymentOcr";
 import { isBookingConfirmableStatus } from "../lib/bookingLifecycle";
+import { insertGroupPaymentAllocations } from "../lib/paymentAllocations";
 
 // Helper: kirim rekap ke admin WA hanya jika tanggal booking = hari ini (WIB)
 function todayWIB(): string {
@@ -344,8 +345,16 @@ router.post("/payments", async (req, res) => {
           id: bookingsTable.id,
           downPayment: bookingsTable.downPayment,
           isDpPaid: bookingsTable.isDpPaid,
+          totalPrice: bookingsTable.totalPrice,
+          grandTotal: bookingsTable.grandTotal,
         }).from(bookingsTable).where(eq(bookingsTable.groupRef, booking.groupRef))
-      : [{ id: booking.id, downPayment: booking.downPayment, isDpPaid: booking.isDpPaid }];
+      : [{
+          id: booking.id,
+          downPayment: booking.downPayment,
+          isDpPaid: booking.isDpPaid,
+          totalPrice: booking.totalPrice,
+          grandTotal: booking.grandTotal,
+        }];
     const groupBookingIds = groupBookings.map((b) => b.id);
     const existingPayments = await db.select().from(paymentsTable)
       .where(eq(paymentsTable.bookingId, Number(bookingId)));
@@ -543,6 +552,12 @@ router.post("/payments", async (req, res) => {
       })
       .returning();
 
+    if (booking.groupRef) {
+      // One transfer/invoice means one financial payment. Session-level
+      // amounts are stored separately as display-only allocations.
+      await insertGroupPaymentAllocations(payment.id, groupBookings, amountNum);
+    }
+
     const prevStatus = booking.status;
     await db.update(bookingsTable)
       .set({ status: "waiting_confirmation", updatedAt: new Date() })
@@ -564,7 +579,9 @@ router.post("/payments", async (req, res) => {
       note: historyNote,
     });
 
-    // Grup repeat booking: propagasi waiting_confirmation + proof ke semua sibling
+    // Grup repeat booking: propagate only booking lifecycle state. Do not copy
+    // the payment row to siblings: that would create duplicate mirrors,
+    // journals, tax ledgers, and bank-reconciliation candidates.
     if (booking.groupRef) {
       const siblings = await db.select().from(bookingsTable).where(
         and(
@@ -573,46 +590,6 @@ router.post("/payments", async (req, res) => {
         )
       );
       for (const sib of siblings) {
-        // Buat payment record untuk sibling agar bukti transfer tercatat di semua sesi
-        const hasPendingPayment = await db.select({ id: paymentsTable.id })
-          .from(paymentsTable)
-          .where(and(
-            eq(paymentsTable.bookingId, sib.id),
-            eq(paymentsTable.status, "pending"),
-          ));
-        if (hasPendingPayment.length === 0) {
-          await db.insert(paymentsTable).values({
-            bookingId: sib.id,
-            // A group payment is one financial event. Mirror the submitted
-            // amount for UI/history consistency instead of showing each
-            // sibling's session price as another payment.
-            amount: String(amountNum),
-            proofUrl,
-            paymentMethod,
-            paymentProvider: paymentProvider ?? "unknown",
-            providerName,
-            providerId,
-            providerOrderId,
-            companyId: paymentEnrichment.companyId ?? null,
-            bankAccountId: paymentEnrichment.bankAccountId,
-            expectedSettlementDate: paymentEnrichment.expectedSettlementDate ?? null,
-            paidAt: paymentEnrichment.paidAt ?? null,
-            notes: `[Grup ${booking.groupRef}] ${notes || ""}`.trim(),
-            ocrName: proofOcr?.name ?? null,
-            ocrAmount: proofOcr?.amount == null ? null : String(proofOcr.amount),
-            ocrDate: proofOcr?.date ?? null,
-            ocrRaw: proofOcr?.rawText ?? null,
-            ocrData: proofOcr ? {
-              paymentMethod: proofOcr.paymentMethod,
-              confidence: proofOcr.confidence,
-              signals: proofOcr.signals,
-              engine: proofOcr.engine,
-              scannedAt: proofOcr.scannedAt,
-              methodMatch: ocrMethodMatch,
-            } : null,
-            paymentType: paymentType as "dp" | "pelunasan" | "full_payment",
-          });
-        }
         const sibPrev = sib.status;
         await db.update(bookingsTable)
           .set({ status: "waiting_confirmation", updatedAt: new Date() })
@@ -1640,9 +1617,6 @@ router.delete("/payments/:id/proof", adminMiddleware, async (req, res) => {
           and(eq(bookingsTable.groupRef, booking.groupRef), ne(bookingsTable.id, booking.id))
         );
         for (const sib of siblings) {
-          // Hapus payment record pending sibling yang dibuat saat upload grup
-          await db.delete(paymentsTable)
-            .where(and(eq(paymentsTable.bookingId, sib.id), eq(paymentsTable.status, "pending")));
           if (sib.status === "waiting_confirmation") {
             await db.update(bookingsTable)
               .set({ status: "pending_payment" })

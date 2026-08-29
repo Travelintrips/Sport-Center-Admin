@@ -2,8 +2,8 @@ import { Router } from "express";
 import multer from "multer";
 import path from "path";
 import { randomUUID, randomBytes, createHmac, timingSafeEqual } from "crypto";
-import { db, bookingsTable, facilitiesTable, paymentsTable, bookingHistoryTable, waActionTokensTable, settingsTable, usersTable, blockedSchedulesTable, waBookingSessionsTable } from "@workspace/db";
-import { eq, and, desc, isNotNull, inArray, or, lt, gt, sql } from "drizzle-orm";
+import { db, bookingsTable, facilitiesTable, paymentsTable, paymentAllocationsTable, bookingGroupsTable, bookingHistoryTable, waActionTokensTable, settingsTable, usersTable, blockedSchedulesTable, waBookingSessionsTable } from "@workspace/db";
+import { eq, and, desc, isNotNull, inArray, or, ne, lt, gt, sql } from "drizzle-orm";
 import { createWaToken, verifyWaToken, consumeWaToken, getWaTokenRow } from "../lib/waTokens";
 import { getBaseUrl } from "../lib/appUrl";
 import {
@@ -68,6 +68,7 @@ import {
   scanPaymentProof,
   storedPaymentProofOcr,
 } from "../lib/paymentProofOcr";
+import { insertGroupPaymentAllocations } from "../lib/paymentAllocations";
 
 const router = Router();
 
@@ -191,7 +192,18 @@ async function getBookingFull(id: number) {
   const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, id)).limit(1);
   if (!booking) return null;
   const [facility] = await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, booking.facilityId)).limit(1);
-  const [payment] = await db.select().from(paymentsTable).where(eq(paymentsTable.bookingId, id)).limit(1);
+  const groupBookingIds = booking.groupRef
+    ? (await db.select({ id: bookingsTable.id }).from(bookingsTable)
+        .where(eq(bookingsTable.groupRef, booking.groupRef))).map((row) => row.id)
+    : [id];
+  const groupPayments = await db.select().from(paymentsTable)
+    .where(inArray(paymentsTable.bookingId, groupBookingIds))
+    .orderBy(desc(paymentsTable.createdAt));
+  const payment = groupPayments[0] ?? null;
+  const paymentAllocations = booking.groupRef
+    ? await db.select().from(paymentAllocationsTable)
+      .where(inArray(paymentAllocationsTable.bookingId, groupBookingIds))
+    : [];
   return {
     ...booking,
     totalPrice: Number(booking.totalPrice),
@@ -205,6 +217,11 @@ async function getBookingFull(id: number) {
     facilityName: facility?.name ?? "",
     facilityCategory: facility?.category ?? "",
     payment: payment ? { ...payment, amount: Number(payment.amount) } : null,
+    payments: groupPayments.map((p) => ({ ...p, amount: Number(p.amount) })),
+    paymentAllocations: paymentAllocations.map((allocation) => ({
+      ...allocation,
+      amount: Number(allocation.amount),
+    })),
   };
 }
 
@@ -317,6 +334,7 @@ router.post("/wa/customer/register", async (req, res) => {
     // Cek duplikat nomor
     const [existing] = await db.select({ id: usersTable.id, name: usersTable.name, customerCode: usersTable.customerCode })
       .from(usersTable).where(eq(usersTable.phone, cleanedPhone)).limit(1);
+    let createdPayment: typeof paymentsTable.$inferSelect | undefined;
     if (existing) {
       res.status(409).json({
         error: "Nomor WhatsApp sudah terdaftar",
@@ -1108,9 +1126,33 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
     const [facility] = await db.select({ name: facilitiesTable.name }).from(facilitiesTable)
       .where(eq(facilitiesTable.id, booking.facilityId)).limit(1);
 
-    // Upsert payment record
-    const [existing] = await db.select().from(paymentsTable)
-      .where(eq(paymentsTable.bookingId, bookingId)).limit(1);
+    const groupBookings = booking.groupRef
+      ? await db.select({
+          id: bookingsTable.id,
+          totalPrice: bookingsTable.totalPrice,
+          grandTotal: bookingsTable.grandTotal,
+        }).from(bookingsTable).where(eq(bookingsTable.groupRef, booking.groupRef))
+      : [{
+          id: booking.id,
+          totalPrice: booking.totalPrice,
+          grandTotal: booking.grandTotal,
+        }];
+    const groupBookingIds = groupBookings.map((row) => row.id);
+    const [bookingGroup] = booking.groupRef
+      ? await db.select({ totalPayment: bookingGroupsTable.totalPayment })
+        .from(bookingGroupsTable)
+        .where(eq(bookingGroupsTable.groupRef, booking.groupRef))
+        .limit(1)
+      : [];
+    const payableTotal = Number(bookingGroup?.totalPayment ?? booking.grandTotal ?? booking.totalPrice);
+    const groupPayments = await db.select().from(paymentsTable)
+      .where(inArray(paymentsTable.bookingId, groupBookingIds))
+      .orderBy(desc(paymentsTable.createdAt));
+    // A confirmed DP is historical and must remain untouched; a new proof is
+    // the next payment event. Only a pending proof may be replaced.
+    const [existing] = groupPayments.filter((candidate) =>
+      candidate.status === "pending" || candidate.status === "waiting_confirmation",
+    );
     const detectedQris = proofOcr?.paymentMethod === "QRIS";
     // WhatsApp is only the submission/notification channel. It is not a payment
     // method, so keep the accounting label as the actual bank transfer method.
@@ -1118,7 +1160,8 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
     const resolvedProvider = detectedQris ? "mandiri_direct" : "unknown";
 
     if (existing) {
-      await ensurePaymentBankAccount(existing, booking);
+      const paymentBooking = groupBookings.find((member) => member.id === existing.bookingId) ?? booking;
+      await ensurePaymentBankAccount(existing, paymentBooking as typeof booking);
       const ocrMethodMatch = paymentMethodMatchesOcr(resolvedPaymentMethod, proofOcr);
       await db.update(paymentsTable).set({
         proofUrl,
@@ -1139,12 +1182,12 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
         status: "pending",
         updatedAt: new Date(),
       })
-        .where(eq(paymentsTable.bookingId, bookingId));
+        .where(eq(paymentsTable.id, existing.id));
     } else {
       const paymentEnrichment = await resolveRequiredPaymentEnrichment(booking, resolvedProvider, new Date());
-      await db.insert(paymentsTable).values({
+      [createdPayment] = await db.insert(paymentsTable).values({
         bookingId,
-        amount: String(Number(booking.totalPrice)),
+        amount: String(payableTotal),
         proofUrl,
         paymentMethod: resolvedPaymentMethod,
         paymentProvider: resolvedProvider,
@@ -1168,7 +1211,11 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
           methodMatch: paymentMethodMatchesOcr(resolvedPaymentMethod, proofOcr),
         } : null,
         status: "pending",
-      });
+      }).returning();
+    }
+    const allocationPaymentId = existing?.id ?? createdPayment?.id;
+    if (booking.groupRef && allocationPaymentId) {
+      await insertGroupPaymentAllocations(allocationPaymentId, groupBookings, payableTotal);
     }
 
     await db.update(bookingsTable).set({ status: "waiting_confirmation", updatedAt: new Date() })
@@ -1178,6 +1225,27 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
       bookingId, fromStatus: booking.status, toStatus: "waiting_confirmation",
       changedByName: booking.customerName, note: "Bukti pembayaran diupload via WhatsApp",
     });
+
+    if (booking.groupRef) {
+      const siblings = await db.select().from(bookingsTable).where(and(
+        eq(bookingsTable.groupRef, booking.groupRef),
+        ne(bookingsTable.id, bookingId),
+      ));
+      for (const sibling of siblings) {
+        if (INACTIVE_STATUSES.includes(sibling.status)) continue;
+        await db.update(bookingsTable).set({
+          status: "waiting_confirmation",
+          updatedAt: new Date(),
+        }).where(eq(bookingsTable.id, sibling.id));
+        await db.insert(bookingHistoryTable).values({
+          bookingId: sibling.id,
+          fromStatus: sibling.status,
+          toStatus: "waiting_confirmation",
+          changedByName: booking.customerName,
+          note: `Bukti pembayaran diupload via WhatsApp (grup ${booking.groupRef})`,
+        });
+      }
+    }
 
     // Create single review token for admin (shows proof + approve/reject buttons in one page)
     const reviewToken = await createWaToken(bookingId, "review_payment", 7);
