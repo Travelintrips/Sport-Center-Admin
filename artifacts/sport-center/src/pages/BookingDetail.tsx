@@ -1704,7 +1704,7 @@ function UploadProofForm({
         )}
 
         <input
-          ref={fileInputRef}
+          ref={fileInputRef as unknown as React.Ref<HTMLInputElement>}
           type="file"
           accept="image/jpeg,image/png,image/webp,application/pdf"
           className="hidden"
