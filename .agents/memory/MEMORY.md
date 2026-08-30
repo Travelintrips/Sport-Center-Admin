@@ -62,6 +62,7 @@
 - [Production payment-confirm trigger](payment-confirm-trigger-prod.md) — verify both function and trigger; production may have tables but neither mirroring object.
 - [Production runtime identity](gae-production-access.md) — current custom domain is attached to Replit Autoscale; tracked GAE files are legacy unless new runtime evidence says otherwise.
 - [Payment metadata-only edits](payment-metadata-edit.md) — dedicated /metadata endpoint; provider NOT NULL uses 'unknown'; QRIS forces mandiri_direct; confirmed rows fail closed on missing settlement rule.
+- [Posted journal metadata correction](posted-journal-metadata-correction.md) — mass historical journal metadata changes require an explicit transaction-local correction gate; financial fields remain immutable.
 - [Payment date corrections](payment-date-corrections.md) — date-only edits must not send booking dates; incomplete or locked accounting evidence must block safely with an actionable conflict.
 - [Tesseract worker bundling](tesseract-worker-bundling.md) — keep OCR external to API bundle, available in App Engine runtime, and cache language files under /tmp.
 - [Sport Center workflow recovery](sport-center-workflow-recovery.md) — missing artifact node_modules causes `vite: not found`; keep one managed web workflow and use its actual port.

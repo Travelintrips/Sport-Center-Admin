@@ -1,0 +1,47 @@
+Saya lanjut dari temuan sebelumnya: nominal di booking adalah Rp160.000, sementara payment dan jejak accounting menerima Rp640.000. Saya akan cek status perubahan yang sudah ada, skema produksi, serta jalur pembuat payment agar koreksi data dan pencegahan regresi bisa dilakukan dengan aman.
+
+
+
+49 actions
+Akar masalah di kode sudah terkonfirmasi: saat satu invoice grup dibayar, bukti dan nominal gabungan disalin ke setiap booking saudara. Itu membuat satu transfer tercatat berulang di sport_payments dan accounting. Saya akan mengambil snapshot read-only produksi untuk memastikan target koreksi yang tepat sebelum menyentuh data.
+
+
+
+11 actions
+Snapshot read-only berhasil dan cocok dengan temuan awal: empat payment terpisah (satu per booking) masing-masing membawa Rp640.000, lalu masing-masing memiliki jurnal dan pajak Rp640.000. Saya akan merangkum seluruh linkage dengan ID dan total debit/kredit agar rencana reversal/repost tidak menyentuh baris yang salah.
+
+
+
+7 actions
+Hasil read-only produksi:
+
+SC-0442–SC-0445 semuanya benar sebagai booking terpisah: Rp160.000, DPP Rp144.144, PPN Rp15.856 per booking.
+Payment 368–371 semuanya confirmed, tetapi masing-masing menyimpan Rp640.000 dan memakai provider order ID yang sama.
+Masing-masing payment punya outbox posted, jurnal internal posted, mirror publik posted, dan accounting entry posted—semuanya Rp640.000.
+Pajak internal dan publik juga masing-masing tercatat DPP Rp576.577 + PPN Rp63.423 = Rp640.000.
+Total yang seharusnya tetap diterima dari transfer grup adalah Rp640.000, tetapi tidak boleh muncul sebagai empat penerimaan finansial Rp640.000.
+Sebelum koreksi production, saya perlu memastikan representasi bisnisnya. Ada dua model aman:
+
+Satu payment grup finansial Rp640.000, lalu booking sibling hanya menjadi referensi alokasi Rp160.000 tanpa jurnal/payment finansial duplikat.
+Empat payment finansial Rp160.000, masing-masing punya jurnal dan pajak sendiri; totalnya tetap Rp640.000. Ini paling dekat dengan permintaan “nominal payment per booking”, tetapi perlu memastikan provider order/payment ID yang sama memang boleh dialokasikan ke empat posting.
+Setelah Anda memilih, saya akan menyiapkan guard idempotensi, reversal atas jejak salah, posting ulang, dan verifikasi linkage payment → mirror → jurnal → pajak sebelum menjalankan perubahan.
+
+
+Model payment yang benar
+1 payment grup Rp640.000 — sibling hanya referensi alokasi
+
+Worked for 3 minutes
+
+Checkpoint made
+14 minutes ago
+Considering duplicate payments
+
+Considering duplicate payments
+Baik, model yang dipilih adalah satu payment grup Rp640.000 dengan alokasi referensi Rp160.000 per booking. Saya akan menerapkan perbaikan kode agar payment sibling tidak lagi dibuat sebagai payment finansial, lalu menyiapkan script repair production yang default-nya hanya dry-run dan memiliki guard ketat. Saya juga akan memetakan status/kolom reversal yang benar sebelum meminta persetujuan eksekusi final.
+
+
+
+36 actions
+
+Worked for 2 minutes
+You've reached your daily free quota limit. It will reset at 12:00 AM UTC.

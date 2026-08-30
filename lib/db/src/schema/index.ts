@@ -48,6 +48,7 @@ export * from "./paylabsSettings";
 export * from "./paymentSettlement";
 export * from "./facilityCompanyMappings";
 export * from "./paymentAccountingOutbox";
+export * from "./paymentAllocations";
 export * from "./publicCompanies";
 export * from "./centralFinanceProcessing";
 export * from "./corporateSubscriptions";

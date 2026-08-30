@@ -379,12 +379,21 @@ export async function resolveRequiredPaymentEnrichment(
   provider: SettlementProvider,
   paidAt: Date | null,
   options?: PaymentEnrichmentOptions,
-): Promise<PaymentEnrichment & { bankAccountId: string }> {
+): Promise<PaymentEnrichment & { companyId: number; bankAccountId: string }> {
   const enrichment = await enrichPayment(booking, provider, paidAt, options);
+  if (
+    enrichment.companyId == null ||
+    !Number.isInteger(enrichment.companyId) ||
+    enrichment.companyId <= 0
+  ) {
+    throw new Error("PAYMENT_COMPANY_ID_REQUIRED");
+  }
+  const companyId = enrichment.companyId;
   const configuredBankAccountId = enrichment.bankAccountId?.trim();
-  if (configuredBankAccountId) {
+  if (configuredBankAccountId && configuredBankAccountId.toLowerCase() !== "unknown") {
     return {
       ...enrichment,
+      companyId,
       bankAccountId: configuredBankAccountId,
     };
   }
@@ -394,12 +403,13 @@ export async function resolveRequiredPaymentEnrichment(
     .from(settingsTable)
     .limit(1);
   const bankAccountId = settings?.bankAccount?.trim() || null;
-  if (!bankAccountId) {
+  if (!bankAccountId || bankAccountId.toLowerCase() === "unknown") {
     throw new Error("RECEIVING_BANK_ACCOUNT_NOT_CONFIGURED");
   }
 
   return {
     ...enrichment,
+    companyId,
     bankAccountId,
     bankAccountEvidenceSource: "default_center_settings",
   };
@@ -419,11 +429,17 @@ export async function ensurePaymentBankAccount(
       normalizedProvider,
       payment.merchantTradeNo ?? payment.providerTradeNo ?? payment.providerReference,
     );
-  const providerName = payment.providerName?.trim() || normalizeProviderName(normalizedProvider);
+  const providerName = payment.providerName?.trim().toLowerCase() === "unknown"
+    ? normalizeProviderName(normalizedProvider)
+    : payment.providerName?.trim() || normalizeProviderName(normalizedProvider);
   if (
+    Number.isInteger(payment.companyId) &&
+    Number(payment.companyId) > 0 &&
     payment.bankAccountId?.trim() &&
+    payment.bankAccountId.trim().toLowerCase() !== "unknown" &&
     payment.providerId?.trim() &&
     payment.providerName?.trim() &&
+    payment.providerName.trim().toLowerCase() !== "unknown" &&
     payment.providerOrderId?.trim()
   ) return payment;
 

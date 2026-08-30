@@ -48,6 +48,7 @@ import {
 } from "../lib/paymentProofOcr";
 import { readPaymentProofOcr } from "../lib/paymentOcr";
 import { isBookingConfirmableStatus } from "../lib/bookingLifecycle";
+import { insertGroupPaymentAllocations } from "../lib/paymentAllocations";
 
 // Helper: kirim rekap ke admin WA hanya jika tanggal booking = hari ini (WIB)
 function todayWIB(): string {
@@ -344,8 +345,16 @@ router.post("/payments", async (req, res) => {
           id: bookingsTable.id,
           downPayment: bookingsTable.downPayment,
           isDpPaid: bookingsTable.isDpPaid,
+          totalPrice: bookingsTable.totalPrice,
+          grandTotal: bookingsTable.grandTotal,
         }).from(bookingsTable).where(eq(bookingsTable.groupRef, booking.groupRef))
-      : [{ id: booking.id, downPayment: booking.downPayment, isDpPaid: booking.isDpPaid }];
+      : [{
+          id: booking.id,
+          downPayment: booking.downPayment,
+          isDpPaid: booking.isDpPaid,
+          totalPrice: booking.totalPrice,
+          grandTotal: booking.grandTotal,
+        }];
     const groupBookingIds = groupBookings.map((b) => b.id);
     const existingPayments = await db.select().from(paymentsTable)
       .where(eq(paymentsTable.bookingId, Number(bookingId)));
@@ -543,6 +552,12 @@ router.post("/payments", async (req, res) => {
       })
       .returning();
 
+    if (booking.groupRef) {
+      // One transfer/invoice means one financial payment. Session-level
+      // amounts are stored separately as display-only allocations.
+      await insertGroupPaymentAllocations(payment.id, groupBookings, amountNum);
+    }
+
     const prevStatus = booking.status;
     await db.update(bookingsTable)
       .set({ status: "waiting_confirmation", updatedAt: new Date() })
@@ -564,7 +579,9 @@ router.post("/payments", async (req, res) => {
       note: historyNote,
     });
 
-    // Grup repeat booking: propagasi waiting_confirmation + proof ke semua sibling
+    // Grup repeat booking: propagate only booking lifecycle state. Do not copy
+    // the payment row to siblings: that would create duplicate mirrors,
+    // journals, tax ledgers, and bank-reconciliation candidates.
     if (booking.groupRef) {
       const siblings = await db.select().from(bookingsTable).where(
         and(
@@ -573,46 +590,6 @@ router.post("/payments", async (req, res) => {
         )
       );
       for (const sib of siblings) {
-        // Buat payment record untuk sibling agar bukti transfer tercatat di semua sesi
-        const hasPendingPayment = await db.select({ id: paymentsTable.id })
-          .from(paymentsTable)
-          .where(and(
-            eq(paymentsTable.bookingId, sib.id),
-            eq(paymentsTable.status, "pending"),
-          ));
-        if (hasPendingPayment.length === 0) {
-          await db.insert(paymentsTable).values({
-            bookingId: sib.id,
-            // A group payment is one financial event. Mirror the submitted
-            // amount for UI/history consistency instead of showing each
-            // sibling's session price as another payment.
-            amount: String(amountNum),
-            proofUrl,
-            paymentMethod,
-            paymentProvider: paymentProvider ?? "unknown",
-            providerName,
-            providerId,
-            providerOrderId,
-            companyId: paymentEnrichment.companyId ?? null,
-            bankAccountId: paymentEnrichment.bankAccountId,
-            expectedSettlementDate: paymentEnrichment.expectedSettlementDate ?? null,
-            paidAt: paymentEnrichment.paidAt ?? null,
-            notes: `[Grup ${booking.groupRef}] ${notes || ""}`.trim(),
-            ocrName: proofOcr?.name ?? null,
-            ocrAmount: proofOcr?.amount == null ? null : String(proofOcr.amount),
-            ocrDate: proofOcr?.date ?? null,
-            ocrRaw: proofOcr?.rawText ?? null,
-            ocrData: proofOcr ? {
-              paymentMethod: proofOcr.paymentMethod,
-              confidence: proofOcr.confidence,
-              signals: proofOcr.signals,
-              engine: proofOcr.engine,
-              scannedAt: proofOcr.scannedAt,
-              methodMatch: ocrMethodMatch,
-            } : null,
-            paymentType: paymentType as "dp" | "pelunasan" | "full_payment",
-          });
-        }
         const sibPrev = sib.status;
         await db.update(bookingsTable)
           .set({ status: "waiting_confirmation", updatedAt: new Date() })
@@ -731,14 +708,11 @@ router.post("/payments", async (req, res) => {
 /**
  * Metadata-only payment edit.
  *
- * Hanya payment_method / payment_provider (+ provider_name turunan) yang
- * boleh diubah oleh admin. Tidak ada konfirmasi, rekonsiliasi, posting jurnal,
- * atau sinkronisasi BizPortal. Jika admin memilih QRIS, rekening penerimaan
- * Mandiri CST diturunkan server dari konfigurasi settlement aktif; input
- * rekening dari klien tetap ditolak. Sinkronisasi metadata ke accounting
- * journal terjadi lewat trigger DB sync_payment_accounting_journal yang
- * metadata-only, dan guard_posted_accounting_journal menjaga field finansial
- * jurnal posted tetap immutable.
+ * Hanya metadata revisi yang boleh diubah oleh admin: metode/provider dan,
+ * bila perlu, company_id/bank_account_id. Tidak ada konfirmasi,
+ * rekonsiliasi, posting jurnal, atau sinkronisasi BizPortal. Mismatch settlement
+ * menjadi warning selama mode revisi; field finansial dan lifecycle tetap
+ * ditolak.
  *
  * Selama masa koreksi yang disetujui owner, transaksi endpoint ini memberi
  * trigger database izin lokal untuk menyelaraskan metadata pada mirror/jurnal
@@ -783,8 +757,8 @@ router.patch("/payments/:id/metadata", adminMiddleware, async (req, res) => {
     // aktif, bukan dari request admin. Dengan begitu trigger canonical dapat
     // memvalidasi provider QRIS terhadap rekening yang benar tanpa membuka
     // endpoint metadata untuk perubahan rekening/settlement secara bebas.
-    let qrisReceivingAccountId: string | null = null;
-    if (update.paymentProvider === "mandiri_direct") {
+     const revisionWarnings: string[] = [];
+     if (update.paymentProvider === "mandiri_direct") {
       const [booking] = await db
         .select()
         .from(bookingsTable)
@@ -798,17 +772,26 @@ router.patch("/payments/:id/metadata", adminMiddleware, async (req, res) => {
       }
 
       const paymentDate = before.paidAt ?? before.confirmedAt ?? before.createdAt;
-      const enrichment = await resolveRequiredPaymentEnrichment(
-        booking,
-        "mandiri_direct",
-        paymentDate,
-        {
-          sourcePaymentCompanyId: before.companyId,
-          explicitCompanyId: before.companyId,
-          effectiveDate: paymentEffectiveDate(paymentDate),
-        },
-      );
-      qrisReceivingAccountId = enrichment.bankAccountId;
+       try {
+         await resolveRequiredPaymentEnrichment(
+           booking,
+           "mandiri_direct",
+           paymentDate,
+           {
+             sourcePaymentCompanyId: update.companyId ?? before.companyId,
+             explicitCompanyId: update.companyId ?? before.companyId,
+             effectiveDate: paymentEffectiveDate(paymentDate),
+           },
+         );
+       } catch (error) {
+         const message = String((error as any)?.message ?? error);
+         revisionWarnings.push(
+           message.includes("COMPANY") || message.includes("PROVIDER")
+             ? "Company/provider settlement belum cocok; silakan koreksi saat revisi."
+             : "Bank account atau settlement rule belum cocok; silakan koreksi saat revisi.",
+         );
+         req.log.warn({ err: error, paymentId: id }, "Payment metadata revision warning");
+       }
     }
 
     const payment = await db.transaction(async (tx) => {
@@ -832,9 +815,8 @@ router.patch("/payments/:id/metadata", adminMiddleware, async (req, res) => {
             ? { paymentProvider: update.paymentProvider as any }
             : {}),
           ...(update.providerName !== undefined ? { providerName: update.providerName } : {}),
-          ...(qrisReceivingAccountId
-            ? { bankAccountId: qrisReceivingAccountId }
-            : {}),
+           ...(update.companyId !== undefined ? { companyId: update.companyId } : {}),
+           ...(update.bankAccountId !== undefined ? { bankAccountId: update.bankAccountId || "unknown" } : {}),
           updatedAt: new Date(),
         })
         .where(eq(paymentsTable.id, id))
@@ -861,7 +843,11 @@ router.patch("/payments/:id/metadata", adminMiddleware, async (req, res) => {
       ...getClientInfo(req),
     });
 
-    res.json({ ...payment, amount: Number(payment.amount) });
+     res.json({
+       ...payment,
+       amount: Number(payment.amount),
+       warnings: revisionWarnings,
+     });
   } catch (err: any) {
     const message = String(err?.message ?? "") + " " + String((err as any)?.cause?.message ?? "");
     if (message.includes("POSTED_ACCOUNTING_JOURNAL") || message.includes("PAYMENT_ACCOUNTING_JOURNAL_AMBIGUOUS")) {
@@ -1631,9 +1617,6 @@ router.delete("/payments/:id/proof", adminMiddleware, async (req, res) => {
           and(eq(bookingsTable.groupRef, booking.groupRef), ne(bookingsTable.id, booking.id))
         );
         for (const sib of siblings) {
-          // Hapus payment record pending sibling yang dibuat saat upload grup
-          await db.delete(paymentsTable)
-            .where(and(eq(paymentsTable.bookingId, sib.id), eq(paymentsTable.status, "pending")));
           if (sib.status === "waiting_confirmation") {
             await db.update(bookingsTable)
               .set({ status: "pending_payment" })

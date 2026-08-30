@@ -82,3 +82,36 @@ causing valid historical owner-approved Mandiri rules to be rejected.
 **How to apply:** Verify both the resolver's manual-provider branch and the
 mirror function's manual-metadata correction support before marking the payment
 mirror migration ready.
+
+After committing a production function migration, repeat the exact startup
+predicate through a fresh connection using the runtime-selected production
+secret.
+
+**Why:** In-transaction verification only proves that the provisioning session
+can see its own definitions; the publish container must independently see the
+same function bodies before it can pass readiness.
+
+**How to apply:** Treat fresh-connection verification as the final provisioning
+step, and do not start publishing while any behavior marker remains false.
+
+Production provisioning and final verification must use the exact unmodified
+database connection selected by the published runtime; do not rewrite the
+Supabase pooler port for this startup-critical check.
+
+**Why:** Port 5432 and port 6543 exposed different function-body marker results
+for the same configured production secret, so provisioning one did not satisfy
+the API startup predicate on the other.
+
+**How to apply:** Run payment function DDL and the fresh-connection marker query
+through the raw production connection URL that `lib/db` will consume.
+
+Serialize replace-in-place payment function migrations with one shared
+transaction-scoped PostgreSQL advisory lock in both development startup and
+production provisioning.
+
+**Why:** Concurrent `CREATE OR REPLACE FUNCTION` calls can race on PostgreSQL
+catalog tuples and fail with `tuple concurrently updated`, preventing the API
+from opening its port.
+
+**How to apply:** Acquire the lock before the first payment function DDL and
+hold it through trigger verification and commit.

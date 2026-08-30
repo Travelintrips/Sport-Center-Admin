@@ -14,3 +14,9 @@ Untuk recovery outbox, hanya event `posted` yang terbukti kehilangan journal int
 **Why:** Rekonsiliasi periodik yang mereset semua row tanpa journal dapat menghapus backoff error dan membuat worker melakukan retry agresif atau mengambil lock aktif.
 
 **How to apply:** Rekonsiliasi payment confirmed harus idempoten, payment-level, dan memvalidasi journal internal sebelum menandai outbox selesai.
+
+Sport Center menyimpan `bank_account_id` sebagai nomor rekening teks, sedangkan mirror `public.sport_payments.bank_account_id` milik BizPortal adalah foreign key integer. Jangan meneruskan nomor rekening mentah ke kolom mirror tersebut; simpan sebagai metadata teks pada jurnal atau gunakan pemetaan internal yang tervalidasi.
+
+**Why:** Nomor rekening dapat melebihi batas integer dan tidak sama dengan ID baris rekening, sehingga konfirmasi pembayaran gagal dengan overflow atau foreign-key violation.
+
+**How to apply:** Validasi boundary antara source Supabase, mirror publik, dan jurnal setiap kali alur konfirmasi atau replay accounting diubah.

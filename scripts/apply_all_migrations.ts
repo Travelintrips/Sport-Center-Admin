@@ -92,6 +92,16 @@ const stmts = [
   `ALTER TABLE sport_center.sport_payments ADD COLUMN IF NOT EXISTS settlement_status text NOT NULL DEFAULT 'unsettled'`,
   `ALTER TABLE sport_center.sport_payments ADD COLUMN IF NOT EXISTS expected_settlement_date text`,
   `ALTER TABLE sport_center.sport_payments ADD COLUMN IF NOT EXISTS gross_tax_inclusive boolean NOT NULL DEFAULT false`,
+  `CREATE TABLE IF NOT EXISTS sport_center.sport_payment_allocations (
+     id serial PRIMARY KEY,
+     payment_id integer NOT NULL REFERENCES sport_center.sport_payments(id) ON DELETE CASCADE,
+     booking_id integer NOT NULL REFERENCES sport_center.sport_bookings(id) ON DELETE CASCADE,
+     amount numeric(14,2) NOT NULL CHECK (amount > 0),
+     created_at timestamptz NOT NULL DEFAULT NOW(),
+     CONSTRAINT sport_payment_allocations_payment_booking_unique UNIQUE (payment_id, booking_id)
+   )`,
+  `CREATE INDEX IF NOT EXISTS sport_payment_allocations_booking_idx
+     ON sport_center.sport_payment_allocations (booking_id)`,
   // confirmed payment journals are finalized, not drafts
   `ALTER TABLE sport_center.accounting_journals ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'posted'`,
   `ALTER TABLE sport_center.accounting_journals ALTER COLUMN status SET DEFAULT 'posted'`,

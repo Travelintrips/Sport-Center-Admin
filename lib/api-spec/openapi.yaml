@@ -4129,6 +4129,12 @@ components:
           enum: [pending_payment, waiting_confirmation, active, expired, cancelled]
         notes:
           type: string
+        startDate:
+          type: string
+          format: date
+        endDate:
+          type: string
+          format: date
 
     MembershipLookupInput:
       type: object

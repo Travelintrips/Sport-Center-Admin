@@ -125,7 +125,8 @@ AS $function$
          AND psc.is_active = TRUE
          AND psc.source = 'OWNER_APPROVED'
          AND psc.effective_from <= v_payment_date
-         AND (psc.effective_until IS NULL OR v_payment_date < psc.effective_until);
+         -- effective_until is inclusive, matching the settlement-config API.
+         AND (psc.effective_until IS NULL OR v_payment_date <= psc.effective_until);
 
        IF v_company_count = 0
           OR v_min_settlement_delay IS NULL
@@ -147,7 +148,8 @@ AS $function$
           AND psc.is_active = TRUE
           AND psc.source = 'OWNER_APPROVED'
           AND psc.effective_from <= v_payment_date
-          AND (psc.effective_until IS NULL OR v_payment_date < psc.effective_until);
+          -- effective_until is inclusive, matching the settlement-config API.
+          AND (psc.effective_until IS NULL OR v_payment_date <= psc.effective_until);
 
        IF v_min_settlement_delay IS DISTINCT FROM v_max_settlement_delay THEN
          RAISE EXCEPTION 'CANONICAL_PROVIDER_RULE_UNRESOLVED: company=% provider=% bank=% conflicting_delays',
@@ -165,7 +167,8 @@ AS $function$
           AND psc.is_active = TRUE
           AND psc.source = 'OWNER_APPROVED'
           AND psc.effective_from <= v_payment_date
-          AND (psc.effective_until IS NULL OR v_payment_date < psc.effective_until)
+          -- effective_until is inclusive, matching the settlement-config API.
+          AND (psc.effective_until IS NULL OR v_payment_date <= psc.effective_until)
         ORDER BY psc.effective_from DESC, psc.id DESC
         LIMIT 1;
 

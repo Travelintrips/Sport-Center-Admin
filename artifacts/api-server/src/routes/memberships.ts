@@ -428,8 +428,45 @@ router.patch("/memberships/:id", adminMiddleware, async (req, res) => {
     const id = parseInt(String(req.params.id));
     const [existing] = await db.select().from(gymMembershipsTable).where(eq(gymMembershipsTable.id, id)).limit(1);
     if (!existing) { res.status(404).json({ error: "Not found" }); return; }
-    const data = { ...req.body };
-    if (data.totalPrice !== undefined) data.totalPrice = String(data.totalPrice);
+
+    const { status, notes, startDate, endDate } = req.body ?? {};
+    const data: {
+      status?: typeof existing.status;
+      notes?: string | null;
+      startDate?: string;
+      endDate?: string;
+      updatedAt: Date;
+    } = { updatedAt: new Date() };
+
+    if (status !== undefined) data.status = status;
+    if (notes !== undefined) data.notes = notes;
+    if (startDate !== undefined || endDate !== undefined) {
+      const nextStartDate = String(startDate ?? existing.startDate);
+      const nextEndDate = String(endDate ?? existing.endDate);
+      const isDateOnly = (value: string) => {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+        const parsed = new Date(`${value}T00:00:00Z`);
+        return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+      };
+
+      if (!isDateOnly(nextStartDate) || !isDateOnly(nextEndDate)) {
+        res.status(400).json({ error: "Tanggal mulai dan berakhir harus berformat YYYY-MM-DD yang valid" });
+        return;
+      }
+      if (nextStartDate > nextEndDate) {
+        res.status(400).json({ error: "Tanggal mulai tidak boleh setelah tanggal berakhir" });
+        return;
+      }
+
+      data.startDate = nextStartDate;
+      data.endDate = nextEndDate;
+    }
+
+    if (Object.keys(data).length === 1) {
+      res.status(400).json({ error: "Tidak ada data yang diperbarui" });
+      return;
+    }
+
     await db.update(gymMembershipsTable).set(data).where(eq(gymMembershipsTable.id, id));
     const [membership] = await db.select().from(gymMembershipsTable).where(eq(gymMembershipsTable.id, id)).limit(1);
     if (!membership) { res.status(404).json({ error: "Not found" }); return; }

@@ -283,7 +283,7 @@ BEGIN
           source_payment_id = CASE WHEN public.sport_payments.posting_status IN ('unposted', 'failed') THEN EXCLUDED.source_payment_id ELSE public.sport_payments.source_payment_id END,
           amount = CASE WHEN public.sport_payments.posting_status IN ('unposted', 'failed') THEN EXCLUDED.amount ELSE public.sport_payments.amount END,
           method = CASE WHEN public.sport_payments.posting_status IN ('unposted', 'failed') OR COALESCE(current_setting('sport_center.allow_posted_payment_metadata_correction', true), 'off') = 'on' THEN EXCLUDED.method ELSE public.sport_payments.method END,
-          paid_at = CASE WHEN public.sport_payments.posting_status IN ('unposted', 'failed') THEN EXCLUDED.paid_at ELSE public.sport_payments.paid_at END,
+          paid_at = CASE WHEN public.sport_payments.posting_status IN ('unposted', 'failed') OR COALESCE(current_setting('sport_center.allow_posted_payment_metadata_correction', true), 'off') = 'on' THEN EXCLUDED.paid_at ELSE public.sport_payments.paid_at END,
           payment_type = CASE WHEN public.sport_payments.posting_status IN ('unposted', 'failed') THEN EXCLUDED.payment_type ELSE public.sport_payments.payment_type END,
           tax_rate = CASE WHEN public.sport_payments.posting_status IN ('unposted', 'failed') THEN EXCLUDED.tax_rate ELSE public.sport_payments.tax_rate END,
           tax_amount = CASE WHEN public.sport_payments.posting_status IN ('unposted', 'failed') THEN EXCLUDED.tax_amount ELSE public.sport_payments.tax_amount END,
@@ -343,7 +343,8 @@ BEGIN
      AND psc.is_active = TRUE
      AND psc.source = 'OWNER_APPROVED'
      AND psc.effective_from <= v_payment_date
-     AND (psc.effective_until IS NULL OR v_payment_date < psc.effective_until);
+     -- effective_until is inclusive, matching the settlement-config API.
+     AND (psc.effective_until IS NULL OR v_payment_date <= psc.effective_until);
 
   IF v_company_count = 0
      OR v_min_settlement_delay IS NULL
@@ -366,7 +367,8 @@ BEGIN
      AND psc.is_active = TRUE
      AND psc.source = 'OWNER_APPROVED'
      AND psc.effective_from <= v_payment_date
-     AND (psc.effective_until IS NULL OR v_payment_date < psc.effective_until)
+     -- effective_until is inclusive, matching the settlement-config API.
+     AND (psc.effective_until IS NULL OR v_payment_date <= psc.effective_until)
    ORDER BY psc.effective_from DESC, psc.id DESC
    LIMIT 1;
 
@@ -449,7 +451,7 @@ BEGIN
         source_payment_id = CASE WHEN public.sport_payments.posting_status IN ('unposted', 'failed') THEN EXCLUDED.source_payment_id ELSE public.sport_payments.source_payment_id END,
         amount = CASE WHEN public.sport_payments.posting_status IN ('unposted', 'failed') THEN EXCLUDED.amount ELSE public.sport_payments.amount END,
         method = CASE WHEN public.sport_payments.posting_status IN ('unposted', 'failed') OR COALESCE(current_setting('sport_center.allow_posted_payment_metadata_correction', true), 'off') = 'on' THEN EXCLUDED.method ELSE public.sport_payments.method END,
-        paid_at = CASE WHEN public.sport_payments.posting_status IN ('unposted', 'failed') THEN EXCLUDED.paid_at ELSE public.sport_payments.paid_at END,
+        paid_at = CASE WHEN public.sport_payments.posting_status IN ('unposted', 'failed') OR COALESCE(current_setting('sport_center.allow_posted_payment_metadata_correction', true), 'off') = 'on' THEN EXCLUDED.paid_at ELSE public.sport_payments.paid_at END,
         payment_type = CASE WHEN public.sport_payments.posting_status IN ('unposted', 'failed') THEN EXCLUDED.payment_type ELSE public.sport_payments.payment_type END,
         tax_rate = CASE WHEN public.sport_payments.posting_status IN ('unposted', 'failed') THEN EXCLUDED.tax_rate ELSE public.sport_payments.tax_rate END,
         tax_amount = CASE WHEN public.sport_payments.posting_status IN ('unposted', 'failed') THEN EXCLUDED.tax_amount ELSE public.sport_payments.tax_amount END,

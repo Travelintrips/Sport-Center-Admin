@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { Users, Search, Trash2, CheckCircle, Dumbbell, Clock, XCircle, ImageIcon, ExternalLink, LogIn, CalendarCheck, BadgeCheck, Download } from "lucide-react";
+import { Users, Search, Trash2, CheckCircle, Dumbbell, Clock, XCircle, ImageIcon, ExternalLink, LogIn, CalendarCheck, BadgeCheck, Download, Pencil, Save, X } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { getToken } from "@/lib/auth";
 
@@ -51,6 +51,10 @@ export default function AdminMemberships() {
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [viewMember, setViewMember] = useState<any>(null);
+  const [editingDates, setEditingDates] = useState(false);
+  const [editStartDate, setEditStartDate] = useState("");
+  const [editEndDate, setEditEndDate] = useState("");
+  const [dateError, setDateError] = useState("");
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const [imgError, setImgError] = useState(false);
 
@@ -145,8 +149,9 @@ export default function AdminMemberships() {
     mutation: {
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: getListMembershipsQueryKey() });
-        toast({ title: "Status berhasil diperbarui" });
+        toast({ title: "Data member berhasil diperbarui" });
         setViewMember(null);
+        setEditingDates(false);
       },
       onError: () => toast({ title: "Gagal memperbarui", variant: "destructive" }),
     },
@@ -180,7 +185,27 @@ export default function AdminMemberships() {
 
   function openMember(m: any) {
     setViewMember(m);
+    setEditingDates(false);
+    setEditStartDate(m.startDate ?? "");
+    setEditEndDate(m.endDate ?? "");
+    setDateError("");
     setImgError(false);
+  }
+
+  function saveDates() {
+    if (!editStartDate || !editEndDate) {
+      setDateError("Tanggal mulai dan berakhir wajib diisi.");
+      return;
+    }
+    if (editStartDate > editEndDate) {
+      setDateError("Tanggal mulai tidak boleh setelah tanggal berakhir.");
+      return;
+    }
+    setDateError("");
+    updateMutation.mutate({
+      id: viewMember.id,
+      data: { startDate: editStartDate, endDate: editEndDate },
+    });
   }
 
   return (
@@ -510,10 +535,6 @@ export default function AdminMemberships() {
                 <div className="font-medium break-all">{viewMember.email}</div>
                 <div className="text-muted-foreground">Telepon</div>
                 <div className="font-medium">{viewMember.phone}</div>
-                <div className="text-muted-foreground">Mulai</div>
-                <div className="font-medium">{viewMember.startDate}</div>
-                <div className="text-muted-foreground">Berakhir</div>
-                <div className="font-medium">{viewMember.endDate}</div>
                 <div className="text-muted-foreground">Durasi</div>
                 <div className="font-medium">{viewMember.months} bulan</div>
                 <div className="text-muted-foreground">Total Bayar</div>
@@ -541,6 +562,94 @@ export default function AdminMemberships() {
                       <CheckCircle size={13} /> Sudah hadir
                     </div>
                   </>
+                )}
+              </div>
+
+              <div className="rounded-xl border border-border p-3 space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-sm font-semibold">Periode Membership</p>
+                  {!editingDates && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="gap-1.5"
+                      onClick={() => {
+                        setEditStartDate(viewMember.startDate ?? "");
+                        setEditEndDate(viewMember.endDate ?? "");
+                        setDateError("");
+                        setEditingDates(true);
+                      }}
+                    >
+                      <Pencil size={13} />
+                      Edit Tanggal
+                    </Button>
+                  )}
+                </div>
+
+                {editingDates ? (
+                  <>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1.5">
+                        <Label htmlFor="membership-start-date">Mulai</Label>
+                        <Input
+                          id="membership-start-date"
+                          type="date"
+                          value={editStartDate}
+                          onChange={(e) => setEditStartDate(e.target.value)}
+                          disabled={updateMutation.isPending}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="membership-end-date">Berakhir</Label>
+                        <Input
+                          id="membership-end-date"
+                          type="date"
+                          value={editEndDate}
+                          onChange={(e) => setEditEndDate(e.target.value)}
+                          disabled={updateMutation.isPending}
+                        />
+                      </div>
+                    </div>
+                    {dateError && <p className="text-xs text-destructive">{dateError}</p>}
+                    <div className="flex justify-end gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        className="gap-1.5"
+                        onClick={() => {
+                          setEditingDates(false);
+                          setDateError("");
+                        }}
+                        disabled={updateMutation.isPending}
+                      >
+                        <X size={13} />
+                        Batal
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        className="gap-1.5"
+                        onClick={saveDates}
+                        disabled={updateMutation.isPending}
+                      >
+                        <Save size={13} />
+                        Simpan Tanggal
+                      </Button>
+                    </div>
+                  </>
+                ) : (
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <div>
+                      <div className="text-muted-foreground">Mulai</div>
+                      <div className="font-medium">{viewMember.startDate}</div>
+                    </div>
+                    <div>
+                      <div className="text-muted-foreground">Berakhir</div>
+                      <div className="font-medium">{viewMember.endDate}</div>
+                    </div>
+                  </div>
                 )}
               </div>
 

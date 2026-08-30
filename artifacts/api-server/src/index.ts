@@ -942,6 +942,16 @@ async function runStartupMigrations() {
       )`,
      `ALTER TABLE sport_center.sport_bookings ADD COLUMN IF NOT EXISTS subscription_id INTEGER`,
      `ALTER TABLE sport_center.sport_bookings ADD COLUMN IF NOT EXISTS occurrence_id INTEGER`,
+      `CREATE TABLE IF NOT EXISTS sport_center.sport_payment_allocations (
+         id SERIAL PRIMARY KEY,
+         payment_id INTEGER NOT NULL REFERENCES sport_center.sport_payments(id) ON DELETE CASCADE,
+         booking_id INTEGER NOT NULL REFERENCES sport_center.sport_bookings(id) ON DELETE CASCADE,
+         amount NUMERIC(14,2) NOT NULL CHECK (amount > 0),
+         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         CONSTRAINT sport_payment_allocations_payment_booking_unique UNIQUE (payment_id, booking_id)
+       )`,
+      `CREATE INDEX IF NOT EXISTS sport_payment_allocations_booking_idx
+         ON sport_center.sport_payment_allocations (booking_id)`,
   ];
 
   for (const stmt of migrations) {

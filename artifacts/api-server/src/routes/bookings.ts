@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { db, bookingsTable, facilitiesTable, paymentsTable, promosTable, discountSettingsTable, apMembersTable, bookingHistoryTable, usersTable, verificationLogsTable, companyUsersTable, bookingGroupsTable, settingsTable, waActionTokensTable, waNotifLogsTable, paylabsSettingsTable } from "@workspace/db";
+import { db, bookingsTable, facilitiesTable, paymentsTable, paymentAllocationsTable, promosTable, discountSettingsTable, apMembersTable, bookingHistoryTable, usersTable, verificationLogsTable, companyUsersTable, bookingGroupsTable, settingsTable, waActionTokensTable, waNotifLogsTable, paylabsSettingsTable } from "@workspace/db";
 import { eq, and, sql, or, ilike, desc, inArray, notExists, gte } from "drizzle-orm";
 import { adminMiddleware, authMiddleware, verifyToken } from "../lib/auth";
 import { broadcastAvailabilityChange } from "../lib/supabase";
@@ -28,6 +28,7 @@ import { syncBookingToBizportal, syncStatusToBizportal, deleteBookingFromBizport
 import { getBaseUrl } from "../lib/appUrl";
 import { calculateTax, recordTaxTransaction, reverseTaxTransaction } from "../lib/tax";
 import { reverseJournalEntry, reversePublicAccountingEntry } from "../lib/accounting";
+import { generateBookingOrderNumber } from "../lib/orderNumber";
 
 const INACTIVE_STATUSES = ["cancelled", "expired", "rejected", "refunded"];
 const AP_MULTIGUNA_HOURLY_PRICE = 300000;
@@ -146,26 +147,6 @@ router.post("/bookings/track-payer-selection", async (req, res) => {
   }
 });
 
-async function generateOrderNumber(): Promise<string> {
-  // Advisory lock (bigint namespace) serializes order number generation across concurrent requests
-  await db.execute(sql`SELECT pg_advisory_lock(42001)`);
-  try {
-    const rows = await db.select({ orderNumber: bookingsTable.orderNumber }).from(bookingsTable);
-    let maxNum = 0;
-    for (const row of rows) {
-      const match = row.orderNumber.match(/^SC-(\d+)$/);
-      if (match) {
-        const n = parseInt(match[1], 10);
-        if (n > maxNum) maxNum = n;
-      }
-    }
-    const next = maxNum + 1;
-    return `SC-${String(next).padStart(4, "0")}`;
-  } finally {
-    await db.execute(sql`SELECT pg_advisory_unlock(42001)`);
-  }
-}
-
 function addHours(time: string, hours: number): string {
   const [h, m] = time.split(":").map(Number);
   const totalMinutes = h * 60 + (m || 0) + hours * 60;
@@ -178,12 +159,21 @@ async function getBookingWithPayment(id: number) {
   const [booking] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, id)).limit(1);
   if (!booking) return null;
   const [facility] = await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, booking.facilityId)).limit(1);
-  const allPayments = await db.select().from(paymentsTable).where(eq(paymentsTable.bookingId, id));
+  const groupBookingIds = booking.groupRef
+    ? (await db.select({ id: bookingsTable.id }).from(bookingsTable)
+        .where(eq(bookingsTable.groupRef, booking.groupRef))).map((row) => row.id)
+    : [id];
+  const allPayments = await db.select().from(paymentsTable)
+    .where(inArray(paymentsTable.bookingId, groupBookingIds));
   allPayments.sort((a, b) => a.id - b.id);
   const payment =
     allPayments.find((p) => p.status === "pending" || p.status === "confirmed") ??
     allPayments[allPayments.length - 1] ??
     null;
+  const allocations = booking.groupRef
+    ? await db.select().from(paymentAllocationsTable)
+      .where(inArray(paymentAllocationsTable.bookingId, groupBookingIds))
+    : [];
 
   // Jika booking bagian dari grup recurring, ambil info grup
   let groupInfo: { groupTotalPayment: number; groupSessionCount: number; groupRef: string } | null = null;
@@ -226,6 +216,10 @@ async function getBookingWithPayment(id: number) {
     isDpPaid: booking.isDpPaid ?? false,
     payment: payment ? { ...payment, amount: Number(payment.amount) } : null,
     payments: allPayments.map((p) => ({ ...p, amount: Number(p.amount) })),
+    paymentAllocations: allocations.map((allocation) => ({
+      ...allocation,
+      amount: Number(allocation.amount),
+    })),
     remainingAmount: (() => {
       const total = payableTotal;
 
@@ -697,7 +691,7 @@ router.post("/bookings", async (req, res) => {
         : Math.min(Number(discountAmount) || 0, basePrice);
     const totalPrice = basePrice - discount;
     const taxCalc = await calculateTax(totalPrice, "sport_booking", bookingDate);
-    const orderNumber = await generateOrderNumber();
+    const orderNumber = await generateBookingOrderNumber();
 
     // customerId: admin → bodyCustomerId atau null; admin_booking/customer → bodyCustomerId atau loggedInUserId
     const effectiveCustomerId = bodyCustomerId ?? (loggedInRole !== "admin" ? loggedInUserId : null);
@@ -1317,7 +1311,7 @@ router.post("/bookings/recurring", async (req, res) => {
       }
       // Per-date tax calc: respects effectiveDate backward-compat rule
       const taxCalc = taxByDate.get(bookingDate)!;
-      const orderNumber = await generateOrderNumber();
+      const orderNumber = await generateBookingOrderNumber();
       const [booking] = await db.insert(bookingsTable).values({
         orderNumber,
         customerId: effectiveCustomerId,
@@ -1937,6 +1931,20 @@ router.patch("/bookings/:id/dates", adminMiddleware, async (req, res) => {
 
       if (paymentDate !== undefined && !payment) {
         throw new Error("PAYMENT_NOT_FOUND");
+      }
+
+      if (paymentDate !== undefined) {
+        // TEMPORARY CORRECTION MODE: during the approved historical correction
+        // window, allow this admin transaction to update the canonical payment
+        // date without rewriting posted public accounting evidence. The setting
+        // is transaction-local and automatically returns to "off" afterward.
+        await tx.execute(sql`
+          SELECT set_config(
+            'sport_center.allow_posted_payment_metadata_correction',
+            'on',
+            true
+          )
+        `);
       }
 
       const paymentTimestamp = paymentDate
