@@ -82,4 +82,5 @@
 - [Development migration ordering](startup-migration-order.md) — start the development scheduler only after background schema migrations and seed complete.
 - [Production auditor schema visibility](production-auditor-schema-visibility.md) — primary and auditor connections can show different schema state; resolve target/replica visibility before declaring a migration verified.
 - [WhatsApp fail-closed policy](whatsapp-fail-closed.md) — non-production must never call the provider; absent or false WA_DRY_RUN is blocked, true is simulated, production remains unchanged.
+- [Secret bootstrap write boundary](secret-bootstrap-write-boundary.md) — runtime bootstrap can read GSM but must not be assumed able to add versions; repairs need explicit write authorization.
 
