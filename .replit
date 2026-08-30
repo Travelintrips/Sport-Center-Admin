@@ -4,7 +4,7 @@ modules = ["nodejs-20", "web", "python-base-3.13", "postgresql-16"]
 [deployment]
 router = "application"
 deploymentTarget = "autoscale"
-run = ["env", "PORT=8080", "NODE_ENV=production", "GCP_PROJECT_ID=sc-sport-center", "GCP_SECRET_ID=sport-center", "node", "--enable-source-maps", "./artifacts/api-server/dist/bootstrap.mjs"]
+run = ["env", "PORT=8080", "NODE_ENV=production", "GCP_PROJECT_ID=sport-center", "GCP_SECRET_ID=sport-center", "node", "--enable-source-maps", "./artifacts/api-server/dist/bootstrap.mjs"]
 build = ["bash", "-c", "pnpm -r --if-present run build"]
 
 [deployment.postBuild]
@@ -76,7 +76,7 @@ router = "path"
 
 [workflows.workflow.tasks.env]
 PORT = "8080"
-GCP_PROJECT_ID = "sc-sport-center"
+GCP_PROJECT_ID = "sport-center"
 
 [agent]
 stack = "BEST_EFFORT_FALLBACK"
