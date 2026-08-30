@@ -2,6 +2,7 @@ import { describe, expect, it } from "@jest/globals";
 import {
   isTerminalBookingStatus,
   normalizePaymentProvider,
+  resolveManualPaymentPaidAt,
   resolvePaylabsPaidAt,
   resolvePaylabsProviderReference,
 } from "./paymentProvider.js";
@@ -26,6 +27,15 @@ describe("canonical payment provider rules", () => {
       callbackAt,
     ).toISOString()).toBe("2026-08-08T09:59:00.000Z");
     expect(resolvePaylabsPaidAt({ paidAt: "not-a-date" }, callbackAt)).toBe(callbackAt);
+  });
+
+  it("always gives manual payments an effective timestamp", () => {
+    const submittedAt = new Date("2026-08-30T17:30:00.000Z");
+    expect(resolveManualPaymentPaidAt({}, submittedAt)).toBe(submittedAt);
+    expect(resolveManualPaymentPaidAt(
+      { paidAt: "2026-08-30T17:29:00.000Z" },
+      submittedAt,
+    ).toISOString()).toBe("2026-08-30T17:29:00.000Z");
   });
 
   it("prefers the provider reference and falls back to provider trade number", () => {

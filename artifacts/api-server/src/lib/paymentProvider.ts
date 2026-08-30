@@ -44,6 +44,13 @@ export function parseProviderPaidAt(body: Record<string, unknown>, now = new Dat
   return null;
 }
 
+export function resolveManualPaymentPaidAt(
+  body: Record<string, unknown>,
+  submittedAt = new Date(),
+): Date {
+  return parseProviderPaidAt(body, submittedAt) ?? submittedAt;
+}
+
 export function isTerminalBookingStatus(status: unknown): boolean {
   return ["cancelled", "expired", "rejected", "refunded"].includes(String(status ?? ""));
 }

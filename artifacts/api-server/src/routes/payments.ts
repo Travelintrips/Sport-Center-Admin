@@ -29,7 +29,7 @@ import { logger } from "../lib/logger";
 import { getBaseUrl } from "../lib/appUrl";
 import { sendRekapPemakaianToAdmin } from "../lib/rekapPemakaian";
 import { sendInvoiceToCustomer, sendGroupInvoiceToCustomer } from "../lib/invoiceDelivery";
-import { normalizePaymentProvider, parseProviderPaidAt } from "../lib/paymentProvider";
+import { normalizePaymentProvider, resolveManualPaymentPaidAt } from "../lib/paymentProvider";
 import { createPaymentProviderId, createPaymentProviderOrderId, normalizeProviderName } from "../lib/paymentMetadata";
 import { validatePaymentMetadataUpdate } from "../lib/paymentMetadataUpdate";
 import {
@@ -496,9 +496,14 @@ router.post("/payments", async (req, res) => {
       }
     }
 
-    const manualPaidAt = paymentMethod === "QRIS"
-      ? parseProviderPaidAt(req.body as Record<string, unknown>) ?? new Date()
-      : null;
+    // Every manual payment needs one canonical effective timestamp, including
+    // bank transfers. Besides preserving when the proof was submitted, this
+    // lets company ownership and settlement rules resolve against the same
+    // effective date instead of leaving transfer payments without company
+    // metadata.
+    const manualPaidAt = resolveManualPaymentPaidAt(
+      req.body as Record<string, unknown>,
+    );
     const paymentEnrichment = await resolveRequiredPaymentEnrichment(
       booking,
       paymentMethod === "QRIS" ? (paymentProvider ?? "unknown") : "unknown",
