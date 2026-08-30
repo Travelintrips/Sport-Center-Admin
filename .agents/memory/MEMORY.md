@@ -16,6 +16,7 @@
 - [WA Admin Commands & BizPortal](wa-admin-commands.md) — Admin phone sourced from DB settings.adminWaPhones first (not env); commands: APPROVE/REJECT/PAID/CANCEL/RESEND; unauthorized_admin_command audit; bookings has approved_by_admin_phone/approved_at/rejected_reason/paid_at columns.
 - [Dev DB full migration recipe](dev-db-migration.md) — Base SQLs (0000/0001/0002) create core tables; all ALTER TABLE extras (account_type, booker_name, fonnte_token, payer_type, etc.) live in scripts/migrate.ts + scripts/fix_settings_cols.ts; must apply both after fresh dev DB setup.
 - [DP multi-payment flow](dp-multi-payment.md) — payments table has payment_type (dp/pelunasan/full_payment); no unique constraint on booking_id; confirm DP → booking stays pending_payment; confirm pelunasan → booking confirmed.
+- [Group payment confirmation UI](group-payment-confirmation-ui.md) — recurring sessions share one confirmation decision; dedupe only the admin confirmation queue by groupRef while preserving session history.
 - [Expenses feature](expenses-feature.md) — sport_expenses table + expense_no_seq + expense_status/category enums; accounting_journals.booking_id made nullable for expense journal entries; /admin/expenses routes.
 
 - [Payment provider audit](payment-provider-audit.md) — QRIS payments now carry canonical provider/reference/timestamp metadata; preserve safe Paylabs callback and terminal-booking guards.

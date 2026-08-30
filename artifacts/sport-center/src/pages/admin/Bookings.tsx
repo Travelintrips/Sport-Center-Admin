@@ -147,6 +147,7 @@ const STATUS_CONFIG: Record<
 const FILTER_OPTIONS = [
   { value: "all",             label: "Semua Status" },
   { value: "pending_payment", label: "Menunggu Pembayaran" },
+  { value: "waiting_confirmation", label: "Perlu Verifikasi" },
   { value: "paid",            label: "Pembayaran Selesai" },
   { value: "confirmed",       label: "Dikonfirmasi" },
   { value: "completed",       label: "Selesai" },
@@ -181,6 +182,50 @@ function formatCurrency(n: number) {
     currency: "IDR",
     maximumFractionDigits: 0,
   }).format(n);
+}
+
+/**
+ * Group/recurring sessions are separate booking rows, but their payment
+ * decision is made once for the group. Keep mirrored payment rows for
+ * history, but show one representative in the confirmation queue.
+ */
+function dedupePaymentConfirmationBookings<T extends {
+  groupRef?: string | null;
+  status?: string;
+  payment?: { status?: string; proofUrl?: string | null } | null;
+}>(rows: T[]): T[] {
+  const representatives = new Map<string, T>();
+  const singles: T[] = [];
+
+  for (const row of rows) {
+    if (!row.groupRef) {
+      singles.push(row);
+      continue;
+    }
+
+    const current = representatives.get(row.groupRef);
+    if (!current) {
+      representatives.set(row.groupRef, row);
+      continue;
+    }
+
+    const isPendingWithProof =
+      (row.status === "waiting_confirmation" || row.status === "paid") &&
+      row.payment?.status === "pending" &&
+      Boolean(row.payment?.proofUrl);
+    const currentIsPendingWithProof =
+      (current.status === "waiting_confirmation" || current.status === "paid") &&
+      current.payment?.status === "pending" &&
+      Boolean(current.payment?.proofUrl);
+
+    // Prefer an actionable pending-proof row if the group is temporarily
+    // inconsistent between sessions.
+    if (isPendingWithProof && !currentIsPendingWithProof) {
+      representatives.set(row.groupRef, row);
+    }
+  }
+
+  return [...singles, ...representatives.values()];
 }
 
 function formatDate(d: string) {
@@ -697,7 +742,9 @@ function SummaryStats({
     },
     {
       label: "Perlu Verifikasi",
-      value: bookings.filter((b) => b.status === "waiting_confirmation" || b.status === "paid").length,
+      value: dedupePaymentConfirmationBookings(
+        bookings.filter((b) => b.status === "waiting_confirmation" || b.status === "paid"),
+      ).length,
       filter: "waiting_confirmation",
       icon: CreditCard,
       color: "text-amber-600 dark:text-amber-400",
@@ -2625,7 +2672,7 @@ export default function AdminBookings() {
   });
 
   const filtered = useMemo(() => {
-    return bookings.filter((b: any) => {
+    const matching = bookings.filter((b: any) => {
       if (statusFilter !== "all") {
         const match =
           statusFilter === "completed"
@@ -2650,7 +2697,13 @@ export default function AdminBookings() {
         );
       }
       return true;
-    }).sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    });
+    const sorted = matching.sort(
+      (a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    );
+    return statusFilter === "waiting_confirmation"
+      ? dedupePaymentConfirmationBookings(sorted)
+      : sorted;
   }, [bookings, statusFilter, search, dateFrom, dateTo]);
 
   const handleStatusUpdate = (status: string, adminNotes?: string) => {
