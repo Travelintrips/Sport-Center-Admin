@@ -48,6 +48,34 @@ function calcTaxBreakdown(totalAmountInclusive: number) {
   return { dpp, dppNilaiLain, ppnAmount, grandTotal };
 }
 
+// Keep the invoice flow compatible with production databases that may contain
+// legacy booking columns not represented in the current Drizzle schema. The
+// previous SELECT * made preview fail even when the fields needed for billing
+// were present.
+const invoiceBookingSelection = {
+  id: bookingsTable.id,
+  orderNumber: bookingsTable.orderNumber,
+  customerName: bookingsTable.customerName,
+  customerPhone: bookingsTable.customerPhone,
+  facilityId: bookingsTable.facilityId,
+  bookingDate: bookingsTable.bookingDate,
+  startTime: bookingsTable.startTime,
+  endTime: bookingsTable.endTime,
+  durationHours: bookingsTable.durationHours,
+  totalPrice: bookingsTable.totalPrice,
+  ppnAmount: bookingsTable.ppnAmount,
+  grandTotal: bookingsTable.grandTotal,
+} as const;
+
+function invoiceBookingFilter(companyCustomerId: number, startDate: string, endDate: string) {
+  return and(
+    eq(bookingsTable.companyCustomerId, companyCustomerId),
+    eq(bookingsTable.billingStatus, "unbilled"),
+    gte(bookingsTable.bookingDate, startDate),
+    lt(bookingsTable.bookingDate, endDate),
+  );
+}
+
 function mapInvoice(
   inv: typeof companyInvoicesTable.$inferSelect,
   companyName?: string,
@@ -174,14 +202,10 @@ router.get("/company-invoices/preview", adminMiddleware, async (req, res) => {
 
     const { startDate, endDate } = periodDateRange(String(periodMonth));
 
-    const unbilledBookings = await db.select().from(bookingsTable).where(
-      and(
-        eq(bookingsTable.companyCustomerId, compId),
-        eq(bookingsTable.billingStatus, "unbilled"),
-        gte(bookingsTable.bookingDate, startDate),
-        lt(bookingsTable.bookingDate, endDate),
-      )
-    );
+    const unbilledBookings = await db
+      .select(invoiceBookingSelection)
+      .from(bookingsTable)
+      .where(invoiceBookingFilter(compId, startDate, endDate));
 
     const facilities = await db.select({ id: facilitiesTable.id, name: facilitiesTable.name }).from(facilitiesTable);
     const facilityMap = Object.fromEntries(facilities.map((f) => [f.id, f.name]));
@@ -253,14 +277,10 @@ async function handleGenerateInvoice(req: any, res: any) {
 
     const { startDate, endDate } = periodDateRange(periodMonth);
 
-    const unbilledBookings = await db.select().from(bookingsTable).where(
-      and(
-        eq(bookingsTable.companyCustomerId, companyCustomerId),
-        eq(bookingsTable.billingStatus, "unbilled"),
-        gte(bookingsTable.bookingDate, startDate),
-        lt(bookingsTable.bookingDate, endDate),
-      )
-    );
+    const unbilledBookings = await db
+      .select(invoiceBookingSelection)
+      .from(bookingsTable)
+      .where(invoiceBookingFilter(companyCustomerId, startDate, endDate));
 
     const facilities = await db.select({ id: facilitiesTable.id, name: facilitiesTable.name }).from(facilitiesTable);
     const facilityMap = Object.fromEntries(facilities.map((f) => [f.id, f.name]));

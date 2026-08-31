@@ -824,17 +824,39 @@ function GenerateInvoiceDialog({
   const generateMutation = useGenerateCompanyInvoice();
   const { data: companies } = useListCustomers({ accountType: "company" });
 
-  const { data: preview, isFetching: previewLoading } = useQuery({
+  const {
+    data: preview,
+    isFetching: previewLoading,
+    error: previewError,
+    refetch: refetchPreview,
+  } = useQuery({
     queryKey: ["invoice-preview", companyId, periodMonth],
     queryFn: async () => {
       if (!companyId) return null;
       const token = getToken();
-      const res = await fetch(
-        `/api/company-invoices/preview?companyCustomerId=${companyId}&periodMonth=${periodMonth}`,
-        { headers: { Authorization: `Bearer ${token ?? ""}` } }
-      );
-      if (!res.ok) throw new Error("Gagal memuat preview");
-      return res.json();
+      const controller = new AbortController();
+      const timeoutId = window.setTimeout(() => controller.abort(), 15000);
+      try {
+        const res = await fetch(
+          `/api/company-invoices/preview?companyCustomerId=${companyId}&periodMonth=${periodMonth}`,
+          {
+            headers: { Authorization: `Bearer ${token ?? ""}` },
+            signal: controller.signal,
+          }
+        );
+        const body = await res.json().catch(() => null);
+        if (!res.ok) {
+          throw new Error(body?.error ?? `Gagal memuat preview (${res.status})`);
+        }
+        return body;
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") {
+          throw new Error("Preview terlalu lama dimuat. Silakan coba lagi.");
+        }
+        throw error;
+      } finally {
+        window.clearTimeout(timeoutId);
+      }
     },
     enabled: !!companyId,
   });
@@ -916,7 +938,25 @@ function GenerateInvoiceDialog({
           </div>
         )}
 
-        {companyId && (
+        {companyId && previewError && (
+          <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+            <div className="font-semibold">Preview booking gagal dimuat</div>
+            <div className="mt-1 text-xs">
+              {previewError instanceof Error ? previewError.message : "Terjadi kesalahan saat memuat booking perusahaan."}
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="mt-2 border-red-300 text-red-800 hover:bg-red-100"
+              onClick={() => refetchPreview()}
+            >
+              Coba lagi
+            </Button>
+          </div>
+        )}
+
+        {companyId && !previewError && (
           <div className="rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
             <button
               type="button"
