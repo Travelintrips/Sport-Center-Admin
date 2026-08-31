@@ -75,6 +75,7 @@
 - [Central settlement wiring](central-settlement-wiring.md) — central payments call the existing settlement owner with payment-scoped identity; preserve canonical mutation ownership and DEV-only gating.
 - [Paylabs settlement rule invariant](paylabs-settlement-rule-invariant.md) — confirmed Paylabs payments require exactly one active OWNER_APPROVED rule matching company, provider, bank, and rule version.
 - [Booking flow audit invariants](booking-flow-audit-invariants.md) — all booking creation paths must share time, conflict, payment, approval, and lifecycle rules.
+- [Public booking detail schema](public-booking-detail-schema.md) — grouped customer details require the production payment allocation table or upload proof is hidden behind a false 404.
 - [Production secret bootstrap](secret-bootstrap.md) — load Secret Manager before importing the app; production startup must fail closed without required secrets.
 - [Shared GCP secret payload](shared-secret-flat-payload.md) — normalize flat `_DEV` pairs into isolated DEV/PROD config without cross-environment fallback.
 - [GSM-loaded test environment](gsm-test-environment.md) — managed API workflows load dev secrets before startup; shell Jest does not inherit them unless explicitly bootstrapped.
