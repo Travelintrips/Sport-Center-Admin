@@ -45,17 +45,16 @@ const ENV_KEYS = [
   "ADMIN_WA_PHONES",
   "WATI_API_TOKEN",
   "WATI_BASE_URL",
-  "MERCHANT_ID_SANDBOX",
-  "PAYLABS_SANDBOX_PRIVATE_KEY",
-  "PAYLABS_SANDBOX_PUBLIC_KEY",
-  "MERCHANT_ID_PROD",
-  "PAYLABS_PROD_PRIVATE_KEY",
-  "PAYLABS_PROD_PUBLIC_KEY",
 ];
 
 // These values are explicitly global/shared in the existing application.
 // They may remain in the runtime environment when the GCP payload omits them.
 const SHARED_RUNTIME_ENV_KEYS = new Set(["SESSION_SECRET"]);
+
+// Paylabs credentials can be supplied as direct Replit Secrets. Unlike the
+// database URLs, do not clear them when the shared GCP payload contains only
+// database configuration; setEnvironmentConfig() below still overwrites them
+// when the selected section explicitly provides a Paylabs credential.
 
 const FIELD_ALIASES: Record<string, string[]> = {
   database_url: [
