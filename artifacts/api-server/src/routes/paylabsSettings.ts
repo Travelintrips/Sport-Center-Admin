@@ -33,27 +33,42 @@ router.get("/admin/paylabs/settings", adminMiddleware, async (req, res) => {
   try {
     const config = await getOrCreate();
 
-    // Credential source of truth is the selected environment's exact env names.
+    // Runtime credentials still use the selected environment's exact env names.
+    // The admin page, however, stores credentials in paylabs_settings and its
+    // badges must reflect what the admin actually configured there. Keep the
+    // values write-only: only safe booleans leave this endpoint.
     const sandboxPublicKeyEffective  = process.env.PAYLABS_SANDBOX_PUBLIC_KEY || "";
     const prodPublicKeyEffective     = process.env.PAYLABS_PROD_PUBLIC_KEY || "";
     const sandboxPrivateKeyRaw = process.env.PAYLABS_SANDBOX_PRIVATE_KEY || "";
     const prodPrivateKeyRaw    = process.env.PAYLABS_PROD_PRIVATE_KEY || "";
+    const sandboxPublicKeyConfigured =
+      Boolean(normalizePaylabsPublicKey(config.sandboxPublicKey || "")) ||
+      Boolean(normalizePaylabsPublicKey(sandboxPublicKeyEffective));
+    const prodPublicKeyConfigured =
+      Boolean(normalizePaylabsPublicKey(config.prodPublicKey || "")) ||
+      Boolean(normalizePaylabsPublicKey(prodPublicKeyEffective));
+    const sandboxPrivateKeyConfigured =
+      isPrivateKeyValid(config.sandboxPrivateKey) ||
+      isPrivateKeyValid(sandboxPrivateKeyRaw);
+    const productionPrivateKeyConfigured =
+      isPrivateKeyValid(config.prodPrivateKey) ||
+      isPrivateKeyValid(prodPrivateKeyRaw);
 
     const merged = {
       ...config,
-      sandboxMerchantId: process.env.MERCHANT_ID_SANDBOX || "",
-      prodMerchantId:    process.env.MERCHANT_ID_PROD || "",
+      sandboxMerchantId: process.env.MERCHANT_ID_SANDBOX || config.sandboxMerchantId || "",
+      prodMerchantId:    process.env.MERCHANT_ID_PROD || config.prodMerchantId || "",
       storeId:           config.storeId           || process.env.PAYLABS_STORE_ID            || "",
       // NEVER return private keys to the client — write-only, validated before storing
       sandboxPrivateKey: undefined,
       prodPrivateKey:    undefined,
-      sandboxPrivateKeyConfigured: isPrivateKeyValid(sandboxPrivateKeyRaw),
-      productionPrivateKeyConfigured: isPrivateKeyValid(prodPrivateKeyRaw),
+      sandboxPrivateKeyConfigured,
+      productionPrivateKeyConfigured,
       // Redact public keys — send only configured status
       sandboxPublicKey: undefined,
       prodPublicKey:    undefined,
-      sandboxPublicKeyConfigured: Boolean(sandboxPublicKeyEffective.trim()),
-      prodPublicKeyConfigured:    Boolean(prodPublicKeyEffective.trim()),
+      sandboxPublicKeyConfigured,
+      prodPublicKeyConfigured,
     };
 
     res.json(merged);

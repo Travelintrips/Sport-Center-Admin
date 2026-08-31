@@ -37,3 +37,10 @@ Paylabs credential resolution uses only the selected environment's exact names: 
 **Why:** The previous merchant-ID aliases could select an empty or wrong environment pair, making a valid Paylabs callback appear as `SIGNATURE_INVALID`.
 
 **How to apply:** Treat missing exact env credentials as a configuration error; never use DB-stored credentials, mock bypasses, or the other environment's key to complete signing or verification.
+
+## Admin status versus runtime readiness
+The admin settings endpoint may report a credential as configured from the validated, write-only DB value, while signing and webhook verification still require the selected exact environment variables at runtime.
+
+**Why:** Admin dashboard persistence and production secret bootstrap are separate concerns; conflating them makes a saved production key appear missing, while hiding the separate runtime requirement.
+
+**How to apply:** When a badge is wrong, inspect both `sport_center.paylabs_settings` and the selected runtime env names. Keep DB values redacted in responses, and ensure the shared-secret loader maps all Paylabs credential fields into their exact environment variables.

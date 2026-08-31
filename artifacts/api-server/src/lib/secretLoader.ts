@@ -45,6 +45,12 @@ const ENV_KEYS = [
   "ADMIN_WA_PHONES",
   "WATI_API_TOKEN",
   "WATI_BASE_URL",
+  "MERCHANT_ID_SANDBOX",
+  "PAYLABS_SANDBOX_PRIVATE_KEY",
+  "PAYLABS_SANDBOX_PUBLIC_KEY",
+  "MERCHANT_ID_PROD",
+  "PAYLABS_PROD_PRIVATE_KEY",
+  "PAYLABS_PROD_PUBLIC_KEY",
 ];
 
 // These values are explicitly global/shared in the existing application.
@@ -248,6 +254,12 @@ function setEnvironmentConfig(section: JsonObject, env: "dev" | "prod"): string[
     ["admin_wa_phones", "ADMIN_WA_PHONES"],
     ["wati_api_token", "WATI_API_TOKEN"],
     ["wati_base_url", "WATI_BASE_URL"],
+    ["merchant_id_sandbox", "MERCHANT_ID_SANDBOX"],
+    ["paylabs_sandbox_private_key", "PAYLABS_SANDBOX_PRIVATE_KEY"],
+    ["paylabs_sandbox_public_key", "PAYLABS_SANDBOX_PUBLIC_KEY"],
+    ["merchant_id_prod", "MERCHANT_ID_PROD"],
+    ["paylabs_prod_private_key", "PAYLABS_PROD_PRIVATE_KEY"],
+    ["paylabs_prod_public_key", "PAYLABS_PROD_PUBLIC_KEY"],
   ];
 
   for (const [field, envKey] of mappings) {
