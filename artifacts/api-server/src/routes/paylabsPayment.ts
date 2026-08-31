@@ -42,6 +42,10 @@ import {
   resolvePaylabsPaidAt,
   resolvePaylabsProviderReference,
 } from "../lib/paymentProvider";
+import {
+  shouldRepairSuccessfulPaylabsBooking,
+  shouldSkipPaylabsInquiry,
+} from "../lib/paylabsRecovery";
 import { resolveRequiredPaymentEnrichment, paymentEffectiveDate } from "../lib/paymentEnrichment";
 import { requirePaymentProviderId, createPaymentProviderOrderId, normalizeProviderName } from "../lib/paymentMetadata";
 
@@ -268,6 +272,84 @@ async function resolveStoredPaylabsPaymentMethod(tx: any, rawMethod?: string): P
   return fallbackLabels[normalized] ?? resolvePaylabsPaymentMethod(raw);
 }
 
+async function findExistingPaylabsPayment(
+  tx: any,
+  merchantTradeNo: string,
+  paylabsTradeNo: string,
+): Promise<{ id: number; booking_id: number; payment_method: string | null; status: string | null } | undefined> {
+  const providerOrderId = createPaymentProviderOrderId("paylabs", merchantTradeNo);
+  const identityClauses = [
+    sql`merchant_trade_no = ${merchantTradeNo}`,
+    sql`provider_order_id = ${providerOrderId}`,
+  ];
+  if (paylabsTradeNo.trim()) {
+    identityClauses.push(
+      sql`provider_trade_no = ${paylabsTradeNo}`,
+      sql`proof_url = ${`paylabs:${paylabsTradeNo}`}`,
+    );
+  }
+  const rows = await tx.execute(sql`
+    SELECT id, booking_id, payment_method, status
+    FROM sport_center.sport_payments
+    WHERE ${sql.join(identityClauses, sql` OR `)}
+    ORDER BY id
+    LIMIT 1
+  `);
+  return ((rows as any).rows?.[0] ?? (rows as any)[0]) as
+    | { id: number; booking_id: number; payment_method: string | null; status: string | null }
+    | undefined;
+}
+
+async function insertCanonicalPaylabsPayment(
+  tx: any,
+  booking: any,
+  txRow: any,
+  opts: FinalizePaymentOptions,
+  canonicalPaidAt: Date,
+): Promise<{ id: number; paymentMethod: string }> {
+  const merchantTradeNo = opts.merchantTradeNo;
+  const paylabsTradeNo = opts.paylabsTradeNo.trim();
+  const resolvedMethod = await resolveStoredPaylabsPaymentMethod(tx, String(txRow.payment_method ?? ""));
+  const amountPaid = Number(txRow.amount ?? booking.grandTotal ?? booking.totalPrice);
+  if (!Number.isFinite(amountPaid) || amountPaid <= 0) {
+    throw new Error(`Invalid Paylabs payment amount for ${merchantTradeNo}`);
+  }
+  const paymentEnrichment = await resolveRequiredPaymentEnrichment(booking, "paylabs", canonicalPaidAt, {
+    explicitCompanyId: booking.payerType === "company" ? booking.companyCustomerId : null,
+    effectiveDate: paymentEffectiveDate(canonicalPaidAt),
+  });
+  const [insertedPayment] = await tx.insert(paymentsTable).values({
+    bookingId: booking.id,
+    amount: String(amountPaid),
+    proofUrl: `paylabs:${paylabsTradeNo}`,
+    notes: `Auto-confirmed via Paylabs ${opts.source} (${merchantTradeNo}) | reason: ${opts.reason ?? "payment_notification"}`,
+    paymentMethod: resolvedMethod,
+    paymentProvider: "paylabs",
+    providerName: normalizeProviderName("paylabs"),
+    providerReference: (opts.providerReference ?? paylabsTradeNo) || null,
+    providerId: requirePaymentProviderId("paylabs", paylabsTradeNo || opts.providerReference || merchantTradeNo),
+    providerOrderId: createPaymentProviderOrderId("paylabs", merchantTradeNo),
+    merchantTradeNo,
+    providerTradeNo: paylabsTradeNo || null,
+    companyId: paymentEnrichment.companyId,
+    bankAccountId: paymentEnrichment.bankAccountId,
+    mdrRate: "0",
+    mdrAmount: "0",
+    settlementStatus: "unsettled",
+    expectedSettlementDate: paymentEnrichment.expectedSettlementDate,
+    grossTaxInclusive: true,
+    status: "confirmed",
+    paymentType: "full_payment",
+    confirmedAt: canonicalPaidAt,
+    paidAt: canonicalPaidAt,
+  } as any).returning({ id: paymentsTable.id });
+
+  if (!insertedPayment?.id) {
+    throw new Error(`Paylabs payment insert returned no id for ${merchantTradeNo}`);
+  }
+  return { id: Number(insertedPayment.id), paymentMethod: resolvedMethod };
+}
+
 async function finalizePayment(opts: FinalizePaymentOptions): Promise<FinalizePaymentResult> {
   const {
     merchantTradeNo, paylabsTradeNo, providerStatus,
@@ -342,16 +424,16 @@ async function finalizePayment(opts: FinalizePaymentOptions): Promise<FinalizePa
 
       if (previousPaymentStatus === "SUCCESS") {
         const existingBookingStatus = String(booking.status ?? "");
-        const paymentProof = `paylabs:${paylabsTradeNo || String(txRow.paylabs_trade_no ?? "")}`;
-        const existingPaymentRows = await tx.execute(sql`
-          SELECT id, payment_method
-          FROM sport_center.sport_payments
-          WHERE merchant_trade_no = ${merchantTradeNo}
-             OR proof_url = ${paymentProof}
-          ORDER BY id
-          LIMIT 1
-        `);
-        const existingPayment = (existingPaymentRows as any).rows?.[0] ?? (existingPaymentRows as any)[0];
+        const existingPayment = await findExistingPaylabsPayment(
+          tx,
+          merchantTradeNo,
+          paylabsTradeNo || String(txRow.paylabs_trade_no ?? ""),
+        );
+        if (existingPayment && Number(existingPayment.booking_id) !== bookingId) {
+          throw new Error(
+            `Paylabs payment identity ${merchantTradeNo} belongs to booking ${existingPayment.booking_id}, not ${bookingId}`,
+          );
+        }
         if (isTerminalBookingStatus(existingBookingStatus) && !existingPayment) {
           return {
             outcome: "terminal_booking_manual_review" as const,
@@ -362,17 +444,82 @@ async function finalizePayment(opts: FinalizePaymentOptions): Promise<FinalizePa
             previousBookingStatus: existingBookingStatus,
           };
         }
+
+        const canonicalPaidAt = opts.paidAt
+          ?? (txRow.paid_at ? new Date(String(txRow.paid_at)) : new Date());
+        if (Number.isNaN(canonicalPaidAt.getTime())) {
+          throw new Error(`Invalid Paylabs paid_at for ${merchantTradeNo}`);
+        }
+        if (existingBookingStatus !== "confirmed" && !isTerminalBookingStatus(existingBookingStatus)) {
+          await tx
+            .update(bookingsTable)
+            .set({ status: "confirmed", paidAt: canonicalPaidAt, updatedAt: new Date() })
+            .where(eq(bookingsTable.id, bookingId));
+        }
+
+        if (!existingPayment) {
+          const repairedPayment = await insertCanonicalPaylabsPayment(
+            tx,
+            booking,
+            txRow,
+            opts,
+            canonicalPaidAt,
+          );
+          await tx.insert(bookingHistoryTable).values({
+            bookingId,
+            fromStatus: existingBookingStatus || null,
+            toStatus: "confirmed",
+            changedBy: opts.source === "paylabs_manual_reconciliation" && adminId ? adminId : null,
+            changedByName: opts.source === "paylabs_manual_reconciliation"
+              ? `admin:${adminId ?? "system"}`
+              : "paylabs-recovery",
+            note: `Paylabs canonical payment repaired after local SUCCESS. merchantTradeNo=${merchantTradeNo} | prevBookingStatus=${existingBookingStatus}`,
+          } as any);
+          return {
+            outcome: "confirmed" as const,
+            bookingId,
+            paymentId: repairedPayment.id,
+            transactionId,
+            orderNumber: String(txRow.order_number),
+            previousPaymentStatus,
+            previousBookingStatus: existingBookingStatus,
+            paymentMethod: repairedPayment.paymentMethod,
+          };
+        }
+
+        if (existingPayment.status !== "confirmed") {
+          await tx.execute(sql`
+            UPDATE sport_center.sport_payments
+            SET status = 'confirmed',
+                confirmed_at = COALESCE(confirmed_at, ${canonicalPaidAt}),
+                paid_at = COALESCE(paid_at, ${canonicalPaidAt}),
+                updated_at = NOW()
+            WHERE id = ${Number(existingPayment.id)}
+          `);
+        }
+        if (existingBookingStatus !== "confirmed" && !isTerminalBookingStatus(existingBookingStatus)) {
+          await tx.insert(bookingHistoryTable).values({
+            bookingId,
+            fromStatus: existingBookingStatus || null,
+            toStatus: "confirmed",
+            changedBy: opts.source === "paylabs_manual_reconciliation" && adminId ? adminId : null,
+            changedByName: opts.source === "paylabs_manual_reconciliation"
+              ? `admin:${adminId ?? "system"}`
+              : "paylabs-recovery",
+            note: `Paylabs booking status repaired from local SUCCESS. merchantTradeNo=${merchantTradeNo} | prevBookingStatus=${existingBookingStatus}`,
+          } as any);
+        }
         return {
           outcome: "already_confirmed" as const,
           bookingId,
-          paymentId: existingPayment?.id ? Number(existingPayment.id) : undefined,
+          paymentId: existingPayment.id ? Number(existingPayment.id) : undefined,
           transactionId,
           orderNumber: String(txRow.order_number),
           previousPaymentStatus,
           previousBookingStatus: String(booking.status ?? ""),
-            paymentMethod: existingPayment?.payment_method
-              ? String(existingPayment.payment_method)
-              : await resolveStoredPaylabsPaymentMethod(tx, String(txRow.payment_method ?? "")),
+          paymentMethod: existingPayment.payment_method
+            ? String(existingPayment.payment_method)
+            : await resolveStoredPaylabsPaymentMethod(tx, String(txRow.payment_method ?? "")),
         };
       }
 
@@ -1367,9 +1514,42 @@ router.get("/paylabs/status/:tradeNo", async (req, res) => {
     const local = (rows as any).rows?.[0] ?? (rows as any)[0];
 
     const localStatus = String(local?.status ?? "").toUpperCase();
-    const terminalStatuses = ["SUCCESS", "PAID", "FAILED", "CANCELLED", "EXPIRED"];
-    if (terminalStatuses.includes(localStatus)) {
+    if (shouldSkipPaylabsInquiry(localStatus)) {
       return res.json({ local: local ?? null, paylabs: null, paylabsOk: false, inquirySkipped: true });
+    }
+
+    // A prior webhook or data sync may have committed the Paylabs transaction
+    // as SUCCESS while booking/payment mirror work was interrupted. Recover by
+    // exact merchantTradeNo; do not call the provider again or create a new
+    // payment order.
+    if (shouldRepairSuccessfulPaylabsBooking(localStatus, "")) {
+      const recoveryResult = await finalizePayment({
+        merchantTradeNo: tradeNo,
+        paylabsTradeNo: String(local?.paylabs_trade_no ?? ""),
+        providerStatus: String(local?.provider_status ?? "02"),
+        source: "paylabs_manual_reconciliation",
+        reason: "automatic local SUCCESS synchronization recovery",
+        paidAt: local?.paid_at ? new Date(String(local.paid_at)) : new Date(),
+        providerReference: String(local?.paylabs_trade_no ?? "") || null,
+      });
+      const refreshedRows = await db.execute(sql`
+        SELECT *
+        FROM sport_center.paylabs_transactions
+        WHERE merchant_trade_no = ${tradeNo}
+        LIMIT 1
+      `);
+      const recoveredLocal = (refreshedRows as any).rows?.[0] ?? (refreshedRows as any)[0] ?? local;
+      return res.json({
+        local: recoveredLocal,
+        paylabs: null,
+        paylabsOk: false,
+        inquirySkipped: true,
+        reconciliation: {
+          outcome: recoveryResult.outcome,
+          bookingId: recoveryResult.bookingId,
+          error: recoveryResult.error,
+        },
+      });
     }
 
     // Use the same database-backed credentials as create-payment.  Calling
