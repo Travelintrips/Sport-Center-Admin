@@ -439,6 +439,23 @@ function getNowMinutesWIB(): number {
   return wib.getUTCHours() * 60 + wib.getUTCMinutes();
 }
 
+const OPERATIONAL_BOOKING_ROLES = new Set([
+  "admin",
+  "super_admin",
+  "admin_booking",
+  "staff",
+]);
+
+function isOperationalBookingRole(role: string | null | undefined): boolean {
+  return !!role && OPERATIONAL_BOOKING_ROLES.has(role);
+}
+
+function getRequestRole(req: { headers: { authorization?: string } }): string | null {
+  const authHeader = req.headers.authorization;
+  if (!authHeader?.startsWith("Bearer ")) return null;
+  return verifyToken(authHeader.slice(7))?.role ?? null;
+}
+
 router.post("/bookings", async (req, res) => {
   // Declared outside try so the catch block can release the advisory lock on error
   let slotLockKey: { fId: number; dInt: number } | null = null;
@@ -592,8 +609,9 @@ router.post("/bookings", async (req, res) => {
       }
       durationHours = parsedDurationHours;
 
-      // Validate slot is not in the past (dilewati untuk admin/operator)
-      if (!isAdminRequest) {
+      // Operational accounts may record bookings retroactively. Regular
+      // customers must still book only future dates and time slots.
+      if (!isOperationalBookingRole(loggedInRole)) {
         const todayWIB = getTodayWIB();
         if (bookingDate < todayWIB) {
           res.status(400).json({ error: "Tidak dapat booking tanggal yang sudah lewat" });
@@ -1062,12 +1080,13 @@ function recurringScheduleError(
   bookingDate: string,
   startTime: string,
   durationHours: number,
+  options: { allowPastSchedule?: boolean } = {},
 ): string | null {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(bookingDate))) return "Tanggal booking tidak valid";
   const parsedDate = new Date(`${bookingDate}T00:00:00+07:00`);
   if (Number.isNaN(parsedDate.getTime())) return "Tanggal booking tidak valid";
   const today = todayWIB();
-  if (bookingDate < today) return "Tanggal booking sudah lewat";
+  if (!options.allowPastSchedule && bookingDate < today) return "Tanggal booking sudah lewat";
   if (!/^\d{2}:\d{2}$/.test(String(startTime))) return "Jam mulai tidak valid";
 
   const startMin = timeToMinutes(startTime);
@@ -1078,7 +1097,7 @@ function recurringScheduleError(
   if (startMin + durationHours * 60 > closeMin) {
     return `Booking harus dalam jam operasional ${facility.openTime}–${getEffectiveCloseTime(facility)}`;
   }
-  if (bookingDate === today) {
+  if (!options.allowPastSchedule && bookingDate === today) {
     const nowWib = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Jakarta" }));
     if (startMin <= nowWib.getHours() * 60 + nowWib.getMinutes()) return "Slot hari ini sudah lewat";
   }
@@ -1089,11 +1108,18 @@ function recurringScheduleError(
 router.post("/bookings/recurring/check", async (req, res) => {
   try {
     const { facilityId, startDate, startTime, durationHours, repeatType, repeatCount } = req.body;
+    const allowPastSchedule = isOperationalBookingRole(getRequestRole(req));
 
     const [facility] = await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, Number(facilityId))).limit(1);
     if (!facility) { res.status(404).json({ error: "Facility not found" }); return; }
 
-    const scheduleError = recurringScheduleError(facility, String(startDate), String(startTime), Number(durationHours));
+    const scheduleError = recurringScheduleError(
+      facility,
+      String(startDate),
+      String(startTime),
+      Number(durationHours),
+      { allowPastSchedule },
+    );
     if (scheduleError) {
       res.json({ dates: [{ date: String(startDate), available: false, reason: scheduleError }], pricePerSession: 0, validCount: 0, totalPrice: 0 });
       return;
@@ -1222,7 +1248,13 @@ router.post("/bookings/recurring", async (req, res) => {
       return;
     }
     const scheduleErrors = uniqueDates
-      .map((date) => recurringScheduleError(facility, date, String(startTime), Number(durationHours)))
+      .map((date) => recurringScheduleError(
+        facility,
+        date,
+        String(startTime),
+        Number(durationHours),
+        { allowPastSchedule: isOperationalBookingRole(loggedInRole) },
+      ))
       .filter(Boolean);
     if (scheduleErrors.length > 0) {
       res.status(400).json({ error: scheduleErrors[0] });

@@ -42,6 +42,13 @@ const MULTIGUNA_ACTIVITIES = [
   { value: "voli", label: "Voli", icon: "🏐" },
 ];
 
+const OPERATIONAL_BOOKING_ROLES = new Set([
+  "admin",
+  "super_admin",
+  "admin_booking",
+  "staff",
+]);
+
 function effectiveCloseTime(facility: { name?: string | null; category?: string | null; closeTime: string }) {
   return "00:00";
 }
@@ -61,7 +68,8 @@ export default function FacilityDetail() {
   const facilityId = params?.id ? parseInt(params.id) : 0;
 
   const { data: meData } = useGetMe({ query: { retry: false, queryKey: getGetMeQueryKey() } });
-  const isAdminOrOperator = !!meData && (meData as { role?: string }).role !== "customer";
+  const isOperationalAccount =
+    !!meData && OPERATIONAL_BOOKING_ROLES.has((meData as { role?: string }).role ?? "");
 
   const [date, setDate] = useState<Date | undefined>(new Date());
   const [selectedTime, setSelectedTime] = useState<string>("");
@@ -413,11 +421,19 @@ export default function FacilityDetail() {
                           setDate(nextDate);
                           setSelectedTime("");
                         }}
-                        disabled={isAdminOrOperator ? undefined : (d) => d < new Date(new Date().setHours(0,0,0,0))}
+                        disabled={isOperationalAccount ? undefined : (d) => d < new Date(new Date().setHours(0,0,0,0))}
                         className="rounded-xl bg-transparent"
                         locale={lang === "en" ? enUS : id}
                       />
                     </div>
+                    {isOperationalAccount && (
+                      <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                        {t(
+                          "Akun operasional dapat mencatat booking untuk tanggal dan jam yang sudah lewat.",
+                          "Operational accounts can record bookings for past dates and times."
+                        )}
+                      </p>
+                    )}
                   </div>
 
                   {/* Walk-in (Gym) info block */}

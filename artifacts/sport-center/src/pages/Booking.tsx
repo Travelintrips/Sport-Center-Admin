@@ -53,6 +53,13 @@ function formatDate(dateStr: string, lang: string = "id") {
 
 type RepeatType = "weekly" | "monthly";
 
+const OPERATIONAL_BOOKING_ROLES = new Set([
+  "admin",
+  "super_admin",
+  "admin_booking",
+  "staff",
+]);
+
 export default function Booking() {
   const [, setLocation] = useLocation();
   const search = useSearch();
@@ -90,6 +97,7 @@ export default function Booking() {
   const isLoggedIn = !!currentUser && currentUser.role !== "admin";
   // Akun admin_booking: bisa booking atas nama customer lain
   const isAdminBooking = currentUser?.role === "admin_booking";
+  const isOperationalAccount = OPERATIONAL_BOOKING_ROLES.has(currentUser?.role ?? "");
   // Akun perusahaan: user IS the company account
   const isCompanyAccount = (currentUser as any)?.accountType === "company";
 
@@ -1424,7 +1432,11 @@ export default function Booking() {
                                 <input
                                   type="date"
                                   value={editingValue}
-                                  min={new Date().toISOString().split("T")[0]}
+                                    min={
+                                      isOperationalAccount
+                                        ? undefined
+                                        : new Date().toISOString().split("T")[0]
+                                    }
                                   onChange={(e) => setEditingValue(e.target.value)}
                                   className="flex-1 text-sm bg-transparent border-none outline-none text-blue-800"
                                 />
