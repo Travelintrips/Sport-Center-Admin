@@ -45,6 +45,12 @@ const ENV_KEYS = [
   "ADMIN_WA_PHONES",
   "WATI_API_TOKEN",
   "WATI_BASE_URL",
+  "MERCHANT_ID_SANDBOX",
+  "PAYLABS_SANDBOX_PRIVATE_KEY",
+  "PAYLABS_SANDBOX_PUBLIC_KEY",
+  "MERCHANT_ID_PROD",
+  "PAYLABS_PROD_PRIVATE_KEY",
+  "PAYLABS_PROD_PUBLIC_KEY",
 ];
 
 // These values are explicitly global/shared in the existing application.
@@ -90,6 +96,24 @@ const FIELD_ALIASES: Record<string, string[]> = {
   admin_wa_phones: ["admin_wa_phones", "ADMIN_WA_PHONES"],
   wati_api_token: ["wati_api_token", "WATI_API_TOKEN"],
   wati_base_url: ["wati_base_url", "WATI_BASE_URL"],
+  merchant_id_sandbox: ["merchant_id_sandbox", "MERCHANT_ID_SANDBOX"],
+  paylabs_sandbox_private_key: [
+    "paylabs_sandbox_private_key",
+    "PAYLABS_SANDBOX_PRIVATE_KEY",
+  ],
+  paylabs_sandbox_public_key: [
+    "paylabs_sandbox_public_key",
+    "PAYLABS_SANDBOX_PUBLIC_KEY",
+  ],
+  merchant_id_prod: ["merchant_id_prod", "MERCHANT_ID_PROD"],
+  paylabs_prod_private_key: [
+    "paylabs_prod_private_key",
+    "PAYLABS_PROD_PRIVATE_KEY",
+  ],
+  paylabs_prod_public_key: [
+    "paylabs_prod_public_key",
+    "PAYLABS_PROD_PUBLIC_KEY",
+  ],
 };
 
 function runtimeEnvironment(): "dev" | "prod" | "audit" | undefined {
@@ -156,13 +180,26 @@ const PROD_FIELDS = new Set([
   "SUPABASE_ANON_KEY",
   "SUPABASE_SERVICE_ROLE_KEY",
   "SUPABASE_STORAGE_BUCKET",
+  "MERCHANT_ID_PROD",
+  "PAYLABS_PROD_PRIVATE_KEY",
+  "PAYLABS_PROD_PUBLIC_KEY",
+]);
+
+// Sandbox credentials belong only to the development section. Keeping this
+// separate from SHARED_FIELDS prevents a production runtime from importing
+// merchant test credentials from a flat shared payload.
+const DEV_FIELDS = new Set([
+  "MERCHANT_ID_SANDBOX",
+  "PAYLABS_SANDBOX_PRIVATE_KEY",
+  "PAYLABS_SANDBOX_PUBLIC_KEY",
 ]);
 
 function flatPayloadSection(payload: JsonObject, env: "dev" | "prod"): JsonObject {
   const section: JsonObject = {};
   for (const [key, value] of Object.entries(payload)) {
-    if (env === "dev" && key.endsWith("_DEV")) {
-      section[key.slice(0, -4)] = value;
+    if (env === "dev" && (key.endsWith("_DEV") || DEV_FIELDS.has(key))) {
+      const normalizedKey = key.endsWith("_DEV") ? key.slice(0, -4) : key;
+      section[normalizedKey] = value;
     } else if (env === "prod" && (PROD_FIELDS.has(key) || SHARED_FIELDS.has(key))) {
       section[key] = value;
     } else if (SHARED_FIELDS.has(key)) {
