@@ -45,12 +45,6 @@ const ENV_KEYS = [
   "ADMIN_WA_PHONES",
   "WATI_API_TOKEN",
   "WATI_BASE_URL",
-  "MERCHANT_ID_SANDBOX",
-  "PAYLABS_SANDBOX_PRIVATE_KEY",
-  "PAYLABS_SANDBOX_PUBLIC_KEY",
-  "MERCHANT_ID_PROD",
-  "PAYLABS_PROD_PRIVATE_KEY",
-  "PAYLABS_PROD_PUBLIC_KEY",
 ];
 
 // These values are explicitly global/shared in the existing application.
