@@ -14,8 +14,15 @@ export function shouldRepairSuccessfulPaylabsBooking(
   transactionStatus: unknown,
   bookingStatus: unknown,
 ): boolean {
+  return shouldRecoverSuccessfulPaylabsTransaction(transactionStatus, bookingStatus)
+    && normalizeStatus(bookingStatus) !== "CONFIRMED";
+}
+
+export function shouldRecoverSuccessfulPaylabsTransaction(
+  transactionStatus: unknown,
+  bookingStatus: unknown,
+): boolean {
   return normalizeStatus(transactionStatus) === "SUCCESS"
-    && normalizeStatus(bookingStatus) !== "CONFIRMED"
     && !["CANCELLED", "EXPIRED", "REJECTED", "REFUNDED"].includes(normalizeStatus(bookingStatus));
 }
 

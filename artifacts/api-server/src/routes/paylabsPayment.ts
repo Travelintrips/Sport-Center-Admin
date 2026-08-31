@@ -43,7 +43,7 @@ import {
   resolvePaylabsProviderReference,
 } from "../lib/paymentProvider";
 import {
-  shouldRepairSuccessfulPaylabsBooking,
+  shouldRecoverSuccessfulPaylabsTransaction,
   shouldSkipPaylabsInquiry,
 } from "../lib/paylabsRecovery";
 import { resolveRequiredPaymentEnrichment, paymentEffectiveDate } from "../lib/paymentEnrichment";
@@ -1522,7 +1522,19 @@ router.get("/paylabs/status/:tradeNo", async (req, res) => {
     // as SUCCESS while booking/payment mirror work was interrupted. Recover by
     // exact merchantTradeNo; do not call the provider again or create a new
     // payment order.
-    if (shouldRepairSuccessfulPaylabsBooking(localStatus, "")) {
+    let localBookingStatus = "";
+    const localBookingId = Number(local?.booking_id);
+    if (Number.isInteger(localBookingId) && localBookingId > 0) {
+      const bookingRows = await db.execute(sql`
+        SELECT status
+        FROM sport_center.sport_bookings
+        WHERE id = ${localBookingId}
+        LIMIT 1
+      `);
+      const localBooking = (bookingRows as any).rows?.[0] ?? (bookingRows as any)[0];
+      localBookingStatus = String(localBooking?.status ?? "");
+    }
+    if (shouldRecoverSuccessfulPaylabsTransaction(localStatus, localBookingStatus)) {
       const recoveryResult = await finalizePayment({
         merchantTradeNo: tradeNo,
         paylabsTradeNo: String(local?.paylabs_trade_no ?? ""),
