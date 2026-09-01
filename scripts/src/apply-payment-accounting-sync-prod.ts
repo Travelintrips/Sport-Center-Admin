@@ -42,6 +42,7 @@ const scriptsDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
 );
+const postedAccountingMetadataGuard = "patch_posted_accounting_metadata_correction.sql";
 const migrationFiles = [
   "patch_resolve_function.sql",
   "patch_internal_payment_journal_metadata_sync.sql",
@@ -55,6 +56,15 @@ try {
   // Serialize replace-in-place function updates with another provisioning run
   // or a concurrent startup migration against the same Supabase database.
   await client.query("SELECT pg_advisory_xact_lock(918274615)");
+
+  // Install the explicit metadata-only correction guard before backfilling
+  // posted journals. The gate below never permits financial field changes.
+  await client.query(
+    await fs.readFile(path.join(scriptsDir, postedAccountingMetadataGuard), "utf8"),
+  );
+  await client.query(
+    "SET LOCAL sport_center.allow_posted_accounting_metadata_correction = 'on'",
+  );
 
   await client.query(`
     ALTER TABLE sport_center.accounting_journals

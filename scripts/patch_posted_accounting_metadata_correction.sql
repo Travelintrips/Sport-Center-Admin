@@ -27,14 +27,36 @@ BEGIN
           'payment_method',
           'payment_provider',
           'company_id',
-          'bank_account_id'
+          'bank_account_id',
+          'provider_name',
+          'provider_id',
+          'payment_type',
+          'expected_settlement_date',
+          'settlement_status',
+          'mdr_rate',
+          'mdr_amount',
+          'provider_reference',
+          'provider_order_id',
+          'merchant_trade_no',
+          'provider_trade_no'
         ]::text[]
       ) IS DISTINCT FROM (
         to_jsonb(OLD) - ARRAY[
           'payment_method',
           'payment_provider',
           'company_id',
-          'bank_account_id'
+          'bank_account_id',
+          'provider_name',
+          'provider_id',
+          'payment_type',
+          'expected_settlement_date',
+          'settlement_status',
+          'mdr_rate',
+          'mdr_amount',
+          'provider_reference',
+          'provider_order_id',
+          'merchant_trade_no',
+          'provider_trade_no'
         ]::text[]
       ) THEN
         RAISE EXCEPTION

@@ -4,6 +4,7 @@ import manualProviderMirrorMigration from "../../../../scripts/patch_manual_prov
 import paymentMetadataResolverMigration from "../../../../scripts/patch_resolve_function.sql";
 import publicPaymentEntryMetadataSyncMigration from "../../../../scripts/patch_public_payment_entry_metadata_sync.sql";
 import internalPaymentJournalMetadataSyncMigration from "../../../../scripts/patch_internal_payment_journal_metadata_sync.sql";
+import postedAccountingMetadataCorrectionMigration from "../../../../scripts/patch_posted_accounting_metadata_correction.sql";
 
 type MigrationState =
   | { status: "pending" }
@@ -135,6 +136,12 @@ export function startPaymentMirrorMigration(): Promise<void> {
          await tx.execute(sql`
            SELECT pg_advisory_xact_lock(918274615)
          `);
+         // Existing posted journals need the explicit metadata-only guard
+         // installed before the one-time snapshot backfill runs.
+         await tx.execute(sql.raw(postedAccountingMetadataCorrectionMigration));
+         await tx.execute(sql.raw(
+           "SET LOCAL sport_center.allow_posted_accounting_metadata_correction = 'on'",
+         ));
          // The trigger below projects payment settlement metadata into the
          // internal accounting journal. Ensure the target columns exist before
          // replacing the trigger function, including on an older database.
