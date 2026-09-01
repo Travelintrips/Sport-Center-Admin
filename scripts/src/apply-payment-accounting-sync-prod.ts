@@ -43,7 +43,10 @@ const scriptsDir = path.resolve(
   "..",
 );
 const postedAccountingMetadataGuard = "patch_posted_accounting_metadata_correction.sql";
+const postedAccountingJournalLinesBackfill =
+  "patch_posted_accounting_journal_lines_backfill.sql";
 const migrationFiles = [
+  postedAccountingJournalLinesBackfill,
   "patch_resolve_function.sql",
   "patch_internal_payment_journal_metadata_sync.sql",
   "patch_public_payment_entry_metadata_sync.sql",

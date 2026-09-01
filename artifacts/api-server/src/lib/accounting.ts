@@ -1469,6 +1469,13 @@ export async function createJournalEntry(
   const { debitAccount, accountCode } = resolvePaymentAccount(paymentMethod);
   const methodLabel = paymentMethod ? ` via ${paymentMethod}` : "";
   const paymentMarker = paymentId != null ? ` [paymentId=${paymentId}]` : "";
+  const lines: Array<{ lineType: string; accountCode: string; accountName: string; amount: number; description?: string }> = [
+    { lineType: "debit",  accountCode, accountName: debitAccount,                         amount: grandTotal,                              description: `Penerimaan booking ${orderNumber}${methodLabel}` },
+    { lineType: "credit", accountCode: "4-1001", accountName: "Pendapatan Sport Center",  amount: ppnAmount > 0 ? netRevenue : grandTotal, description: `Pendapatan booking ${orderNumber}` },
+  ];
+  if (ppnAmount > 0) {
+    lines.push({ lineType: "credit", accountCode: "2-1101", accountName: "PPN Keluaran", amount: ppnAmount, description: `PPN 11% booking ${orderNumber}` });
+  }
 
   // The payment id is the accounting idempotency key. This still allows DP
   // and pelunasan to have separate journals for the same booking.
@@ -1506,11 +1513,16 @@ export async function createJournalEntry(
       .limit(1);
     if (existing.length > 0) {
       const current = existing[0];
+      const existingLines = await db
+        .select({ id: accountingJournalLinesTable.id })
+        .from(accountingJournalLinesTable)
+        .where(eq(accountingJournalLinesTable.journalId, current.id))
+        .limit(1);
       await db
         .update(accountingJournalsTable)
         .set({
           bookingId,
-          status: "posted",
+          status: existingLines.length === 0 ? "draft" : "posted",
           companyId: paymentContext?.companyId ?? current.companyId ?? null,
           paymentMethod: paymentMethod ?? current.paymentMethod ?? null,
           paymentProvider: paymentContext?.paymentProvider ?? current.paymentProvider ?? null,
@@ -1534,6 +1546,13 @@ export async function createJournalEntry(
       console.info(
         `[accounting] Internal journal sudah ada untuk payment=${paymentId} (id=${current.id}) — metadata diperkaya`,
       );
+      if (existingLines.length === 0) {
+        await postJournalLines(current.id, lines);
+        await db
+          .update(accountingJournalsTable)
+          .set({ status: "posted" })
+          .where(eq(accountingJournalsTable.id, current.id));
+      }
       return;
     }
   }
@@ -1546,7 +1565,7 @@ export async function createJournalEntry(
         companyId: paymentContext?.companyId ?? null,
       orderNumber,
       journalType: "payment_confirmed",
-      status: "posted",
+      status: "draft",
       paymentMethod: paymentMethod ?? null,
       paymentProvider: paymentContext?.paymentProvider ?? null,
       providerName: paymentContext?.providerName ?? null,
@@ -1578,15 +1597,11 @@ export async function createJournalEntry(
 
   if (!journal) return;
 
-  const lines: Array<{ lineType: string; accountCode: string; accountName: string; amount: number; description?: string }> = [
-    { lineType: "debit",  accountCode, accountName: debitAccount,                         amount: grandTotal,                              description: `Penerimaan booking ${orderNumber}${methodLabel}` },
-    { lineType: "credit", accountCode: "4-1001", accountName: "Pendapatan Sport Center",  amount: ppnAmount > 0 ? netRevenue : grandTotal, description: `Pendapatan booking ${orderNumber}` },
-  ];
-  if (ppnAmount > 0) {
-    lines.push({ lineType: "credit", accountCode: "2-1101", accountName: "PPN Keluaran", amount: ppnAmount, description: `PPN 11% booking ${orderNumber}` });
-  }
-
   await postJournalLines(journal.id, lines);
+  await db
+    .update(accountingJournalsTable)
+    .set({ status: "posted" })
+    .where(eq(accountingJournalsTable.id, journal.id));
 }
 
 type ConfirmedPaymentAccountingInput = {

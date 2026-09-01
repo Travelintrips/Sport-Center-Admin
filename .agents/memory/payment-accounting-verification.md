@@ -9,11 +9,11 @@ Acceptance untuk payment mirror tidak boleh dinilai dari keberadaan fungsi posti
 
 **How to apply:** Pisahkan status implementasi kode, status migrasi/schema, dan status verifikasi runtime/test. Jangan menyatakan task selesai sebelum ketiganya memenuhi acceptance criteria.
 
-Untuk recovery outbox, hanya event `posted` yang terbukti kehilangan journal internal boleh di-reset langsung; status `failed` harus mempertahankan backoff retry dan `processing` tidak boleh direbut oleh rekonsiliasi.
+Untuk recovery payment accounting, audit harus mencari dua gap: header journal yang hilang dan header yang ada tetapi tanpa journal lines. Outbox `failed`/`processing` hanya boleh di-reset secara scoped untuk kandidat yang lock-nya stale.
 
-**Why:** Rekonsiliasi periodik yang mereset semua row tanpa journal dapat menghapus backoff error dan membuat worker melakukan retry agresif atau mengambil lock aktif.
+**Why:** Header posted tanpa lines membuat status `posted` menyesatkan; reset global dapat menghapus backoff error atau mengambil lock aktif.
 
-**How to apply:** Rekonsiliasi payment confirmed harus idempoten, payment-level, dan memvalidasi journal internal sebelum menandai outbox selesai.
+**How to apply:** Backfill lines memakai gate transaction-local yang hanya mengizinkan INSERT, lalu validasi debit/kredit balance sebelum outbox ditandai posted.
 
 Sport Center menyimpan `bank_account_id` sebagai nomor rekening teks, sedangkan mirror `public.sport_payments.bank_account_id` milik BizPortal adalah foreign key integer. Jangan meneruskan nomor rekening mentah ke kolom mirror tersebut; simpan sebagai metadata teks pada jurnal atau gunakan pemetaan internal yang tervalidasi.
 

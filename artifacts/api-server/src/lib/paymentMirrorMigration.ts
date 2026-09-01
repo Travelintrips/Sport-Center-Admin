@@ -5,6 +5,7 @@ import paymentMetadataResolverMigration from "../../../../scripts/patch_resolve_
 import publicPaymentEntryMetadataSyncMigration from "../../../../scripts/patch_public_payment_entry_metadata_sync.sql";
 import internalPaymentJournalMetadataSyncMigration from "../../../../scripts/patch_internal_payment_journal_metadata_sync.sql";
 import postedAccountingMetadataCorrectionMigration from "../../../../scripts/patch_posted_accounting_metadata_correction.sql";
+import postedAccountingJournalLinesBackfillMigration from "../../../../scripts/patch_posted_accounting_journal_lines_backfill.sql";
 
 type MigrationState =
   | { status: "pending" }
@@ -136,6 +137,7 @@ export function startPaymentMirrorMigration(): Promise<void> {
          await tx.execute(sql`
            SELECT pg_advisory_xact_lock(918274615)
          `);
+         await tx.execute(sql.raw(postedAccountingJournalLinesBackfillMigration));
          // Existing posted journals need the explicit metadata-only guard
          // installed before the one-time snapshot backfill runs.
          await tx.execute(sql.raw(postedAccountingMetadataCorrectionMigration));

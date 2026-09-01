@@ -1803,9 +1803,16 @@ async function ensureMissingPaymentAccountingOutbox(pool: pg.Pool): Promise<numb
           last_error = NULL,
           updated_at = NOW()
     -- A posted outbox without its internal journal is the stale state this
-    -- repair targets. Failed/pending rows keep their retry backoff and active
-    -- processing rows are never stolen by the reconciliation pass.
+    -- repair targets. Also recover processing rows whose lock is older than
+    -- the worker lease; active processing rows are never stolen.
     WHERE sport_center.payment_accounting_outbox.status = 'posted'
+       OR (
+         sport_center.payment_accounting_outbox.status = 'processing'
+         AND (
+           sport_center.payment_accounting_outbox.locked_at IS NULL
+           OR sport_center.payment_accounting_outbox.locked_at < NOW() - INTERVAL '15 minutes'
+         )
+       )
   `);
   return result.rowCount ?? 0;
 }
