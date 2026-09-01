@@ -706,11 +706,11 @@ export async function postSportCenterBookingPayment(
                 payment_method = $4,
                 payment_provider = $5,
                 payment_type = $6,
-                bank_account_id = $7,
-                provider_reference = $8,
-                provider_order_id = $9,
-                merchant_trade_no = $10,
-                provider_trade_no = $11
+                 bank_account_id = NULL,
+                 provider_reference = $7,
+                 provider_order_id = $8,
+                 merchant_trade_no = $9,
+                 provider_trade_no = $10
           WHERE id = $1`,
         [
           Number(existing.id),
@@ -719,7 +719,6 @@ export async function postSportCenterBookingPayment(
           canonicalMethod,
           canonicalProvider,
           paymentType,
-          bankAccountId,
           providerReference,
           providerOrderId,
           merchantTradeNo,
@@ -811,7 +810,7 @@ export async function postSportCenterBookingPayment(
          payment_method, payment_provider, payment_type, source_payment_id,
          bank_account_id, provider_reference, provider_order_id, merchant_trade_no, provider_trade_no)
          VALUES ($1,$2,$3::date,$4,$5,'draft','sport_center_payment',$6,$7,$7,$8,$9,'{}',
-               $10,$11,$12,$13,$14,$15,$16,$17,$18)
+               $10,$11,$12,$13,NULL,$14,$15,$16,$17)
        RETURNING id`,
       [
         entryNumber,
@@ -827,7 +826,6 @@ export async function postSportCenterBookingPayment(
         canonicalProvider,
         paymentType,
          sourcePaymentId,
-        bankAccountId,
         providerReference,
         providerOrderId,
         merchantTradeNo,

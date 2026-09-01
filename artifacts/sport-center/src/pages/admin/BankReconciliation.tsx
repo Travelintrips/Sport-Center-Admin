@@ -432,10 +432,12 @@ function resolveProofUrl(url: string | null | undefined): string | null {
 function MatchCandidateRow({
   match,
   onApprove,
+  onRepair,
   isPending,
 }: {
   match: any;
   onApprove: (matchId: number) => void;
+  onRepair: () => void;
   isPending: boolean;
 }) {
   const [lightbox, setLightbox] = useState<string | null>(null);
@@ -461,9 +463,11 @@ function MatchCandidateRow({
   );
   const [ocrLoading, setOcrLoading] = useState(false);
   const [ocrError, setOcrError] = useState<string | null>(null);
+  const [repairLoading, setRepairLoading] = useState(false);
   const { toast } = useToast();
 
   const proofUrl = resolveProofUrl(match.proofUrl);
+  const isGymQrisReview = String(match.matchReason ?? "").includes("GYM_QRIS_METADATA_REVIEW");
 
   const handleScanOcr = async () => {
     if (!proofUrl) return;
@@ -495,6 +499,31 @@ function MatchCandidateRow({
       setOcrError(e.message);
     } finally {
       setOcrLoading(false);
+    }
+  };
+
+  const handleRepairQris = async () => {
+    setRepairLoading(true);
+    try {
+      const resp = await fetch(`${API_BASE}/payments/${match.candidateId}/repair-qris`, {
+        method: "POST",
+        headers: authHeaders(),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error ?? "Gagal memperbaiki payment QRIS");
+      toast({
+        title: "Payment QRIS diperbaiki",
+        description: "Metadata, jurnal internal, dan mirror public sudah disinkronkan.",
+      });
+      onRepair();
+    } catch (e: any) {
+      toast({
+        title: "Repair QRIS belum berhasil",
+        description: e.message,
+        variant: "destructive",
+      });
+    } finally {
+      setRepairLoading(false);
     }
   };
 
@@ -706,11 +735,24 @@ function MatchCandidateRow({
             </div>
           )}
         </div>
-        {match.status === "candidate" && (
-          <Button size="sm" className="shrink-0 h-7 text-xs gap-1" onClick={() => onApprove(match.id)} disabled={isPending}>
-            <CheckCircle2 size={12} /> Pilih
-          </Button>
-        )}
+        <div className="shrink-0 flex flex-col gap-1 items-end">
+          {isGymQrisReview && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-[10px] gap-1 border-violet-300 text-violet-700 hover:bg-violet-50"
+              onClick={handleRepairQris}
+              disabled={repairLoading || isPending}
+            >
+              {repairLoading ? "Repair..." : "Repair QRIS + jurnal"}
+            </Button>
+          )}
+          {match.status === "candidate" && (
+            <Button size="sm" className="h-7 text-xs gap-1" onClick={() => onApprove(match.id)} disabled={isPending || repairLoading}>
+              <CheckCircle2 size={12} /> Pilih
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* Lightbox */}
@@ -1175,6 +1217,7 @@ function MutationRow({ mutation, qc }: { mutation: any; qc: any }) {
                       const { sheetId, sheetName } = getSheetContext();
                       approveMutation.mutate({ mutationId: mutation.id, data: { matchId, sheetId, sheetName } });
                     }}
+                    onRepair={() => matchesQuery.refetch()}
                     isPending={isPending}
                   />
                 ))}

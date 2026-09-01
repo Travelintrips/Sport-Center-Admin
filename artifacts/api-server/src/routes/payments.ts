@@ -47,6 +47,50 @@ import {
   verifyProofOcrToken,
 } from "../lib/paymentProofOcr";
 import { readPaymentProofOcr } from "../lib/paymentOcr";
+
+async function postPaymentAccountingProjection(payment: any, booking: any): Promise<void> {
+  let dpp = extractBookingDpp(booking).dpp;
+  let ppnAmount = extractBookingDpp(booking).ppnAmount;
+
+  if (booking.groupRef) {
+    const groupBookings = await db
+      .select({
+        dpp: bookingsTable.dpp,
+        totalPrice: bookingsTable.totalPrice,
+        grandTotal: bookingsTable.grandTotal,
+        ppnAmount: bookingsTable.ppnAmount,
+      })
+      .from(bookingsTable)
+      .where(eq(bookingsTable.groupRef, booking.groupRef));
+    dpp = 0;
+    ppnAmount = 0;
+    for (const groupBooking of groupBookings) {
+      const extracted = extractBookingDpp(groupBooking);
+      dpp += extracted.dpp;
+      ppnAmount += extracted.ppnAmount;
+    }
+  }
+
+  const paidAt = payment.paidAt ?? payment.confirmedAt ?? new Date();
+  await postConfirmedPaymentAccounting({
+    bookingId: booking.id,
+    orderNumber: booking.orderNumber,
+    dpp,
+    ppnAmount,
+    ppnRate: booking.ppnRate == null ? null : Number(booking.ppnRate),
+    facilityId: booking.facilityId,
+    journalDate: paidAt.toISOString().slice(0, 10),
+    paymentMethod: payment.paymentMethod ?? undefined,
+    paymentId: payment.id,
+    paymentType: payment.paymentType,
+    paymentProvider: payment.paymentProvider,
+    bankAccountId: payment.bankAccountId,
+    providerReference: payment.providerReference,
+    providerOrderId: payment.providerOrderId,
+    merchantTradeNo: payment.merchantTradeNo,
+    providerTradeNo: payment.providerTradeNo,
+  });
+}
 import { isBookingConfirmableStatus } from "../lib/bookingLifecycle";
 import { insertGroupPaymentAllocations } from "../lib/paymentAllocations";
 
@@ -711,6 +755,196 @@ router.post("/payments", async (req, res) => {
 });
 
 /**
+ * Repair a historical Gym payment after QRIS evidence has been verified.
+ *
+ * This endpoint is intentionally separate from the generic metadata editor:
+ * it can enrich provider/company dimensions and replay accounting, but only
+ * when the stored/current OCR evidence is high-confidence QRIS.
+ */
+router.post("/payments/:id/repair-qris", adminMiddleware, async (req, res) => {
+  try {
+    const id = Number.parseInt(String(req.params.id), 10);
+    if (!Number.isFinite(id)) {
+      res.status(400).json({ error: "ID pembayaran tidak valid" });
+      return;
+    }
+
+    const [payment] = await db
+      .select()
+      .from(paymentsTable)
+      .where(eq(paymentsTable.id, id))
+      .limit(1);
+    if (!payment) {
+      res.status(404).json({ error: "Pembayaran tidak ditemukan" });
+      return;
+    }
+    const [booking] = await db
+      .select()
+      .from(bookingsTable)
+      .where(eq(bookingsTable.id, payment.bookingId))
+      .limit(1);
+    if (!booking) {
+      res.status(409).json({ error: "Booking pembayaran tidak ditemukan" });
+      return;
+    }
+
+    const storedOcr = storedPaymentProofOcr(payment);
+    let ocrResult: Awaited<ReturnType<typeof readPaymentProofOcr>> | null = null;
+    if (
+      payment.proofUrl &&
+      (!storedOcr || storedOcr.paymentMethod !== "QRIS" || storedOcr.confidence < 0.85)
+    ) {
+      try {
+        ocrResult = await readPaymentProofOcr(payment.proofUrl);
+      } catch (error) {
+        req.log.warn({ err: error, paymentId: id }, "QRIS repair OCR gagal");
+      }
+    }
+
+    const detection = ocrResult?.paymentMethodDetection;
+    const hasQrisEvidence =
+      payment.paymentMethod?.trim().toUpperCase() === "QRIS" ||
+      storedOcr?.paymentMethod === "QRIS" && storedOcr.confidence >= 0.85 ||
+      detection?.paymentMethod === "QRIS" && detection.highConfidence;
+    if (!hasQrisEvidence) {
+      res.status(422).json({
+        error: "Bukti QRIS belum terdeteksi dengan confidence tinggi. Payment tetap tidak diubah.",
+        candidate: true,
+        ocr: detection ?? storedOcr ?? null,
+      });
+      return;
+    }
+
+    const paidAt = payment.paidAt ?? payment.confirmedAt ?? payment.createdAt;
+    const enrichment = await resolveRequiredPaymentEnrichment(
+      booking,
+      "mandiri_direct",
+      paidAt,
+      {
+        sourcePaymentCompanyId: payment.companyId,
+        explicitCompanyId: payment.companyId,
+        effectiveDate: paymentEffectiveDate(paidAt),
+      },
+    );
+    const usableProviderId = payment.providerId &&
+      !payment.providerId.toLowerCase().startsWith("legacy-") &&
+      !payment.providerId.toLowerCase().startsWith("internal-unknown-")
+      ? payment.providerId
+      : null;
+    const usableProviderOrderId = payment.providerOrderId &&
+      !payment.providerOrderId.toLowerCase().startsWith("legacy-") &&
+      !payment.providerOrderId.toLowerCase().startsWith("internal-order-unknown-")
+      ? payment.providerOrderId
+      : null;
+    const providerId = createPaymentProviderId(
+      "mandiri_direct",
+      usableProviderId
+        ? usableProviderId
+        : payment.providerReference ?? payment.providerTradeNo ?? payment.merchantTradeNo,
+    );
+    const providerOrderId = createPaymentProviderOrderId(
+      "mandiri_direct",
+      usableProviderOrderId
+        ? usableProviderOrderId
+        : payment.merchantTradeNo ?? payment.providerTradeNo ?? payment.providerReference,
+    );
+
+    const mergedOcrData = {
+      ...(payment.ocrData && typeof payment.ocrData === "object"
+        ? payment.ocrData as Record<string, unknown>
+        : {}),
+      ...(ocrResult
+        ? {
+            paymentMethodDetection: {
+              ...ocrResult.paymentMethodDetection,
+              detectedAt: new Date().toISOString(),
+              source: "repair_qris",
+            },
+          }
+        : {}),
+      qrisRepair: {
+        evidence: "high_confidence_ocr_or_existing_qris_method",
+        repairedAt: new Date().toISOString(),
+      },
+    };
+
+    const [repaired] = await db
+      .update(paymentsTable)
+      .set({
+        paymentMethod: "QRIS",
+        paymentProvider: "mandiri_direct",
+        providerName: normalizeProviderName("mandiri_direct"),
+        providerId,
+        providerOrderId,
+        companyId: enrichment.companyId,
+        bankAccountId: enrichment.bankAccountId,
+        expectedSettlementDate: payment.expectedSettlementDate ?? enrichment.expectedSettlementDate,
+        ocrName: ocrResult?.ocrName ?? payment.ocrName,
+        ocrAmount: ocrResult?.ocrAmount == null
+          ? payment.ocrAmount
+          : String(ocrResult.ocrAmount),
+        ocrDate: ocrResult?.ocrDate ?? payment.ocrDate,
+        ocrRaw: ocrResult?.ocrRaw ?? payment.ocrRaw,
+        ocrData: mergedOcrData,
+        updatedAt: new Date(),
+      })
+      .where(eq(paymentsTable.id, id))
+      .returning();
+    if (!repaired) {
+      res.status(409).json({ error: "Payment gagal diperbarui" });
+      return;
+    }
+
+    let accounting: "posted" | "skipped" = "skipped";
+    if (repaired.status === "confirmed") {
+      await postPaymentAccountingProjection(repaired, booking);
+      accounting = "posted";
+    }
+
+    await logAudit({
+      ...getUserFromReq(req),
+      action: "PAYMENT_QRIS_REPAIRED",
+      entity: "payment",
+      entityId: id,
+      before: {
+        paymentMethod: payment.paymentMethod,
+        paymentProvider: payment.paymentProvider,
+        providerName: payment.providerName,
+        providerId: payment.providerId,
+        companyId: payment.companyId,
+      },
+      after: {
+        paymentMethod: repaired.paymentMethod,
+        paymentProvider: repaired.paymentProvider,
+        providerName: repaired.providerName,
+        providerId: repaired.providerId,
+        companyId: repaired.companyId,
+        accounting,
+      },
+      ...getClientInfo(req),
+    });
+
+    res.json({
+      ...repaired,
+      amount: Number(repaired.amount),
+      accounting,
+      evidence: detection ?? storedOcr ?? { paymentMethod: "QRIS", source: "existing_payment_method" },
+    });
+  } catch (err: any) {
+    req.log.error({ err }, "Repair QRIS payment error");
+    const message = String(err?.message ?? err);
+    if (message.includes("PAYMENT_COMPANY_ID_REQUIRED") || message.includes("RECEIVING_BANK_ACCOUNT_NOT_CONFIGURED")) {
+      res.status(409).json({
+        error: "Company atau rekening settlement belum dapat dibuktikan secara deterministik. Payment tetap menjadi kandidat review.",
+        candidate: true,
+      });
+      return;
+    }
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+/**
  * Metadata-only payment edit.
  *
  * Hanya metadata revisi yang boleh diubah oleh admin: metode/provider dan,
@@ -748,7 +982,9 @@ router.patch("/payments/:id/metadata", adminMiddleware, async (req, res) => {
       (update.paymentMethod === undefined ||
         update.paymentMethod === String(before.paymentMethod ?? "").trim()) &&
       (update.paymentProvider === undefined ||
-        String(update.paymentProvider ?? "") === String(before.paymentProvider ?? ""));
+        String(update.paymentProvider ?? "") === String(before.paymentProvider ?? "")) &&
+      (update.companyId === undefined || update.companyId === before.companyId) &&
+      (update.bankAccountId === undefined || String(update.bankAccountId ?? "") === String(before.bankAccountId ?? ""));
 
     if (noChange) {
       // Idempotent: mengulang nilai yang sama tidak boleh error dan tidak
@@ -762,8 +998,17 @@ router.patch("/payments/:id/metadata", adminMiddleware, async (req, res) => {
     // aktif, bukan dari request admin. Dengan begitu trigger canonical dapat
     // memvalidasi provider QRIS terhadap rekening yang benar tanpa membuka
     // endpoint metadata untuk perubahan rekening/settlement secara bebas.
-     const revisionWarnings: string[] = [];
-     if (update.paymentProvider === "mandiri_direct") {
+    const revisionWarnings: string[] = [];
+    const metadataPatch: Record<string, unknown> = {
+      ...(update.paymentMethod !== undefined ? { paymentMethod: update.paymentMethod } : {}),
+      ...(update.paymentProvider !== undefined ? { paymentProvider: update.paymentProvider } : {}),
+      ...(update.providerName !== undefined ? { providerName: update.providerName } : {}),
+      ...(update.companyId !== undefined ? { companyId: update.companyId } : {}),
+      ...(update.bankAccountId !== undefined ? { bankAccountId: update.bankAccountId || "unknown" } : {}),
+    };
+    const effectiveMethod = String(update.paymentMethod ?? before.paymentMethod ?? "").trim().toUpperCase();
+    let metadataBooking: any = null;
+    if (effectiveMethod === "QRIS") {
       const [booking] = await db
         .select()
         .from(bookingsTable)
@@ -775,28 +1020,51 @@ router.patch("/payments/:id/metadata", adminMiddleware, async (req, res) => {
         });
         return;
       }
+      metadataBooking = booking;
 
       const paymentDate = before.paidAt ?? before.confirmedAt ?? before.createdAt;
-       try {
-         await resolveRequiredPaymentEnrichment(
-           booking,
-           "mandiri_direct",
-           paymentDate,
-           {
-             sourcePaymentCompanyId: update.companyId ?? before.companyId,
-             explicitCompanyId: update.companyId ?? before.companyId,
-             effectiveDate: paymentEffectiveDate(paymentDate),
-           },
-         );
-       } catch (error) {
-         const message = String((error as any)?.message ?? error);
-         revisionWarnings.push(
-           message.includes("COMPANY") || message.includes("PROVIDER")
-             ? "Company/provider settlement belum cocok; silakan koreksi saat revisi."
-             : "Bank account atau settlement rule belum cocok; silakan koreksi saat revisi.",
-         );
-         req.log.warn({ err: error, paymentId: id }, "Payment metadata revision warning");
-       }
+      const enrichment = await resolveRequiredPaymentEnrichment(
+        booking,
+        "mandiri_direct",
+        paymentDate,
+        {
+          sourcePaymentCompanyId: update.companyId ?? before.companyId,
+          explicitCompanyId: update.companyId ?? before.companyId,
+          effectiveDate: paymentEffectiveDate(paymentDate),
+        },
+      );
+      const usableProviderId = before.providerId &&
+        !before.providerId.toLowerCase().startsWith("legacy-") &&
+        !before.providerId.toLowerCase().startsWith("internal-unknown-")
+        ? before.providerId
+        : null;
+      const usableProviderOrderId = before.providerOrderId &&
+        !before.providerOrderId.toLowerCase().startsWith("legacy-") &&
+        !before.providerOrderId.toLowerCase().startsWith("internal-order-unknown-")
+        ? before.providerOrderId
+        : null;
+      const providerId = createPaymentProviderId(
+        "mandiri_direct",
+        usableProviderId
+          ? usableProviderId
+          : before.providerReference ?? before.providerTradeNo ?? before.merchantTradeNo,
+      );
+      const providerOrderId = createPaymentProviderOrderId(
+        "mandiri_direct",
+        usableProviderOrderId
+          ? usableProviderOrderId
+          : before.merchantTradeNo ?? before.providerTradeNo ?? before.providerReference,
+      );
+      Object.assign(metadataPatch, {
+        paymentMethod: "QRIS",
+        paymentProvider: "mandiri_direct",
+        providerName: normalizeProviderName("mandiri_direct"),
+        providerId,
+        providerOrderId,
+        companyId: update.companyId ?? before.companyId ?? enrichment.companyId,
+        bankAccountId: enrichment.bankAccountId,
+        expectedSettlementDate: before.expectedSettlementDate ?? enrichment.expectedSettlementDate,
+      });
     }
 
     const payment = await db.transaction(async (tx) => {
@@ -814,16 +1082,7 @@ router.patch("/payments/:id/metadata", adminMiddleware, async (req, res) => {
 
       const [updated] = await tx
         .update(paymentsTable)
-        .set({
-          ...(update.paymentMethod !== undefined ? { paymentMethod: update.paymentMethod } : {}),
-          ...(update.paymentProvider !== undefined
-            ? { paymentProvider: update.paymentProvider as any }
-            : {}),
-          ...(update.providerName !== undefined ? { providerName: update.providerName } : {}),
-           ...(update.companyId !== undefined ? { companyId: update.companyId } : {}),
-           ...(update.bankAccountId !== undefined ? { bankAccountId: update.bankAccountId || "unknown" } : {}),
-          updatedAt: new Date(),
-        })
+        .set({ ...metadataPatch, updatedAt: new Date() } as any)
         .where(eq(paymentsTable.id, id))
         .returning();
       return updated;
@@ -848,11 +1107,18 @@ router.patch("/payments/:id/metadata", adminMiddleware, async (req, res) => {
       ...getClientInfo(req),
     });
 
-     res.json({
-       ...payment,
-       amount: Number(payment.amount),
-       warnings: revisionWarnings,
-     });
+    let accounting: "posted" | "skipped" = "skipped";
+    if (payment.status === "confirmed" && effectiveMethod === "QRIS" && metadataBooking) {
+      await postPaymentAccountingProjection(payment, metadataBooking);
+      accounting = "posted";
+    }
+
+    res.json({
+      ...payment,
+      amount: Number(payment.amount),
+      accounting,
+      warnings: revisionWarnings,
+    });
   } catch (err: any) {
     const message = String(err?.message ?? "") + " " + String((err as any)?.cause?.message ?? "");
     if (message.includes("POSTED_ACCOUNTING_JOURNAL") || message.includes("PAYMENT_ACCOUNTING_JOURNAL_AMBIGUOUS")) {
