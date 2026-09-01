@@ -56,6 +56,38 @@ try {
   // or a concurrent startup migration against the same Supabase database.
   await client.query("SELECT pg_advisory_xact_lock(918274615)");
 
+  await client.query(`
+    ALTER TABLE sport_center.accounting_journals
+      ADD COLUMN IF NOT EXISTS provider_name text,
+      ADD COLUMN IF NOT EXISTS provider_id text,
+      ADD COLUMN IF NOT EXISTS expected_settlement_date text,
+      ADD COLUMN IF NOT EXISTS settlement_status text,
+      ADD COLUMN IF NOT EXISTS mdr_rate numeric(8,5),
+      ADD COLUMN IF NOT EXISTS mdr_amount numeric(14,2)
+  `);
+  await client.query(`
+    UPDATE sport_center.accounting_journals aj
+       SET payment_method = sp.payment_method,
+           payment_provider = sp.payment_provider::text,
+           provider_name = sp.provider_name,
+           provider_id = sp.provider_id,
+           payment_type = sp.payment_type::text,
+           bank_account_id = sp.bank_account_id,
+           expected_settlement_date = sp.expected_settlement_date,
+           settlement_status = sp.settlement_status,
+           mdr_rate = sp.mdr_rate,
+           mdr_amount = sp.mdr_amount,
+           provider_reference = sp.provider_reference,
+           provider_order_id = sp.provider_order_id,
+           merchant_trade_no = sp.merchant_trade_no,
+           provider_trade_no = sp.provider_trade_no,
+           company_id = COALESCE(sp.company_id, aj.company_id)
+      FROM sport_center.sport_payments sp
+     WHERE aj.payment_id = sp.id
+       AND aj.journal_type = 'payment_confirmed'
+       AND aj.is_reversal = false
+  `);
+
   for (const file of migrationFiles) {
     const sql = await fs.readFile(path.join(scriptsDir, file), "utf8");
     await client.query(sql);

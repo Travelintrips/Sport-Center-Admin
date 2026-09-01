@@ -291,7 +291,9 @@ async function postAccountingJournal(
   mutation: {
     id: number; transactionDate: string; amount: string | null; direction: string;
     description: string; accountingPosted: boolean;
-    bankAccountId?: string | null; taxType?: string | null; transactionType?: string | null;
+    bankAccountId?: string | null; companyId?: number | null;
+    matchedPaymentId?: number | null;
+    taxType?: string | null; transactionType?: string | null;
   },
   candidateType: string | undefined,
   candidateId: number | undefined,
@@ -304,6 +306,28 @@ async function postAccountingJournal(
 
   const journalId = `JRN-${mutation.transactionDate.replace(/-/g, "").slice(0, 8)}-${String(mutation.id).padStart(6, "0")}`;
   const memo = mutation.description.slice(0, 200);
+  const paymentId =
+    mutation.matchedPaymentId ??
+    (candidateType === "payment" ? candidateId ?? null : null);
+  const [paymentSnapshot] = paymentId
+    ? await db.select({
+        id: paymentsTable.id,
+        paymentMethod: paymentsTable.paymentMethod,
+        paymentProvider: paymentsTable.paymentProvider,
+        providerName: paymentsTable.providerName,
+        providerReference: paymentsTable.providerReference,
+        providerId: paymentsTable.providerId,
+        providerOrderId: paymentsTable.providerOrderId,
+        merchantTradeNo: paymentsTable.merchantTradeNo,
+        providerTradeNo: paymentsTable.providerTradeNo,
+        companyId: paymentsTable.companyId,
+        bankAccountId: paymentsTable.bankAccountId,
+        expectedSettlementDate: paymentsTable.expectedSettlementDate,
+        mdrRate: paymentsTable.mdrRate,
+        mdrAmount: paymentsTable.mdrAmount,
+        settlementStatus: paymentsTable.settlementStatus,
+      }).from(paymentsTable).where(eq(paymentsTable.id, paymentId)).limit(1)
+    : [undefined];
 
   let debitCode: string, debitName: string, creditCode: string, creditName: string;
 
@@ -376,7 +400,7 @@ async function postAccountingJournal(
   await db.insert(bankJournalEntriesTable).values({
     journalId,
     mutationId: mutation.id,
-    companyId: (mutation as any).companyId ?? null,
+    companyId: mutation.companyId ?? paymentSnapshot?.companyId ?? null,
     direction: mutation.direction,
     amount: String(amount),
     debitAccountCode: debitCode,
@@ -386,6 +410,21 @@ async function postAccountingJournal(
     memo,
     candidateType: candidateType ?? null,
     candidateId: candidateId ?? null,
+    paymentId: paymentSnapshot?.id ?? null,
+    paymentMethod: paymentSnapshot?.paymentMethod ?? null,
+    paymentProvider: paymentSnapshot?.paymentProvider ?? null,
+    providerName: paymentSnapshot?.providerName ?? null,
+    providerReference: paymentSnapshot?.providerReference ?? null,
+    providerId: paymentSnapshot?.providerId ?? null,
+    providerOrderId: paymentSnapshot?.providerOrderId ?? null,
+    merchantTradeNo: paymentSnapshot?.merchantTradeNo ?? null,
+    providerTradeNo: paymentSnapshot?.providerTradeNo ?? null,
+    paymentCompanyId: paymentSnapshot?.companyId ?? null,
+    paymentBankAccountId: paymentSnapshot?.bankAccountId ?? null,
+    paymentExpectedSettlementDate: paymentSnapshot?.expectedSettlementDate ?? null,
+    paymentMdrRate: paymentSnapshot?.mdrRate ?? null,
+    paymentMdrAmount: paymentSnapshot?.mdrAmount ?? null,
+    paymentSettlementStatus: paymentSnapshot?.settlementStatus ?? null,
     postedAt: new Date(),
     postedBy: postedBy ?? null,
   });
@@ -976,7 +1015,7 @@ router.post("/bank-reconciliation/:mutationId/approve", adminMiddleware, async (
         .set({
           status: "approved",
           matchedPaymentId: match?.candidateType === "payment" ? match.candidateId : null,
-          matchedOrderId: ((match?.candidateType as string) === "order" || (match?.candidateType as string) === "group_payment") ? match.candidateId : null,
+          matchedOrderId: match && ((match.candidateType as string) === "order" || (match.candidateType as string) === "group_payment") ? match.candidateId : null,
           updatedAt: new Date(),
         })
         .where(eq(bankMutationsTable.id, mutationId));

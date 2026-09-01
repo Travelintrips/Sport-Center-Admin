@@ -1337,6 +1337,24 @@ function MutationRow({ mutation, qc }: { mutation: any; qc: any }) {
                           ))}
                         </tbody>
                       </table>
+                      {journalLines[0]?.paymentId && (
+                        <div className="border-t bg-slate-50/70 px-3 py-2">
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1">
+                            Snapshot Payment saat Posting
+                          </p>
+                          <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px]">
+                            <span>Payment #{journalLines[0].paymentId}</span>
+                            <span>Metode: {journalLines[0].paymentMethod ?? "—"}</span>
+                            <span>Provider: {journalLines[0].providerName ?? "—"}</span>
+                            <span>Company ID: {journalLines[0].paymentCompanyId ?? "—"}</span>
+                            <span>Bank Account: {journalLines[0].paymentBankAccountId ?? "—"}</span>
+                            <span>Expected Settlement: {journalLines[0].paymentExpectedSettlementDate ?? "—"}</span>
+                            {journalLines[0].providerOrderId && (
+                              <span>Provider Order: {journalLines[0].providerOrderId}</span>
+                            )}
+                          </div>
+                        </div>
+                      )}
 
                       {/* Inline Edit Form */}
                       {editingCOA && (
