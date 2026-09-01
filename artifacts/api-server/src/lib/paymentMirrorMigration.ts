@@ -4,6 +4,7 @@ import manualProviderMirrorMigration from "../../../../scripts/patch_manual_prov
 import paymentMetadataResolverMigration from "../../../../scripts/patch_resolve_function.sql";
 import publicPaymentEntryMetadataSyncMigration from "../../../../scripts/patch_public_payment_entry_metadata_sync.sql";
 import internalPaymentJournalMetadataSyncMigration from "../../../../scripts/patch_internal_payment_journal_metadata_sync.sql";
+import postedAccountingMetadataCorrectionMigration from "../../../../scripts/patch_posted_accounting_metadata_correction.sql";
 
 type MigrationState =
   | { status: "pending" }
@@ -134,6 +135,46 @@ export function startPaymentMirrorMigration(): Promise<void> {
          // fail with "tuple concurrently updated".
          await tx.execute(sql`
            SELECT pg_advisory_xact_lock(918274615)
+         `);
+         // Existing posted journals need the explicit metadata-only guard
+         // installed before the one-time snapshot backfill runs.
+         await tx.execute(sql.raw(postedAccountingMetadataCorrectionMigration));
+         await tx.execute(sql.raw(
+           "SET LOCAL sport_center.allow_posted_accounting_metadata_correction = 'on'",
+         ));
+         // The trigger below projects payment settlement metadata into the
+         // internal accounting journal. Ensure the target columns exist before
+         // replacing the trigger function, including on an older database.
+         await tx.execute(sql`
+           ALTER TABLE sport_center.accounting_journals
+             ADD COLUMN IF NOT EXISTS provider_name text,
+             ADD COLUMN IF NOT EXISTS provider_id text,
+             ADD COLUMN IF NOT EXISTS expected_settlement_date text,
+             ADD COLUMN IF NOT EXISTS settlement_status text,
+             ADD COLUMN IF NOT EXISTS mdr_rate numeric(8,5),
+             ADD COLUMN IF NOT EXISTS mdr_amount numeric(14,2)
+         `);
+         await tx.execute(sql`
+           UPDATE sport_center.accounting_journals aj
+              SET payment_method = sp.payment_method,
+                  payment_provider = sp.payment_provider::text,
+                  provider_name = sp.provider_name,
+                  provider_id = sp.provider_id,
+                  payment_type = sp.payment_type::text,
+                  bank_account_id = sp.bank_account_id,
+                  expected_settlement_date = sp.expected_settlement_date,
+                  settlement_status = sp.settlement_status,
+                  mdr_rate = sp.mdr_rate,
+                  mdr_amount = sp.mdr_amount,
+                  provider_reference = sp.provider_reference,
+                  provider_order_id = sp.provider_order_id,
+                  merchant_trade_no = sp.merchant_trade_no,
+                  provider_trade_no = sp.provider_trade_no,
+                  company_id = COALESCE(sp.company_id, aj.company_id)
+             FROM sport_center.sport_payments sp
+            WHERE aj.payment_id = sp.id
+              AND aj.journal_type = 'payment_confirmed'
+              AND aj.is_reversal = false
          `);
         // The resolver may be reached by older/direct database triggers before
         // the mirror projection runs. Install its manual-payment branch first,

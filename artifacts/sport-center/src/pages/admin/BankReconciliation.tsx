@@ -432,10 +432,12 @@ function resolveProofUrl(url: string | null | undefined): string | null {
 function MatchCandidateRow({
   match,
   onApprove,
+  onRepair,
   isPending,
 }: {
   match: any;
   onApprove: (matchId: number) => void;
+  onRepair: () => void;
   isPending: boolean;
 }) {
   const [lightbox, setLightbox] = useState<string | null>(null);
@@ -461,9 +463,11 @@ function MatchCandidateRow({
   );
   const [ocrLoading, setOcrLoading] = useState(false);
   const [ocrError, setOcrError] = useState<string | null>(null);
+  const [repairLoading, setRepairLoading] = useState(false);
   const { toast } = useToast();
 
   const proofUrl = resolveProofUrl(match.proofUrl);
+  const isGymQrisReview = String(match.matchReason ?? "").includes("GYM_QRIS_METADATA_REVIEW");
 
   const handleScanOcr = async () => {
     if (!proofUrl) return;
@@ -495,6 +499,31 @@ function MatchCandidateRow({
       setOcrError(e.message);
     } finally {
       setOcrLoading(false);
+    }
+  };
+
+  const handleRepairQris = async () => {
+    setRepairLoading(true);
+    try {
+      const resp = await fetch(`${API_BASE}/payments/${match.candidateId}/repair-qris`, {
+        method: "POST",
+        headers: authHeaders(),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error ?? "Gagal memperbaiki payment QRIS");
+      toast({
+        title: "Payment QRIS diperbaiki",
+        description: "Metadata, jurnal internal, dan mirror public sudah disinkronkan.",
+      });
+      onRepair();
+    } catch (e: any) {
+      toast({
+        title: "Repair QRIS belum berhasil",
+        description: e.message,
+        variant: "destructive",
+      });
+    } finally {
+      setRepairLoading(false);
     }
   };
 
@@ -641,6 +670,28 @@ function MatchCandidateRow({
             {match.orderIdMatch && <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">✓ Order ID</span>}
             {match.proofMatch && <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">✓ Bukti</span>}
           </div>
+          {match.candidateType === "payment" && (
+            <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[10px]">
+              <span className="px-1.5 py-0.5 rounded border bg-slate-50 text-slate-700">
+                Metode: {match.paymentMethod || "—"}
+              </span>
+              <span className="px-1.5 py-0.5 rounded border bg-slate-50 text-slate-700">
+                Provider: {match.providerName || "—"}
+              </span>
+              <span className="px-1.5 py-0.5 rounded border bg-slate-50 text-slate-700">
+                Company ID: {match.companyId ?? "—"}
+              </span>
+              {match.reconciliationReady ? (
+                <span className="px-1.5 py-0.5 rounded border border-green-200 bg-green-50 text-green-700">
+                  ✓ Syarat payment terpenuhi
+                </span>
+              ) : (
+                <span className="px-1.5 py-0.5 rounded border border-amber-200 bg-amber-50 text-amber-700">
+                  Kurang: {(match.reconciliationMissing ?? []).join(", ")}
+                </span>
+              )}
+            </div>
+          )}
           <ScoreBreakdown reason={match.matchReason} totalScore={match.matchScore} />
 
           {/* OCR Results */}
@@ -706,11 +757,24 @@ function MatchCandidateRow({
             </div>
           )}
         </div>
-        {match.status === "candidate" && (
-          <Button size="sm" className="shrink-0 h-7 text-xs gap-1" onClick={() => onApprove(match.id)} disabled={isPending}>
-            <CheckCircle2 size={12} /> Pilih
-          </Button>
-        )}
+        <div className="shrink-0 flex flex-col gap-1 items-end">
+          {isGymQrisReview && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-[10px] gap-1 border-violet-300 text-violet-700 hover:bg-violet-50"
+              onClick={handleRepairQris}
+              disabled={repairLoading || isPending}
+            >
+              {repairLoading ? "Repair..." : "Repair QRIS + jurnal"}
+            </Button>
+          )}
+          {match.status === "candidate" && (
+            <Button size="sm" className="h-7 text-xs gap-1" onClick={() => onApprove(match.id)} disabled={isPending || repairLoading}>
+              <CheckCircle2 size={12} /> Pilih
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* Lightbox */}
@@ -1175,6 +1239,7 @@ function MutationRow({ mutation, qc }: { mutation: any; qc: any }) {
                       const { sheetId, sheetName } = getSheetContext();
                       approveMutation.mutate({ mutationId: mutation.id, data: { matchId, sheetId, sheetName } });
                     }}
+                    onRepair={() => matchesQuery.refetch()}
                     isPending={isPending}
                   />
                 ))}
@@ -1272,6 +1337,24 @@ function MutationRow({ mutation, qc }: { mutation: any; qc: any }) {
                           ))}
                         </tbody>
                       </table>
+                      {journalLines[0]?.paymentId && (
+                        <div className="border-t bg-slate-50/70 px-3 py-2">
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1">
+                            Snapshot Payment saat Posting
+                          </p>
+                          <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px]">
+                            <span>Payment #{journalLines[0].paymentId}</span>
+                            <span>Metode: {journalLines[0].paymentMethod ?? "—"}</span>
+                            <span>Provider: {journalLines[0].providerName ?? "—"}</span>
+                            <span>Company ID: {journalLines[0].paymentCompanyId ?? "—"}</span>
+                            <span>Bank Account: {journalLines[0].paymentBankAccountId ?? "—"}</span>
+                            <span>Expected Settlement: {journalLines[0].paymentExpectedSettlementDate ?? "—"}</span>
+                            {journalLines[0].providerOrderId && (
+                              <span>Provider Order: {journalLines[0].providerOrderId}</span>
+                            )}
+                          </div>
+                        </div>
+                      )}
 
                       {/* Inline Edit Form */}
                       {editingCOA && (

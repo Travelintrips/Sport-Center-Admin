@@ -12,6 +12,7 @@ import {
   type QrisPaymentInput,
   type QrisMutationInput,
 } from "./qrisCandidateEngine";
+import { getPaymentReconciliationMissingFields } from "./paymentReconciliationEligibility";
 
 const GOPAY_PATTERN = /DOMPET ANAK BANGSA|GOPAY|OVO|DANA|LINKAJA|SHOPEEPAY/i;
 const ORDER_ID_PATTERN = /\b(ID\d{15,25}[A-Z]{0,4}|TRX\d{10,}|INV-\d{8,})\b/i;
@@ -56,6 +57,11 @@ export function extractOrderId(desc: string): string | null {
 }
 
 export function extractProviderName(desc: string): string | null {
+  // Bank statements often identify a QRIS credit without naming the
+  // underlying provider. Return the canonical unknown provider so the strict
+  // QRIS matcher can surface a review candidate instead of falling through to
+  // generic booking matching.
+  if (/\bQRIS\b|\bQR\s*CODE\b|\bGPN\b/i.test(desc)) return "unknown";
   const m = desc.match(GOPAY_PATTERN);
   if (!m) return null;
   if (/DOMPET ANAK BANGSA|GOPAY/i.test(m[0])) return "GoPay";
@@ -134,6 +140,7 @@ async function computeStrictQrisCandidate(mutation: BankMutation): Promise<Match
       p.amount,
       p.payment_method AS "paymentMethod",
       p.payment_provider AS "provider",
+      p.provider_name AS "providerName",
       p.expected_settlement_date AS "expectedSettlementDate",
       p.provider_reference AS "providerReference",
       p.merchant_trade_no AS "merchantTradeNo",
@@ -149,6 +156,8 @@ async function computeStrictQrisCandidate(mutation: BankMutation): Promise<Match
     bankAccountId: typeof row.bankAccountId === "string" ? row.bankAccountId : null,
     amount: Number(row.amount),
     provider: isCanonicalQrisProvider(row.provider) ? row.provider : null,
+    paymentMethod: typeof row.paymentMethod === "string" ? row.paymentMethod : null,
+    providerName: typeof row.providerName === "string" ? row.providerName : null,
     expectedSettlementDate: typeof row.expectedSettlementDate === "string" ? row.expectedSettlementDate.slice(0, 10) : null,
     providerReference: typeof row.providerReference === "string" ? row.providerReference : null,
     merchantTradeNo: typeof row.merchantTradeNo === "string" ? row.merchantTradeNo : null,
@@ -197,7 +206,89 @@ async function computeStrictQrisCandidate(mutation: BankMutation): Promise<Match
   const evaluation = evaluateQrisMutation(qrisMutation, payments, rules);
   const candidateId = evaluation.paymentIds[0] ?? 0;
 
-  if (evaluation.decision === "UNMATCHED" && !evaluation.paymentIds.length) return [];
+  if (evaluation.decision === "UNMATCHED" && !evaluation.paymentIds.length) {
+    // Historical Gym payments can predate the mandatory settlement metadata.
+    // Keep them visible as review-only QRIS candidates rather than silently
+    // dropping them from reconciliation. Missing dimensions must be repaired
+    // from evidence before accounting is posted.
+    const legacyRows = await db.execute(sql`
+      SELECT
+        p.id,
+        p.amount,
+        p.payment_method AS "paymentMethod",
+        p.payment_provider AS provider,
+        p.provider_name AS "providerName",
+        p.provider_id AS "providerId",
+        p.provider_order_id AS "providerOrderId",
+        p.company_id AS "companyId",
+        p.ocr_data AS "ocrData",
+        b.order_number AS "orderNumber",
+        f.name AS "facilityName",
+        f.category AS "facilityCategory"
+      FROM sport_center.sport_payments p
+      JOIN sport_center.sport_bookings b ON b.id = p.booking_id
+      JOIN sport_center.sport_facilities f ON f.id = b.facility_id
+      WHERE p.status = 'confirmed'
+        AND (
+          LOWER(COALESCE(f.category, '')) IN ('gym', 'fitness')
+          OR LOWER(COALESCE(f.name, '')) LIKE '%gym%'
+          OR LOWER(COALESCE(f.name, '')) LIKE '%fitness%'
+        )
+        AND ROUND(p.amount::numeric) = ROUND(${Number(mutation.creditAmount ?? mutation.amount ?? 0)}::numeric)
+        AND (
+          p.payment_method IS NULL
+          OR UPPER(TRIM(p.payment_method)) <> 'QRIS'
+          OR p.payment_provider IS NULL
+          OR p.payment_provider = 'unknown'
+          OR LOWER(TRIM(COALESCE(p.provider_name, ''))) = 'unknown'
+          OR p.company_id IS NULL
+        )
+        AND (
+          b.booking_date BETWEEN (${mutation.transactionDate}::date - INTERVAL '7 days')
+                              AND (${mutation.transactionDate}::date + INTERVAL '7 days')
+          OR p.created_at::date BETWEEN (${mutation.transactionDate}::date - INTERVAL '7 days')
+                                    AND (${mutation.transactionDate}::date + INTERVAL '7 days')
+          OR p.confirmed_at::date BETWEEN (${mutation.transactionDate}::date - INTERVAL '7 days')
+                                      AND (${mutation.transactionDate}::date + INTERVAL '7 days')
+        )
+      ORDER BY p.created_at DESC, p.id DESC
+      LIMIT 25
+    `);
+
+    const legacyCandidates = (legacyRows.rows as Array<Record<string, unknown>>).map((row): MatchCandidate => {
+      const missing: string[] = [];
+      if (!row.paymentMethod || String(row.paymentMethod).toUpperCase() !== "QRIS") missing.push("payment_method");
+      if (!row.provider || row.provider === "unknown") missing.push("payment_provider");
+      if (!row.providerName || String(row.providerName).toLowerCase() === "unknown") missing.push("provider_name");
+      if (!row.providerId || String(row.providerId).toLowerCase().startsWith("legacy-")) missing.push("provider_id");
+      if (!row.providerOrderId || String(row.providerOrderId).toLowerCase().startsWith("legacy-")) missing.push("provider_order_id");
+      if (row.companyId == null) missing.push("company_id");
+
+      return {
+        candidateType: "payment",
+        candidateId: Number(row.id),
+        score: 50,
+        reason: [
+          "GYM_QRIS_METADATA_REVIEW",
+          `order=${String(row.orderNumber ?? "")}`,
+          `facility=${String(row.facilityName ?? row.facilityCategory ?? "Gym")}`,
+          `nominal=${Number(row.amount)}`,
+          `missing=${missing.join(",") || "review_evidence"}`,
+          "tidak auto-match: metadata settlement belum deterministic",
+        ],
+        amountMatch: true,
+        dateMatch: true,
+        nameMatch: false,
+        orderIdMatch: false,
+        proofMatch: Boolean(row.ocrData),
+        statusValidMatch: true,
+        toleranceUsed: false,
+        hardReview: true,
+      };
+    });
+    if (legacyCandidates.length) return legacyCandidates;
+    return [];
+  }
 
   return [{
     candidateType: "payment",
@@ -349,7 +440,11 @@ export async function computeMatchesForMutation(mutation: BankMutation): Promise
       p.ocr_name AS "ocrName",
       p.ocr_amount AS "ocrAmount",
       p.ocr_date AS "ocrDate",
-      p.ocr_raw AS "ocrRaw"
+      p.ocr_raw AS "ocrRaw",
+      p.payment_method AS "paymentMethod",
+      p.payment_provider AS "paymentProvider",
+      p.provider_name AS "providerName",
+      p.company_id AS "companyId"
     FROM sport_center.sport_payments p
   `);
 
@@ -365,6 +460,10 @@ export async function computeMatchesForMutation(mutation: BankMutation): Promise
     ocrAmount: number | null;
     ocrDate: string | null;
     ocrRaw: string | null;
+    paymentMethod: string | null;
+    paymentProvider: string | null;
+    providerName: string | null;
+    companyId: number | null;
   };
 
   const paymentsRows = allPayments.rows as PaymentRow[];
@@ -391,6 +490,14 @@ export async function computeMatchesForMutation(mutation: BankMutation): Promise
   for (const booking of bookings) {
     const payments = paymentsByBookingId.get(booking.id);
     const payment = payments?.length ? bestPayment(payments) : undefined;
+    const paymentMissingFields = payment
+      ? getPaymentReconciliationMissingFields(payment)
+      : [];
+
+    // A booking with a payment row must not fall back to an order candidate
+    // while the payment's required reconciliation metadata is incomplete.
+    // That would let approval bypass payment-level evidence.
+    if (payment && paymentMissingFields.length > 0) continue;
 
     const bookingAmountGross = booking.grandTotal ? Number(booking.grandTotal) : null;
     const bookingAmountNet = Number(booking.totalPrice);
@@ -548,13 +655,24 @@ export async function computeMatchesForMutation(mutation: BankMutation): Promise
 
       // Cari representative payment (yang ada bukti transfer)
       let repPayment: PaymentRow | undefined;
+      let hasPaymentRecord = false;
       for (const b of groupBookings) {
         const pmts = paymentsByBookingId.get(b.id);
+        if (pmts?.length) hasPaymentRecord = true;
         if (pmts?.length) {
-          const withProof = pmts.find(p => p.proofUrl);
+          const eligiblePayments = pmts.filter(
+            (p) => getPaymentReconciliationMissingFields(p).length === 0,
+          );
+          const withProof = eligiblePayments.find(p => p.proofUrl);
           repPayment = withProof ?? pmts[0];
+          if (eligiblePayments.length > 0 && !withProof) {
+            repPayment = eligiblePayments[0];
+          }
           if (withProof) break;
         }
+      }
+      if (hasPaymentRecord && (!repPayment || getPaymentReconciliationMissingFields(repPayment).length > 0)) {
+        continue;
       }
       const repBooking = groupBookings[0]!;
 
@@ -598,7 +716,7 @@ export async function computeMatchesForMutation(mutation: BankMutation): Promise
         if (ocrResult.ocrMatch) ocrMatch = true;
       }
 
-      const groupCandidate: MatchCandidate = {
+       const groupCandidate: MatchCandidate = {
         candidateType: repPayment ? "payment" : "order",
         candidateId: repPayment ? repPayment.id : repBooking.id,
         score: Math.min(score, 100),
@@ -617,7 +735,7 @@ export async function computeMatchesForMutation(mutation: BankMutation): Promise
         groupTotalAmount: useAmount,
       };
 
-      candidates.push(groupCandidate);
+       candidates.push(groupCandidate);
     }
   }
 
@@ -636,6 +754,16 @@ export async function computeMatchesForMutation(mutation: BankMutation): Promise
 
   for (const [gRef, groupBookings] of bookingsByGroupRef.entries()) {
     if (groupBookings.length < 2) continue; // grup harus ≥ 2 booking
+
+    const groupPayments = groupBookings.flatMap(
+      (booking) => paymentsByBookingId.get(booking.id) ?? [],
+    );
+    if (
+      groupPayments.length > 0 &&
+      !groupPayments.some((payment) => getPaymentReconciliationMissingFields(payment).length === 0)
+    ) {
+      continue;
+    }
 
     const groupTotal = groupBookings.reduce((sum, b) => {
       return sum + (b.grandTotal ? Number(b.grandTotal) : Number(b.totalPrice));

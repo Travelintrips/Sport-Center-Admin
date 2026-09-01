@@ -706,11 +706,11 @@ export async function postSportCenterBookingPayment(
                 payment_method = $4,
                 payment_provider = $5,
                 payment_type = $6,
-                bank_account_id = $7,
-                provider_reference = $8,
-                provider_order_id = $9,
-                merchant_trade_no = $10,
-                provider_trade_no = $11
+                 bank_account_id = NULL,
+                 provider_reference = $7,
+                 provider_order_id = $8,
+                 merchant_trade_no = $9,
+                 provider_trade_no = $10
           WHERE id = $1`,
         [
           Number(existing.id),
@@ -719,7 +719,6 @@ export async function postSportCenterBookingPayment(
           canonicalMethod,
           canonicalProvider,
           paymentType,
-          bankAccountId,
           providerReference,
           providerOrderId,
           merchantTradeNo,
@@ -811,7 +810,7 @@ export async function postSportCenterBookingPayment(
          payment_method, payment_provider, payment_type, source_payment_id,
          bank_account_id, provider_reference, provider_order_id, merchant_trade_no, provider_trade_no)
          VALUES ($1,$2,$3::date,$4,$5,'draft','sport_center_payment',$6,$7,$7,$8,$9,'{}',
-               $10,$11,$12,$13,$14,$15,$16,$17,$18)
+               $10,$11,$12,$13,NULL,$14,$15,$16,$17)
        RETURNING id`,
       [
         entryNumber,
@@ -827,7 +826,6 @@ export async function postSportCenterBookingPayment(
         canonicalProvider,
         paymentType,
          sourcePaymentId,
-        bankAccountId,
         providerReference,
         providerOrderId,
         merchantTradeNo,
@@ -1449,7 +1447,13 @@ export async function createJournalEntry(
     companyId?: number | null;
     paymentType?: string | null;
     paymentProvider?: string | null;
+    providerName?: string | null;
+    providerId?: string | null;
     bankAccountId?: string | null;
+    expectedSettlementDate?: string | null;
+    settlementStatus?: string | null;
+    mdrRate?: number | string | null;
+    mdrAmount?: number | string | null;
     grossAmount?: number | null;
     dppAmount?: number | null;
     taxAmount?: number | null;
@@ -1475,8 +1479,14 @@ export async function createJournalEntry(
         companyId: accountingJournalsTable.companyId,
         paymentMethod: accountingJournalsTable.paymentMethod,
         paymentProvider: accountingJournalsTable.paymentProvider,
+         providerName: accountingJournalsTable.providerName,
+         providerId: accountingJournalsTable.providerId,
         paymentType: accountingJournalsTable.paymentType,
         bankAccountId: accountingJournalsTable.bankAccountId,
+         expectedSettlementDate: accountingJournalsTable.expectedSettlementDate,
+         settlementStatus: accountingJournalsTable.settlementStatus,
+         mdrRate: accountingJournalsTable.mdrRate,
+         mdrAmount: accountingJournalsTable.mdrAmount,
         grossAmount: accountingJournalsTable.grossAmount,
         dppAmount: accountingJournalsTable.dppAmount,
         taxAmount: accountingJournalsTable.taxAmount,
@@ -1504,8 +1514,14 @@ export async function createJournalEntry(
           companyId: paymentContext?.companyId ?? current.companyId ?? null,
           paymentMethod: paymentMethod ?? current.paymentMethod ?? null,
           paymentProvider: paymentContext?.paymentProvider ?? current.paymentProvider ?? null,
+           providerName: paymentContext?.providerName ?? current.providerName ?? null,
+           providerId: paymentContext?.providerId ?? current.providerId ?? null,
           paymentType: paymentContext?.paymentType ?? current.paymentType ?? null,
           bankAccountId: paymentContext?.bankAccountId ?? current.bankAccountId ?? null,
+           expectedSettlementDate: paymentContext?.expectedSettlementDate ?? current.expectedSettlementDate ?? null,
+           settlementStatus: paymentContext?.settlementStatus ?? current.settlementStatus ?? null,
+           mdrRate: paymentContext?.mdrRate != null ? String(paymentContext.mdrRate) : current.mdrRate ?? null,
+           mdrAmount: paymentContext?.mdrAmount != null ? String(paymentContext.mdrAmount) : current.mdrAmount ?? null,
           grossAmount: String(paymentContext?.grossAmount ?? current.grossAmount ?? grandTotal),
           dppAmount: String(paymentContext?.dppAmount ?? current.dppAmount ?? subtotal),
           taxAmount: String(paymentContext?.taxAmount ?? current.taxAmount ?? ppnAmount),
@@ -1533,8 +1549,14 @@ export async function createJournalEntry(
       status: "posted",
       paymentMethod: paymentMethod ?? null,
       paymentProvider: paymentContext?.paymentProvider ?? null,
+      providerName: paymentContext?.providerName ?? null,
+      providerId: paymentContext?.providerId ?? null,
       paymentType: paymentContext?.paymentType ?? null,
       bankAccountId: paymentContext?.bankAccountId ?? null,
+      expectedSettlementDate: paymentContext?.expectedSettlementDate ?? null,
+      settlementStatus: paymentContext?.settlementStatus ?? null,
+      mdrRate: paymentContext?.mdrRate != null ? String(paymentContext.mdrRate) : null,
+      mdrAmount: paymentContext?.mdrAmount != null ? String(paymentContext.mdrAmount) : null,
       grossAmount: String(paymentContext?.grossAmount ?? grandTotal),
       dppAmount: String(paymentContext?.dppAmount ?? subtotal),
       taxAmount: String(paymentContext?.taxAmount ?? ppnAmount),
@@ -1580,7 +1602,13 @@ type ConfirmedPaymentAccountingInput = {
   companyId?: number | null;
   paymentType?: string | null;
   paymentProvider?: string | null;
+  providerName?: string | null;
+  providerId?: string | null;
   bankAccountId?: string | null;
+  expectedSettlementDate?: string | null;
+  settlementStatus?: string | null;
+  mdrRate?: number | string | null;
+  mdrAmount?: number | string | null;
   providerReference?: string | null;
   providerOrderId?: string | null;
   merchantTradeNo?: string | null;
@@ -1614,6 +1642,8 @@ export function postConfirmedPaymentAccounting(
             amount: paymentsTable.amount,
             paymentMethod: paymentsTable.paymentMethod,
             paymentProvider: paymentsTable.paymentProvider,
+             providerName: paymentsTable.providerName,
+             providerId: paymentsTable.providerId,
             paymentType: paymentsTable.paymentType,
             companyId: paymentsTable.companyId,
             bankAccountId: paymentsTable.bankAccountId,
@@ -1621,6 +1651,10 @@ export function postConfirmedPaymentAccounting(
             providerOrderId: paymentsTable.providerOrderId,
             merchantTradeNo: paymentsTable.merchantTradeNo,
             providerTradeNo: paymentsTable.providerTradeNo,
+             expectedSettlementDate: paymentsTable.expectedSettlementDate,
+             settlementStatus: paymentsTable.settlementStatus,
+             mdrRate: paymentsTable.mdrRate,
+             mdrAmount: paymentsTable.mdrAmount,
             paidAt: paymentsTable.paidAt,
             confirmedAt: paymentsTable.confirmedAt,
           })
@@ -1636,6 +1670,8 @@ export function postConfirmedPaymentAccounting(
     const grossAmount = Math.round(Number(payment?.amount ?? input.dpp + input.ppnAmount));
     const paymentMethod = payment?.paymentMethod ?? input.paymentMethod ?? null;
     const paymentProvider = payment?.paymentProvider ?? input.paymentProvider ?? "unknown";
+    const providerName = payment?.providerName ?? input.providerName ?? null;
+    const providerId = payment?.providerId ?? input.providerId ?? null;
     const paymentType = payment?.paymentType ?? input.paymentType ?? "full_payment";
     const companyId = payment?.companyId ?? input.companyId ?? null;
     const paidAt = payment?.paidAt ?? payment?.confirmedAt ?? input.journalDate;
@@ -1681,7 +1717,13 @@ export function postConfirmedPaymentAccounting(
         paymentType,
         companyId,
         paymentProvider,
+         providerName,
+         providerId,
         bankAccountId: payment?.bankAccountId ?? input.bankAccountId,
+         expectedSettlementDate: payment?.expectedSettlementDate ?? input.expectedSettlementDate,
+         settlementStatus: payment?.settlementStatus ?? input.settlementStatus,
+         mdrRate: payment?.mdrRate ?? input.mdrRate,
+         mdrAmount: payment?.mdrAmount ?? input.mdrAmount,
         grossAmount,
         dppAmount: grossAmount - effectivePpnAmount,
         taxAmount: effectivePpnAmount,

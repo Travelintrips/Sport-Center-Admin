@@ -92,6 +92,7 @@ timeoutMs = 90000
 
 [nix]
 channel = "stable-25_05"
+<<<<<<< HEAD
 
 [[ports]]
 localPort = 5000
@@ -104,3 +105,5 @@ externalPort = 8080
 [[ports]]
 localPort = 21089
 externalPort = 3000
+=======
+>>>>>>> 792160083f71c096aa0af6f51230905213eae44d

@@ -190,6 +190,49 @@ CREATE TABLE IF NOT EXISTS sport_center.accounting_journals (
 CREATE INDEX IF NOT EXISTS accounting_journals_booking_id_idx ON sport_center.accounting_journals(booking_id);
 CREATE INDEX IF NOT EXISTS accounting_journals_journal_date_idx ON sport_center.accounting_journals(journal_date DESC);
 
+ALTER TABLE sport_center.accounting_journals
+  ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'posted',
+  ADD COLUMN IF NOT EXISTS payment_id integer,
+  ADD COLUMN IF NOT EXISTS company_id integer,
+  ADD COLUMN IF NOT EXISTS payment_method text,
+  ADD COLUMN IF NOT EXISTS payment_provider text,
+  ADD COLUMN IF NOT EXISTS provider_name text,
+  ADD COLUMN IF NOT EXISTS provider_id text,
+  ADD COLUMN IF NOT EXISTS payment_type text,
+  ADD COLUMN IF NOT EXISTS bank_account_id text,
+  ADD COLUMN IF NOT EXISTS expected_settlement_date text,
+  ADD COLUMN IF NOT EXISTS settlement_status text,
+  ADD COLUMN IF NOT EXISTS mdr_rate numeric(8,5),
+  ADD COLUMN IF NOT EXISTS mdr_amount numeric(14,2),
+  ADD COLUMN IF NOT EXISTS gross_amount numeric(14,2),
+  ADD COLUMN IF NOT EXISTS dpp_amount numeric(14,2),
+  ADD COLUMN IF NOT EXISTS tax_amount numeric(14,2),
+  ADD COLUMN IF NOT EXISTS provider_reference text,
+  ADD COLUMN IF NOT EXISTS provider_order_id text,
+  ADD COLUMN IF NOT EXISTS merchant_trade_no text,
+  ADD COLUMN IF NOT EXISTS provider_trade_no text;
+
+UPDATE sport_center.accounting_journals aj
+   SET payment_method = sp.payment_method,
+       payment_provider = sp.payment_provider::text,
+       provider_name = sp.provider_name,
+       provider_id = sp.provider_id,
+       payment_type = sp.payment_type::text,
+       bank_account_id = sp.bank_account_id,
+       expected_settlement_date = sp.expected_settlement_date,
+       settlement_status = sp.settlement_status,
+       mdr_rate = sp.mdr_rate,
+       mdr_amount = sp.mdr_amount,
+       provider_reference = sp.provider_reference,
+       provider_order_id = sp.provider_order_id,
+       merchant_trade_no = sp.merchant_trade_no,
+       provider_trade_no = sp.provider_trade_no,
+       company_id = COALESCE(sp.company_id, aj.company_id)
+  FROM sport_center.sport_payments sp
+ WHERE aj.payment_id = sp.id
+   AND aj.journal_type = 'payment_confirmed'
+   AND aj.is_reversal = false;
+
 -- ==========================================================
 -- company_invoice_items (jika belum ada)
 -- ==========================================================

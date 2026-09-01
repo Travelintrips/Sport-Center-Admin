@@ -29,6 +29,8 @@ function payment(overrides: Partial<QrisPaymentInput> = {}): QrisPaymentInput {
     bankAccountId: "MANDIRI",
     amount: 100_000,
     provider: "mandiri_direct",
+    paymentMethod: "QRIS",
+    providerName: "Mandiri Direct",
     expectedSettlementDate: "2026-08-04",
     ...overrides,
   };

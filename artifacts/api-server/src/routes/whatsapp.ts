@@ -1158,6 +1158,7 @@ router.post("/wa/proof/:token", uploadProof.single("proof"), async (req, res) =>
     // method, so keep the accounting label as the actual bank transfer method.
     const resolvedPaymentMethod = detectedQris ? "QRIS" : "Transfer Bank";
     const resolvedProvider = detectedQris ? "mandiri_direct" : "unknown";
+    let createdPayment: typeof paymentsTable.$inferSelect | undefined;
 
     if (existing) {
       const paymentBooking = groupBookings.find((member) => member.id === existing.bookingId) ?? booking;
