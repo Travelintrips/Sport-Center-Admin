@@ -6,6 +6,8 @@ export type QrisPaymentInput = {
   bankAccountId: string | null;
   amount: number;
   provider: QrisProvider | null;
+  paymentMethod?: string | null;
+  providerName?: string | null;
   expectedSettlementDate: string | null;
   providerReference?: string | null;
   merchantTradeNo?: string | null;
@@ -205,7 +207,10 @@ export function evaluateQrisMutation(
     payment.bankAccountId != null &&
     mutation.bankAccountId != null &&
     payment.bankAccountId === mutation.bankAccountId &&
-    payment.provider === provider
+    payment.provider === provider &&
+    payment.paymentMethod?.trim().toUpperCase() === "QRIS" &&
+    payment.providerName?.trim() &&
+    payment.providerName.trim().toLowerCase() !== "unknown"
   );
   const scopedPayments = boundaryPayments.filter(
     (payment) => payment.expectedSettlementDate === mutation.transactionDate,

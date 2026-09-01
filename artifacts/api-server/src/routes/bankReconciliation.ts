@@ -30,6 +30,7 @@ import multer from "multer";
 import { ensurePaymentBankAccount } from "../lib/paymentEnrichment";
 import { readPaymentProofOcr } from "../lib/paymentOcr";
 import { getClientInfo, getUserFromReq, logAudit } from "../lib/auditLog";
+import { getPaymentReconciliationMissingFields } from "../lib/paymentReconciliationEligibility";
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -726,6 +727,14 @@ router.get("/bank-reconciliation/matches/:mutationId", adminMiddleware, async (r
         p.ocr_raw            AS "ocrRaw",
         p.ocr_data           AS "ocrData",
         p.payment_method     AS "paymentMethod",
+         p.payment_provider   AS "paymentProvider",
+         p.provider_name      AS "providerName",
+         p.company_id         AS "companyId",
+         p.bank_account_id    AS "bankAccountId",
+         p.provider_id        AS "providerId",
+         p.provider_order_id  AS "providerOrderId",
+         p.expected_settlement_date AS "expectedSettlementDate",
+         p.settlement_status  AS "settlementStatus",
         p.status             AS "paymentStatus",
         p.booking_id         AS "paymentBookingId",
         -- Booking enrichment via payment (candidateType = 'payment')
@@ -771,9 +780,18 @@ router.get("/bank-reconciliation/matches/:mutationId", adminMiddleware, async (r
 
     // Normalise: untuk candidateType='order' salin field order* ke field utama agar UI konsisten
     const normalised = (rows as any[]).map((r) => {
+      const reconciliationMissing = r.candidateType === "payment"
+        ? getPaymentReconciliationMissingFields({
+            paymentMethod: r.paymentMethod,
+            providerName: r.providerName,
+            companyId: r.companyId == null ? null : Number(r.companyId),
+          })
+        : [];
       if (r.candidateType === "order") {
         return {
           ...r,
+          reconciliationReady: null,
+          reconciliationMissing: [],
           bookingOrderNumber: r.orderOrderNumber ?? r.bookingOrderNumber,
           customerName: r.orderCustomerName ?? r.customerName,
           customerPhone: r.orderCustomerPhone ?? r.customerPhone,
@@ -786,11 +804,17 @@ router.get("/bank-reconciliation/matches/:mutationId", adminMiddleware, async (r
       if (r.candidateType === "group_payment") {
         return {
           ...r,
+          reconciliationReady: reconciliationMissing.length === 0,
+          reconciliationMissing,
           customerName: r.groupCustomerName ?? r.customerName,
           customerPhone: r.groupCustomerPhone ?? r.customerPhone,
         };
       }
-      return r;
+      return {
+        ...r,
+        reconciliationReady: reconciliationMissing.length === 0,
+        reconciliationMissing,
+      };
     });
 
     // Enrich group_payment candidates with child bookings data (batch query)
@@ -886,6 +910,45 @@ router.post("/bank-reconciliation/:mutationId/approve", adminMiddleware, async (
     const auditCtx = { userId: adminUser?.userId, userRole: adminUser?.role, ipAddress: req.ip, userAgent: req.headers["user-agent"] as string };
     let approvedCandidateType: string | undefined;
     let approvedCandidateId: number | undefined;
+    let selectedMatch: typeof bankReconciliationMatchesTable.$inferSelect | undefined;
+
+    if (matchId) {
+      [selectedMatch] = await db
+        .select()
+        .from(bankReconciliationMatchesTable)
+        .where(and(
+          eq(bankReconciliationMatchesTable.mutationId, mutationId),
+          eq(bankReconciliationMatchesTable.id, matchId),
+        ))
+        .limit(1);
+    }
+
+    const selectedType = selectedMatch?.candidateType ?? candidateType;
+    const selectedId = selectedMatch?.candidateId ?? candidateId;
+    if (selectedType === "payment" && selectedId) {
+      const [payment] = await db
+        .select({
+          paymentMethod: paymentsTable.paymentMethod,
+          providerName: paymentsTable.providerName,
+          companyId: paymentsTable.companyId,
+        })
+        .from(paymentsTable)
+        .where(eq(paymentsTable.id, selectedId))
+        .limit(1);
+      if (!payment) {
+        res.status(409).json({ error: "Payment kandidat tidak ditemukan." });
+        return;
+      }
+      const missing = getPaymentReconciliationMissingFields(payment);
+      if (missing.length > 0) {
+        res.status(409).json({
+          error: "Payment belum memenuhi syarat kandidat rekonsiliasi.",
+          code: "PAYMENT_RECONCILIATION_METADATA_INCOMPLETE",
+          missing,
+        });
+        return;
+      }
+    }
 
     await db
       .update(bankReconciliationMatchesTable)
@@ -903,11 +966,7 @@ router.post("/bank-reconciliation/:mutationId/approve", adminMiddleware, async (
           )
         );
 
-      const [match] = await db
-        .select()
-        .from(bankReconciliationMatchesTable)
-        .where(eq(bankReconciliationMatchesTable.id, matchId))
-        .limit(1);
+      const match = selectedMatch;
 
       approvedCandidateType = match?.candidateType ?? undefined;
       approvedCandidateId = match?.candidateId ?? undefined;

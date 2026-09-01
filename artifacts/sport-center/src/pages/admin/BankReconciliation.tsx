@@ -670,6 +670,28 @@ function MatchCandidateRow({
             {match.orderIdMatch && <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">✓ Order ID</span>}
             {match.proofMatch && <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">✓ Bukti</span>}
           </div>
+          {match.candidateType === "payment" && (
+            <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[10px]">
+              <span className="px-1.5 py-0.5 rounded border bg-slate-50 text-slate-700">
+                Metode: {match.paymentMethod || "—"}
+              </span>
+              <span className="px-1.5 py-0.5 rounded border bg-slate-50 text-slate-700">
+                Provider: {match.providerName || "—"}
+              </span>
+              <span className="px-1.5 py-0.5 rounded border bg-slate-50 text-slate-700">
+                Company ID: {match.companyId ?? "—"}
+              </span>
+              {match.reconciliationReady ? (
+                <span className="px-1.5 py-0.5 rounded border border-green-200 bg-green-50 text-green-700">
+                  ✓ Syarat payment terpenuhi
+                </span>
+              ) : (
+                <span className="px-1.5 py-0.5 rounded border border-amber-200 bg-amber-50 text-amber-700">
+                  Kurang: {(match.reconciliationMissing ?? []).join(", ")}
+                </span>
+              )}
+            </div>
+          )}
           <ScoreBreakdown reason={match.matchReason} totalScore={match.matchScore} />
 
           {/* OCR Results */}
