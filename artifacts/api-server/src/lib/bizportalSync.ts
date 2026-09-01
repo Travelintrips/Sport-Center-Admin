@@ -1,5 +1,5 @@
 import pg from "pg";
-import type { Booking, GymMembership, CompanyInvoice } from "@workspace/db";
+import type { Booking, GymMembership, MembershipPayment, CompanyInvoice } from "@workspace/db";
 import {
   postConfirmedPaymentAccounting,
   postSportCenterBookingPayment,
@@ -1617,19 +1617,20 @@ async function getBankAccountId(pool: pg.Pool): Promise<string | null> {
 // Idempotent: mutationKey 'SC-MB-{id}' dicek sebelum insert.
 export async function pushMembershipPaymentAsBankMutation(
   membership: GymMembership,
+  payment: MembershipPayment,
   confirmedAt?: Date | null,
 ): Promise<void> {
   const pool = getProdPool();
   if (!pool) return;
 
-  const amount = Math.round(Number(membership.totalPrice));
+  const amount = Math.round(Number(payment.amount));
   if (amount <= 0) return;
 
-  const mutationKey = `SC-MB-${membership.id}`;
+  const mutationKey = `SC-MBP-${payment.id}`;
   const transactionDate = confirmedAt
     ? confirmedAt.toISOString().split("T")[0]!
     : new Date().toISOString().split("T")[0]!;
-  const description = `SPORT CENTER MEMBER GYM | MB-${membership.id} | ${membership.name}`;
+  const description = `SPORT CENTER MEMBER GYM | MB-${membership.id} | PAYMENT-${payment.id} | ${membership.name}`;
   const normalizedDescription = description
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, " ")

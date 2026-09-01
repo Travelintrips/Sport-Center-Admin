@@ -1,6 +1,6 @@
 import { Router } from "express";
-import { db, gymMembershipsTable, publicMembershipsTable, gymCheckinsTable } from "@workspace/db";
-import { eq, and, ilike } from "drizzle-orm";
+import { db, gymMembershipsTable, membershipPaymentsTable, publicMembershipsTable, gymCheckinsTable } from "@workspace/db";
+import { eq, and, ilike, desc, inArray } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
 import { syncMembershipToBizportal, pushMembershipPaymentAsBankMutation } from "../lib/bizportalSync";
 import { createMembershipJournalEntry, createPublicMembershipAccountingEntry } from "../lib/accounting";
@@ -261,6 +261,27 @@ router.get("/memberships/export", adminMiddleware, async (req, res) => {
   }
 });
 
+router.get("/memberships/:id/payments", adminMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(String(req.params.id));
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: "ID membership tidak valid" });
+      return;
+    }
+
+    const payments = await db
+      .select()
+      .from(membershipPaymentsTable)
+      .where(eq(membershipPaymentsTable.membershipId, id))
+      .orderBy(desc(membershipPaymentsTable.id));
+
+    res.json(payments.map((payment) => ({ ...payment, amount: Number(payment.amount) })));
+  } catch (err) {
+    req.log.error({ err }, "List membership payments error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 router.get("/memberships/:id", adminMiddleware, async (req, res) => {
   try {
     const id = parseInt(String(req.params.id));
@@ -322,6 +343,15 @@ router.post("/memberships", async (req, res) => {
       })
       .returning();
 
+    await db.insert(membershipPaymentsTable).values({
+      membershipId: membership!.id,
+      periodStart: membership!.startDate,
+      periodEnd: membership!.endDate,
+      months: membership!.months,
+      amount: membership!.totalPrice,
+      status: "pending_payment",
+    });
+
     syncMembershipToBizportal(membership).catch(() => {});
     await syncToPublic(membership!);
     res.status(201).json({ ...membership, totalPrice: Number(membership!.totalPrice) });
@@ -373,6 +403,15 @@ router.post("/memberships/:id/renew", async (req, res) => {
       .where(eq(gymMembershipsTable.id, id))
       .returning();
 
+    await db.insert(membershipPaymentsTable).values({
+      membershipId: updated!.id,
+      periodStart: updated!.startDate,
+      periodEnd: updated!.endDate,
+      months: updated!.months,
+      amount: updated!.totalPrice,
+      status: "pending_payment",
+    });
+
     await syncToPublic(updated!);
     res.json({ ...updated, totalPrice: Number(updated!.totalPrice) });
   } catch (err) {
@@ -398,9 +437,46 @@ router.post("/memberships/:id/payment-proof", async (req, res) => {
       return;
     }
 
+    let [pendingPayment] = await db
+      .select()
+      .from(membershipPaymentsTable)
+      .where(
+        and(
+          eq(membershipPaymentsTable.membershipId, id),
+          eq(membershipPaymentsTable.status, "pending_payment"),
+        ),
+      )
+      .orderBy(desc(membershipPaymentsTable.id))
+      .limit(1);
+
+    if (!pendingPayment) {
+      [pendingPayment] = await db
+        .insert(membershipPaymentsTable)
+        .values({
+          membershipId: existing.id,
+          periodStart: existing.startDate,
+          periodEnd: existing.endDate,
+          months: existing.months,
+          amount: existing.totalPrice,
+          status: "pending_payment",
+        })
+        .returning();
+    }
+
     await db.update(gymMembershipsTable)
       .set({ paymentMethod, paymentProofUrl, status: "waiting_confirmation" })
       .where(eq(gymMembershipsTable.id, id));
+
+    await db
+      .update(membershipPaymentsTable)
+      .set({
+        paymentMethod,
+        paymentProofUrl,
+        status: "waiting_confirmation",
+        submittedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(membershipPaymentsTable.id, pendingPayment.id));
 
     const [membership] = await db.select().from(gymMembershipsTable).where(eq(gymMembershipsTable.id, id)).limit(1);
     syncMembershipToBizportal(membership).catch(() => {});
@@ -470,15 +546,92 @@ router.patch("/memberships/:id", adminMiddleware, async (req, res) => {
     await db.update(gymMembershipsTable).set(data).where(eq(gymMembershipsTable.id, id));
     const [membership] = await db.select().from(gymMembershipsTable).where(eq(gymMembershipsTable.id, id)).limit(1);
     if (!membership) { res.status(404).json({ error: "Not found" }); return; }
+
+    if (data.startDate !== undefined || data.endDate !== undefined) {
+      await db
+        .update(membershipPaymentsTable)
+        .set({
+          periodStart: membership.startDate,
+          periodEnd: membership.endDate,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(membershipPaymentsTable.membershipId, membership.id),
+            inArray(membershipPaymentsTable.status, ["pending_payment", "waiting_confirmation"]),
+          ),
+        );
+    }
+
+    if (membership.status === "cancelled" && existing.status !== "cancelled") {
+      await db
+        .update(membershipPaymentsTable)
+        .set({ status: "cancelled", updatedAt: new Date() })
+        .where(
+          and(
+            eq(membershipPaymentsTable.membershipId, membership.id),
+            inArray(membershipPaymentsTable.status, ["pending_payment", "waiting_confirmation"]),
+          ),
+        );
+    }
+
     syncMembershipToBizportal(membership).catch(() => {});
     if (membership.status === "active" && existing.status !== "active") {
-      const refNumber = `MB-${membership.id}`;
+      let [payment] = await db
+        .select()
+        .from(membershipPaymentsTable)
+        .where(
+          and(
+            eq(membershipPaymentsTable.membershipId, membership.id),
+            inArray(membershipPaymentsTable.status, ["pending_payment", "waiting_confirmation"]),
+          ),
+        )
+        .orderBy(desc(membershipPaymentsTable.id))
+        .limit(1);
+
+      if (!payment) {
+        [payment] = await db
+          .insert(membershipPaymentsTable)
+          .values({
+            membershipId: membership.id,
+            periodStart: membership.startDate,
+            periodEnd: membership.endDate,
+            months: membership.months,
+            amount: membership.totalPrice,
+            status: "pending_payment",
+            paymentMethod: membership.paymentMethod,
+            paymentProofUrl: membership.paymentProofUrl,
+          })
+          .returning();
+      }
+
+      const confirmedAt = new Date();
+      const refNumber = `MB-${membership.id}-P${payment.id}`;
+      const mutationKey = `SC-MBP-${payment.id}`;
+      await db
+        .update(membershipPaymentsTable)
+        .set({
+          status: "confirmed",
+          paymentMethod: membership.paymentMethod,
+          paymentProofUrl: membership.paymentProofUrl,
+          confirmedAt,
+          mutationKey,
+          accountingRef: refNumber,
+          updatedAt: confirmedAt,
+        })
+        .where(eq(membershipPaymentsTable.id, payment.id));
+
+      const [confirmedPayment] = await db
+        .select()
+        .from(membershipPaymentsTable)
+        .where(eq(membershipPaymentsTable.id, payment.id))
+        .limit(1);
       const today = new Date().toISOString().split("T")[0]!;
       // totalPrice sudah inklusif PPN — hitung DPP dan PPN agar tidak double-count
       const totalPrice = Number(membership.totalPrice);
       const membershipDpp = Math.round(totalPrice / 1.11);
       const membershipPpn = totalPrice - membershipDpp;
-      pushMembershipPaymentAsBankMutation(membership, new Date()).catch(() => {});
+      pushMembershipPaymentAsBankMutation(membership, confirmedPayment!, confirmedAt).catch(() => {});
       createMembershipJournalEntry(membership.id, refNumber, membershipDpp, membershipPpn, today).catch((err) =>
         logAccountingError({ operation: "createMembershipJournalEntry", orderNumber: refNumber, bookingId: membership.id, error: err }),
       );

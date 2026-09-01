@@ -1093,6 +1093,40 @@ export interface MembershipPaymentProofInput {
   paymentProofUrl: string;
 }
 
+export type MembershipPaymentStatus = typeof MembershipPaymentStatus[keyof typeof MembershipPaymentStatus];
+
+
+export const MembershipPaymentStatus = {
+  pending_payment: 'pending_payment',
+  waiting_confirmation: 'waiting_confirmation',
+  confirmed: 'confirmed',
+  cancelled: 'cancelled',
+} as const;
+
+export interface MembershipPayment {
+  id: number;
+  membershipId: number;
+  periodStart: string;
+  periodEnd: string;
+  months: number;
+  amount: number;
+  status: MembershipPaymentStatus;
+  /** @nullable */
+  paymentMethod?: string | null;
+  /** @nullable */
+  paymentProofUrl?: string | null;
+  /** @nullable */
+  submittedAt?: string | null;
+  /** @nullable */
+  confirmedAt?: string | null;
+  /** @nullable */
+  mutationKey?: string | null;
+  /** @nullable */
+  accountingRef?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export type TenantStatus = typeof TenantStatus[keyof typeof TenantStatus];
 
 

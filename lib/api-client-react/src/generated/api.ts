@@ -100,6 +100,7 @@ import type {
   LoginInput,
   MembershipLookupInput,
   MembershipLookupResult,
+  MembershipPayment,
   MembershipPaymentProofInput,
   MyBookingItem,
   OkResult,
@@ -5553,6 +5554,83 @@ export const useSubmitMembershipPaymentProof = <TError = ErrorType<unknown>,
       > => {
       return useMutation(getSubmitMembershipPaymentProofMutationOptions(options));
     }
+
+export const getListMembershipPaymentsUrl = (id: number,) => {
+
+
+
+
+  return `/api/memberships/${id}/payments`
+}
+
+/**
+ * @summary List payment history for a gym membership (admin)
+ */
+export const listMembershipPayments = async (id: number, options?: RequestInit): Promise<MembershipPayment[]> => {
+
+  return customFetch<MembershipPayment[]>(getListMembershipPaymentsUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListMembershipPaymentsQueryKey = (id: number,) => {
+    return [
+    `/api/memberships/${id}/payments`
+    ] as const;
+    }
+
+
+export const getListMembershipPaymentsQueryOptions = <TData = Awaited<ReturnType<typeof listMembershipPayments>>, TError = ErrorType<unknown>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listMembershipPayments>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListMembershipPaymentsQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listMembershipPayments>>> = ({ signal }) => listMembershipPayments(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listMembershipPayments>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListMembershipPaymentsQueryResult = NonNullable<Awaited<ReturnType<typeof listMembershipPayments>>>
+export type ListMembershipPaymentsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List payment history for a gym membership (admin)
+ */
+
+export function useListMembershipPayments<TData = Awaited<ReturnType<typeof listMembershipPayments>>, TError = ErrorType<unknown>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listMembershipPayments>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListMembershipPaymentsQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
 
 export const getGetMembershipUrl = (id: number,) => {
 

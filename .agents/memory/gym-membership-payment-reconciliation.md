@@ -1,10 +1,10 @@
 ---
-name: Gym membership payment reconciliation
-description: Standalone Gym membership fees are not yet represented as bank-recon payments.
+name: Gym membership payment history and reconciliation
+description: Monthly Gym membership renewals must retain distinct payment identities and periods.
 ---
 
-Gym membership records sync to BizPortal as member/status data, but bank reconciliation currently matches only booking-backed payments. A membership fee without a booking cannot be auto-matched or approved safely.
+Every Gym registration or renewal is a separate financial event even though the member master is reused. Payment proof, period, amount, confirmation, bank mutation, and accounting references must follow the payment identity rather than being overwritten on the member.
 
-**Why:** `sport_memberships` stores the membership and proof fields, while `sport_payments` requires a booking reference; treating a membership fee as a fake booking would corrupt booking and accounting history.
+**Why:** A membership ID survives across many monthly renewals. Using it as the sole mutation or journal key suppresses later payments and loses historical proof and period data.
 
-**How to apply:** Add a first-class membership payment identity and candidate type before enabling reconciliation; approval must activate/settle the membership and post one idempotent accounting event with the same provider metadata rules as booking payments.
+**How to apply:** Create one immutable payment event per registration/renewal. Pending period edits may update that event, but confirmed history stays unchanged. Reconciliation and accounting references must include the payment ID.

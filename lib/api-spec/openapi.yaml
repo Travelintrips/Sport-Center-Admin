@@ -1505,6 +1505,27 @@ paths:
               schema:
                 $ref: "#/components/schemas/GymMembership"
 
+  /memberships/{id}/payments:
+    get:
+      operationId: listMembershipPayments
+      tags: [memberships]
+      summary: List payment history for a gym membership (admin)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Membership payment history
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MembershipPayment"
+
   /memberships/{id}:
     get:
       operationId: getMembership
@@ -4175,6 +4196,44 @@ components:
           type: string
           enum: [transfer, qris]
         paymentProofUrl:
+          type: string
+
+    MembershipPayment:
+      type: object
+      required: [id, membershipId, periodStart, periodEnd, months, amount, status, createdAt, updatedAt]
+      properties:
+        id:
+          type: integer
+        membershipId:
+          type: integer
+        periodStart:
+          type: string
+          format: date
+        periodEnd:
+          type: string
+          format: date
+        months:
+          type: integer
+        amount:
+          type: number
+        status:
+          type: string
+          enum: [pending_payment, waiting_confirmation, confirmed, cancelled]
+        paymentMethod:
+          type: ["string", "null"]
+        paymentProofUrl:
+          type: ["string", "null"]
+        submittedAt:
+          type: ["string", "null"]
+        confirmedAt:
+          type: ["string", "null"]
+        mutationKey:
+          type: ["string", "null"]
+        accountingRef:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+        updatedAt:
           type: string
 
     Tenant:

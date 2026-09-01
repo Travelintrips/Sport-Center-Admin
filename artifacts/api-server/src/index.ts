@@ -906,6 +906,35 @@ async function runStartupMigrations() {
        created_at        timestamptz NOT NULL DEFAULT NOW(),
        updated_at        timestamptz NOT NULL DEFAULT NOW()
      )`,
+    `CREATE TABLE IF NOT EXISTS sport_center.sport_membership_payments (
+       id                serial PRIMARY KEY,
+       membership_id     integer NOT NULL REFERENCES sport_center.sport_memberships(id) ON DELETE CASCADE,
+       period_start      text NOT NULL,
+       period_end        text NOT NULL,
+       months            integer NOT NULL DEFAULT 1 CHECK (months > 0),
+       amount            numeric(14,2) NOT NULL CHECK (amount > 0),
+       status            text NOT NULL DEFAULT 'pending_payment'
+                         CHECK (status IN ('pending_payment','waiting_confirmation','confirmed','cancelled')),
+       payment_method    text,
+       payment_proof_url text,
+       submitted_at      timestamptz,
+       confirmed_at      timestamptz,
+       mutation_key      text,
+       accounting_ref    text,
+       created_at        timestamptz NOT NULL DEFAULT NOW(),
+       updated_at        timestamptz NOT NULL DEFAULT NOW(),
+       CHECK (period_end >= period_start)
+     )`,
+    `CREATE INDEX IF NOT EXISTS sport_membership_payments_membership_idx
+       ON sport_center.sport_membership_payments (membership_id)`,
+    `CREATE INDEX IF NOT EXISTS sport_membership_payments_period_idx
+       ON sport_center.sport_membership_payments (period_start, period_end)`,
+    `CREATE INDEX IF NOT EXISTS sport_membership_payments_status_idx
+       ON sport_center.sport_membership_payments (status)`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS sport_membership_payments_mutation_key_idx
+       ON sport_center.sport_membership_payments (mutation_key) WHERE mutation_key IS NOT NULL`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS sport_membership_payments_accounting_ref_idx
+       ON sport_center.sport_membership_payments (accounting_ref) WHERE accounting_ref IS NOT NULL`,
     // ── ap_members (Angkasa Pura member list) ─────────────────────────────
     `CREATE TABLE IF NOT EXISTS sport_center.ap_members (
        id             serial PRIMARY KEY,

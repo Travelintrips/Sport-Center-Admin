@@ -2082,6 +2082,33 @@ export const SubmitMembershipPaymentProofResponse = zod.object({
 
 
 /**
+ * @summary List payment history for a gym membership (admin)
+ */
+export const ListMembershipPaymentsParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const ListMembershipPaymentsResponseItem = zod.object({
+  "id": zod.number(),
+  "membershipId": zod.number(),
+  "periodStart": zod.coerce.date(),
+  "periodEnd": zod.coerce.date(),
+  "months": zod.number(),
+  "amount": zod.number(),
+  "status": zod.enum(['pending_payment', 'waiting_confirmation', 'confirmed', 'cancelled']),
+  "paymentMethod": zod.string().nullish(),
+  "paymentProofUrl": zod.string().nullish(),
+  "submittedAt": zod.string().nullish(),
+  "confirmedAt": zod.string().nullish(),
+  "mutationKey": zod.string().nullish(),
+  "accountingRef": zod.string().nullish(),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
+})
+export const ListMembershipPaymentsResponse = zod.array(ListMembershipPaymentsResponseItem)
+
+
+/**
  * @summary Get membership detail
  */
 export const GetMembershipParams = zod.object({

@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { Users, Search, Trash2, CheckCircle, Dumbbell, Clock, XCircle, ImageIcon, ExternalLink, LogIn, CalendarCheck, BadgeCheck, Download, Pencil, Save, X } from "lucide-react";
+import { Users, Search, Trash2, CheckCircle, Dumbbell, Clock, XCircle, ImageIcon, ExternalLink, LogIn, CalendarCheck, BadgeCheck, Download, Pencil, Save, X, ReceiptText } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { getToken } from "@/lib/auth";
 
@@ -42,6 +42,29 @@ interface Checkin {
   notes: string | null;
   memberName: string | null;
   memberPhone: string | null;
+}
+
+interface MembershipPayment {
+  id: number;
+  membershipId: number;
+  periodStart: string;
+  periodEnd: string;
+  months: number;
+  amount: number;
+  status: "pending_payment" | "waiting_confirmation" | "confirmed" | "cancelled";
+  paymentMethod: string | null;
+  paymentProofUrl: string | null;
+  submittedAt: string | null;
+  confirmedAt: string | null;
+  mutationKey: string | null;
+  accountingRef: string | null;
+}
+
+function PaymentStatusBadge({ status }: { status: MembershipPayment["status"] }) {
+  if (status === "confirmed") return <Badge className="bg-green-100 text-green-700 border-green-200">Terkonfirmasi</Badge>;
+  if (status === "waiting_confirmation") return <Badge className="bg-yellow-100 text-yellow-700 border-yellow-200">Verifikasi</Badge>;
+  if (status === "pending_payment") return <Badge className="bg-blue-100 text-blue-700 border-blue-200">Menunggu Bayar</Badge>;
+  return <Badge className="bg-red-100 text-red-700 border-red-200">Dibatalkan</Badge>;
 }
 
 export default function AdminMemberships() {
@@ -114,6 +137,17 @@ export default function AdminMemberships() {
     refetchInterval: 30000,
   });
   const checkins: Checkin[] = Array.isArray(rawCheckins) ? rawCheckins : [];
+
+  const { data: rawPaymentHistory, isLoading: isPaymentHistoryLoading } = useQuery<MembershipPayment[]>({
+    queryKey: ["membership-payments", viewMember?.id],
+    enabled: Boolean(viewMember?.id),
+    queryFn: async () => {
+      const response = await fetch(`${API}/memberships/${viewMember.id}/payments`, { headers: authHeaders() });
+      if (!response.ok) throw new Error("Gagal memuat histori pembayaran");
+      return response.json();
+    },
+  });
+  const paymentHistory = Array.isArray(rawPaymentHistory) ? rawPaymentHistory : [];
 
   const checkedInIds = new Set(checkins.map((c) => c.membershipId));
   const checkinById = new Map(checkins.map((c) => [c.membershipId, c]));
@@ -649,6 +683,70 @@ export default function AdminMemberships() {
                       <div className="text-muted-foreground">Berakhir</div>
                       <div className="font-medium">{viewMember.endDate}</div>
                     </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="rounded-xl border border-border p-3 space-y-3">
+                <div className="flex items-center gap-2">
+                  <ReceiptText size={15} className="text-primary" />
+                  <p className="text-sm font-semibold">Histori Pembayaran Bulanan</p>
+                </div>
+                {isPaymentHistoryLoading ? (
+                  <div className="space-y-2">
+                    <Skeleton className="h-16 w-full rounded-lg" />
+                    <Skeleton className="h-16 w-full rounded-lg" />
+                  </div>
+                ) : paymentHistory.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    Belum ada histori pembayaran per periode. Data lama akan mulai tercatat saat pembayaran berikutnya.
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    {paymentHistory.map((payment) => (
+                      <div key={payment.id} className="rounded-lg bg-muted/40 border border-border/70 p-3 space-y-2">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-semibold">
+                              {payment.periodStart} s/d {payment.periodEnd}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              {payment.months} bulan · #{payment.id}
+                            </p>
+                          </div>
+                          <PaymentStatusBadge status={payment.status} />
+                        </div>
+                        <div className="flex items-end justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-bold text-primary">{formatCurrency(payment.amount)}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {payment.paymentMethod === "qris"
+                                ? "QRIS"
+                                : payment.paymentMethod
+                                  ? "Transfer Bank"
+                                  : "Metode belum dipilih"}
+                            </p>
+                          </div>
+                          {payment.paymentProofUrl && (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="h-8 gap-1.5"
+                              onClick={() => setLightboxUrl(payment.paymentProofUrl)}
+                            >
+                              <ImageIcon size={13} />
+                              Bukti
+                            </Button>
+                          )}
+                        </div>
+                        {payment.confirmedAt && (
+                          <p className="text-[11px] text-muted-foreground">
+                            Dikonfirmasi {new Date(payment.confirmedAt).toLocaleString("id-ID")}
+                          </p>
+                        )}
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>

@@ -6,6 +6,7 @@ export * from "./promos";
 export * from "./schedules";
 export * from "./settings";
 export * from "./memberships";
+export * from "./membershipPayments";
 export * from "./angkasaPura";
 export * from "./bookingHistory";
 export * from "./auditLogs";
