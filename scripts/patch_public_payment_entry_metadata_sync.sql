@@ -11,6 +11,17 @@ AS $function$
 DECLARE
   v_entry_status text;
 BEGIN
+  -- An upsert from the canonical Sport Center payment can include method and
+  -- payment_provider in its SET list even when their values did not change.
+  -- PostgreSQL still fires an UPDATE OF trigger in that case. A payment-date
+  -- correction before bank matching must not be blocked by classification
+  -- accounting checks that are unrelated to paid_at.
+  IF TG_OP = 'UPDATE'
+     AND NEW.method IS NOT DISTINCT FROM OLD.method
+     AND NEW.payment_provider IS NOT DISTINCT FROM OLD.payment_provider THEN
+    RETURN NEW;
+  END IF;
+
   -- A mirror can exist before the central entry is posted. There is no header
   -- to synchronize until entry_id has been assigned.
   IF NEW.entry_id IS NULL THEN

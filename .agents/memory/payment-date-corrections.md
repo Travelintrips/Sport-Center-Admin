@@ -26,3 +26,11 @@ the temporary flag from the endpoint when the correction window is closed.
 Under that flag, the mirror upsert may update only `paid_at` in addition to the
 already-approved classification metadata; posted accounting entry and line
 dates remain untouched.
+
+PostgreSQL `UPDATE OF` triggers fire when a column appears in an upsert's `SET`
+list even if its value is unchanged. Public classification synchronization must
+return immediately when method/provider are unchanged, otherwise a paid-at-only
+correction can be blocked by unrelated accounting-entry validation. The admin
+date transaction must enable both the payment-metadata and accounting-metadata
+transaction-local gates because settlement resolution can also repair stale
+journal snapshots while processing the date correction.

@@ -1977,6 +1977,17 @@ router.patch("/bookings/:id/dates", adminMiddleware, async (req, res) => {
             true
           )
         `);
+        // Re-resolving a confirmed payment can also repair stale settlement
+        // metadata on its internal posted journal. Permit only that existing
+        // metadata allow-list for this transaction; financial values, journal
+        // lines, status, and dates remain immutable in the database guard.
+        await tx.execute(sql`
+          SELECT set_config(
+            'sport_center.allow_posted_accounting_metadata_correction',
+            'on',
+            true
+          )
+        `);
       }
 
       const paymentTimestamp = paymentDate

@@ -113,6 +113,7 @@ try {
     mirror_supports_manual_metadata_correction: boolean;
     internal_journal_trigger_exists: boolean;
     public_entry_trigger_exists: boolean;
+    public_entry_sync_ignores_unchanged_classification: boolean;
   }>(`
     SELECT
       to_regprocedure('sport_center.resolve_and_persist_payment_metadata(integer)') IS NOT NULL
@@ -180,6 +181,16 @@ try {
           AND p.proname = 'sync_sport_payment_entry_metadata'
           AND t.tgenabled IN ('O', 'A')
       ) AS public_entry_trigger_exists
+      ,
+      COALESCE(
+        POSITION(
+          'NEW.method IS NOT DISTINCT FROM OLD.method'
+          IN pg_get_functiondef(
+            to_regprocedure('public.sync_sport_payment_entry_metadata()')
+          )
+        ) > 0,
+        FALSE
+      ) AS public_entry_sync_ignores_unchanged_classification
   `);
 
   const state = verification.rows[0];
@@ -189,7 +200,8 @@ try {
     !state.mirror_trigger_exists ||
     !state.mirror_supports_manual_metadata_correction ||
     !state.internal_journal_trigger_exists ||
-    !state.public_entry_trigger_exists
+    !state.public_entry_trigger_exists ||
+    !state.public_entry_sync_ignores_unchanged_classification
   ) {
     throw new Error("PAYMENT_ACCOUNTING_TRIGGER_VERIFICATION_FAILED");
   }

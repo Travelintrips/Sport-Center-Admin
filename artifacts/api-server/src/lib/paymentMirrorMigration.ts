@@ -80,6 +80,16 @@ export function startPaymentMirrorMigration(): Promise<void> {
               AND p.proname = 'sync_sport_payment_entry_metadata'
               AND t.tgenabled IN ('O', 'A')
           ) AS public_entry_sync_trigger_exists
+           ,
+           COALESCE(
+             POSITION(
+               'NEW.method IS NOT DISTINCT FROM OLD.method'
+               IN pg_get_functiondef(
+                 to_regprocedure('public.sync_sport_payment_entry_metadata()')
+               )
+             ) > 0,
+             FALSE
+           ) AS public_entry_sync_ignores_unchanged_classification
           ,
           EXISTS (
             SELECT 1
@@ -102,6 +112,7 @@ export function startPaymentMirrorMigration(): Promise<void> {
               trigger_exists?: boolean;
               mirror_supports_manual_metadata_correction?: boolean;
               public_entry_sync_trigger_exists?: boolean;
+              public_entry_sync_ignores_unchanged_classification?: boolean;
               internal_journal_sync_trigger_exists?: boolean;
             }
           | undefined;
@@ -111,6 +122,7 @@ export function startPaymentMirrorMigration(): Promise<void> {
           !row.trigger_exists ||
           !row.mirror_supports_manual_metadata_correction ||
           !row.public_entry_sync_trigger_exists ||
+          !row.public_entry_sync_ignores_unchanged_classification ||
           !row.internal_journal_sync_trigger_exists
         ) {
           const markerState = {
@@ -121,6 +133,9 @@ export function startPaymentMirrorMigration(): Promise<void> {
               row?.mirror_supports_manual_metadata_correction,
             ),
             publicEntrySyncTriggerExists: Boolean(row?.public_entry_sync_trigger_exists),
+            publicEntrySyncIgnoresUnchangedClassification: Boolean(
+              row?.public_entry_sync_ignores_unchanged_classification,
+            ),
             internalJournalSyncTriggerExists: Boolean(
               row?.internal_journal_sync_trigger_exists,
             ),
