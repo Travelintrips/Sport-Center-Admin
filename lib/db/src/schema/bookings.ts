@@ -65,6 +65,7 @@ export const bookingsTable = scSchema.table("sport_bookings", {
   subscriptionId: integer("subscription_id"),
   occurrenceId: integer("occurrence_id"),
   membershipId: integer("membership_id"),
+  membershipPaymentId: integer("membership_payment_id"),
   eventDiscountAmount: numeric("event_discount_amount", { precision: 12, scale: 2 }),
   status: bookingStatusEnum("status").notNull().default("pending_payment"),
   activityType: text("activity_type"),

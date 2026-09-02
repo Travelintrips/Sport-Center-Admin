@@ -1619,6 +1619,7 @@ export async function pushMembershipPaymentAsBankMutation(
   membership: GymMembership,
   payment: MembershipPayment,
   confirmedAt?: Date | null,
+  booking?: Pick<Booking, "id" | "orderNumber">,
 ): Promise<void> {
   const pool = getProdPool();
   if (!pool) return;
@@ -1630,7 +1631,13 @@ export async function pushMembershipPaymentAsBankMutation(
   const transactionDate = confirmedAt
     ? confirmedAt.toISOString().split("T")[0]!
     : new Date().toISOString().split("T")[0]!;
-  const description = `SPORT CENTER MEMBER GYM | MB-${membership.id} | PAYMENT-${payment.id} | ${membership.name}`;
+   const description = [
+     "SPORT CENTER MEMBER GYM",
+     `MB-${membership.id}`,
+     `PAYMENT-${payment.id}`,
+     booking?.orderNumber ? `ORDER-${booking.orderNumber}` : "",
+     membership.name,
+   ].filter(Boolean).join(" | ");
   const normalizedDescription = description
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, " ")
@@ -1658,7 +1665,7 @@ export async function pushMembershipPaymentAsBankMutation(
           mutationKey,
           normalizedDescription,
           mutationKey,
-          null,
+           booking?.id ?? null,
         ],
       );
     }, `pushMembershipMutation:${membership.id}`);

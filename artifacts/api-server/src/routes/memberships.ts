@@ -11,7 +11,11 @@ import {
 } from "@workspace/db";
 import { eq, and, ilike, desc, inArray, or } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
-import { syncMembershipToBizportal, pushMembershipPaymentAsBankMutation } from "../lib/bizportalSync";
+import {
+  syncMembershipToBizportal,
+  syncBookingToBizportal,
+  pushMembershipPaymentAsBankMutation,
+} from "../lib/bizportalSync";
 import { createMembershipJournalEntry, createPublicMembershipAccountingEntry } from "../lib/accounting";
 import { logAccountingError } from "../lib/auditLog";
 import { sendRekapPemakaianToAdmin } from "../lib/rekapPemakaian";
@@ -29,6 +33,176 @@ function addHours(time: string, hours: number): string {
   const endHour = Math.floor(totalMinutes / 60) % 24;
   const endMinute = totalMinutes % 60;
   return `${String(endHour).padStart(2, "0")}:${String(endMinute).padStart(2, "0")}`;
+}
+
+function membershipBookingStatus(
+  paymentStatus: string,
+): "pending_payment" | "waiting_confirmation" | "confirmed" | "cancelled" {
+  if (paymentStatus === "waiting_confirmation") return "waiting_confirmation";
+  if (paymentStatus === "confirmed") return "confirmed";
+  if (paymentStatus === "cancelled") return "cancelled";
+  return "pending_payment";
+}
+
+function membershipTaxBreakdown(amount: number) {
+  const dpp = Math.round(amount / 1.11);
+  return { dpp, ppnAmount: amount - dpp };
+}
+
+async function getGymFacility() {
+  const [gymFacility] = await db.select().from(facilitiesTable)
+    .where(or(
+      eq(facilitiesTable.bookingMode, "walk_in"),
+      ilike(facilitiesTable.name, "%gym%"),
+      ilike(facilitiesTable.name, "%fitness%"),
+      ilike(facilitiesTable.category, "%gym%"),
+      ilike(facilitiesTable.category, "%fitness%"),
+    ))
+    .limit(1);
+  return gymFacility;
+}
+
+async function syncBookingRecordToBizportal(booking: typeof bookingsTable.$inferSelect) {
+  const [facility] = await db
+    .select({ name: facilitiesTable.name, category: facilitiesTable.category })
+    .from(facilitiesTable)
+    .where(eq(facilitiesTable.id, booking.facilityId))
+    .limit(1);
+  if (!facility) return;
+  await syncBookingToBizportal({
+    booking,
+    facilityName: facility.name,
+    facilityCategory: facility.category,
+  });
+}
+
+/**
+ * Membership payment and gym usage are deliberately two different booking
+ * sources:
+ * - gym_membership_payment: one financial booking per registration/renewal
+ * - gym_membership: one zero-value booking per daily check-in
+ *
+ * The payment booking is the order candidate used by Bizportal
+ * reconciliation. It never creates a second membership payment.
+ */
+async function ensureMembershipPaymentBooking(
+  membership: typeof gymMembershipsTable.$inferSelect,
+  payment: typeof membershipPaymentsTable.$inferSelect,
+) {
+  const [existing] = await db
+    .select()
+    .from(bookingsTable)
+    .where(eq(bookingsTable.membershipPaymentId, payment.id))
+    .limit(1);
+
+  const gymFacility = existing ? undefined : await getGymFacility();
+  if (!existing && !gymFacility) {
+    throw new Error("Fasilitas Gym belum tersedia");
+  }
+
+  const amount = Math.round(Number(payment.amount));
+  const { dpp, ppnAmount } = membershipTaxBreakdown(amount);
+  const status = membershipBookingStatus(payment.status);
+  const isConfirmed = status === "confirmed";
+  const values = {
+    customerName: membership.name,
+    customerEmail: membership.email,
+    customerPhone: membership.phone,
+    bookingDate: payment.periodStart,
+    startTime: gymFacility?.openTime ?? "00:00",
+    endTime: gymFacility ? addHours(gymFacility.openTime, 1) : "01:00",
+    durationHours: 1,
+    totalPrice: String(amount),
+    basePrice: String(amount),
+    discountAmount: "0",
+    apDiscountAmount: "0",
+    grandTotal: String(amount),
+    dpp: String(dpp),
+    ppnRate: "11",
+    ppnAmount: String(ppnAmount),
+    status,
+    paymentRequiredNow: !isConfirmed,
+    billingStatus: isConfirmed ? "paid" as const : "unbilled" as const,
+    paymentDeadline: null,
+    paymentReminderSentAt: null,
+    source: "gym_membership_payment",
+    membershipId: membership.id,
+    membershipPaymentId: payment.id,
+    notes: `Pembayaran membership gym #${membership.id} | Payment #${payment.id} | Periode ${payment.periodStart} s/d ${payment.periodEnd}`,
+    updatedAt: new Date(),
+  };
+
+  if (existing) {
+    const [updated] = await db
+      .update(bookingsTable)
+      .set(values)
+      .where(eq(bookingsTable.id, existing.id))
+      .returning();
+    return updated ?? existing;
+  }
+
+  const orderNumber = await generateBookingOrderNumber();
+  const [created] = await db
+    .insert(bookingsTable)
+    .values({
+      orderNumber,
+      customerId: null,
+      customerName: values.customerName,
+      customerEmail: values.customerEmail,
+      customerPhone: values.customerPhone,
+      facilityId: gymFacility!.id,
+      bookingDate: values.bookingDate,
+      startTime: values.startTime,
+      endTime: values.endTime,
+      durationHours: values.durationHours,
+      totalPrice: values.totalPrice,
+      discountAmount: values.discountAmount,
+      customerType: "umum",
+      verificationStatus: "not_required",
+      basePrice: values.basePrice,
+      apDiscountAmount: values.apDiscountAmount,
+      bookingType: "regular",
+      membershipId: values.membershipId,
+      membershipPaymentId: values.membershipPaymentId,
+      status: values.status,
+      source: values.source,
+      numberOfPeople: 1,
+      notes: values.notes,
+      paymentRequiredNow: values.paymentRequiredNow,
+      payerType: "personal",
+      billingStatus: values.billingStatus,
+      dpp: values.dpp,
+      ppnRate: values.ppnRate,
+      ppnAmount: values.ppnAmount,
+      grandTotal: values.grandTotal,
+      paidAt: isConfirmed ? payment.confirmedAt ?? new Date() : null,
+    })
+    .returning();
+
+  if (!created) throw new Error("Gagal membuat booking pembayaran membership");
+
+  await db.insert(bookingHistoryTable).values({
+    bookingId: created.id,
+    fromStatus: null,
+    toStatus: status,
+    changedByName: membership.name,
+    note: `Booking pembayaran membership dibuat dari payment #${payment.id}`,
+  });
+  return created;
+}
+
+async function syncMembershipPaymentBookings(membership: typeof gymMembershipsTable.$inferSelect) {
+  const payments = await db
+    .select()
+    .from(membershipPaymentsTable)
+    .where(eq(membershipPaymentsTable.membershipId, membership.id));
+
+  for (const payment of payments) {
+    const booking = await ensureMembershipPaymentBooking(membership, payment);
+    syncBookingRecordToBizportal(booking).catch((err) =>
+      console.error("[membership] Gagal sync booking payment ke Bizportal:", err),
+    );
+  }
 }
 
 async function syncToPublic(m: typeof gymMembershipsTable.$inferSelect) {
@@ -189,15 +363,7 @@ router.post("/memberships/:id/checkin", adminMiddleware, async (req, res) => {
     // Every member visit is also a booking record so it appears in the
     // central booking list. It is prepaid by the membership and must never
     // enter the regular payment queue.
-    const [gymFacility] = await db.select().from(facilitiesTable)
-      .where(or(
-        eq(facilitiesTable.bookingMode, "walk_in"),
-        ilike(facilitiesTable.name, "%gym%"),
-        ilike(facilitiesTable.name, "%fitness%"),
-        ilike(facilitiesTable.category, "%gym%"),
-        ilike(facilitiesTable.category, "%fitness%"),
-      ))
-      .limit(1);
+    const gymFacility = await getGymFacility();
     if (!gymFacility) {
       res.status(409).json({ error: "Fasilitas Gym belum tersedia" });
       return;
@@ -259,6 +425,10 @@ router.post("/memberships/:id/checkin", adminMiddleware, async (req, res) => {
 
     res.status(201).json(result);
 
+    syncBookingRecordToBizportal(result.booking).catch((err) =>
+      req.log.error({ err }, "[checkin] Gagal sync booking membership ke Bizportal")
+    );
+
     // Fire-and-forget: kirim rekap WA hari ini ke grup admin
     sendRekapPemakaianToAdmin(checkinDate).catch((err) =>
       req.log.error({ err }, "[checkin] Gagal kirim rekap WA setelah check-in")
@@ -280,7 +450,7 @@ router.delete("/memberships/checkins/:checkinId", adminMiddleware, async (req, r
     if (existing) {
       // Keep the booking for audit purposes, but make the cancelled check-in
       // disappear from active booking totals.
-      await db.update(bookingsTable)
+      const [cancelledBooking] = await db.update(bookingsTable)
         .set({
           status: "cancelled",
           notes: "Pemakaian member gym dibatalkan bersama check-in.",
@@ -290,7 +460,13 @@ router.delete("/memberships/checkins/:checkinId", adminMiddleware, async (req, r
           eq(bookingsTable.membershipId, existing.membershipId),
           eq(bookingsTable.bookingDate, existing.checkinDate),
           eq(bookingsTable.source, "gym_membership"),
-        ));
+        ))
+        .returning();
+      if (cancelledBooking) {
+        syncBookingRecordToBizportal(cancelledBooking).catch((err) =>
+          req.log.error({ err }, "[checkin] Gagal sync pembatalan booking membership ke Bizportal")
+        );
+      }
     }
     res.status(204).send();
 
@@ -446,16 +622,20 @@ router.post("/memberships", async (req, res) => {
       })
       .returning();
 
-    await db.insert(membershipPaymentsTable).values({
+    const [payment] = await db.insert(membershipPaymentsTable).values({
       membershipId: membership!.id,
       periodStart: membership!.startDate,
       periodEnd: membership!.endDate,
       months: membership!.months,
       amount: membership!.totalPrice,
       status: "pending_payment",
-    });
+    }).returning();
 
     syncMembershipToBizportal(membership).catch(() => {});
+    const paymentBooking = await ensureMembershipPaymentBooking(membership!, payment!);
+    syncBookingRecordToBizportal(paymentBooking).catch((err) =>
+      req.log.error({ err }, "[membership] Gagal sync booking pembayaran ke Bizportal")
+    );
     await syncToPublic(membership!);
     res.status(201).json({ ...membership, totalPrice: Number(membership!.totalPrice) });
   } catch (err) {
@@ -506,15 +686,19 @@ router.post("/memberships/:id/renew", async (req, res) => {
       .where(eq(gymMembershipsTable.id, id))
       .returning();
 
-    await db.insert(membershipPaymentsTable).values({
+    const [payment] = await db.insert(membershipPaymentsTable).values({
       membershipId: updated!.id,
       periodStart: updated!.startDate,
       periodEnd: updated!.endDate,
       months: updated!.months,
       amount: updated!.totalPrice,
       status: "pending_payment",
-    });
+    }).returning();
 
+    const paymentBooking = await ensureMembershipPaymentBooking(updated!, payment!);
+    syncBookingRecordToBizportal(paymentBooking).catch((err) =>
+      req.log.error({ err }, "[membership] Gagal sync booking renewal ke Bizportal")
+    );
     await syncToPublic(updated!);
     res.json({ ...updated, totalPrice: Number(updated!.totalPrice) });
   } catch (err) {
@@ -582,7 +766,18 @@ router.post("/memberships/:id/payment-proof", async (req, res) => {
       .where(eq(membershipPaymentsTable.id, pendingPayment.id));
 
     const [membership] = await db.select().from(gymMembershipsTable).where(eq(gymMembershipsTable.id, id)).limit(1);
+    const paymentBooking = await ensureMembershipPaymentBooking(membership!, {
+      ...pendingPayment,
+      paymentMethod,
+      paymentProofUrl,
+      status: "waiting_confirmation",
+      submittedAt: new Date(),
+      updatedAt: new Date(),
+    });
     syncMembershipToBizportal(membership).catch(() => {});
+    syncBookingRecordToBizportal(paymentBooking).catch((err) =>
+      req.log.error({ err }, "[membership] Gagal sync booking payment proof ke Bizportal")
+    );
     await syncToPublic(membership!);
 
     const appUrl = await getBaseUrl();
@@ -729,12 +924,16 @@ router.patch("/memberships/:id", adminMiddleware, async (req, res) => {
         .from(membershipPaymentsTable)
         .where(eq(membershipPaymentsTable.id, payment.id))
         .limit(1);
+      const paymentBooking = await ensureMembershipPaymentBooking(membership, confirmedPayment!);
+      syncBookingRecordToBizportal(paymentBooking).catch((err) =>
+        req.log.error({ err }, "[membership] Gagal sync booking konfirmasi ke Bizportal")
+      );
       const today = new Date().toISOString().split("T")[0]!;
       // totalPrice sudah inklusif PPN — hitung DPP dan PPN agar tidak double-count
       const totalPrice = Number(membership.totalPrice);
       const membershipDpp = Math.round(totalPrice / 1.11);
       const membershipPpn = totalPrice - membershipDpp;
-      pushMembershipPaymentAsBankMutation(membership, confirmedPayment!, confirmedAt).catch(() => {});
+      pushMembershipPaymentAsBankMutation(membership, confirmedPayment!, confirmedAt, paymentBooking).catch(() => {});
       createMembershipJournalEntry(membership.id, refNumber, membershipDpp, membershipPpn, today).catch((err) =>
         logAccountingError({ operation: "createMembershipJournalEntry", orderNumber: refNumber, bookingId: membership.id, error: err }),
       );
@@ -742,6 +941,10 @@ router.patch("/memberships/:id", adminMiddleware, async (req, res) => {
         logAccountingError({ operation: "createPublicMembershipAccountingEntry", orderNumber: refNumber, bookingId: membership.id, error: err }),
       );
     }
+    // Also repair/sync payment bookings when an admin changes the membership
+    // dates or cancels it. This keeps the order mirror consistent with the
+    // immutable membership payment events.
+    await syncMembershipPaymentBookings(membership);
     await syncToPublic(membership);
     res.json({ ...membership, totalPrice: Number(membership.totalPrice) });
   } catch (err) {
