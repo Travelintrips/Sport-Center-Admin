@@ -8,6 +8,9 @@ export const CUSTOM_MIGRATION_SQL = `
 -- ============================================================
 CREATE EXTENSION IF NOT EXISTS btree_gist;
 
+ALTER TABLE sport_center.sport_bookings
+  ADD COLUMN IF NOT EXISTS membership_id INTEGER;
+
 CREATE TABLE IF NOT EXISTS sport_center.facility_company_mappings (
   id serial PRIMARY KEY,
   facility_id integer NOT NULL REFERENCES sport_center.sport_facilities(id) ON DELETE CASCADE,

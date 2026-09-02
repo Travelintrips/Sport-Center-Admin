@@ -1,6 +1,15 @@
 import { Router } from "express";
-import { db, gymMembershipsTable, membershipPaymentsTable, publicMembershipsTable, gymCheckinsTable } from "@workspace/db";
-import { eq, and, ilike, desc, inArray } from "drizzle-orm";
+import {
+  db,
+  gymMembershipsTable,
+  membershipPaymentsTable,
+  publicMembershipsTable,
+  gymCheckinsTable,
+  bookingsTable,
+  bookingHistoryTable,
+  facilitiesTable,
+} from "@workspace/db";
+import { eq, and, ilike, desc, inArray, or } from "drizzle-orm";
 import { adminMiddleware } from "../lib/auth";
 import { syncMembershipToBizportal, pushMembershipPaymentAsBankMutation } from "../lib/bizportalSync";
 import { createMembershipJournalEntry, createPublicMembershipAccountingEntry } from "../lib/accounting";
@@ -8,10 +17,19 @@ import { logAccountingError } from "../lib/auditLog";
 import { sendRekapPemakaianToAdmin } from "../lib/rekapPemakaian";
 import { notifyMembershipPaymentProofUploaded } from "../lib/notifications";
 import { getBaseUrl } from "../lib/appUrl";
+import { generateBookingOrderNumber } from "../lib/orderNumber";
 
 const router = Router();
 
 const PRICE_PER_MONTH = 300000;
+
+function addHours(time: string, hours: number): string {
+  const [hour, minute] = time.split(":").map(Number);
+  const totalMinutes = hour * 60 + (minute || 0) + hours * 60;
+  const endHour = Math.floor(totalMinutes / 60) % 24;
+  const endMinute = totalMinutes % 60;
+  return `${String(endHour).padStart(2, "0")}:${String(endMinute).padStart(2, "0")}`;
+}
 
 async function syncToPublic(m: typeof gymMembershipsTable.$inferSelect) {
   try {
@@ -168,8 +186,78 @@ router.post("/memberships/:id/checkin", adminMiddleware, async (req, res) => {
       .limit(1);
     if (existing) { res.status(409).json({ error: "Sudah check-in pada tanggal ini", checkin: existing }); return; }
 
-    const [checkin] = await db.insert(gymCheckinsTable).values({ membershipId: id, checkinDate, notes }).returning();
-    res.status(201).json(checkin);
+    // Every member visit is also a booking record so it appears in the
+    // central booking list. It is prepaid by the membership and must never
+    // enter the regular payment queue.
+    const [gymFacility] = await db.select().from(facilitiesTable)
+      .where(or(
+        eq(facilitiesTable.bookingMode, "walk_in"),
+        ilike(facilitiesTable.name, "%gym%"),
+        ilike(facilitiesTable.name, "%fitness%"),
+        ilike(facilitiesTable.category, "%gym%"),
+        ilike(facilitiesTable.category, "%fitness%"),
+      ))
+      .limit(1);
+    if (!gymFacility) {
+      res.status(409).json({ error: "Fasilitas Gym belum tersedia" });
+      return;
+    }
+
+    const orderNumber = await generateBookingOrderNumber();
+    const checkedInAt = new Date();
+    const bookingNote = [
+      `Pemakaian member gym #${member.id}`,
+      notes ? `Catatan check-in: ${String(notes).trim()}` : "",
+    ].filter(Boolean).join(" — ");
+
+    const result = await db.transaction(async (tx) => {
+      const [newCheckin] = await tx.insert(gymCheckinsTable)
+        .values({ membershipId: id, checkinDate, notes })
+        .returning();
+
+      const [newBooking] = await tx.insert(bookingsTable).values({
+        orderNumber,
+        customerId: null,
+        customerName: member.name,
+        customerEmail: member.email,
+        customerPhone: member.phone,
+        facilityId: gymFacility.id,
+        bookingDate: checkinDate,
+        startTime: gymFacility.openTime,
+        endTime: addHours(gymFacility.openTime, 1),
+        durationHours: 1,
+        totalPrice: "0",
+        discountAmount: "0",
+        customerType: "umum",
+        verificationStatus: "not_required",
+        basePrice: "0",
+        apDiscountAmount: "0",
+        bookingType: "regular",
+        membershipId: member.id,
+        status: "confirmed",
+        source: "gym_membership",
+        numberOfPeople: 1,
+        notes: bookingNote,
+        paymentRequiredNow: false,
+        payerType: "personal",
+        billingStatus: "paid",
+        dpp: "0",
+        grandTotal: "0",
+        checkedInAt,
+      }).returning();
+
+      await tx.insert(bookingHistoryTable).values({
+        bookingId: newBooking.id,
+        fromStatus: null,
+        toStatus: "confirmed",
+        changedByName: member.name,
+        note: `Pemakaian member gym dicatat dari check-in membership #${member.id}`,
+      });
+
+      return { checkin: newCheckin, booking: newBooking };
+    });
+
+    res.status(201).json(result);
 
     // Fire-and-forget: kirim rekap WA hari ini ke grup admin
     sendRekapPemakaianToAdmin(checkinDate).catch((err) =>
@@ -189,6 +277,21 @@ router.delete("/memberships/checkins/:checkinId", adminMiddleware, async (req, r
     // Ambil tanggal dulu sebelum dihapus, untuk rekap
     const [existing] = await db.select().from(gymCheckinsTable).where(eq(gymCheckinsTable.id, checkinId)).limit(1);
     await db.delete(gymCheckinsTable).where(eq(gymCheckinsTable.id, checkinId));
+    if (existing) {
+      // Keep the booking for audit purposes, but make the cancelled check-in
+      // disappear from active booking totals.
+      await db.update(bookingsTable)
+        .set({
+          status: "cancelled",
+          notes: "Pemakaian member gym dibatalkan bersama check-in.",
+          updatedAt: new Date(),
+        })
+        .where(and(
+          eq(bookingsTable.membershipId, existing.membershipId),
+          eq(bookingsTable.bookingDate, existing.checkinDate),
+          eq(bookingsTable.source, "gym_membership"),
+        ));
+    }
     res.status(204).send();
 
     // Fire-and-forget: kirim rekap WA hari ini ke grup admin

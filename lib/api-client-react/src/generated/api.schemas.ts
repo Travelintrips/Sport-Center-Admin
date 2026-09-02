@@ -269,6 +269,10 @@ export interface Booking {
   /** @nullable */
   numberOfPeople?: number | null;
   /** @nullable */
+  membershipId?: number | null;
+  /** @nullable */
+  source?: string | null;
+  /** @nullable */
   notes?: string | null;
   /** @nullable */
   adminNotes?: string | null;

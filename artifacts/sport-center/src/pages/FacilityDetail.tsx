@@ -28,6 +28,8 @@ import {
   Star,
   MessageCircle,
   ShoppingCart,
+  Dumbbell,
+  RefreshCw,
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import AvailabilityCalendar from "@/components/AvailabilityCalendar";
@@ -446,6 +448,42 @@ export default function FacilityDetail() {
                           "Gym is accessible anytime between 06:00–22:00 WIB. No time slot needed — just come and enjoy."
                         )}
                       </p>
+                    </div>
+                  )}
+
+                  {/* Gym membership actions */}
+                  {isGymFacility && (
+                    <div className="rounded-2xl border border-primary/20 bg-primary/5 p-4">
+                      <div className="flex items-start gap-3 mb-3">
+                        <div className="w-9 h-9 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                          <Dumbbell className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <div className="font-bold text-foreground">
+                            {t("Sudah punya atau ingin jadi member?", "Already a member or want to join?")}
+                          </div>
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            {t(
+                              "Daftar membership bulanan dan nikmati akses Gym tanpa perlu membayar setiap kunjungan.",
+                              "Register for monthly membership and enjoy Gym access without paying per visit."
+                            )}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <Button asChild variant="outline" className="w-full border-primary/30 text-primary hover:bg-primary/10">
+                          <Link href="/membership?mode=register">
+                            <Dumbbell className="w-4 h-4 mr-2" />
+                            {t("Daftar Member Gym", "Register Gym Member")}
+                          </Link>
+                        </Button>
+                        <Button asChild variant="outline" className="w-full border-primary/30 text-primary hover:bg-primary/10">
+                          <Link href="/membership?mode=renew">
+                            <RefreshCw className="w-4 h-4 mr-2" />
+                            {t("Perpanjang Membership", "Renew Membership")}
+                          </Link>
+                        </Button>
+                      </div>
                     </div>
                   )}
 

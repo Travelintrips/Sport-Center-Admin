@@ -33,6 +33,7 @@
 - [Workflow waitForPort config](workflow-port-config.md) — restart_workflow tool fails "DIDNT_OPEN_A_PORT" if workflow not configured with waitForPort; fix via configureWorkflow({waitForPort:8080,outputType:"console"}).
 - [WhatsApp daily usage list](wa-daily-usage-list.md) — operational list includes confirmed/completed bookings and only resends after its persisted fingerprint changes.
 - [Gym walk-in detection](gym-walk-in-detection.md) — legacy Gym rows with time_slot mode still use per-visit access based on name/category fallback.
+- [Gym membership usage bookings](gym-membership-usage-bookings.md) — member check-ins mirror into zero-value confirmed bookings; exclude mirrors from WhatsApp rekap to avoid double counting.
 - [Gym membership payment history](gym-membership-payment-reconciliation.md) — every registration/renewal is a distinct payment event; never key monthly finance records only by membership ID.
 - [Recurring booking WA notification](recurring-wa-notification.md) — recurring/group bookings need one admin WhatsApp summary after all sessions and groupRef are created; per-session booking notifications are not enough.
 - [Re-import recovery](reimport-recovery.md) — Sport Center is a mature project, not a fresh import; on re-import just pnpm install + restart workflows, secrets/replit.md already cover setup.

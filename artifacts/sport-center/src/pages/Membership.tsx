@@ -100,7 +100,10 @@ export default function Membership() {
   const { t } = useLang();
 
   // ─── Shared state ─────────────────────────────────────────────────────────
-  const [mode, setMode] = useState<Mode>("register");
+  const [mode, setMode] = useState<Mode>(() => {
+    const requestedMode = new URLSearchParams(window.location.search).get("mode");
+    return requestedMode === "renew" ? "renew" : "register";
+  });
   const [step, setStep] = useState<Step>("form");
   const [paymentMethod, setPaymentMethod] = useState<"transfer" | "qris" | null>(null);
   const [proofFile, setProofFile] = useState<File | null>(null);

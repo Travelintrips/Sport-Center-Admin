@@ -1045,6 +1045,7 @@ async function runStartupMigrations() {
       )`,
      `ALTER TABLE sport_center.sport_bookings ADD COLUMN IF NOT EXISTS subscription_id INTEGER`,
      `ALTER TABLE sport_center.sport_bookings ADD COLUMN IF NOT EXISTS occurrence_id INTEGER`,
+      `ALTER TABLE sport_center.sport_bookings ADD COLUMN IF NOT EXISTS membership_id INTEGER`,
       `CREATE TABLE IF NOT EXISTS sport_center.sport_payment_allocations (
          id SERIAL PRIMARY KEY,
          payment_id INTEGER NOT NULL REFERENCES sport_center.sport_payments(id) ON DELETE CASCADE,

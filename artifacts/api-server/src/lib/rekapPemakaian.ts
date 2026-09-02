@@ -1,5 +1,5 @@
 import { db, bookingsTable, facilitiesTable, gymCheckinsTable, gymMembershipsTable, usersTable } from "@workspace/db";
-import { eq, and, or } from "drizzle-orm";
+import { eq, and, or, isNull, ne } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { sendWAToAdmins } from "./notifications";
 import { logger } from "./logger";
@@ -102,6 +102,9 @@ export async function generateRekapPemakaian(
           eq(bookingsTable.status, "paid"),
           eq(bookingsTable.status, "waiting_confirmation"),
         )!,
+        // Membership visits are appended from gym_checkins below so they
+        // retain their actual check-in time and are not counted twice.
+        or(isNull(bookingsTable.source), ne(bookingsTable.source, "gym_membership"))!,
       ),
     )
     .orderBy(bookingsTable.startTime);

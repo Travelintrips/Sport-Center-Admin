@@ -65,6 +65,7 @@ import {
   CheckCircle,
   AlertCircle,
   Lock as LockIcon,
+  Dumbbell,
 } from "lucide-react";
 import { getToken } from "@/lib/auth";
 import VerifyIdDialog from "@/components/admin/VerifyIdDialog";
@@ -1182,6 +1183,19 @@ function BookingDetailDrawer({
                   {(booking as any).eventDiscountAmount != null && Number((booking as any).eventDiscountAmount) > 0
                     ? `Diskon diterapkan: ${formatCurrency(Number((booking as any).eventDiscountAmount))} dari harga normal ${formatCurrency(Number((booking as any).basePrice ?? booking.totalPrice) + Number((booking as any).eventDiscountAmount))}`
                     : "Diskon event sudah diterapkan ke harga"}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Gym membership usage */}
+          {((booking as any).membershipId || (booking as any).source === "gym_membership") && (
+            <div className="flex items-center gap-3 p-3 rounded-xl border border-cyan-200 dark:border-cyan-800 bg-cyan-50 dark:bg-cyan-900/20">
+              <Dumbbell size={16} className="text-cyan-600 dark:text-cyan-400 shrink-0" />
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-bold text-cyan-700 dark:text-cyan-300">Pemakaian Member Gym</div>
+                <div className="text-xs text-cyan-600 dark:text-cyan-400">
+                  Membership #{(booking as any).membershipId ?? "—"} — tidak ada tagihan kunjungan (Rp0)
                 </div>
               </div>
             </div>
