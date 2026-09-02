@@ -13,7 +13,7 @@ Replit Publish updates the Autoscale deployment but does not synchronize this ex
 **Why:** The application can deploy successfully while new Drizzle fields are absent from Supabase, producing PostgreSQL `42703` errors only when a route selects them.
 
 **How to apply:** First run a read-only DEV↔PROD schema audit, then write a targeted Node.js/pg script in `scripts/src/` that:
-1. Connects via session pooler (port 5432, not 6543)
+1. Uses the exact application runtime connection for any function/trigger checked during startup; general DDL may use the session pooler, but must be re-verified through a fresh runtime connection before publishing
 2. Uses `information_schema.columns` to check which columns already exist per table
 3. Only runs `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` for missing columns
 4. Runs the columns only for `sport_center.*` tables by name
@@ -31,4 +31,10 @@ as HTTP 500.
 and every startup/manual migration statement before publishing. Verify the
 target table with a read-only schema query before approving PROD changes.
 
-Production connection source: `SUPABASE_DATABASE_URL`; use the session pooler (5432) for DDL, never log or commit the URL.
+Production connection source: `SUPABASE_DATABASE_URL`; never log or commit the URL.
+
+Startup-gated function and trigger migrations must load secrets through the same runtime loader as the published API and preserve the configured pooler endpoint.
+
+**Why:** Rewriting the connection or parsing the shared secret independently can update a different catalog view while the published runtime still sees the old function definition, causing a port timeout before `app.listen()`.
+
+**How to apply:** Use the guarded production migration runner, then verify all startup markers again from a new connection created by the application secret loader.
