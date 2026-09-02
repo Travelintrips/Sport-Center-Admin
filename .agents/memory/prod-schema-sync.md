@@ -38,3 +38,9 @@ Startup-gated function and trigger migrations must load secrets through the same
 **Why:** Rewriting the connection or parsing the shared secret independently can update a different catalog view while the published runtime still sees the old function definition, causing a port timeout before `app.listen()`.
 
 **How to apply:** Use the guarded production migration runner, then verify all startup markers again from a new connection created by the application secret loader.
+
+The production startup guard may transactionally self-repair only the canonical resolver and payment-mirror function definitions when their compatibility markers drift, under the provisioning advisory lock; every other invariant remains read-only and fail-closed.
+
+**Why:** Both functions were observed reverting after a successful publish, causing a later cold start to exit before opening its port even though the prior deployment had passed.
+
+**How to apply:** Check markers under the advisory lock, replace only the drifted functions, then run the complete invariant query before binding the server port. Investigate and remove the external writer separately.

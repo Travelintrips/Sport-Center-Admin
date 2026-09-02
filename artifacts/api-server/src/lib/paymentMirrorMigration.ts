@@ -25,7 +25,75 @@ export function startPaymentMirrorMigration(): Promise<void> {
   if (startupPromise) return startupPromise;
 
   startupPromise = (process.env.NODE_ENV === "production"
-    ? db.execute(sql.raw(`
+    ? db.transaction(async (tx) => {
+        // Production schema provisioning remains external, but these two
+        // replace-in-place functions have been observed drifting back to an
+        // older definition after a successful publish. Repair only that
+        // narrowly-scoped compatibility drift under the same advisory lock
+        // used by the provisioning runner, then perform the full fail-closed
+        // verification below before the server binds its port.
+        await tx.execute(sql`
+          SELECT pg_advisory_xact_lock(918274615)
+        `);
+        const compatibility = await tx.execute(sql.raw(`
+          SELECT
+            COALESCE(
+              POSITION(
+                'v_provider_code = ''unknown'''
+                IN pg_get_functiondef(
+                  to_regprocedure('sport_center.resolve_and_persist_payment_metadata(integer)')
+                )
+              ) > 0,
+              FALSE
+            ) AS resolver_supports_manual_provider,
+            EXISTS (
+              SELECT 1
+              FROM pg_trigger t
+              JOIN pg_class r ON r.oid = t.tgrelid
+              JOIN pg_namespace n ON n.oid = r.relnamespace
+              JOIN pg_proc p ON p.oid = t.tgfoid
+              WHERE n.nspname = 'sport_center'
+                AND r.relname = 'sport_payments'
+                AND t.tgname = 'trg_mirror_confirmed_payment_to_public'
+                AND NOT t.tgisinternal
+                AND p.proname = 'mirror_confirmed_payment_to_public'
+                AND t.tgenabled IN ('O', 'A')
+            ) AS trigger_exists,
+            COALESCE(
+              POSITION(
+                'v_provider_code = ''unknown'''
+                IN pg_get_functiondef(
+                  to_regprocedure('sport_center.mirror_confirmed_payment_to_public()')
+                )
+              ) > 0
+              AND POSITION(
+                'allow_posted_payment_metadata_correction'
+                IN pg_get_functiondef(
+                  to_regprocedure('sport_center.mirror_confirmed_payment_to_public()')
+                )
+              ) > 0,
+              FALSE
+            ) AS mirror_supports_manual_metadata_correction
+        `));
+        const compatibilityRow = compatibility.rows[0] as
+          | {
+              resolver_supports_manual_provider?: boolean;
+              trigger_exists?: boolean;
+              mirror_supports_manual_metadata_correction?: boolean;
+            }
+          | undefined;
+
+        if (!compatibilityRow?.resolver_supports_manual_provider) {
+          await tx.execute(sql.raw(paymentMetadataResolverMigration));
+        }
+        if (
+          !compatibilityRow?.trigger_exists ||
+          !compatibilityRow.mirror_supports_manual_metadata_correction
+        ) {
+          await tx.execute(sql.raw(manualProviderMirrorMigration));
+        }
+
+        return tx.execute(sql.raw(`
         SELECT
           to_regprocedure('sport_center.resolve_and_persist_payment_metadata(integer)') IS NOT NULL
             AS resolver_exists,
@@ -104,7 +172,8 @@ export function startPaymentMirrorMigration(): Promise<void> {
               AND p.proname = 'sync_payment_accounting_journal'
               AND t.tgenabled IN ('O', 'A')
           ) AS internal_journal_sync_trigger_exists
-      `)).then((result) => {
+        `));
+      }).then((result) => {
         const row = result.rows[0] as
           | {
               resolver_exists?: boolean;
