@@ -27,6 +27,8 @@ const router = Router();
 
 const PRICE_PER_MONTH = 300000;
 
+type DbExecutor = Pick<typeof db, "select" | "insert" | "update">;
+
 function addHours(time: string, hours: number): string {
   const [hour, minute] = time.split(":").map(Number);
   const totalMinutes = hour * 60 + (minute || 0) + hours * 60;
@@ -49,8 +51,8 @@ function membershipTaxBreakdown(amount: number) {
   return { dpp, ppnAmount: amount - dpp };
 }
 
-async function getGymFacility() {
-  const [gymFacility] = await db.select().from(facilitiesTable)
+async function getGymFacility(executor: DbExecutor = db) {
+  const [gymFacility] = await executor.select().from(facilitiesTable)
     .where(or(
       eq(facilitiesTable.bookingMode, "walk_in"),
       ilike(facilitiesTable.name, "%gym%"),
@@ -88,14 +90,16 @@ async function syncBookingRecordToBizportal(booking: typeof bookingsTable.$infer
 async function ensureMembershipPaymentBooking(
   membership: typeof gymMembershipsTable.$inferSelect,
   payment: typeof membershipPaymentsTable.$inferSelect,
+  executor: DbExecutor = db,
+  allocatedOrderNumber?: string,
 ) {
-  const [existing] = await db
+  const [existing] = await executor
     .select()
     .from(bookingsTable)
     .where(eq(bookingsTable.membershipPaymentId, payment.id))
     .limit(1);
 
-  const gymFacility = existing ? undefined : await getGymFacility();
+  const gymFacility = existing ? undefined : await getGymFacility(executor);
   if (!existing && !gymFacility) {
     throw new Error("Fasilitas Gym belum tersedia");
   }
@@ -133,7 +137,7 @@ async function ensureMembershipPaymentBooking(
   };
 
   if (existing) {
-    const [updated] = await db
+    const [updated] = await executor
       .update(bookingsTable)
       .set(values)
       .where(eq(bookingsTable.id, existing.id))
@@ -141,8 +145,8 @@ async function ensureMembershipPaymentBooking(
     return updated ?? existing;
   }
 
-  const orderNumber = await generateBookingOrderNumber();
-  const [created] = await db
+  const orderNumber = allocatedOrderNumber ?? await generateBookingOrderNumber();
+  const [created] = await executor
     .insert(bookingsTable)
     .values({
       orderNumber,
@@ -181,7 +185,7 @@ async function ensureMembershipPaymentBooking(
 
   if (!created) throw new Error("Gagal membuat booking pembayaran membership");
 
-  await db.insert(bookingHistoryTable).values({
+  await executor.insert(bookingHistoryTable).values({
     bookingId: created.id,
     fromStatus: null,
     toStatus: status,
@@ -575,19 +579,39 @@ router.get("/memberships/:id", adminMiddleware, async (req, res) => {
 
 router.post("/memberships", async (req, res) => {
   try {
-    const { name, email, phone, startDate, months, notes } = req.body;
-    if (!name || !email || !phone || !startDate) {
+    const { name, email, phone, startDate, months, notes } = req.body ?? {};
+    const nameNorm = String(name ?? "").trim();
+    const emailNorm = String(email ?? "").trim();
+    const phoneNorm = String(phone ?? "").trim();
+    const startDateNorm = String(startDate ?? "").trim();
+
+    if (!nameNorm || !emailNorm || !phoneNorm || !startDateNorm) {
       res.status(400).json({ error: "name, email, phone, dan startDate wajib diisi" });
       return;
     }
 
+    const isDateOnly = (value: string) => {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+      const parsed = new Date(`${value}T00:00:00Z`);
+      return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+    };
+    if (!isDateOnly(startDateNorm)) {
+      res.status(400).json({ error: "Tanggal mulai harus berformat YYYY-MM-DD yang valid" });
+      return;
+    }
+
+    const monthsNum = Number(months ?? 1);
+    if (!Number.isInteger(monthsNum) || monthsNum < 1 || monthsNum > 12) {
+      res.status(400).json({ error: "Durasi membership harus berupa bilangan bulat 1 sampai 12 bulan" });
+      return;
+    }
+
     // ── Cegah duplikat: tolak jika phone sudah punya membership aktif/pending ──
-    const phoneNorm = String(phone).trim().toUpperCase();
     const BLOCK_STATUSES = ["active", "pending_payment", "waiting_confirmation"];
     const existingAll = await db
       .select()
       .from(gymMembershipsTable)
-      .where(eq(gymMembershipsTable.phone, String(phone).trim()));
+      .where(eq(gymMembershipsTable.phone, phoneNorm));
 
     const conflict = existingAll.find((m) => BLOCK_STATUSES.includes(m.status));
     if (conflict) {
@@ -599,45 +623,67 @@ router.post("/memberships", async (req, res) => {
       return;
     }
 
-    const monthsNum = Number(months) || 1;
     const totalPrice = PRICE_PER_MONTH * monthsNum;
 
-    const start = new Date(startDate);
+    const start = new Date(`${startDateNorm}T00:00:00Z`);
     const end = new Date(start);
-    end.setMonth(end.getMonth() + monthsNum);
+    end.setUTCMonth(end.getUTCMonth() + monthsNum);
     const endDate = end.toISOString().split("T")[0];
 
-    const [membership] = await db
-      .insert(gymMembershipsTable)
-      .values({
-        name,
-        email,
-        phone: String(phone).trim(),
-        startDate,
-        endDate,
-        months: monthsNum,
-        totalPrice: String(totalPrice),
-        notes,
+    // Allocate the order number before the transaction because the sequence
+    // helper owns its transaction. A sequence gap is harmless; partial member
+    // records are not, so the member/payment/booking writes stay atomic below.
+    const orderNumber = await generateBookingOrderNumber();
+    const { membership, payment, paymentBooking } = await db.transaction(async (tx) => {
+      const [createdMembership] = await tx
+        .insert(gymMembershipsTable)
+        .values({
+          name: nameNorm,
+          email: emailNorm,
+          phone: phoneNorm,
+          startDate: startDateNorm,
+          endDate,
+          months: monthsNum,
+          totalPrice: String(totalPrice),
+          notes: notes ? String(notes).trim() : null,
+          status: "pending_payment",
+        })
+        .returning();
+
+      if (!createdMembership) throw new Error("Gagal membuat data membership");
+
+      const [createdPayment] = await tx.insert(membershipPaymentsTable).values({
+        membershipId: createdMembership.id,
+        periodStart: createdMembership.startDate,
+        periodEnd: createdMembership.endDate,
+        months: createdMembership.months,
+        amount: createdMembership.totalPrice,
         status: "pending_payment",
-      })
-      .returning();
+      }).returning();
 
-    const [payment] = await db.insert(membershipPaymentsTable).values({
-      membershipId: membership!.id,
-      periodStart: membership!.startDate,
-      periodEnd: membership!.endDate,
-      months: membership!.months,
-      amount: membership!.totalPrice,
-      status: "pending_payment",
-    }).returning();
+      if (!createdPayment) throw new Error("Gagal membuat data pembayaran membership");
 
-    syncMembershipToBizportal(membership).catch(() => {});
-    const paymentBooking = await ensureMembershipPaymentBooking(membership!, payment!);
+      const createdPaymentBooking = await ensureMembershipPaymentBooking(
+        createdMembership,
+        createdPayment,
+        tx,
+        orderNumber,
+      );
+      return {
+        membership: createdMembership,
+        payment: createdPayment,
+        paymentBooking: createdPaymentBooking,
+      };
+    });
+
+    syncMembershipToBizportal(membership).catch((err) =>
+      req.log.error({ err }, "[membership] Gagal sync membership ke Bizportal"),
+    );
     syncBookingRecordToBizportal(paymentBooking).catch((err) =>
       req.log.error({ err }, "[membership] Gagal sync booking pembayaran ke Bizportal")
     );
-    await syncToPublic(membership!);
-    res.status(201).json({ ...membership, totalPrice: Number(membership!.totalPrice) });
+    await syncToPublic(membership);
+    res.status(201).json({ ...membership, totalPrice: Number(membership.totalPrice) });
   } catch (err) {
     req.log.error({ err }, "Create membership error");
     res.status(500).json({ error: "Internal server error" });
