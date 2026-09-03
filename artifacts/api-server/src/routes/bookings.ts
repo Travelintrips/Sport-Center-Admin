@@ -1983,6 +1983,16 @@ router.patch("/bookings/:id/dates", adminMiddleware, async (req, res) => {
       res.status(404).json({ error: "Booking tidak ditemukan" });
       return;
     }
+    const [membershipPayment] =
+      before.membershipPaymentId != null
+        ? await db
+            .select()
+            .from(membershipPaymentsTable)
+            .where(eq(membershipPaymentsTable.id, before.membershipPaymentId))
+            .limit(1)
+        : [];
+    const isMembershipPaymentBooking =
+      before.source === "gym_membership_payment" || before.membershipPaymentId != null;
     const nextStartTime = startTime ?? before.startTime;
     const nextEndTime = endTime ?? before.endTime;
     if (nextStartTime >= nextEndTime) {
@@ -2031,7 +2041,20 @@ router.patch("/bookings/:id/dates", adminMiddleware, async (req, res) => {
         .orderBy(desc(paymentsTable.createdAt))
         .limit(1);
 
-      if (paymentDate !== undefined && !payment) {
+      const linkedMembershipPayment =
+        membershipPayment ??
+        (isMembershipPaymentBooking && before.membershipId != null
+          ? (
+              await tx
+                .select()
+                .from(membershipPaymentsTable)
+                .where(eq(membershipPaymentsTable.membershipId, before.membershipId))
+                .orderBy(desc(membershipPaymentsTable.id))
+                .limit(1)
+            )[0]
+          : undefined);
+
+      if (paymentDate !== undefined && !payment && !linkedMembershipPayment) {
         throw new Error("PAYMENT_NOT_FOUND");
       }
 
@@ -2063,9 +2086,17 @@ router.patch("/bookings/:id/dates", adminMiddleware, async (req, res) => {
       const paymentTimestamp = paymentDate
         ? new Date(`${paymentDate}T12:00:00+07:00`)
         : undefined;
+      if (paymentTimestamp && Number.isNaN(paymentTimestamp.getTime())) {
+        throw new Error("PAYMENT_DATE_INVALID");
+      }
       const durationHours = Math.round(
         (timeToMinutes(nextEndTime) - timeToMinutes(nextStartTime)) / 60,
       );
+      const membershipPaymentDateField =
+        linkedMembershipPayment?.status === "confirmed" ||
+        linkedMembershipPayment?.confirmedAt != null
+          ? "confirmedAt"
+          : "submittedAt";
       const [booking] = await tx
         .update(bookingsTable)
         .set({
@@ -2073,7 +2104,10 @@ router.patch("/bookings/:id/dates", adminMiddleware, async (req, res) => {
           ...(startTime !== undefined ? { startTime } : {}),
           ...(endTime !== undefined ? { endTime } : {}),
           ...(startTime !== undefined || endTime !== undefined ? { durationHours } : {}),
-          ...(paymentTimestamp ? { paidAt: paymentTimestamp } : {}),
+          ...(paymentTimestamp &&
+          (payment != null || linkedMembershipPayment?.status === "confirmed" || before.paidAt != null)
+            ? { paidAt: paymentTimestamp }
+            : {}),
           updatedAt: new Date(),
         })
         .where(eq(bookingsTable.id, id))
@@ -2089,7 +2123,35 @@ router.patch("/bookings/:id/dates", adminMiddleware, async (req, res) => {
           })
           .where(eq(paymentsTable.id, payment.id));
       }
-      return { booking, payment: paymentTimestamp ? { ...payment, paidAt: paymentTimestamp, confirmedAt: paymentTimestamp } : payment };
+      if (linkedMembershipPayment && paymentTimestamp) {
+        await tx
+          .update(membershipPaymentsTable)
+          .set({
+            ...(membershipPaymentDateField === "confirmedAt"
+              ? { confirmedAt: paymentTimestamp }
+              : { submittedAt: paymentTimestamp }),
+            updatedAt: new Date(),
+          })
+          .where(eq(membershipPaymentsTable.id, linkedMembershipPayment.id));
+      }
+      return {
+        booking,
+        payment: paymentTimestamp
+          ? payment
+            ? { ...payment, paidAt: paymentTimestamp, confirmedAt: paymentTimestamp }
+            : undefined
+          : payment,
+        membershipPayment:
+          paymentTimestamp && linkedMembershipPayment
+            ? {
+                ...linkedMembershipPayment,
+                ...(membershipPaymentDateField === "confirmedAt"
+                  ? { confirmedAt: paymentTimestamp }
+                  : { submittedAt: paymentTimestamp }),
+              }
+            : linkedMembershipPayment,
+        paymentDate: paymentTimestamp ?? before.paidAt ?? null,
+      };
     });
 
     await logAudit({
@@ -2099,15 +2161,19 @@ router.patch("/bookings/:id/dates", adminMiddleware, async (req, res) => {
       entityId: id,
       before: {
         bookingDate: before.bookingDate,
-        paymentDate: before.paidAt,
-        paymentConfirmedAt: before.paidAt,
+        paymentDate: before.paidAt ?? membershipPayment?.confirmedAt ?? membershipPayment?.submittedAt,
+        paymentConfirmedAt: before.paidAt ?? membershipPayment?.confirmedAt,
         startTime: before.startTime,
         endTime: before.endTime,
       },
       after: {
         bookingDate: updated.booking.bookingDate,
-        paymentDate: updated.payment?.paidAt ?? before.paidAt,
-        paymentConfirmedAt: updated.payment?.confirmedAt ?? before.paidAt,
+        paymentDate:
+          updated.payment?.paidAt ??
+          updated.membershipPayment?.confirmedAt ??
+          updated.membershipPayment?.submittedAt ??
+          before.paidAt,
+        paymentConfirmedAt: updated.payment?.confirmedAt ?? updated.membershipPayment?.confirmedAt ?? before.paidAt,
         startTime: updated.booking.startTime,
         endTime: updated.booking.endTime,
       },
@@ -2119,6 +2185,10 @@ router.patch("/bookings/:id/dates", adminMiddleware, async (req, res) => {
   } catch (err: any) {
     if (String(err?.message) === "PAYMENT_NOT_FOUND") {
       res.status(400).json({ error: "Booking ini belum memiliki pembayaran yang dapat dikoreksi" });
+      return;
+    }
+    if (String(err?.message) === "PAYMENT_DATE_INVALID") {
+      res.status(400).json({ error: "Tanggal pembayaran tidak valid" });
       return;
     }
     const message = `${String(err?.message ?? "")} ${String(err?.cause?.message ?? "")}`;
