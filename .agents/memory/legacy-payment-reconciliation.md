@@ -14,3 +14,9 @@ For a mirror whose `entry_id` points to a deleted entry, restore its link only i
 **Why:** A missing entry pointer can block otherwise legitimate booking corrections. Reattaching it from a reference match alone could instead bind a payment to the wrong historical journal or tax period.
 
 **How to apply:** Treat any missing, duplicated, reversed, unbalanced, or tax-mismatched evidence as a manual-review exception; it is not an auto-repair candidate. Re-run dry-run after application to prove the operation is idempotent.
+
+After repairing a dead public entry link, validate the originally blocked metadata correction in a separate rollback transaction across all four layers: canonical payment, internal journal, public payment mirror, and public accounting entry.
+
+**Why:** A valid replacement link alone does not prove that trigger propagation and posted-journal guards now agree end to end.
+
+**How to apply:** Require the classification fields to align in all four layers while debit, credit, tax, posting status, and journal lines remain unchanged; then roll back the validation transaction.
