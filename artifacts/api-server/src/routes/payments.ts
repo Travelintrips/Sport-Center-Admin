@@ -1079,6 +1079,17 @@ router.patch("/payments/:id/metadata", adminMiddleware, async (req, res) => {
           true
         )
       `);
+      // The internal posted-journal guard uses a separate, narrower GUC.
+      // Enable it only for this metadata-only transaction so the journal
+      // trigger can mirror method/provider changes without allowing any
+      // financial, lifecycle, or journal-line mutation.
+      await tx.execute(sql`
+        SELECT set_config(
+          'sport_center.allow_posted_accounting_metadata_correction',
+          'on',
+          true
+        )
+      `);
 
       const [updated] = await tx
         .update(paymentsTable)
