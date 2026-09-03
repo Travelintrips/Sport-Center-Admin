@@ -3604,6 +3604,14 @@ export default function AdminBookings() {
                       isPendingVerificationBooking &&
                       groupPendingRows.length > 0 &&
                       groupVerificationRow?.id === b.id;
+                    const listPayment = b.membershipPayment ?? b.payment;
+                    const listPaymentDate =
+                      listPayment?.confirmedAt ??
+                      listPayment?.submittedAt ??
+                      listPayment?.paidAt ??
+                      listPayment?.updatedAt ??
+                      listPayment?.createdAt;
+                    const isMembershipPayment = Boolean(b.membershipPayment);
 
                     return (
                     <motion.tr
@@ -3694,31 +3702,33 @@ export default function AdminBookings() {
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">
                          <PaymentMethodSelect
-                           payment={b.payment}
+                            payment={listPayment}
                            options={paymentMethodOptions}
                            onChange={(paymentId, paymentMethod) =>
-                             updatePaymentMetadataMutation.mutate({
-                               id: paymentId,
-                               data: { paymentMethod },
-                             })
+                              !isMembershipPayment &&
+                              updatePaymentMetadataMutation.mutate({
+                                id: paymentId,
+                                data: { paymentMethod },
+                              })
                            }
                            disabled={updatePaymentMetadataMutation.isPending}
+                            lockedReason={
+                              isMembershipPayment
+                                ? "Metode pembayaran dikelola dari data membership"
+                                : undefined
+                            }
                          />
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">
-                        {b.payment?.confirmedAt ? (
+                        {listPaymentDate ? (
                           <div>
                             <div className="text-xs font-medium text-slate-700 dark:text-slate-300">
-                              {new Date(b.payment.confirmedAt).toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" })}
+                              {new Date(listPaymentDate).toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" })}
                             </div>
                             <div className="text-[11px] text-slate-400">
-                              {new Date(b.payment.confirmedAt).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}
+                              {new Date(listPaymentDate).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}
                             </div>
                           </div>
-                        ) : b.payment?.updatedAt ? (
-                          <span className="text-[11px] text-slate-400">
-                            {new Date(b.payment.updatedAt).toLocaleDateString("id-ID", { day: "2-digit", month: "short" })}
-                          </span>
                         ) : (
                           <span className="text-xs text-slate-300 dark:text-slate-600">—</span>
                         )}

@@ -261,7 +261,11 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
     const membershipIds = [
       ...new Set(
         bookings
-          .filter((booking) => booking.source === "gym_membership_payment")
+          .filter(
+            (booking) =>
+              booking.source === "gym_membership_payment" ||
+              booking.source === "gym_membership",
+          )
           .map((booking) => booking.membershipId)
           .filter((id): id is number => id != null),
       ),
@@ -287,10 +291,18 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
       membershipPayments.map((payment) => [payment.id, payment]),
     );
     const latestMembershipPaymentByMembership = new Map<number, (typeof membershipPayments)[number]>();
+    const membershipPaymentsByMembership = new Map<
+      number,
+      (typeof membershipPayments)[number][]
+    >();
     for (const payment of membershipPayments) {
       if (!latestMembershipPaymentByMembership.has(payment.membershipId)) {
         latestMembershipPaymentByMembership.set(payment.membershipId, payment);
       }
+      const paymentsForMembership =
+        membershipPaymentsByMembership.get(payment.membershipId) ?? [];
+      paymentsForMembership.push(payment);
+      membershipPaymentsByMembership.set(payment.membershipId, paymentsForMembership);
     }
 
     // Legacy Paylabs rows may have been inserted with only the provider code
@@ -356,8 +368,15 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
         (b.membershipPaymentId != null
           ? membershipPaymentById.get(b.membershipPaymentId)
           : undefined) ??
-        (b.source === "gym_membership_payment" && b.membershipId != null
-          ? latestMembershipPaymentByMembership.get(b.membershipId)
+        (b.membershipId != null
+          ? membershipPaymentsByMembership
+              .get(b.membershipId)
+              ?.find(
+                (payment) =>
+                  payment.periodStart <= b.bookingDate &&
+                  b.bookingDate < payment.periodEnd,
+              ) ??
+            latestMembershipPaymentByMembership.get(b.membershipId)
           : undefined);
       const payment =
         bPayments.find((p) => p.status === "pending" || p.status === "confirmed") ??
