@@ -91,10 +91,14 @@ function proofImageUrl(rawUrl: string): string {
 
 type BookingStatus =
   | "pending_payment"
+  | "waiting_confirmation"
+  | "waiting_admin_approval"
   | "paid"
   | "confirmed"
   | "completed"
   | "cancelled"
+  | "rejected"
+  | "expired"
   | "refunded";
 
 const STATUS_CONFIG: Record<
@@ -103,6 +107,20 @@ const STATUS_CONFIG: Record<
 > = {
   pending_payment: {
     label: "Menunggu Pembayaran",
+    color: "text-amber-700 dark:text-amber-300",
+    bg: "bg-amber-100 dark:bg-amber-900/30",
+    icon: Clock,
+    pill: "border-amber-200 dark:border-amber-800",
+  },
+  waiting_confirmation: {
+    label: "Menunggu Verifikasi",
+    color: "text-blue-700 dark:text-blue-300",
+    bg: "bg-blue-100 dark:bg-blue-900/30",
+    icon: Clock,
+    pill: "border-blue-200 dark:border-blue-800",
+  },
+  waiting_admin_approval: {
+    label: "Menunggu Persetujuan Admin",
     color: "text-amber-700 dark:text-amber-300",
     bg: "bg-amber-100 dark:bg-amber-900/30",
     icon: Clock,
@@ -135,6 +153,20 @@ const STATUS_CONFIG: Record<
     bg: "bg-red-100 dark:bg-red-900/30",
     icon: XCircle,
     pill: "border-red-200 dark:border-red-800",
+  },
+  rejected: {
+    label: "Ditolak",
+    color: "text-red-700 dark:text-red-300",
+    bg: "bg-red-100 dark:bg-red-900/30",
+    icon: XCircle,
+    pill: "border-red-200 dark:border-red-800",
+  },
+  expired: {
+    label: "Kedaluwarsa",
+    color: "text-slate-700 dark:text-slate-300",
+    bg: "bg-slate-100 dark:bg-slate-900/30",
+    icon: Clock,
+    pill: "border-slate-200 dark:border-slate-700",
   },
   refunded: {
     label: "Pengembalian Dana",
@@ -971,6 +1003,8 @@ function BookingDetailDrawer({
   onUpdateStatus,
   onConfirmPayment,
   onRejectPayment,
+  onConfirmMembershipPayment,
+  onRejectMembershipPayment,
   onClearProof,
   onDelete,
   paymentMethodOptions,
@@ -984,6 +1018,8 @@ function BookingDetailDrawer({
   onUpdateStatus: (status: string, notes?: string) => void;
   onConfirmPayment: (paymentId: number) => void;
   onRejectPayment: (paymentId: number) => void;
+  onConfirmMembershipPayment: (membershipId: number) => void;
+  onRejectMembershipPayment: (membershipId: number) => void;
   onClearProof: (paymentId: number) => void;
   onDelete: (id: number) => void;
   paymentMethodOptions: PaymentMethodOption[];
@@ -998,7 +1034,28 @@ function BookingDetailDrawer({
     endTime?: string,
   ) => Promise<void>;
 }) {
-  const allPayments: any[] = booking.payments ?? (booking.payment ? [booking.payment] : []);
+  const membershipPaymentBooking =
+    booking.source === "gym_membership_payment" || booking.membershipPaymentId != null;
+  const membershipUsageBooking = booking.source === "gym_membership";
+  const membershipPayment = booking.membershipPayment
+    ? {
+        ...booking.membershipPayment,
+        id: booking.membershipPayment.id,
+        amount: Number(booking.membershipPayment.amount),
+        proofUrl: booking.membershipPayment.paymentProofUrl,
+        paymentType: "full_payment",
+        isMembershipPayment: true,
+        membershipId: booking.membershipId,
+      }
+    : null;
+  const allPayments: any[] =
+    booking.payments?.length > 0
+      ? booking.payments
+      : membershipPaymentBooking && membershipPayment
+        ? [membershipPayment]
+        : booking.payment
+          ? [booking.payment]
+          : [];
   const editablePayment =
     [...allPayments]
       .sort((a, b) => Number(b.id ?? 0) - Number(a.id ?? 0))
@@ -1006,7 +1063,11 @@ function BookingDetailDrawer({
     [...allPayments].sort((a, b) => Number(b.id ?? 0) - Number(a.id ?? 0))[0] ??
     booking.payment ??
     null;
-  const paymentDateValue = editablePayment?.paidAt ?? editablePayment?.confirmedAt ?? booking.paidAt;
+  const paymentDateValue =
+    editablePayment?.paidAt ??
+    editablePayment?.confirmedAt ??
+    editablePayment?.submittedAt ??
+    booking.paidAt;
   const [adminNotes, setAdminNotes] = useState(booking.adminNotes ?? "");
   const [confirmAction, setConfirmAction] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -1037,6 +1098,7 @@ function BookingDetailDrawer({
   };
 
   const isCompleted = booking.status === "completed" || booking.status === "confirmed";
+  const hasPaymentData = Boolean(editablePayment || booking.paidAt || booking.membershipPayment);
   const hasConfirmedPaymentBookingMismatch =
     !isCompleted &&
     ["pending_payment", "waiting_confirmation", "paid"].includes(booking.status) &&
@@ -1161,7 +1223,10 @@ function BookingDetailDrawer({
               <div className={`text-sm font-bold ${cfg.color}`}>{cfg.label}</div>
               <div className="text-xs text-slate-500">
                 {booking.status === "pending_payment" && "Menunggu customer upload bukti pembayaran"}
-                {booking.status === "paid" && "Bukti transfer diterima — perlu verifikasi admin"}
+                {membershipPaymentBooking && (booking.status === "waiting_confirmation" || booking.status === "paid") &&
+                  "Bukti pembayaran membership diterima — perlu verifikasi admin"}
+                {!membershipPaymentBooking && booking.status === "paid" && "Bukti transfer diterima — perlu verifikasi admin"}
+                {!membershipPaymentBooking && booking.status === "waiting_confirmation" && "Bukti pembayaran diterima — perlu verifikasi admin"}
                 {(booking.status === "completed" || booking.status === "confirmed") && (
                   booking.payerType === "company"
                     ? "Booking perusahaan — dikonfirmasi otomatis, masuk tagihan bulanan"
@@ -1189,13 +1254,24 @@ function BookingDetailDrawer({
           )}
 
           {/* Gym membership usage */}
-          {((booking as any).membershipId || (booking as any).source === "gym_membership") && (
+          {membershipUsageBooking && (
             <div className="flex items-center gap-3 p-3 rounded-xl border border-cyan-200 dark:border-cyan-800 bg-cyan-50 dark:bg-cyan-900/20">
               <Dumbbell size={16} className="text-cyan-600 dark:text-cyan-400 shrink-0" />
               <div className="flex-1 min-w-0">
                 <div className="text-sm font-bold text-cyan-700 dark:text-cyan-300">Pemakaian Member Gym</div>
                 <div className="text-xs text-cyan-600 dark:text-cyan-400">
-                  Membership #{(booking as any).membershipId ?? "—"} — tidak ada tagihan kunjungan (Rp0)
+                  Membership #{(booking as any).membershipId ?? "—"} — kunjungan sudah termasuk membership (Rp0)
+                </div>
+              </div>
+            </div>
+          )}
+          {membershipPaymentBooking && membershipPayment && (
+            <div className="flex items-center gap-3 p-3 rounded-xl border border-cyan-200 dark:border-cyan-800 bg-cyan-50 dark:bg-cyan-900/20">
+              <Dumbbell size={16} className="text-cyan-600 dark:text-cyan-400 shrink-0" />
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-bold text-cyan-700 dark:text-cyan-300">Pembayaran Membership Gym</div>
+                <div className="text-xs text-cyan-600 dark:text-cyan-400">
+                  Membership #{booking.membershipId ?? "—"} · Periode {membershipPayment.periodStart} s/d {membershipPayment.periodEnd}
                 </div>
               </div>
             </div>
@@ -1262,7 +1338,7 @@ function BookingDetailDrawer({
                       type="date"
                       value={paymentDate}
                       onChange={(event) => setPaymentDate(event.target.value)}
-                      disabled={!booking.payment && !booking.paidAt}
+                      disabled={!hasPaymentData}
                       className="h-8 text-xs bg-white dark:bg-slate-900"
                     />
                   </div>
@@ -1287,7 +1363,7 @@ function BookingDetailDrawer({
                     />
                   </div>
                 </div>
-                {!booking.payment && !booking.paidAt && <div className="text-[10px] text-slate-500">Belum ada pembayaran untuk dikoreksi.</div>}
+                {!hasPaymentData && <div className="text-[10px] text-slate-500">Belum ada pembayaran untuk dikoreksi.</div>}
                 <Button
                   size="sm"
                   onClick={saveDates}
@@ -1429,13 +1505,13 @@ function BookingDetailDrawer({
                   const statusColor =
                     pmt.status === "confirmed"
                       ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
-                      : pmt.status === "rejected"
+                      : pmt.status === "rejected" || pmt.status === "cancelled"
                       ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300"
                       : "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300";
                   const statusLabel =
                     pmt.status === "confirmed"
                       ? "Dikonfirmasi"
-                      : pmt.status === "rejected"
+                      : pmt.status === "rejected" || pmt.status === "cancelled"
                       ? "Ditolak"
                       : "Menunggu";
                   const isRepairingBooking =
@@ -1470,6 +1546,7 @@ function BookingDetailDrawer({
                           options={paymentMethodOptions}
                           onChange={onUpdatePaymentMethod}
                           disabled={isUpdating}
+                          lockedReason={pmt.isMembershipPayment ? "Metode pembayaran membership dikelola dari data membership" : undefined}
                         />
                         {(() => {
                           const ocr = pmt.ocrData as {
@@ -1510,10 +1587,14 @@ function BookingDetailDrawer({
                         })()}
                       </div>
                       {pmt.proofUrl && <ProofImage proofUrl={pmt.proofUrl} />}
-                      {((pmt.status === "pending" && pmt.proofUrl) || isRepairingBooking) && (
+                      {(((pmt.status === "pending" || pmt.status === "waiting_confirmation" || pmt.status === "pending_payment") && pmt.proofUrl) || isRepairingBooking) && (
                         <div className="flex gap-2 pt-1">
                           <button
-                            onClick={() => onConfirmPayment(pmt.id)}
+                            onClick={() =>
+                              pmt.isMembershipPayment
+                                ? onConfirmMembershipPayment(pmt.membershipId)
+                                : onConfirmPayment(pmt.id)
+                            }
                             disabled={isUpdating}
                             className="flex-1 flex items-center justify-center gap-1.5 h-9 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50 transition-colors"
                           >
@@ -1521,21 +1602,27 @@ function BookingDetailDrawer({
                             {confirmLabel}
                           </button>
                           <button
-                            onClick={() => onRejectPayment(pmt.id)}
+                            onClick={() =>
+                              pmt.isMembershipPayment
+                                ? onRejectMembershipPayment(pmt.membershipId)
+                                : onRejectPayment(pmt.id)
+                            }
                             disabled={isUpdating}
                             className="flex items-center justify-center gap-1.5 h-9 px-3 rounded-xl text-xs font-semibold border border-red-200 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50 transition-colors"
                           >
                             <XCircle size={13} />
                             Tolak
                           </button>
-                          <button
-                            onClick={() => onClearProof(pmt.id)}
-                            disabled={isUpdating}
-                            title="Hapus bukti transfer"
-                            className="flex items-center justify-center gap-1.5 h-9 px-3 rounded-xl text-xs font-semibold border border-slate-200 dark:border-slate-600 text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-50 transition-colors"
-                          >
-                            <Trash2 size={13} />
-                          </button>
+                          {!pmt.isMembershipPayment && (
+                            <button
+                              onClick={() => onClearProof(pmt.id)}
+                              disabled={isUpdating}
+                              title="Hapus bukti transfer"
+                              className="flex items-center justify-center gap-1.5 h-9 px-3 rounded-xl text-xs font-semibold border border-slate-200 dark:border-slate-600 text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-50 transition-colors"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          )}
                         </div>
                       )}
                     </div>
@@ -2611,6 +2698,55 @@ export default function AdminBookings() {
     },
   });
 
+  const membershipPaymentMutation = useMutation({
+    mutationFn: async ({
+      membershipId,
+      status,
+    }: {
+      membershipId: number;
+      status: "active" | "cancelled";
+    }) => {
+      const response = await fetch(`${API_BASE}/memberships/${membershipId}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${getToken() ?? ""}`,
+        },
+        body: JSON.stringify({ status }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data?.error ?? `HTTP ${response.status}`);
+      }
+      return { data, status };
+    },
+    onSuccess: async ({ status }) => {
+      await queryClient.invalidateQueries({ queryKey: getListBookingsQueryKey() });
+      const refreshed = await refetchBookings();
+      setSelectedBooking((current: any) => {
+        if (!current) return current;
+        return (
+          (refreshed.data as any[] | undefined)?.find((booking) => booking.id === current.id) ??
+          current
+        );
+      });
+      toast({
+        title: status === "active"
+          ? "Pembayaran membership dikonfirmasi"
+          : "Pembayaran membership ditolak",
+        description: status === "active"
+          ? "Membership dan booking pembayaran sudah diaktifkan."
+          : "Membership dibatalkan dan booking pembayaran ditolak.",
+      });
+    },
+    onError: (error: Error) =>
+      toast({
+        title: "Gagal memperbarui pembayaran membership",
+        description: error.message,
+        variant: "destructive",
+      }),
+  });
+
   // Edit metadata pembayaran (metode/provider) memakai endpoint khusus yang
   // tidak menyentuh status, konfirmasi, settlement, atau akuntansi finansial.
   const updatePaymentMetadataMutation = useUpdatePaymentMetadata({
@@ -2915,7 +3051,12 @@ export default function AdminBookings() {
     onError: (err: Error) => toast({ title: "Gagal", description: err.message, variant: "destructive" }),
   });
 
-  const isUpdating = updateBookingMutation.isPending || updatePaymentMutation.isPending || updatePaymentMetadataMutation.isPending || deletingId !== null;
+  const isUpdating =
+    updateBookingMutation.isPending ||
+    updatePaymentMutation.isPending ||
+    membershipPaymentMutation.isPending ||
+    updatePaymentMetadataMutation.isPending ||
+    deletingId !== null;
   const pendingVerification = useMemo(() => {
     const keys = new Set(
       bookings
@@ -3892,6 +4033,12 @@ export default function AdminBookings() {
           }
           onRejectPayment={(paymentId) =>
             updatePaymentMutation.mutate({ id: paymentId, data: { status: "rejected" } })
+          }
+          onConfirmMembershipPayment={(membershipId) =>
+            membershipPaymentMutation.mutate({ membershipId, status: "active" })
+          }
+          onRejectMembershipPayment={(membershipId) =>
+            membershipPaymentMutation.mutate({ membershipId, status: "cancelled" })
           }
            paymentMethodOptions={paymentMethodOptions}
            onUpdatePaymentMethod={(paymentId, paymentMethod) =>

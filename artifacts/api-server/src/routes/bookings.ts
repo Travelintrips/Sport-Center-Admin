@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { db, bookingsTable, facilitiesTable, paymentsTable, paymentAllocationsTable, promosTable, discountSettingsTable, apMembersTable, bookingHistoryTable, usersTable, verificationLogsTable, companyUsersTable, bookingGroupsTable, settingsTable, waActionTokensTable, waNotifLogsTable, paylabsSettingsTable } from "@workspace/db";
+import { db, bookingsTable, facilitiesTable, paymentsTable, membershipPaymentsTable, paymentAllocationsTable, promosTable, discountSettingsTable, apMembersTable, bookingHistoryTable, usersTable, verificationLogsTable, companyUsersTable, bookingGroupsTable, settingsTable, waActionTokensTable, waNotifLogsTable, paylabsSettingsTable } from "@workspace/db";
 import { eq, and, sql, or, ilike, desc, inArray, notExists, gte } from "drizzle-orm";
 import { adminMiddleware, authMiddleware, verifyToken } from "../lib/auth";
 import { broadcastAvailabilityChange } from "../lib/supabase";
@@ -251,6 +251,47 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
 
     const bookingIds = bookings.map((b) => b.id);
     const allPayments = bookingIds.length > 0 ? await db.select().from(paymentsTable) : [];
+    const membershipPaymentIds = [
+      ...new Set(
+        bookings
+          .map((booking) => booking.membershipPaymentId)
+          .filter((id): id is number => id != null),
+      ),
+    ];
+    const membershipIds = [
+      ...new Set(
+        bookings
+          .filter((booking) => booking.source === "gym_membership_payment")
+          .map((booking) => booking.membershipId)
+          .filter((id): id is number => id != null),
+      ),
+    ];
+    const membershipPayments =
+      membershipPaymentIds.length > 0 || membershipIds.length > 0
+        ? await db
+            .select()
+            .from(membershipPaymentsTable)
+            .where(
+              or(
+                ...(membershipPaymentIds.length > 0
+                  ? [inArray(membershipPaymentsTable.id, membershipPaymentIds)]
+                  : []),
+                ...(membershipIds.length > 0
+                  ? [inArray(membershipPaymentsTable.membershipId, membershipIds)]
+                  : []),
+              ),
+            )
+            .orderBy(desc(membershipPaymentsTable.id))
+        : [];
+    const membershipPaymentById = new Map(
+      membershipPayments.map((payment) => [payment.id, payment]),
+    );
+    const latestMembershipPaymentByMembership = new Map<number, (typeof membershipPayments)[number]>();
+    for (const payment of membershipPayments) {
+      if (!latestMembershipPaymentByMembership.has(payment.membershipId)) {
+        latestMembershipPaymentByMembership.set(payment.membershipId, payment);
+      }
+    }
 
     // Legacy Paylabs rows may have been inserted with only the provider code
     // ("bni", "bri", etc.). Resolve that code from the original transaction
@@ -311,6 +352,13 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
     const result = bookings.map((b) => {
       const facility = facilities.find((f) => f.id === b.facilityId);
       const bPayments = paymentsByBookingId[b.id] ?? [];
+      const membershipPayment =
+        (b.membershipPaymentId != null
+          ? membershipPaymentById.get(b.membershipPaymentId)
+          : undefined) ??
+        (b.source === "gym_membership_payment" && b.membershipId != null
+          ? latestMembershipPaymentByMembership.get(b.membershipId)
+          : undefined);
       const payment =
         bPayments.find((p) => p.status === "pending" || p.status === "confirmed") ??
         bPayments[bPayments.length - 1] ??
@@ -384,6 +432,9 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
         facilityCategory: facility?.category ?? "",
         payment: paymentForResponse ? { ...paymentForResponse, amount: Number(paymentForResponse.amount) } : null,
         payments: paymentsForResponse,
+        membershipPayment: membershipPayment
+          ? { ...membershipPayment, amount: Number(membershipPayment.amount) }
+          : null,
         remainingAmount: (() => {
           const confirmedDp = bPayments
             .filter((p) => p.paymentType === "dp" && p.status === "confirmed")
