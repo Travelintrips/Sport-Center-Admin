@@ -1,7 +1,10 @@
 import { describe, expect, it } from "@jest/globals";
 import {
+  FINAL_BANK_MATCH_STATUSES,
   getPaymentReconciliationMissingFields,
+  isPaymentSettledAndMatched,
   isPaymentReconciliationReady,
+  isFinalBankMatchStatus,
 } from "./paymentReconciliationEligibility";
 
 describe("payment reconciliation eligibility", () => {
@@ -32,5 +35,42 @@ describe("payment reconciliation eligibility", () => {
       providerName: "Manual Transfer",
       companyId: Number.NaN,
     })).toContain("company_id");
+  });
+
+  it.each(FINAL_BANK_MATCH_STATUSES)(
+    "marks a settled payment as reconciled for final mutation status %s",
+    (status) => {
+      expect(isFinalBankMatchStatus(status)).toBe(true);
+      expect(isPaymentSettledAndMatched(
+        { settlementStatus: "settled" },
+        true,
+      )).toBe(true);
+    },
+  );
+
+  it("does not highlight a payment that is not settled", () => {
+    for (const settlementStatus of [null, "unsettled", "pending", "SETTLING"]) {
+      expect(isPaymentSettledAndMatched({ settlementStatus }, true)).toBe(false);
+    }
+  });
+
+  it("does not highlight a settled payment without a final bank match", () => {
+    expect(isPaymentSettledAndMatched({ settlementStatus: "settled" }, false)).toBe(false);
+    expect(isFinalBankMatchStatus("need_review")).toBe(false);
+    expect(isFinalBankMatchStatus("candidate")).toBe(false);
+  });
+
+  it("allows a booking with DP and pelunasan to highlight when either payment qualifies", () => {
+    const payments = [
+      { settlementStatus: "settled", hasFinalBankMatch: false },
+      { settlementStatus: "unsettled", hasFinalBankMatch: true },
+      { settlementStatus: "settled", hasFinalBankMatch: true },
+    ];
+
+    expect(
+      payments.some((payment) =>
+        isPaymentSettledAndMatched(payment, payment.hasFinalBankMatch),
+      ),
+    ).toBe(true);
   });
 });

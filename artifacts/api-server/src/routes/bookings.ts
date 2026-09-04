@@ -29,6 +29,10 @@ import { getBaseUrl } from "../lib/appUrl";
 import { calculateTax, recordTaxTransaction, reverseTaxTransaction } from "../lib/tax";
 import { reverseJournalEntry, reversePublicAccountingEntry } from "../lib/accounting";
 import { generateBookingOrderNumber } from "../lib/orderNumber";
+import {
+  FINAL_BANK_MATCH_STATUSES,
+  isPaymentSettledAndMatched,
+} from "../lib/paymentReconciliationEligibility";
 
 const INACTIVE_STATUSES = ["cancelled", "expired", "rejected", "refunded"];
 const AP_MULTIGUNA_HOURLY_PRICE = 300000;
@@ -259,7 +263,7 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
         .from(bankMutationsTable)
         .where(and(
           inArray(bankMutationsTable.matchedPaymentId, paymentIds),
-          inArray(bankMutationsTable.status, ["auto_matched", "matched", "approved"] as any[]),
+          inArray(bankMutationsTable.status, [...FINAL_BANK_MATCH_STATUSES] as any[]),
         ));
       for (const mutation of reconciledMutations) {
         if (mutation.paymentId != null) reconciledPaymentIds.add(mutation.paymentId);
@@ -442,8 +446,10 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
           ...p,
           paymentMethod: label ?? p.paymentMethod,
           amount: Number(p.amount),
-          isBankReconciled:
-            p.settlementStatus === "settled" && reconciledPaymentIds.has(p.id),
+          isBankReconciled: isPaymentSettledAndMatched(
+            p,
+            reconciledPaymentIds.has(p.id),
+          ),
         };
       });
       const grandTotalNum = b.grandTotal != null ? Number(b.grandTotal) : Number(b.totalPrice);
@@ -469,9 +475,10 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
            ? {
                ...paymentForResponse,
                amount: Number(paymentForResponse.amount),
-               isBankReconciled:
-                 paymentForResponse.settlementStatus === "settled" &&
+               isBankReconciled: isPaymentSettledAndMatched(
+                 paymentForResponse,
                  reconciledPaymentIds.has(paymentForResponse.id),
+               ),
              }
            : null,
         payments: paymentsForResponse,

@@ -4,6 +4,28 @@ export type PaymentReconciliationMetadata = {
   companyId?: number | null;
 };
 
+export const FINAL_BANK_MATCH_STATUSES = [
+  "auto_matched",
+  "matched",
+  "approved",
+] as const;
+
+export function isFinalBankMatchStatus(status?: string | null): boolean {
+  return FINAL_BANK_MATCH_STATUSES.includes(
+    String(status ?? "").trim().toLowerCase() as (typeof FINAL_BANK_MATCH_STATUSES)[number],
+  );
+}
+
+export function isPaymentSettledAndMatched(
+  payment: { settlementStatus?: string | null },
+  hasFinalBankMatch: boolean,
+): boolean {
+  return (
+    String(payment.settlementStatus ?? "").trim().toLowerCase() === "settled" &&
+    hasFinalBankMatch
+  );
+}
+
 /**
  * Minimum metadata required before a payment may be used as a bank
  * reconciliation candidate. The matcher may still leave a valid payment in
