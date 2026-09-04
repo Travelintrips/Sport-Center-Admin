@@ -3612,6 +3612,10 @@ export default function AdminBookings() {
                       listPayment?.updatedAt ??
                       listPayment?.createdAt;
                     const isMembershipPayment = Boolean(b.membershipPayment);
+                    const isBankReconciled = Boolean(
+                      listPayment?.isBankReconciled ||
+                      (Array.isArray(b.payments) && b.payments.some((payment: any) => payment.isBankReconciled)),
+                    );
 
                     return (
                     <motion.tr
@@ -3630,10 +3634,20 @@ export default function AdminBookings() {
                           onChange={() => toggleSelect(b.id)}
                         />
                       </td>
-                      <td className="px-4 py-3">
-                        <span className="font-mono text-xs font-bold text-slate-600 dark:text-slate-400">
-                          {b.orderNumber}
-                        </span>
+                       <td className="px-4 py-3">
+                         <span
+                           className={`inline-flex items-center gap-1.5 rounded-md px-1.5 py-1 font-mono text-xs font-bold ${
+                             isBankReconciled
+                               ? "bg-yellow-100 text-yellow-800 ring-1 ring-inset ring-yellow-300 dark:bg-yellow-900/40 dark:text-yellow-200 dark:ring-yellow-700"
+                               : "text-slate-600 dark:text-slate-400"
+                           }`}
+                           title={isBankReconciled ? "Payment settled dan matched dengan mutasi bank" : undefined}
+                         >
+                           {b.orderNumber}
+                           {isBankReconciled && (
+                             <CheckCircle2 size={11} className="text-yellow-700 dark:text-yellow-300" aria-label="Settled dan matched" />
+                           )}
+                         </span>
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">

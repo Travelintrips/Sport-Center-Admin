@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { db, bookingsTable, facilitiesTable, paymentsTable, membershipPaymentsTable, paymentAllocationsTable, promosTable, discountSettingsTable, apMembersTable, bookingHistoryTable, usersTable, verificationLogsTable, companyUsersTable, bookingGroupsTable, settingsTable, waActionTokensTable, waNotifLogsTable, paylabsSettingsTable } from "@workspace/db";
+import { db, bookingsTable, facilitiesTable, paymentsTable, membershipPaymentsTable, paymentAllocationsTable, promosTable, discountSettingsTable, apMembersTable, bookingHistoryTable, usersTable, verificationLogsTable, companyUsersTable, bookingGroupsTable, settingsTable, waActionTokensTable, waNotifLogsTable, paylabsSettingsTable, bankMutationsTable } from "@workspace/db";
 import { eq, and, sql, or, ilike, desc, inArray, notExists, gte } from "drizzle-orm";
 import { adminMiddleware, authMiddleware, verifyToken } from "../lib/auth";
 import { broadcastAvailabilityChange } from "../lib/supabase";
@@ -251,6 +251,20 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
 
     const bookingIds = bookings.map((b) => b.id);
     const allPayments = bookingIds.length > 0 ? await db.select().from(paymentsTable) : [];
+    const paymentIds = [...new Set(allPayments.map((payment) => payment.id))];
+    const reconciledPaymentIds = new Set<number>();
+    if (paymentIds.length > 0) {
+      const reconciledMutations = await db
+        .select({ paymentId: bankMutationsTable.matchedPaymentId })
+        .from(bankMutationsTable)
+        .where(and(
+          inArray(bankMutationsTable.matchedPaymentId, paymentIds),
+          inArray(bankMutationsTable.status, ["auto_matched", "matched", "approved"] as any[]),
+        ));
+      for (const mutation of reconciledMutations) {
+        if (mutation.paymentId != null) reconciledPaymentIds.add(mutation.paymentId);
+      }
+    }
     const membershipPaymentIds = [
       ...new Set(
         bookings
@@ -428,6 +442,8 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
           ...p,
           paymentMethod: label ?? p.paymentMethod,
           amount: Number(p.amount),
+          isBankReconciled:
+            p.settlementStatus === "settled" && reconciledPaymentIds.has(p.id),
         };
       });
       const grandTotalNum = b.grandTotal != null ? Number(b.grandTotal) : Number(b.totalPrice);
@@ -449,7 +465,15 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
         isDpPaid: b.isDpPaid ?? false,
         facilityName: facility?.name ?? "",
         facilityCategory: facility?.category ?? "",
-        payment: paymentForResponse ? { ...paymentForResponse, amount: Number(paymentForResponse.amount) } : null,
+         payment: paymentForResponse
+           ? {
+               ...paymentForResponse,
+               amount: Number(paymentForResponse.amount),
+               isBankReconciled:
+                 paymentForResponse.settlementStatus === "settled" &&
+                 reconciledPaymentIds.has(paymentForResponse.id),
+             }
+           : null,
         payments: paymentsForResponse,
         membershipPayment: membershipPayment
           ? { ...membershipPayment, amount: Number(membershipPayment.amount) }

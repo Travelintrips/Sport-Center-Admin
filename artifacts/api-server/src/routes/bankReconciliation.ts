@@ -59,7 +59,11 @@ async function propagateApproval(
       rawPayment.paymentProvider ?? "unknown",
     );
 
-    await db.update(paymentsTable).set({ status: "confirmed", updatedAt: new Date() }).where(eq(paymentsTable.id, id));
+    await db.update(paymentsTable).set({
+      status: "confirmed",
+      settlementStatus: "settled",
+      updatedAt: new Date(),
+    }).where(eq(paymentsTable.id, id));
     await db.insert(auditLogsTable).values({
       userId: ctx.userId, userRole: ctx.userRole,
       action: "payment_confirmed_via_recon", entity: "payment", entityId: id,
@@ -98,7 +102,7 @@ async function propagateApproval(
           await db.update(bookingsTable).set({ status: "confirmed", updatedAt: new Date() })
             .where(eq(bookingsTable.id, sib.id));
           await db.update(paymentsTable)
-            .set({ status: "confirmed", updatedAt: new Date() })
+            .set({ status: "confirmed", settlementStatus: "settled", updatedAt: new Date() })
             .where(and(eq(paymentsTable.bookingId, sib.id), eq(paymentsTable.status, "pending")));
           await db.insert(auditLogsTable).values({
             userId: ctx.userId, userRole: ctx.userRole,
@@ -162,7 +166,7 @@ async function propagateApproval(
 
         // Konfirmasi payment terkait
         await db.update(paymentsTable)
-          .set({ status: "confirmed", updatedAt: new Date() })
+            .set({ status: "confirmed", settlementStatus: "settled", updatedAt: new Date() })
           .where(and(
             eq(paymentsTable.bookingId, row.id),
             inArray(paymentsTable.status, ["pending", "waiting_confirmation"] as any[])
