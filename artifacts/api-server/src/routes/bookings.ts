@@ -31,6 +31,7 @@ import { reverseJournalEntry, reversePublicAccountingEntry } from "../lib/accoun
 import { generateBookingOrderNumber } from "../lib/orderNumber";
 import {
   FINAL_BANK_MATCH_STATUSES,
+  getReconciledPaymentIds,
   isPaymentSettledAndMatched,
 } from "../lib/paymentReconciliationEligibility";
 
@@ -256,18 +257,26 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
     const bookingIds = bookings.map((b) => b.id);
     const allPayments = bookingIds.length > 0 ? await db.select().from(paymentsTable) : [];
     const paymentIds = [...new Set(allPayments.map((payment) => payment.id))];
-    const reconciledPaymentIds = new Set<number>();
+    let reconciledPaymentIds = new Set<number>();
     if (paymentIds.length > 0) {
       const reconciledMutations = await db
-        .select({ paymentId: bankMutationsTable.matchedPaymentId })
+        .select({
+          paymentId: bankMutationsTable.matchedPaymentId,
+          orderId: bankMutationsTable.matchedOrderId,
+        })
         .from(bankMutationsTable)
         .where(and(
-          inArray(bankMutationsTable.matchedPaymentId, paymentIds),
+          or(
+            inArray(bankMutationsTable.matchedPaymentId, paymentIds),
+            inArray(bankMutationsTable.matchedOrderId, bookingIds),
+          ),
           inArray(bankMutationsTable.status, [...FINAL_BANK_MATCH_STATUSES] as any[]),
         ));
-      for (const mutation of reconciledMutations) {
-        if (mutation.paymentId != null) reconciledPaymentIds.add(mutation.paymentId);
-      }
+      reconciledPaymentIds = getReconciledPaymentIds(
+        allPayments,
+        bookings,
+        reconciledMutations,
+      );
     }
     const membershipPaymentIds = [
       ...new Set(

@@ -26,6 +26,62 @@ export function isPaymentSettledAndMatched(
   );
 }
 
+export type ReconciliationPaymentReference = {
+  id: number;
+  bookingId: number;
+};
+
+export type ReconciliationBookingReference = {
+  id: number;
+  groupRef?: string | null;
+};
+
+export type ReconciliationMutationReference = {
+  paymentId?: number | null;
+  orderId?: number | null;
+  status?: string | null;
+};
+
+/**
+ * Resolves both direct payment matches and order/group matches to the
+ * payment IDs used by the booking list highlight.
+ */
+export function getReconciledPaymentIds(
+  payments: ReconciliationPaymentReference[],
+  bookings: ReconciliationBookingReference[],
+  mutations: ReconciliationMutationReference[],
+): Set<number> {
+  const reconciledPaymentIds = new Set<number>();
+  const bookingById = new Map(bookings.map((booking) => [booking.id, booking]));
+  const bookingIdsByGroupRef = new Map<string, number[]>();
+
+  for (const booking of bookings) {
+    if (!booking.groupRef) continue;
+    const groupBookingIds = bookingIdsByGroupRef.get(booking.groupRef) ?? [];
+    groupBookingIds.push(booking.id);
+    bookingIdsByGroupRef.set(booking.groupRef, groupBookingIds);
+  }
+
+  for (const mutation of mutations) {
+    if (!isFinalBankMatchStatus(mutation.status ?? null)) continue;
+    if (mutation.paymentId != null) reconciledPaymentIds.add(mutation.paymentId);
+
+    if (mutation.orderId == null) continue;
+    const matchedBooking = bookingById.get(mutation.orderId);
+    const matchedBookingIds = matchedBooking?.groupRef
+      ? bookingIdsByGroupRef.get(matchedBooking.groupRef) ?? [matchedBooking.id]
+      : [mutation.orderId];
+
+    for (const payment of payments) {
+      if (matchedBookingIds.includes(payment.bookingId)) {
+        reconciledPaymentIds.add(payment.id);
+      }
+    }
+  }
+
+  return reconciledPaymentIds;
+}
+
 /**
  * Minimum metadata required before a payment may be used as a bank
  * reconciliation candidate. The matcher may still leave a valid payment in

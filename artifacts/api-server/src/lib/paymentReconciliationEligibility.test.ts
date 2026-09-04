@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@jest/globals";
 import {
   FINAL_BANK_MATCH_STATUSES,
+  getReconciledPaymentIds,
   getPaymentReconciliationMissingFields,
   isPaymentSettledAndMatched,
   isPaymentReconciliationReady,
@@ -72,5 +73,37 @@ describe("payment reconciliation eligibility", () => {
         isPaymentSettledAndMatched(payment, payment.hasFinalBankMatch),
       ),
     ).toBe(true);
+  });
+
+  it("resolves an approved order match to the booking payment", () => {
+    expect(getReconciledPaymentIds(
+      [{ id: 11, bookingId: 101 }],
+      [{ id: 101, groupRef: null }],
+      [{ orderId: 101, status: "approved" }],
+    )).toEqual(new Set([11]));
+  });
+
+  it("resolves a group order match to all DP and pelunasan payments", () => {
+    expect(getReconciledPaymentIds(
+      [
+        { id: 21, bookingId: 201 },
+        { id: 22, bookingId: 202 },
+        { id: 23, bookingId: 203 },
+      ],
+      [
+        { id: 201, groupRef: "GRP-1" },
+        { id: 202, groupRef: "GRP-1" },
+        { id: 203, groupRef: "GRP-2" },
+      ],
+      [{ orderId: 202, status: "approved" }],
+    )).toEqual(new Set([21, 22]));
+  });
+
+  it("ignores order matches that are still under review", () => {
+    expect(getReconciledPaymentIds(
+      [{ id: 31, bookingId: 301 }],
+      [{ id: 301, groupRef: null }],
+      [{ orderId: 301, status: "need_review" }],
+    )).toEqual(new Set());
   });
 });
