@@ -44,3 +44,15 @@ ledger or fallback posting in Sport Center can create irreconcilable balances.
 **How to apply:** Before any accounting, payment, expense, tax, bank, or
 settlement change, identify the canonical object and duplicate-protection key
 before editing code or schema.
+
+Public booking bridges must use the live public uniqueness key and must not copy
+Sport Center customer IDs directly into public customer foreign keys.
+
+**Why:** The public booking number is unique while `sc_booking_id` may only be
+indexed, and customer IDs belong to separate namespaces. Assuming otherwise
+breaks bridge creation and blocks payment confirmation.
+
+**How to apply:** Inspect production indexes before selecting an upsert target;
+resolve the public customer explicitly or store it as null while preserving
+name, phone, and email. With outer joins, lock only the source table (`FOR SHARE
+OF source_alias`) rather than the nullable joined side.

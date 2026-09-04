@@ -55,14 +55,14 @@ export async function ensureSportCenterBookingMirror(
     `SELECT sb.id, sb.order_number, sb.customer_id, sb.customer_name,
             sb.customer_phone, sb.customer_email, sb.facility_id,
             sb.booking_date, sb.start_time, sb.end_time, sb.duration_hours,
-            sb.total_price, sb.discount_amount, sb.status, sb.payment_status,
+             sb.total_price, sb.discount_amount, sb.status,
             sb.notes, sb.ppn_rate, sb.ppn_amount, sb.grand_total,
             sb.created_at,
             sf.name AS facility_name
        FROM sport_center.sport_bookings sb
        LEFT JOIN sport_center.sport_facilities sf ON sf.id = sb.facility_id
       WHERE sb.id = $1
-      FOR SHARE`,
+       FOR SHARE OF sb`,
     [sourceBookingId],
   );
   const source = sourceResult.rows[0];
@@ -107,6 +107,18 @@ export async function ensureSportCenterBookingMirror(
   const publicFacilityId = facility.rows[0]?.id == null
     ? null
     : Number(facility.rows[0].id);
+  const customer = source.customer_id == null
+    ? { rows: [] as Array<{ id: number }> }
+    : await client.query(
+        `SELECT id
+           FROM public.sport_customers
+          WHERE id = $1
+          LIMIT 1`,
+        [source.customer_id],
+      );
+  const publicCustomerId = customer.rows[0]?.id == null
+    ? null
+    : Number(customer.rows[0].id);
   const ppnRate = source.ppn_rate == null ? 0 : Number(source.ppn_rate);
   const ppnAmount = source.ppn_amount == null ? 0 : Math.round(Number(source.ppn_amount));
   const totalAmount = source.grand_total == null
@@ -134,9 +146,10 @@ export async function ensureSportCenterBookingMirror(
         tax_amount, customer_email, sc_booking_id)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8::date,$9::time,$10::time,$11,$12,$13,
              $14,$15,$16,NULL,$17,$18,NOW(),$19,$20,$21,$22)
-     ON CONFLICT (sc_booking_id) DO UPDATE SET
+     ON CONFLICT (booking_number) DO UPDATE SET
        company_id = EXCLUDED.company_id,
        booking_number = EXCLUDED.booking_number,
+       sc_booking_id = EXCLUDED.sc_booking_id,
        customer_id = COALESCE(EXCLUDED.customer_id, public.sport_bookings.customer_id),
        customer_name = EXCLUDED.customer_name,
        customer_phone = EXCLUDED.customer_phone,
@@ -160,7 +173,7 @@ export async function ensureSportCenterBookingMirror(
     [
       companyId,
       String(source.order_number),
-      source.customer_id == null ? null : Number(source.customer_id),
+       publicCustomerId,
       String(source.customer_name),
       source.customer_phone ?? null,
       publicFacilityId,
