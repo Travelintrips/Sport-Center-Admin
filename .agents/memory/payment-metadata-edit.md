@@ -83,6 +83,18 @@ causing valid historical owner-approved Mandiri rules to be rejected.
 mirror function's manual-metadata correction support before marking the payment
 mirror migration ready.
 
+Behavioral markers must match the complete manual-provider control-flow branch,
+not a loose provider comparison substring that may also exist in an older rule
+query.
+
+**Why:** A loose `provider = unknown` source-text check falsely verified an old
+resolver that still demanded an owner-approved settlement rule for Transfer Bank,
+causing payment confirmation to fail with an HTTP 500.
+
+**How to apply:** Require the explicit `IF provider is null/unknown THEN` branch
+in both resolver and mirror function definitions before startup reports the
+payment mirror migration as ready.
+
 After committing a production function migration, repeat the exact startup
 predicate through a fresh connection using the runtime-selected production
 secret.

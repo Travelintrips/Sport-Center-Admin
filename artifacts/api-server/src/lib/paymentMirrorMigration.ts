@@ -39,7 +39,7 @@ export function startPaymentMirrorMigration(): Promise<void> {
           SELECT
             COALESCE(
               POSITION(
-                'v_provider_code = ''unknown'''
+                 'IF v_provider_code IS NULL OR v_provider_code = ''unknown'' THEN'
                 IN pg_get_functiondef(
                   to_regprocedure('sport_center.resolve_and_persist_payment_metadata(integer)')
                 )
@@ -61,7 +61,7 @@ export function startPaymentMirrorMigration(): Promise<void> {
             ) AS trigger_exists,
             COALESCE(
               POSITION(
-                'v_provider_code = ''unknown'''
+                 'IF v_provider_code IS NULL OR v_provider_code = ''unknown'' THEN'
                 IN pg_get_functiondef(
                   to_regprocedure('sport_center.mirror_confirmed_payment_to_public()')
                 )
@@ -99,7 +99,7 @@ export function startPaymentMirrorMigration(): Promise<void> {
             AS resolver_exists,
           COALESCE(
             POSITION(
-              'v_provider_code = ''unknown'''
+               'IF v_provider_code IS NULL OR v_provider_code = ''unknown'' THEN'
               IN pg_get_functiondef(
                 to_regprocedure('sport_center.resolve_and_persist_payment_metadata(integer)')
               )
@@ -121,7 +121,7 @@ export function startPaymentMirrorMigration(): Promise<void> {
           ) AS trigger_exists,
           COALESCE(
             POSITION(
-              'v_provider_code = ''unknown'''
+               'IF v_provider_code IS NULL OR v_provider_code = ''unknown'' THEN'
               IN pg_get_functiondef(
                 to_regprocedure('sport_center.mirror_confirmed_payment_to_public()')
               )
