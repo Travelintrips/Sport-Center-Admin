@@ -10,10 +10,10 @@ Production uploaded files (facility images, payment proofs, QRIS) are stored in 
 **Why:** App runs on Replit autoscale = ephemeral filesystem. Files written to local disk (`process.cwd()/uploads`) vanish on redeploy/restart, so images 404'd in production.
 
 **How to apply:**
-- Storage and DB live in the **same Supabase project** `xssrfshdrtdfupgqwfdw`. The `SUPABASE_SERVICE_ROLE_KEY` JWT `ref` claim = `xssrfshdrtdfupgqwfdw`; storage helper derives URL from that ref automatically.
-- Public buckets: `facility-images` (facility photos + QRIS under `qris/` prefix, 5MB image-only) and `payment-proofs` (proofs, 10MB, image-only). Both created/confirmed on 2026-06-11.
+- Derive the active Storage project from the environment-specific service-role key; never hardcode a historical Supabase project ref.
+- Required runtime buckets are `facility-images` and `payment-proofs`. Production startup ensures these exist; historical URLs can still reference deleted buckets and cannot restore missing bytes.
 - Server helper `artifacts/api-server/src/lib/supabaseStorage.ts` wraps upload/delete/getPublicUrl using `@supabase/supabase-js` + service role key. All upload routes use `multer.memoryStorage()` then `uploadToStorage(...)`.
-- Storage is shared across dev & prod environments (same storage project), so one upload serves both DBs — only the per-environment DB URL rows differ.
+- Development and production Storage credentials are isolated; never assume an object uploaded in one environment exists in the other.
 - Frontend renders stored URLs raw (`images[0].url`, `qrisImageUrl`); proof rendering passes `http...` URLs through unchanged. No frontend URL-prefixing — store absolute Supabase public URLs.
 - Admin membership proof previews use authenticated API download routes backed by the Storage service role; do not rely on direct public bucket access for financial evidence.
 - DEV may start without `SUPABASE_SERVICE_ROLE_KEY_DEV` when Replit Object Storage is available; never enable `ALLOW_DEV_ON_PROD_STORAGE` as a workaround.

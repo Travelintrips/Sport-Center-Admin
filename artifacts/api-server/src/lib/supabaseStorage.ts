@@ -163,14 +163,16 @@ export async function validateBuckets(): Promise<void> {
     try {
       const { data, error } = await supabase.storage.getBucket(bucket);
       if (error || !data) {
-        if (!IS_DEV) {
+        const requiredRuntimeBucket = bucket === BUCKETS.facility || bucket === BUCKETS.proof;
+        if (!IS_DEV && !requiredRuntimeBucket) {
           const message = error?.message ?? "Bucket does not exist";
           console.error(`[Storage] ❌ Production bucket "${bucket}" is unavailable: ${message}`);
           bucketStatus[bucket] = { ok: false, checkedAt: now, error: message };
           continue;
         }
 
-        // Development may provision missing buckets in the isolated dev project.
+        // Required upload buckets are safe to provision in-place in production;
+        // creating an empty bucket never mutates existing financial records.
         const mimeTypes = bucket === BUCKETS.facility
           ? ["image/jpeg", "image/png", "image/webp"]
           : ["image/jpeg", "image/png", "image/webp", "application/pdf", "application/octet-stream"];

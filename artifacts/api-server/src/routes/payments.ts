@@ -17,6 +17,7 @@ import { notifyPaymentConfirmed, notifyPaymentProofUploaded } from "../lib/notif
 import { logAudit, getClientInfo, getUserFromReq, logAccountingError } from "../lib/auditLog";
 import { syncStatusToBizportal, pushConfirmedPaymentAsBankMutation } from "../lib/bizportalSync";
 import { uploadProofWithFallback } from "./storage";
+import { downloadFromStorageUrl } from "../lib/supabaseStorage";
 
 import {
   createJournalEntry,
@@ -141,6 +142,36 @@ router.post("/payments/proof-upload", upload.single("proof"), async (req, res) =
   } catch (err) {
     req.log.error({ err }, "Upload proof error");
     res.status(500).json({ error: "Upload failed" });
+  }
+});
+
+router.get("/payments/:id/proof-file", adminMiddleware, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id)) {
+      res.status(400).json({ error: "ID pembayaran tidak valid" });
+      return;
+    }
+    const [payment] = await db
+      .select({ proofUrl: paymentsTable.proofUrl })
+      .from(paymentsTable)
+      .where(eq(paymentsTable.id, id))
+      .limit(1);
+    if (!payment?.proofUrl) {
+      res.status(404).json({ error: "Bukti pembayaran tidak ditemukan" });
+      return;
+    }
+
+    const file = await downloadFromStorageUrl(payment.proofUrl);
+    res.setHeader("Content-Type", file.contentType);
+    res.setHeader("Cache-Control", "private, max-age=300");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.send(file.buffer);
+  } catch (err) {
+    req.log.error({ err, paymentId: req.params.id }, "Read payment proof file error");
+    res.status(404).json({
+      error: "File bukti tidak tersedia di Storage. Minta pelanggan mengunggah ulang.",
+    });
   }
 });
 

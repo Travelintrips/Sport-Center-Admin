@@ -71,22 +71,6 @@ import { getToken } from "@/lib/auth";
 import VerifyIdDialog from "@/components/admin/VerifyIdDialog";
 import CorporateDocUpload from "@/components/CorporateDocUpload";
 
-/* ─── Helpers ───────────────────────────────────────────────────── */
-
-function proofImageUrl(rawUrl: string): string {
-  if (!rawUrl) return rawUrl;
-  // External URL — use as-is
-  if (rawUrl.startsWith("http")) return rawUrl;
-  // Find /api/uploads/ anywhere (handles malformed /api/storage/objects//api/uploads/... paths)
-  const uploadsIdx = rawUrl.lastIndexOf("/api/uploads/");
-  if (uploadsIdx !== -1) return rawUrl.slice(uploadsIdx);
-  // No leading slash variant: api/uploads/proofs/...
-  if (rawUrl.startsWith("api/uploads/")) return `/${rawUrl}`;
-  // Bare filename — assume proofs/ subdir
-  const bare = rawUrl.replace(/^\/+/, "");
-  return `/api/uploads/proofs/${bare}`;
-}
-
 /* ─── Status Config ────────────────────────────────────────────── */
 
 type BookingStatus =
@@ -858,24 +842,52 @@ function SummaryStats({
 
 /* ─── Proof Image Component ─────────────────────────────────────── */
 
-function ProofImage({ proofUrl }: { proofUrl: string }) {
+function ProofImage({ paymentId }: { paymentId: number }) {
   const [imgError, setImgError] = useState(false);
-  const url = proofImageUrl(proofUrl);
+  const [url, setUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    let objectUrl: string | null = null;
+    setImgError(false);
+    setUrl(null);
+
+    fetch(`${API_BASE}/payments/${paymentId}/proof-file`, {
+      headers: { Authorization: `Bearer ${getToken()}` },
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          const body = await response.json().catch(() => null);
+          throw new Error(body?.error || "Bukti pembayaran tidak dapat dimuat");
+        }
+        return response.blob();
+      })
+      .then((blob) => {
+        objectUrl = URL.createObjectURL(blob);
+        if (active) setUrl(objectUrl);
+        else URL.revokeObjectURL(objectUrl);
+      })
+      .catch(() => {
+        if (active) setImgError(true);
+      });
+
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [paymentId]);
 
   return (
     <div className="space-y-2">
       <div className="text-xs font-medium text-slate-500">Bukti Transfer</div>
       {imgError ? (
-        <a
-          href={url}
-          target="_blank"
-          rel="noreferrer"
-          className="flex items-center gap-2 px-3 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
+        <div
+          className="flex items-center gap-2 px-3 py-2.5 rounded-lg border border-amber-200 bg-amber-50 text-xs text-amber-700 dark:border-amber-900/50 dark:bg-amber-950/30"
         >
-          <FileImage size={14} /> Buka File Bukti
-          <ExternalLink size={11} className="ml-auto" />
-        </a>
-      ) : (
+          <AlertTriangle size={14} />
+          File tidak tersedia di Storage. Minta pelanggan upload ulang.
+        </div>
+      ) : url ? (
         <div className="relative rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 group">
           <img
             src={url}
@@ -894,6 +906,8 @@ function ProofImage({ proofUrl }: { proofUrl: string }) {
             </span>
           </a>
         </div>
+      ) : (
+        <Skeleton className="h-28 w-full rounded-lg" />
       )}
     </div>
   );
@@ -1586,7 +1600,7 @@ function BookingDetailDrawer({
                           );
                         })()}
                       </div>
-                      {pmt.proofUrl && <ProofImage proofUrl={pmt.proofUrl} />}
+                      {pmt.proofUrl && <ProofImage paymentId={pmt.id} />}
                       {(((pmt.status === "pending" || pmt.status === "waiting_confirmation" || pmt.status === "pending_payment") && pmt.proofUrl) || isRepairingBooking) && (
                         <div className="flex gap-2 pt-1">
                           <button
