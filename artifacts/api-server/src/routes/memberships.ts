@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type Response } from "express";
 import {
   db,
   gymMembershipsTable,
@@ -22,6 +22,7 @@ import { sendRekapPemakaianToAdmin } from "../lib/rekapPemakaian";
 import { notifyMembershipPaymentProofUploaded } from "../lib/notifications";
 import { getBaseUrl } from "../lib/appUrl";
 import { generateBookingOrderNumber } from "../lib/orderNumber";
+import { downloadFromStorageUrl } from "../lib/supabaseStorage";
 
 const router = Router();
 
@@ -259,6 +260,75 @@ async function deleteFromPublic(sourceId: number) {
     console.warn("[sync-public-memberships] Non-fatal delete error:", err);
   }
 }
+
+async function sendMembershipProof(
+  paymentProofUrl: string | null,
+  res: Response,
+) {
+  if (!paymentProofUrl) {
+    res.status(404).json({ error: "Bukti pembayaran tidak ditemukan" });
+    return;
+  }
+
+  const file = await downloadFromStorageUrl(paymentProofUrl);
+  res.setHeader("Content-Type", file.contentType);
+  res.setHeader("Cache-Control", "private, max-age=300");
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.send(file.buffer);
+}
+
+router.get("/memberships/:id/payment-proof-file", adminMiddleware, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id)) {
+      res.status(400).json({ error: "ID member tidak valid" });
+      return;
+    }
+    const [membership] = await db
+      .select({ paymentProofUrl: gymMembershipsTable.paymentProofUrl })
+      .from(gymMembershipsTable)
+      .where(eq(gymMembershipsTable.id, id))
+      .limit(1);
+    if (!membership) {
+      res.status(404).json({ error: "Membership tidak ditemukan" });
+      return;
+    }
+    await sendMembershipProof(membership.paymentProofUrl, res);
+  } catch (err) {
+    req.log.error({ err, membershipId: req.params.id }, "Read membership payment proof error");
+    res.status(404).json({ error: "File bukti pembayaran tidak tersedia di Storage" });
+  }
+});
+
+router.get("/memberships/:id/payments/:paymentId/proof-file", adminMiddleware, async (req, res) => {
+  try {
+    const membershipId = Number(req.params.id);
+    const paymentId = Number(req.params.paymentId);
+    if (!Number.isInteger(membershipId) || !Number.isInteger(paymentId)) {
+      res.status(400).json({ error: "ID pembayaran tidak valid" });
+      return;
+    }
+    const [payment] = await db
+      .select({ paymentProofUrl: membershipPaymentsTable.paymentProofUrl })
+      .from(membershipPaymentsTable)
+      .where(and(
+        eq(membershipPaymentsTable.id, paymentId),
+        eq(membershipPaymentsTable.membershipId, membershipId),
+      ))
+      .limit(1);
+    if (!payment) {
+      res.status(404).json({ error: "Pembayaran membership tidak ditemukan" });
+      return;
+    }
+    await sendMembershipProof(payment.paymentProofUrl, res);
+  } catch (err) {
+    req.log.error(
+      { err, membershipId: req.params.id, paymentId: req.params.paymentId },
+      "Read membership payment history proof error",
+    );
+    res.status(404).json({ error: "File bukti pembayaran tidak tersedia di Storage" });
+  }
+});
 
 // ─── Gym Check-in Endpoints ───────────────────────────────────────────────────
 

@@ -15,6 +15,7 @@ Production uploaded files (facility images, payment proofs, QRIS) are stored in 
 - Server helper `artifacts/api-server/src/lib/supabaseStorage.ts` wraps upload/delete/getPublicUrl using `@supabase/supabase-js` + service role key. All upload routes use `multer.memoryStorage()` then `uploadToStorage(...)`.
 - Storage is shared across dev & prod environments (same storage project), so one upload serves both DBs — only the per-environment DB URL rows differ.
 - Frontend renders stored URLs raw (`images[0].url`, `qrisImageUrl`); proof rendering passes `http...` URLs through unchanged. No frontend URL-prefixing — store absolute Supabase public URLs.
+- Admin membership proof previews use authenticated API download routes backed by the Storage service role; do not rely on direct public bucket access for financial evidence.
 - DEV may start without `SUPABASE_SERVICE_ROLE_KEY_DEV` when Replit Object Storage is available; never enable `ALLOW_DEV_ON_PROD_STORAGE` as a workaround.
 
 **Known gap:** `POST /payments/proof-upload` and `POST /storage/upload-proof` are intentionally unauthenticated (anonymous customers upload payment proof without an account). Size/mime limits are the only abuse guard. Adding auth would break anonymous booking; rate-limiting is a possible future hardening.

@@ -247,6 +247,27 @@ export function parseStorageUrl(
   return { bucket: m[1], objectPath: decodeURIComponent(m[2]) };
 }
 
+export async function downloadFromStorageUrl(
+  url: string,
+): Promise<{ buffer: Buffer; contentType: string }> {
+  const parsed = parseStorageUrl(url);
+  if (!parsed) {
+    throw new Error("Unsupported storage URL");
+  }
+
+  const { data, error } = await getClient().storage
+    .from(parsed.bucket)
+    .download(parsed.objectPath);
+  if (error || !data) {
+    throw error ?? new Error("Stored file not found");
+  }
+
+  return {
+    buffer: Buffer.from(await data.arrayBuffer()),
+    contentType: data.type || "application/octet-stream",
+  };
+}
+
 export async function deleteFromStorage(url: string): Promise<void> {
   if (!url || !isStorageConfigured()) return;
   const parsed = parseStorageUrl(url);

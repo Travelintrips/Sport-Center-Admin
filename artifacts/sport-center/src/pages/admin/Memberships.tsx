@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useListMemberships, useUpdateMembership, useDeleteMembership, getListMembershipsQueryKey } from "@workspace/api-client-react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -80,6 +80,62 @@ export default function AdminMemberships() {
   const [dateError, setDateError] = useState("");
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const [imgError, setImgError] = useState(false);
+  const [currentProofUrl, setCurrentProofUrl] = useState<string | null>(null);
+  const [proofLoadingId, setProofLoadingId] = useState<number | null>(null);
+
+  async function loadProtectedProof(path: string): Promise<string> {
+    const response = await fetch(`${API}${path}`, {
+      headers: { Authorization: `Bearer ${getToken()}` },
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => null);
+      throw new Error(body?.error || "Bukti pembayaran tidak dapat dimuat");
+    }
+    return URL.createObjectURL(await response.blob());
+  }
+
+  useEffect(() => {
+    let active = true;
+    let objectUrl: string | null = null;
+    setImgError(false);
+    setCurrentProofUrl(null);
+
+    if (viewMember?.id && viewMember?.paymentProofUrl) {
+      loadProtectedProof(`/memberships/${viewMember.id}/payment-proof-file`)
+        .then((url) => {
+          objectUrl = url;
+          if (active) setCurrentProofUrl(url);
+          else URL.revokeObjectURL(url);
+        })
+        .catch(() => {
+          if (active) setImgError(true);
+        });
+    }
+
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [viewMember?.id, viewMember?.paymentProofUrl]);
+
+  async function openPaymentHistoryProof(payment: MembershipPayment) {
+    if (!viewMember?.id) return;
+    setProofLoadingId(payment.id);
+    try {
+      const url = await loadProtectedProof(
+        `/memberships/${viewMember.id}/payments/${payment.id}/proof-file`,
+      );
+      setLightboxUrl(url);
+    } catch (error) {
+      toast({
+        title: "Bukti tidak dapat dibuka",
+        description: error instanceof Error ? error.message : "File tidak tersedia",
+        variant: "destructive",
+      });
+    } finally {
+      setProofLoadingId(null);
+    }
+  }
 
   // Export CSV
   const now = new Date();
@@ -733,10 +789,11 @@ export default function AdminMemberships() {
                               size="sm"
                               variant="outline"
                               className="h-8 gap-1.5"
-                              onClick={() => setLightboxUrl(payment.paymentProofUrl)}
+                              disabled={proofLoadingId === payment.id}
+                              onClick={() => openPaymentHistoryProof(payment)}
                             >
                               <ImageIcon size={13} />
-                              Bukti
+                              {proofLoadingId === payment.id ? "Memuat..." : "Bukti"}
                             </Button>
                           )}
                         </div>
@@ -761,30 +818,27 @@ export default function AdminMemberships() {
                     <div className="w-full rounded-xl border border-border bg-muted/40 flex flex-col items-center justify-center py-8 gap-2 text-muted-foreground text-sm">
                       <ImageIcon size={28} className="opacity-40" />
                       <span>Gambar tidak dapat dimuat</span>
-                      <a
-                        href={viewMember.paymentProofUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-primary underline text-xs"
-                      >
-                        Coba buka langsung
-                      </a>
+                      <span className="text-xs text-center px-4">
+                        File tidak ditemukan di Storage. Silakan upload ulang bukti pembayaran.
+                      </span>
                     </div>
-                  ) : (
+                  ) : currentProofUrl ? (
                     <img
-                      src={viewMember.paymentProofUrl}
+                      src={currentProofUrl}
                       alt="Bukti Pembayaran"
                       className="w-full max-h-64 object-contain rounded-xl border border-border cursor-zoom-in"
                       onError={() => setImgError(true)}
-                      onClick={() => setLightboxUrl(viewMember.paymentProofUrl)}
+                      onClick={() => setLightboxUrl(currentProofUrl)}
                     />
+                  ) : (
+                    <Skeleton className="h-44 w-full rounded-xl" />
                   )}
-                  {!imgError && (
+                  {!imgError && currentProofUrl && (
                     <Button
                       variant="outline"
                       size="sm"
                       className="w-full gap-2"
-                      onClick={() => setLightboxUrl(viewMember.paymentProofUrl)}
+                      onClick={() => setLightboxUrl(currentProofUrl)}
                     >
                       <ExternalLink size={14} />
                       Lihat Penuh
