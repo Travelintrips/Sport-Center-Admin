@@ -2873,6 +2873,10 @@ export default function AdminBookings() {
 
   const filtered = useMemo(() => {
     const matching = bookings.filter((b: any) => {
+      // Check-in member Gym tetap disimpan sebagai booking mirror untuk audit
+      // operasional, tetapi bukan transaksi pemesanan yang perlu ditampilkan.
+      if (b.source === "gym_membership") return false;
+
       if (statusFilter !== "all") {
         const match =
           statusFilter === "completed"
