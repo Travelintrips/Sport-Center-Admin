@@ -14,3 +14,9 @@ Each membership payment event also has one paired booking-order record marked as
 **Why:** Bizportal's order matcher reads `sport_bookings`, while the membership ledger is intentionally separate. A single payment-linked order makes the event visible without turning check-ins into duplicate income.
 
 **How to apply:** Key the payment order by the membership payment identity, sync it with the booking mirror, and keep check-in mirrors clearly marked as usage-only.
+
+Admin views of a membership-payment booking must fetch its proof through the membership-payment resource, not the ordinary booking-payment resource, even when both expose a numeric payment ID.
+
+**Why:** The two payment ledgers have independent ID sequences. Treating a membership payment ID as an ordinary payment ID can return the wrong row or a missing-file error while the real membership proof still exists.
+
+**How to apply:** Preserve the payment-source discriminator and membership ID through booking mirrors and UI models, then route proof reads and payment actions to the matching ledger endpoint.

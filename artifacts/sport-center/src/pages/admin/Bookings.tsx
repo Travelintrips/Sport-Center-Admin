@@ -842,7 +842,13 @@ function SummaryStats({
 
 /* ─── Proof Image Component ─────────────────────────────────────── */
 
-function ProofImage({ paymentId }: { paymentId: number }) {
+function ProofImage({
+  paymentId,
+  membershipId,
+}: {
+  paymentId: number;
+  membershipId?: number | null;
+}) {
   const [imgError, setImgError] = useState(false);
   const [url, setUrl] = useState<string | null>(null);
 
@@ -852,7 +858,11 @@ function ProofImage({ paymentId }: { paymentId: number }) {
     setImgError(false);
     setUrl(null);
 
-    fetch(`${API_BASE}/payments/${paymentId}/proof-file`, {
+    const proofEndpoint = membershipId
+      ? `${API_BASE}/memberships/${membershipId}/payments/${paymentId}/proof-file`
+      : `${API_BASE}/payments/${paymentId}/proof-file`;
+
+    fetch(proofEndpoint, {
       headers: { Authorization: `Bearer ${getToken()}` },
     })
       .then(async (response) => {
@@ -875,7 +885,7 @@ function ProofImage({ paymentId }: { paymentId: number }) {
       active = false;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [paymentId]);
+  }, [membershipId, paymentId]);
 
   return (
     <div className="space-y-2">
@@ -1600,7 +1610,12 @@ function BookingDetailDrawer({
                           );
                         })()}
                       </div>
-                      {pmt.proofUrl && <ProofImage paymentId={pmt.id} />}
+                      {pmt.proofUrl && (
+                        <ProofImage
+                          paymentId={pmt.id}
+                          membershipId={pmt.isMembershipPayment ? pmt.membershipId : null}
+                        />
+                      )}
                       {(((pmt.status === "pending" || pmt.status === "waiting_confirmation" || pmt.status === "pending_payment") && pmt.proofUrl) || isRepairingBooking) && (
                         <div className="flex gap-2 pt-1">
                           <button
