@@ -2875,7 +2875,16 @@ export default function AdminBookings() {
     const matching = bookings.filter((b: any) => {
       // Check-in member Gym tetap disimpan sebagai booking mirror untuk audit
       // operasional, tetapi bukan transaksi pemesanan yang perlu ditampilkan.
-      if (b.source === "gym_membership") return false;
+      // Baris legacy dapat kehilangan source, jadi kenali juga dari relasi
+      // membership tanpa payment event dan nilai booking Rp0.
+      const isMembershipCheckIn =
+        b.source === "gym_membership" ||
+        (
+          b.membershipId != null &&
+          b.membershipPaymentId == null &&
+          Number(b.grandTotal ?? b.totalPrice ?? 0) === 0
+        );
+      if (isMembershipCheckIn) return false;
 
       if (statusFilter !== "all") {
         const match =
