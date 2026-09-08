@@ -2875,15 +2875,11 @@ export default function AdminBookings() {
     const matching = bookings.filter((b: any) => {
       // Check-in member Gym tetap disimpan sebagai booking mirror untuk audit
       // operasional, tetapi bukan transaksi pemesanan yang perlu ditampilkan.
-      // Baris legacy dapat kehilangan source, jadi kenali juga dari relasi
-      // membership tanpa payment event dan nilai booking Rp0.
+      // Untuk entri membership, hanya pendaftaran/perpanjangan yang memiliki
+      // membershipPaymentId yang boleh tampil, termasuk pada data legacy.
       const isMembershipCheckIn =
         b.source === "gym_membership" ||
-        (
-          b.membershipId != null &&
-          b.membershipPaymentId == null &&
-          Number(b.grandTotal ?? b.totalPrice ?? 0) === 0
-        );
+        (b.membershipId != null && b.membershipPaymentId == null);
       if (isMembershipCheckIn) return false;
 
       if (statusFilter !== "all") {
