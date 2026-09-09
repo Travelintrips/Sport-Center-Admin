@@ -1134,18 +1134,21 @@ function BookingDetailDrawer({
     endTime !== originalEndTime;
 
   const saveDates = async () => {
-    if (
-      !bookingDate ||
-      (paymentDate && !/^\d{4}-\d{2}-\d{2}$/.test(paymentDate)) ||
-      !/^\d{2}:\d{2}$/.test(startTime) ||
-      !/^\d{2}:\d{2}$/.test(endTime) ||
-      startTime >= endTime
-    ) return;
     const nextBookingDate = bookingDate !== originalBookingDate ? bookingDate : undefined;
     const nextPaymentDate =
       paymentDate !== originalPaymentDate ? paymentDate || undefined : undefined;
     const nextStartTime = startTime !== originalStartTime ? startTime : undefined;
     const nextEndTime = endTime !== originalEndTime ? endTime : undefined;
+    const timeChanged = nextStartTime !== undefined || nextEndTime !== undefined;
+
+    if (
+      !bookingDate ||
+      (paymentDate && !/^\d{4}-\d{2}-\d{2}$/.test(paymentDate)) ||
+      (timeChanged &&
+        (!/^\d{2}:\d{2}$/.test(startTime) ||
+          !/^\d{2}:\d{2}$/.test(endTime) ||
+          startTime >= endTime))
+    ) return;
     if (
       nextBookingDate === undefined &&
       nextPaymentDate === undefined &&

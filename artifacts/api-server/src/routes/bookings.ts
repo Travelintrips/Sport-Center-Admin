@@ -2035,7 +2035,7 @@ router.patch("/bookings/:id/dates", adminMiddleware, async (req, res) => {
       before.source === "gym_membership_payment" || before.membershipPaymentId != null;
     const nextStartTime = startTime ?? before.startTime;
     const nextEndTime = endTime ?? before.endTime;
-    if (nextStartTime >= nextEndTime) {
+    if ((startTime !== undefined || endTime !== undefined) && nextStartTime >= nextEndTime) {
       res.status(400).json({ error: "Jam selesai harus lebih besar dari jam mulai" });
       return;
     }
