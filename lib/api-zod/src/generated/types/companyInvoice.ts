@@ -17,6 +17,9 @@ export interface CompanyInvoice {
   totalAmount: number;
   ppnAmount: number;
   grandTotal: number;
+  pphRate: number;
+  pphAmount: number;
+  netAmount: number;
   status: CompanyInvoiceStatus;
   /** @nullable */
   paidAt?: string | null;

@@ -112,6 +112,9 @@ export async function resolveInvoiceData(orderNumber: string): Promise<InvoiceDa
     ppnRate,
     ppnAmount,
     grandTotal,
+    pphRate: booking.pphRate == null ? 0 : Number(booking.pphRate),
+    pphAmount: booking.pphAmount == null ? 0 : Number(booking.pphAmount),
+    netAmount: booking.netAmount == null ? grandTotal : Number(booking.netAmount),
 
     promoCode: booking.promoCode ?? null,
     discountAmount: Number(booking.discountAmount ?? 0),
@@ -244,6 +247,9 @@ export async function resolveGroupInvoiceData(groupRef: string): Promise<Invoice
     ppnRate,
     ppnAmount,
     grandTotal,
+    pphRate: firstBooking.pphRate == null ? 0 : Number(firstBooking.pphRate),
+    pphAmount: groupBookings.reduce((sum, b) => sum + Number(b.pphAmount ?? 0), 0),
+    netAmount: groupBookings.reduce((sum, b) => sum + Number(b.netAmount ?? b.grandTotal ?? b.totalPrice), 0),
 
     promoCode: firstBooking.promoCode ?? null,
     discountAmount: totalDiscount,

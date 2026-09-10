@@ -41,6 +41,9 @@ export interface InvoiceData {
   ppnRate: number;
   ppnAmount: number;
   grandTotal: number;
+  pphRate: number;
+  pphAmount: number;
+  netAmount: number;
 
   promoCode?: string | null;
   discountAmount?: number;
@@ -642,6 +645,15 @@ export function buildInvoiceHtml(data: InvoiceData, opts: BuildOptions = {}): st
         <td>TOTAL</td>
         <td style="text-align:right;">Rp ${rp(data.grandTotal)}</td>
       </tr>
+      ${data.pphAmount > 0 ? `
+      <tr class="ppn">
+        <td>PPh dipotong ${data.pphRate}%</td>
+        <td style="text-align:right;">- Rp ${rp(data.pphAmount)}</td>
+      </tr>
+      <tr class="grand">
+        <td>NET DIBAYAR</td>
+        <td style="text-align:right;">Rp ${rp(data.netAmount)}</td>
+      </tr>` : ""}
     </table>
   </div>
   ${data.dppNilaiLain > 0 ? `

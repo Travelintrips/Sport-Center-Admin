@@ -11,6 +11,7 @@ import { createInvoiceJournalEntry, createPublicInvoiceAccountingEntry } from ".
 import { BUCKETS, uploadToStorage } from "../lib/supabaseStorage";
 import { uploadProofWithFallback } from "./storage";
 import { allowWhatsAppProviderSend } from "../lib/whatsappSafety";
+import { calculateWithholdingTax } from "../lib/tax";
 
 const uploadMiddleware = multer({
   storage: multer.memoryStorage(),
@@ -65,6 +66,9 @@ const invoiceBookingSelection = {
   totalPrice: bookingsTable.totalPrice,
   ppnAmount: bookingsTable.ppnAmount,
   grandTotal: bookingsTable.grandTotal,
+  pphRate: bookingsTable.pphRate,
+  pphAmount: bookingsTable.pphAmount,
+  netAmount: bookingsTable.netAmount,
 } as const;
 
 function invoiceBookingFilter(companyCustomerId: number, startDate: string, endDate: string) {
@@ -83,7 +87,15 @@ function mapInvoice(
   company?: typeof usersTable.$inferSelect | null,
 ) {
   const totalAmount = Number(inv.totalAmount); // inclusive price (subtotal pemakaian)
-  const { dpp, dppNilaiLain, ppnAmount, grandTotal } = calcTaxBreakdown(totalAmount);
+  const dpp = Number(inv.dppNilaiLain ?? 0) > 0
+    ? Math.round(Number(inv.dppNilaiLain) * 12 / 11)
+    : calcTaxBreakdown(totalAmount).dpp;
+  const dppNilaiLain = Number(inv.dppNilaiLain ?? 0) || calcTaxBreakdown(totalAmount).dppNilaiLain;
+  const ppnAmount = Number(inv.ppnAmount ?? 0);
+  const grandTotal = Number(inv.grandTotal ?? totalAmount);
+  const pphAmount = Number(inv.pphAmount ?? 0);
+  const pphRate = Number(inv.pphRate ?? 0);
+  const netAmount = Number(inv.netAmount ?? grandTotal - pphAmount);
   return {
     id: inv.id,
     invoiceNumber: inv.invoiceNumber,
@@ -98,6 +110,9 @@ function mapInvoice(
     dpp,
     dppNilaiLain,
     ppnAmount,
+    pphRate,
+    pphAmount,
+    netAmount,
     grandTotal,
     status: inv.status,
     paidAt: inv.paidAt ?? null,
@@ -121,6 +136,7 @@ function mapInvoice(
       subtotal: Number(item.subtotal ?? 0),
       taxAmount: Number(item.taxAmount ?? 0),
       totalAmount: Number(item.totalAmount ?? 0),
+      pphAmount: Number(item.pphAmount ?? 0),
     })),
   };
 }
@@ -140,6 +156,7 @@ async function buildAndInsertItems(invoiceId: number, companyId: number, booking
     pricePerHour: String(b.pricePerHour ?? 0),
     subtotal: String(Number(b.totalPrice ?? 0)),
     taxAmount: String(Number(b.ppnAmount ?? 0)),
+    pphAmount: String(Number(b.pphAmount ?? 0)),
     totalAmount: String(Number(b.grandTotal ?? b.totalPrice ?? 0)),
     orderNumber: b.orderNumber ?? null,
   }));
@@ -224,11 +241,17 @@ router.get("/company-invoices/preview", adminMiddleware, async (req, res) => {
       totalPrice: Number(b.totalPrice ?? 0),
       ppnAmount: b.ppnAmount == null ? null : Number(b.ppnAmount),
       grandTotal: b.grandTotal == null ? null : Number(b.grandTotal),
+      pphRate: b.pphRate == null ? null : Number(b.pphRate),
+      pphAmount: b.pphAmount == null ? null : Number(b.pphAmount),
+      netAmount: b.netAmount == null ? null : Number(b.netAmount),
     }));
 
     // subtotal = sum of inclusive prices (what customers paid)
-    const subtotal = bookingList.reduce((s, b) => s + b.totalPrice, 0);
+    const subtotal = bookingList.reduce((s, b) => s + (b.grandTotal ?? b.totalPrice), 0);
     const { dpp, dppNilaiLain, ppnAmount, grandTotal } = calcTaxBreakdown(subtotal);
+    const pphAmount = bookingList.reduce((s, b) => s + (b.pphAmount ?? 0), 0);
+    const pphRate = pphAmount > 0 ? Number(company.withholdingTaxRate ?? 10) : 0;
+    const netAmount = grandTotal - pphAmount;
 
     // Check if invoice already exists for this company + period
     const [existingInvoice] = await db.select().from(companyInvoicesTable).where(
@@ -371,8 +394,10 @@ async function handleGenerateInvoice(req: any, res: any) {
 
     // No existing invoice — create new one
     // totalAmount = sum of inclusive prices (what customers paid)
-    const totalAmount = unbilledBookings.reduce((sum, b) => sum + Number(b.totalPrice), 0);
+    const totalAmount = unbilledBookings.reduce((sum, b) => sum + Number(b.grandTotal ?? b.totalPrice), 0);
     const { dpp, dppNilaiLain, ppnAmount, grandTotal } = calcTaxBreakdown(totalAmount);
+    const pphAmount = unbilledBookings.reduce((sum, b) => sum + Number(b.pphAmount ?? 0), 0);
+    const pphRate = pphAmount > 0 ? Number(company.withholdingTaxRate ?? 10) : 0;
 
     const [inv] = await db.insert(companyInvoicesTable).values({
       invoiceNumber: "TEMP",
@@ -382,6 +407,9 @@ async function handleGenerateInvoice(req: any, res: any) {
       dppNilaiLain: String(dppNilaiLain),
       ppnAmount: String(ppnAmount),
       grandTotal: String(grandTotal),
+      pphRate: String(pphRate),
+      pphAmount: String(pphAmount),
+      netAmount: String(grandTotal - pphAmount),
       status: "unpaid",
       notes: notes ?? null,
     }).returning();

@@ -98,6 +98,9 @@ export const bookingsTable = scSchema.table("sport_bookings", {
   dpp: numeric("dpp", { precision: 14, scale: 2 }),
   ppnAmount: numeric("ppn_amount", { precision: 12, scale: 2 }),
   grandTotal: numeric("grand_total", { precision: 12, scale: 2 }),
+  pphRate: numeric("pph_rate", { precision: 5, scale: 2 }),
+  pphAmount: numeric("pph_amount", { precision: 14, scale: 2 }),
+  netAmount: numeric("net_amount", { precision: 14, scale: 2 }),
   additionalCharges: jsonb("additional_charges")
     .$type<BookingAdditionalCharge[]>()
     .notNull()

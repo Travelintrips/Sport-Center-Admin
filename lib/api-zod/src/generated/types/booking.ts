@@ -57,6 +57,12 @@ export interface Booking {
   ppnAmount?: number | null;
   /** @nullable */
   grandTotal?: number | null;
+  /** @nullable */
+  pphRate?: number | null;
+  /** @nullable */
+  pphAmount?: number | null;
+  /** @nullable */
+  netAmount?: number | null;
   additionalCharges: AdditionalCharge[];
   downPayment?: number;
   isDpPaid?: boolean;

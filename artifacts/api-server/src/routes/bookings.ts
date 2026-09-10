@@ -26,7 +26,7 @@ import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
 import { logger } from "../lib/logger";
 import { syncBookingToBizportal, syncStatusToBizportal, deleteBookingFromBizportal, pushConfirmedPaymentAsBankMutation } from "../lib/bizportalSync";
 import { getBaseUrl } from "../lib/appUrl";
-import { calculateTax, recordTaxTransaction, reverseTaxTransaction } from "../lib/tax";
+import { calculateTax, calculateWithholdingTax, recordTaxTransaction, resolveWithholdingTax, reverseTaxTransaction } from "../lib/tax";
 import { additionalChargesTotal, normalizeAdditionalCharges } from "../lib/additionalCharges";
 import { reverseJournalEntry, reversePublicAccountingEntry } from "../lib/accounting";
 import { generateBookingOrderNumber } from "../lib/orderNumber";
@@ -874,6 +874,11 @@ router.post("/bookings", async (req, res) => {
         : Math.min(Number(discountAmount) || 0, basePrice);
     const totalPrice = basePrice - discount + additionalChargesTotal(additionalCharges);
     const taxCalc = await calculateTax(totalPrice, "sport_booking", bookingDate);
+    const pphCalc = await resolveWithholdingTax(
+      companyBillingUser?.id,
+      taxCalc.taxAmount > 0 ? taxCalc.grandTotal : totalPrice,
+      taxCalc.taxAmount > 0 ? taxCalc.dpp : totalPrice,
+    );
     const orderNumber = await generateBookingOrderNumber();
 
     // customerId: admin → bodyCustomerId atau null; admin_booking/customer → bodyCustomerId atau loggedInUserId
@@ -888,7 +893,7 @@ router.post("/bookings", async (req, res) => {
     // karena kolom bookings.group_ref punya FK ke booking_groups.group_ref (baris induk harus ada dulu)
     if (incomingGroupRef) {
       // Payable amount: pakai grandTotal bila ada PPN, fallback ke totalPrice
-      const payableAmount = taxCalc.taxAmount > 0 ? taxCalc.grandTotal : totalPrice;
+      const payableAmount = pphCalc.netAmount;
 
       const [existingGroup] = await db.select().from(bookingGroupsTable)
         .where(eq(bookingGroupsTable.groupRef, incomingGroupRef)).limit(1);
@@ -1537,6 +1542,11 @@ router.post("/bookings/recurring", async (req, res) => {
       const taxCalc = isFirstCreatedSession
         ? await calculateTax(sessionTotalPrice, "sport_booking", bookingDate)
         : taxByDate.get(bookingDate)!;
+      const pphCalc = await resolveWithholdingTax(
+        companyBillingUser?.id,
+        taxCalc.taxAmount > 0 ? taxCalc.grandTotal : sessionTotalPrice,
+        taxCalc.taxAmount > 0 ? taxCalc.dpp : sessionTotalPrice,
+      );
       const orderNumber = await generateBookingOrderNumber();
       const [booking] = await db.insert(bookingsTable).values({
         orderNumber,
@@ -1565,6 +1575,9 @@ router.post("/bookings/recurring", async (req, res) => {
         dpp: taxCalc.taxAmount > 0 ? String(taxCalc.dpp) : null,
         ppnAmount: taxCalc.taxAmount > 0 ? String(taxCalc.taxAmount) : null,
         grandTotal: taxCalc.taxAmount > 0 ? String(taxCalc.grandTotal) : null,
+        pphRate: pphCalc.enabled ? String(pphCalc.rate) : null,
+        pphAmount: pphCalc.enabled ? String(pphCalc.amount) : null,
+        netAmount: pphCalc.enabled ? String(pphCalc.netAmount) : String(pphCalc.grossAmount),
         additionalCharges: sessionAdditionalCharges,
         ...(requestedDownPayment != null
           ? {

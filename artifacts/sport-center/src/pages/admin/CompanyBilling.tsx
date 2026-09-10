@@ -864,6 +864,8 @@ function GenerateInvoiceDialog({
   const subtotal = preview?.subtotal ?? 0;
   const ppnAmount = preview?.ppnAmount ?? 0;
   const grandTotal = preview?.grandTotal ?? subtotal;
+  const pphAmount = preview?.pphAmount ?? 0;
+  const netAmount = preview?.netAmount ?? grandTotal - pphAmount;
   const existingInvoice = preview?.existingInvoice;
 
   const handleGenerate = async () => {
@@ -944,7 +946,13 @@ function GenerateInvoiceDialog({
             <div className="mt-1 text-xs">
               {previewError instanceof Error ? previewError.message : "Terjadi kesalahan saat memuat booking perusahaan."}
             </div>
-            <Button
+          {pphAmount > 0 && (
+            <div className="rounded-lg border border-orange-200 bg-orange-50 p-3 text-sm text-orange-900">
+              <div className="flex justify-between"><span>PPh dipotong (10%)</span><strong>{formatCurrency(pphAmount)}</strong></div>
+              <div className="flex justify-between mt-1 font-semibold"><span>Net dibayar</span><strong>{formatCurrency(netAmount)}</strong></div>
+            </div>
+          )}
+          <Button
               type="button"
               variant="outline"
               size="sm"

@@ -1,4 +1,4 @@
-import { db, taxSettingsTable, taxTransactionsTable } from "@workspace/db";
+import { db, taxSettingsTable, taxTransactionsTable, usersTable } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
 
 export interface TaxCalculation {
@@ -7,6 +7,60 @@ export interface TaxCalculation {
   taxAmount: number;
   grandTotal: number;
   taxCode: string;
+}
+
+export interface WithholdingTaxCalculation {
+  enabled: boolean;
+  rate: number;
+  amount: number;
+  grossAmount: number;
+  netAmount: number;
+}
+
+/**
+ * PPh dipotong dari DPP, bukan dari PPN. Gross tetap menjadi nilai invoice/
+ * booking, sedangkan netAmount adalah nominal yang benar-benar dibayar oleh
+ * perusahaan yang mengaktifkan pemotongan.
+ */
+export function calculateWithholdingTax(
+  grossAmount: number,
+  dpp: number,
+  enabled: boolean,
+  rate = 10,
+): WithholdingTaxCalculation {
+  const normalizedRate = enabled ? Math.max(0, Math.min(100, Number(rate) || 0)) : 0;
+  const amount = normalizedRate > 0 ? Math.round(Math.max(0, dpp) * normalizedRate / 100) : 0;
+  return {
+    enabled: normalizedRate > 0,
+    rate: normalizedRate,
+    amount,
+    grossAmount: Math.max(0, Math.round(grossAmount)),
+    netAmount: Math.max(0, Math.round(grossAmount) - amount),
+  };
+}
+
+export async function resolveWithholdingTax(
+  companyCustomerId: number | null | undefined,
+  grossAmount: number,
+  dpp: number,
+): Promise<WithholdingTaxCalculation> {
+  if (companyCustomerId == null) {
+    return calculateWithholdingTax(grossAmount, dpp, false);
+  }
+  const [company] = await db
+    .select({
+      withholdingTaxEnabled: usersTable.withholdingTaxEnabled,
+      withholdingTaxRate: usersTable.withholdingTaxRate,
+    })
+    .from(usersTable)
+    .where(eq(usersTable.id, companyCustomerId))
+    .limit(1);
+  return calculateWithholdingTax(
+    grossAmount,
+    dpp,
+    company?.withholdingTaxEnabled === true,
+    Number(company?.withholdingTaxRate ?? 10),
+  );
 }
 
 /**

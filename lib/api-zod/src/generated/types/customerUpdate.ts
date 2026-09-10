@@ -20,5 +20,7 @@ export interface CustomerUpdate {
   paymentTermsDays?: number;
   monthlyCreditLimit?: number;
   allowMonthlyBilling?: boolean;
+  withholdingTaxEnabled?: boolean;
+  withholdingTaxRate?: number;
   accountStatus?: string;
 }

@@ -650,7 +650,9 @@ ALTER TABLE sport_center.users
   ADD COLUMN IF NOT EXISTS company_tax_id text,
   ADD COLUMN IF NOT EXISTS payment_terms_days integer DEFAULT 30,
   ADD COLUMN IF NOT EXISTS monthly_credit_limit numeric(14,2),
-  ADD COLUMN IF NOT EXISTS account_status text DEFAULT 'active';
+  ADD COLUMN IF NOT EXISTS account_status text DEFAULT 'active',
+  ADD COLUMN IF NOT EXISTS withholding_tax_enabled boolean NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS withholding_tax_rate numeric(5,2) NOT NULL DEFAULT 10;
 
 ALTER TABLE sport_center.sport_bookings
   ADD COLUMN IF NOT EXISTS payer_type sport_center.payer_type DEFAULT 'personal',
@@ -660,6 +662,19 @@ ALTER TABLE sport_center.sport_bookings
   ADD COLUMN IF NOT EXISTS payment_required_now boolean DEFAULT true,
   ADD COLUMN IF NOT EXISTS billing_status sport_center.billing_status,
   ADD COLUMN IF NOT EXISTS company_invoice_id integer REFERENCES sport_center.company_invoices(id) ON DELETE SET NULL;
+
+ALTER TABLE sport_center.sport_bookings
+  ADD COLUMN IF NOT EXISTS pph_rate numeric(5,2),
+  ADD COLUMN IF NOT EXISTS pph_amount numeric(14,2),
+  ADD COLUMN IF NOT EXISTS net_amount numeric(14,2);
+
+ALTER TABLE sport_center.company_invoices
+  ADD COLUMN IF NOT EXISTS pph_rate numeric(5,2) NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS pph_amount numeric(14,2) NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS net_amount numeric(14,2) NOT NULL DEFAULT 0;
+
+ALTER TABLE sport_center.company_invoice_items
+  ADD COLUMN IF NOT EXISTS pph_amount numeric(14,2);
 
 -- ============================================================
 -- 16. ap2_employee role + verification_logs table

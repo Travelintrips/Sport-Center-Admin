@@ -34,6 +34,8 @@ function mapUser(u: typeof usersTable.$inferSelect, userBookings: (typeof bookin
     paymentTermsDays: u.paymentTermsDays,
     monthlyCreditLimit: u.monthlyCreditLimit != null ? Number(u.monthlyCreditLimit) : null,
     allowMonthlyBilling: u.allowMonthlyBilling,
+    withholdingTaxEnabled: u.withholdingTaxEnabled,
+    withholdingTaxRate: u.withholdingTaxRate == null ? 10 : Number(u.withholdingTaxRate),
     accountStatus: u.accountStatus ?? "active",
     totalBookings: userBookings.length,
     totalSpent,
@@ -161,7 +163,8 @@ router.post("/customers", adminMiddleware, async (req, res) => {
     const {
       name, email, phone, accountType,
       companyName, picName, picPhone, picEmail, billingAddress,
-      paymentTermsDays, monthlyCreditLimit, allowMonthlyBilling, accountStatus
+      paymentTermsDays, monthlyCreditLimit, allowMonthlyBilling, accountStatus,
+      withholdingTaxEnabled, withholdingTaxRate
     } = req.body;
 
     if (!name || !email || !accountType) {
@@ -197,6 +200,8 @@ router.post("/customers", adminMiddleware, async (req, res) => {
       monthlyCreditLimit: monthlyCreditLimit ? String(monthlyCreditLimit) : null,
       allowMonthlyBilling: allowMonthlyBilling ?? false,
       accountStatus: accountStatus ?? "active",
+      withholdingTaxEnabled: accountType === "company" ? withholdingTaxEnabled ?? false : false,
+      withholdingTaxRate: accountType === "company" ? String(withholdingTaxRate ?? 10) : "10",
     }).returning();
 
     res.status(201).json({ ...mapUser(user, []), tempPassword: randomPassword });
@@ -392,7 +397,8 @@ router.patch("/customers/:id", adminMiddleware, async (req, res) => {
     const {
       name, email, phone, accountType,
       companyName, picName, picPhone, picEmail, billingAddress,
-      paymentTermsDays, monthlyCreditLimit, allowMonthlyBilling, accountStatus
+      paymentTermsDays, monthlyCreditLimit, allowMonthlyBilling, accountStatus,
+      withholdingTaxEnabled, withholdingTaxRate
     } = req.body;
 
     const updates: Partial<typeof usersTable.$inferInsert> = {};
@@ -409,6 +415,8 @@ router.patch("/customers/:id", adminMiddleware, async (req, res) => {
     if (monthlyCreditLimit !== undefined) updates.monthlyCreditLimit = monthlyCreditLimit ? String(monthlyCreditLimit) : null;
     if (allowMonthlyBilling !== undefined) updates.allowMonthlyBilling = allowMonthlyBilling;
     if (accountStatus !== undefined) updates.accountStatus = accountStatus;
+    if (withholdingTaxEnabled !== undefined) updates.withholdingTaxEnabled = withholdingTaxEnabled;
+    if (withholdingTaxRate !== undefined) updates.withholdingTaxRate = String(withholdingTaxRate);
 
     const [updated] = await db.update(usersTable).set(updates).where(eq(usersTable.id, id)).returning();
     const userBookings = await db.select().from(bookingsTable).where(

@@ -4,6 +4,7 @@ import {
   accountingJournalLinesTable,
   taxTransactionsTable,
   paymentsTable,
+  bookingsTable,
 } from "@workspace/db";
 import { isCentralFinanceMode } from "./financeBoundary";
 import { eq, and } from "drizzle-orm";
@@ -288,6 +289,9 @@ export type SportCenterBookingPaymentPosting = {
   bookingId: number;
   orderNumber: string;
   amount: number;
+  grossAmount?: number | null;
+  pphRate?: number | null;
+  pphAmount?: number | null;
   paymentMethod?: string | null;
   paymentType?: string | null;
   paidAt?: Date | string | null;
@@ -786,7 +790,8 @@ export async function postSportCenterBookingPayment(
       };
     }
 
-    const grossAmount = requestedAmount;
+    const cashAmount = requestedAmount;
+    const grossAmount = Math.round(Number(input.grossAmount ?? requestedAmount));
     if (!Number.isFinite(grossAmount) || grossAmount <= 0) {
       throw new Error(`[accounting] Nominal payment ${input.paymentNumber} tidak valid.`);
     }
@@ -795,6 +800,7 @@ export async function postSportCenterBookingPayment(
     const ppnAmount = rate > 0
       ? Math.round((grossAmount * rate) / (100 + rate))
       : 0;
+    const pphAmount = Math.max(0, Math.round(Number(input.pphAmount ?? 0)));
     const dpp = grossAmount - ppnAmount;
     const year = new Date(journalDate).getFullYear();
     const entryNumber = await nextPublicEntryNumber(client, year);
@@ -802,6 +808,7 @@ export async function postSportCenterBookingPayment(
     const paymentAccount = await getPublicPaymentAccount(client, canonicalMethod);
     const methodLabel = normalizePublicPaymentMethod(canonicalMethod);
     const hasPpn = ppnAmount > 0;
+    const hasPph = pphAmount > 0;
 
     const entryResult = await client.query(
       `INSERT INTO public.accounting_entries
@@ -835,7 +842,35 @@ export async function postSportCenterBookingPayment(
     const entryId = Number(entryResult.rows[0]?.id);
     if (!entryId) throw new Error(`[accounting] Entry gagal dibuat untuk ${input.paymentNumber}.`);
 
-    if (hasPpn) {
+    if (hasPph && hasPpn) {
+      await client.query(
+        `INSERT INTO public.accounting_entry_lines
+          (entry_id, account_id, description, debit, credit) VALUES
+          ($1,$2,$3,$4,0),
+          ($1,$5,$6,$7,0),
+          ($1,$8,$9,0,$10),
+          ($1,$11,$12,0,$13)`,
+        [
+          entryId, paymentAccount.id, `Penerimaan ${input.paymentNumber} via ${methodLabel}`, cashAmount,
+          ids.coaPendapatan, `PPh dipotong ${input.orderNumber}`, pphAmount,
+          ids.coaPendapatan, `Pendapatan booking ${input.orderNumber}`, dpp,
+          ids.coaPpnKeluaran, `PPN Keluaran booking ${input.orderNumber}`, ppnAmount,
+        ],
+      );
+    } else if (hasPph) {
+      await client.query(
+        `INSERT INTO public.accounting_entry_lines
+          (entry_id, account_id, description, debit, credit) VALUES
+          ($1,$2,$3,$4,0),
+          ($1,$5,$6,$7,0),
+          ($1,$8,$9,0,$10)`,
+        [
+          entryId, paymentAccount.id, `Penerimaan ${input.paymentNumber} via ${methodLabel}`, cashAmount,
+          ids.coaPendapatan, `PPh dipotong ${input.orderNumber}`, pphAmount,
+          ids.coaPendapatan, `Pendapatan booking ${input.orderNumber}`, dpp,
+        ],
+      );
+    } else if (hasPpn) {
       await client.query(
         `INSERT INTO public.accounting_entry_lines
           (entry_id, account_id, description, debit, credit) VALUES
@@ -846,7 +881,7 @@ export async function postSportCenterBookingPayment(
           entryId,
           paymentAccount.id,
           `Penerimaan ${input.paymentNumber} via ${methodLabel}`,
-          grossAmount,
+          cashAmount,
           ids.coaPendapatan,
           `Pendapatan booking ${input.orderNumber}`,
           dpp,
@@ -865,7 +900,7 @@ export async function postSportCenterBookingPayment(
           entryId,
           paymentAccount.id,
           `Penerimaan ${input.paymentNumber} via ${methodLabel}`,
-          grossAmount,
+         cashAmount,
           ids.coaPendapatan,
           `Pendapatan booking ${input.orderNumber}`,
         ],
@@ -939,7 +974,7 @@ export async function postSportCenterBookingPayment(
        const canonicalBankMutationId = await ensureCanonicalSportCenterBankMutation(client, {
         paymentId: Number(sourcePaymentId),
         companyId,
-        amount: grossAmount,
+        amount: cashAmount,
         paymentMethod: canonicalMethod,
         paymentProvider: canonicalProvider,
         bankAccountId,
@@ -959,8 +994,8 @@ export async function postSportCenterBookingPayment(
          paymentType,
          bankAccountId,
          settlementDate,
-         journalDate,
-         grossAmount,
+        journalDate,
+         grossAmount: cashAmount,
          ppnRate: rate,
          canonicalBankMutationId,
        });
@@ -1457,6 +1492,9 @@ export async function createJournalEntry(
     grossAmount?: number | null;
     dppAmount?: number | null;
     taxAmount?: number | null;
+    pphRate?: number | null;
+    pphAmount?: number | null;
+    netAmount?: number | null;
     providerReference?: string | null;
     providerOrderId?: string | null;
     merchantTradeNo?: string | null;
@@ -1464,13 +1502,16 @@ export async function createJournalEntry(
   },
 ): Promise<void> {
   // subtotal = DPP (sebelum PPN), grandTotal = DPP + PPN = jumlah yang masuk ke bank
-  const grandTotal = subtotal + ppnAmount;
+  const grandTotal = paymentContext?.grossAmount ?? subtotal + ppnAmount;
+  const pphAmount = Math.max(0, Number(paymentContext?.pphAmount ?? 0));
+  const cashAmount = Math.max(0, grandTotal - pphAmount);
   const netRevenue = subtotal;
   const { debitAccount, accountCode } = resolvePaymentAccount(paymentMethod);
   const methodLabel = paymentMethod ? ` via ${paymentMethod}` : "";
   const paymentMarker = paymentId != null ? ` [paymentId=${paymentId}]` : "";
   const lines: Array<{ lineType: string; accountCode: string; accountName: string; amount: number; description?: string }> = [
-    { lineType: "debit",  accountCode, accountName: debitAccount,                         amount: grandTotal,                              description: `Penerimaan booking ${orderNumber}${methodLabel}` },
+    { lineType: "debit",  accountCode, accountName: debitAccount,                         amount: cashAmount,                              description: `Penerimaan booking ${orderNumber}${methodLabel}` },
+    ...(pphAmount > 0 ? [{ lineType: "debit", accountCode: "1-1301", accountName: "PPh Dipotong Pelanggan", amount: pphAmount, description: `PPh dipotong booking ${orderNumber}` }] : []),
     { lineType: "credit", accountCode: "4-1001", accountName: "Pendapatan Sport Center",  amount: ppnAmount > 0 ? netRevenue : grandTotal, description: `Pendapatan booking ${orderNumber}` },
   ];
   if (ppnAmount > 0) {
@@ -1579,12 +1620,15 @@ export async function createJournalEntry(
       grossAmount: String(paymentContext?.grossAmount ?? grandTotal),
       dppAmount: String(paymentContext?.dppAmount ?? subtotal),
       taxAmount: String(paymentContext?.taxAmount ?? ppnAmount),
+      pphRate: paymentContext?.pphRate != null ? String(paymentContext.pphRate) : null,
+      pphAmount: paymentContext?.pphAmount != null ? String(paymentContext.pphAmount) : null,
+      netAmount: String(paymentContext?.netAmount ?? cashAmount),
       providerReference: paymentContext?.providerReference ?? null,
       providerOrderId: paymentContext?.providerOrderId ?? null,
       merchantTradeNo: paymentContext?.merchantTradeNo ?? null,
       providerTradeNo: paymentContext?.providerTradeNo ?? null,
       debitAccount,
-      debitAmount: String(grandTotal),
+      debitAmount: String(cashAmount),
       creditRevenueAccount: "Pendapatan Sport Center",
       creditRevenueAmount: String(ppnAmount > 0 ? netRevenue : grandTotal),
       creditPpnAccount: ppnAmount > 0 ? "PPN Keluaran" : "",
@@ -1610,6 +1654,10 @@ type ConfirmedPaymentAccountingInput = {
   dpp: number;
   ppnAmount: number;
   ppnRate?: number | null;
+  grossAmount?: number | null;
+  pphRate?: number | null;
+  pphAmount?: number | null;
+  netAmount?: number | null;
   facilityId: number | null;
   journalDate: string;
   paymentMethod?: string;
@@ -1682,7 +1730,23 @@ export function postConfirmedPaymentAccounting(
       throw new Error("[accounting] Confirmed payment harus memiliki paymentId.");
     }
 
-    const grossAmount = Math.round(Number(payment?.amount ?? input.dpp + input.ppnAmount));
+    const [bookingSnapshot] = await db
+      .select({
+        grandTotal: bookingsTable.grandTotal,
+        totalPrice: bookingsTable.totalPrice,
+        pphRate: bookingsTable.pphRate,
+        pphAmount: bookingsTable.pphAmount,
+        netAmount: bookingsTable.netAmount,
+      })
+      .from(bookingsTable)
+      .where(eq(bookingsTable.id, input.bookingId))
+      .limit(1);
+    const snapshotPph = Math.max(0, Number(bookingSnapshot?.pphAmount ?? 0));
+    const pphAmount = Math.max(0, Math.round(Number(input.pphAmount ?? snapshotPph)));
+    const snapshotGross = Number(bookingSnapshot?.grandTotal ?? bookingSnapshot?.totalPrice ?? 0);
+    const netAmount = Math.round(Number(payment?.amount ?? input.netAmount ?? bookingSnapshot?.netAmount ?? input.dpp + input.ppnAmount));
+    const grossAmount = Math.round(Number(input.grossAmount ?? (snapshotGross > 0 ? snapshotGross : netAmount + pphAmount)));
+    const pphRate = input.pphRate ?? (bookingSnapshot?.pphRate == null ? null : Number(bookingSnapshot.pphRate));
     const paymentMethod = payment?.paymentMethod ?? input.paymentMethod ?? null;
     const paymentProvider = payment?.paymentProvider ?? input.paymentProvider ?? "unknown";
     const providerName = payment?.providerName ?? input.providerName ?? null;
@@ -1700,7 +1764,10 @@ export function postConfirmedPaymentAccounting(
       sourcePaymentId: paymentId,
       bookingId: input.bookingId,
       orderNumber: input.orderNumber,
-      amount: grossAmount,
+      amount: netAmount,
+      grossAmount,
+      pphRate,
+      pphAmount,
       paymentMethod,
       paymentType,
       paidAt,
@@ -1740,6 +1807,9 @@ export function postConfirmedPaymentAccounting(
          mdrRate: payment?.mdrRate ?? input.mdrRate,
          mdrAmount: payment?.mdrAmount ?? input.mdrAmount,
         grossAmount,
+        pphRate,
+        pphAmount,
+        netAmount,
         dppAmount: grossAmount - effectivePpnAmount,
         taxAmount: effectivePpnAmount,
         providerReference: payment?.providerReference ?? input.providerReference,

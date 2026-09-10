@@ -3107,6 +3107,12 @@ components:
           type: ["number", "null"]
         grandTotal:
           type: ["number", "null"]
+        pphRate:
+          type: ["number", "null"]
+        pphAmount:
+          type: ["number", "null"]
+        netAmount:
+          type: ["number", "null"]
         additionalCharges:
           type: array
           items:
@@ -3606,6 +3612,10 @@ components:
           type: ["number", "null"]
         allowMonthlyBilling:
           type: ["boolean", "null"]
+        withholdingTaxEnabled:
+          type: ["boolean", "null"]
+        withholdingTaxRate:
+          type: ["number", "null"]
         accountStatus:
           type: ["string", "null"]
         totalBookings:
@@ -3644,6 +3654,10 @@ components:
           type: number
         allowMonthlyBilling:
           type: boolean
+        withholdingTaxEnabled:
+          type: boolean
+        withholdingTaxRate:
+          type: number
         accountStatus:
           type: string
 
@@ -3675,12 +3689,16 @@ components:
           type: number
         allowMonthlyBilling:
           type: boolean
+        withholdingTaxEnabled:
+          type: boolean
+        withholdingTaxRate:
+          type: number
         accountStatus:
           type: string
 
     CompanyInvoice:
       type: object
-      required: [id, invoiceNumber, companyCustomerId, periodMonth, totalAmount, ppnAmount, grandTotal, status, createdAt]
+      required: [id, invoiceNumber, companyCustomerId, periodMonth, totalAmount, ppnAmount, grandTotal, pphRate, pphAmount, netAmount, status, createdAt]
       properties:
         id:
           type: integer
@@ -3697,6 +3715,12 @@ components:
         ppnAmount:
           type: number
         grandTotal:
+          type: number
+        pphRate:
+          type: number
+        pphAmount:
+          type: number
+        netAmount:
           type: number
         status:
           type: string

@@ -291,6 +291,12 @@ export interface Booking {
   ppnAmount?: number | null;
   /** @nullable */
   grandTotal?: number | null;
+  /** @nullable */
+  pphRate?: number | null;
+  /** @nullable */
+  pphAmount?: number | null;
+  /** @nullable */
+  netAmount?: number | null;
   additionalCharges: AdditionalCharge[];
   downPayment?: number;
   isDpPaid?: boolean;
@@ -658,6 +664,10 @@ export interface Customer {
   /** @nullable */
   allowMonthlyBilling?: boolean | null;
   /** @nullable */
+  withholdingTaxEnabled?: boolean | null;
+  /** @nullable */
+  withholdingTaxRate?: number | null;
+  /** @nullable */
   accountStatus?: string | null;
   totalBookings?: number;
   totalSpent?: number;
@@ -685,6 +695,8 @@ export interface CustomerInput {
   paymentTermsDays?: number;
   monthlyCreditLimit?: number;
   allowMonthlyBilling?: boolean;
+  withholdingTaxEnabled?: boolean;
+  withholdingTaxRate?: number;
   accountStatus?: string;
 }
 
@@ -709,6 +721,8 @@ export interface CustomerUpdate {
   paymentTermsDays?: number;
   monthlyCreditLimit?: number;
   allowMonthlyBilling?: boolean;
+  withholdingTaxEnabled?: boolean;
+  withholdingTaxRate?: number;
   accountStatus?: string;
 }
 
@@ -729,6 +743,9 @@ export interface CompanyInvoice {
   totalAmount: number;
   ppnAmount: number;
   grandTotal: number;
+  pphRate: number;
+  pphAmount: number;
+  netAmount: number;
   status: CompanyInvoiceStatus;
   /** @nullable */
   paidAt?: string | null;

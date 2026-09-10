@@ -35,6 +35,10 @@ export interface Customer {
   /** @nullable */
   allowMonthlyBilling?: boolean | null;
   /** @nullable */
+  withholdingTaxEnabled?: boolean | null;
+  /** @nullable */
+  withholdingTaxRate?: number | null;
+  /** @nullable */
   accountStatus?: string | null;
   totalBookings?: number;
   totalSpent?: number;

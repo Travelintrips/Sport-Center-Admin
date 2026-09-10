@@ -428,6 +428,8 @@ function CompanyForm({ initial, onClose }: { initial?: any; onClose: () => void 
     paymentTermsDays: initial?.paymentTermsDays ?? 30,
     monthlyCreditLimit: initial?.monthlyCreditLimit ?? "",
     allowMonthlyBilling: initial?.allowMonthlyBilling ?? false,
+    withholdingTaxEnabled: initial?.withholdingTaxEnabled ?? false,
+    withholdingTaxRate: initial?.withholdingTaxRate ?? 10,
     accountStatus: initial?.accountStatus ?? "active",
   });
 
@@ -492,6 +494,16 @@ function CompanyForm({ initial, onClose }: { initial?: any; onClose: () => void 
             <Switch id="allowBilling" checked={form.allowMonthlyBilling} onCheckedChange={(v) => set("allowMonthlyBilling", v)} />
             <Label htmlFor="allowBilling">Aktifkan tagihan bulanan</Label>
           </div>
+          <div className="flex items-center gap-3 mt-3">
+            <Switch id="withholdingTax" checked={form.withholdingTaxEnabled} onCheckedChange={(v) => set("withholdingTaxEnabled", v)} />
+            <Label htmlFor="withholdingTax">PPh 10% dipotong customer</Label>
+          </div>
+          {form.withholdingTaxEnabled && (
+            <div className="mt-2 max-w-[180px] space-y-1">
+              <Label>Tarif PPh (%)</Label>
+              <Input type="number" min="0" max="100" value={form.withholdingTaxRate} onChange={(e) => set("withholdingTaxRate", Number(e.target.value))} />
+            </div>
+          )}
         </div>
         <div className="flex justify-end gap-2 pt-2">
           <Button variant="outline" onClick={onClose}>Batal</Button>
