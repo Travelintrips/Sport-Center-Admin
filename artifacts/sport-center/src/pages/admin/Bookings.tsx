@@ -3040,14 +3040,21 @@ export default function AdminBookings() {
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        throw new Error(body?.error ?? `HTTP ${res.status}`);
+        const error = new Error(body?.error ?? `HTTP ${res.status}`) as Error & {
+          code?: string;
+        };
+        error.code = body?.code;
+        throw error;
       }
       queryClient.invalidateQueries({ queryKey: getListBookingsQueryKey() });
       toast({ title: "Booking berhasil dihapus" });
       setSelectedBooking(null);
     } catch (err: any) {
+      const hasPostedAccounting = err?.code === "BOOKING_HAS_POSTED_ACCOUNTING";
       toast({
-        title: "Gagal menghapus booking",
+        title: hasPostedAccounting
+          ? "Booking tidak dapat dihapus permanen"
+          : "Gagal menghapus booking",
         description: err?.message ?? "Terjadi kesalahan",
         variant: "destructive",
       });

@@ -1840,13 +1840,24 @@ router.delete("/bookings/:id", adminMiddleware, async (req, res) => {
       return;
     }
     const orderNumber = booking.orderNumber;
-    await db.delete(paymentsTable).where(eq(paymentsTable.bookingId, id));
-    await db.delete(bookingsTable).where(eq(bookingsTable.id, id));
+    await db.transaction(async (tx) => {
+      await tx.delete(paymentsTable).where(eq(paymentsTable.bookingId, id));
+      await tx.delete(bookingsTable).where(eq(bookingsTable.id, id));
+    });
     // Hapus juga dari BizPortal agar data tetap sinkron
     deleteBookingFromBizportal(orderNumber).catch(() => {});
     res.json({ success: true });
   } catch (err) {
     req.log.error({ err }, "Delete booking error");
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes("POSTED_ACCOUNTING_JOURNAL_FINANCIAL_FIELDS_IMMUTABLE")) {
+      res.status(409).json({
+        code: "BOOKING_HAS_POSTED_ACCOUNTING",
+        error:
+          "Booking sudah memiliki jurnal keuangan dan tidak boleh dihapus permanen. Gunakan Batalkan Booking atau Kembalikan Dana agar jurnal pembalik tercatat.",
+      });
+      return;
+    }
     res.status(500).json({ error: "Internal server error" });
   }
 });
