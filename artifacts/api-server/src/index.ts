@@ -282,17 +282,26 @@ async function runStartupMigrations() {
     `ALTER TABLE sport_center.sport_payments
        ADD COLUMN IF NOT EXISTS ocr_name text`,
     `ALTER TABLE sport_center.users
+        ADD COLUMN IF NOT EXISTS ppn_enabled boolean NOT NULL DEFAULT true,
        ADD COLUMN IF NOT EXISTS withholding_tax_enabled boolean NOT NULL DEFAULT false,
        ADD COLUMN IF NOT EXISTS withholding_tax_rate numeric(5,2) NOT NULL DEFAULT 10`,
     `ALTER TABLE sport_center.sport_bookings
+        ADD COLUMN IF NOT EXISTS ppn_treatment text NOT NULL DEFAULT 'none',
+        ADD COLUMN IF NOT EXISTS ppn_collected_by_customer boolean NOT NULL DEFAULT false,
        ADD COLUMN IF NOT EXISTS pph_rate numeric(5,2),
        ADD COLUMN IF NOT EXISTS pph_amount numeric(14,2),
        ADD COLUMN IF NOT EXISTS net_amount numeric(14,2)`,
     `ALTER TABLE sport_center.company_invoices
+        ADD COLUMN IF NOT EXISTS ppn_rate numeric(5,2) NOT NULL DEFAULT 0,
+        ADD COLUMN IF NOT EXISTS ppn_treatment text NOT NULL DEFAULT 'normal',
+        ADD COLUMN IF NOT EXISTS ppn_collected_by_customer boolean NOT NULL DEFAULT false,
        ADD COLUMN IF NOT EXISTS pph_rate numeric(5,2) NOT NULL DEFAULT 0,
        ADD COLUMN IF NOT EXISTS pph_amount numeric(14,2) NOT NULL DEFAULT 0,
        ADD COLUMN IF NOT EXISTS net_amount numeric(14,2) NOT NULL DEFAULT 0`,
     `ALTER TABLE sport_center.company_invoice_items
+        ADD COLUMN IF NOT EXISTS ppn_rate numeric(5,2),
+        ADD COLUMN IF NOT EXISTS ppn_treatment text,
+        ADD COLUMN IF NOT EXISTS ppn_collected_by_customer boolean NOT NULL DEFAULT false,
        ADD COLUMN IF NOT EXISTS pph_amount numeric(14,2)`,
     `ALTER TABLE sport_center.accounting_journals
        ADD COLUMN IF NOT EXISTS pph_rate numeric(5,2),

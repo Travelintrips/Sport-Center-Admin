@@ -26,7 +26,7 @@ import { logAudit, getClientInfo, getUserFromReq } from "../lib/auditLog";
 import { logger } from "../lib/logger";
 import { syncBookingToBizportal, syncStatusToBizportal, deleteBookingFromBizportal, pushConfirmedPaymentAsBankMutation } from "../lib/bizportalSync";
 import { getBaseUrl } from "../lib/appUrl";
-import { calculateTax, calculateWithholdingTax, recordTaxTransaction, resolveWithholdingTax, reverseTaxTransaction } from "../lib/tax";
+import { calculateTax, calculateWithholdingTax, recordTaxTransaction, resolveCustomerTax, resolveWithholdingTax, reverseTaxTransaction } from "../lib/tax";
 import { additionalChargesTotal, normalizeAdditionalCharges } from "../lib/additionalCharges";
 import { reverseJournalEntry, reversePublicAccountingEntry } from "../lib/accounting";
 import { generateBookingOrderNumber } from "../lib/orderNumber";
@@ -38,6 +38,17 @@ import {
 
 const INACTIVE_STATUSES = ["cancelled", "expired", "rejected", "refunded"];
 const AP_MULTIGUNA_HOURLY_PRICE = 300000;
+
+function taxSnapshotFields(taxCalc: Awaited<ReturnType<typeof resolveCustomerTax>>) {
+  return {
+    ppnRate: taxCalc.taxRate > 0 ? String(taxCalc.taxRate) : null,
+    dpp: String(taxCalc.dpp),
+    ppnAmount: String(taxCalc.taxAmount),
+    grandTotal: String(taxCalc.grandTotal),
+    ppnTreatment: taxCalc.ppnTreatment,
+    ppnCollectedByCustomer: taxCalc.ppnCollectedByCustomer,
+  };
+}
 
 const PAYLABS_METHOD_LABELS: Record<string, string> = {
   qris: "Paylabs - QRIS",
@@ -718,6 +729,8 @@ router.post("/bookings", async (req, res) => {
     const isCompanyBilling = !!companyBillingUser;
     const isPendingCompany = !isCompanyBilling && !!pendingCompanyUser;
     const effectiveCompanyCustomerId = companyBillingUser?.id ?? pendingCompanyUser?.id ?? null;
+    // customerId: admin → bodyCustomerId atau null; admin_booking/customer → bodyCustomerId atau loggedInUserId
+    const effectiveCustomerId = bodyCustomerId ?? (loggedInRole !== "admin" ? loggedInUserId : null);
     const activityType = req.body.activityType || null;
     let numberOfPeople = req.body.numberOfPeople == null ? null : Number(req.body.numberOfPeople);
     const idCardNumber = String(req.body?.idCardNumber || "").trim().toUpperCase() || null;
@@ -876,16 +889,17 @@ router.post("/bookings", async (req, res) => {
         ? eventDiscountAmountCalc
         : Math.min(Number(discountAmount) || 0, basePrice);
     const totalPrice = basePrice - discount + additionalChargesTotal(additionalCharges);
-    const taxCalc = await calculateTax(totalPrice, "sport_booking", bookingDate);
+    const taxCalc = await resolveCustomerTax(totalPrice, {
+      customerId: effectiveCustomerId,
+      companyCustomerId: effectiveCompanyCustomerId,
+      bookingDate,
+    });
     const pphCalc = await resolveWithholdingTax(
       companyBillingUser?.id,
-      taxCalc.taxAmount > 0 ? taxCalc.grandTotal : totalPrice,
-      taxCalc.taxAmount > 0 ? taxCalc.dpp : totalPrice,
+      taxCalc.ppnCollectedByCustomer ? taxCalc.dpp : (taxCalc.taxAmount > 0 ? taxCalc.grandTotal : totalPrice),
+      taxCalc.dpp,
     );
     const orderNumber = await generateBookingOrderNumber();
-
-    // customerId: admin → bodyCustomerId atau null; admin_booking/customer → bodyCustomerId atau loggedInUserId
-    const effectiveCustomerId = bodyCustomerId ?? (loggedInRole !== "admin" ? loggedInUserId : null);
 
     // groupRef dari cart checkout (frontend kirim saat multi-lapangan)
     const incomingGroupRef: string | null = req.body.groupRef
@@ -972,10 +986,7 @@ router.post("/bookings", async (req, res) => {
       })(),
       bookedForName: (isCompanyBilling || isPendingCompany) ? (req.body.bookedForName?.trim() || customerName) : null,
       bookedForPhone: (isCompanyBilling || isPendingCompany) ? (req.body.bookedForPhone?.trim() || customerPhone) : null,
-      ppnRate: taxCalc.taxRate > 0 ? String(taxCalc.taxRate) : null,
-      dpp: taxCalc.taxAmount > 0 ? String(taxCalc.dpp) : null,
-      ppnAmount: taxCalc.taxAmount > 0 ? String(taxCalc.taxAmount) : null,
-      grandTotal: taxCalc.taxAmount > 0 ? String(taxCalc.grandTotal) : null,
+       ...taxSnapshotFields(taxCalc),
        pphRate: pphCalc.enabled ? String(pphCalc.rate) : null,
        pphAmount: pphCalc.enabled ? String(pphCalc.amount) : null,
        netAmount: pphCalc.enabled ? String(pphCalc.netAmount) : String(pphCalc.grossAmount),
@@ -1509,12 +1520,21 @@ router.post("/bookings/recurring", async (req, res) => {
     // DP recurring adalah DP untuk seluruh grup, bukan untuk satu sesi.
     // Hitung total projected semua tanggal sebelum insert agar DP seperti
     // Rp100.000 tetap valid untuk 4 sesi @ Rp80.000 (total Rp320.000).
-    const taxByDate = new Map<string, Awaited<ReturnType<typeof calculateTax>>>();
+    const taxByDate = new Map<string, Awaited<ReturnType<typeof resolveCustomerTax>>>();
     let projectedGrandTotal = additionalChargeAmount;
     for (const bookingDate of dates) {
-      const taxCalc = await calculateTax(baseSessionPrice, "sport_booking", bookingDate);
+      const taxCalc = await resolveCustomerTax(baseSessionPrice, {
+        customerId: effectiveCustomerId,
+        companyCustomerId: verifiedCompanyCustomerId,
+        bookingDate,
+      });
       taxByDate.set(bookingDate, taxCalc);
-      projectedGrandTotal += baseSessionPrice;
+      const pphCalc = await resolveWithholdingTax(
+        verifiedCompanyCustomerId,
+        taxCalc.ppnCollectedByCustomer ? taxCalc.dpp : taxCalc.grandTotal,
+        taxCalc.dpp,
+      );
+      projectedGrandTotal += pphCalc.netAmount;
     }
     if (
       requestedDownPayment != null &&
@@ -1546,12 +1566,16 @@ router.post("/bookings/recurring", async (req, res) => {
       const sessionAdditionalCharges = isFirstCreatedSession ? additionalCharges : [];
       const sessionTotalPrice = baseSessionPrice + additionalChargesTotal(sessionAdditionalCharges);
       const taxCalc = isFirstCreatedSession
-        ? await calculateTax(sessionTotalPrice, "sport_booking", bookingDate)
+        ? await resolveCustomerTax(sessionTotalPrice, {
+            customerId: effectiveCustomerId,
+            companyCustomerId: verifiedCompanyCustomerId,
+            bookingDate,
+          })
         : taxByDate.get(bookingDate)!;
       const pphCalc = await resolveWithholdingTax(
         companyBillingUser?.id,
-        taxCalc.taxAmount > 0 ? taxCalc.grandTotal : sessionTotalPrice,
-        taxCalc.taxAmount > 0 ? taxCalc.dpp : sessionTotalPrice,
+        taxCalc.ppnCollectedByCustomer ? taxCalc.dpp : (taxCalc.taxAmount > 0 ? taxCalc.grandTotal : sessionTotalPrice),
+        taxCalc.dpp,
       );
       const orderNumber = await generateBookingOrderNumber();
       const [booking] = await db.insert(bookingsTable).values({
@@ -1577,10 +1601,7 @@ router.post("/bookings/recurring", async (req, res) => {
         idCardNumber: idCardNumber || null,
         verificationStatus: isAp ? (apAutoVerifiedR ? "verified" : "pending") : "not_required",
         notes,
-        ppnRate: taxCalc.taxRate > 0 ? String(taxCalc.taxRate) : null,
-        dpp: taxCalc.taxAmount > 0 ? String(taxCalc.dpp) : null,
-        ppnAmount: taxCalc.taxAmount > 0 ? String(taxCalc.taxAmount) : null,
-        grandTotal: taxCalc.taxAmount > 0 ? String(taxCalc.grandTotal) : null,
+         ...taxSnapshotFields(taxCalc),
         pphRate: pphCalc.enabled ? String(pphCalc.rate) : null,
         pphAmount: pphCalc.enabled ? String(pphCalc.amount) : null,
         netAmount: pphCalc.enabled ? String(pphCalc.netAmount) : String(pphCalc.grossAmount),
@@ -2017,16 +2038,25 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
           ? Math.max(0, Number(row.basePrice) - Number(row.discountAmount ?? 0))
           : Math.max(0, Number(row.totalPrice) - oldChargeTotal);
         const totalPrice = baseSessionPrice + additionalChargesTotal(rowCharges);
-        const taxCalc = await calculateTax(totalPrice, "sport_booking", row.bookingDate);
+        const taxCalc = await resolveCustomerTax(totalPrice, {
+          customerId: row.customerId,
+          companyCustomerId: row.companyCustomerId,
+          bookingDate: row.bookingDate,
+        });
+        const pphCalc = await resolveWithholdingTax(
+          row.companyCustomerId,
+          taxCalc.ppnCollectedByCustomer ? taxCalc.dpp : taxCalc.grandTotal,
+          taxCalc.dpp,
+        );
 
         await reverseTaxTransaction(row.id, row.orderNumber, row.bookingDate);
         await db.update(bookingsTable).set({
           additionalCharges: rowCharges,
           totalPrice: String(totalPrice),
-          ppnRate: taxCalc.taxRate > 0 ? String(taxCalc.taxRate) : null,
-          dpp: taxCalc.taxAmount > 0 ? String(taxCalc.dpp) : null,
-          ppnAmount: taxCalc.taxAmount > 0 ? String(taxCalc.taxAmount) : null,
-          grandTotal: taxCalc.taxAmount > 0 ? String(taxCalc.grandTotal) : null,
+          ...taxSnapshotFields(taxCalc),
+          pphRate: pphCalc.enabled ? String(pphCalc.rate) : null,
+          pphAmount: pphCalc.enabled ? String(pphCalc.amount) : null,
+          netAmount: pphCalc.netAmount > 0 ? String(pphCalc.netAmount) : String(pphCalc.grossAmount),
           updatedAt: new Date(),
         }).where(eq(bookingsTable.id, row.id));
         if (taxCalc.taxCode) {
@@ -2074,15 +2104,25 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
          : Number(beforeUpdate.basePrice);
        const discount = Number(beforeUpdate.discountAmount ?? 0);
        const totalPrice = Math.max(0, basePrice - discount) + additionalChargesTotal(additionalCharges);
-      const taxCalc = await calculateTax(totalPrice, "sport_booking", beforeUpdate.bookingDate);
+      const taxCalc = await resolveCustomerTax(totalPrice, {
+        customerId: beforeUpdate.customerId,
+        companyCustomerId: beforeUpdate.companyCustomerId,
+        bookingDate: beforeUpdate.bookingDate,
+      });
+      const pphCalc = await resolveWithholdingTax(
+        beforeUpdate.companyCustomerId,
+        taxCalc.ppnCollectedByCustomer ? taxCalc.dpp : taxCalc.grandTotal,
+        taxCalc.dpp,
+      );
 
        await reverseTaxTransaction(beforeUpdate.id, beforeUpdate.orderNumber, beforeUpdate.bookingDate);
       updateData.additionalCharges = additionalCharges;
       updateData.totalPrice = String(totalPrice);
-      updateData.ppnRate = taxCalc.taxRate > 0 ? String(taxCalc.taxRate) : null;
-      updateData.dpp = taxCalc.taxAmount > 0 ? String(taxCalc.dpp) : null;
-      updateData.ppnAmount = taxCalc.taxAmount > 0 ? String(taxCalc.taxAmount) : null;
-      updateData.grandTotal = taxCalc.taxAmount > 0 ? String(taxCalc.grandTotal) : null;
+       Object.assign(updateData, taxSnapshotFields(taxCalc), {
+         pphRate: pphCalc.enabled ? String(pphCalc.rate) : null,
+         pphAmount: pphCalc.enabled ? String(pphCalc.amount) : null,
+         netAmount: String(pphCalc.netAmount),
+       });
        if (taxCalc.taxCode) {
          await recordTaxTransaction("booking", beforeUpdate.id, beforeUpdate.orderNumber, taxCalc, beforeUpdate.bookingDate);
        }

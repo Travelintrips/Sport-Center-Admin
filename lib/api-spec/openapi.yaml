@@ -3612,6 +3612,8 @@ components:
           type: ["number", "null"]
         allowMonthlyBilling:
           type: ["boolean", "null"]
+        ppnEnabled:
+          type: boolean
         withholdingTaxEnabled:
           type: ["boolean", "null"]
         withholdingTaxRate:
@@ -3654,6 +3656,8 @@ components:
           type: number
         allowMonthlyBilling:
           type: boolean
+        ppnEnabled:
+          type: boolean
         withholdingTaxEnabled:
           type: boolean
         withholdingTaxRate:
@@ -3689,6 +3693,8 @@ components:
           type: number
         allowMonthlyBilling:
           type: boolean
+        ppnEnabled:
+          type: boolean
         withholdingTaxEnabled:
           type: boolean
         withholdingTaxRate:
@@ -3716,6 +3722,13 @@ components:
           type: number
         grandTotal:
           type: number
+        ppnRate:
+          type: number
+        ppnTreatment:
+          type: string
+          enum: [none, inclusive, normal, collected_by_customer, mixed]
+        ppnCollectedByCustomer:
+          type: boolean
         pphRate:
           type: number
         pphAmount:

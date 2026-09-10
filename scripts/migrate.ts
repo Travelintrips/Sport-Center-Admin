@@ -3,6 +3,20 @@ import pg from "pg";
 const { Client } = pg;
 
 export const CUSTOM_MIGRATION_SQL = `
+ALTER TABLE sport_center.users
+  ADD COLUMN IF NOT EXISTS ppn_enabled BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE sport_center.sport_bookings
+  ADD COLUMN IF NOT EXISTS ppn_treatment TEXT NOT NULL DEFAULT 'none',
+  ADD COLUMN IF NOT EXISTS ppn_collected_by_customer BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE sport_center.company_invoices
+  ADD COLUMN IF NOT EXISTS ppn_rate NUMERIC(5,2) NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS ppn_treatment TEXT NOT NULL DEFAULT 'normal',
+  ADD COLUMN IF NOT EXISTS ppn_collected_by_customer BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE sport_center.company_invoice_items
+  ADD COLUMN IF NOT EXISTS ppn_rate NUMERIC(5,2),
+  ADD COLUMN IF NOT EXISTS ppn_treatment TEXT,
+  ADD COLUMN IF NOT EXISTS ppn_collected_by_customer BOOLEAN NOT NULL DEFAULT false;
+
 -- ============================================================
 -- Facility → company ownership mapping (effective-dated)
 -- ============================================================

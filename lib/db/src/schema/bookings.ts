@@ -98,6 +98,9 @@ export const bookingsTable = scSchema.table("sport_bookings", {
   dpp: numeric("dpp", { precision: 14, scale: 2 }),
   ppnAmount: numeric("ppn_amount", { precision: 12, scale: 2 }),
   grandTotal: numeric("grand_total", { precision: 12, scale: 2 }),
+  // Frozen customer tax treatment used by invoices and accounting.
+  ppnTreatment: text("ppn_treatment").notNull().default("none"),
+  ppnCollectedByCustomer: boolean("ppn_collected_by_customer").notNull().default(false),
   pphRate: numeric("pph_rate", { precision: 5, scale: 2 }),
   pphAmount: numeric("pph_amount", { precision: 14, scale: 2 }),
   netAmount: numeric("net_amount", { precision: 14, scale: 2 }),

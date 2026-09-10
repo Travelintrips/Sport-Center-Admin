@@ -7,7 +7,11 @@ export interface TaxCalculation {
   taxAmount: number;
   grandTotal: number;
   taxCode: string;
+  ppnTreatment: PpnTreatment;
+  ppnCollectedByCustomer: boolean;
 }
+
+export type PpnTreatment = "none" | "inclusive" | "normal" | "collected_by_customer" | "mixed";
 
 export interface WithholdingTaxCalculation {
   enabled: boolean;
@@ -63,6 +67,60 @@ export async function resolveWithholdingTax(
   );
 }
 
+function noTax(subtotal: number, ppnTreatment: PpnTreatment = "none"): TaxCalculation {
+  const amount = Math.max(0, Math.round(Number(subtotal) || 0));
+  return {
+    dpp: amount,
+    taxRate: 0,
+    taxAmount: 0,
+    grandTotal: amount,
+    taxCode: "",
+    ppnTreatment,
+    ppnCollectedByCustomer: ppnTreatment === "collected_by_customer",
+  };
+}
+
+/**
+ * Resolve PPN treatment from the customer snapshot source before calculating
+ * the amount. The global tax setting remains the source for the active rate.
+ *
+ * Personal checked  = inclusive PPN.
+ * Personal unchecked = no PPN.
+ * Company unchecked  = normal PPN received by Sport Center.
+ * Company checked    = PPN shown on the invoice but collected by customer.
+ */
+export async function resolveCustomerTax(
+  subtotal: number,
+  options: {
+    customerId?: number | null;
+    companyCustomerId?: number | null;
+    bookingDate?: string;
+  } = {},
+): Promise<TaxCalculation> {
+  const sourceId = options.companyCustomerId ?? options.customerId ?? null;
+  const [customer] = sourceId == null
+    ? []
+    : await db
+        .select({ accountType: usersTable.accountType, ppnEnabled: usersTable.ppnEnabled })
+        .from(usersTable)
+        .where(eq(usersTable.id, sourceId))
+        .limit(1);
+
+  const accountType = customer?.accountType === "company" ? "company" : "personal";
+  const enabled = customer?.ppnEnabled ?? true;
+  const treatment: PpnTreatment = accountType === "company"
+    ? (enabled ? "collected_by_customer" : "normal")
+    : (enabled ? "inclusive" : "none");
+
+  if (treatment === "none") return noTax(subtotal, treatment);
+  const calculated = await calculateTax(subtotal, "sport_booking", options.bookingDate);
+  return {
+    ...calculated,
+    ppnTreatment: treatment,
+    ppnCollectedByCustomer: treatment === "collected_by_customer",
+  };
+}
+
 /**
  * Calculate PPN for a given subtotal.
  *
@@ -78,7 +136,7 @@ export async function calculateTax(
   appliesTo: string = "sport_booking",
   bookingDate?: string,
 ): Promise<TaxCalculation> {
-  const noTax: TaxCalculation = { dpp: subtotal, taxRate: 0, taxAmount: 0, grandTotal: subtotal, taxCode: "" };
+  const zeroTax = noTax(subtotal);
 
   const [setting] = await db
     .select()
@@ -86,11 +144,11 @@ export async function calculateTax(
     .where(and(eq(taxSettingsTable.appliesTo, appliesTo), eq(taxSettingsTable.isActive, true)))
     .limit(1);
 
-  if (!setting) return noTax;
+  if (!setting) return zeroTax;
 
   // Backward-compatibility: if effectiveDate is configured, honour it.
   if (setting.effectiveDate && bookingDate) {
-    if (bookingDate < setting.effectiveDate) return noTax;
+    if (bookingDate < setting.effectiveDate) return zeroTax;
   }
 
   const rate = Number(setting.taxRate);
@@ -103,6 +161,8 @@ export async function calculateTax(
     taxAmount,
     grandTotal: subtotal,
     taxCode: setting.taxCode,
+    ppnTreatment: "inclusive",
+    ppnCollectedByCustomer: false,
   };
 }
 

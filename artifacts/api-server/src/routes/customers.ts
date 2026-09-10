@@ -34,6 +34,7 @@ function mapUser(u: typeof usersTable.$inferSelect, userBookings: (typeof bookin
     paymentTermsDays: u.paymentTermsDays,
     monthlyCreditLimit: u.monthlyCreditLimit != null ? Number(u.monthlyCreditLimit) : null,
     allowMonthlyBilling: u.allowMonthlyBilling,
+    ppnEnabled: u.ppnEnabled,
     withholdingTaxEnabled: u.withholdingTaxEnabled,
     withholdingTaxRate: u.withholdingTaxRate == null ? 10 : Number(u.withholdingTaxRate),
     accountStatus: u.accountStatus ?? "active",
@@ -164,6 +165,7 @@ router.post("/customers", adminMiddleware, async (req, res) => {
       name, email, phone, accountType,
       companyName, picName, picPhone, picEmail, billingAddress,
       paymentTermsDays, monthlyCreditLimit, allowMonthlyBilling, accountStatus,
+      ppnEnabled,
       withholdingTaxEnabled, withholdingTaxRate
     } = req.body;
 
@@ -199,6 +201,7 @@ router.post("/customers", adminMiddleware, async (req, res) => {
       paymentTermsDays: paymentTermsDays ?? 30,
       monthlyCreditLimit: monthlyCreditLimit ? String(monthlyCreditLimit) : null,
       allowMonthlyBilling: allowMonthlyBilling ?? false,
+      ppnEnabled: accountType === "personal" ? ppnEnabled ?? true : ppnEnabled ?? false,
       accountStatus: accountStatus ?? "active",
       withholdingTaxEnabled: accountType === "company" ? withholdingTaxEnabled ?? false : false,
       withholdingTaxRate: accountType === "company" ? String(withholdingTaxRate ?? 10) : "10",
@@ -398,6 +401,7 @@ router.patch("/customers/:id", adminMiddleware, async (req, res) => {
       name, email, phone, accountType,
       companyName, picName, picPhone, picEmail, billingAddress,
       paymentTermsDays, monthlyCreditLimit, allowMonthlyBilling, accountStatus,
+      ppnEnabled,
       withholdingTaxEnabled, withholdingTaxRate
     } = req.body;
 
@@ -414,6 +418,7 @@ router.patch("/customers/:id", adminMiddleware, async (req, res) => {
     if (paymentTermsDays !== undefined) updates.paymentTermsDays = paymentTermsDays;
     if (monthlyCreditLimit !== undefined) updates.monthlyCreditLimit = monthlyCreditLimit ? String(monthlyCreditLimit) : null;
     if (allowMonthlyBilling !== undefined) updates.allowMonthlyBilling = allowMonthlyBilling;
+    if (ppnEnabled !== undefined) updates.ppnEnabled = ppnEnabled;
     if (accountStatus !== undefined) updates.accountStatus = accountStatus;
     if (withholdingTaxEnabled !== undefined) updates.withholdingTaxEnabled = withholdingTaxEnabled;
     if (withholdingTaxRate !== undefined) updates.withholdingTaxRate = String(withholdingTaxRate);

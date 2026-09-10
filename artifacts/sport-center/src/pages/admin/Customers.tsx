@@ -358,10 +358,10 @@ function PersonalForm({ onClose, onCreated }: { onClose: () => void; onCreated: 
   const { toast } = useToast();
   const qc = useQueryClient();
   const createMutation = useCreateCustomer();
-  const [form, setForm] = useState({ name: "", email: "", phone: "" });
+  const [form, setForm] = useState({ name: "", email: "", phone: "", ppnEnabled: true });
   const [loading, setLoading] = useState(false);
 
-  const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
+  const set = (k: string, v: any) => setForm((f) => ({ ...f, [k]: v }));
 
   const handleSubmit = async () => {
     if (!form.name.trim() || !form.email.trim()) {
@@ -370,7 +370,7 @@ function PersonalForm({ onClose, onCreated }: { onClose: () => void; onCreated: 
     setLoading(true);
     try {
       const result = await createMutation.mutateAsync({
-        data: { name: form.name.trim(), email: form.email.trim(), phone: form.phone.trim() || undefined, accountType: "personal" as const },
+        data: { name: form.name.trim(), email: form.email.trim(), phone: form.phone.trim() || undefined, accountType: "personal" as const, ppnEnabled: form.ppnEnabled },
       });
       qc.invalidateQueries({ queryKey: getListCustomersQueryKey() });
       onCreated((result as any).tempPassword ?? "", form.email.trim());
@@ -400,6 +400,13 @@ function PersonalForm({ onClose, onCreated }: { onClose: () => void; onCreated: 
           <Label>No. WhatsApp</Label>
           <Input placeholder="08xxxxxxxxxx" value={form.phone} onChange={(e) => set("phone", e.target.value)} />
         </div>
+        <div className="flex items-center gap-3 rounded-lg border p-3">
+          <Switch id="personalPpn" checked={form.ppnEnabled} onCheckedChange={(v) => set("ppnEnabled", v)} />
+          <div>
+            <Label htmlFor="personalPpn">PPN termasuk dalam harga</Label>
+            <p className="text-xs text-muted-foreground">Harga customer personal sudah termasuk PPN.</p>
+          </div>
+        </div>
         <div className="flex justify-end gap-2 pt-1">
           <Button variant="outline" onClick={onClose} disabled={loading}>Batal</Button>
           <Button onClick={handleSubmit} disabled={loading || !form.name.trim() || !form.email.trim()}>
@@ -428,6 +435,7 @@ function CompanyForm({ initial, onClose }: { initial?: any; onClose: () => void 
     paymentTermsDays: initial?.paymentTermsDays ?? 30,
     monthlyCreditLimit: initial?.monthlyCreditLimit ?? "",
     allowMonthlyBilling: initial?.allowMonthlyBilling ?? false,
+    ppnEnabled: initial?.ppnEnabled ?? false,
     withholdingTaxEnabled: initial?.withholdingTaxEnabled ?? false,
     withholdingTaxRate: initial?.withholdingTaxRate ?? 10,
     accountStatus: initial?.accountStatus ?? "active",
@@ -497,6 +505,13 @@ function CompanyForm({ initial, onClose }: { initial?: any; onClose: () => void 
           <div className="flex items-center gap-3 mt-3">
             <Switch id="withholdingTax" checked={form.withholdingTaxEnabled} onCheckedChange={(v) => set("withholdingTaxEnabled", v)} />
             <Label htmlFor="withholdingTax">PPh 10% dipotong customer</Label>
+          </div>
+          <div className="flex items-center gap-3 mt-3">
+            <Switch id="companyPpn" checked={form.ppnEnabled} onCheckedChange={(v) => set("ppnEnabled", v)} />
+            <div>
+              <Label htmlFor="companyPpn">PPN dipungut customer</Label>
+              <p className="text-xs text-muted-foreground">PPN tetap tampil di invoice, tetapi tidak masuk kas Sport Center.</p>
+            </div>
           </div>
           {form.withholdingTaxEnabled && (
             <div className="mt-2 max-w-[180px] space-y-1">
@@ -656,6 +671,7 @@ function PersonalEditForm({ initial, onClose }: { initial: any; onClose: () => v
     email: initial?.email ?? "",
     phone: initial?.phone ?? "",
     accountStatus: initial?.accountStatus ?? "active",
+    ppnEnabled: initial?.ppnEnabled ?? true,
   });
   const set = (k: string, v: any) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -681,6 +697,13 @@ function PersonalEditForm({ initial, onClose }: { initial: any; onClose: () => v
         <div className="flex items-center justify-between py-1">
           <Label>Status Aktif</Label>
           <Switch checked={form.accountStatus === "active"} onCheckedChange={v => set("accountStatus", v ? "active" : "inactive")} />
+        </div>
+        <div className="flex items-center gap-3 rounded-lg border p-3">
+          <Switch id="personalEditPpn" checked={form.ppnEnabled} onCheckedChange={(v) => set("ppnEnabled", v)} />
+          <div>
+            <Label htmlFor="personalEditPpn">PPN termasuk dalam harga</Label>
+            <p className="text-xs text-muted-foreground">Harga customer personal sudah termasuk PPN.</p>
+          </div>
         </div>
         <div className="flex justify-end gap-2 pt-2">
           <Button variant="outline" onClick={onClose} disabled={updateMutation.isPending}>Batal</Button>
