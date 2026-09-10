@@ -18,7 +18,10 @@ jest.unstable_mockModule("@workspace/db", () => ({
   },
   accountingJournalLinesTable: {},
   taxTransactionsTable: {},
+  taxSettingsTable: {},
+  usersTable: {},
   paymentsTable: {},
+  bookingsTable: {},
 }));
 
 jest.unstable_mockModule("drizzle-orm", () => ({
@@ -28,6 +31,7 @@ jest.unstable_mockModule("drizzle-orm", () => ({
 
 const { extractBookingDpp } = await import("./accountingMath.js");
 const { createJournalEntry } = await import("./accounting.js");
+const { calculateWithholdingTax } = await import("./tax.js");
 
 function selectResult(rows: unknown[]) {
   return {
@@ -69,6 +73,26 @@ describe("confirmed booking payment accounting", () => {
     expect(amounts.dpp + amounts.ppnAmount).toBe(200000);
   });
 
+  it("calculates PPh from DPP while keeping gross unchanged", () => {
+    expect(calculateWithholdingTax(200000, 180180, true, 10)).toEqual({
+      enabled: true,
+      rate: 10,
+      amount: 18018,
+      grossAmount: 200000,
+      netAmount: 181982,
+    });
+  });
+
+  it("returns zero PPh when withholding is disabled", () => {
+    expect(calculateWithholdingTax(200000, 180180, false, 10)).toMatchObject({
+      enabled: false,
+      rate: 0,
+      amount: 0,
+      grossAmount: 200000,
+      netAmount: 200000,
+    });
+  });
+
   it("creates exactly one internal journal on a duplicate confirmation", async () => {
     const journalValues: Record<string, unknown>[] = [];
     let journalLookupCount = 0;
@@ -107,11 +131,42 @@ describe("confirmed booking payment accounting", () => {
     expect(journalValues).toHaveLength(1);
     expect(journalValues[0]).toMatchObject({
       paymentId: 15,
-    status: "posted",
+      status: "draft",
       debitAmount: "200000",
       creditRevenueAmount: "180180",
       creditPpnAmount: "19820",
     });
     expect(mockInsert).toHaveBeenCalledTimes(2);
+  });
+
+  it("stores invoice PPh and net cash in the internal journal snapshot", async () => {
+    const journalValues: Record<string, unknown>[] = [];
+    mockInsert
+      .mockImplementationOnce(() => ({
+        values: jest.fn().mockImplementation((values: Record<string, unknown>) => {
+          journalValues.push(values);
+          return { returning: jest.fn().mockResolvedValue([{ id: 202 }]) };
+        }),
+      }))
+      .mockImplementationOnce(() => insertResult());
+
+    await (await import("./accounting.js")).createInvoiceJournalEntry(
+      22,
+      "INV-202608-0022",
+      180180,
+      19820,
+      "2026-08-08",
+      18018,
+      10,
+    );
+
+    expect(journalValues[0]).toMatchObject({
+      debitAmount: "200000",
+      creditRevenueAmount: "180180",
+      creditPpnAmount: "19820",
+      pphRate: "10",
+      pphAmount: "18018",
+      netAmount: "181982",
+    });
   });
 });

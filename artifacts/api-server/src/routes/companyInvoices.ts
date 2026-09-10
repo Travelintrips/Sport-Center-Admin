@@ -11,7 +11,6 @@ import { createInvoiceJournalEntry, createPublicInvoiceAccountingEntry } from ".
 import { BUCKETS, uploadToStorage } from "../lib/supabaseStorage";
 import { uploadProofWithFallback } from "./storage";
 import { allowWhatsAppProviderSend } from "../lib/whatsappSafety";
-import { calculateWithholdingTax } from "../lib/tax";
 
 const uploadMiddleware = multer({
   storage: multer.memoryStorage(),
@@ -47,6 +46,21 @@ function calcTaxBreakdown(totalAmountInclusive: number) {
   const ppnAmount = Math.round(dppNilaiLain * 0.12);
   const grandTotal = dpp + ppnAmount;
   return { dpp, dppNilaiLain, ppnAmount, grandTotal };
+}
+
+function summarizeWithholdingTax(
+  rows: Array<{ pphRate?: string | number | null; pphAmount?: string | number | null }>,
+) {
+  const pphAmount = rows.reduce((sum, row) => sum + Math.max(0, Number(row.pphAmount ?? 0)), 0);
+  const rates = [...new Set(
+    rows
+      .map((row) => Number(row.pphRate ?? 0))
+      .filter((rate) => rate > 0),
+  )];
+  return {
+    pphRate: pphAmount > 0 && rates.length === 1 ? rates[0] : 0,
+    pphAmount,
+  };
 }
 
 // Keep the invoice flow compatible with production databases that may contain
@@ -95,7 +109,7 @@ function mapInvoice(
   const grandTotal = Number(inv.grandTotal ?? totalAmount);
   const pphAmount = Number(inv.pphAmount ?? 0);
   const pphRate = Number(inv.pphRate ?? 0);
-  const netAmount = Number(inv.netAmount ?? grandTotal - pphAmount);
+  const netAmount = Number(inv.netAmount ?? Math.max(0, grandTotal - pphAmount));
   return {
     id: inv.id,
     invoiceNumber: inv.invoiceNumber,
@@ -179,6 +193,9 @@ router.get("/company-invoices", adminMiddleware, async (req, res) => {
       totalAmount: companyInvoicesTable.totalAmount,
       ppnAmount: companyInvoicesTable.ppnAmount,
       grandTotal: companyInvoicesTable.grandTotal,
+      pphRate: companyInvoicesTable.pphRate,
+      pphAmount: companyInvoicesTable.pphAmount,
+      netAmount: companyInvoicesTable.netAmount,
       status: companyInvoicesTable.status,
       paidAt: companyInvoicesTable.paidAt,
       notes: companyInvoicesTable.notes,
@@ -249,9 +266,8 @@ router.get("/company-invoices/preview", adminMiddleware, async (req, res) => {
     // subtotal = sum of inclusive prices (what customers paid)
     const subtotal = bookingList.reduce((s, b) => s + (b.grandTotal ?? b.totalPrice), 0);
     const { dpp, dppNilaiLain, ppnAmount, grandTotal } = calcTaxBreakdown(subtotal);
-    const pphAmount = bookingList.reduce((s, b) => s + (b.pphAmount ?? 0), 0);
-    const pphRate = pphAmount > 0 ? Number(company.withholdingTaxRate ?? 10) : 0;
-    const netAmount = grandTotal - pphAmount;
+    const { pphRate, pphAmount } = summarizeWithholdingTax(bookingList);
+    const netAmount = Math.max(0, grandTotal - pphAmount);
 
     // Check if invoice already exists for this company + period
     const [existingInvoice] = await db.select().from(companyInvoicesTable).where(
@@ -270,6 +286,9 @@ router.get("/company-invoices/preview", adminMiddleware, async (req, res) => {
       dpp,
       dppNilaiLain,
       ppnAmount,
+      pphRate,
+      pphAmount,
+      netAmount,
       grandTotal,
       bookings: bookingList,
       existingInvoice: existingInvoice ? {
@@ -353,7 +372,8 @@ async function handleGenerateInvoice(req: any, res: any) {
         eq(companyInvoiceItemsTable.invoiceId, existingInvoice.id)
       );
       const newSubtotal = allItems.reduce((s, i) => s + Number(i.subtotal ?? 0), 0); // inclusive
-      const { dpp: nd, dppNilaiLain: newDppNilaiLain, ppnAmount: newPpn, grandTotal: newGrandTotal } = calcTaxBreakdown(newSubtotal);
+       const { dpp: nd, dppNilaiLain: newDppNilaiLain, ppnAmount: newPpn, grandTotal: newGrandTotal } = calcTaxBreakdown(newSubtotal);
+       const { pphRate: newPphRate, pphAmount: newPphAmount } = summarizeWithholdingTax(allItems);
 
       const [updated] = await db.update(companyInvoicesTable)
         .set({
@@ -361,6 +381,9 @@ async function handleGenerateInvoice(req: any, res: any) {
           dppNilaiLain: String(newDppNilaiLain),
           ppnAmount: String(newPpn),
           grandTotal: String(newGrandTotal),
+           pphRate: String(newPphRate),
+           pphAmount: String(newPphAmount),
+           netAmount: String(Math.max(0, newGrandTotal - newPphAmount)),
           ...(notes ? { notes } : {}),
         })
         .where(eq(companyInvoicesTable.id, existingInvoice.id))
@@ -396,8 +419,7 @@ async function handleGenerateInvoice(req: any, res: any) {
     // totalAmount = sum of inclusive prices (what customers paid)
     const totalAmount = unbilledBookings.reduce((sum, b) => sum + Number(b.grandTotal ?? b.totalPrice), 0);
     const { dpp, dppNilaiLain, ppnAmount, grandTotal } = calcTaxBreakdown(totalAmount);
-    const pphAmount = unbilledBookings.reduce((sum, b) => sum + Number(b.pphAmount ?? 0), 0);
-    const pphRate = pphAmount > 0 ? Number(company.withholdingTaxRate ?? 10) : 0;
+    const { pphRate, pphAmount } = summarizeWithholdingTax(unbilledBookings);
 
     const [inv] = await db.insert(companyInvoicesTable).values({
       invoiceNumber: "TEMP",
@@ -652,12 +674,15 @@ router.patch("/company-invoices/:id", adminMiddleware, async (req, res) => {
       const today = paidDate.toISOString().split("T")[0]!;
       // totalAmount = harga inklusif PPN. Fungsi journal menerima DPP (sebelum PPN).
       // Gunakan calcTaxBreakdown (sama seperti mapInvoice) untuk ekstrak DPP & ppnAmount.
-      const { dpp: invDpp, ppnAmount: invPpn } = calcTaxBreakdown(Number(updated.totalAmount));
+      const invPpn = Number(updated.ppnAmount ?? 0);
+      const invDpp = Math.max(0, Number(updated.grandTotal ?? updated.totalAmount) - invPpn);
+      const invPph = Number(updated.pphAmount ?? 0);
+      const invPphRate = Number(updated.pphRate ?? 0);
       pushInvoicePaymentAsBankMutation(updated, company?.companyName ?? company?.name, paidDate).catch(() => {});
-      createInvoiceJournalEntry(updated.id, updated.invoiceNumber, invDpp, invPpn, today).catch((err) =>
+      createInvoiceJournalEntry(updated.id, updated.invoiceNumber, invDpp, invPpn, today, invPph, invPphRate).catch((err) =>
         logAccountingError({ operation: "createInvoiceJournalEntry", orderNumber: updated.invoiceNumber, bookingId: updated.id, error: err }),
       );
-      createPublicInvoiceAccountingEntry(updated.id, updated.invoiceNumber, invDpp, invPpn, today).catch((err) =>
+      createPublicInvoiceAccountingEntry(updated.id, updated.invoiceNumber, invDpp, invPpn, today, invPph).catch((err) =>
         logAccountingError({ operation: "createPublicInvoiceAccountingEntry", orderNumber: updated.invoiceNumber, bookingId: updated.id, error: err }),
       );
     }
@@ -740,6 +765,20 @@ router.post("/company-invoices/:id/upload-payment-proof", adminMiddleware, uploa
       await db.update(bookingsTable)
         .set({ billingStatus: "paid" })
         .where(eq(bookingsTable.companyInvoiceId, id));
+
+      const paidDate = updated.paidAt ?? new Date();
+      const paidDay = paidDate.toISOString().split("T")[0]!;
+      const invPpn = Number(updated.ppnAmount ?? 0);
+      const invDpp = Math.max(0, Number(updated.grandTotal ?? updated.totalAmount) - invPpn);
+      const invPph = Number(updated.pphAmount ?? 0);
+      const invPphRate = Number(updated.pphRate ?? 0);
+      pushInvoicePaymentAsBankMutation(updated, undefined, paidDate).catch(() => {});
+      createInvoiceJournalEntry(updated.id, updated.invoiceNumber, invDpp, invPpn, paidDay, invPph, invPphRate).catch((err) =>
+        logAccountingError({ operation: "createInvoiceJournalEntry", orderNumber: updated.invoiceNumber, bookingId: updated.id, error: err }),
+      );
+      createPublicInvoiceAccountingEntry(updated.id, updated.invoiceNumber, invDpp, invPpn, paidDay, invPph).catch((err) =>
+        logAccountingError({ operation: "createPublicInvoiceAccountingEntry", orderNumber: updated.invoiceNumber, bookingId: updated.id, error: err }),
+      );
     }
 
     const { ipAddress, userAgent } = getClientInfo(req);
@@ -788,7 +827,11 @@ router.post("/company-invoices/:id/send-wa", adminMiddleware, async (req, res) =
       `• Periode: *${periodLabel}*\n` +
       `• DPP: Rp ${Number(inv.totalAmount).toLocaleString("id-ID")}\n` +
       `• PPN 11%: Rp ${Number(inv.ppnAmount).toLocaleString("id-ID")}\n` +
-      `• *Grand Total: Rp ${Number(inv.grandTotal).toLocaleString("id-ID")}*\n\n` +
+      `• Grand Total: Rp ${Number(inv.grandTotal).toLocaleString("id-ID")}\n` +
+      (Number(inv.pphAmount ?? 0) > 0
+        ? `• PPh dipotong ${Number(inv.pphRate ?? 0)}%: Rp ${Number(inv.pphAmount).toLocaleString("id-ID")}\n`
+        : "") +
+      `• *Net dibayar: Rp ${Number(inv.netAmount ?? inv.grandTotal).toLocaleString("id-ID")}*\n\n` +
       `Mohon segera melakukan pembayaran. Terima kasih.\n\n` +
       `Sport Center Soekarno-Hatta`
     );

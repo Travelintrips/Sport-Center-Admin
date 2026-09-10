@@ -164,14 +164,18 @@ function printInvoicePdf(invoice: any, ds: DocTemplateSettings) {
   const periodStr = periodLabel(invoice.periodMonth);
   const today = new Date().toLocaleDateString("id-ID", { day:"numeric", month:"long", year:"numeric" });
 
-  // Sum-of-rows agar konsisten dengan tabel (hindari rounding drift)
+  // Prefer server snapshots so historical invoices never change when tax
+  // settings are edited later.
   const rowDpp   = (i: any) => Math.round(Number(i.subtotal ?? 0) / 1.11);
   const rowDppNL = (i: any) => Math.round(rowDpp(i) * 11 / 12);
   const rowPpn   = (i: any) => Math.round(rowDppNL(i) * 0.12);
-  const dpp         = items.reduce((s: number, i: any) => s + rowDpp(i), 0);
-  const dppNilaiLain = items.reduce((s: number, i: any) => s + rowDppNL(i), 0);
-  const ppn         = items.reduce((s: number, i: any) => s + rowPpn(i), 0);
-  const grandTotal  = invoice.totalAmount ?? 0; // selalu = sum subtotal, bukan dpp+ppn
+  const dpp         = invoice.dpp ?? items.reduce((s: number, i: any) => s + rowDpp(i), 0);
+  const dppNilaiLain = invoice.dppNilaiLain ?? items.reduce((s: number, i: any) => s + rowDppNL(i), 0);
+  const ppn         = invoice.ppnAmount ?? items.reduce((s: number, i: any) => s + rowPpn(i), 0);
+  const pph         = Number(invoice.pphAmount ?? items.reduce((s: number, i: any) => s + Number(i.pphAmount ?? 0), 0));
+  const pphRate     = Number(invoice.pphRate ?? 0);
+  const grandTotal  = invoice.grandTotal ?? invoice.totalAmount ?? 0;
+  const netAmount   = invoice.netAmount ?? Math.max(0, grandTotal - pph);
 
   const rows = items.map((item: any, i: number) => `
     <tr style="border-bottom:1px solid #e5e7eb; ${i % 2 === 1 ? "background:#f9fafb;" : ""}">
@@ -270,7 +274,9 @@ function printInvoicePdf(invoice: any, ds: DocTemplateSettings) {
         <tr class="tax-row" style="background:#f9fafb;"><td style="padding:7px 12px;">DPP</td><td style="padding:7px 12px;text-align:right;font-weight:600;">${formatCurrency(dpp)}</td></tr>
         <tr class="tax-row"><td style="padding:7px 12px;">DPP Nilai Lain</td><td style="padding:7px 12px;text-align:right;font-weight:600;">${formatCurrency(dppNilaiLain)}</td></tr>
         <tr class="tax-row" style="background:#f9fafb;"><td style="padding:7px 12px;">PPN 12%</td><td style="padding:7px 12px;text-align:right;font-weight:600;">${formatCurrency(ppn)}</td></tr>
+        ${pph > 0 ? `<tr class="tax-row"><td style="padding:7px 12px;">PPh dipotong ${pphRate}%</td><td style="padding:7px 12px;text-align:right;font-weight:600;color:#c2410c;">- ${formatCurrency(pph)}</td></tr>` : ""}
         <tr class="grand-row"><td style="padding:10px 12px;font-size:13px;">GRAND TOTAL</td><td style="padding:10px 12px;text-align:right;font-size:15px;font-weight:900;">${formatCurrency(grandTotal)}</td></tr>
+        ${pph > 0 ? `<tr class="grand-row" style="background:#f0fdf4;"><td style="padding:10px 12px;font-size:13px;">NET DIBAYAR</td><td style="padding:10px 12px;text-align:right;font-size:15px;font-weight:900;color:#15803d;">${formatCurrency(netAmount)}</td></tr>` : ""}
       </tbody>
     </table>
   </div>
@@ -445,8 +451,8 @@ function printKwitansi(invoice: any, ds: DocTemplateSettings) {
       <div class="value">${invoice.companyName}</div>
     </div>
     <div class="amount-box">
-      <div style="font-size:12px;color:#9ca3af;margin-bottom:4px;">JUMLAH</div>
-      <div class="num">${formatCurrency(invoice.grandTotal)}</div>
+      <div style="font-size:12px;color:#9ca3af;margin-bottom:4px;">JUMLAH DITERIMA</div>
+      <div class="num">${formatCurrency(invoice.netAmount ?? invoice.grandTotal)}</div>
     </div>
     <div class="row">
       <div class="label">Untuk Pembayaran</div>
@@ -543,7 +549,9 @@ function printSpp(invoice: any, ds: DocTemplateSettings) {
       <tr><td>DPP</td><td>${formatCurrency(invoice.dpp ?? Math.round((invoice.totalAmount ?? 0) / 1.11))}</td></tr>
       <tr><td>DPP Nilai Lain</td><td>${formatCurrency(invoice.dppNilaiLain ?? Math.round(Math.round((invoice.totalAmount ?? 0) / 1.11) * 11 / 12))}</td></tr>
       <tr><td>PPN 12%</td><td>${formatCurrency(invoice.ppnAmount)}</td></tr>
+      ${(Number(invoice.pphAmount ?? 0) > 0) ? `<tr><td>PPh dipotong ${Number(invoice.pphRate ?? 0)}%</td><td>- ${formatCurrency(invoice.pphAmount)}</td></tr>` : ""}
       <tr><td style="font-weight:700;background:#fef3c7;">GRAND TOTAL</td><td style="font-weight:700;color:#dc2626;font-size:14px;background:#fef3c7;">${formatCurrency(invoice.grandTotal)}</td></tr>
+      ${(Number(invoice.pphAmount ?? 0) > 0) ? `<tr><td style="font-weight:700;background:#f0fdf4;">NET DIBAYAR</td><td style="font-weight:700;color:#15803d;background:#f0fdf4;">${formatCurrency(invoice.netAmount ?? invoice.grandTotal)}</td></tr>` : ""}
       <tr><td>Jatuh Tempo</td><td>${dueDate}</td></tr>
     </tbody>
   </table>
@@ -946,13 +954,7 @@ function GenerateInvoiceDialog({
             <div className="mt-1 text-xs">
               {previewError instanceof Error ? previewError.message : "Terjadi kesalahan saat memuat booking perusahaan."}
             </div>
-          {pphAmount > 0 && (
-            <div className="rounded-lg border border-orange-200 bg-orange-50 p-3 text-sm text-orange-900">
-              <div className="flex justify-between"><span>PPh dipotong (10%)</span><strong>{formatCurrency(pphAmount)}</strong></div>
-              <div className="flex justify-between mt-1 font-semibold"><span>Net dibayar</span><strong>{formatCurrency(netAmount)}</strong></div>
-            </div>
-          )}
-          <Button
+            <Button
               type="button"
               variant="outline"
               size="sm"
@@ -1011,14 +1013,19 @@ function GenerateInvoiceDialog({
           const pvDpp         = pvRows.length > 0 ? pvRows.reduce((s, b) => s + rowDpp(b), 0) : (preview?.dpp ?? Math.round(subtotal / 1.11));
           const pvDppNilaiLain = pvRows.length > 0 ? pvRows.reduce((s, b) => s + rowDppNL(b), 0) : (preview?.dppNilaiLain ?? Math.round(pvDpp * 11 / 12));
           const pvPpn          = pvRows.length > 0 ? pvRows.reduce((s, b) => s + rowPpn(b), 0) : (preview?.ppnAmount ?? Math.round(pvDppNilaiLain * 0.12));
-          const pvGrandTotal  = subtotal; // selalu = sum subtotal
+           const pvGrandTotal  = preview?.grandTotal ?? subtotal;
+           const pvPph         = preview?.pphAmount ?? 0;
+           const pvNet         = preview?.netAmount ?? Math.max(0, pvGrandTotal - pvPph);
+           const pvPphRate     = preview?.pphRate ?? 0;
           return (
             <div className="rounded-lg bg-muted/40 p-3 space-y-1 text-sm">
               <div className="flex justify-between"><span className="text-muted-foreground">Subtotal Pemakaian</span><span className="font-semibold">{formatCurrency(subtotal)}</span></div>
               <div className="flex justify-between text-xs"><span className="text-muted-foreground">DPP</span><span>{formatCurrency(pvDpp)}</span></div>
               <div className="flex justify-between text-xs"><span className="text-muted-foreground">DPP Nilai Lain</span><span className="text-orange-600">{formatCurrency(pvDppNilaiLain)}</span></div>
               <div className="flex justify-between text-xs"><span className="text-muted-foreground">PPN 12%</span><span>{formatCurrency(pvPpn)}</span></div>
+               {pvPph > 0 && <div className="flex justify-between text-xs text-orange-700"><span>PPh dipotong ({pvPphRate}%)</span><span>{formatCurrency(pvPph)}</span></div>}
               <div className="flex justify-between border-t pt-1 font-black"><span>Grand Total</span><span className="text-primary">{formatCurrency(pvGrandTotal)}</span></div>
+               {pvPph > 0 && <div className="flex justify-between font-black text-green-700"><span>Net dibayar</span><span>{formatCurrency(pvNet)}</span></div>}
             </div>
           );
         })()}
@@ -1495,15 +1502,17 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
         </div>
 
         {/* Totals */}
-        {(() => {
-          // Hitung dari sum-of-rows supaya konsisten dengan tabel (hindari rounding drift)
-          const rowDpp      = (i: any) => Math.round((i.subtotal ?? 0) / 1.11);
-          const rowDppNL    = (i: any) => Math.round(rowDpp(i) * 11 / 12);
-          const rowPpn      = (i: any) => Math.round(rowDppNL(i) * 0.12);
-          const dpp         = items.reduce((s: number, i: any) => s + rowDpp(i), 0);
-          const dppNilaiLain = items.reduce((s: number, i: any) => s + rowDppNL(i), 0);
-          const ppn         = items.reduce((s: number, i: any) => s + rowPpn(i), 0);
-          const grand       = invoice.totalAmount ?? 0; // selalu = sum subtotal, bukan dpp+ppn
+         {(() => {
+           const rowDpp      = (i: any) => Math.round((i.subtotal ?? 0) / 1.11);
+           const rowDppNL    = (i: any) => Math.round(rowDpp(i) * 11 / 12);
+           const rowPpn      = (i: any) => Math.round(rowDppNL(i) * 0.12);
+           const dpp         = invoice.dpp ?? items.reduce((s: number, i: any) => s + rowDpp(i), 0);
+           const dppNilaiLain = invoice.dppNilaiLain ?? items.reduce((s: number, i: any) => s + rowDppNL(i), 0);
+           const ppn         = invoice.ppnAmount ?? items.reduce((s: number, i: any) => s + rowPpn(i), 0);
+           const pph         = Number(invoice.pphAmount ?? items.reduce((s: number, i: any) => s + Number(i.pphAmount ?? 0), 0));
+           const pphRate     = Number(invoice.pphRate ?? 0);
+           const grand       = invoice.grandTotal ?? invoice.totalAmount ?? 0;
+           const net         = invoice.netAmount ?? Math.max(0, grand - pph);
           return (
             <div className="rounded-lg border overflow-hidden text-sm">
               <div className="bg-muted/30 px-4 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Ringkasan Pajak</div>
@@ -1524,11 +1533,19 @@ function InvoiceDetail({ invoiceId, onClose }: { invoiceId: number; onClose: () 
                   <span className="text-muted-foreground">PPN 12%</span>
                   <span className="font-semibold">{formatCurrency(ppn)}</span>
                 </div>
+                 {pph > 0 && <div className="flex justify-between px-4 py-2.5 text-orange-700">
+                   <span>PPh dipotong ({pphRate}%)</span>
+                   <span className="font-semibold">- {formatCurrency(pph)}</span>
+                 </div>}
               </div>
               <div className="flex justify-between px-4 py-3 bg-primary text-white font-black text-base">
                 <span>Grand Total</span>
                 <span>{formatCurrency(grand)}</span>
               </div>
+               {pph > 0 && <div className="flex justify-between px-4 py-3 bg-green-50 text-green-800 font-black text-base dark:bg-green-900/20 dark:text-green-300">
+                 <span>Net dibayar</span>
+                 <span>{formatCurrency(net)}</span>
+               </div>}
             </div>
           );
         })()}
@@ -1929,7 +1946,9 @@ export default function AdminCompanyBilling() {
                       <th className="pb-3 pr-4 font-semibold text-muted-foreground">Periode</th>
                       <th className="pb-3 pr-4 font-semibold text-muted-foreground">DPP</th>
                       <th className="pb-3 pr-4 font-semibold text-muted-foreground">PPN 12%</th>
+                      <th className="pb-3 pr-4 font-semibold text-muted-foreground">PPh</th>
                       <th className="pb-3 pr-4 font-semibold text-muted-foreground">Grand Total</th>
+                      <th className="pb-3 pr-4 font-semibold text-muted-foreground">Net Dibayar</th>
                       <th className="pb-3 pr-4 font-semibold text-muted-foreground">Status</th>
                       <th className="pb-3 font-semibold text-muted-foreground">Aksi</th>
                     </tr>
@@ -1951,7 +1970,9 @@ export default function AdminCompanyBilling() {
                           <td className="py-3 pr-4 text-muted-foreground">{label}</td>
                           <td className="py-3 pr-4">{formatCurrency(Math.round((inv.totalAmount ?? 0) / 1.11))}</td>
                           <td className="py-3 pr-4 text-muted-foreground">{formatCurrency(inv.ppnAmount)}</td>
+                          <td className="py-3 pr-4 text-orange-700">{Number(inv.pphAmount ?? 0) > 0 ? `- ${formatCurrency(inv.pphAmount)}` : "—"}</td>
                           <td className="py-3 pr-4 font-semibold">{formatCurrency(inv.grandTotal)}</td>
+                          <td className="py-3 pr-4 font-semibold text-green-700">{formatCurrency(inv.netAmount ?? inv.grandTotal)}</td>
                           <td className="py-3 pr-4"><StatusBadge status={inv.status} /></td>
                           <td className="py-3">
                             <div className="flex items-center gap-1">

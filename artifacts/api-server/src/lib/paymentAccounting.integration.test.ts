@@ -473,6 +473,7 @@ jest.unstable_mockModule("@workspace/db", () => ({
   accountingJournalLinesTable: {},
   taxTransactionsTable: {},
   paymentsTable: {},
+  bookingsTable: {},
 }));
 
 process.env.SUPABASE_DATABASE_URL_DEV = "postgres://integration-test";

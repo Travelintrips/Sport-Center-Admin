@@ -1,0 +1,42 @@
+Considering API specifications Tarif PPh 10% sudah saya tetapkan. Saya akan menerapkan perubahan end-to-end dengan snapshot pajak pada booking/invoice, lalu memperbarui perhitungan payment dan accounting agar PPh menjadi pengurang kas hanya untuk company yang mengaktifkannya.
+
+9 actions Saya mulai dari implementasi backend terlebih dahulu: konfigurasi customer, snapshot booking/invoice, kalkulasi bruto–PPN–PPh, lalu jurnal accounting. Setelah kontraknya stabil baru saya sinkronkan UI dan codegen agar tidak ada tampilan yang hanya menyimpan sebagian data.
+
+38 actions Implementasi akan memakai snapshot numerik dan flag yang eksplisit, bukan menghitung ulang dari setting customer saat invoice lama dibuka. Saya mulai dari schema/helper dan migration idempoten; setelah itu baru mengubah endpoint serta UI.
+
+41 actions Schema dan kalkulasi inti sudah masuk. Saya lanjutkan dengan memperbaiki jalur invoice/accounting yang masih memakai kalkulasi lama, lalu regenerasi kontrak API dan menyambungkan form customer.
+
+63 actions Typecheck API dan web sudah bersih. Saya sekarang menutup gap perilaku: kalkulasi invoice historis, accounting PPh/PPN customer, test engine, lalu restart workflow dan cek endpoint.
+
+19 actions
+
+Worked for 13 minutes You've reached your monthly free quota limit. It will reset on September 21, 2026.
+
+Free
+17 minutes ago
+Continuing analysis task
+
+Continuing analysis task
+Saya melanjutkan dari checkpoint terakhir: saya akan audit perubahan PPh yang sudah ada, mencari gap di invoice/payment/accounting dan UI, lalu memperbaiki serta memverifikasi workflow yang berjalan.
+
+
+
+13 actions
+Perubahan terakhir sudah tersimpan di commit checkpoint, jadi saya tidak melihat diff lokal yang belum tersimpan. Saya akan membaca commit dan log workflow untuk menentukan gap yang benar-benar tersisa sebelum menyentuh kode.
+
+
+
+45 actions
+Gap-nya jelas: branch saat ini belum memiliki field PPh sama sekali, sementara PPN masih dihitung ulang dari setting saat invoice lama dibuka. Saya akan menambahkan snapshot PPh pada customer→booking→invoice, memakai nilai snapshot untuk invoice/payment, dan menambahkan jurnal PPh yang tetap balance tanpa mengubah booking historis lama.
+
+
+
+103 actions
+Backend tax fields and core corporate booking/invoice calculations are in place. I’m finishing the contract regeneration, payment projection wiring, and a final compile/workflow check now.
+
+
+
+23 actions
+
+Worked for 13 minutes
+You've reached your daily free quota limit. It will reset at 12:00 AM UTC.

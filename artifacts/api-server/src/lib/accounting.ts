@@ -89,6 +89,7 @@ let _publicIds: {
   coaKas: number;
   coaPendapatan: number;
   coaPpnKeluaran: number;
+  coaPphDipotong: number | null;
   taxIdPpn: number;
 } | null = null;
 
@@ -98,11 +99,20 @@ async function getPublicIds() {
   const pool = getPublicPool();
   if (!pool) throw new Error("[accounting] Tidak ada Supabase URL — tidak bisa write ke public.accounting_entries");
 
-  const [journal, kas, pendapatan, ppn, tax] = await Promise.all([
+  const [journal, kas, pendapatan, ppn, pph, tax] = await Promise.all([
     pool.query(`SELECT id FROM public.accounting_journals WHERE code = 'BNK-CST' LIMIT 1`),
     pool.query(`SELECT id FROM public.chart_of_accounts WHERE code = '1-1020-CST' AND is_active = true LIMIT 1`),
     pool.query(`SELECT id FROM public.chart_of_accounts WHERE code = '4-1017-CST' AND is_active = true LIMIT 1`),
     pool.query(`SELECT id FROM public.chart_of_accounts WHERE code = '2-1020-CST' AND is_active = true LIMIT 1`),
+    pool.query(`SELECT id
+                  FROM public.chart_of_accounts c
+                 WHERE c.is_active = true
+                   AND (
+                     c.code IN ('1-1301-CST', '1-1301')
+                     OR COALESCE(to_jsonb(c)->>'name', to_jsonb(c)->>'account_name', '') ILIKE '%PPh%Potong%'
+                   )
+                 ORDER BY CASE WHEN code = '1-1301-CST' THEN 0 ELSE 1 END, id
+                 LIMIT 1`),
     pool.query(`SELECT id FROM public.accounting_taxes WHERE name ILIKE '%PPN Keluaran%' AND company_id = $1 ORDER BY id LIMIT 1`, [COMPANY_ID]),
   ]);
 
@@ -110,6 +120,7 @@ async function getPublicIds() {
   const coaKas = Number(kas.rows[0]?.id);
   const coaPendapatan = Number(pendapatan.rows[0]?.id);
   const coaPpnKeluaran = Number(ppn.rows[0]?.id);
+  const coaPphDipotong = pph.rows[0]?.id == null ? null : Number(pph.rows[0].id);
   const taxIdPpn = Number(tax.rows[0]?.id ?? 1);
 
   if (!journalId || !coaKas || !coaPendapatan || !coaPpnKeluaran) {
@@ -120,7 +131,7 @@ async function getPublicIds() {
     );
   }
 
-  _publicIds = { journalId, coaKas, coaPendapatan, coaPpnKeluaran, taxIdPpn };
+  _publicIds = { journalId, coaKas, coaPendapatan, coaPpnKeluaran, coaPphDipotong, taxIdPpn };
   return _publicIds;
 }
 
@@ -1246,6 +1257,7 @@ export async function createPublicInvoiceAccountingEntry(
   subtotal: number,
   ppnAmount: number,
   journalDate: string,
+  pphAmount = 0,
 ): Promise<void> {
   const pool = getPublicPool();
   if (!pool) {
@@ -1254,12 +1266,17 @@ export async function createPublicInvoiceAccountingEntry(
   }
 
   const grandTotal  = subtotal + ppnAmount;
+  const cashAmount  = Math.max(0, grandTotal - pphAmount);
   const netRevenue  = subtotal;
   const hasPpn      = ppnAmount > 0;
+  const hasPph      = pphAmount > 0;
   const year        = new Date(journalDate).getFullYear();
   const period      = journalDate.slice(0, 7);
   const entryNumber = await nextPublicEntryNumber(pool, year);
   const ids         = await getPublicIds();
+  if (hasPph && !ids.coaPphDipotong) {
+    throw new Error("[accounting] COA PPh Dipotong Pelanggan tidak ditemukan di public chart_of_accounts.");
+  }
 
   const entryResult = await pool.query(
     `INSERT INTO public.accounting_entries
@@ -1276,26 +1293,17 @@ export async function createPublicInvoiceAccountingEntry(
   );
   const entryId = Number(entryResult.rows[0]?.id);
 
-  if (hasPpn) {
+  const lines = [
+    { accountId: ids.coaKas, description: `Penerimaan invoice ${invoiceNumber}`, debit: cashAmount, credit: 0 },
+    ...(hasPph ? [{ accountId: ids.coaPphDipotong!, description: `PPh dipotong invoice ${invoiceNumber}`, debit: pphAmount, credit: 0 }] : []),
+    { accountId: ids.coaPendapatan, description: `Pendapatan invoice ${invoiceNumber}`, debit: 0, credit: netRevenue },
+    ...(hasPpn ? [{ accountId: ids.coaPpnKeluaran, description: `PPN Keluaran invoice ${invoiceNumber}`, debit: 0, credit: ppnAmount }] : []),
+  ];
+  for (const line of lines) {
     await pool.query(
-      `INSERT INTO public.accounting_entry_lines (entry_id, account_id, description, debit, credit) VALUES
-        ($1,$2,$3,$4,0),
-        ($1,$5,$6,0,$7),
-        ($1,$8,$9,0,$10)`,
-      [
-        entryId,
-        ids.coaKas,         `Penerimaan invoice ${invoiceNumber}`, grandTotal,
-        ids.coaPendapatan,  `Pendapatan invoice ${invoiceNumber}`, netRevenue,
-        ids.coaPpnKeluaran, `PPN Keluaran invoice ${invoiceNumber}`, ppnAmount,
-      ]
-    );
-
-  } else {
-    await pool.query(
-      `INSERT INTO public.accounting_entry_lines (entry_id, account_id, description, debit, credit) VALUES
-        ($1,$2,$3,$4,0),
-        ($1,$5,$6,0,$4)`,
-      [entryId, ids.coaKas, `Penerimaan invoice ${invoiceNumber}`, grandTotal, ids.coaPendapatan, `Pendapatan invoice ${invoiceNumber}`]
+      `INSERT INTO public.accounting_entry_lines (entry_id, account_id, description, debit, credit)
+       VALUES ($1,$2,$3,$4,$5)`,
+      [entryId, line.accountId, line.description, line.debit, line.credit],
     );
   }
 
@@ -1324,16 +1332,7 @@ export async function createPublicInvoiceAccountingEntry(
       VALUES ($1,$2,'PPN_OUT',11,$3,$4,'out',$5,'company_invoice',$6,false,NOW())`,
       [COMPANY_ID, entryId, subtotal, ppnAmount, period, invoiceNumber]
     );
-  } else {
-    await pool.query(
-      `INSERT INTO public.accounting_entry_lines (entry_id, account_id, description, debit, credit) VALUES
-        ($1,$2,$3,$4,0),
-        ($1,$5,$6,0,$4)`,
-      [entryId, ids.coaKas, `Penerimaan invoice ${invoiceNumber}`, grandTotal, ids.coaPendapatan, `Pendapatan invoice ${invoiceNumber}`]
-    );
   }
-
-  await pool.query(`UPDATE public.accounting_entries SET status = 'posted' WHERE id = $1`, [entryId]);
   console.info(`[accounting] ✓ Public accounting entry created (invoice): ${entryNumber} (${invoiceNumber})`);
 }
 
@@ -1875,8 +1874,11 @@ export async function createInvoiceJournalEntry(
   subtotal: number,   // DPP (sebelum PPN) — bukan totalAmount inklusif
   ppnAmount: number,
   journalDate: string,
+  pphAmount = 0,
+  pphRate = 0,
 ): Promise<void> {
   const grandTotal = subtotal + ppnAmount;
+  const cashAmount = Math.max(0, grandTotal - pphAmount);
   const netRevenue = subtotal;
 
   const [journal] = await db
@@ -1891,6 +1893,9 @@ export async function createInvoiceJournalEntry(
       creditRevenueAmount: String(ppnAmount > 0 ? netRevenue : grandTotal),
       creditPpnAccount: ppnAmount > 0 ? "PPN Keluaran" : "",
       creditPpnAmount: String(ppnAmount),
+      pphRate: pphAmount > 0 ? String(pphRate) : null,
+      pphAmount: String(pphAmount),
+      netAmount: String(cashAmount),
       journalDate,
       isReversal: false,
       notes: `Pembayaran dikonfirmasi untuk invoice perusahaan ${invoiceNumber}`,
@@ -1900,7 +1905,10 @@ export async function createInvoiceJournalEntry(
   if (!journal) return;
 
   const lines: Array<{ lineType: string; accountCode: string; accountName: string; amount: number; description?: string }> = [
-    { lineType: "debit",  accountCode: "1104", accountName: "Bank Mandiri",              amount: grandTotal,  description: `Penerimaan invoice ${invoiceNumber}` },
+    { lineType: "debit",  accountCode: "1104", accountName: "Bank Mandiri",              amount: cashAmount,  description: `Penerimaan invoice ${invoiceNumber}` },
+    ...(pphAmount > 0
+      ? [{ lineType: "debit", accountCode: "1-1301", accountName: "PPh Dipotong Pelanggan", amount: pphAmount, description: `PPh dipotong invoice ${invoiceNumber}` }]
+      : []),
     { lineType: "credit", accountCode: "4-1001", accountName: "Pendapatan Sport Center", amount: ppnAmount > 0 ? netRevenue : grandTotal, description: `Pendapatan invoice ${invoiceNumber}` },
   ];
   if (ppnAmount > 0) {

@@ -231,6 +231,9 @@ async function getBookingWithPayment(id: number) {
     dpp: booking.dpp == null ? null : Number(booking.dpp),
     ppnAmount: booking.ppnAmount == null ? null : Number(booking.ppnAmount),
     grandTotal: booking.grandTotal == null ? null : Number(booking.grandTotal),
+    pphRate: booking.pphRate == null ? null : Number(booking.pphRate),
+    pphAmount: booking.pphAmount == null ? null : Number(booking.pphAmount),
+    netAmount: booking.netAmount == null ? null : Number(booking.netAmount),
     downPayment: Number(booking.downPayment ?? 0),
     isDpPaid: booking.isDpPaid ?? false,
     payment: payment ? { ...payment, amount: Number(payment.amount) } : null,
@@ -973,6 +976,9 @@ router.post("/bookings", async (req, res) => {
       dpp: taxCalc.taxAmount > 0 ? String(taxCalc.dpp) : null,
       ppnAmount: taxCalc.taxAmount > 0 ? String(taxCalc.taxAmount) : null,
       grandTotal: taxCalc.taxAmount > 0 ? String(taxCalc.grandTotal) : null,
+       pphRate: pphCalc.enabled ? String(pphCalc.rate) : null,
+       pphAmount: pphCalc.enabled ? String(pphCalc.amount) : null,
+       netAmount: pphCalc.enabled ? String(pphCalc.netAmount) : String(pphCalc.grossAmount),
       additionalCharges,
       vendorId: req.body.vendorId ? Number(req.body.vendorId) : null,
     }).returning();
@@ -2507,6 +2513,11 @@ router.post("/bookings/:id/fix-gym-people", adminMiddleware, async (req, res) =>
     const existingAdditionalCharges = normalizeAdditionalCharges(booking.additionalCharges);
     const totalPrice = basePrice + additionalChargesTotal(existingAdditionalCharges);
     const taxCalc = await calculateTax(totalPrice, "sport_booking", booking.bookingDate);
+    const pphCalc = await resolveWithholdingTax(
+      booking.companyCustomerId,
+      taxCalc.taxAmount > 0 ? taxCalc.grandTotal : totalPrice,
+      taxCalc.taxAmount > 0 ? taxCalc.dpp : totalPrice,
+    );
 
     await db.update(bookingsTable).set({
       numberOfPeople,
@@ -2518,6 +2529,9 @@ router.post("/bookings/:id/fix-gym-people", adminMiddleware, async (req, res) =>
       ppnRate: taxCalc.taxRate > 0 ? String(taxCalc.taxRate) : null,
       ppnAmount: taxCalc.taxAmount > 0 ? String(taxCalc.taxAmount) : null,
       grandTotal: String(taxCalc.grandTotal),
+      pphRate: pphCalc.enabled ? String(pphCalc.rate) : null,
+      pphAmount: pphCalc.enabled ? String(pphCalc.amount) : null,
+      netAmount: pphCalc.enabled ? String(pphCalc.netAmount) : String(pphCalc.grossAmount),
     }).where(eq(bookingsTable.id, id));
 
     await reverseTaxTransaction(booking.id, booking.orderNumber, booking.bookingDate);
@@ -2712,6 +2726,11 @@ async function runApVerification(
   }
   const finalTotal = finalPrice + bookingAdditionalChargesTotal;
   const finalTaxCalc = await calculateTax(finalTotal, "sport_booking", booking.bookingDate ?? undefined);
+  const finalPphCalc = await resolveWithholdingTax(
+    booking.companyCustomerId,
+    finalTaxCalc.taxAmount > 0 ? finalTaxCalc.grandTotal : finalTotal,
+    finalTaxCalc.taxAmount > 0 ? finalTaxCalc.dpp : finalTotal,
+  );
 
   // Terapkan diskon ke booking utama
   await db.update(bookingsTable).set({
@@ -2725,6 +2744,9 @@ async function runApVerification(
     ppnAmount: finalTaxCalc.taxAmount > 0 ? String(finalTaxCalc.taxAmount) : null,
     grandTotal: finalTaxCalc.taxAmount > 0 ? String(finalTaxCalc.grandTotal) : null,
     dpp: finalTaxCalc.taxAmount > 0 ? String(finalTaxCalc.dpp) : null,
+    pphRate: finalPphCalc.enabled ? String(finalPphCalc.rate) : null,
+    pphAmount: finalPphCalc.enabled ? String(finalPphCalc.amount) : null,
+    netAmount: finalPphCalc.enabled ? String(finalPphCalc.netAmount) : String(finalPphCalc.grossAmount),
 
   }).where(eq(bookingsTable.id, bookingId));
 
@@ -2787,6 +2809,11 @@ async function runApVerification(
        const siblingFinal = siblingBase - siblingDiscount;
        const siblingFinalTotal = siblingFinal + siblingAdditionalChargesTotal;
        const siblingTaxCalc = await calculateTax(siblingFinalTotal, "sport_booking", sibling.bookingDate ?? undefined);
+        const siblingPphCalc = await resolveWithholdingTax(
+          sibling.companyCustomerId,
+          siblingTaxCalc.taxAmount > 0 ? siblingTaxCalc.grandTotal : siblingFinalTotal,
+          siblingTaxCalc.taxAmount > 0 ? siblingTaxCalc.dpp : siblingFinalTotal,
+        );
        await reverseTaxTransaction(sibling.id, sibling.orderNumber, sibling.bookingDate);
       await db.update(bookingsTable).set({
         verificationStatus: "verified",
@@ -2798,6 +2825,9 @@ async function runApVerification(
         grandTotal: siblingTaxCalc.taxAmount > 0 ? String(siblingTaxCalc.grandTotal) : null,
         dpp: siblingTaxCalc.taxAmount > 0 ? String(siblingTaxCalc.dpp) : null,
         ppnAmount: siblingTaxCalc.taxAmount > 0 ? String(siblingTaxCalc.taxAmount) : null,
+         pphRate: siblingPphCalc.enabled ? String(siblingPphCalc.rate) : null,
+         pphAmount: siblingPphCalc.enabled ? String(siblingPphCalc.amount) : null,
+         netAmount: siblingPphCalc.enabled ? String(siblingPphCalc.netAmount) : String(siblingPphCalc.grossAmount),
       }).where(eq(bookingsTable.id, sibling.id));
        if (siblingTaxCalc.taxCode) {
          await recordTaxTransaction("booking", sibling.id, sibling.orderNumber, siblingTaxCalc, sibling.bookingDate);
@@ -2896,6 +2926,11 @@ router.post("/bookings/:id/fix-discount", adminMiddleware, async (req, res) => {
 
     const finalTotal = finalPrice + bookingAdditionalChargesTotal;
     const taxCalc = await calculateTax(finalTotal, "sport_booking", booking.bookingDate);
+    const pphCalc = await resolveWithholdingTax(
+      booking.companyCustomerId,
+      taxCalc.taxAmount > 0 ? taxCalc.grandTotal : finalTotal,
+      taxCalc.taxAmount > 0 ? taxCalc.dpp : finalTotal,
+    );
     await db.update(bookingsTable).set({
       apDiscountAmount: String(discountAmount),
       discountAmount: String(discountAmount),
@@ -2903,6 +2938,10 @@ router.post("/bookings/:id/fix-discount", adminMiddleware, async (req, res) => {
       ppnRate: taxCalc.taxRate > 0 ? String(taxCalc.taxRate) : null,
       ppnAmount: taxCalc.taxAmount > 0 ? String(taxCalc.taxAmount) : null,
       grandTotal: taxCalc.taxAmount > 0 ? String(taxCalc.grandTotal) : null,
+      dpp: taxCalc.taxAmount > 0 ? String(taxCalc.dpp) : null,
+      pphRate: pphCalc.enabled ? String(pphCalc.rate) : null,
+      pphAmount: pphCalc.enabled ? String(pphCalc.amount) : null,
+      netAmount: pphCalc.enabled ? String(pphCalc.netAmount) : String(pphCalc.grossAmount),
     }).where(eq(bookingsTable.id, id));
 
     await reverseTaxTransaction(booking.id, booking.orderNumber, booking.bookingDate);
@@ -3044,6 +3083,11 @@ router.post("/bookings/groups/:groupRef/reapply-discount", adminMiddleware, asyn
       const finalPrice = basePrice - discountAmount;
       const finalTotal = finalPrice + bookingAdditionalChargesTotal;
       const taxCalc = await calculateTax(finalTotal, "sport_booking", booking.bookingDate ?? undefined);
+      const pphCalc = await resolveWithholdingTax(
+        booking.companyCustomerId,
+        taxCalc.taxAmount > 0 ? taxCalc.grandTotal : finalTotal,
+        taxCalc.taxAmount > 0 ? taxCalc.dpp : finalTotal,
+      );
 
       const before = Number(booking.grandTotal ?? booking.totalPrice);
 
@@ -3056,6 +3100,9 @@ router.post("/bookings/groups/:groupRef/reapply-discount", adminMiddleware, asyn
         grandTotal: taxCalc.taxAmount > 0 ? String(taxCalc.grandTotal) : null,
         dpp: taxCalc.taxAmount > 0 ? String(taxCalc.dpp) : null,
         ppnAmount: taxCalc.taxAmount > 0 ? String(taxCalc.taxAmount) : null,
+        pphRate: pphCalc.enabled ? String(pphCalc.rate) : null,
+        pphAmount: pphCalc.enabled ? String(pphCalc.amount) : null,
+        netAmount: pphCalc.enabled ? String(pphCalc.netAmount) : String(pphCalc.grossAmount),
       }).where(eq(bookingsTable.id, booking.id));
 
       await reverseTaxTransaction(booking.id, booking.orderNumber, booking.bookingDate);
