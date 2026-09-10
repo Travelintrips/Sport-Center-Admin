@@ -2480,7 +2480,8 @@ router.post("/bookings/:id/fix-gym-people", adminMiddleware, async (req, res) =>
     const unitPrice = Number(facility.pricePerHour);
     const basePrice = unitPrice * numberOfPeople;
     const discountAmount = 0;
-    const totalPrice = basePrice;
+    const existingAdditionalCharges = normalizeAdditionalCharges(booking.additionalCharges);
+    const totalPrice = basePrice + additionalChargesTotal(existingAdditionalCharges);
     const taxCalc = await calculateTax(totalPrice, "sport_booking", booking.bookingDate);
 
     await db.update(bookingsTable).set({
@@ -2657,7 +2658,11 @@ async function runApVerification(
   const [setting] = await db.select().from(discountSettingsTable)
     .where(eq(discountSettingsTable.customerType, "angkasa_pura")).limit(1);
   const discountEnabled = !!setting && setting.isActive;
-  const basePrice = booking.basePrice == null ? Number(booking.totalPrice) : Number(booking.basePrice);
+  const bookingAdditionalCharges = normalizeAdditionalCharges(booking.additionalCharges);
+  const bookingAdditionalChargesTotal = additionalChargesTotal(bookingAdditionalCharges);
+  const basePrice = booking.basePrice == null
+    ? Math.max(0, Number(booking.totalPrice) - bookingAdditionalChargesTotal)
+    : Number(booking.basePrice);
   const durationHours = Math.max(1, Number(booking.durationHours) || 1);
   const specialMultigunaPrice = AP_MULTIGUNA_HOURLY_PRICE * durationHours;
   const isSpecialMultiguna = isMultigunaFacility(facility ?? {});
@@ -2681,10 +2686,8 @@ async function runApVerification(
       finalPrice = apDiscount.finalPrice;
     }
   }
-  const taxCalc = await calculateTax(finalPrice, "sport_booking", booking.bookingDate);
-
-  // Recalculate tax on finalPrice (tax is inclusive — grandTotal = finalPrice)
-  const finalTaxCalc = await calculateTax(finalPrice, "sport_booking", booking.bookingDate ?? undefined);
+  const finalTotal = finalPrice + bookingAdditionalChargesTotal;
+  const finalTaxCalc = await calculateTax(finalTotal, "sport_booking", booking.bookingDate ?? undefined);
 
   // Terapkan diskon ke booking utama
   await db.update(bookingsTable).set({
@@ -2692,7 +2695,7 @@ async function runApVerification(
     idCardNumber: normalizedIdCardNumber,
     apDiscountAmount: String(discountAmount),
     discountAmount: String(discountAmount),
-    totalPrice: String(finalPrice),
+    totalPrice: String(finalTotal),
 
     ppnRate: finalTaxCalc.taxRate > 0 ? String(finalTaxCalc.taxRate) : null,
     ppnAmount: finalTaxCalc.taxAmount > 0 ? String(finalTaxCalc.taxAmount) : null,
@@ -2704,8 +2707,8 @@ async function runApVerification(
   // Booking awal dibuat dengan harga normal karena masih menunggu verifikasi.
   // Balikkan jurnal pajak awal lalu catat ulang berdasarkan harga AP final.
   await reverseTaxTransaction(booking.id, booking.orderNumber, booking.bookingDate);
-  if (taxCalc.taxCode) {
-    await recordTaxTransaction("booking", booking.id, booking.orderNumber, taxCalc, booking.bookingDate);
+  if (finalTaxCalc.taxCode) {
+    await recordTaxTransaction("booking", booking.id, booking.orderNumber, finalTaxCalc, booking.bookingDate);
   }
 
   // Propagate the verified AP price to Bizportal as well.
@@ -2749,22 +2752,32 @@ async function runApVerification(
       ));
 
     for (const sibling of siblings) {
-      const siblingBase = sibling.basePrice == null ? Number(sibling.totalPrice) : Number(sibling.basePrice);
+       const siblingAdditionalCharges = normalizeAdditionalCharges(sibling.additionalCharges);
+       const siblingAdditionalChargesTotal = additionalChargesTotal(siblingAdditionalCharges);
+       const siblingBase = sibling.basePrice == null
+         ? Math.max(0, Number(sibling.totalPrice) - siblingAdditionalChargesTotal)
+         : Number(sibling.basePrice);
       const siblingDiscount = Number(setting?.discountAmount ?? 0) > 0
         ? Math.min(Number(setting.discountAmount), siblingBase)
         : Math.round((siblingBase * discountPct) / 100);
-      const siblingFinal = siblingBase - siblingDiscount;
-      const siblingTaxCalc = await calculateTax(siblingFinal, "sport_booking", sibling.bookingDate ?? undefined);
+       const siblingFinal = siblingBase - siblingDiscount;
+       const siblingFinalTotal = siblingFinal + siblingAdditionalChargesTotal;
+       const siblingTaxCalc = await calculateTax(siblingFinalTotal, "sport_booking", sibling.bookingDate ?? undefined);
+       await reverseTaxTransaction(sibling.id, sibling.orderNumber, sibling.bookingDate);
       await db.update(bookingsTable).set({
         verificationStatus: "verified",
         idCardNumber,
         apDiscountAmount: String(siblingDiscount),
         discountAmount: String(siblingDiscount),
-        totalPrice: String(siblingFinal),
+         totalPrice: String(siblingFinalTotal),
+         ppnRate: siblingTaxCalc.taxRate > 0 ? String(siblingTaxCalc.taxRate) : null,
         grandTotal: siblingTaxCalc.taxAmount > 0 ? String(siblingTaxCalc.grandTotal) : null,
         dpp: siblingTaxCalc.taxAmount > 0 ? String(siblingTaxCalc.dpp) : null,
         ppnAmount: siblingTaxCalc.taxAmount > 0 ? String(siblingTaxCalc.taxAmount) : null,
       }).where(eq(bookingsTable.id, sibling.id));
+       if (siblingTaxCalc.taxCode) {
+         await recordTaxTransaction("booking", sibling.id, sibling.orderNumber, siblingTaxCalc, sibling.bookingDate);
+       }
       groupUpdatedCount++;
     }
 
@@ -2782,13 +2795,13 @@ async function runApVerification(
     success: true, result: "verified" as const,
     message: discountEnabled
 
-      ? `Verifikasi berhasil. ${isSpecialMultiguna ? "Harga khusus AP Multiguna diterapkan. " : `Diskon ${discountPct}% diterapkan${groupUpdatedCount > 0 ? ` ke ${groupUpdatedCount + 1} booking dalam grup` : ""}. `}Harga akhir Rp ${finalPrice.toLocaleString("id-ID")}.`
+      ? `Verifikasi berhasil. ${isSpecialMultiguna ? "Harga khusus AP Multiguna diterapkan. " : `Diskon ${discountPct}% diterapkan${groupUpdatedCount > 0 ? ` ke ${groupUpdatedCount + 1} booking dalam grup` : ""}. `}Harga akhir Rp ${finalTotal.toLocaleString("id-ID")}.`
 
       : "ID Card valid. Terverifikasi (diskon Angkasa Pura sedang nonaktif).",
     discountApplied: discountEnabled,
     discountPercentage: discountPct,
     discountAmount,
-    finalPrice,
+    finalPrice: finalTotal,
     memberName: member.name,
     bookingId,
     groupUpdatedCount,
@@ -2826,6 +2839,8 @@ router.post("/bookings/:id/fix-discount", adminMiddleware, async (req, res) => {
       .where(eq(discountSettingsTable.customerType, "angkasa_pura"))
       .limit(1);
     const durationHours = Math.max(1, Number(booking.durationHours) || 1);
+    const bookingAdditionalCharges = normalizeAdditionalCharges(booking.additionalCharges);
+    const bookingAdditionalChargesTotal = additionalChargesTotal(bookingAdditionalCharges);
     const basePrice = booking.basePrice == null
       ? Number(facility.pricePerHour) * durationHours
       : Number(booking.basePrice);
@@ -2855,11 +2870,12 @@ router.post("/bookings/:id/fix-discount", adminMiddleware, async (req, res) => {
       discountPercentage = apDiscount.percentage;
     }
 
-    const taxCalc = await calculateTax(finalPrice, "sport_booking", booking.bookingDate);
+    const finalTotal = finalPrice + bookingAdditionalChargesTotal;
+    const taxCalc = await calculateTax(finalTotal, "sport_booking", booking.bookingDate);
     await db.update(bookingsTable).set({
       apDiscountAmount: String(discountAmount),
       discountAmount: String(discountAmount),
-      totalPrice: String(finalPrice),
+      totalPrice: String(finalTotal),
       ppnRate: taxCalc.taxRate > 0 ? String(taxCalc.taxRate) : null,
       ppnAmount: taxCalc.taxAmount > 0 ? String(taxCalc.taxAmount) : null,
       grandTotal: taxCalc.taxAmount > 0 ? String(taxCalc.grandTotal) : null,
@@ -2911,7 +2927,7 @@ router.post("/bookings/:id/fix-discount", adminMiddleware, async (req, res) => {
         verificationStatus: booking.verificationStatus,
       },
       after: {
-        totalPrice: finalPrice,
+        totalPrice: finalTotal,
         grandTotal: taxCalc.grandTotal,
         apDiscountAmount: discountAmount,
         verificationStatus: booking.verificationStatus,
@@ -2993,12 +3009,17 @@ router.post("/bookings/groups/:groupRef/reapply-discount", adminMiddleware, asyn
     const details: { orderNumber: string; before: number; after: number; discount: number }[] = [];
 
     for (const booking of allBookings) {
-      const basePrice = booking.basePrice == null ? Number(booking.totalPrice) : Number(booking.basePrice);
+      const bookingAdditionalCharges = normalizeAdditionalCharges(booking.additionalCharges);
+      const bookingAdditionalChargesTotal = additionalChargesTotal(bookingAdditionalCharges);
+      const basePrice = booking.basePrice == null
+        ? Math.max(0, Number(booking.totalPrice) - bookingAdditionalChargesTotal)
+        : Number(booking.basePrice);
       const discountAmount = fixedDiscountAmount > 0
         ? Math.min(fixedDiscountAmount, basePrice)
         : Math.round((basePrice * discountPct) / 100);
       const finalPrice = basePrice - discountAmount;
-      const taxCalc = await calculateTax(finalPrice, "sport_booking", booking.bookingDate ?? undefined);
+      const finalTotal = finalPrice + bookingAdditionalChargesTotal;
+      const taxCalc = await calculateTax(finalTotal, "sport_booking", booking.bookingDate ?? undefined);
 
       const before = Number(booking.grandTotal ?? booking.totalPrice);
 
@@ -3006,16 +3027,22 @@ router.post("/bookings/groups/:groupRef/reapply-discount", adminMiddleware, asyn
         verificationStatus: "verified",
         apDiscountAmount: String(discountAmount),
         discountAmount: String(discountAmount),
-        totalPrice: String(finalPrice),
+        totalPrice: String(finalTotal),
+        ppnRate: taxCalc.taxRate > 0 ? String(taxCalc.taxRate) : null,
         grandTotal: taxCalc.taxAmount > 0 ? String(taxCalc.grandTotal) : null,
         dpp: taxCalc.taxAmount > 0 ? String(taxCalc.dpp) : null,
         ppnAmount: taxCalc.taxAmount > 0 ? String(taxCalc.taxAmount) : null,
       }).where(eq(bookingsTable.id, booking.id));
 
+      await reverseTaxTransaction(booking.id, booking.orderNumber, booking.bookingDate);
+      if (taxCalc.taxCode) {
+        await recordTaxTransaction("booking", booking.id, booking.orderNumber, taxCalc, booking.bookingDate);
+      }
+
       details.push({
         orderNumber: booking.orderNumber,
         before,
-        after: taxCalc.taxAmount > 0 ? taxCalc.grandTotal : finalPrice,
+        after: taxCalc.taxAmount > 0 ? taxCalc.grandTotal : finalTotal,
         discount: discountAmount,
       });
       updatedCount++;
