@@ -60,6 +60,8 @@ async function postPaymentAccountingProjection(payment: any, booking: any): Prom
         totalPrice: bookingsTable.totalPrice,
         grandTotal: bookingsTable.grandTotal,
         ppnAmount: bookingsTable.ppnAmount,
+         ppnTreatment: bookingsTable.ppnTreatment,
+         ppnCollectedByCustomer: bookingsTable.ppnCollectedByCustomer,
       })
       .from(bookingsTable)
       .where(eq(bookingsTable.groupRef, booking.groupRef));
@@ -79,6 +81,8 @@ async function postPaymentAccountingProjection(payment: any, booking: any): Prom
     dpp,
     ppnAmount,
     ppnRate: booking.ppnRate == null ? null : Number(booking.ppnRate),
+    ppnTreatment: booking.ppnTreatment,
+    ppnCollectedByCustomer: booking.ppnCollectedByCustomer,
     facilityId: booking.facilityId,
     journalDate: paidAt.toISOString().slice(0, 10),
     paymentMethod: payment.paymentMethod ?? undefined,

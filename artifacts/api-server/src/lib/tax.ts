@@ -80,6 +80,36 @@ function noTax(subtotal: number, ppnTreatment: PpnTreatment = "none"): TaxCalcul
   };
 }
 
+export function calculateTaxFromTreatment(
+  subtotal: number,
+  taxRate: number,
+  taxCode: string,
+  ppnTreatment: PpnTreatment,
+): TaxCalculation {
+  const amount = Math.max(0, Math.round(Number(subtotal) || 0));
+  const rate = Math.max(0, Number(taxRate) || 0);
+  if (!taxCode || rate <= 0 || ppnTreatment === "none") {
+    return noTax(amount, ppnTreatment);
+  }
+
+  const dpp = ppnTreatment === "inclusive"
+    ? Math.round(amount / (1 + rate / 100))
+    : amount;
+  const taxAmount = ppnTreatment === "inclusive"
+    ? amount - dpp
+    : Math.round(dpp * rate / 100);
+
+  return {
+    dpp,
+    taxRate: rate,
+    taxAmount,
+    grandTotal: ppnTreatment === "inclusive" ? amount : dpp + taxAmount,
+    taxCode,
+    ppnTreatment,
+    ppnCollectedByCustomer: ppnTreatment === "collected_by_customer",
+  };
+}
+
 /**
  * Resolve PPN treatment from the customer snapshot source before calculating
  * the amount. The global tax setting remains the source for the active rate.
@@ -112,13 +142,31 @@ export async function resolveCustomerTax(
     ? (enabled ? "collected_by_customer" : "normal")
     : (enabled ? "inclusive" : "none");
 
-  if (treatment === "none") return noTax(subtotal, treatment);
-  const calculated = await calculateTax(subtotal, "sport_booking", options.bookingDate);
-  return {
-    ...calculated,
-    ppnTreatment: treatment,
-    ppnCollectedByCustomer: treatment === "collected_by_customer",
-  };
+  return calculateTaxForTreatment(subtotal, treatment, options.bookingDate);
+}
+
+async function calculateTaxForTreatment(
+  subtotal: number,
+  treatment: PpnTreatment,
+  bookingDate?: string,
+): Promise<TaxCalculation> {
+  const zeroTax = noTax(subtotal, treatment);
+  const [setting] = await db
+    .select()
+    .from(taxSettingsTable)
+    .where(and(eq(taxSettingsTable.appliesTo, "sport_booking"), eq(taxSettingsTable.isActive, true)))
+    .limit(1);
+
+  if (!setting) return zeroTax;
+  if (setting.effectiveDate && bookingDate && bookingDate < setting.effectiveDate) {
+    return zeroTax;
+  }
+  return calculateTaxFromTreatment(
+    subtotal,
+    Number(setting.taxRate),
+    setting.taxCode,
+    treatment,
+  );
 }
 
 /**
@@ -152,18 +200,7 @@ export async function calculateTax(
   }
 
   const rate = Number(setting.taxRate);
-  // Harga sudah termasuk PPN (inklusif): ekstrak DPP dari harga
-  const dpp = Math.round(subtotal / (1 + rate / 100));
-  const taxAmount = subtotal - dpp;
-  return {
-    dpp,
-    taxRate: rate,
-    taxAmount,
-    grandTotal: subtotal,
-    taxCode: setting.taxCode,
-    ppnTreatment: "inclusive",
-    ppnCollectedByCustomer: false,
-  };
+  return calculateTaxFromTreatment(subtotal, rate, setting.taxCode, "inclusive");
 }
 
 export async function recordTaxTransaction(
@@ -176,7 +213,7 @@ export async function recordTaxTransaction(
   transactionType: "original" | "reversal" = "original",
   reversalOfId?: number
 ): Promise<number | null> {
-  if (!taxCalc.taxCode || taxCalc.taxAmount === 0) return null;
+  if (!taxCalc.taxCode || taxCalc.taxAmount === 0 || taxCalc.ppnCollectedByCustomer) return null;
   const dppNilaiLain = taxCalc.dpp > 0 ? Math.round(taxCalc.dpp * 11 / 12) : 0;
   const [row] = await db.insert(taxTransactionsTable).values({
     referenceType,

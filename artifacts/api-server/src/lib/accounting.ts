@@ -307,6 +307,9 @@ export type SportCenterBookingPaymentPosting = {
   paymentType?: string | null;
   paidAt?: Date | string | null;
   ppnRate?: number | null;
+  ppnAmount?: number | null;
+  ppnTreatment?: string | null;
+  ppnCollectedByCustomer?: boolean | null;
   paymentProvider?: string | null;
   companyId?: number | null;
   bankAccountId?: string | null;
@@ -574,6 +577,18 @@ export async function postSportCenterBookingPayment(
     const sourceAmount = sourcePayment?.amount == null ? null : Math.round(Number(sourcePayment.amount));
     const mirrorAmount = mirroredPayment.amount == null ? null : Math.round(Number(mirroredPayment.amount));
     const requestedAmount = Math.round(Number(input.amount));
+    const collectedByCustomer =
+      input.ppnCollectedByCustomer === true ||
+      input.ppnTreatment === "collected_by_customer";
+    const sourceGrossForTax = Math.round(Number(input.grossAmount ?? requestedAmount));
+    const postingPpnAmount = collectedByCustomer
+      ? 0
+      : input.ppnAmount != null
+        ? Math.max(0, Math.round(Number(input.ppnAmount)))
+        : Number(input.ppnRate ?? 0) > 0
+          ? Math.round((sourceGrossForTax * Number(input.ppnRate)) / (100 + Number(input.ppnRate)))
+          : 0;
+    const postingDpp = Math.max(0, sourceGrossForTax - postingPpnAmount);
     if (sourceAmount != null && sourceAmount !== requestedAmount) {
       throw new Error(`[accounting] Amount mismatch source=${sourceAmount} input=${requestedAmount} payment=${input.paymentNumber}.`);
     }
@@ -683,7 +698,9 @@ export async function postSportCenterBookingPayment(
             settlementDate,
             journalDate,
             grossAmount: requestedAmount,
-            ppnRate: Number(input.ppnRate ?? 0),
+            ppnRate: collectedByCustomer ? 0 : Number(input.ppnRate ?? 0),
+            ppnTreatment: input.ppnTreatment,
+            ppnCollectedByCustomer: collectedByCustomer,
             canonicalBankMutationId,
           });
         }
@@ -745,12 +762,10 @@ export async function postSportCenterBookingPayment(
         entryId: Number(existing.id),
         companyId,
         paymentNumber: input.paymentNumber,
-        ppnRate: Number(input.ppnRate ?? 0),
-        dpp: Math.max(0, requestedAmount - Math.round((requestedAmount * Number(input.ppnRate ?? 0)) / (100 + Number(input.ppnRate ?? 0)))),
+        ppnRate: collectedByCustomer ? 0 : Number(input.ppnRate ?? 0),
+        dpp: postingDpp,
         grossAmount: requestedAmount,
-        ppnAmount: Number(input.ppnRate ?? 0) > 0
-          ? Math.round((requestedAmount * Number(input.ppnRate ?? 0)) / (100 + Number(input.ppnRate ?? 0)))
-          : 0,
+        ppnAmount: collectedByCustomer ? 0 : postingPpnAmount,
         journalDate: input.paidAt ? new Date(input.paidAt).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
       });
       await client.query(
@@ -789,7 +804,9 @@ export async function postSportCenterBookingPayment(
            settlementDate,
            journalDate: input.paidAt ? new Date(input.paidAt).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
            grossAmount: requestedAmount,
-           ppnRate: Number(input.ppnRate ?? 0),
+           ppnRate: collectedByCustomer ? 0 : Number(input.ppnRate ?? 0),
+           ppnTreatment: input.ppnTreatment,
+           ppnCollectedByCustomer: collectedByCustomer,
            canonicalBankMutationId,
          });
       }
@@ -808,9 +825,7 @@ export async function postSportCenterBookingPayment(
     }
 
     const rate = Math.max(0, Number(input.ppnRate ?? 0));
-    const ppnAmount = rate > 0
-      ? Math.round((grossAmount * rate) / (100 + rate))
-      : 0;
+    const ppnAmount = postingPpnAmount;
     const pphAmount = Math.max(0, Math.round(Number(input.pphAmount ?? 0)));
     const dpp = grossAmount - ppnAmount;
     const year = new Date(journalDate).getFullYear();
@@ -1007,7 +1022,9 @@ export async function postSportCenterBookingPayment(
          settlementDate,
         journalDate,
          grossAmount: cashAmount,
-         ppnRate: rate,
+         ppnRate: collectedByCustomer ? 0 : rate,
+         ppnTreatment: input.ppnTreatment,
+         ppnCollectedByCustomer: collectedByCustomer,
          canonicalBankMutationId,
        });
     }
@@ -1653,6 +1670,8 @@ type ConfirmedPaymentAccountingInput = {
   dpp: number;
   ppnAmount: number;
   ppnRate?: number | null;
+  ppnTreatment?: string | null;
+  ppnCollectedByCustomer?: boolean | null;
   grossAmount?: number | null;
   pphRate?: number | null;
   pphAmount?: number | null;
@@ -1733,6 +1752,10 @@ export function postConfirmedPaymentAccounting(
       .select({
         grandTotal: bookingsTable.grandTotal,
         totalPrice: bookingsTable.totalPrice,
+        dpp: bookingsTable.dpp,
+        ppnAmount: bookingsTable.ppnAmount,
+        ppnTreatment: bookingsTable.ppnTreatment,
+        ppnCollectedByCustomer: bookingsTable.ppnCollectedByCustomer,
         pphRate: bookingsTable.pphRate,
         pphAmount: bookingsTable.pphAmount,
         netAmount: bookingsTable.netAmount,
@@ -1742,9 +1765,25 @@ export function postConfirmedPaymentAccounting(
       .limit(1);
     const snapshotPph = Math.max(0, Number(bookingSnapshot?.pphAmount ?? 0));
     const pphAmount = Math.max(0, Math.round(Number(input.pphAmount ?? snapshotPph)));
-    const snapshotGross = Number(bookingSnapshot?.grandTotal ?? bookingSnapshot?.totalPrice ?? 0);
+    const storedGross = Number(bookingSnapshot?.grandTotal ?? bookingSnapshot?.totalPrice ?? 0);
+    const inputGross = Math.round(Number(input.dpp ?? 0) + Number(input.ppnAmount ?? 0));
+    const snapshotGross = inputGross > 0 ? inputGross : storedGross;
+    const snapshotDpp = Math.max(
+      0,
+      Number(bookingSnapshot?.dpp ?? (snapshotGross - Number(bookingSnapshot?.ppnAmount ?? input.ppnAmount ?? 0))),
+    );
+    const snapshotPpn = Math.max(0, Number(bookingSnapshot?.ppnAmount ?? input.ppnAmount ?? 0));
+    const collectedByCustomer =
+      bookingSnapshot?.ppnCollectedByCustomer === true ||
+      bookingSnapshot?.ppnTreatment === "collected_by_customer" ||
+      input.ppnCollectedByCustomer === true ||
+      input.ppnTreatment === "collected_by_customer";
+    const accountingPpnAmount = collectedByCustomer ? 0 : snapshotPpn;
+    const accountingGrossAmount = collectedByCustomer ? snapshotDpp : snapshotGross;
     const netAmount = Math.round(Number(payment?.amount ?? input.netAmount ?? bookingSnapshot?.netAmount ?? input.dpp + input.ppnAmount));
-    const grossAmount = Math.round(Number(input.grossAmount ?? (snapshotGross > 0 ? snapshotGross : netAmount + pphAmount)));
+    const grossAmount = Math.round(Number(
+      input.grossAmount ?? (accountingGrossAmount > 0 ? accountingGrossAmount : netAmount + pphAmount),
+    ));
     const pphRate = input.pphRate ?? (bookingSnapshot?.pphRate == null ? null : Number(bookingSnapshot.pphRate));
     const paymentMethod = payment?.paymentMethod ?? input.paymentMethod ?? null;
     const paymentProvider = payment?.paymentProvider ?? input.paymentProvider ?? "unknown";
@@ -1770,7 +1809,10 @@ export function postConfirmedPaymentAccounting(
       paymentMethod,
       paymentType,
       paidAt,
-      ppnRate: input.ppnRate,
+      ppnRate: collectedByCustomer ? 0 : input.ppnRate,
+      ppnAmount: accountingPpnAmount,
+      ppnTreatment: bookingSnapshot?.ppnTreatment ?? input.ppnTreatment,
+      ppnCollectedByCustomer: collectedByCustomer,
       paymentProvider,
       companyId,
       bankAccountId: payment?.bankAccountId ?? input.bankAccountId,
@@ -1783,9 +1825,7 @@ export function postConfirmedPaymentAccounting(
     // Keep the internal Sport Center journal, but make it a projection of the
     // same payment-level amount/context. Public posting above is canonical and
     // idempotent; this journal remains for the existing Sport Center reports.
-    const effectivePpnAmount = input.ppnRate != null
-      ? Math.round((grossAmount * Number(input.ppnRate)) / (100 + Number(input.ppnRate)))
-      : Math.round(Number(input.ppnAmount));
+    const effectivePpnAmount = accountingPpnAmount;
     await createJournalEntry(
       input.bookingId,
       input.orderNumber,

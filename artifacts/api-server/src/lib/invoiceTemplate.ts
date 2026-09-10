@@ -40,6 +40,8 @@ export interface InvoiceData {
   dppNilaiLain: number;
   ppnRate: number;
   ppnAmount: number;
+  ppnTreatment?: string | null;
+  ppnCollectedByCustomer?: boolean;
   grandTotal: number;
   pphRate: number;
   pphAmount: number;
@@ -638,7 +640,7 @@ export function buildInvoiceHtml(data: InvoiceData, opts: BuildOptions = {}): st
         <td style="text-align:right;color:#4b5563;font-size:11.5px;">Rp ${rp(data.dppNilaiLain)}</td>
       </tr>
       <tr class="ppn">
-        <td>PPN ${data.ppnRate ? data.ppnRate + '%' : '12%'}</td>
+        <td>PPN ${data.ppnRate ? data.ppnRate + '%' : '12%'}${data.ppnCollectedByCustomer ? ' (dipungut customer)' : ''}</td>
         <td style="text-align:right;">Rp ${rp(data.ppnAmount)}</td>
       </tr>` : ""}
       <tr class="grand">
@@ -660,6 +662,12 @@ export function buildInvoiceHtml(data: InvoiceData, opts: BuildOptions = {}): st
   <div style="text-align:right;margin-top:-14px;margin-bottom:16px;">
     <span style="font-size:10px;color:#9ca3af;font-style:italic;">
       Perhitungan pajak menggunakan DPP Nilai Lain sesuai konfigurasi sistem.
+    </span>
+  </div>` : ""}
+  ${data.ppnCollectedByCustomer ? `
+  <div style="text-align:right;margin-top:-10px;margin-bottom:16px;">
+    <span style="font-size:10px;color:#b45309;font-style:italic;">
+      PPN dipungut dan disetorkan oleh customer; tidak termasuk kas yang diterima Sport Center.
     </span>
   </div>` : ""}
 

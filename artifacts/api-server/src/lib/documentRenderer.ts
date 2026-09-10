@@ -303,15 +303,11 @@ export async function renderDocument(params: {
     const docTitle = documentType === "invoice" ? "INVOICE" : documentType === "lampiran" ? "LAMPIRAN INVOICE" : "BERITA ACARA PEMBAYARAN";
     const subtotal = Number(inv.totalAmount);
     const grand = Number(inv.grandTotal);
-    // Core tax calculation (DPP Nilai Lain is display-only):
-    //   DPP          = grandTotal / 1.11
-    //   DPP Nilai Lain = DPP × (11/12)  ← display only, tidak masuk total
-    //   PPN          = DPP × 11%
-    //   TOTAL        = DPP + PPN
-    const dppCorp = grand > 0 ? Math.round(grand / 1.11) : 0;
-    const dppNilaiLainCorp = dppCorp > 0 ? Math.round(dppCorp * 11 / 12) : 0;
-    const ppnCorp = dppCorp > 0 ? Math.round(dppCorp * 0.11) : Number(inv.ppnAmount);
-    const grandAligned = dppCorp > 0 ? dppCorp + ppnCorp : grand;
+    const ppnCorp = Math.max(0, Number(inv.ppnAmount ?? 0));
+    const dppCorp = Math.max(0, grand - ppnCorp);
+    const dppNilaiLainCorp = ppnCorp > 0 ? Math.round(dppCorp * 11 / 12) : 0;
+    const grandAligned = grand;
+    const collectedByCustomer = inv.ppnCollectedByCustomer === true || inv.ppnTreatment === "collected_by_customer";
 
     const itemsTable = buildInvoiceTableHtml(items);
 
@@ -319,7 +315,7 @@ export async function renderDocument(params: {
           <tr><td style="padding:4px 16px;">Subtotal</td><td style="text-align:right;font-weight:600;">${formatIDR(subtotal)}</td></tr>
           <tr><td style="padding:4px 16px;">DPP</td><td style="text-align:right;font-weight:600;">${formatIDR(dppCorp)}</td></tr>
           <tr><td style="padding:4px 16px;color:#6b7280;font-size:12px;">DPP Nilai Lain <span style="font-weight:400;">(11/12 × DPP)</span></td><td style="text-align:right;color:#6b7280;font-size:12px;">${formatIDR(dppNilaiLainCorp)}</td></tr>
-          <tr><td style="padding:4px 16px;">PPN 11%</td><td style="text-align:right;font-weight:600;">${formatIDR(ppnCorp)}</td></tr>` : `
+           <tr><td style="padding:4px 16px;">PPN ${Number(inv.ppnRate ?? 0) || 11}%${collectedByCustomer ? " (dipungut customer)" : ""}</td><td style="text-align:right;font-weight:600;">${formatIDR(ppnCorp)}</td></tr>` : `
           <tr><td style="padding:4px 16px;">Subtotal</td><td style="text-align:right;font-weight:600;">${formatIDR(subtotal)}</td></tr>`;
 
     bodyContent = `
@@ -346,8 +342,18 @@ export async function renderDocument(params: {
             <td style="padding:8px 16px;font-weight:700;">GRAND TOTAL</td>
             <td style="padding:8px 16px;text-align:right;font-weight:900;font-size:15px;">${formatIDR(grandAligned)}</td>
           </tr>
+          ${Number(inv.pphAmount ?? 0) > 0 ? `
+          <tr>
+            <td style="padding:6px 16px;">PPh dipotong ${Number(inv.pphRate ?? 0)}%</td>
+            <td style="padding:6px 16px;text-align:right;color:#b45309;">- ${formatIDR(inv.pphAmount)}</td>
+          </tr>
+          <tr style="background:#fff7ed;">
+            <td style="padding:8px 16px;font-weight:700;">NET DIBAYAR</td>
+            <td style="padding:8px 16px;text-align:right;font-weight:900;">${formatIDR(inv.netAmount)}</td>
+          </tr>` : ""}
         </table>
       </div>
+      ${collectedByCustomer ? `<div style="margin-top:12px;color:#b45309;font-size:12px;font-style:italic;">PPN dipungut dan disetorkan oleh customer; tidak termasuk kas yang diterima Sport Center.</div>` : ""}
       ${inv.notes ? `<div style="margin-top:16px;padding:12px;background:#fef3c7;border:1px solid #f59e0b;border-radius:6px;font-size:12px;"><strong>Catatan:</strong> ${inv.notes}</div>` : ""}
       <div style="margin-top:24px;padding:16px;background:#f0fdf4;border:1px solid #86efac;border-radius:6px;font-size:13px;">
         <div style="font-weight:700;margin-bottom:8px;">Pembayaran ditransfer ke:</div>
@@ -385,16 +391,12 @@ export async function renderDocument(params: {
     const docTitle = docTitleMap[documentType] || documentType.toUpperCase();
     const total = Number(booking.totalPrice ?? 0);
     const grand = Number(booking.grandTotal ?? total);
-    // Core tax calculation (DPP Nilai Lain is display-only):
-    //   DPP          = grandTotal / 1.11
-    //   DPP Nilai Lain = DPP × (11/12)  ← display only, tidak masuk total
-    //   PPN          = DPP × 11%
-    //   TOTAL        = DPP + PPN
-    const hasPpn = Number(booking.ppnAmount ?? 0) > 0 || Number(booking.ppnRate ?? 0) > 0;
-    const dppBook = hasPpn ? Math.round(grand / 1.11) : 0;
-    const dppNilaiLainBook = dppBook > 0 ? Math.round(dppBook * 11 / 12) : 0;
-    const ppnBook = dppBook > 0 ? Math.round(dppBook * 0.11) : 0;
-    const grandAlignedBook = dppBook > 0 ? dppBook + ppnBook : grand;
+    const ppnBook = Math.max(0, Number(booking.ppnAmount ?? 0));
+    const hasPpn = ppnBook > 0;
+    const dppBook = Math.max(0, Number(booking.dpp ?? grand - ppnBook));
+    const dppNilaiLainBook = hasPpn ? Math.round(dppBook * 11 / 12) : 0;
+    const grandAlignedBook = grand;
+    const collectedBook = booking.ppnCollectedByCustomer === true || booking.ppnTreatment === "collected_by_customer";
 
     bodyContent = `
       ${kopHtml}
@@ -436,7 +438,7 @@ export async function renderDocument(params: {
             <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;text-align:right;color:#6b7280;font-size:12px;">${formatIDR(dppNilaiLainBook)}</td>
           </tr>
           <tr>
-            <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;">PPN 11%</td>
+            <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;">PPN ${Number(booking.ppnRate ?? 0) || 11}%${collectedBook ? " (dipungut customer)" : ""}</td>
             <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;"></td>
             <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;text-align:right;">${formatIDR(ppnBook)}</td>
           </tr>` : ""}

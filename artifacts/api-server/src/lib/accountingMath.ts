@@ -3,6 +3,8 @@ export type BookingTaxAmounts = {
   dpp?: string | number | null;
   ppnAmount?: string | number | null;
   grandTotal?: string | number | null;
+  ppnTreatment?: string | null;
+  ppnCollectedByCustomer?: boolean | null;
 };
 
 /**
@@ -12,6 +14,7 @@ export type BookingTaxAmounts = {
 export function extractBookingDpp(booking: BookingTaxAmounts): {
   dpp: number;
   ppnAmount: number;
+  ppnCollectedByCustomer: boolean;
 } {
   const ppnAmount = booking.ppnAmount != null ? Number(booking.ppnAmount) : 0;
   const grandTotalAmt =
@@ -24,5 +27,11 @@ export function extractBookingDpp(booking: BookingTaxAmounts): {
       : ppnAmount > 0
         ? grandTotalAmt - ppnAmount
         : grandTotalAmt;
-  return { dpp, ppnAmount };
+  return {
+    dpp,
+    ppnAmount,
+    ppnCollectedByCustomer:
+      booking.ppnCollectedByCustomer === true ||
+      booking.ppnTreatment === "collected_by_customer",
+  };
 }

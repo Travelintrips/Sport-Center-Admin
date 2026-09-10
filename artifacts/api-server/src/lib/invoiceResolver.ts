@@ -66,6 +66,26 @@ function calcDpp(grandTotal: number, ppnRate: number) {
   return { dpp, dppNilaiLain, ppnAmount, grandTotal: dpp + ppnAmount };
 }
 
+function snapshotTax(booking: {
+  totalPrice: string | number | null;
+  dpp?: string | number | null;
+  ppnAmount?: string | number | null;
+  grandTotal?: string | number | null;
+  ppnRate?: string | number | null;
+}) {
+  const hasSnapshot = booking.dpp != null || booking.ppnAmount != null || booking.grandTotal != null;
+  const grandTotal = Math.round(Number(booking.grandTotal ?? booking.totalPrice ?? 0));
+  if (!hasSnapshot) return null;
+  const ppnAmount = Math.max(0, Math.round(Number(booking.ppnAmount ?? 0)));
+  const dpp = Math.max(0, Math.round(Number(booking.dpp ?? grandTotal - ppnAmount)));
+  return {
+    dpp,
+    dppNilaiLain: ppnAmount > 0 ? Math.round((dpp * 11) / 12) : 0,
+    ppnAmount,
+    grandTotal,
+  };
+}
+
 // ─── resolveInvoiceData — invoice booking tunggal ────────────────────────────
 
 export async function resolveInvoiceData(orderNumber: string): Promise<InvoiceData | null> {
@@ -85,9 +105,9 @@ export async function resolveInvoiceData(orderNumber: string): Promise<InvoiceDa
   const [settings] = await db.select().from(settingsTable).limit(1);
   const { invoiceDoc, generalDoc } = await loadDocSettings();
 
-  const ppnRate = await resolvePpnRate(booking.ppnRate);
+  const ppnRate = booking.ppnRate == null ? await resolvePpnRate(booking.ppnRate) : Number(booking.ppnRate);
   const baseGrandTotal = booking.grandTotal ? Number(booking.grandTotal) : Number(booking.totalPrice ?? 0);
-  const { dpp, dppNilaiLain, ppnAmount, grandTotal } = calcDpp(baseGrandTotal, ppnRate);
+  const tax = snapshotTax(booking) ?? calcDpp(baseGrandTotal, ppnRate);
   const invoiceNumber = formatInvoiceNumber(booking.orderNumber, booking.bookingDate);
 
   return {
@@ -107,14 +127,16 @@ export async function resolveInvoiceData(orderNumber: string): Promise<InvoiceDa
     durationHours: booking.durationHours,
 
     pricePerHour: facility ? Number(facility.pricePerHour) : 0,
-    dpp,
-    dppNilaiLain,
+    dpp: tax.dpp,
+    dppNilaiLain: tax.dppNilaiLain,
     ppnRate,
-    ppnAmount,
-    grandTotal,
+    ppnAmount: tax.ppnAmount,
+    ppnTreatment: booking.ppnTreatment,
+    ppnCollectedByCustomer: booking.ppnCollectedByCustomer === true || booking.ppnTreatment === "collected_by_customer",
+    grandTotal: tax.grandTotal,
     pphRate: booking.pphRate == null ? 0 : Number(booking.pphRate),
     pphAmount: booking.pphAmount == null ? 0 : Number(booking.pphAmount),
-    netAmount: booking.netAmount == null ? grandTotal : Number(booking.netAmount),
+    netAmount: booking.netAmount == null ? tax.grandTotal : Number(booking.netAmount),
 
     promoCode: booking.promoCode ?? null,
     discountAmount: Number(booking.discountAmount ?? 0),
@@ -177,11 +199,21 @@ export async function resolveGroupInvoiceData(groupRef: string): Promise<Invoice
   const [settings] = await db.select().from(settingsTable).limit(1);
   const { invoiceDoc, generalDoc } = await loadDocSettings();
 
-  const ppnRate = await resolvePpnRate(firstBooking.ppnRate);
-  const totalGrandTotal = groupBookings.reduce((sum, b) => {
-    return sum + (b.grandTotal != null ? Number(b.grandTotal) : Number(b.totalPrice));
-  }, 0);
-  const { dpp, dppNilaiLain, ppnAmount, grandTotal } = calcDpp(totalGrandTotal, ppnRate);
+  const ppnRate = firstBooking.ppnRate == null ? await resolvePpnRate(firstBooking.ppnRate) : Number(firstBooking.ppnRate);
+  const groupTax = groupBookings.reduce(
+    (sum, b) => {
+      const tax = snapshotTax(b) ?? calcDpp(Number(b.totalPrice ?? 0), Number(b.ppnRate ?? ppnRate));
+      sum.dpp += tax.dpp;
+      sum.ppnAmount += tax.ppnAmount;
+      sum.grandTotal += tax.grandTotal;
+      return sum;
+    },
+    { dpp: 0, ppnAmount: 0, grandTotal: 0 },
+  );
+  const dpp = groupTax.dpp;
+  const dppNilaiLain = groupTax.ppnAmount > 0 ? Math.round((dpp * 11) / 12) : 0;
+  const ppnAmount = groupTax.ppnAmount;
+  const grandTotal = groupTax.grandTotal;
 
   // Nama fasilitas per booking (bisa berbeda jika multi-fasilitas)
   const facilityNames: Record<number, string> = {};
@@ -246,6 +278,8 @@ export async function resolveGroupInvoiceData(groupRef: string): Promise<Invoice
     dppNilaiLain,
     ppnRate,
     ppnAmount,
+    ppnTreatment: firstBooking.ppnTreatment,
+    ppnCollectedByCustomer: groupBookings.every((b) => b.ppnCollectedByCustomer === true || b.ppnTreatment === "collected_by_customer"),
     grandTotal,
     pphRate: firstBooking.pphRate == null ? 0 : Number(firstBooking.pphRate),
     pphAmount: groupBookings.reduce((sum, b) => sum + Number(b.pphAmount ?? 0), 0),

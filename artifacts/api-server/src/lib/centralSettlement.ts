@@ -15,6 +15,8 @@ export type CentralSettlementInput = {
   journalDate: string;
   grossAmount: number;
   ppnRate: number;
+  ppnTreatment?: string | null;
+  ppnCollectedByCustomer?: boolean | null;
   canonicalBankMutationId: number;
 };
 
@@ -49,7 +51,10 @@ export async function ensureCentralPaymentSettlement(
     throw new Error(`CANONICAL_BANK_MUTATION_REQUIRED: payment=${input.paymentId}`);
   }
 
-  const ppnAmount = input.ppnRate > 0
+  const collectedByCustomer =
+    input.ppnCollectedByCustomer === true ||
+    input.ppnTreatment === "collected_by_customer";
+  const ppnAmount = !collectedByCustomer && input.ppnRate > 0
     ? Math.round((input.grossAmount * input.ppnRate) / (100 + input.ppnRate))
     : 0;
   const dppAmount = input.grossAmount - ppnAmount;

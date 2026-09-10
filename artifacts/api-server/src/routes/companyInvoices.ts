@@ -35,17 +35,52 @@ function periodDateRange(periodMonth: string) {
   return { startDate, endDate };
 }
 
-// totalAmountInclusive = harga jual termasuk PPN (yang customer bayar)
-// DPP              = totalAmountInclusive / 1.11
-// DPP Nilai Lain   = DPP × (11/12)
-// PPN 12%          = DPP Nilai Lain × 0.12  (≡ DPP × 11%)
-// Grand Total      = DPP + PPN ≈ totalAmountInclusive
+// Fallback only for legacy bookings that have no tax snapshot.
 function calcTaxBreakdown(totalAmountInclusive: number) {
   const dpp = Math.round(totalAmountInclusive / 1.11);
   const dppNilaiLain = Math.round(dpp * 11 / 12);
   const ppnAmount = Math.round(dppNilaiLain * 0.12);
   const grandTotal = dpp + ppnAmount;
   return { dpp, dppNilaiLain, ppnAmount, grandTotal };
+}
+
+function summarizeBookingTax(rows: Array<{
+  totalPrice?: string | number | null;
+  dpp?: string | number | null;
+  ppnAmount?: string | number | null;
+  grandTotal?: string | number | null;
+  ppnRate?: string | number | null;
+  ppnTreatment?: string | null;
+  ppnCollectedByCustomer?: boolean | null;
+}>) {
+  const hasSnapshot = rows.some((b) => b.dpp != null || b.ppnAmount != null || b.grandTotal != null);
+  const totalAmount = rows.reduce((sum, b) => sum + Number(b.totalPrice ?? 0), 0);
+  if (!hasSnapshot) {
+    const tax = calcTaxBreakdown(totalAmount);
+    return { totalAmount, ...tax, ppnRate: 11, ppnTreatment: "normal", ppnCollectedByCustomer: false };
+  }
+
+  const dpp = rows.reduce((sum, b) => {
+    const grand = Number(b.grandTotal ?? b.totalPrice ?? 0);
+    return sum + Math.max(0, Number(b.dpp ?? grand - Number(b.ppnAmount ?? 0)));
+  }, 0);
+  const ppnAmount = rows.reduce((sum, b) => sum + Math.max(0, Number(b.ppnAmount ?? 0)), 0);
+  const grandTotal = rows.reduce((sum, b) => sum + Number(b.grandTotal ?? b.totalPrice ?? 0), 0);
+  const rates = [...new Set(rows.map((b) => Number(b.ppnRate ?? 0)).filter((rate) => rate > 0))];
+  const collected = rows.length > 0 && rows.every((b) =>
+    b.ppnCollectedByCustomer === true || b.ppnTreatment === "collected_by_customer",
+  );
+  const treatments = [...new Set(rows.map((b) => b.ppnTreatment).filter(Boolean))];
+  return {
+    totalAmount,
+    dpp: Math.round(dpp),
+    dppNilaiLain: ppnAmount > 0 ? Math.round(dpp * 11 / 12) : 0,
+    ppnAmount: Math.round(ppnAmount),
+    grandTotal: Math.round(grandTotal),
+    ppnRate: rates.length === 1 ? rates[0] : 0,
+    ppnTreatment: treatments.length === 1 ? treatments[0] : "mixed",
+    ppnCollectedByCustomer: collected,
+  };
 }
 
 function summarizeWithholdingTax(
@@ -78,8 +113,12 @@ const invoiceBookingSelection = {
   endTime: bookingsTable.endTime,
   durationHours: bookingsTable.durationHours,
   totalPrice: bookingsTable.totalPrice,
+  dpp: bookingsTable.dpp,
   ppnAmount: bookingsTable.ppnAmount,
   grandTotal: bookingsTable.grandTotal,
+  ppnRate: bookingsTable.ppnRate,
+  ppnTreatment: bookingsTable.ppnTreatment,
+  ppnCollectedByCustomer: bookingsTable.ppnCollectedByCustomer,
   pphRate: bookingsTable.pphRate,
   pphAmount: bookingsTable.pphAmount,
   netAmount: bookingsTable.netAmount,
@@ -101,12 +140,10 @@ function mapInvoice(
   company?: typeof usersTable.$inferSelect | null,
 ) {
   const totalAmount = Number(inv.totalAmount); // inclusive price (subtotal pemakaian)
-  const dpp = Number(inv.dppNilaiLain ?? 0) > 0
-    ? Math.round(Number(inv.dppNilaiLain) * 12 / 11)
-    : calcTaxBreakdown(totalAmount).dpp;
-  const dppNilaiLain = Number(inv.dppNilaiLain ?? 0) || calcTaxBreakdown(totalAmount).dppNilaiLain;
   const ppnAmount = Number(inv.ppnAmount ?? 0);
   const grandTotal = Number(inv.grandTotal ?? totalAmount);
+  const dpp = Math.max(0, grandTotal - ppnAmount);
+  const dppNilaiLain = Number(inv.dppNilaiLain ?? 0) || (ppnAmount > 0 ? Math.round(dpp * 11 / 12) : 0);
   const pphAmount = Number(inv.pphAmount ?? 0);
   const pphRate = Number(inv.pphRate ?? 0);
   const netAmount = Number(inv.netAmount ?? Math.max(0, grandTotal - pphAmount));
@@ -124,6 +161,8 @@ function mapInvoice(
     dpp,
     dppNilaiLain,
     ppnAmount,
+    ppnTreatment: inv.ppnTreatment,
+    ppnCollectedByCustomer: inv.ppnCollectedByCustomer,
     pphRate,
     pphAmount,
     netAmount,
@@ -170,6 +209,9 @@ async function buildAndInsertItems(invoiceId: number, companyId: number, booking
     pricePerHour: String(b.pricePerHour ?? 0),
     subtotal: String(Number(b.totalPrice ?? 0)),
     taxAmount: String(Number(b.ppnAmount ?? 0)),
+    ppnRate: b.ppnRate == null ? null : String(Number(b.ppnRate)),
+    ppnTreatment: b.ppnTreatment ?? null,
+    ppnCollectedByCustomer: b.ppnCollectedByCustomer === true || b.ppnTreatment === "collected_by_customer",
     pphAmount: String(Number(b.pphAmount ?? 0)),
     totalAmount: String(Number(b.grandTotal ?? b.totalPrice ?? 0)),
     orderNumber: b.orderNumber ?? null,
@@ -256,16 +298,19 @@ router.get("/company-invoices/preview", adminMiddleware, async (req, res) => {
       customerPhone: b.customerPhone,
       pricePerHour: 0,
       totalPrice: Number(b.totalPrice ?? 0),
+      dpp: b.dpp == null ? null : Number(b.dpp),
       ppnAmount: b.ppnAmount == null ? null : Number(b.ppnAmount),
       grandTotal: b.grandTotal == null ? null : Number(b.grandTotal),
+      ppnRate: b.ppnRate == null ? null : Number(b.ppnRate),
+      ppnTreatment: b.ppnTreatment ?? null,
+      ppnCollectedByCustomer: b.ppnCollectedByCustomer === true || b.ppnTreatment === "collected_by_customer",
       pphRate: b.pphRate == null ? null : Number(b.pphRate),
       pphAmount: b.pphAmount == null ? null : Number(b.pphAmount),
       netAmount: b.netAmount == null ? null : Number(b.netAmount),
     }));
 
-    // subtotal = sum of inclusive prices (what customers paid)
-    const subtotal = bookingList.reduce((s, b) => s + (b.grandTotal ?? b.totalPrice), 0);
-    const { dpp, dppNilaiLain, ppnAmount, grandTotal } = calcTaxBreakdown(subtotal);
+    const tax = summarizeBookingTax(bookingList);
+    const { totalAmount: subtotal, dpp, dppNilaiLain, ppnAmount, grandTotal, ppnRate, ppnTreatment, ppnCollectedByCustomer } = tax;
     const { pphRate, pphAmount } = summarizeWithholdingTax(bookingList);
     const netAmount = Math.max(0, grandTotal - pphAmount);
 
@@ -286,6 +331,9 @@ router.get("/company-invoices/preview", adminMiddleware, async (req, res) => {
       dpp,
       dppNilaiLain,
       ppnAmount,
+      ppnRate,
+      ppnTreatment,
+      ppnCollectedByCustomer,
       pphRate,
       pphAmount,
       netAmount,
@@ -367,23 +415,26 @@ async function handleGenerateInvoice(req: any, res: any) {
       // Add new bookings as items and recalculate totals
       await buildAndInsertItems(existingInvoice.id, companyCustomerId, unbilledBookings, facilityMap);
 
-      // Get all items, recalc from inclusive subtotals
+      // Rebuild invoice totals from the stored booking snapshots on each item.
       const allItems = await db.select().from(companyInvoiceItemsTable).where(
         eq(companyInvoiceItemsTable.invoiceId, existingInvoice.id)
       );
-      const newSubtotal = allItems.reduce((s, i) => s + Number(i.subtotal ?? 0), 0); // inclusive
-       const { dpp: nd, dppNilaiLain: newDppNilaiLain, ppnAmount: newPpn, grandTotal: newGrandTotal } = calcTaxBreakdown(newSubtotal);
-       const { pphRate: newPphRate, pphAmount: newPphAmount } = summarizeWithholdingTax(allItems);
+      const newTax = summarizeBookingTax(allItems);
+      const newSubtotal = newTax.totalAmount;
+      const { pphRate: newPphRate, pphAmount: newPphAmount } = summarizeWithholdingTax(allItems);
 
       const [updated] = await db.update(companyInvoicesTable)
         .set({
           totalAmount: String(newSubtotal),
-          dppNilaiLain: String(newDppNilaiLain),
-          ppnAmount: String(newPpn),
-          grandTotal: String(newGrandTotal),
+           dppNilaiLain: String(newTax.dppNilaiLain),
+           ppnAmount: String(newTax.ppnAmount),
+           grandTotal: String(newTax.grandTotal),
+           ppnRate: String(newTax.ppnRate),
+           ppnTreatment: newTax.ppnTreatment ?? "normal",
+           ppnCollectedByCustomer: newTax.ppnCollectedByCustomer,
            pphRate: String(newPphRate),
            pphAmount: String(newPphAmount),
-           netAmount: String(Math.max(0, newGrandTotal - newPphAmount)),
+            netAmount: String(Math.max(0, newTax.grandTotal - newPphAmount)),
           ...(notes ? { notes } : {}),
         })
         .where(eq(companyInvoicesTable.id, existingInvoice.id))
@@ -401,7 +452,7 @@ async function handleGenerateInvoice(req: any, res: any) {
         action: "CORPORATE_BILLING_AGGREGATED",
         entity: "company_invoice",
         entityId: existingInvoice.id,
-        after: { addedBookings: unbilledBookings.length, invoiceNumber: existingInvoice.invoiceNumber, dppNilaiLain: newDppNilaiLain, dpp: nd },
+         after: { addedBookings: unbilledBookings.length, invoiceNumber: existingInvoice.invoiceNumber, dppNilaiLain: newTax.dppNilaiLain, dpp: newTax.dpp },
         ipAddress,
         userAgent,
       });
@@ -415,10 +466,10 @@ async function handleGenerateInvoice(req: any, res: any) {
       });
     }
 
-    // No existing invoice — create new one
-    // totalAmount = sum of inclusive prices (what customers paid)
-    const totalAmount = unbilledBookings.reduce((sum, b) => sum + Number(b.grandTotal ?? b.totalPrice), 0);
-    const { dpp, dppNilaiLain, ppnAmount, grandTotal } = calcTaxBreakdown(totalAmount);
+    // No existing invoice — use each booking's tax snapshot; never re-extract
+    // historical values from the current tax settings.
+    const tax = summarizeBookingTax(unbilledBookings);
+    const { totalAmount, dpp, dppNilaiLain, ppnAmount, grandTotal, ppnRate, ppnTreatment, ppnCollectedByCustomer } = tax;
     const { pphRate, pphAmount } = summarizeWithholdingTax(unbilledBookings);
 
     const [inv] = await db.insert(companyInvoicesTable).values({
@@ -429,6 +480,9 @@ async function handleGenerateInvoice(req: any, res: any) {
       dppNilaiLain: String(dppNilaiLain),
       ppnAmount: String(ppnAmount),
       grandTotal: String(grandTotal),
+      ppnRate: String(ppnRate),
+      ppnTreatment: ppnTreatment ?? "normal",
+      ppnCollectedByCustomer,
       pphRate: String(pphRate),
       pphAmount: String(pphAmount),
       netAmount: String(grandTotal - pphAmount),
@@ -672,10 +726,10 @@ router.patch("/company-invoices/:id", adminMiddleware, async (req, res) => {
     if (status === "paid" && inv.status !== "paid") {
       const paidDate = updated.paidAt ?? new Date();
       const today = paidDate.toISOString().split("T")[0]!;
-      // totalAmount = harga inklusif PPN. Fungsi journal menerima DPP (sebelum PPN).
-      // Gunakan calcTaxBreakdown (sama seperti mapInvoice) untuk ekstrak DPP & ppnAmount.
-      const invPpn = Number(updated.ppnAmount ?? 0);
-      const invDpp = Math.max(0, Number(updated.grandTotal ?? updated.totalAmount) - invPpn);
+      const invoicePpn = Number(updated.ppnAmount ?? 0);
+      const invCollected = updated.ppnCollectedByCustomer === true || updated.ppnTreatment === "collected_by_customer";
+      const invPpn = invCollected ? 0 : invoicePpn;
+      const invDpp = Math.max(0, Number(updated.grandTotal ?? updated.totalAmount) - invoicePpn);
       const invPph = Number(updated.pphAmount ?? 0);
       const invPphRate = Number(updated.pphRate ?? 0);
       pushInvoicePaymentAsBankMutation(updated, company?.companyName ?? company?.name, paidDate).catch(() => {});
@@ -768,8 +822,10 @@ router.post("/company-invoices/:id/upload-payment-proof", adminMiddleware, uploa
 
       const paidDate = updated.paidAt ?? new Date();
       const paidDay = paidDate.toISOString().split("T")[0]!;
-      const invPpn = Number(updated.ppnAmount ?? 0);
-      const invDpp = Math.max(0, Number(updated.grandTotal ?? updated.totalAmount) - invPpn);
+      const invoicePpn = Number(updated.ppnAmount ?? 0);
+      const invCollected = updated.ppnCollectedByCustomer === true || updated.ppnTreatment === "collected_by_customer";
+      const invPpn = invCollected ? 0 : invoicePpn;
+      const invDpp = Math.max(0, Number(updated.grandTotal ?? updated.totalAmount) - invoicePpn);
       const invPph = Number(updated.pphAmount ?? 0);
       const invPphRate = Number(updated.pphRate ?? 0);
       pushInvoicePaymentAsBankMutation(updated, undefined, paidDate).catch(() => {});

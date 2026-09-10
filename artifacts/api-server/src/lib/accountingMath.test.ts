@@ -31,7 +31,7 @@ jest.unstable_mockModule("drizzle-orm", () => ({
 
 const { extractBookingDpp } = await import("./accountingMath.js");
 const { createJournalEntry } = await import("./accounting.js");
-const { calculateWithholdingTax } = await import("./tax.js");
+const { calculateWithholdingTax, calculateTaxFromTreatment } = await import("./tax.js");
 
 function selectResult(rows: unknown[]) {
   return {
@@ -69,7 +69,7 @@ describe("confirmed booking payment accounting", () => {
       ppnAmount: "19820",
     });
 
-    expect(amounts).toEqual({ dpp: 180180, ppnAmount: 19820 });
+    expect(amounts).toEqual({ dpp: 180180, ppnAmount: 19820, ppnCollectedByCustomer: false });
     expect(amounts.dpp + amounts.ppnAmount).toBe(200000);
   });
 
@@ -90,6 +90,30 @@ describe("confirmed booking payment accounting", () => {
       amount: 0,
       grossAmount: 200000,
       netAmount: 200000,
+    });
+  });
+
+  it("applies the four customer tax treatments without reinterpreting the subtotal", () => {
+    expect(calculateTaxFromTreatment(200000, 11, "PPN_OUT_11", "inclusive")).toMatchObject({
+      dpp: 180180, taxAmount: 19820, grandTotal: 200000, ppnCollectedByCustomer: false,
+    });
+    expect(calculateTaxFromTreatment(200000, 11, "PPN_OUT_11", "none")).toMatchObject({
+      dpp: 200000, taxAmount: 0, grandTotal: 200000, ppnCollectedByCustomer: false,
+    });
+    expect(calculateTaxFromTreatment(200000, 11, "PPN_OUT_11", "normal")).toMatchObject({
+      dpp: 200000, taxAmount: 22000, grandTotal: 222000, ppnCollectedByCustomer: false,
+    });
+    expect(calculateTaxFromTreatment(200000, 11, "PPN_OUT_11", "collected_by_customer")).toMatchObject({
+      dpp: 200000, taxAmount: 22000, grandTotal: 222000, ppnCollectedByCustomer: true,
+    });
+  });
+
+  it("keeps PPh based on DPP in both company PPN modes", () => {
+    expect(calculateWithholdingTax(222000, 200000, true, 2)).toMatchObject({
+      amount: 4000, grossAmount: 222000, netAmount: 218000,
+    });
+    expect(calculateWithholdingTax(200000, 200000, true, 2)).toMatchObject({
+      amount: 4000, grossAmount: 200000, netAmount: 196000,
     });
   });
 

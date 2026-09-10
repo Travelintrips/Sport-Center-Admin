@@ -1,0 +1,34 @@
+Terapkan konfigurasi pajak berdasarkan tipe customer:
+
+Personal
+
+PPN dicentang = harga sudah termasuk PPN (inclusive). Jangan menambah PPN ke harga; pecah harga menjadi DPP + PPN untuk invoice/accounting.
+PPN tidak dicentang = PPN Rp0 / tidak dipungut.
+Tidak ada PPh.
+Company
+
+PPN tidak dicentang = PPN normal; customer membayar DPP + PPN ke Sport Center dan Sport Center menyetorkan PPN.
+PPN dicentang = customer adalah Pemungut PPN; PPN tetap dihitung dan ditampilkan, tetapi ditandai dipungut/disetor customer dan tidak dihitung sebagai kas yang diterima Sport Center.
+PPh dicentang = customer memotong PPh; invoice tetap bruto dan PPh menjadi pengurang kas yang diterima.
+PPh tidak dicentang = tidak ada withholding PPh.
+Simpan konfigurasi pajak pada customer dan snapshot ke booking/invoice agar invoice historis tidak berubah ketika setting customer diubah.
+
+Audit flow booking → invoice → payment → accounting terlebih dahulu, lalu implementasikan minimal diff, test, dan verifikasi seluruh perhitungan serta jurnal.
+
+Free
+12 minutes ago
+
+2 actions
+Saya akan audit rantai data lengkap terlebih dahulu—setting customer, pembuatan booking, pembentukan invoice, konfirmasi payment, sampai jurnal internal/public—agar flag “PPN dipungut customer” tidak hanya tampil di UI tetapi juga mengubah kas dan jurnal dengan benar. Setelah titik snapshot dan caller terpetakan, saya terapkan perubahan minimal di schema, route, UI, dan test.
+
+
+
+35 actions
+Audit selesai. Temuan yang paling berisiko adalah invoice perusahaan masih menghitung ulang PPN dengan rumus hard-coded, sedangkan jurnal payment belum tahu apakah PPN dipungut customer; akibatnya tampilan invoice, kas, dan jurnal bisa berbeda. Saya akan menjadikan snapshot booking sebagai sumber kebenaran, menambah treatment PPN eksplisit, lalu meneruskannya ke invoice dan accounting.
+
+
+
+21 actions
+Saya mulai dari kontrak data dan resolver pajak agar seluruh jalur memakai aturan yang sama. Setelah itu saya hubungkan ulang booking dan invoice; perubahan jurnal akan memakai treatment snapshot, bukan membaca ulang konfigurasi customer yang sudah berubah.
+
+
