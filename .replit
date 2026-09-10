@@ -1,25 +1,11 @@
-<<<<<<< HEAD
-modules = ["nodejs-20", "web"]
-=======
-
-modules = ["nodejs-20", "web", "postgresql-16", "python-base-3.13"]
-
-
-modules = ["nodejs-20", "web", "postgresql-16"]
->>>>>>> 23c8f7ec47860cd6a43572db9c8375c27749ee4a
-
+modules = ["nodejs-20", "web", "python-base-3.13", "postgresql-16"]
 
 
 [deployment]
 router = "application"
 deploymentTarget = "autoscale"
-run = [
-  "bash",
-  "-c",
-  "PORT=8080 NODE_ENV=production node --enable-source-maps ./artifacts/api-server/dist/index.mjs",
-]
-# Perbaikan: Tambahkan pnpm install SEBELUM build
-build = ["bash", "-c", "pnpm install && pnpm -r --if-present run build"]
+run = ["env", "PORT=8080", "NODE_ENV=production", "GCP_SECRET_ID=sport-center", "node", "--enable-source-maps", "./artifacts/api-server/dist/bootstrap.mjs"]
+build = ["bash", "-c", "pnpm -r --if-present run build"]
 
 [deployment.postBuild]
 args = ["pnpm", "store", "prune"]
@@ -29,25 +15,67 @@ env = { "CI" = "true" }
 runButton = "Project"
 
 [[workflows.workflow]]
-name = "Project"
-mode = "parallel"
+name = "artifacts/sport-center: web"
 author = "agent"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "Start application"
-
-[[workflows.workflow]]
-name = "Start application"
-author = "agent"
+mode = "sequential"
 
 [workflows.workflow.metadata]
 outputType = "webview"
+artifactId = "artifacts/sport-center"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "bash scripts/start-dev.sh"
-waitForPort = 5000
+args = "pnpm --filter @workspace/sport-center run dev"
+cwd = "./artifacts/sport-center"
+waitForPort = 21089
+ensurePreviewReachable = "/"
+router = "path"
+
+[workflows.workflow.tasks.env]
+PORT = "21089"
+BASE_PATH = "/"
+
+[[workflows.workflow]]
+name = "artifacts/mockup-sandbox: Component Preview Server"
+author = "agent"
+mode = "sequential"
+
+[workflows.workflow.metadata]
+outputType = "webview"
+artifactId = "XegfDyZt7HqfW2Bb8Ghoy"
+isCanvasWorkflow = true
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/mockup-sandbox run dev"
+cwd = "./artifacts/mockup-sandbox"
+waitForPort = 8081
+ensurePreviewReachable = "/"
+router = "path"
+
+[workflows.workflow.tasks.env]
+PORT = "8081"
+BASE_PATH = "/__mockup"
+
+[[workflows.workflow]]
+name = "artifacts/api-server: API Server"
+author = "agent"
+mode = "sequential"
+
+[workflows.workflow.metadata]
+outputType = "webview"
+artifactId = "3B4_FFSkEVBkAeYMFRJ2e"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/api-server run dev"
+cwd = "./artifacts/api-server"
+waitForPort = 8080
+ensurePreviewReachable = "/"
+router = "path"
+
+[workflows.workflow.tasks.env]
+PORT = "8080"
 
 [agent]
 stack = "BEST_EFFORT_FALLBACK"
@@ -55,7 +83,14 @@ expertMode = true
 
 [postMerge]
 path = "scripts/post-merge.sh"
-timeoutMs = 20000
+timeoutMs = 90000
+
+
+# Runtime secrets are managed outside tracked configuration.
+# Production application secrets are loaded from Google Secret Manager.
+
+[nix]
+channel = "stable-25_05"
 
 [[ports]]
 localPort = 5000
@@ -65,65 +100,6 @@ externalPort = 80
 localPort = 8080
 externalPort = 8080
 
-# Konfigurasi nix (HANYA SATU KALI)
-[nix]
-channel = "stable-25_05"
-
-[nix.env]
-# Force pnpm untuk hoist dependencies agar tersedia di semua workspace packages
-PNPM_SHAMEFULLY_HOIST = "true"
-CI = "true"
-
-
-[userenv]
-
-# ── Non-sensitive shared config ──────────────────────────────────────────────
-# Secrets (API keys, tokens, private keys, passwords) disimpan di Replit Secrets,
-# BUKAN di sini. Lihat daftar secrets di panel Secrets Replit.
-[userenv.shared]
-ADMIN_EMAIL = "admcst001@gmail.com"
-ADMIN_EMAIL_DOMAINS = "example.com"
-ADMIN_EMAILS = "divatranssoetta@gmail.com,admcst001@gmail.com,almanosetiawan@gmail.com,divarestorxr@gmail.com,wangsamasindo@gmail.com"
-ADMIN_WA_PHONES = "085121073537,087882639826"
-APP_URL = "https://sport-center-admin-111569.replit.app"
-DEFAULT_OBJECT_STORAGE_BUCKET_ID = "replit-objstore-e357cc66-19c3-4d73-9ca9-3069d78355d1"
-FONNTE_ADMIN_WA = "085121073537"
-FONNTE_CUSTOMER_TOKEN = ""
-GOOGLE_CLIENT_ID = "751551151000-fqrgt8si0pgnchqkn3pfo6nmqienv38f.apps.googleusercontent.com"
-PORTAL_ADMIN_EMAILS = "admcst001@gmail.com,wangsamasindo@gmail.com"
-PRIVATE_OBJECT_DIR = "/replit-objstore-e357cc66-19c3-4d73-9ca9-3069d78355d1/private"
-PUBLIC_OBJECT_SEARCH_PATHS = "/replit-objstore-e357cc66-19c3-4d73-9ca9-3069d78355d1/public"
-SMTP_FROM = "info@cstlogistic.co.id"
-WATI_BASE_URL = "https://live-mt-server.wati.io/10176503"
-VITE_GOOGLE_CLIENT_ID = "751551151000-fqrgt8si0pgnchqkn3pfo6nmqienv38f.apps.googleusercontent.com"
-OPENAI_MODEL = "gpt-4o"
-AI_SPORTCENTER_ENABLED = "true"
-AI_SPORTCENTER_MAX_REPLY_LENGTH = "900"
-OPENAI_BASE_URL = "https://api.openai.com/v1"
-VITE_PUBLIC_URL = "https://sc.travelintrips.co.id"
-PORT = "8080"
-PAYLABS_PROD_MERCHANT_ID = "010613"
-PAYLABS_SANDBOX_MERCHANT_ID = "010728"
-# Paylabs public keys (bukan secret — dipakai untuk verifikasi signature webhook dari Paylabs)
-PAYLABS_PROD_PUBLIC_KEY = "-----BEGIN PUBLIC KEY----- MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0HDowwUAniBqAxUziB2+RL7bKwMBY31V3yZav0y8mJwriSjYgFlXIkaSspybEPPnPHfaTT40jBEGIGlzWq5K+wV7abhkVNRJN1U/2P9WXuZrv+mGDKqwzpqqwoMYJM46eXVw8D8twt5bH64hXuZC0FzkmZA+mjPpKMEbpSj63+Xnx2ZNAzB/GeoDBFSV05XaIlYC+vvVxfO4i2/jFLSc6R0SpRcva8NHurEh3m5urFmhVL01yBvr7iJV1TVFDuyO5AnsNQ2VmOFPeTPkL4butMGHT6ng8OIvHaUpR5ynqHexqkPeB6DQCsgj+Lal9CjjdmYSY31SuXSa/sRJAzBLmwIDAQAB -----END PUBLIC KEY-----"
-PAYLABS_SANDBOX_PUBLIC_KEY = "-----BEGIN PUBLIC KEY----- MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAkIbGoeDb+PSeISrr8gn+ qMJmS3euQef35bH3+cDdykV6IJSMiXRCQ4tpxKxS9fFuXDFbdkSXau4EAhztqwD4 WwYxHRdguWKXKlRu9q1asLszJ1uqwWpK7+eB1X94csmfU4I4VjvSxMiIq945Lv6J 9Hw/qfh7O56Q3jNA4BJqH+therGhGA2a77xqEWIGYYdDQ9SW5hXZJ3t1i5C4XeHT iC40zm9Yz88OjPMpF406fDHtUkPJWFnqhqWZqmAVqZdVZMBDDByyZzWt2qIJYY/i 7F/5NGwgAXPVnO3o+2H49sGEzDqLmRtXrA7XFU1szgJILuLmEXMHRFJMilp4jK5u twIDAQAB -----END PUBLIC KEY-----"
-# VAPID public key (bukan secret — dikirim ke browser untuk Web Push)
-VAPID_PUBLIC_KEY = "BEAKgZOdT9HxFJLxVNxgtY-Dh2XzGptrjQwQibP2obUjPlLkfk0WR1TyzqbJvnhLlWrNGjiexhndtXZj9klZUPE"
-
-# ── Development environment (dev Supabase: xssrfshdrtdfupgqwfdw) ─────────────
-# Secrets DEV (SERVICE_ROLE_KEY, DATABASE_URL, ANON_KEY, URL) → Replit Secrets
-[userenv.development]
-# VITE_ keys harus env var (bukan secret) karena di-inject saat build frontend
-VITE_SUPABASE_URL_DEV = "https://xssrfshdrtdfupgqwfdw.supabase.co"
-VITE_SUPABASE_ANON_KEY_DEV = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhzc3Jmc2hkcnRkZnVwZ3F3ZmR3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg4OTY3MjgsImV4cCI6MjA5NDQ3MjcyOH0.czKzR9GjEL6UK8AhPAX6OYyF74fz1YtImYQSXiiG69U"
-SUPABASE_STORAGE_BUCKET_DEV = "https://xssrfshdrtdfupgqwfdw.storage.supabase.co/storage/v1/s3"
-
-# ── Production environment (prod Supabase: nzdweipzckfszczzqtuw) ─────────────
-# Secrets PROD (SERVICE_ROLE_KEY, DATABASE_URL, ANON_KEY, URL) → Replit Secrets
-[userenv.production]
-# VITE_ keys harus env var (bukan secret) karena di-inject saat build frontend
-VITE_SUPABASE_URL = "https://nzdweipzckfszczzqtuw.supabase.co"
-VITE_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im56ZHdlaXB6Y2tmc3pjenpxdHV3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg0MDI4NDQsImV4cCI6MjA5Mzk3ODg0NH0.p9k3-qyRjPuXsHLizUrSRMyS-0yJAatUyjQU9NIIu1U"
-SUPABASE_STORAGE_BUCKET = "https://nzdweipzckfszczzqtuw.storage.supabase.co/storage/v1/s3"
-# WhatsApp Group ID untuk notifikasi (isi dengan ID group Anda)
-WHATSAPP_GROUP_ID = ""
+[[ports]]
+localPort = 21089
+externalPort = 3000
