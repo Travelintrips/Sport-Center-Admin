@@ -658,7 +658,13 @@ export default function Booking() {
         .map((d) => d.date)
     : [];
   const effectiveCount = selectedDates.length;
-  const effectiveTotalPrice = checkResult ? checkResult.pricePerSession * effectiveCount : 0;
+  const additionalChargesTotal = additionalCharges.reduce(
+    (sum, charge) => sum + (Number.isFinite(Number(charge.amount)) ? Number(charge.amount) : 0),
+    0,
+  );
+  const effectiveTotalPrice = checkResult
+    ? checkResult.pricePerSession * effectiveCount + (effectiveCount > 0 ? additionalChargesTotal : 0)
+    : 0;
 
   // --- End time ---
   const [hours, minutes] = startTime ? startTime.split(":").map(Number) : [0, 0];
@@ -672,10 +678,6 @@ export default function Booking() {
   const totalPrice = facility
     ? facility.pricePerHour * (isWalkIn ? bookingPeopleCount : duration)
     : 0;
-  const additionalChargesTotal = additionalCharges.reduce(
-    (sum, charge) => sum + (Number.isFinite(Number(charge.amount)) ? Number(charge.amount) : 0),
-    0,
-  );
   const singlePriceBeforeDiscount = totalPrice + additionalChargesTotal;
   const isMultiguna = facility
     ? `${facility.name} ${facility.category}`.toLowerCase().replace(/[^a-z0-9]/g, "").includes("multiguna")
@@ -949,7 +951,9 @@ export default function Booking() {
                     <div>
                       <Label className="font-semibold">{t("Biaya Tambahan", "Additional Charges")}</Label>
                       <p className="mt-1 text-xs text-muted-foreground">
-                        {t("Opsional, misalnya tips petugas atau air mineral. Berlaku sekali untuk setiap booking/sesi.", "Optional, such as staff tips or mineral water. Applied once to each booking/session.")}
+                         {isRepeat
+                           ? t("Opsional, misalnya tips petugas atau air mineral. Berlaku sekali untuk seluruh booking berulang.", "Optional, such as staff tips or mineral water. Applied once to the entire recurring booking.")
+                           : t("Opsional, misalnya tips petugas atau air mineral. Berlaku sekali untuk booking ini.", "Optional, such as staff tips or mineral water. Applied once to this booking.")}
                       </p>
                     </div>
                     <Button
@@ -1753,8 +1757,14 @@ export default function Booking() {
                   <>
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">{t("Harga/sesi", "Price/session")}</span>
-                       <span>{formatCurrency(singlePriceBeforeDiscount)}</span>
+                         <span>{formatCurrency(totalPrice)}</span>
                     </div>
+                     {additionalChargesTotal > 0 && (
+                       <div className="flex justify-between text-amber-700 font-medium">
+                         <span>{t("Biaya tambahan (sekali)", "Additional charge (once)")}</span>
+                         <span>+{formatCurrency(additionalChargesTotal)}</span>
+                       </div>
+                     )}
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">{t("Sesi dipilih", "Sessions selected")}</span>
                       <span>
@@ -1781,7 +1791,7 @@ export default function Booking() {
                     <>
                       <div className="flex justify-between text-muted-foreground text-sm">
                         <span>{t("Harga Normal", "Normal Price")}</span>
-                        <span className="line-through">{isRepeat ? (isChecking ? "..." : formatCurrency((checkResult ? effectiveTotalPrice : singlePriceBeforeDiscount * repeatCount))) : formatCurrency(singlePriceBeforeDiscount)}</span>
+                       <span className="line-through">{isRepeat ? (isChecking ? "..." : formatCurrency((checkResult ? effectiveTotalPrice : totalPrice * repeatCount + additionalChargesTotal))) : formatCurrency(singlePriceBeforeDiscount)}</span>
                       </div>
                       <div className="flex justify-between text-purple-700 font-medium">
                         <span className="flex items-center gap-1"><Tag size={12} /> {t("Diskon Event 21,4%", "Event Discount 21.4%")}</span>
@@ -1807,7 +1817,7 @@ export default function Booking() {
                     : (couponResult?.discountAmount ?? 0) + apMultigunaDiscountTotal;
 
                   const grand = isRepeat
-                    ? (isChecking ? null : Math.max(0, (checkResult ? effectiveTotalPrice : totalPrice * repeatCount) - disc))
+                     ? (isChecking ? null : Math.max(0, (checkResult ? effectiveTotalPrice : totalPrice * repeatCount + additionalChargesTotal) - disc))
                      : Math.max(0, singlePriceBeforeDiscount - disc);
                   return (
                     <>

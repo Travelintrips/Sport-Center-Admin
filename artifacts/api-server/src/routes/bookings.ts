@@ -182,17 +182,29 @@ async function getBookingWithPayment(id: number) {
     : [];
 
   // Jika booking bagian dari grup recurring, ambil info grup
-  let groupInfo: { groupTotalPayment: number; groupSessionCount: number; groupRef: string } | null = null;
+  let groupInfo: {
+    groupTotalPayment: number;
+    groupSessionCount: number;
+    groupRef: string;
+    additionalCharges: ReturnType<typeof normalizeAdditionalCharges>;
+  } | null = null;
   if (booking.groupRef) {
     const [group] = await db.select().from(bookingGroupsTable)
       .where(eq(bookingGroupsTable.groupRef, booking.groupRef)).limit(1);
-    const groupBookings = await db.select({ id: bookingsTable.id })
+    const groupBookings = await db.select({
+      id: bookingsTable.id,
+      additionalCharges: bookingsTable.additionalCharges,
+    })
       .from(bookingsTable).where(eq(bookingsTable.groupRef, booking.groupRef));
     if (group) {
+      const groupCharges = groupBookings
+        .map((row) => normalizeAdditionalCharges(row.additionalCharges))
+        .find((charges) => charges.length > 0) ?? [];
       groupInfo = {
         groupRef: booking.groupRef,
         groupTotalPayment: Number(group.totalPayment),
         groupSessionCount: groupBookings.length,
+        additionalCharges: groupCharges,
       };
     }
   }
@@ -257,6 +269,28 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
       : [];
 
     const bookingIds = bookings.map((b) => b.id);
+    const groupRefs = [
+      ...new Set(
+        bookings
+          .map((b) => b.groupRef)
+          .filter((groupRef): groupRef is string => Boolean(groupRef)),
+      ),
+    ];
+    const groupChargeRows = groupRefs.length > 0
+      ? await db
+        .select({
+          groupRef: bookingsTable.groupRef,
+          additionalCharges: bookingsTable.additionalCharges,
+        })
+        .from(bookingsTable)
+        .where(inArray(bookingsTable.groupRef, groupRefs))
+      : [];
+    const groupAdditionalCharges = new Map<string, ReturnType<typeof normalizeAdditionalCharges>>();
+    for (const row of groupChargeRows) {
+      if (!row.groupRef || groupAdditionalCharges.has(row.groupRef)) continue;
+      const charges = normalizeAdditionalCharges(row.additionalCharges);
+      if (charges.length > 0) groupAdditionalCharges.set(row.groupRef, charges);
+    }
     const allPayments = bookingIds.length > 0 ? await db.select().from(paymentsTable) : [];
     const paymentIds = [...new Set(allPayments.map((payment) => payment.id))];
     let reconciledPaymentIds = new Set<number>();
@@ -478,6 +512,10 @@ router.get("/bookings", adminMiddleware, async (req, res) => {
         dpp: b.dpp == null ? null : Number(b.dpp),
         ppnAmount: b.ppnAmount == null ? null : Number(b.ppnAmount),
         grandTotal: b.grandTotal == null ? null : Number(b.grandTotal),
+        additionalCharges: normalizeAdditionalCharges(b.additionalCharges),
+        groupAdditionalCharges: b.groupRef
+          ? (groupAdditionalCharges.get(b.groupRef) ?? [])
+          : [],
         downPayment: dpAmt,
         isDpPaid: b.isDpPaid ?? false,
         facilityName: facility?.name ?? "",
@@ -562,6 +600,10 @@ function isOperationalBookingRole(role: string | null | undefined): boolean {
   return !!role && OPERATIONAL_BOOKING_ROLES.has(role);
 }
 
+function canSubmitAdditionalCharges(role: string | null | undefined): boolean {
+  return role === "customer" || isOperationalBookingRole(role);
+}
+
 function getRequestRole(req: { headers: { authorization?: string } }): string | null {
   const authHeader = req.headers.authorization;
   if (!authHeader?.startsWith("Bearer ")) return null;
@@ -603,6 +645,10 @@ router.post("/bookings", async (req, res) => {
     }
     // Deteksi apakah request berasal dari admin (role selain customer)
     const isAdminRequest = !!loggedInRole && loggedInRole !== "customer";
+    if (additionalCharges.length > 0 && !canSubmitAdditionalCharges(loggedInRole)) {
+      res.status(401).json({ error: "Login sebagai customer atau operator diperlukan untuk menambahkan biaya tambahan" });
+      return;
+    }
 
     // Deteksi apakah company customer dengan tagihan bulanan
     // Prioritas 1: explicit companyCustomerId di body — HANYA boleh dari admin
@@ -1237,6 +1283,10 @@ router.post("/bookings/recurring/check", async (req, res) => {
       return;
     }
     const allowPastSchedule = isOperationalBookingRole(getRequestRole(req));
+    if (additionalCharges.length > 0 && !canSubmitAdditionalCharges(getRequestRole(req))) {
+      res.status(401).json({ error: "Login sebagai customer atau operator diperlukan untuk menambahkan biaya tambahan" });
+      return;
+    }
 
     const [facility] = await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, Number(facilityId))).limit(1);
     if (!facility) { res.status(404).json({ error: "Facility not found" }); return; }
@@ -1263,15 +1313,14 @@ router.post("/bookings/recurring/check", async (req, res) => {
       })
     );
 
-    const pricePerSession =
-      Number(facility.pricePerHour) * durationHours + additionalChargesTotal(additionalCharges);
+    const pricePerSession = Number(facility.pricePerHour) * durationHours;
     const validCount = results.filter((r) => r.available).length;
 
     res.json({
       dates: results,
       pricePerSession,
       validCount,
-      totalPrice: pricePerSession * validCount,
+      totalPrice: pricePerSession * validCount + (validCount > 0 ? additionalChargesTotal(additionalCharges) : 0),
     });
   } catch (err) {
     req.log.error({ err }, "Check recurring error");
@@ -1432,7 +1481,8 @@ router.post("/bookings/recurring", async (req, res) => {
       : isEventR
         ? eventDiscountAmountCalcR
         : Math.min(Number(discountAmountPerSession) || 0, basePrice);
-    const totalPrice = basePrice - discount + additionalChargesTotal(additionalCharges);
+    const baseSessionPrice = Math.max(0, basePrice - discount);
+    const additionalChargeAmount = additionalChargesTotal(additionalCharges);
     const requestedDownPayment =
       downPaymentAmount == null || downPaymentAmount === ""
         ? null
@@ -1449,11 +1499,11 @@ router.post("/bookings/recurring", async (req, res) => {
     // Hitung total projected semua tanggal sebelum insert agar DP seperti
     // Rp100.000 tetap valid untuk 4 sesi @ Rp80.000 (total Rp320.000).
     const taxByDate = new Map<string, Awaited<ReturnType<typeof calculateTax>>>();
-    let projectedGrandTotal = 0;
+    let projectedGrandTotal = additionalChargeAmount;
     for (const bookingDate of dates) {
-      const taxCalc = await calculateTax(totalPrice, "sport_booking", bookingDate);
+      const taxCalc = await calculateTax(baseSessionPrice, "sport_booking", bookingDate);
       taxByDate.set(bookingDate, taxCalc);
-      projectedGrandTotal += taxCalc.grandTotal;
+      projectedGrandTotal += baseSessionPrice;
     }
     if (
       requestedDownPayment != null &&
@@ -1479,7 +1529,14 @@ router.post("/bookings/recurring", async (req, res) => {
         continue;
       }
       // Per-date tax calc: respects effectiveDate backward-compat rule
-      const taxCalc = taxByDate.get(bookingDate)!;
+      // A recurring booking is one payment group. Additional charges belong
+      // to the first session that is actually created, not every session.
+      const isFirstCreatedSession = created.length === 0;
+      const sessionAdditionalCharges = isFirstCreatedSession ? additionalCharges : [];
+      const sessionTotalPrice = baseSessionPrice + additionalChargesTotal(sessionAdditionalCharges);
+      const taxCalc = isFirstCreatedSession
+        ? await calculateTax(sessionTotalPrice, "sport_booking", bookingDate)
+        : taxByDate.get(bookingDate)!;
       const orderNumber = await generateBookingOrderNumber();
       const [booking] = await db.insert(bookingsTable).values({
         orderNumber,
@@ -1493,7 +1550,7 @@ router.post("/bookings/recurring", async (req, res) => {
         startTime,
         endTime,
         durationHours,
-        totalPrice: String(totalPrice),
+        totalPrice: String(sessionTotalPrice),
         promoCode: isAp || isEventR ? null : (promoCode || null),
         discountAmount: String(discount),
         apDiscountAmount: isAp ? String(apAutoDiscountAmountR) : "0",
@@ -1508,7 +1565,7 @@ router.post("/bookings/recurring", async (req, res) => {
         dpp: taxCalc.taxAmount > 0 ? String(taxCalc.dpp) : null,
         ppnAmount: taxCalc.taxAmount > 0 ? String(taxCalc.taxAmount) : null,
         grandTotal: taxCalc.taxAmount > 0 ? String(taxCalc.grandTotal) : null,
-        additionalCharges,
+        additionalCharges: sessionAdditionalCharges,
         ...(requestedDownPayment != null
           ? {
               // downPayment is the configured amount, not proof that the DP
@@ -1892,7 +1949,73 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
     if (status && status !== "completed") updateData.status = status;
     if (adminNotes !== undefined) updateData.adminNotes = adminNotes;
 
-    if (hasAdditionalChargesUpdate) {
+    if (hasAdditionalChargesUpdate && beforeUpdate.groupRef) {
+      let additionalCharges: ReturnType<typeof normalizeAdditionalCharges>;
+      try {
+        additionalCharges = normalizeAdditionalCharges(req.body.additionalCharges);
+      } catch (error) {
+        res.status(400).json({ error: error instanceof Error ? error.message : "Biaya tambahan tidak valid" });
+        return;
+      }
+
+      const groupBookings = await db
+        .select()
+        .from(bookingsTable)
+        .where(eq(bookingsTable.groupRef, beforeUpdate.groupRef));
+      const groupBookingIds = groupBookings.map((row) => row.id);
+      const groupPayments = groupBookingIds.length > 0
+        ? await db.select({ id: paymentsTable.id })
+          .from(paymentsTable)
+          .where(inArray(paymentsTable.bookingId, groupBookingIds))
+        : [];
+      if (groupPayments.length > 0) {
+        res.status(409).json({ error: "Biaya tambahan tidak dapat diubah setelah ada pembayaran pada booking grup." });
+        return;
+      }
+      if (groupBookings.some((row) => !["pending_payment", "waiting_confirmation", "waiting_admin_approval"].includes(row.status))) {
+        res.status(409).json({ error: "Biaya tambahan hanya dapat diubah sebelum booking grup dibayar atau dikonfirmasi." });
+        return;
+      }
+
+      // A recurring/cart booking has one charge list for the whole group.
+      // Store it on the edited session and clear sibling rows so the amount
+      // remains visible without being counted more than once.
+      for (const row of groupBookings) {
+        const rowCharges = row.id === id ? additionalCharges : [];
+        const oldChargeTotal = additionalChargesTotal(normalizeAdditionalCharges(row.additionalCharges));
+        const baseSessionPrice = row.basePrice != null
+          ? Math.max(0, Number(row.basePrice) - Number(row.discountAmount ?? 0))
+          : Math.max(0, Number(row.totalPrice) - oldChargeTotal);
+        const totalPrice = baseSessionPrice + additionalChargesTotal(rowCharges);
+        const taxCalc = await calculateTax(totalPrice, "sport_booking", row.bookingDate);
+
+        await reverseTaxTransaction(row.id, row.orderNumber, row.bookingDate);
+        await db.update(bookingsTable).set({
+          additionalCharges: rowCharges,
+          totalPrice: String(totalPrice),
+          ppnRate: taxCalc.taxRate > 0 ? String(taxCalc.taxRate) : null,
+          dpp: taxCalc.taxAmount > 0 ? String(taxCalc.dpp) : null,
+          ppnAmount: taxCalc.taxAmount > 0 ? String(taxCalc.taxAmount) : null,
+          grandTotal: taxCalc.taxAmount > 0 ? String(taxCalc.grandTotal) : null,
+          updatedAt: new Date(),
+        }).where(eq(bookingsTable.id, row.id));
+        if (taxCalc.taxCode) {
+          await recordTaxTransaction("booking", row.id, row.orderNumber, taxCalc, row.bookingDate);
+        }
+      }
+
+      const updatedGroupRows = await db
+        .select({ totalPrice: bookingsTable.totalPrice, grandTotal: bookingsTable.grandTotal })
+        .from(bookingsTable)
+        .where(eq(bookingsTable.groupRef, beforeUpdate.groupRef));
+      const groupTotal = updatedGroupRows.reduce(
+        (sum, row) => sum + Number(row.grandTotal ?? row.totalPrice),
+        0,
+      );
+      await db.update(bookingGroupsTable)
+        .set({ totalPayment: String(groupTotal), updatedAt: new Date() })
+        .where(eq(bookingGroupsTable.groupRef, beforeUpdate.groupRef));
+    } else if (hasAdditionalChargesUpdate) {
       let additionalCharges: ReturnType<typeof normalizeAdditionalCharges>;
       try {
         additionalCharges = normalizeAdditionalCharges(req.body.additionalCharges);
@@ -1915,17 +2038,24 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
         return;
       }
 
-      const basePrice = Number(beforeUpdate.basePrice ?? beforeUpdate.totalPrice);
-      const discount = Number(beforeUpdate.discountAmount ?? 0);
-      const totalPrice = Math.max(0, basePrice - discount) + additionalChargesTotal(additionalCharges);
+       const oldChargeTotal = additionalChargesTotal(normalizeAdditionalCharges(beforeUpdate.additionalCharges));
+       const basePrice = beforeUpdate.basePrice == null
+         ? Math.max(0, Number(beforeUpdate.totalPrice) - oldChargeTotal)
+         : Number(beforeUpdate.basePrice);
+       const discount = Number(beforeUpdate.discountAmount ?? 0);
+       const totalPrice = Math.max(0, basePrice - discount) + additionalChargesTotal(additionalCharges);
       const taxCalc = await calculateTax(totalPrice, "sport_booking", beforeUpdate.bookingDate);
 
+       await reverseTaxTransaction(beforeUpdate.id, beforeUpdate.orderNumber, beforeUpdate.bookingDate);
       updateData.additionalCharges = additionalCharges;
       updateData.totalPrice = String(totalPrice);
       updateData.ppnRate = taxCalc.taxRate > 0 ? String(taxCalc.taxRate) : null;
       updateData.dpp = taxCalc.taxAmount > 0 ? String(taxCalc.dpp) : null;
       updateData.ppnAmount = taxCalc.taxAmount > 0 ? String(taxCalc.taxAmount) : null;
       updateData.grandTotal = taxCalc.taxAmount > 0 ? String(taxCalc.grandTotal) : null;
+       if (taxCalc.taxCode) {
+         await recordTaxTransaction("booking", beforeUpdate.id, beforeUpdate.orderNumber, taxCalc, beforeUpdate.bookingDate);
+       }
     }
 
     if (status === "completed" && beforeUpdate && beforeUpdate.status !== "completed") {

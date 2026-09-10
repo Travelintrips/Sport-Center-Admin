@@ -1104,8 +1104,12 @@ function BookingDetailDrawer({
   const [startTime, setStartTime] = useState(String(booking.startTime ?? "").slice(0, 5));
   const [endTime, setEndTime] = useState(String(booking.endTime ?? "").slice(0, 5));
   const [savingDates, setSavingDates] = useState(false);
+  const displayedAdditionalCharges =
+    Array.isArray(booking.groupAdditionalCharges) && booking.groupAdditionalCharges.length > 0
+      ? booking.groupAdditionalCharges
+      : (booking.additionalCharges ?? []);
   const [chargeDraft, setChargeDraft] = useState<{ name: string; amount: string }[]>(
-    (booking.additionalCharges ?? []).map((charge: any) => ({
+    displayedAdditionalCharges.map((charge: any) => ({
       name: String(charge.name ?? ""),
       amount: String(Number(charge.amount ?? 0)),
     })),
@@ -1734,7 +1738,7 @@ function BookingDetailDrawer({
           <div className="space-y-2 rounded-xl border border-amber-200 dark:border-amber-900/60 bg-amber-50/50 dark:bg-amber-950/20 p-4">
             <div>
               <label className="text-xs font-semibold text-amber-800 dark:text-amber-200 uppercase tracking-wide">
-                Biaya Tambahan
+                 {booking.groupRef ? "Biaya Tambahan (sekali untuk seluruh grup)" : "Biaya Tambahan"}
               </label>
               <p className="mt-1 text-[11px] text-amber-700/80 dark:text-amber-300/80">
                 Hanya dapat diubah sebelum booking memiliki pembayaran.

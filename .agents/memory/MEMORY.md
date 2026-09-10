@@ -47,6 +47,7 @@
 - [Paylabs webhook acknowledgement](paylabs-webhook-ack.md) — valid callbacks require a signed HTTP 200 ACK with the exact Paylabs body and headers.
 - [Paylabs private key persistence](paylabs-private-key-persistence.md) — GET must never return private keys; PATCH only accepts them when explicitly provided + valid; badge+editor UI pattern is the correct fix.
 - [Booking payment method options](booking-payment-method-options.md) — active admin methods drive labels; manual customer payments use canonical QRIS/Transfer Bank values.
+- [Recurring additional charges](recurring-additional-charges.md) — recurring fees are stored on one created session and counted once in the group total; group edits clear sibling fees.
 - [Merge recovery validation](merge-recovery.md) — after external merges, sync workspace dependencies and regenerate API clients before validating typecheck/build.
 - [Sport Center payment accounting audit](sport-center-payment-accounting-audit.md) — `posting_status=posted` is insufficient; verify linked public entry, GL lines, and both PPN ledgers by payment ID.
 - [Legacy payment reconciliation](legacy-payment-reconciliation.md) — legacy accounting payments may retain valid entries without sport mirrors; link only unique ref+amount pairs, never delete audit rows.
