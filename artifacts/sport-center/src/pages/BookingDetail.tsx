@@ -462,6 +462,19 @@ export default function BookingDetail() {
                   <div>{t("Harga sesi ini", "This session price")}</div>
                   <div>Rp {booking.totalPrice.toLocaleString("id-ID")}</div>
                 </div>
+                  {Array.isArray((booking as any).additionalCharges) && (booking as any).additionalCharges.length > 0 && (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-2.5 dark:border-amber-900/60 dark:bg-amber-950/20">
+                      <div className="mb-1 text-xs font-semibold text-amber-800 dark:text-amber-200">
+                        {t("Biaya tambahan sesi ini", "Additional charges for this session")}
+                      </div>
+                      {(booking as any).additionalCharges.map((charge: any, index: number) => (
+                        <div key={index} className="flex justify-between text-xs text-amber-900 dark:text-amber-100">
+                          <span>{charge.name}</span>
+                          <span>Rp {Number(charge.amount).toLocaleString("id-ID")}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 <div className="flex justify-between items-center text-sm text-muted-foreground">
                   <div>{t("Jumlah sesi", "Total sessions")}</div>
                   <div>{(booking as any).groupInfo.groupSessionCount} {t("sesi", "sessions")}</div>
@@ -490,6 +503,19 @@ export default function BookingDetail() {
                 const ppnVal = hasPpn ? (gt - dppVal) : 0;
                 return (
                   <div className="space-y-1.5 w-full">
+                    {Array.isArray((booking as any).additionalCharges) && (booking as any).additionalCharges.length > 0 && (
+                      <div className="mb-2 rounded-lg border border-amber-200 bg-amber-50/60 p-2.5 dark:border-amber-900/60 dark:bg-amber-950/20">
+                        <div className="mb-1 text-xs font-semibold text-amber-800 dark:text-amber-200">
+                          {t("Biaya tambahan", "Additional charges")}
+                        </div>
+                        {(booking as any).additionalCharges.map((charge: any, index: number) => (
+                          <div key={index} className="flex justify-between text-xs text-amber-900 dark:text-amber-100">
+                            <span>{charge.name}</span>
+                            <span>Rp {Number(charge.amount).toLocaleString("id-ID")}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                     {hasPpn && (
                       <>
                         <div className="flex justify-between items-center text-sm text-muted-foreground">

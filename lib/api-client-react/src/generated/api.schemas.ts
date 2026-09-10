@@ -178,6 +178,11 @@ export const BookingVerificationStatus = {
   rejected: 'rejected',
 } as const;
 
+export interface AdditionalCharge {
+  name: string;
+  amount: number;
+}
+
 /**
  * @nullable
  */
@@ -269,10 +274,6 @@ export interface Booking {
   /** @nullable */
   numberOfPeople?: number | null;
   /** @nullable */
-  membershipId?: number | null;
-  /** @nullable */
-  source?: string | null;
-  /** @nullable */
   notes?: string | null;
   /** @nullable */
   adminNotes?: string | null;
@@ -290,6 +291,7 @@ export interface Booking {
   ppnAmount?: number | null;
   /** @nullable */
   grandTotal?: number | null;
+  additionalCharges: AdditionalCharge[];
   downPayment?: number;
   isDpPaid?: boolean;
   payment?: Payment | null;
@@ -322,6 +324,7 @@ export interface RecurringBookingCheckInput {
      * @maximum 52
      */
   repeatCount: number;
+  additionalCharges?: AdditionalCharge[];
 }
 
 export interface RecurringDateStatus {
@@ -365,6 +368,7 @@ export interface RecurringBookingInput {
   repeatType: RecurringBookingInputRepeatType;
   repeatCount: number;
   notes?: string;
+  additionalCharges?: AdditionalCharge[];
   /** Total down payment for the recurring payment group. Must be less than the group grand total. */
   downPaymentAmount?: number;
   customerType?: RecurringBookingInputCustomerType;
@@ -423,6 +427,7 @@ export interface BookingInput {
   idCardNumber?: string;
   notes?: string;
   vendorId?: number | null;
+  additionalCharges?: AdditionalCharge[];
 }
 
 export type BookingUpdateStatus = typeof BookingUpdateStatus[keyof typeof BookingUpdateStatus];
@@ -443,6 +448,7 @@ export const BookingUpdateStatus = {
 export interface BookingUpdate {
   status?: BookingUpdateStatus;
   adminNotes?: string;
+  additionalCharges?: AdditionalCharge[];
 }
 
 export type PaymentInputPaymentMethod = typeof PaymentInputPaymentMethod[keyof typeof PaymentInputPaymentMethod];

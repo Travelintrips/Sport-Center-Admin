@@ -27,6 +27,7 @@ import { logger } from "../lib/logger";
 import { syncBookingToBizportal, syncStatusToBizportal, deleteBookingFromBizportal, pushConfirmedPaymentAsBankMutation } from "../lib/bizportalSync";
 import { getBaseUrl } from "../lib/appUrl";
 import { calculateTax, recordTaxTransaction, reverseTaxTransaction } from "../lib/tax";
+import { additionalChargesTotal, normalizeAdditionalCharges } from "../lib/additionalCharges";
 import { reverseJournalEntry, reversePublicAccountingEntry } from "../lib/accounting";
 import { generateBookingOrderNumber } from "../lib/orderNumber";
 import {
@@ -205,6 +206,7 @@ async function getBookingWithPayment(id: number) {
   return {
     ...rest,
     idCardNumber: null,
+    additionalCharges: normalizeAdditionalCharges(booking.additionalCharges),
     totalPrice: Number(booking.totalPrice),
     discountAmount: Number(booking.discountAmount),
     basePrice: booking.basePrice == null ? null : Number(booking.basePrice),
@@ -571,6 +573,13 @@ router.post("/bookings", async (req, res) => {
   let slotLockKey: { fId: number; dInt: number } | null = null;
   try {
     const { customerName, customerEmail, facilityId, bookingDate, notes, promoCode, discountAmount, customerType } = req.body;
+    let additionalCharges: ReturnType<typeof normalizeAdditionalCharges>;
+    try {
+      additionalCharges = normalizeAdditionalCharges(req.body.additionalCharges);
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : "Biaya tambahan tidak valid" });
+      return;
+    }
     const customerPhone: string = normalizePhone(String(req.body.customerPhone ?? "").trim());
     const bookingSource: string = req.body.source || "";
     const rawBookingType = req.body.bookingType;
@@ -817,7 +826,7 @@ router.post("/bookings", async (req, res) => {
       : isEvent
         ? eventDiscountAmountCalc
         : Math.min(Number(discountAmount) || 0, basePrice);
-    const totalPrice = basePrice - discount;
+    const totalPrice = basePrice - discount + additionalChargesTotal(additionalCharges);
     const taxCalc = await calculateTax(totalPrice, "sport_booking", bookingDate);
     const orderNumber = await generateBookingOrderNumber();
 
@@ -913,6 +922,7 @@ router.post("/bookings", async (req, res) => {
       dpp: taxCalc.taxAmount > 0 ? String(taxCalc.dpp) : null,
       ppnAmount: taxCalc.taxAmount > 0 ? String(taxCalc.taxAmount) : null,
       grandTotal: taxCalc.taxAmount > 0 ? String(taxCalc.grandTotal) : null,
+      additionalCharges,
       vendorId: req.body.vendorId ? Number(req.body.vendorId) : null,
     }).returning();
 
@@ -1124,6 +1134,7 @@ router.post("/bookings", async (req, res) => {
       dpp: booking.dpp == null ? null : Number(booking.dpp),
       ppnAmount: booking.ppnAmount == null ? null : Number(booking.ppnAmount),
       grandTotal: booking.grandTotal == null ? null : Number(booking.grandTotal),
+      additionalCharges: normalizeAdditionalCharges(booking.additionalCharges),
       facilityName: facility.name,
       facilityCategory: facility.category,
       payment: null,
@@ -1218,6 +1229,13 @@ function recurringScheduleError(
 router.post("/bookings/recurring/check", async (req, res) => {
   try {
     const { facilityId, startDate, startTime, durationHours, repeatType, repeatCount } = req.body;
+    let additionalCharges: ReturnType<typeof normalizeAdditionalCharges>;
+    try {
+      additionalCharges = normalizeAdditionalCharges(req.body.additionalCharges);
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : "Biaya tambahan tidak valid" });
+      return;
+    }
     const allowPastSchedule = isOperationalBookingRole(getRequestRole(req));
 
     const [facility] = await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, Number(facilityId))).limit(1);
@@ -1245,7 +1263,8 @@ router.post("/bookings/recurring/check", async (req, res) => {
       })
     );
 
-    const pricePerSession = Number(facility.pricePerHour) * durationHours;
+    const pricePerSession =
+      Number(facility.pricePerHour) * durationHours + additionalChargesTotal(additionalCharges);
     const validCount = results.filter((r) => r.available).length;
 
     res.json({
@@ -1277,12 +1296,20 @@ router.post("/bookings/recurring", async (req, res) => {
       // AP2 employee fields (optional)
       customerType: rawCustomerType, idCardNumber: rawIdCardNumber,
       bookingType: rawBookingTypeR,
+      additionalCharges: rawAdditionalCharges,
       // External groupRef dari cart checkout (agar semua lapangan + sesi repeat masuk 1 grup)
       groupRef: externalGroupRefRaw,
     } = req.body;
     const externalGroupRef: string | null = externalGroupRefRaw
       ? String(externalGroupRefRaw).trim().slice(0, 64) || null
       : null;
+    let additionalCharges: ReturnType<typeof normalizeAdditionalCharges>;
+    try {
+      additionalCharges = normalizeAdditionalCharges(rawAdditionalCharges);
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : "Biaya tambahan tidak valid" });
+      return;
+    }
     const bookingTypeR: "regular" | "event" = rawBookingTypeR === "event" ? "event" : "regular";
     const isEventR = bookingTypeR === "event";
     const customerPhone: string = normalizePhone(String(req.body.customerPhone ?? "").trim());
@@ -1405,7 +1432,7 @@ router.post("/bookings/recurring", async (req, res) => {
       : isEventR
         ? eventDiscountAmountCalcR
         : Math.min(Number(discountAmountPerSession) || 0, basePrice);
-    const totalPrice = basePrice - discount;
+    const totalPrice = basePrice - discount + additionalChargesTotal(additionalCharges);
     const requestedDownPayment =
       downPaymentAmount == null || downPaymentAmount === ""
         ? null
@@ -1481,6 +1508,7 @@ router.post("/bookings/recurring", async (req, res) => {
         dpp: taxCalc.taxAmount > 0 ? String(taxCalc.dpp) : null,
         ppnAmount: taxCalc.taxAmount > 0 ? String(taxCalc.taxAmount) : null,
         grandTotal: taxCalc.taxAmount > 0 ? String(taxCalc.grandTotal) : null,
+        additionalCharges,
         ...(requestedDownPayment != null
           ? {
               // downPayment is the configured amount, not proof that the DP
@@ -1516,6 +1544,7 @@ router.post("/bookings/recurring", async (req, res) => {
         dpp: booking.dpp == null ? null : Number(booking.dpp),
         ppnAmount: booking.ppnAmount == null ? null : Number(booking.ppnAmount),
         grandTotal: booking.grandTotal == null ? null : Number(booking.grandTotal),
+        additionalCharges: normalizeAdditionalCharges(booking.additionalCharges),
         facilityName: facility.name,
         facilityCategory: facility.category,
         payment: null,
@@ -1845,6 +1874,7 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
   try {
     const id = parseInt(String(req.params.id));
     const { status, adminNotes } = req.body;
+    const hasAdditionalChargesUpdate = Object.prototype.hasOwnProperty.call(req.body, "additionalCharges");
 
     const validStatuses = ["pending_payment", "paid", "confirmed", "completed", "cancelled", "refunded"];
     if (status && !validStatuses.includes(status)) {
@@ -1852,11 +1882,52 @@ router.patch("/bookings/:id", adminMiddleware, async (req, res) => {
       return;
     }
 
+    const [beforeUpdate] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, id)).limit(1);
+    if (!beforeUpdate) {
+      res.status(404).json({ error: "Not found" });
+      return;
+    }
+
     const updateData: Record<string, unknown> = {};
     if (status && status !== "completed") updateData.status = status;
     if (adminNotes !== undefined) updateData.adminNotes = adminNotes;
 
-    const [beforeUpdate] = await db.select().from(bookingsTable).where(eq(bookingsTable.id, id)).limit(1);
+    if (hasAdditionalChargesUpdate) {
+      let additionalCharges: ReturnType<typeof normalizeAdditionalCharges>;
+      try {
+        additionalCharges = normalizeAdditionalCharges(req.body.additionalCharges);
+      } catch (error) {
+        res.status(400).json({ error: error instanceof Error ? error.message : "Biaya tambahan tidak valid" });
+        return;
+      }
+
+      const existingPayments = await db
+        .select({ id: paymentsTable.id })
+        .from(paymentsTable)
+        .where(eq(paymentsTable.bookingId, id))
+        .limit(1);
+      if (existingPayments.length > 0) {
+        res.status(409).json({ error: "Biaya tambahan tidak dapat diubah setelah ada pembayaran." });
+        return;
+      }
+      if (!["pending_payment", "waiting_confirmation", "waiting_admin_approval"].includes(beforeUpdate.status)) {
+        res.status(409).json({ error: "Biaya tambahan hanya dapat diubah sebelum booking dibayar atau dikonfirmasi." });
+        return;
+      }
+
+      const basePrice = Number(beforeUpdate.basePrice ?? beforeUpdate.totalPrice);
+      const discount = Number(beforeUpdate.discountAmount ?? 0);
+      const totalPrice = Math.max(0, basePrice - discount) + additionalChargesTotal(additionalCharges);
+      const taxCalc = await calculateTax(totalPrice, "sport_booking", beforeUpdate.bookingDate);
+
+      updateData.additionalCharges = additionalCharges;
+      updateData.totalPrice = String(totalPrice);
+      updateData.ppnRate = taxCalc.taxRate > 0 ? String(taxCalc.taxRate) : null;
+      updateData.dpp = taxCalc.taxAmount > 0 ? String(taxCalc.dpp) : null;
+      updateData.ppnAmount = taxCalc.taxAmount > 0 ? String(taxCalc.taxAmount) : null;
+      updateData.grandTotal = taxCalc.taxAmount > 0 ? String(taxCalc.grandTotal) : null;
+    }
+
     if (status === "completed" && beforeUpdate && beforeUpdate.status !== "completed") {
       const completion = await completeBooking(id, getUserFromReq(req));
       if (!completion.ok) {

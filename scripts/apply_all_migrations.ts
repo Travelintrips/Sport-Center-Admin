@@ -75,6 +75,7 @@ const stmts = [
   `ALTER TABLE sport_center.sport_bookings ADD COLUMN IF NOT EXISTS grand_total numeric(14,2)`,
   `ALTER TABLE sport_center.sport_bookings ADD COLUMN IF NOT EXISTS down_payment numeric(12,2)`,
   `ALTER TABLE sport_center.sport_bookings ADD COLUMN IF NOT EXISTS is_dp_paid boolean DEFAULT false`,
+  `ALTER TABLE sport_center.sport_bookings ADD COLUMN IF NOT EXISTS additional_charges jsonb NOT NULL DEFAULT '[]'::jsonb`,
   // payments
   `DO $$ BEGIN CREATE TYPE sport_center.payment_provider AS ENUM ('mandiri_direct','paylabs','unknown'); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
   `ALTER TABLE sport_center.sport_payments ADD COLUMN IF NOT EXISTS payment_method text DEFAULT 'Transfer Bank'`,

@@ -12,6 +12,8 @@ ALTER TABLE sport_center.sport_bookings
   ADD COLUMN IF NOT EXISTS membership_id INTEGER;
 ALTER TABLE sport_center.sport_bookings
   ADD COLUMN IF NOT EXISTS membership_payment_id INTEGER;
+ALTER TABLE sport_center.sport_bookings
+  ADD COLUMN IF NOT EXISTS additional_charges JSONB NOT NULL DEFAULT '[]'::jsonb;
 CREATE UNIQUE INDEX IF NOT EXISTS sport_bookings_membership_payment_uidx
   ON sport_center.sport_bookings (membership_payment_id)
   WHERE membership_payment_id IS NOT NULL;

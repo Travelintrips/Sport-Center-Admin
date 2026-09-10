@@ -3040,7 +3040,7 @@ components:
 
     Booking:
       type: object
-      required: [id, orderNumber, customerName, customerEmail, customerPhone, facilityId, facilityName, bookingDate, startTime, endTime, durationHours, totalPrice, status]
+      required: [id, orderNumber, customerName, customerEmail, customerPhone, facilityId, facilityName, bookingDate, startTime, endTime, durationHours, totalPrice, status, additionalCharges]
       properties:
         id:
           type: integer
@@ -3107,6 +3107,10 @@ components:
           type: ["number", "null"]
         grandTotal:
           type: ["number", "null"]
+        additionalCharges:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdditionalCharge"
         downPayment:
           type: number
         isDpPaid:
@@ -3122,6 +3126,15 @@ components:
           type: number
         createdAt:
           type: string
+
+    AdditionalCharge:
+      type: object
+      required: [name, amount]
+      properties:
+        name:
+          type: string
+        amount:
+          type: number
 
     DpPaymentInput:
       type: object
@@ -3150,6 +3163,10 @@ components:
           type: integer
           minimum: 1
           maximum: 52
+        additionalCharges:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdditionalCharge"
 
     RecurringDateStatus:
       type: object
@@ -3202,6 +3219,10 @@ components:
           type: integer
         notes:
           type: string
+        additionalCharges:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdditionalCharge"
 
         downPaymentAmount:
           type: number
@@ -3296,6 +3317,10 @@ components:
         vendorId:
           type: integer
           nullable: true
+        additionalCharges:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdditionalCharge"
 
     BookingUpdate:
       type: object
@@ -3305,6 +3330,10 @@ components:
           enum: [pending_payment, waiting_confirmation, paid, confirmed, completed, cancelled, rejected, expired, refunded]
         adminNotes:
           type: string
+        additionalCharges:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdditionalCharge"
 
     Payment:
       type: object

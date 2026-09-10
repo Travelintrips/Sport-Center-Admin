@@ -5,6 +5,7 @@
  * Sport Center API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { AdditionalCharge } from './additionalCharge';
 import type { BookingInputCustomerType } from './bookingInputCustomerType';
 
 export interface BookingInput {
@@ -21,4 +22,5 @@ export interface BookingInput {
   idCardNumber?: string;
   notes?: string;
   vendorId?: number | null;
+  additionalCharges?: AdditionalCharge[];
 }

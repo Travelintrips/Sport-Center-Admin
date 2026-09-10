@@ -425,6 +425,10 @@ export const ListBookingsResponseItem = zod.object({
   "ppnRate": zod.number().nullish(),
   "ppnAmount": zod.number().nullish(),
   "grandTotal": zod.number().nullish(),
+  "additionalCharges": zod.array(zod.object({
+  "name": zod.string(),
+  "amount": zod.number()
+})),
   "downPayment": zod.number().optional(),
   "isDpPaid": zod.boolean().optional(),
   "payment": zod.object({
@@ -493,7 +497,11 @@ export const CreateBookingBody = zod.object({
   "customerType": zod.enum(['umum', 'angkasa_pura']).optional(),
   "idCardNumber": zod.string().optional(),
   "notes": zod.string().optional(),
-  "vendorId": zod.number().nullish()
+  "vendorId": zod.number().nullish(),
+  "additionalCharges": zod.array(zod.object({
+  "name": zod.string(),
+  "amount": zod.number()
+})).optional()
 })
 
 
@@ -510,7 +518,11 @@ export const CheckRecurringBookingBody = zod.object({
   "startTime": zod.string(),
   "durationHours": zod.number(),
   "repeatType": zod.enum(['weekly', 'monthly']),
-  "repeatCount": zod.number().min(1).max(checkRecurringBookingBodyRepeatCountMax)
+  "repeatCount": zod.number().min(1).max(checkRecurringBookingBodyRepeatCountMax),
+  "additionalCharges": zod.array(zod.object({
+  "name": zod.string(),
+  "amount": zod.number()
+})).optional()
 })
 
 export const CheckRecurringBookingResponse = zod.object({
@@ -539,6 +551,10 @@ export const CreateRecurringBookingBody = zod.object({
   "repeatType": zod.enum(['weekly', 'monthly']),
   "repeatCount": zod.number(),
   "notes": zod.string().optional(),
+  "additionalCharges": zod.array(zod.object({
+  "name": zod.string(),
+  "amount": zod.number()
+})).optional(),
   "downPaymentAmount": zod.number().optional().describe('Total down payment for the recurring payment group. Must be less than the group grand total.'),
   "customerType": zod.enum(['umum', 'angkasa_pura']).optional(),
   "idCardNumber": zod.string().optional()
@@ -584,6 +600,10 @@ export const GetBookingResponse = zod.object({
   "ppnRate": zod.number().nullish(),
   "ppnAmount": zod.number().nullish(),
   "grandTotal": zod.number().nullish(),
+  "additionalCharges": zod.array(zod.object({
+  "name": zod.string(),
+  "amount": zod.number()
+})),
   "downPayment": zod.number().optional(),
   "isDpPaid": zod.boolean().optional(),
   "payment": zod.object({
@@ -644,7 +664,11 @@ export const UpdateBookingParams = zod.object({
 
 export const UpdateBookingBody = zod.object({
   "status": zod.enum(['pending_payment', 'waiting_confirmation', 'paid', 'confirmed', 'completed', 'cancelled', 'rejected', 'expired', 'refunded']).optional(),
-  "adminNotes": zod.string().optional()
+  "adminNotes": zod.string().optional(),
+  "additionalCharges": zod.array(zod.object({
+  "name": zod.string(),
+  "amount": zod.number()
+})).optional()
 })
 
 export const UpdateBookingResponse = zod.object({
@@ -679,6 +703,10 @@ export const UpdateBookingResponse = zod.object({
   "ppnRate": zod.number().nullish(),
   "ppnAmount": zod.number().nullish(),
   "grandTotal": zod.number().nullish(),
+  "additionalCharges": zod.array(zod.object({
+  "name": zod.string(),
+  "amount": zod.number()
+})),
   "downPayment": zod.number().optional(),
   "isDpPaid": zod.boolean().optional(),
   "payment": zod.object({
@@ -777,6 +805,10 @@ export const PayBookingDpResponse = zod.object({
   "ppnRate": zod.number().nullish(),
   "ppnAmount": zod.number().nullish(),
   "grandTotal": zod.number().nullish(),
+  "additionalCharges": zod.array(zod.object({
+  "name": zod.string(),
+  "amount": zod.number()
+})),
   "downPayment": zod.number().optional(),
   "isDpPaid": zod.boolean().optional(),
   "payment": zod.object({
@@ -867,6 +899,10 @@ export const GetBookingByOrderResponse = zod.object({
   "ppnRate": zod.number().nullish(),
   "ppnAmount": zod.number().nullish(),
   "grandTotal": zod.number().nullish(),
+  "additionalCharges": zod.array(zod.object({
+  "name": zod.string(),
+  "amount": zod.number()
+})),
   "downPayment": zod.number().optional(),
   "isDpPaid": zod.boolean().optional(),
   "payment": zod.object({
@@ -1545,6 +1581,10 @@ export const ListCompanyInvoicesResponseItem = zod.object({
   "ppnRate": zod.number().nullish(),
   "ppnAmount": zod.number().nullish(),
   "grandTotal": zod.number().nullish(),
+  "additionalCharges": zod.array(zod.object({
+  "name": zod.string(),
+  "amount": zod.number()
+})),
   "downPayment": zod.number().optional(),
   "isDpPaid": zod.boolean().optional(),
   "payment": zod.object({
@@ -1672,6 +1712,10 @@ export const GetCompanyInvoiceResponse = zod.object({
   "ppnRate": zod.number().nullish(),
   "ppnAmount": zod.number().nullish(),
   "grandTotal": zod.number().nullish(),
+  "additionalCharges": zod.array(zod.object({
+  "name": zod.string(),
+  "amount": zod.number()
+})),
   "downPayment": zod.number().optional(),
   "isDpPaid": zod.boolean().optional(),
   "payment": zod.object({
@@ -1781,6 +1825,10 @@ export const UpdateCompanyInvoiceResponse = zod.object({
   "ppnRate": zod.number().nullish(),
   "ppnAmount": zod.number().nullish(),
   "grandTotal": zod.number().nullish(),
+  "additionalCharges": zod.array(zod.object({
+  "name": zod.string(),
+  "amount": zod.number()
+})),
   "downPayment": zod.number().optional(),
   "isDpPaid": zod.boolean().optional(),
   "payment": zod.object({
@@ -1921,6 +1969,10 @@ export const GetDashboardResponse = zod.object({
   "ppnRate": zod.number().nullish(),
   "ppnAmount": zod.number().nullish(),
   "grandTotal": zod.number().nullish(),
+  "additionalCharges": zod.array(zod.object({
+  "name": zod.string(),
+  "amount": zod.number()
+})),
   "downPayment": zod.number().optional(),
   "isDpPaid": zod.boolean().optional(),
   "payment": zod.object({
@@ -2457,6 +2509,10 @@ export const CheckInBookingResponse = zod.object({
   "ppnRate": zod.number().nullish(),
   "ppnAmount": zod.number().nullish(),
   "grandTotal": zod.number().nullish(),
+  "additionalCharges": zod.array(zod.object({
+  "name": zod.string(),
+  "amount": zod.number()
+})),
   "downPayment": zod.number().optional(),
   "isDpPaid": zod.boolean().optional(),
   "payment": zod.object({
@@ -2594,6 +2650,10 @@ export const VerifyBookingResponse = zod.object({
   "ppnRate": zod.number().nullish(),
   "ppnAmount": zod.number().nullish(),
   "grandTotal": zod.number().nullish(),
+  "additionalCharges": zod.array(zod.object({
+  "name": zod.string(),
+  "amount": zod.number()
+})),
   "downPayment": zod.number().optional(),
   "isDpPaid": zod.boolean().optional(),
   "payment": zod.object({
@@ -2695,6 +2755,10 @@ export const VerifyBookingByOrderResponse = zod.object({
   "ppnRate": zod.number().nullish(),
   "ppnAmount": zod.number().nullish(),
   "grandTotal": zod.number().nullish(),
+  "additionalCharges": zod.array(zod.object({
+  "name": zod.string(),
+  "amount": zod.number()
+})),
   "downPayment": zod.number().optional(),
   "isDpPaid": zod.boolean().optional(),
   "payment": zod.object({

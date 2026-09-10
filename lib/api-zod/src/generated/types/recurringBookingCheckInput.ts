@@ -5,6 +5,7 @@
  * Sport Center API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { AdditionalCharge } from './additionalCharge';
 import type { RecurringBookingCheckInputRepeatType } from './recurringBookingCheckInputRepeatType';
 
 export interface RecurringBookingCheckInput {
@@ -18,4 +19,5 @@ export interface RecurringBookingCheckInput {
      * @maximum 52
      */
   repeatCount: number;
+  additionalCharges?: AdditionalCharge[];
 }

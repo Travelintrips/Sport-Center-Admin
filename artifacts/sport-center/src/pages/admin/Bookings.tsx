@@ -1036,6 +1036,7 @@ function BookingDetailDrawer({
   isUpdating,
   settings,
   onUpdateDates,
+  onUpdateAdditionalCharges,
 }: {
   booking: any;
   onClose: () => void;
@@ -1057,6 +1058,7 @@ function BookingDetailDrawer({
     startTime?: string,
     endTime?: string,
   ) => Promise<void>;
+  onUpdateAdditionalCharges: (charges: { name: string; amount: number }[]) => void;
 }) {
   const membershipPaymentBooking =
     booking.source === "gym_membership_payment" || booking.membershipPaymentId != null;
@@ -1102,6 +1104,12 @@ function BookingDetailDrawer({
   const [startTime, setStartTime] = useState(String(booking.startTime ?? "").slice(0, 5));
   const [endTime, setEndTime] = useState(String(booking.endTime ?? "").slice(0, 5));
   const [savingDates, setSavingDates] = useState(false);
+  const [chargeDraft, setChargeDraft] = useState<{ name: string; amount: string }[]>(
+    (booking.additionalCharges ?? []).map((charge: any) => ({
+      name: String(charge.name ?? ""),
+      amount: String(Number(charge.amount ?? 0)),
+    })),
+  );
   const originalBookingDate = String(booking.bookingDate ?? "");
   const originalPaymentDate = paymentDateValue?.slice(0, 10) ?? "";
   const originalStartTime = String(booking.startTime ?? "").slice(0, 5);
@@ -1167,6 +1175,14 @@ function BookingDetailDrawer({
     } finally {
       setSavingDates(false);
     }
+  };
+
+  const saveAdditionalCharges = () => {
+    const validCharges = chargeDraft
+      .filter((charge) => charge.name.trim() && Number(charge.amount) > 0)
+      .map((charge) => ({ name: charge.name.trim(), amount: Number(charge.amount) }));
+    if (validCharges.length !== chargeDraft.length) return;
+    onUpdateAdditionalCharges(validCharges);
   };
 
   return (
@@ -1711,6 +1727,63 @@ function BookingDetailDrawer({
                   </div>
                 </div>
               )}
+            </div>
+          </div>
+
+          {/* Admin Notes */}
+          <div className="space-y-2 rounded-xl border border-amber-200 dark:border-amber-900/60 bg-amber-50/50 dark:bg-amber-950/20 p-4">
+            <div>
+              <label className="text-xs font-semibold text-amber-800 dark:text-amber-200 uppercase tracking-wide">
+                Biaya Tambahan
+              </label>
+              <p className="mt-1 text-[11px] text-amber-700/80 dark:text-amber-300/80">
+                Hanya dapat diubah sebelum booking memiliki pembayaran.
+              </p>
+            </div>
+            {chargeDraft.map((charge, index) => (
+              <div key={index} className="flex items-center gap-2">
+                <Input
+                  value={charge.name}
+                  onChange={(event) => setChargeDraft((current) => current.map((item, itemIndex) =>
+                    itemIndex === index ? { ...item, name: event.target.value } : item,
+                  ))}
+                  placeholder="Nama biaya"
+                  className="h-8 bg-white dark:bg-slate-900 text-xs"
+                />
+                <Input
+                  value={charge.amount ? Number(charge.amount).toLocaleString("id-ID") : ""}
+                  onChange={(event) => setChargeDraft((current) => current.map((item, itemIndex) =>
+                    itemIndex === index ? { ...item, amount: event.target.value.replace(/[^0-9]/g, "") } : item,
+                  ))}
+                  placeholder="Nominal"
+                  className="h-8 w-28 bg-white dark:bg-slate-900 text-xs font-mono"
+                />
+                <button
+                  type="button"
+                  onClick={() => setChargeDraft((current) => current.filter((_, itemIndex) => itemIndex !== index))}
+                  className="rounded p-1.5 text-slate-400 hover:bg-red-100 hover:text-red-600"
+                  aria-label="Hapus biaya tambahan"
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            ))}
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setChargeDraft((current) => [...current, { name: "", amount: "" }])}
+                className="text-xs font-semibold text-amber-700 hover:underline dark:text-amber-300"
+              >
+                + Tambah biaya
+              </button>
+              <button
+                type="button"
+                onClick={saveAdditionalCharges}
+                disabled={isUpdating}
+                className="ml-auto rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-50"
+              >
+                Simpan biaya
+              </button>
             </div>
           </div>
 
@@ -2945,6 +3018,14 @@ export default function AdminBookings() {
     });
   };
 
+  const handleAdditionalChargesUpdate = (charges: { name: string; amount: number }[]) => {
+    if (!selectedBooking) return;
+    updateBookingMutation.mutate({
+      id: selectedBooking.id,
+      data: { additionalCharges: charges } as any,
+    });
+  };
+
   const handleDelete = async (id: number) => {
     setDeletingId(id);
     try {
@@ -4113,6 +4194,7 @@ export default function AdminBookings() {
           onDelete={handleDelete}
           isUpdating={isUpdating || clearProofMutation.isPending}
            onUpdateDates={updateDates}
+           onUpdateAdditionalCharges={handleAdditionalChargesUpdate}
         />
       )}
 

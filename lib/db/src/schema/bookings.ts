@@ -1,9 +1,14 @@
-import { text, serial, timestamp, numeric, integer, boolean } from "drizzle-orm/pg-core";
+import { text, serial, timestamp, numeric, integer, boolean, jsonb } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { facilitiesTable } from "./facilities";
 import { usersTable } from "./users";
 import { scSchema } from "./_schema";
+
+export type BookingAdditionalCharge = {
+  name: string;
+  amount: number;
+};
 
 export const bookingStatusEnum = scSchema.enum("booking_status", [
   "pending_payment",
@@ -93,6 +98,10 @@ export const bookingsTable = scSchema.table("sport_bookings", {
   dpp: numeric("dpp", { precision: 14, scale: 2 }),
   ppnAmount: numeric("ppn_amount", { precision: 12, scale: 2 }),
   grandTotal: numeric("grand_total", { precision: 12, scale: 2 }),
+  additionalCharges: jsonb("additional_charges")
+    .$type<BookingAdditionalCharge[]>()
+    .notNull()
+    .default([]),
   downPayment: numeric("down_payment", { precision: 12, scale: 2 }).notNull().default("0"),
   isDpPaid: boolean("is_dp_paid").notNull().default(false),
   bookedByUserId: integer("booked_by_user_id").references(() => usersTable.id, { onDelete: "set null" }),

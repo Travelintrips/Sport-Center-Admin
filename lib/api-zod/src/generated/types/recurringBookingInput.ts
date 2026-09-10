@@ -5,6 +5,7 @@
  * Sport Center API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { AdditionalCharge } from './additionalCharge';
 import type { RecurringBookingInputCustomerType } from './recurringBookingInputCustomerType';
 import type { RecurringBookingInputRepeatType } from './recurringBookingInputRepeatType';
 
@@ -19,6 +20,7 @@ export interface RecurringBookingInput {
   repeatType: RecurringBookingInputRepeatType;
   repeatCount: number;
   notes?: string;
+  additionalCharges?: AdditionalCharge[];
   /** Total down payment for the recurring payment group. Must be less than the group grand total. */
   downPaymentAmount?: number;
   customerType?: RecurringBookingInputCustomerType;

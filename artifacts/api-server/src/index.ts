@@ -1060,6 +1060,8 @@ async function runStartupMigrations() {
        )`,
       `CREATE INDEX IF NOT EXISTS sport_payment_allocations_booking_idx
          ON sport_center.sport_payment_allocations (booking_id)`,
+      `ALTER TABLE sport_center.sport_bookings
+         ADD COLUMN IF NOT EXISTS additional_charges jsonb NOT NULL DEFAULT '[]'::jsonb`,
   ];
 
   for (const stmt of migrations) {
